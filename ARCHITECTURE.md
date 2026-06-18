@@ -30,11 +30,13 @@ that aren't your differentiator.
 - MVT/MLT **decode** (hand-rolled proto reader is small and dependency-free; clean-room friendly)
 - style-spec model + layer / paint / layout plumbing + **expression evaluation**
 - fill + **line geometry** generation (joins / caps / miter — edge-case-heavy; budget for it)
+- **polygon triangulation (fills)** → clean-room **earcut** (ear-clipping; what Mapbox/MapLibre use).
+  Small enough to own; ISC as reference only; implementable **Burst-compatible** (struct/array-based) so
+  fill tessellation jobifies. We classify MVT rings (outer vs hole) by signed area before triangulating.
 - **label placement & collision** — the crown jewel; where domain experience differentiates the result
 - the ECS rendering layer (this *is* the product) — meshes / materials / GPU-driven draw
 
 **Vendor as clean permissive dependencies — don't reinvent** (one-line notice each):
-- **polygon triangulation** → `LibTessDotNet` (MIT, robust w/ holes + self-intersection) or an earcut C# port
 - **text shaping** (i18n) → `HarfBuzzSharp` (MIT) — an entire subfield; never hand-roll
 - **SDF glyphs** → TextMeshPro SDF, or generate offline
 - *(if MVT via lib instead of hand-roll)* → `protobuf-net` (MIT) / `Google.Protobuf` (BSD)
@@ -90,6 +92,70 @@ The data-parallel stages run as Burst jobs across tiles; only mesh creation touc
 
 Labels stay upright and don't scale with zoom → screen-space placement + collision **every frame**.
 This is a separate path from fills/lines and is where these projects historically die — sequenced last.
+
+### Styling model — build geometry once, restyle via material
+
+Core principle (matches MapLibre/Mapbox GPU rendering): **bake topology once; drive appearance through
+shader uniforms / material properties.** Changing a style value sets a material value — no mesh rebuild.
+This also makes smooth zoom-driven width and live restyling cheap.
+
+**Lines use GPU-side expansion** — the mesh stores the *centerline*, not the final ribbon:
+- per vertex: centerline position, **extrusion normal** (unit perpendicular, packed), `distance-along-line`
+  (dashes), side (+/−), and a reserved **per-feature width-scale** attribute (for data-driven width).
+- the **vertex shader** offsets each vertex along the normal by `½ · width` (width from material) → width
+  is a uniform, not geometry.
+- the **fragment shader** does AA (feathered edge from the interpolated extrude amount; `blur` uniform) +
+  dash pattern + color/opacity.
+
+**Build-time vs material-time — what's tweakable without a rebuild:**
+
+| Material/uniform (no rebuild) | Baked at build (rebuild to change) |
+|---|---|
+| `line-width`, `line-color`, `line-opacity` | `line-join` shape (miter/bevel/round) |
+| `line-blur` (AA), `line-gap-width` (casing) | `line-cap` shape (butt/round/square) |
+| `line-offset`, `line-dasharray`, `line-pattern` | centerline + per-zoom simplification |
+
+Fills: triangulated once; color/opacity/pattern via material. Fill-extrusion height: material or vertex
+attr. Symbols/text: SDF shader, size/halo via material.
+
+**Two MapLibre style dimensions to support:**
+- **Zoom-dependent** (width interpolates over zoom): evaluate on CPU per frame → set the uniform. This is
+  where build-once-restyle shines — smooth changes, zero rebuilds.
+- **Data-driven** (per-feature width/color): bake a per-vertex attribute and combine with the zoom uniform
+  in-shader. A lone uniform only gives per-layer values; the attribute preserves per-feature variation
+  while base width stays a material knob.
+
+**Width units — DECIDED: meters canonical, pixels derived in-shader.** The vertex shader extrudes the
+centerline by `½ · widthMeters` — **world meters is the single canonical shader unit.** A style width in
+**meters** is used directly; a width in **pixels** (MapLibre semantics) is converted px→m from camera
+parameters. Doing the conversion *in the shader* lets us ship a per-frame `metersPerPixel` uniform first
+(exact for top-down / orthographic) and later upgrade to a **per-vertex perspective-correct** factor
+(exact pixel width under a *tilted* camera — the MapLibre-grade result) **without changing mesh format or
+materials.** Width stays a material knob (`_Width` + a unit-mode flag).
+- *Why per-vertex matters:* under perspective tilt, `metersPerPixel` varies with depth across the screen;
+  a single per-frame factor is exact only at the focal depth. Per-vertex scaling by clip-space depth fixes it.
+- **AA / edge feather** uses screen-space derivatives (`fwidth`) → ~1px regardless of unit or camera.
+- **"meters" = Web-Mercator meters** (the geometry's own units; stretched by latitude). Apply an optional
+  `1/cos(lat)` correction only if true-ground-meters are wanted.
+
+**Unity path:** hand-written HLSL URP/HDRP shaders (ShaderGraph can't easily express screen-space extrusion
++ AA), per-layer `Material` / `MaterialPropertyBlock`, submitted via BatchRendererGroup /
+`Graphics.RenderPrimitives` (instanced, GC-free).
+
+### Layer ordering & draw submission
+The style is an **ordered list of layers**, composited in order (painter's algorithm). Most layers are
+**coplanar** (the ground plane), so Unity's default sort — render queue → camera distance → depth buffer —
+**z-fights and reorders them wrongly**. Rule: **we own draw order; we never rely on Unity's automatic sort.**
+
+- **Flat layers (fills, lines — the bulk):** painter's algorithm — **ZWrite off**, draw in style order.
+  Implemented via a **custom URP `ScriptableRenderPass` / `BatchRendererGroup`** that issues draws in layer
+  order with `SortingCriteria.None` (owns the order; scales past the integer-queue trick). Simple interim
+  fallback: `material.renderQueue = base + layerIndex`, ZWrite off.
+- **3D layers (fill-extrusion, terrain, globe):** ZWrite on + depth test; give each layer a **depth
+  range/slice** so the depth buffer enforces *both* layer order *and* 3D occlusion (MapLibre's approach).
+- Order *within* a layer across tiles is irrelevant (disjoint regions); order *across* layers is strict.
+
+Step 2+ concern (first multi-layer render); Step 0 (single layer) doesn't hit it.
 
 ### Performance levers (the differentiator)
 - **Burst + Jobs** for decode and tessellation → parallelize across all in-flight tiles; no GC in the hot path.
@@ -148,8 +214,9 @@ not a current target.
 ## 4. Licensing posture
 - **Spec-built parts** (MVT CC-BY *text* but free to implement; MLT; style spec): **zero obligation** —
   implementing a spec isn't a derivative work.
-- **Vendored deps** are all permissive: LibTessDotNet (MIT), HarfBuzzSharp (MIT), protobuf-net (MIT) /
-  Google.Protobuf (BSD), Clipper2 (Boost). Commercial + closed-source fine.
+- **Vendored deps** are all permissive: HarfBuzzSharp (MIT), protobuf-net (MIT) / Google.Protobuf (BSD),
+  Clipper2 (Boost). Commercial + closed-source fine. Fill triangulation is **clean-room earcut** — ISC
+  only as reference, implemented ourselves → no dependency/obligation.
 - **Compliance = one file.** A bundled `THIRD-PARTY-NOTICES.txt` (and an in-app credits screen if you
   ship binaries) reproducing each dep's copyright + license satisfies them all. No copyleft, no
   open-sourcing, no in-UI attribution required.
@@ -160,7 +227,7 @@ not a current target.
 | Risk | Mitigation |
 |---|---|
 | DOTS / Entities API churn & learning curve; Entities Graphics constraints | Keep the hot path as **Burst jobs + NativeArrays** (stable surface); use ECS where it clearly pays; don't force every subsystem into it |
-| Hard kernels (placement, line tessellation) subtly wrong | Vendor triangulation/shaping; clean-room placement carefully; **golden-image diffs vs MapLibre output** |
+| Hard kernels (placement, line tessellation) subtly wrong | Vendor shaping; clean-room earcut + placement carefully; **golden-image diffs vs MapLibre output** |
 | Coordinate jitter at world scale | Floating-origin rebasing from Step 3; doubles in core, floats at render |
 | GC / frame spikes | NativeArray everywhere in hot path; no managed allocs per frame; GraphicsBuffer for large geometry |
 | Text / i18n complexity | HarfBuzzSharp; sequence last (Step 4) |

@@ -107,6 +107,7 @@ InitTestScene*.unity*
 
 # ---- Project tooling / OS ----
 .claude/settings.local.json
+.vscode/
 .DS_Store
 .DS_Store?
 ._*

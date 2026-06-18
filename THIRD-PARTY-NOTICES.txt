@@ -1,0 +1,20 @@
+THIRD-PARTY NOTICES
+===================
+
+unity-map-renderer is proprietary — all rights reserved. The items below are third-party
+materials included with or referenced by this project, with their respective licenses.
+
+CODE
+----
+(No third-party source code is bundled yet.)
+
+Fill triangulation is a clean-room implementation of the ear-clipping algorithm. The Mapbox
+"earcut" project (ISC) was consulted only as an algorithm reference; no source was copied.
+
+DATA / TEST FIXTURES
+--------------------
+Assets/Fixtures/sample-tile.bytes
+  A single Mapbox Vector Tile (z0/x0/y0) from the MapLibre "demotiles" dataset.
+  Underlying geometry: Natural Earth — public domain (no attribution required).
+  Sources: https://demotiles.maplibre.org/  •  https://www.naturalearthdata.com/
+  Bundled as an offline, deterministic test fixture.
