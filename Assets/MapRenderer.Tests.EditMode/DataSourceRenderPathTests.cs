@@ -2,10 +2,11 @@
 // NOT included in Tools/core-tests/core-tests.csproj.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
-using System.Collections.Generic;
+using System.Security.Cryptography;
 using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -23,24 +24,22 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Proves that both <see cref="FileDataSource"/> and <see cref="HttpDataSource"/> feed the
-    /// S02 render path identically: same bytes → same decoded tile → same vertex/index count from
-    /// <see cref="MeshBuilder"/>.
+    /// render path identically: same bytes → same decoded tile → same vertex/index CONTENT HASH
+    /// (not just count) from the full decode→assemble→earcut→MeshBuilder pipeline.
     ///
-    /// This closes the "renders unchanged through each source" acceptance criterion. The byte-identity
-    /// and decode-layer-counts are tested in <see cref="DataSourceTests"/>; this test additionally
-    /// runs the full decode→assemble→earcut→MeshBuilder pipeline to confirm that the render path
-    /// is unchanged when bytes originate from each source rather than a direct file read.
+    /// S04 upgrade: asserts buffer content hashes (SHA-256 over vertex positions and index arrays)
+    /// rather than just counts. A count-only comparison is blind to divergent vertex positions —
+    /// two pipelines could produce the same count with completely different geometry. Content hash
+    /// guards against any regression in decode / assembly / triangulation across sources.
     ///
-    /// <b>Note:</b> <see cref="MapFillBootstrap"/> stays synchronous/TextAsset-default in S03.
-    /// The sources feed the render path only through this test. Full async integration (ECS/jobs) is S04.
+    /// This subsumes the S03 "count-only" follow-up from docs/follow-ups.md (line 46-48).
     /// </summary>
     [TestFixture]
     public class DataSourceRenderPathTests
     {
         [Test]
-        public void FileSource_And_HttpSource_FeedRenderPath_ProduceSameVertexAndIndexCounts()
+        public void FileSource_And_HttpSource_FeedRenderPath_ProduceSameVertexAndIndexContentHash()
         {
-            // Load fixture via direct file read (baseline — same as the existing S02 pipeline).
             string fixturePath = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(fixturePath), $"Fixture missing: {fixturePath}");
             byte[] fixtureBytes = File.ReadAllBytes(fixturePath);
@@ -76,34 +75,34 @@ namespace MapRenderer.Tests
                 httpBytes = httpResp.Bytes;
             }
 
-            // 3. Run the full render pipeline on each source's bytes; compare vertex/index counts.
-            int baselineV, baselineI;
-            BuildMeshCounts(fixtureBytes, out baselineV, out baselineI);
+            // 3. Run the full render pipeline on each source's bytes; compare CONTENT HASHES.
+            // Hash includes vertex positions and triangle indices (not just counts).
+            var (baselineVH, baselineIH) = BuildContentHashes(fixtureBytes);
+            var (fileVH,     fileIH)     = BuildContentHashes(fileBytes);
+            var (httpVH,     httpIH)     = BuildContentHashes(httpBytes);
 
-            int fileV, fileI;
-            BuildMeshCounts(fileBytes, out fileV, out fileI);
+            Assert.AreEqual(baselineVH, fileVH,
+                "FileDataSource render path vertex content hash must match the direct baseline. " +
+                "A mismatch means the file source returns different bytes or the decode path is non-deterministic.");
+            Assert.AreEqual(baselineIH, fileIH,
+                "FileDataSource render path index content hash must match the direct baseline.");
+            Assert.AreEqual(baselineVH, httpVH,
+                "HttpDataSource render path vertex content hash must match the direct baseline. " +
+                "A mismatch means the HTTP source returns different bytes or decode is non-deterministic.");
+            Assert.AreEqual(baselineIH, httpIH,
+                "HttpDataSource render path index content hash must match the direct baseline.");
 
-            int httpV, httpI;
-            BuildMeshCounts(httpBytes, out httpV, out httpI);
-
-            Assert.AreEqual(baselineV, fileV,
-                "FileDataSource render path must produce the same vertex count as the direct baseline");
-            Assert.AreEqual(baselineI, fileI,
-                "FileDataSource render path must produce the same index count as the direct baseline");
-            Assert.AreEqual(baselineV, httpV,
-                "HttpDataSource render path must produce the same vertex count as the direct baseline");
-            Assert.AreEqual(baselineI, httpI,
-                "HttpDataSource render path must produce the same index count as the direct baseline");
-
-            Debug.Log($"[DataSourceRenderPathTests] baseline={baselineV}v/{baselineI}i, " +
-                      $"file={fileV}v/{fileI}i, http={httpV}v/{httpI}i — all match.");
+            Debug.Log($"[DataSourceRenderPathTests] All three sources produce identical vertex+index content hashes: {baselineVH[..16]}...");
         }
 
-        // -----------------------------------------------------------------------------------------
-        // Helpers — mirrors the pipeline in MapFillBootstrap.BuildMesh (countries layer, TileId 0,0,0)
-        // -----------------------------------------------------------------------------------------
+        // ── Helpers ───────────────────────────────────────────────────────────────────────────
 
-        private static void BuildMeshCounts(byte[] mvtBytes, out int vertexCount, out int indexCount)
+        /// <summary>
+        /// Runs the full managed pipeline on MVT bytes and returns SHA-256 hashes of the flat
+        /// vertex position array and flat index array (both in pipeline order across all features).
+        /// Vertex positions are float3 world positions (output of ProjectTileVerticesJob).
+        /// </summary>
+        private static (string vertHash, string idxHash) BuildContentHashes(byte[] mvtBytes)
         {
             var tile  = MvtDecoder.Decode(mvtBytes);
             var layer = tile.GetLayer("countries");
@@ -115,7 +114,10 @@ namespace MapRenderer.Tests
             double originX = bMin.x;
             double originY = bMin.y;
 
-            var meshBuilder = new MeshBuilder();
+            using var sha256 = SHA256.Create();
+            var vertBytes = new List<byte>();
+            var idxBytes  = new List<byte>();
+            int globalIndexOffset = 0;
 
             foreach (var feature in layer.Features)
             {
@@ -135,43 +137,52 @@ namespace MapRenderer.Tests
                     int[]     triIdx    = earcutResult.Indices;
                     int       vCount    = flatVerts.Length;
 
-                    var tileCoords = new NativeArray<double2>(vCount, Allocator.TempJob,
-                        NativeArrayOptions.UninitializedMemory);
-                    var worldPos = new NativeArray<float3>(vCount, Allocator.TempJob,
-                        NativeArrayOptions.UninitializedMemory);
+                    // Not using 'using var' — CS1654 makes using-var NativeArrays read-only in C# 8+.
+                    var tileCoords = new NativeArray<double2>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var worldPos   = new NativeArray<float3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 
                     for (int i = 0; i < vCount; i++)
                         tileCoords[i] = flatVerts[i];
 
-                    var job = new ProjectTileVerticesJob
+                    try
                     {
-                        TileZ         = 0, TileX = 0, TileY = 0,
-                        Extent        = extent,
-                        OriginMercX   = originX,
-                        OriginMercY   = originY,
-                        TileCoords    = tileCoords,
-                        WorldPositions = worldPos
-                    };
-                    job.Schedule(vCount, 64).Complete();
+                        var job = new ProjectTileVerticesJob
+                        {
+                            TileZ = 0, TileX = 0, TileY = 0,
+                            Extent       = extent,
+                            OriginMercX  = originX,
+                            OriginMercY  = originY,
+                            TileCoords   = tileCoords,
+                            WorldPositions = worldPos
+                        };
+                        job.Schedule(vCount, 64).Complete();
 
-                    var verts = new float3[vCount];
-                    for (int i = 0; i < vCount; i++)
-                        verts[i] = worldPos[i];
+                        for (int i = 0; i < vCount; i++)
+                        {
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].x));
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].y));
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].z));
+                        }
 
-                    tileCoords.Dispose();
-                    worldPos.Dispose();
+                        foreach (int idx in triIdx)
+                            idxBytes.AddRange(BitConverter.GetBytes(globalIndexOffset + idx));
 
-                    meshBuilder.AddFeature(verts, triIdx);
+                        globalIndexOffset += vCount;
+                    }
+                    finally
+                    {
+                        tileCoords.Dispose();
+                        worldPos.Dispose();
+                    }
                 }
             }
 
-            vertexCount = meshBuilder.VertexCount;
-            indexCount  = meshBuilder.IndexCount;
+            string vh = Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
+            string ih = Convert.ToBase64String(sha256.ComputeHash(idxBytes.ToArray()));
+            return (vh, ih);
         }
 
-        // -----------------------------------------------------------------------------------------
-        // Stub HTTP handler (local, EditMode-only; the engine-free version is in DataSourceTests)
-        // -----------------------------------------------------------------------------------------
+        // ── Stub HTTP handler (local, EditMode-only) ──────────────────────────────────────────
 
         private sealed class TestStubHttpHandler : HttpMessageHandler
         {
@@ -184,13 +195,13 @@ namespace MapRenderer.Tests
                 _content = content;
             }
 
-            protected override System.Threading.Tasks.Task<HttpResponseMessage> SendAsync(
+            protected override Task<HttpResponseMessage> SendAsync(
                 HttpRequestMessage request, System.Threading.CancellationToken ct)
             {
                 var msg = new HttpResponseMessage(_status);
                 if (_content != null)
                     msg.Content = new ByteArrayContent(_content);
-                return System.Threading.Tasks.Task.FromResult(msg);
+                return Task.FromResult(msg);
             }
         }
     }

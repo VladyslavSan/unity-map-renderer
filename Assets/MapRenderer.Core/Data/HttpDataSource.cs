@@ -60,7 +60,17 @@ namespace MapRenderer.Core.Data
 
                 response.EnsureSuccessStatusCode();
 
+                // Thread ct through the body read where the overload is available.
+                // ReadAsByteArrayAsync(CancellationToken) is .NET 5+ / not guaranteed on
+                // netstandard2.1 (Unity 6 apiCompatibilityLevel=6 targets netstandard2.1).
+                // Under Unity the #else branch compiles: ThrowIfCancellationRequested gives a
+                // pre-read cancellation check; mid-read cancellation is best-effort there.
+#if NET5_0_OR_GREATER
+                byte[] bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
+#else
+                ct.ThrowIfCancellationRequested();
                 byte[] bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+#endif
                 return new TileResponse(bytes, TileEncoding.Mvt);
             }
         }

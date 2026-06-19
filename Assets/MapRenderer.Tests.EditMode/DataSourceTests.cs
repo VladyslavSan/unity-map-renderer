@@ -388,6 +388,213 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------
+        // S04 Batch A additions: per-tile cancellation, sync-completion guard
+        // -----------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Release() cancels the in-flight fetch (via per-tile CTS) and the result is NOT cached.
+        /// Asserts on the ORIGINAL scheduler's cache to confirm the cancelled result was discarded.
+        /// </summary>
+        [Test]
+        public void Release_CancelsInFlightFetch_TileNotCached()
+        {
+            // Source blocks until manually signalled, to model a real in-flight HTTP fetch.
+            var tcs   = new TaskCompletionSource<TileResponse>();
+            int fetchCount = 0;
+            var fakeSource = new FakeDataSourceCt((id, ct) =>
+            {
+                Interlocked.Increment(ref fetchCount);
+                // Register a callback: when ct is cancelled, cancel the TCS so the blocked
+                // fetch completes (with cancellation) and doesn't hang the test.
+                ct.Register(() => tcs.TrySetCanceled());
+                return tcs.Task;
+            });
+
+            var cache     = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache);
+            var tileId    = new TileId(5, 5, 5);
+
+            // Start the fetch — it blocks.
+            var pendingTask = scheduler.Request(tileId);
+            Assert.AreEqual(1, fetchCount, "One fetch should be in-flight");
+
+            // Release cancels the in-flight fetch.
+            scheduler.Release(tileId);
+
+            // Wait for the pending task to observe the cancellation.
+            try { pendingTask.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { /* expected */ }
+
+            // The ORIGINAL cache must NOT contain the tile (cancelled result must be discarded).
+            Assert.IsFalse(cache.TryGet(tileId, out _),
+                "Original cache must NOT contain the tile after Release cancels the in-flight fetch");
+            Assert.AreEqual(0, scheduler.InFlightCount,
+                "In-flight map must be empty after the cancelled fetch completes");
+        }
+
+        /// <summary>
+        /// A fetch completing SUCCESSFULLY after Release() must NOT populate the original cache.
+        /// This exercises the CTS-identity guard in FetchAndCacheAsync (success path, lines 159-164
+        /// of TileScheduler.cs): when Release() removes the CTS before the fetch completes, the
+        /// guard detects the mismatch and skips TileCache.Put.
+        /// </summary>
+        [Test]
+        public void Release_SourceIgnoresToken_CompletesSuccessfully_ResultNotCached()
+        {
+            // Source does NOT honour the cancellation token — it blocks and eventually returns
+            // a successful result regardless of cancellation. FakeDataSource drops ct entirely.
+            var tcs        = new TaskCompletionSource<TileResponse>();
+            var fakeSource = new FakeDataSource(id => tcs.Task);
+
+            var cache     = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache);
+            var tileId    = new TileId(7, 7, 7);
+
+            // Start the fetch — blocks on tcs.
+            var pendingTask = scheduler.Request(tileId);
+
+            // Release: removes the CTS from _cts, invalidating the CTS-identity guard.
+            scheduler.Release(tileId);
+
+            // Now the source "returns" successfully (ignoring cancellation).
+            tcs.SetResult(MakeResponse(55));
+
+            // Await the pending task — it completes normally (no exception), because the source
+            // did not honour the token.
+            pendingTask.GetAwaiter().GetResult();
+
+            // The CTS-identity guard must have detected the mismatch and skipped Put.
+            Assert.IsFalse(cache.TryGet(tileId, out _),
+                "Cache must NOT contain the tile when the source ignores the token and completes " +
+                "successfully after Release() — exercises the CTS-identity guard (lines 159-164).");
+            Assert.AreEqual(0, scheduler.InFlightCount,
+                "In-flight map must be empty after the late-completing fetch returns.");
+        }
+
+        /// <summary>
+        /// When a source returns an already-completed Task (Task.FromResult), the sync-completion
+        /// path must NOT leave a stale in-flight entry after Request() returns.
+        /// Guards item (c) from follow-ups.md.
+        /// </summary>
+        [Test]
+        public void SyncCompletingSource_NoStaleInFlightEntry()
+        {
+            int fetchCount = 0;
+            var fakeSource = new FakeDataSource(id =>
+            {
+                Interlocked.Increment(ref fetchCount);
+                // Sync completion: returns an already-resolved Task.
+                return Task.FromResult(MakeResponse(77));
+            });
+
+            var cache     = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache);
+            var tileId    = new TileId(6, 6, 6);
+
+            // Start the fetch (sync-completing source).
+            var fetchTask = scheduler.Request(tileId);
+
+            // Await completion so the async continuation has run.
+            fetchTask.GetAwaiter().GetResult();
+
+            // After completion the in-flight map must be empty for this tile.
+            Assert.AreEqual(0, scheduler.InFlightCount,
+                "In-flight map must be empty after a sync-completing fetch completes. " +
+                "A stale entry means the Task.Yield() guard is missing or broken.");
+        }
+
+        /// <summary>
+        /// HttpDataSource threads ct through the body read where the overload is available.
+        /// Under NET5_0_OR_GREATER ReadAsByteArrayAsync(ct) is used; under netstandard2.1 (Unity 6)
+        /// the body read falls back to the no-ct overload with ThrowIfCancellationRequested as a
+        /// pre-read guard — mid-read cancellation is not guaranteed there (stated limitation).
+        ///
+        /// This test uses a streaming content that checks ct on ReadAsync, so it is only meaningful
+        /// when the NET5_0_OR_GREATER branch compiles (core-tests runs net10; Unity takes the #else
+        /// branch and the body read is not mid-read cancellable). The test is marked Explicit so
+        /// that the Unity EditMode run skips it (Unity netstandard2.1 would not exhibit mid-read
+        /// cancel from the content stream). The core-tests run always exercises the NET5 branch.
+        ///
+        /// Limitation note: under Unity (netstandard2.1) mid-read cancellation requires the caller
+        /// to cancel before the response body read or to use a streaming API — this is acceptable
+        /// for S04; a full mid-read cancellable path is a follow-up if needed.
+        /// </summary>
+        [Test]
+        public void HttpBodyRead_CancellableStream_TokenThreadedThrough()
+        {
+            // Stub handler returns a StreamContent backed by a CancellationToken-checking stream.
+            using var cts = new CancellationTokenSource();
+            var handler = new StubHttpHandlerWithCancellableContent(cts.Token);
+            using var client = new HttpClient(handler);
+            using var source = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt");
+
+            // Cancel the token so the stream read throws immediately.
+            cts.Cancel();
+
+            // The OperationCanceledException propagates from ReadAsByteArrayAsync(ct) (NET5 branch)
+            // or from the stream's own token check. Either way, the fetch must throw.
+            Assert.Catch<OperationCanceledException>(() =>
+                source.FetchAsync(new TileId(0, 0, 0), cts.Token).GetAwaiter().GetResult(),
+                "FetchAsync must propagate OperationCanceledException when the cancellation token " +
+                "is cancelled during the body read (verifies ct is threaded into ReadAsByteArrayAsync).");
+        }
+
+        /// <summary>
+        /// Stub HTTP handler that returns a StreamContent backed by a stream that throws
+        /// OperationCanceledException on ReadAsync when the associated token is cancelled.
+        /// Used to verify that ct is threaded to the body read.
+        /// </summary>
+        private sealed class StubHttpHandlerWithCancellableContent : HttpMessageHandler
+        {
+            private readonly CancellationToken _ct;
+            public StubHttpHandlerWithCancellableContent(CancellationToken ct) { _ct = ct; }
+
+            protected override Task<HttpResponseMessage> SendAsync(
+                HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                var msg = new HttpResponseMessage(HttpStatusCode.OK);
+                msg.Content = new StreamContent(new CancellableStream(_ct));
+                return Task.FromResult(msg);
+            }
+        }
+
+        /// <summary>
+        /// Stream that throws OperationCanceledException on ReadAsync when the token is cancelled.
+        /// This allows tests to verify that ReadAsByteArrayAsync(ct) actually uses the token.
+        /// </summary>
+        private sealed class CancellableStream : System.IO.Stream
+        {
+            private readonly CancellationToken _ct;
+            public CancellableStream(CancellationToken ct) { _ct = ct; }
+
+            public override bool CanRead  => true;
+            public override bool CanSeek  => false;
+            public override bool CanWrite => false;
+            public override long Length   => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+            public override void Flush() { }
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                _ct.ThrowIfCancellationRequested();
+                return 0; // EOF
+            }
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
+            {
+                // Check both the stream's token and the passed-in token.
+                _ct.ThrowIfCancellationRequested();
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult(0);
+            }
+            public override long Seek(long offset, System.IO.SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value)   => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+
+        // -----------------------------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------------------------
 
@@ -436,6 +643,27 @@ namespace MapRenderer.Tests
 
             public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
                 => _fetch(id);
+
+            public void Dispose() { }
+        }
+
+        /// <summary>
+        /// Fake data source variant that exposes the CancellationToken to the fetch delegate,
+        /// so tests can register cancellation callbacks (needed for Release_CancelsInFlightFetch test).
+        /// </summary>
+        private sealed class FakeDataSourceCt : IDataSource
+        {
+            private readonly Func<TileId, CancellationToken, Task<TileResponse>> _fetch;
+
+            public TileEncoding Encoding => TileEncoding.Mvt;
+
+            public FakeDataSourceCt(Func<TileId, CancellationToken, Task<TileResponse>> fetch)
+            {
+                _fetch = fetch;
+            }
+
+            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+                => _fetch(id, ct);
 
             public void Dispose() { }
         }

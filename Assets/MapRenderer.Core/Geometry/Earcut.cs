@@ -58,12 +58,29 @@ namespace MapRenderer.Core.Geometry
 
             int outerCount = outer.Count;
 
-            // Sort valid holes by leftmost x vertex (for deterministic bridging).
+            // Sort valid holes by (leftmost-x, min-y, original-hole-index) for fully-deterministic
+            // bridging order. The three-level sort matches the jobified pipeline's Array.Sort in
+            // TileTessellationPipeline (which also sorts by leftmost-x then min-y then ring-index),
+            // guaranteeing bit-identical output between the managed and Burst paths.
+            // List.Sort is unstable; without the tiebreaks, equal-leftmost-x holes produce
+            // non-deterministic ordering that breaks the parity hash tests.
             var validHoles = new List<List<double2>>();
             if (holes != null)
                 foreach (var h in holes)
                     if (h != null && h.Count >= 3) validHoles.Add(h);
-            validHoles.Sort((a, b) => LeftmostX(a).CompareTo(LeftmostX(b)));
+            var holeOrigIdx = new int[validHoles.Count];
+            for (int hi = 0; hi < validHoles.Count; hi++) holeOrigIdx[hi] = hi;
+            Array.Sort(holeOrigIdx, (ia, ib) =>
+            {
+                int cmp = LeftmostX(validHoles[ia]).CompareTo(LeftmostX(validHoles[ib]));
+                if (cmp != 0) return cmp;
+                cmp = MinY(validHoles[ia]).CompareTo(MinY(validHoles[ib]));
+                if (cmp != 0) return cmp;
+                return ia.CompareTo(ib);  // hole index tiebreak for total order
+            });
+            var sortedHoles = new List<List<double2>>(validHoles.Count);
+            foreach (int hi in holeOrigIdx) sortedHoles.Add(validHoles[hi]);
+            validHoles = sortedHoles;
 
             // Capacity: outer + each hole + 2 bridge verts per hole.
             int capacity = outerCount;
@@ -325,6 +342,13 @@ namespace MapRenderer.Core.Geometry
             double minX = double.MaxValue;
             foreach (var p in ring) if (p.x < minX) minX = p.x;
             return minX;
+        }
+
+        private static double MinY(List<double2> ring)
+        {
+            double minY = double.MaxValue;
+            foreach (var p in ring) if (p.y < minY) minY = p.y;
+            return minY;
         }
 
         private static int HoleLeftmostIndex(double[] vx, double[] vy, int holeStart, int holeCount)
