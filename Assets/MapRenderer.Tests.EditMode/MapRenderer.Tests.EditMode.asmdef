@@ -3,7 +3,12 @@
     "rootNamespace": "MapRenderer.Tests",
     "references": [
         "MapRenderer.Core",
+        "MapRenderer.Jobs",
+        "MapRenderer.Unity",
         "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Jobs",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner"
     ],

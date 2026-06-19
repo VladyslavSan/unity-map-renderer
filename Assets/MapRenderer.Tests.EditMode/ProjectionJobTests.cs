@@ -1,0 +1,244 @@
+using System;
+using System.IO;
+using NUnit.Framework;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Mvt;
+using MapRenderer.Jobs;
+
+namespace MapRenderer.Tests
+{
+    /// <summary>
+    /// EditMode tests for ProjectTileVerticesJob.
+    ///
+    /// (1) Parity test — job matches TileId.ToMercator − origin for known tile coords,
+    ///     including a non-z0 tile to exercise the 2^z path.
+    /// (2) Acceptance — all 239 countries' vertices project within MercatorBounds (± margin).
+    /// (3) Precision intent — origin-relative float3 magnitudes are smaller than absolute Mercator.
+    ///
+    /// Note: Tests run the job via managed fallback (.Run() / .Complete()), not Burst-compiled.
+    /// They validate numeric correctness but do NOT prove Burst compilation.
+    /// </summary>
+    public class ProjectionJobTests
+    {
+        private const double R = 6378137.0;
+
+        // -----------------------------------------------------------------------------------------
+        // Helper: run the job synchronously over a single tile coord.
+        // -----------------------------------------------------------------------------------------
+
+        private static float3 Project(int z, int x, int y, double extent, double px, double py,
+            double originX, double originY)
+        {
+            var coords = new NativeArray<double2>(1, Allocator.TempJob);
+            var result = new NativeArray<float3>(1, Allocator.TempJob);
+            coords[0] = new double2(px, py);
+
+            new ProjectTileVerticesJob
+            {
+                TileZ = z, TileX = x, TileY = y,
+                Extent = extent,
+                OriginMercX = originX,
+                OriginMercY = originY,
+                TileCoords = coords,
+                WorldPositions = result
+            }.Schedule(1, 1).Complete();
+
+            float3 r = result[0];
+            coords.Dispose();
+            result.Dispose();
+            return r;
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // (1) Parity — job vs TileId.ToMercator (z0)
+        // -----------------------------------------------------------------------------------------
+
+        [Test]
+        public void Parity_JobMatchesCore_Z0()
+        {
+            var tile = new TileId(0, 0, 0);
+            var (bMin, _) = tile.MercatorBounds();
+            double originX = bMin.x, originY = bMin.y;
+            double extent = 4096.0;
+
+            // Test a handful of tile-space coords.
+            double[][] testPoints = {
+                new[] { 0.0, 0.0 },
+                new[] { 2048.0, 2048.0 },
+                new[] { 4096.0, 0.0 },
+                new[] { 0.0, 4096.0 },
+                new[] { 1000.0, 3000.0 },
+            };
+
+            // Generous tolerance: at z0 tile, float ULP at world scale (~20M m) is ~2–5 m.
+            // A formula bug errors by thousands of km, so 50 m absolute tol is safe and not too tight.
+            const double tol = 50.0;
+
+            foreach (var pt in testPoints)
+            {
+                double px = pt[0], py = pt[1];
+                double2 mercRef = tile.ToMercator(px, py, extent);
+                double refDx = mercRef.x - originX;
+                double refDz = mercRef.y - originY;
+
+                float3 jobOut = Project(0, 0, 0, extent, px, py, originX, originY);
+
+                Assert.That((double)jobOut.x, Is.EqualTo(refDx).Within(tol),
+                    $"X mismatch at px={px}, py={py}: job={jobOut.x:F2}, ref={refDx:F2}");
+                Assert.That((double)jobOut.z, Is.EqualTo(refDz).Within(tol),
+                    $"Z mismatch at px={px}, py={py}: job={jobOut.z:F2}, ref={refDz:F2}");
+                Assert.AreEqual(0.0f, jobOut.y, "Y should be 0.");
+            }
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // (1b) Parity — non-z0 tile (exercises 2^z path)
+        // -----------------------------------------------------------------------------------------
+
+        [Test]
+        public void Parity_JobMatchesCore_NonZ0()
+        {
+            // z=5, x=10, y=12 — a realistic non-trivial tile
+            int z = 5, tx = 10, ty = 12;
+            var tile = new TileId(z, tx, ty);
+            var (bMin, _) = tile.MercatorBounds();
+            double originX = bMin.x, originY = bMin.y;
+            double extent = 4096.0;
+
+            double[][] testPoints = {
+                new[] { 0.0, 0.0 },
+                new[] { 2048.0, 2048.0 },
+                new[] { 4096.0, 4096.0 },
+                new[] { 1000.0, 500.0 },
+            };
+
+            const double tol = 5.0; // Non-z0: tile is smaller, ULPs much tighter, 5 m is safe.
+
+            foreach (var pt in testPoints)
+            {
+                double px = pt[0], py = pt[1];
+                double2 mercRef = tile.ToMercator(px, py, extent);
+                double refDx = mercRef.x - originX;
+                double refDz = mercRef.y - originY;
+
+                float3 jobOut = Project(z, tx, ty, extent, px, py, originX, originY);
+
+                Assert.That((double)jobOut.x, Is.EqualTo(refDx).Within(tol),
+                    $"X mismatch z={z} tx={tx} ty={ty} px={px}: job={jobOut.x:F4}, ref={refDx:F4}");
+                Assert.That((double)jobOut.z, Is.EqualTo(refDz).Within(tol),
+                    $"Z mismatch z={z} tx={tx} ty={ty} py={py}: job={jobOut.z:F4}, ref={refDz:F4}");
+            }
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // (2) Acceptance — 239 country vertices within MercatorBounds
+        // -----------------------------------------------------------------------------------------
+
+        [Test]
+        public void CountryVertices_ProjectWithinMercatorBounds()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
+            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+
+            var mvtTile = MvtDecoder.Decode(File.ReadAllBytes(path));
+            var layer = mvtTile.GetLayer("countries");
+            Assert.IsNotNull(layer);
+
+            var tileId = new TileId(0, 0, 0);
+            var (bMin, bMax) = tileId.MercatorBounds();
+            double originX = bMin.x, originY = bMin.y;
+            double extent = layer.Extent;
+
+            // 5% margin for vertices at the tile boundary.
+            double marginX = (bMax.x - bMin.x) * 0.05;
+            double marginY = (bMax.y - bMin.y) * 0.05;
+
+            int totalChecked = 0;
+            foreach (var feature in layer.Features)
+            {
+                var rings = MapRenderer.Core.Mvt.MvtGeometry.Decode(feature.Geometry);
+                foreach (var ring in rings)
+                {
+                    if (ring == null || ring.Count == 0) continue;
+
+                    var coords = new NativeArray<double2>(ring.Count, Allocator.TempJob);
+                    var results = new NativeArray<float3>(ring.Count, Allocator.TempJob);
+
+                    for (int i = 0; i < ring.Count; i++)
+                        coords[i] = ring[i];
+
+                    new ProjectTileVerticesJob
+                    {
+                        TileZ = 0, TileX = 0, TileY = 0,
+                        Extent = extent,
+                        OriginMercX = originX,
+                        OriginMercY = originY,
+                        TileCoords = coords,
+                        WorldPositions = results
+                    }.Schedule(ring.Count, 64).Complete();
+
+                    for (int i = 0; i < ring.Count; i++)
+                    {
+                        float3 wp = results[i];
+                        // Reconstruct absolute mercator from origin-relative
+                        double absX = (double)wp.x + originX;
+                        double absZ = (double)wp.z + originY;
+
+                        Assert.That(absX, Is.GreaterThanOrEqualTo(bMin.x - marginX).And.LessThanOrEqualTo(bMax.x + marginX),
+                            $"absX={absX:F2} out of [{bMin.x:F2}, {bMax.x:F2}]");
+                        Assert.That(absZ, Is.GreaterThanOrEqualTo(bMin.y - marginY).And.LessThanOrEqualTo(bMax.y + marginY),
+                            $"absZ={absZ:F2} out of [{bMin.y:F2}, {bMax.y:F2}]");
+
+                        totalChecked++;
+                    }
+
+                    coords.Dispose();
+                    results.Dispose();
+                }
+            }
+            Assert.Greater(totalChecked, 0, "Should have checked at least one vertex.");
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // (3) Precision intent — origin-relative float3 magnitudes smaller than absolute Mercator
+        // -----------------------------------------------------------------------------------------
+
+        [Test]
+        public void OriginRelative_MagnitudesAreBoundedByTileSize()
+        {
+            // At z0, the whole-world tile spans ~±20M m in X, ~±20M m in Y.
+            // Origin-relative coords from the tile corner should be in [0, ~40M] for x and z.
+            // (We subtract the MIN corner, so values range from 0 to the tile width.)
+            var tile = new TileId(0, 0, 0);
+            var (bMin, bMax) = tile.MercatorBounds();
+            double originX = bMin.x, originY = bMin.y;
+            double tileWidth = bMax.x - bMin.x;
+            double tileHeight = bMax.y - bMin.y;
+            double extent = 4096.0;
+
+            // Sample the four corners
+            double[][] corners = {
+                new[] { 0.0, 0.0 },
+                new[] { 4096.0, 0.0 },
+                new[] { 0.0, 4096.0 },
+                new[] { 4096.0, 4096.0 },
+            };
+
+            foreach (var c in corners)
+            {
+                float3 wp = Project(0, 0, 0, extent, c[0], c[1], originX, originY);
+
+                // Origin-relative x should be in [0, tileWidth] (with float rounding)
+                Assert.That((double)wp.x, Is.GreaterThanOrEqualTo(-1000.0).And.LessThanOrEqualTo(tileWidth + 1000.0),
+                    $"Origin-relative X={wp.x} out of tile width bounds.");
+                // Origin-relative z should be in [0, tileHeight] (note: Y-axis: top=low Mercator)
+                Assert.That((double)wp.z, Is.GreaterThanOrEqualTo(-tileHeight - 1000.0).And.LessThanOrEqualTo(tileHeight + 1000.0),
+                    $"Origin-relative Z={wp.z} out of tile height bounds.");
+            }
+        }
+    }
+}

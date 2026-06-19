@@ -1,0 +1,21 @@
+{
+    "name": "MapRenderer.Unity",
+    "rootNamespace": "MapRenderer.Unity",
+    "references": [
+        "MapRenderer.Core",
+        "MapRenderer.Jobs",
+        "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Jobs"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

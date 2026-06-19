@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch",
+      "Bash(./Tools/run-tests.sh:*)",
+      "Bash(./Tools/analyze-run.sh:*)",
+      "Bash(./Tools/watch-agents.sh:*)",
+      "Bash(git diff:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(which:*)",
+      "Bash(mkdir:*)",
+      "Bash(pgrep:*)",
+      "Bash(test:*)",
+      "Edit(Assets/**)",
+      "Write(Assets/**)",
+      "Edit(docs/**)",
+      "Write(docs/**)"
+    ],
+    "deny": [
+      "Bash(git push:*)",
+      "Bash(rm -rf:*)"
+    ]
+  }
+}

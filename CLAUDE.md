@@ -19,37 +19,51 @@ Unity's Test Framework runs headless from the CLI in batch mode. Prefer this for
 it verifies **compilation and tests** without the GUI. Only fall back to asking the user to use the
 in-Editor Test Runner if headless licensing is unavailable (see caveats).
 
-**Recipe** (self-discovering; run from anywhere inside the repo):
+**Recipe** — use the committed wrapper script (canonical command; run it from the repo root):
 ```bash
-ROOT="$(git rev-parse --show-toplevel)"
-VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt")"
-
-# Editor binary — Unity Hub default install locations (macOS):
-UNITY="/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-[ -x "$UNITY" ] || UNITY="$HOME/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-# (Linux: .../Editor/$VERSION/Editor/Unity ; Windows: .../Editor/$VERSION/Editor/Unity.exe)
-
-mkdir -p "$ROOT/Logs"
-"$UNITY" -runTests -batchmode -projectPath "$ROOT" \
-  -testPlatform EditMode \
-  -testResults "$ROOT/Logs/test-results.xml" \
-  -logFile "$ROOT/Logs/test-run.log"
-echo "exit: $?"   # 0 = compiled AND all tests passed; non-zero = compile error or test failure
+./Tools/run-tests.sh            # EditMode (default)
+./Tools/run-tests.sh PlayMode   # PlayMode
 ```
-- Use `-testPlatform PlayMode` for play-mode tests.
-- **Run it in the background** (`run_in_background`): the first batch launch does a full asset import +
-  compile and can take minutes. You'll be notified on completion.
+It is self-locating, finds the Editor binary for this project's Unity version, refuses to run if the
+Editor is open (exit 3), runs the tests, then prints the result summary and any `error CS` lines. Exit
+`0` = compiled AND all tests passed; non-zero = compile error or test failure (don't trust the code
+alone — read the printed summary). **Run it in the background** (`run_in_background`): the first batch
+launch does a full asset import + compile and can take minutes; you'll be notified on completion.
 
-**Read the results** (don't trust the exit code alone):
+> The script is allowlisted in `.claude/settings.json` (`Bash(./Tools/run-tests.sh:*)`) so it runs
+> without a permission prompt. What it does, expanded, in case you need to invoke a step by hand:
+> ```bash
+> ROOT="$(git rev-parse --show-toplevel)"
+> VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt")"
+> # Editor binary — Unity Hub default install locations (macOS):
+> UNITY="/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
+> [ -x "$UNITY" ] || UNITY="$HOME/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
+> # (Linux: .../Editor/$VERSION/Editor/Unity ; Windows: .../Editor/$VERSION/Editor/Unity.exe)
+> mkdir -p "$ROOT/Logs"
+> "$UNITY" -runTests -batchmode -projectPath "$ROOT" -testPlatform EditMode \
+>   -testResults "$ROOT/Logs/test-results.xml" -logFile "$ROOT/Logs/test-run.log"
+> # results (don't trust exit code alone):
+> grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$ROOT/Logs/test-results.xml" | head -1
+> grep -oE '<test-case [^>]*' "$ROOT/Logs/test-results.xml" \
+>   | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
+> grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u   # compile errors prevent tests running at all
+> ```
+
+### Fast Core tests (no Unity) — prefer these for `MapRenderer.Core` logic
+`MapRenderer.Core` is plain C# (its only Unity dependency is `Unity.Mathematics.double2`, which a 2-field
+shim replaces). `Tools/core-tests/` is a `dotnet test` project that compiles the **real** Core `.cs` files
+plus the **engine-free EditMode test files verbatim** (single source of truth — they run in both runners).
+It executes in **~0.1s, with no Editor and no project lock** (works while Unity is open).
 ```bash
-ROOT="$(git rev-parse --show-toplevel)"
-# overall + per-test:
-grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$ROOT/Logs/test-results.xml" | head -1
-grep -oE '<test-case [^>]*' "$ROOT/Logs/test-results.xml" \
-  | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
-# compile errors (these prevent tests from running at all):
-grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u
+dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 ```
+- Use this as the **default** loop for decode / geometry / earcut / assembler / projection-math changes —
+  it's seconds, not minutes, and won't trip long-run watchdogs.
+- It can also iterate root-cause experiments (it's how the disjoint-hole assembler bug was found): edit
+  `Tools/core-tests/CorePipelineTests.cs` to probe the real pipeline over the fixture.
+- **Still run the Unity EditMode recipe (above) before declaring a stage done** — it's the source of truth
+  for engine-integration tests that the fast project can't cover: `MeshBuilder`/`UnityEngine.Mesh`,
+  `NativeArray`/Burst jobs, MonoBehaviours, and Burst-compilation correctness.
 
 ### Unity CLI caveats
 - **The Editor must be closed.** Unity locks the project; batch mode can't run alongside an open Editor.

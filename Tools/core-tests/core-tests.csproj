@@ -1,0 +1,49 @@
+<!--
+  Fast, Unity-free unit tests for MapRenderer.Core. Compiles the REAL Core .cs files plus a tiny
+  Unity.Mathematics shim, so pure-logic tests run via `dotnet test` in ~1s instead of a minutes-long
+  Editor batch run (and without the Unity project lock).
+
+  Engine-free EditMode test files are included VERBATIM (single source of truth — they also run in the
+  Unity Test Framework). Tests that need the engine (MeshBuilder/UnityEngine.Mesh, NativeArray jobs,
+  MonoBehaviours) stay Unity-only by design. NUnit pinned to 3.x to match Unity's runner API.
+
+  Run:  dotnet test Tools/core-tests
+-->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>MapRenderer.Core.Tests</AssemblyName>
+    <RootNamespace>MapRenderer.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="NUnit" Version="3.14.0" />
+    <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="Shim.cs" />
+    <Compile Include="CorePipelineTests.cs" />
+
+    <!-- Real Core sources (single source of truth) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Mvt/ProtobufReader.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Mvt/MvtModels.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Mvt/MvtDecoder.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Mvt/MvtGeometry.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/SignedArea.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/Polygon.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/PolygonAssembler.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/Earcut.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Imaging/SnapshotCoverage.cs" />
+
+    <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
+  </ItemGroup>
+</Project>
