@@ -8,7 +8,7 @@ namespace MapRenderer.Core.Coordinates
     /// lon/lat and Web Mercator. Tile-local origin is top-left; the lon/lat formula already encodes
     /// the Y-down convention, so callers must NOT pre-flip Y (see docs §4).
     /// </summary>
-    public readonly struct TileId
+    public readonly struct TileId : IEquatable<TileId>
     {
         public readonly int Z, X, Y;
 
@@ -43,5 +43,31 @@ namespace MapRenderer.Core.Coordinates
             double2 b = ToMercator(1.0, 1.0, 1.0);
             return (math.min(a, b), math.max(a, b));
         }
+
+        // -----------------------------------------------------------------------------------------
+        // IEquatable<TileId> — required for use as Dictionary/HashSet key without boxing.
+        // -----------------------------------------------------------------------------------------
+
+        public bool Equals(TileId other) => Z == other.Z && X == other.X && Y == other.Y;
+
+        public override bool Equals(object obj) => obj is TileId other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            // FNV-1a-inspired combine — cheap and low-collision for small z/x/y values.
+            unchecked
+            {
+                int h = 17;
+                h = h * 31 + Z;
+                h = h * 31 + X;
+                h = h * 31 + Y;
+                return h;
+            }
+        }
+
+        public static bool operator ==(TileId a, TileId b) => a.Equals(b);
+        public static bool operator !=(TileId a, TileId b) => !a.Equals(b);
+
+        public override string ToString() => $"{Z}/{X}/{Y}";
     }
 }

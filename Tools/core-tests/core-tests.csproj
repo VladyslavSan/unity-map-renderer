@@ -41,9 +41,19 @@
     <Compile Include="../../Assets/MapRenderer.Core/Geometry/Earcut.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Imaging/SnapshotCoverage.cs" />
 
+    <!-- S03: BYO data-source layer (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Data/FileDataSource.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Data/HttpDataSource.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Data/TileCache.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Data/TileScheduler.cs" />
+
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/DataSourceTests.cs" />
   </ItemGroup>
 </Project>
