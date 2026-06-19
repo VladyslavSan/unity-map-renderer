@@ -1,0 +1,45 @@
+Unity Companion License ("License")
+Software Copyright © 2019 Unity Technologies ApS
+
+Unity Technologies ApS ("Unity") grants to you a worldwide, non-exclusive, no-charge, and royalty-free
+copyright license to reproduce, prepare derivative works of, publicly display, publicly perform,
+sublicense, and distribute the Software, subject to the following terms and conditions:
+
+1. Unity Companion Use Only. Exercise of the license granted herein is limited to exercise for the
+   creation, use, and/or distribution of applications, software, or other content pursuant to a valid
+   Unity content authoring and runtime license ("Commercial License") with Unity. By exercising the
+   copyright license granted herein, you represent and warrant that (a) you have entered into a
+   Commercial License with Unity, or have accepted Unity's Terms of Service and are acting pursuant to
+   the personal, non-commercial license granted thereunder; and (b) your exercise of the license granted
+   herein is within the scope of the Commercial License or the personal, non-commercial license.
+
+2. No Modification of Unity Runtime. The license herein does not include a license to modify the
+   Software as incorporated into Unity's runtime or editor (e.g., the Unity runtime dll's or their
+   equivalents). No license is granted to modify or create derivative works of the Unity runtime or
+   editor.
+
+3. Ownership of Derivative Works. Unity will own all rights, title, and interest in derivative
+   works of the Software that are created by Unity. You will own all rights, title, and interest in
+   derivative works of the Software that you create, and you grant Unity a copyright license to use,
+   reproduce, prepare derivative works, publicly display, publicly perform, sublicense, and distribute
+   derivative works of the Software that you create, for any purposes.
+
+4. Trademarks. You are not granted any right or license under this License to use any trademarks, service
+   marks, trade names, products names, or branding of Unity or its affiliates ("Trademarks").
+   Descriptive uses of Trademarks are permitted; see, for example, Unity's Trademark Guidelines at
+   https://unity3d.com/legal/branding_trademarks.
+
+5. Notices. This License does not grant permission to use the trade names, trademarks, service marks, or
+   product names of Unity, except as required for reasonable and customary use in describing the origin
+   of the Software and reproducing the content of the notices in the NOTICES file.
+
+6. DISCLAIMER, LIMITATION OF LIABILITY. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+   PARTICULAR PURPOSE, AND NON-INFRINGEMENT. IN NO EVENT SHALL UNITY OR COPYRIGHT HOLDERS BE LIABLE FOR
+   ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+   FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+--
+
+The terms under which this license is available are described at:
+http://www.unity3d.com/legal/licenses/Unity_Companion_License

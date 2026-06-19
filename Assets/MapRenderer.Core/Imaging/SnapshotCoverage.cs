@@ -213,5 +213,75 @@ namespace MapRenderer.Core.Imaging
             int    bgG,
             int    bgB)
             => Analyse(pixels, width, height, (byte)bgR, (byte)bgG, (byte)bgB);
+
+        /// <summary>
+        /// Compute the mean luminance (relative [0,1]) of pixels that are NOT the background colour
+        /// (Manhattan distance > <see cref="Tolerance"/>).
+        ///
+        /// Luminance uses the standard Rec.709 coefficients: Y = 0.2126·R + 0.7152·G + 0.0722·B.
+        ///
+        /// Returns 0.0 when there are no non-background pixels (e.g. blank render or GPU failure).
+        ///
+        /// Used by <c>LitFillSnapshotTests</c> to prove lighting is active: under a directional
+        /// light with intensity I1 vs I2, the mean luminance of non-background pixels differs.
+        /// A constant unlit color would give equal luminance regardless of light intensity.
+        ///
+        /// Pure C# — no engine dependency — testable with dotnet test.
+        /// </summary>
+        /// <param name="pixels">RGBA32 flat byte array: length = width * height * 4.</param>
+        /// <param name="width">Image width in pixels.</param>
+        /// <param name="height">Image height in pixels.</param>
+        /// <param name="bgR">Background red (0–255).</param>
+        /// <param name="bgG">Background green (0–255).</param>
+        /// <param name="bgB">Background blue (0–255).</param>
+        public static double MeanLuminanceOfNonBackground(
+            byte[] pixels,
+            int    width,
+            int    height,
+            byte   bgR,
+            byte   bgG,
+            byte   bgB)
+        {
+            if (pixels == null) throw new ArgumentNullException(nameof(pixels));
+            int total = width * height;
+            if (total == 0) return 0.0;
+            if (pixels.Length < total * 4)
+                throw new ArgumentException(
+                    $"pixels.Length ({pixels.Length}) < width*height*4 ({total * 4}).");
+
+            double lumSum = 0.0;
+            int    count  = 0;
+
+            for (int i = 0; i < total; i++)
+            {
+                int  b    = i * 4;
+                byte r    = pixels[b];
+                byte g    = pixels[b + 1];
+                byte bCh  = pixels[b + 2];
+
+                int dist = Math.Abs(r - bgR) + Math.Abs(g - bgG) + Math.Abs(bCh - bgB);
+                if (dist > Tolerance)
+                {
+                    // Rec.709 luminance (linear approx — good enough for delta comparison).
+                    double lum = (0.2126 * r + 0.7152 * g + 0.0722 * bCh) / 255.0;
+                    lumSum += lum;
+                    count++;
+                }
+            }
+
+            return count > 0 ? lumSum / count : 0.0;
+        }
+
+        /// <summary>
+        /// Convenience overload with int background components.
+        /// </summary>
+        public static double MeanLuminanceOfNonBackground(
+            byte[] pixels,
+            int    width,
+            int    height,
+            int    bgR,
+            int    bgG,
+            int    bgB)
+            => MeanLuminanceOfNonBackground(pixels, width, height, (byte)bgR, (byte)bgG, (byte)bgB);
     }
 }

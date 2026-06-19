@@ -141,7 +141,7 @@ namespace MapRenderer.Unity
             _material.SetFloat("_Width",          Width);
             _material.SetFloat("_WidthIsPixels",  WidthIsPixels ? 1f : 0f);
             _material.SetFloat("_MetersPerPixel", MetersPerPixel);
-            _material.SetColor("_Color",          LineColor);
+            _material.SetColor("_MapColor",       LineColor);
             _material.SetFloat("_Opacity",        Opacity);
             _material.SetFloat("_Blur",           Blur);
         }

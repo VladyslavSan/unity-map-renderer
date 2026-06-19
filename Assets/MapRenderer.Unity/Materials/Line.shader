@@ -12,7 +12,7 @@
 // For a top-down orthographic camera: _MetersPerPixel = 2 * orthographicSize / pixelHeight (exact).
 //
 // Clean-room: implemented from first principles; not derived from MapLibre source.
-Shader "MapRenderer/Line"
+Shader "Hidden/MapRenderer/Line_S05_Deprecated"
 {
     Properties
     {

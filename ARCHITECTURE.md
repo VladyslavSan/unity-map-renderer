@@ -138,9 +138,17 @@ materials.** Width stays a material knob (`_Width` + a unit-mode flag).
 - **"meters" = Web-Mercator meters** (the geometry's own units; stretched by latitude). Apply an optional
   `1/cos(lat)` correction only if true-ground-meters are wanted.
 
-**Unity path:** hand-written HLSL URP/HDRP shaders (ShaderGraph can't easily express screen-space extrusion
-+ AA), per-layer `Material` / `MaterialPropertyBlock`, submitted via BatchRendererGroup /
-`Graphics.RenderPrimitives` (instanced, GC-free).
+**Unity path:** hand-written HLSL URP shaders (ShaderGraph cannot share one HLSL vertex function across
+N per-layer graphs and is impractical for extrusion + fwidth AA). All map-geometry shaders share a single
+`MapLitCore.hlsl` (the single source of truth for the `UnityPerMaterial` CBUFFER and the
+`MapVertexModify(...)` vertex hook) plus a per-layer `*_Input.hlsl` implementing that hook's body.
+See `docs/lit-rendering-design.md` for the full convention.
+
+Per-layer styling: **per-layer Material instances** (never `MaterialPropertyBlock` — it silently
+disables the SRP Batcher). Style properties (`_Color`, `_Width`, `_Opacity`, …) live in the shared
+`UnityPerMaterial` CBUFFER and are additionally registered as `UNITY_DOTS_INSTANCED_PROP` so the same
+names work under SRP Batcher AND BatchRendererGroup (BRG) without any call-site changes.
+Submitted via BatchRendererGroup / `Graphics.RenderPrimitives` (instanced, GC-free).
 
 ### Layer ordering & draw submission
 The style is an **ordered list of layers**, composited in order (painter's algorithm). Most layers are

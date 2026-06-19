@@ -29,6 +29,7 @@
   <ItemGroup>
     <Compile Include="Shim.cs" />
     <Compile Include="CorePipelineTests.cs" />
+    <Compile Include="ShaderStructureTests.cs" />
 
     <!-- Real Core sources (single source of truth) -->
     <Compile Include="../../Assets/MapRenderer.Core/Mvt/ProtobufReader.cs" />

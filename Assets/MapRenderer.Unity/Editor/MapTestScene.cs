@@ -33,9 +33,26 @@ namespace MapRenderer.Unity.Editor
                 cam.backgroundColor = new Color(0.10f, 0.11f, 0.15f, 1f);
             }
 
+            // Add a directional light so the MapRenderer/Fill (URP Lit) material renders brightly.
+            // Without a light, fills look near-black — misleading for a "look" workflow.
+            var lightGo  = new GameObject("DirectionalLight");
+            var light    = lightGo.AddComponent<Light>();
+            light.type       = LightType.Directional;
+            light.intensity  = 1f;
+            lightGo.transform.rotation = Quaternion.Euler(50f, 30f, 0f); // angled down toward XZ fill
+
             var go = new GameObject("MapFill");
             var boot = go.AddComponent<MapFillBootstrap>(); // RequireComponent adds MeshFilter + MeshRenderer
             boot.Tile = AssetDatabase.LoadAssetAtPath<TextAsset>(FixturePath);
+            // Wire the committed MapFill.mat template so the scene uses the live template material
+            // (review comment #2: MapFillBootstrap must use MapFill.mat, not the new-Material fallback).
+            var templateMat = AssetDatabase.LoadAssetAtPath<Material>(
+                "Assets/MapRenderer.Unity/Materials/MapFill.mat");
+            if (templateMat != null)
+                boot.FillMaterial = templateMat;
+            else
+                Debug.LogWarning("[MapTestScene] MapFill.mat not found — FillMaterial left null. " +
+                                 "Re-import Assets to fix.");
             boot.FitToView = true;
             boot.ViewSize = 100f;
             boot.Build(); // build now so the mesh is visible without entering Play mode

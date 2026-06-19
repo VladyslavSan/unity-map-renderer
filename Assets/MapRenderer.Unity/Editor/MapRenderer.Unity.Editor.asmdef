@@ -2,7 +2,9 @@
     "name": "MapRenderer.Unity.Editor",
     "rootNamespace": "MapRenderer.Unity.Editor",
     "references": [
-        "MapRenderer.Unity"
+        "MapRenderer.Unity",
+        "Unity.RenderPipelines.Universal.Editor",
+        "Unity.RenderPipelines.Core.Editor"
     ],
     "includePlatforms": [
         "Editor"

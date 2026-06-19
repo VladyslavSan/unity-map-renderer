@@ -8,12 +8,15 @@ using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Jobs;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace MapRenderer.Unity
 {
     /// <summary>
     /// MonoBehaviour bootstrap: decodes the sample tile's country fills and renders them as a single
-    /// Unity Mesh using an unlit double-sided material.
+    /// Unity Mesh using a URP Lit material (MapRenderer/Fill shader).
     ///
     /// Pipeline:
     ///   TextAsset (MVT bytes)
@@ -24,20 +27,51 @@ namespace MapRenderer.Unity
     ///   → ProjectTileVerticesJob (Burst: tile→Mercator→origin-relative float3)
     ///   → MeshBuilder → UnityEngine.Mesh → MeshFilter/MeshRenderer
     ///
-    /// Winding: Cull Off material avoids front/back visibility issues for this spike.
+    /// Material: MapRenderer/Fill (URP Lit, Cull Off, deferred-eligible).
+    ///   Default template: Assets/MapRenderer.Unity/Materials/MapFill.mat.
+    ///   Assign FillMaterial to use the template (or an instance) directly — change shader properties
+    ///   on that Material to restyle with no mesh rebuild (live restyle, no rebuild).
+    ///   Per docs/lit-rendering-design.md: NEVER use MaterialPropertyBlock on batched renderers
+    ///   (silently disables SRP Batcher); use per-layer Material instances instead.
+    ///
+    /// UV0 (S34): tile-space [0,1] UVs supplied to MeshBuilder for texture/normal map sampling.
+    /// Tangents (S34): constant float4(1,0,0,1) per vertex for normal map tangent space.
+    ///
+    /// Winding: Cull Off shader avoids front/back visibility issues for this spike.
     /// Correct winding is a deliberate follow-up.
     /// </summary>
     [RequireComponent(typeof(MeshFilter), typeof(MeshRenderer))]
     public sealed class MapFillBootstrap : MonoBehaviour
     {
+        // Path to the committed template material (relative to Assets/).
+        private const string TemplateMaterialPath =
+            "Assets/MapRenderer.Unity/Materials/MapFill.mat";
+
         [Tooltip("Drag Assets/Fixtures/sample-tile.bytes here. If empty, it is loaded from disk (Editor).")]
         public TextAsset Tile;
 
         [Tooltip("Layer name to render. Default: countries.")]
         public string LayerName = "countries";
 
-        [Tooltip("URP-compatible unlit material (Cull Off). If null, Sprites/Default is used.")]
+        [Tooltip("URP Lit fill material (MapRenderer/Fill shader, Cull Off). " +
+                 "Defaults to the committed template Assets/MapRenderer.Unity/Materials/MapFill.mat. " +
+                 "Change properties on this Material instance to restyle with no mesh rebuild (live restyle). " +
+                 "Never assign via MaterialPropertyBlock — use per-layer Material instances " +
+                 "(see docs/lit-rendering-design.md).")]
         public Material FillMaterial;
+
+        /// <summary>
+        /// Called by Unity when the component is first added in the Editor or Reset is selected.
+        /// Auto-populates FillMaterial with the committed MapFill.mat template so the template
+        /// is the live source of styling by default (without requiring manual inspector drag).
+        /// </summary>
+        private void Reset()
+        {
+#if UNITY_EDITOR
+            if (FillMaterial == null)
+                FillMaterial = AssetDatabase.LoadAssetAtPath<Material>(TemplateMaterialPath);
+#endif
+        }
 
         [Tooltip("Center + scale the built map to ViewSize units at the origin for easy viewing. " +
                  "The raw mesh is the z0 world tile in metres (~40,000,000 units) and lies flat in XZ.")]
@@ -137,8 +171,8 @@ namespace MapRenderer.Unity
                     tileCoords.Dispose();
                     worldPos.Dispose();
 
-                    // 8. Add to mesh builder.
-                    meshBuilder.AddFeature(verts, triIndices);
+                    // 8. Add to mesh builder (S34: pass flatVerts for UV0 and extent for normalisation).
+                    meshBuilder.AddFeature(verts, triIndices, flatVerts, extent);
                 }
             }
 
@@ -155,13 +189,34 @@ namespace MapRenderer.Unity
             var mr = GetComponent<MeshRenderer>();
             if (FillMaterial != null)
             {
-                mr.sharedMaterial = FillMaterial;
+                // Instantiate a copy so the committed MapFill.mat template is never mutated by
+                // runtime SetColor / EnableKeyword calls (SRP Batcher: use Material instances,
+                // never MaterialPropertyBlock on batched renderers — see docs/lit-rendering-design.md).
+                mr.sharedMaterial = new Material(FillMaterial) { name = FillMaterial.name };
             }
             else
             {
-                // Sprites/Default is URP-safe, unlit, Cull Off — recommended spike material.
-                var mat = new Material(Shader.Find("Sprites/Default"));
-                mat.color = new Color(0.4f, 0.7f, 0.4f, 1f);
+                // Create a default lit fill material from the MapRenderer/Fill shader.
+                // Fallback to Sprites/Default if the shader is not yet compiled (e.g. first import).
+                var fillShader = Shader.Find("MapRenderer/Fill");
+                Material mat;
+                if (fillShader != null)
+                {
+                    mat = new Material(fillShader) { name = "MapFill_DefaultLit" };
+                    mat.SetColor("_MapColor",   new Color(0.4f, 0.7f, 0.4f, 1f));
+                    mat.SetFloat("_Opacity",    1f);
+                    mat.SetFloat("_Metallic",   0f);
+                    mat.SetFloat("_Smoothness", 0.3f);
+                }
+                else
+                {
+                    // Shader not yet compiled (first import or missing). Use Sprites/Default as a
+                    // transient fallback so the mesh is at least visible. A reimport will fix this.
+                    Debug.LogWarning("[MapFillBootstrap] MapRenderer/Fill shader not found — " +
+                                     "falling back to Sprites/Default. Reimport Assets to fix.");
+                    mat = new Material(Shader.Find("Sprites/Default"));
+                    mat.color = new Color(0.4f, 0.7f, 0.4f, 1f);
+                }
                 mr.sharedMaterial = mat;
             }
 

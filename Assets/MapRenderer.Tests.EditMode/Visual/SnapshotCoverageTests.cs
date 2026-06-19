@@ -417,5 +417,64 @@ namespace MapRenderer.Tests.Visual
             Assert.That(result.FilledFraction, Is.GreaterThan(0.99f),
                 "Pixels outside tolerance must be counted as fill.");
         }
+
+        // ─── MeanLuminanceOfNonBackground tests (S32) ────────────────────────────────
+
+        [Test]
+        public void MeanLuminance_SolidBackground_ReturnsZero()
+        {
+            // All pixels are background → no non-bg pixels → luminance = 0.
+            var buf = SolidBuffer(16, 16, BgR, BgG, BbB);
+            double lum = SnapshotCoverage.MeanLuminanceOfNonBackground(buf, 16, 16, BgR, BgG, BbB);
+            Assert.That(lum, Is.EqualTo(0.0),
+                "A solid-background buffer has no non-background pixels; luminance must be 0.");
+        }
+
+        [Test]
+        public void MeanLuminance_SolidWhiteFill_ReturnsNearOne()
+        {
+            // All pixels are pure white (far from the dark bg) → luminance ≈ 1.
+            var buf = SolidBuffer(16, 16, 255, 255, 255);
+            double lum = SnapshotCoverage.MeanLuminanceOfNonBackground(buf, 16, 16, BgR, BgG, BbB);
+            Assert.That(lum, Is.GreaterThan(0.95),
+                "Solid-white fill must give luminance near 1.0.");
+        }
+
+        [Test]
+        public void MeanLuminance_KnownRGB_ExactValue()
+        {
+            // Buffer: 2×1 pixels. Both non-background.
+            //   pixel0: R=200, G=100, B=50 → lum = (0.2126*200 + 0.7152*100 + 0.0722*50)/255
+            //   pixel1: R=50,  G=200, B=100 → lum = (0.2126*50  + 0.7152*200 + 0.0722*100)/255
+            // Neither matches the dark-slate bg (BgR=26, BgG=28, BbB=38).
+            const int W = 2, H = 1;
+            var buf = new byte[W * H * 4]
+            {
+                200, 100, 50, 255,
+                50, 200, 100, 255,
+            };
+            double lum0 = (0.2126 * 200 + 0.7152 * 100 + 0.0722 * 50) / 255.0;
+            double lum1 = (0.2126 * 50  + 0.7152 * 200 + 0.0722 * 100) / 255.0;
+            double expected = (lum0 + lum1) / 2.0;
+
+            double actual = SnapshotCoverage.MeanLuminanceOfNonBackground(buf, W, H, BgR, BgG, BbB);
+            Assert.That(actual, Is.EqualTo(expected).Within(1e-6),
+                $"MeanLuminance: expected {expected:F6}, got {actual:F6}.");
+        }
+
+        [Test]
+        public void MeanLuminance_BrightVsDimFill_DimIsSmaller()
+        {
+            // Bright fill (R=200, G=200, B=200) vs dim fill (R=50, G=50, B=50).
+            // Both are clearly non-background (far from dark-slate bg).
+            var bright = SolidBuffer(8, 8, 200, 200, 200);
+            var dim    = SolidBuffer(8, 8, 50,  50,  50);
+
+            double lumBright = SnapshotCoverage.MeanLuminanceOfNonBackground(bright, 8, 8, BgR, BgG, BbB);
+            double lumDim    = SnapshotCoverage.MeanLuminanceOfNonBackground(dim,    8, 8, BgR, BgG, BbB);
+
+            Assert.That(lumBright, Is.GreaterThan(lumDim),
+                $"Bright fill lum ({lumBright:F3}) must be greater than dim fill lum ({lumDim:F3}).");
+        }
     }
 }
