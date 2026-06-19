@@ -50,10 +50,15 @@
     <Compile Include="../../Assets/MapRenderer.Core/Data/TileCache.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/TileScheduler.cs" />
 
+    <!-- S05: Line tessellator -->
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/LineVertex.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Geometry/LineTessellator.cs" />
+
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/DataSourceTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
   </ItemGroup>
 </Project>
