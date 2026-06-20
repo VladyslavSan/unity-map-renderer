@@ -40,6 +40,8 @@ struct Attributes
     float2 texcoord     : TEXCOORD0;
     float2 staticLightmapUV   : TEXCOORD1;
     float2 dynamicLightmapUV  : TEXCOORD2;
+    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -78,6 +80,10 @@ struct Varyings
 #ifdef USE_APV_PROBE_OCCLUSION
     float4 probeOcclusion : TEXCOORD10;
 #endif
+
+    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
+    // TEXCOORD11 is free in this pass; avoids collisions with TEXCOORD0-10 above.
+    half4 vColor                    : TEXCOORD11;
 
     float4 positionCS               : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -244,6 +250,9 @@ Varyings LitPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
+    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    output.vColor = input.color;
+
     return output;
 }
 
@@ -274,8 +283,12 @@ void LitPassFragment(
 
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
     // _MapColor modulates the base color; _Opacity modulates alpha (effective in transparent queue).
-    surfaceData.albedo *= _MapColor.rgb;
-    surfaceData.alpha  *= _Opacity;
+    // [MAP DELTA S12] Composite data-driven × zoom:
+    //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
+    //   _MapColor.rgb    = zoom-level or constant color (S11 uniform dimension)
+    //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
+    surfaceData.albedo *= input.vColor.rgb * _MapColor.rgb;
+    surfaceData.alpha  *= input.vColor.a   * _Opacity;
 
 #ifdef LOD_FADE_CROSSFADE
     LODFadeCrossFade(input.positionCS);

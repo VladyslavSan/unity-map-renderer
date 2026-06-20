@@ -7,6 +7,8 @@ using Unity.Mathematics;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Filters;
+using MapRenderer.Core.Style;
 using MapRenderer.Jobs;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -37,6 +39,10 @@ namespace MapRenderer.Unity
     /// UV0 (S34): tile-space [0,1] UVs supplied to MeshBuilder for texture/normal map sampling.
     /// Tangents (S34): constant float4(1,0,0,1) per vertex for normal map tangent space.
     ///
+    /// Vertex COLOR (S12): when FillColorExpression is set, per-feature vertex colors are baked from
+    ///   a data-driven paint expression (evaluated against decoded feature properties).  When null/empty,
+    ///   vertex colors default to white (S11 zoom-uniform behavior preserved exactly).
+    ///
     /// Winding: Cull Off shader avoids front/back visibility issues for this spike.
     /// Correct winding is a deliberate follow-up.
     /// </summary>
@@ -59,6 +65,18 @@ namespace MapRenderer.Unity
                  "Never assign via MaterialPropertyBlock — use per-layer Material instances " +
                  "(see docs/lit-rendering-design.md).")]
         public Material FillMaterial;
+
+        [Tooltip("S12: Optional data-driven fill-color expression (MapLibre expression JSON). " +
+                 "When non-empty, per-feature vertex colors are baked from this expression " +
+                 "evaluated against decoded feature properties (e.g. " +
+                 "[\\\"match\\\",[\\\"get\\\",\\\"CONTINENT\\\"],\\\"Asia\\\",[\\\"rgba\\\",200,50,50,1],[\\\"rgba\\\",128,128,128,1]]). " +
+                 "The baked vertex COLOR is multiplied by _MapColor in-shader (composite data-driven × zoom). " +
+                 "When empty, vertex colors default to white and _MapColor drives the fill uniformly (S11).")]
+        public string FillColorExpression;
+
+        [Tooltip("S12: Zoom level used when evaluating FillColorExpression (for zoom-dependent stops). " +
+                 "Only relevant when FillColorExpression contains zoom-dependent sub-expressions.")]
+        public double StyleZoom = 0.0;
 
         /// <summary>
         /// Called by Unity when the component is first added in the Editor or Reset is selected.
@@ -106,7 +124,12 @@ namespace MapRenderer.Unity
         {
             // 1. Decode MVT.
             MvtTile tile = MvtDecoder.Decode(mvtBytes);
-            MvtLayer layer = tile.GetLayer(LayerName);
+
+            // S13: Use SourceLayerResolver seam to resolve the MVT layer from the style layer name.
+            // Construct a minimal StyleLayer from the LayerName field (the architectural seam requires
+            // a StyleLayer, not a bare string — consistent with the full style pipeline).
+            var styleLayer = new StyleLayer { SourceLayer = LayerName };
+            MvtLayer layer = SourceLayerResolver.ResolveMvtLayer(styleLayer, tile);
             if (layer == null)
             {
                 Debug.LogError($"[MapFillBootstrap] Layer '{LayerName}' not found.");
@@ -121,12 +144,50 @@ namespace MapRenderer.Unity
             double originX = bMin.x;
             double originY = bMin.y;
 
+            // S12: Parse the data-driven fill-color expression once (if supplied).
+            // Evaluation runs in the managed path (here) — never inside the Burst MvtDecodeJob.
+            DataDrivenPaintEvaluator colorEvaluator = null;
+            bool useDataDrivenColor = !string.IsNullOrEmpty(FillColorExpression);
+            if (useDataDrivenColor)
+            {
+                try
+                {
+                    colorEvaluator = new DataDrivenPaintEvaluator(FillColorExpression);
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning(
+                        $"[MapFillBootstrap] FillColorExpression parse failed: {ex.Message}. " +
+                        "Falling back to white vertex color (S11 uniform mode).");
+                    useDataDrivenColor = false;
+                }
+            }
+
             var meshBuilder = new MeshBuilder();
 
             foreach (var feature in layer.Features)
             {
                 if (feature.GeometryType != MvtGeometryType.Polygon)
                     continue;
+
+                // S12: Bake per-feature vertex color once, before the polygon/sub-polygon loop.
+                // All sub-polygons of the same feature get the same baked color.
+                //
+                // Color space (D2): Core Color is sRGB [0,1]. We pass channels directly to
+                // UnityEngine.Color here (sRGB float channels). MeshBuilder.Build() then calls
+                // Color.linear on each before Mesh.SetColors, converting to linear space. This
+                // matches material.SetColor which linearizes sRGB→linear at the material boundary
+                // (in Unity's Linear color space project). Without the linearization step in
+                // MeshBuilder, the vertex color stream would be in sRGB while _MapColor is in
+                // linear — the shader multiply would combine mismatched spaces.
+                UnityEngine.Color featureColor = UnityEngine.Color.white;
+                if (useDataDrivenColor && colorEvaluator != null)
+                {
+                    var adapter = new MvtFeatureAdapter(feature);
+                    if (colorEvaluator.TryEvaluateColor(StyleZoom, adapter, out MapRenderer.Core.Expressions.Color c))
+                        featureColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
+                    // On failure: featureColor stays white (neutral — _MapColor drives color uniformly).
+                }
 
                 // 3. Decode rings.
                 List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
@@ -171,8 +232,8 @@ namespace MapRenderer.Unity
                     tileCoords.Dispose();
                     worldPos.Dispose();
 
-                    // 8. Add to mesh builder (S34: pass flatVerts for UV0 and extent for normalisation).
-                    meshBuilder.AddFeature(verts, triIndices, flatVerts, extent);
+                    // 8. Add to mesh builder (S34: UVs + extent; S12: per-feature baked color).
+                    meshBuilder.AddFeature(verts, triIndices, flatVerts, extent, featureColor);
                 }
             }
 
@@ -187,26 +248,27 @@ namespace MapRenderer.Unity
             GetComponent<MeshFilter>().sharedMesh = mesh;
 
             var mr = GetComponent<MeshRenderer>();
+            Material activeMat;
             if (FillMaterial != null)
             {
                 // Instantiate a copy so the committed MapFill.mat template is never mutated by
                 // runtime SetColor / EnableKeyword calls (SRP Batcher: use Material instances,
                 // never MaterialPropertyBlock on batched renderers — see docs/lit-rendering-design.md).
-                mr.sharedMaterial = new Material(FillMaterial) { name = FillMaterial.name };
+                activeMat = new Material(FillMaterial) { name = FillMaterial.name };
+                mr.sharedMaterial = activeMat;
             }
             else
             {
                 // Create a default lit fill material from the MapRenderer/Fill shader.
                 // Fallback to Sprites/Default if the shader is not yet compiled (e.g. first import).
                 var fillShader = Shader.Find("MapRenderer/Fill");
-                Material mat;
                 if (fillShader != null)
                 {
-                    mat = new Material(fillShader) { name = "MapFill_DefaultLit" };
-                    mat.SetColor("_MapColor",   new Color(0.4f, 0.7f, 0.4f, 1f));
-                    mat.SetFloat("_Opacity",    1f);
-                    mat.SetFloat("_Metallic",   0f);
-                    mat.SetFloat("_Smoothness", 0.3f);
+                    activeMat = new Material(fillShader) { name = "MapFill_DefaultLit" };
+                    activeMat.SetColor("_MapColor",   new Color(0.4f, 0.7f, 0.4f, 1f));
+                    activeMat.SetFloat("_Opacity",    1f);
+                    activeMat.SetFloat("_Metallic",   0f);
+                    activeMat.SetFloat("_Smoothness", 0.3f);
                 }
                 else
                 {
@@ -214,10 +276,60 @@ namespace MapRenderer.Unity
                     // transient fallback so the mesh is at least visible. A reimport will fix this.
                     Debug.LogWarning("[MapFillBootstrap] MapRenderer/Fill shader not found — " +
                                      "falling back to Sprites/Default. Reimport Assets to fix.");
-                    mat = new Material(Shader.Find("Sprites/Default"));
-                    mat.color = new Color(0.4f, 0.7f, 0.4f, 1f);
+                    activeMat = new Material(Shader.Find("Sprites/Default"));
+                    activeMat.color = new Color(0.4f, 0.7f, 0.4f, 1f);
                 }
-                mr.sharedMaterial = mat;
+                mr.sharedMaterial = activeMat;
+            }
+
+            // S13: Bind new fill paint uniforms (constant/zoom path) via FillPaint + ZoomStyleApplier.
+            // A default StyleLayer with no Paint object produces inert-fallback defaults (spec defaults).
+            // This wires _FillOutlineColor, _FillAntialias, _FillTranslate, _FillTranslateAnchor,
+            // _FillPattern to the material. When a full StyleDocument is available (future stage), the
+            // StyleLayer.Paint will be populated and override these defaults.
+            // Skip for the Sprites/Default fallback (it doesn't have the fill uniforms).
+            if (activeMat != null && activeMat.shader != null &&
+                activeMat.shader.name != "Sprites/Default")
+            {
+                try
+                {
+                    var fillStyleLayer = new StyleLayer { SourceLayer = LayerName };
+                    var fillPaint      = new FillPaint(fillStyleLayer);
+                    var applier        = new ZoomStyleApplier(activeMat);
+
+                    // Bind constant/zoom properties (only Constant/Zoom kinds go through ZoomStyleApplier).
+                    // fill-opacity: constant or zoom-dependent → _Opacity uniform.
+                    if (fillPaint.Opacity != null)
+                        applier.BindFloat(fillPaint.Opacity, "_Opacity");
+
+                    // fill-outline-color → _FillOutlineColor.
+                    if (fillPaint.OutlineColor != null)
+                        applier.BindColor(fillPaint.OutlineColor, "_FillOutlineColor");
+
+                    // fill-antialias → _FillAntialias.
+                    if (fillPaint.Antialias != null)
+                        applier.BindFloat(fillPaint.Antialias, "_FillAntialias");
+
+                    // fill-translate: two scalar components → packed into _FillTranslate.xy.
+                    // We bind each component and set the float4 directly for the initial constant case.
+                    float tx = (float)fillPaint.TranslateX.EvaluateNumber(StyleZoom);
+                    float ty = (float)fillPaint.TranslateY.EvaluateNumber(StyleZoom);
+                    activeMat.SetVector("_FillTranslate", new Vector4(tx, ty, 0f, 0f));
+
+                    // fill-translate-anchor → _FillTranslateAnchor.
+                    if (fillPaint.TranslateAnchor != null)
+                        applier.BindFloat(fillPaint.TranslateAnchor, "_FillTranslateAnchor");
+
+                    // Apply all constant/zoom bindings at current StyleZoom.
+                    applier.ApplyZoom(StyleZoom);
+                }
+                catch (System.Exception ex)
+                {
+                    // Non-fatal: FillPaint defaults are spec-compliant; uniform binding failure
+                    // just means the shader falls back to its own Property defaults.
+                    Debug.LogWarning(
+                        $"[MapFillBootstrap] FillPaint uniform binding failed: {ex.Message}");
+                }
             }
 
             Debug.Log($"[MapFillBootstrap] Built mesh: {meshBuilder.VertexCount} verts, {meshBuilder.IndexCount / 3} triangles.");

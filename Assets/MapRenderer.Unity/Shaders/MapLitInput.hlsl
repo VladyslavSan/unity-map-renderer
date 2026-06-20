@@ -49,14 +49,26 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map paint properties (S34 additions) ─────────────────────────────────────
-// _MapColor — map fill/line/symbol color, multiplied onto albedo in the fragment.
-//            Named _MapColor (not _Color / _BaseColor) so URP's legacy _BaseColor alias has no
-//            bare _Color to clobber to {1,1,1} on import/Editor-open.
-// _Opacity — overall opacity [0,1], multiplied onto alpha in the fragment.
-//            In opaque queue it has no visual effect; wired for forward-compatible styling.
+// ── Map paint properties (S34/S13 additions) ──────────────────────────────────
+// _MapColor       — map fill/line/symbol color, multiplied onto albedo in the fragment.
+//                   Named _MapColor (not _Color / _BaseColor) so URP's legacy _BaseColor alias
+//                   has no bare _Color to clobber to {1,1,1} on import/Editor-open.
+// _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment.
+//                   In opaque queue it has no visual effect; wired for forward-compatible styling.
+// _FillOutlineColor — fill-outline-color (S13): used by a future outline pass; declared here so
+//                   the SRP Batcher CBUFFER shape is stable across all passes from day one.
+// _FillTranslate  — fill-translate (S13): xy = pixel offset (world-space or viewport-space per
+//                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
+// _FillAntialias  — fill-antialias (S13): 1=AA on (default), 0=off. Used by future MSAA/AA variant.
+// _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
+// _FillPattern    — fill-pattern (S13): sprite atlas index/flag for pattern fills. 0=no pattern.
 float4 _MapColor;
 float  _Opacity;
+float4 _FillOutlineColor;
+float4 _FillTranslate;
+float  _FillAntialias;
+float  _FillTranslateAnchor;
+float  _FillPattern;
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
@@ -79,9 +91,14 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Map paint additions:
+    // Map paint additions (S34/S13):
     UNITY_DOTS_INSTANCED_PROP(float4, _MapColor)
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
+    UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
+    UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillPattern)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 // Cache values in statics to avoid redundant load code per property use (same pattern as
@@ -99,9 +116,14 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Map paint statics:
+// Map paint statics (S34/S13):
 static float4 unity_DOTS_Sampled_MapColor;
 static float  unity_DOTS_Sampled_Opacity;
+static float4 unity_DOTS_Sampled_FillOutlineColor;
+static float4 unity_DOTS_Sampled_FillTranslate;
+static float  unity_DOTS_Sampled_FillAntialias;
+static float  unity_DOTS_Sampled_FillTranslateAnchor;
+static float  unity_DOTS_Sampled_FillPattern;
 
 void SetupDOTSMapLitMaterialPropertyCaches()
 {
@@ -120,6 +142,11 @@ void SetupDOTSMapLitMaterialPropertyCaches()
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
     unity_DOTS_Sampled_MapColor             = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _MapColor);
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
+    unity_DOTS_Sampled_FillOutlineColor     = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillOutlineColor);
+    unity_DOTS_Sampled_FillTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillTranslate);
+    unity_DOTS_Sampled_FillAntialias        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
+    unity_DOTS_Sampled_FillTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
+    unity_DOTS_Sampled_FillPattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillPattern);
 }
 
 // Redirect UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() → our extended function.
@@ -142,9 +169,14 @@ void SetupDOTSMapLitMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Map paint redirects:
+// Map paint redirects (S34/S13):
 #define _MapColor               unity_DOTS_Sampled_MapColor
 #define _Opacity                unity_DOTS_Sampled_Opacity
+#define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
+#define _FillTranslate          unity_DOTS_Sampled_FillTranslate
+#define _FillAntialias          unity_DOTS_Sampled_FillAntialias
+#define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor
+#define _FillPattern            unity_DOTS_Sampled_FillPattern
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 

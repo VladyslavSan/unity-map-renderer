@@ -153,14 +153,23 @@ namespace MapRenderer.Tests
             string text = ReadShaderFile("MapLitForwardPass.hlsl");
             // The init-then-modulate pattern: call init first, then multiply.
             int initIdx    = text.IndexOf("InitializeStandardLitSurfaceData(", StringComparison.Ordinal);
-            int albedoIdx  = text.IndexOf("surfaceData.albedo *= _MapColor.rgb", StringComparison.Ordinal);
-            int alphaIdx   = text.IndexOf("surfaceData.alpha  *= _Opacity", StringComparison.Ordinal);
+
+            // S12 updated these lines to include per-vertex color (vColor) × material color (_MapColor).
+            // Accept either the S11 form (_MapColor.rgb alone) or the S12 form (vColor * _MapColor.rgb).
+            int albedoIdx  = text.IndexOf("surfaceData.albedo *= ", StringComparison.Ordinal);
+            int alphaIdx   = text.IndexOf("surfaceData.alpha  *= ", StringComparison.Ordinal);
 
             Assert.That(initIdx,   Is.GreaterThanOrEqualTo(0), "InitializeStandardLitSurfaceData call not found.");
             Assert.That(albedoIdx, Is.GreaterThan(initIdx),
-                "albedo modulation (surfaceData.albedo *= _MapColor.rgb) must appear AFTER InitializeStandardLitSurfaceData.");
+                "albedo modulation (surfaceData.albedo *= ...) must appear AFTER InitializeStandardLitSurfaceData.");
             Assert.That(alphaIdx,  Is.GreaterThan(initIdx),
-                "alpha modulation (surfaceData.alpha *= _Opacity) must appear AFTER InitializeStandardLitSurfaceData.");
+                "alpha modulation (surfaceData.alpha  *= ...) must appear AFTER InitializeStandardLitSurfaceData.");
+
+            // Confirm _MapColor.rgb and _Opacity are present in the modulation lines (either S11 or S12 form).
+            Assert.That(text, Does.Contain("_MapColor.rgb"),
+                "Forward pass must reference _MapColor.rgb in albedo modulation.");
+            Assert.That(text, Does.Contain("_Opacity"),
+                "Forward pass must reference _Opacity in alpha modulation.");
         }
 
         // ── CBUFFER location ──────────────────────────────────────────────────

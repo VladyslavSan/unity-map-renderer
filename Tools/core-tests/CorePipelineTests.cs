@@ -19,12 +19,16 @@ namespace MapRenderer.Tests
         // Walk up from the test assembly to find the repo's committed fixture.
         private static byte[] LoadFixture()
         {
-            string dir = AppContext.BaseDirectory;
-            for (int i = 0; i < 12 && dir != null; i++)
+            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+            foreach (string start in starts)
             {
-                string p = Path.Combine(dir, "Assets", "Fixtures", "sample-tile.bytes");
-                if (File.Exists(p)) return File.ReadAllBytes(p);
-                dir = Directory.GetParent(dir)?.FullName;
+                string dir = start;
+                for (int i = 0; i < 16 && dir != null; i++)
+                {
+                    string p = Path.Combine(dir, "Assets", "Fixtures", "sample-tile.bytes");
+                    if (File.Exists(p)) return File.ReadAllBytes(p);
+                    dir = Directory.GetParent(dir)?.FullName;
+                }
             }
             throw new FileNotFoundException(
                 "sample-tile.bytes not found walking up from " + AppContext.BaseDirectory);

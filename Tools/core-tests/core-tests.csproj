@@ -64,6 +64,45 @@
     <!-- S07: painter's-algorithm layer draw-order (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Rendering/LayerDrawOrder.cs" />
 
+    <!-- S08: hand-rolled JSON DOM + style-spec model + source-layer resolution (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Json/JsonValue.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Json/JsonParser.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/StyleLayerType.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/StyleLayer.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/SourceDefinition.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/StyleDocument.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/StyleParser.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/SourceLayerResolver.cs" />
+
+    <!-- S11: type assertions + PaintPropertyEvaluator (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Assertions.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/PaintPropertyEvaluator.cs" />
+
+    <!-- S09: clean-room expression evaluation engine (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/ValueType.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Color.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/ColorParser.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Value.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Coercions.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/IFeature.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/EvaluationContext.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Classification.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Expression.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Nodes.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/ExpressionException.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/ExpressionParser.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Literals.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Lookup.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Decision.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/DecisionOps.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Ramps.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/MathOps.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/ColorCtors.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/FeatureData.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/ContextOps.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Strings.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Variables.cs" />
+
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
@@ -76,5 +115,58 @@
     <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LayerDrawOrderTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/SnapshotColorTests.cs" />
+
+    <!-- S08: style-spec model tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/StyleParserTests.cs" />
+
+    <!-- S09: expression engine tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ExprTestUtil.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/LiteralTypeTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/LookupTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/DecisionTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/RampCurveTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ZoomTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/StringTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/LetVarTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ClassificationTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ExpressionErrorTests.cs" />
+
+    <!-- S10: filters (legacy + expression) — Core sources -->
+    <Compile Include="../../Assets/MapRenderer.Core/Filters/FilterDialect.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Filters/LegacyFilterTranslator.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Filters/CompiledFilter.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Filters/MvtFeatureAdapter.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Filters/FeatureSelector.cs" />
+
+    <!-- S11: type assertions + paint evaluator tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/AssertionTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/PaintPropertyEvaluatorTests.cs" />
+
+    <!-- S10: filters tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/LegacyFilterTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FeatureSelectorTests.cs" />
+
+    <!-- S39: MVT property/id decoding tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Mvt/MvtPropertyDecodeTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/PropertyFilterTests.cs" />
+
+    <!-- S12: Data-driven paint evaluator + feature color baker (Core sources, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/DataDrivenPaintEvaluator.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/FeatureColorBaker.cs" />
+
+    <!-- S12: Engine-free tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/DataDrivenPaintEvaluatorTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/FeatureColorBakerTests.cs" />
+
+    <!-- S13: FillPaint aggregator (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/FillPaint.cs" />
+
+    <!-- S13: Engine-free tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/FillPaintTests.cs" />
   </ItemGroup>
 </Project>

@@ -95,11 +95,23 @@ Shader "MapRenderer/Fill"
         [HideInInspector][NoScaleOffset]unity_LightmapsInd("unity_LightmapsInd", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset]unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
 
-        // ── Map paint properties (S34 additions) ─────────────────────────────
+        // ── Map paint properties (S34/S13 additions) ─────────────────────────
         // These are the MapLibre-style styling knobs; they modulate the URP surface.
         // _MapColor modulates albedo; _Opacity modulates alpha (active in transparent queue).
         _MapColor  ("Map Color", Color) = (0.4, 0.7, 0.4, 1)
         _Opacity   ("Opacity", Range(0, 1)) = 1.0
+
+        // S13 fill paint properties (MapLibre Style Spec fill layer):
+        // _FillOutlineColor: color of the optional fill outline (future outline pass).
+        // _FillAntialias: 1=AA on (default), 0=off.
+        // _FillTranslate: xy = pixel offset (world/viewport per _FillTranslateAnchor). zw unused.
+        // _FillTranslateAnchor: 0=map world-space, 1=viewport screen-space.
+        // _FillPattern: sprite atlas index or flag for pattern fills. 0=no pattern (default).
+        _FillOutlineColor    ("Fill Outline Color", Color) = (0, 0, 0, 1)
+        _FillAntialias       ("Fill Antialias", Float) = 1.0
+        _FillTranslate       ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
+        _FillTranslateAnchor ("Fill Translate Anchor", Float) = 0.0
+        _FillPattern         ("Fill Pattern", Float) = 0.0
     }
 
     SubShader
@@ -130,6 +142,12 @@ Shader "MapRenderer/Fill"
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
+
+            // Blend state driven by _SrcBlend/_DstBlend (set by ShaderGUI or C# for transparent queue).
+            // Default values (1,0 / 1,0) = opaque. Set _Surface=1 for transparent mode.
+            // AlphaToMask parity with URP Lit.shader ForwardLit pass.
+            Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+            AlphaToMask [_AlphaToMask]
 
             HLSLPROGRAM
             #pragma target 2.0

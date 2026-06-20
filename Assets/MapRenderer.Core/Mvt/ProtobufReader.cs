@@ -49,6 +49,61 @@ namespace MapRenderer.Core.Mvt
 
         public uint ReadUInt32() => (uint)ReadVarint();
 
+        /// <summary>Reads a wire-type-1 (64-bit) field as a double (protobuf fixed64, little-endian).</summary>
+        public double ReadDouble()
+        {
+            if (_pos + 8 > _end) throw new InvalidOperationException("double overruns buffer");
+            // Protobuf fixed64 is little-endian IEEE 754.
+            long bits;
+            if (BitConverter.IsLittleEndian)
+            {
+                bits = (long)_b[_pos]
+                     | ((long)_b[_pos + 1] << 8)
+                     | ((long)_b[_pos + 2] << 16)
+                     | ((long)_b[_pos + 3] << 24)
+                     | ((long)_b[_pos + 4] << 32)
+                     | ((long)_b[_pos + 5] << 40)
+                     | ((long)_b[_pos + 6] << 48)
+                     | ((long)_b[_pos + 7] << 56);
+            }
+            else
+            {
+                bits = ((long)_b[_pos] << 56)
+                     | ((long)_b[_pos + 1] << 48)
+                     | ((long)_b[_pos + 2] << 40)
+                     | ((long)_b[_pos + 3] << 32)
+                     | ((long)_b[_pos + 4] << 24)
+                     | ((long)_b[_pos + 5] << 16)
+                     | ((long)_b[_pos + 6] << 8)
+                     | (long)_b[_pos + 7];
+            }
+            _pos += 8;
+            return BitConverter.Int64BitsToDouble(bits);
+        }
+
+        /// <summary>Reads a wire-type-5 (32-bit) field as a float (protobuf fixed32, little-endian).</summary>
+        public float ReadFloat()
+        {
+            if (_pos + 4 > _end) throw new InvalidOperationException("float overruns buffer");
+            // Protobuf fixed32 is little-endian IEEE 754.
+            int bits = (int)_b[_pos]
+                     | ((int)_b[_pos + 1] << 8)
+                     | ((int)_b[_pos + 2] << 16)
+                     | ((int)_b[_pos + 3] << 24);
+            _pos += 4;
+            return BitConverter.ToSingle(BitConverter.GetBytes(bits), 0);
+        }
+
+        /// <summary>
+        /// Reads a varint-encoded sint64 value (zigzag: (n >> 1) ^ -(n &amp; 1)).
+        /// Used for the MVT Value sint_value field (wire type 0).
+        /// </summary>
+        public long ReadSInt64()
+        {
+            ulong u = ReadVarint();
+            return (long)(u >> 1) ^ -(long)(u & 1);
+        }
+
         /// <summary>Reads a length-delimited field, returning [start,end) and advancing past it.</summary>
         public (int start, int end) ReadLengthDelimited()
         {
