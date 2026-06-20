@@ -31,6 +31,97 @@ namespace MapRenderer.Jobs
     /// </summary>
     public static class TileTessellationPipeline
     {
+        // MVT command IDs (per MVT spec §4.3) — must match MvtDecodeJob's constants.
+        private const uint MoveTo = 1;
+        private const uint LineTo = 2;
+
+        /// <summary>
+        /// Exact pre-count of the rings and vertices <see cref="MvtDecodeJob.Execute"/> will emit for a
+        /// layer's flattened command stream — computed by walking every command exactly as the decode job
+        /// does (S06 gated follow-up, item a; the fix that closes it for real).
+        ///
+        /// <b>Why exact (not a heuristic).</b> The decode job emits one ring AND one vertex per MoveTo point,
+        /// and one vertex per LineTo point. So:
+        ///   - <c>rings    = Σ over all MoveTo commands of (count)</c>
+        ///   - <c>vertices = Σ over all MoveTo + LineTo commands of (count)</c>
+        /// These are the precise quantities the job writes, for ANY input — including a malformed multi-point
+        /// <c>MoveTo</c> (count=N), which starts N rings from a single header. The old heuristic
+        /// (<c>maxRings = totalCommands/3 + featureCount + 2</c>) was correct only for spec-compliant polygons
+        /// (one MoveTo per ring → ≥3 cmd uints/ring) and UNDER-allocated for a multi-point MoveTo
+        /// (counterexample: one MoveTo count=11 → 11 rings, but the heuristic sized maxRings=10), letting
+        /// <see cref="MvtDecodeJob"/> write out of range and corrupt adjacent <see cref="NativeArray{T}"/>
+        /// memory in a release build (where <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c> is stripped). Sizing from
+        /// this exact pre-count makes under-allocation impossible, so the OOB write cannot occur in any build.
+        ///
+        /// <b>Must mirror <see cref="MvtDecodeJob.Execute"/> exactly.</b> The job advances its read cursor by
+        /// 2 param uints per MoveTo/LineTo point and reads no params for ClosePath or any unknown command. We
+        /// walk the commands the same way here. If you change one, change the other — they desync silently
+        /// otherwise and re-introduce the overflow.
+        ///
+        /// Note (latent, out of scope here): a truncated/malformed param stream can make the decode job read
+        /// PAST the feature's command range (an input-read OOB, distinct from the output-write OOB this closes).
+        /// The counts computed here still match what the job writes, so the sizing is correct regardless; the
+        /// input-read hardening is tracked separately.
+        /// </summary>
+        public static void PrecountRingsAndVertices(List<uint[]> features, out int rings, out int vertices)
+        {
+            rings    = 0;
+            vertices = 0;
+            if (features == null) return;
+
+            for (int fi = 0; fi < features.Count; fi++)
+            {
+                uint[] geom = features[fi];
+                if (geom == null) continue;
+
+                int i = 0;
+                int len = geom.Length;
+                while (i < len)
+                {
+                    uint commandInteger = geom[i++];
+                    uint command = commandInteger & 0x7u;
+                    uint count   = commandInteger >> 3;
+
+                    if (command == MoveTo)
+                    {
+                        // One ring AND one vertex per point; 2 param uints each.
+                        rings    += (int)count;
+                        vertices += (int)count;
+                        i        += 2 * (int)count;
+                    }
+                    else if (command == LineTo)
+                    {
+                        // One vertex per point; 2 param uints each. No new ring.
+                        vertices += (int)count;
+                        i        += 2 * (int)count;
+                    }
+                    // ClosePath / unknown: header consumed, no params (matches the job's i++ only).
+                }
+            }
+        }
+
+        /// <summary>
+        /// Never-fired capacity backstop for the sizing pre-pass (S06 gated follow-up, item a).
+        ///
+        /// With the exact <see cref="PrecountRingsAndVertices"/> sizing, the decode/ring-assembly jobs can
+        /// never report a count exceeding the buffers they were sized for, so this <c>if</c> never fires. It is
+        /// kept as defense-in-depth: a plain <c>if</c> (NOT behind <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c>, so it
+        /// runs in Editor and release alike) that would fail fast — loudly, before any further processing —
+        /// should a future sizing miscalculation ever under-allocate.
+        /// </summary>
+        /// <param name="count">The actual count reported by a job (or computed in the pre-pass).</param>
+        /// <param name="capacity">The capacity the buffer was sized to.</param>
+        /// <param name="what">A short label naming the quantity, for the exception message.</param>
+        public static void EnsureCapacity(int count, int capacity, string what)
+        {
+            if (count > capacity)
+                throw new InvalidOperationException(
+                    $"TileTessellationPipeline sizing overflow: {what} count {count} exceeds pre-sized " +
+                    $"capacity {capacity}. With exact PrecountRingsAndVertices sizing this should be " +
+                    "unreachable — it indicates a sizing-vs-decode desync (the pre-count walk no longer " +
+                    "mirrors MvtDecodeJob.Execute). Fix the pre-count to match the decode job.");
+        }
+
         /// <summary>
         /// Input descriptor for one layer's polygon features, already decoded from MVT bytes.
         /// </summary>
@@ -65,8 +156,15 @@ namespace MapRenderer.Jobs
             for (int fi = 0; fi < featureCount; fi++)
                 totalCommands += features[fi]?.Length ?? 0;
 
-            int maxRings    = totalCommands / 3 + featureCount + 2;
-            int maxVertices = totalCommands + 4;
+            // Exact sizing: walk every command exactly as MvtDecodeJob does to pre-count the rings and
+            // vertices it will emit (S06 item a). This makes under-allocation — and thus the in-job OOB write
+            // — impossible for ANY input, including a malformed multi-point MoveTo. Each ring is classified
+            // exactly once by RingAssemblyJob (outer / hole / skipped), so polygons and holes each number at
+            // most `exactRings`; sizing those to exactRings is the tight safe bound (they cannot be exact
+            // pre-counted without running the area classification).
+            PrecountRingsAndVertices(features, out int exactRings, out int exactVertices);
+            int maxRings    = exactRings;
+            int maxVertices = exactVertices;
             int maxPolygons = maxRings;
             int maxHoles    = maxRings;
 
@@ -114,8 +212,15 @@ namespace MapRenderer.Jobs
             featLengths.Dispose();
 
             int ringCount = ringCountArr[0];
+            int decodedVertCount = vertCountArr[0];
             ringCountArr.Dispose();
             vertCountArr.Dispose();
+
+            // Never-fired backstop: with exact PrecountRingsAndVertices sizing the decode job's reported
+            // ring/vertex counts equal the buffer capacities, so these cannot trip. Kept as defense-in-depth
+            // against a future sizing-vs-decode desync. (S06 gated item a; see EnsureCapacity doc.)
+            EnsureCapacity(ringCount, maxRings, "ring");
+            EnsureCapacity(decodedVertCount, maxVertices, "decoded vertex");
 
             // ── Stage 2: ring assembly. ────────────────────────────────────────────────────────────
             var polyOuterIdx  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -143,6 +248,12 @@ namespace MapRenderer.Jobs
             int totalHoles   = holeCountArr[0];
             polyCountArr.Dispose();
             holeCountArr.Dispose();
+
+            // Never-fired backstop: each ring is classified exactly once (outer / hole / skipped), so
+            // polyCount + totalHoles ≤ ringCount ≤ maxRings = maxPolygons = maxHoles. Cannot trip with exact
+            // sizing. (S06 gated item a.)
+            EnsureCapacity(polyCount, maxPolygons, "polygon");
+            EnsureCapacity(totalHoles, maxHoles, "hole");
 
             if (polyCount == 0)
             {

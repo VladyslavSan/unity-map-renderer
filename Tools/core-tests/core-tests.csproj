@@ -45,6 +45,12 @@
     <!-- S03: BYO data-source layer (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
+
+    <!-- S06: view-state / tile cover / floating-origin / input math (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/ViewState.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/TileCover.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/FileDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/HttpDataSource.cs" />
@@ -61,5 +67,7 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/DataSourceTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewMathTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewInputTests.cs" />
   </ItemGroup>
 </Project>

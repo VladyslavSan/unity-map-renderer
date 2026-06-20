@@ -10,6 +10,24 @@ namespace Unity.Mathematics
         public double2(double x, double y) { this.x = x; this.y = y; }
     }
 
+    // S06: float3 / double3 are needed by MapRenderer.Core.View.FloatingOrigin (render-space offsets).
+    // Minimal field-only shims; no operators required by the tested paths.
+    public struct float3
+    {
+        public float x;
+        public float y;
+        public float z;
+        public float3(float x, float y, float z) { this.x = x; this.y = y; this.z = z; }
+    }
+
+    public struct double3
+    {
+        public double x;
+        public double y;
+        public double z;
+        public double3(double x, double y, double z) { this.x = x; this.y = y; this.z = z; }
+    }
+
     /// <summary>
     /// Subset of Unity.Mathematics.math sufficient for the Core files included in core-tests.
     /// Extend as new Core files that use math.* are added to the csproj.

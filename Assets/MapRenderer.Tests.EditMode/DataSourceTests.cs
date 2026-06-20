@@ -595,6 +595,181 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------
+        // S06 Batch A: negative-caching policy (item b) — fake clock, no wall-clock sleeps
+        // -----------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// An absent tile (HasData=false) is NOT re-fetched within the negative-cache TTL: a second
+        /// request inside the TTL is served from the negative cache without a second source fetch.
+        /// </summary>
+        [Test]
+        public void NegativeCache_AbsentTile_NotRefetchedWithinTtl()
+        {
+            int fetchCount = 0;
+            var fakeSource = new FakeDataSource(id =>
+            {
+                Interlocked.Increment(ref fetchCount);
+                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+
+            var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var clock  = new FakeClock(now);
+            var cache  = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache,
+                negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
+            var tileId = new TileId(9, 1, 1);
+
+            // First request — issues a fetch that reports absent.
+            var r1 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            Assert.IsFalse(r1.HasData, "First response must be absent");
+            Assert.AreEqual(1, fetchCount, "First request issues exactly one fetch");
+
+            // Advance the clock but stay inside the TTL.
+            clock.Advance(TimeSpan.FromSeconds(2));
+
+            // Second request — must be served from the negative cache, NOT re-fetched.
+            var r2 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            Assert.IsFalse(r2.HasData, "Second response must still be absent");
+            Assert.AreEqual(1, fetchCount,
+                "Absent tile must NOT be re-fetched within the negative-cache TTL (item b).");
+
+            // The absent tile must NOT have been written to the LRU cache.
+            Assert.IsFalse(cache.ContainsKey(tileId),
+                "Absent tile must not be stored in the LRU TileCache (no indefinite caching).");
+        }
+
+        /// <summary>
+        /// After the negative-cache TTL expires, an absent tile IS re-fetched — a recovered tile can
+        /// re-appear. Time is advanced via the fake clock (deterministic, no Thread.Sleep).
+        /// </summary>
+        [Test]
+        public void NegativeCache_RefetchesAfterTtlExpiry()
+        {
+            int fetchCount = 0;
+            var fakeSource = new FakeDataSource(id =>
+            {
+                Interlocked.Increment(ref fetchCount);
+                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+
+            var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var clock  = new FakeClock(now);
+            var cache  = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache,
+                negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
+            var tileId = new TileId(9, 2, 2);
+
+            scheduler.Request(tileId).GetAwaiter().GetResult();
+            Assert.AreEqual(1, fetchCount, "First request issues one fetch");
+
+            // Advance past the TTL.
+            clock.Advance(TimeSpan.FromSeconds(6));
+
+            scheduler.Request(tileId).GetAwaiter().GetResult();
+            Assert.AreEqual(2, fetchCount,
+                "Absent tile must be re-fetched once the negative-cache TTL has expired (item b).");
+        }
+
+        /// <summary>
+        /// A negative TTL of zero disables negative caching entirely: every request for an absent tile
+        /// re-fetches (the opt-out path, useful where the caller wants no suppression).
+        /// </summary>
+        [Test]
+        public void NegativeCache_ZeroTtl_AlwaysRefetches()
+        {
+            int fetchCount = 0;
+            var fakeSource = new FakeDataSource(id =>
+            {
+                Interlocked.Increment(ref fetchCount);
+                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            });
+
+            var clock  = new FakeClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+            var cache  = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache,
+                negativeTtl: TimeSpan.Zero, clock: clock.Now);
+            var tileId = new TileId(9, 3, 3);
+
+            scheduler.Request(tileId).GetAwaiter().GetResult();
+            scheduler.Request(tileId).GetAwaiter().GetResult();
+            Assert.AreEqual(2, fetchCount,
+                "With negativeTtl == TimeSpan.Zero, an absent tile is re-fetched every request.");
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // S06 Batch A: Dispose ownership (item c)
+        // -----------------------------------------------------------------------------------------
+
+        /// <summary>
+        /// Dispose must NOT dispose the injected IDataSource — the scheduler is a non-owning coordinator
+        /// (the caller owns the source's lifetime). Documents and pins the ownership decision (item c).
+        /// </summary>
+        [Test]
+        public void Dispose_DoesNotDisposeInjectedSource()
+        {
+            var spySource = new DisposeSpySource();
+            var cache     = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(spySource, cache);
+
+            scheduler.Dispose();
+
+            Assert.IsFalse(spySource.WasDisposed,
+                "TileScheduler.Dispose must NOT dispose the injected IDataSource — the caller owns it " +
+                "(it may be shared across schedulers or outlive one). See item c.");
+        }
+
+        /// <summary>
+        /// Dispose cancels an in-flight fetch (its per-tile CTS is cancelled) so a source honouring the
+        /// token observes cancellation. Confirms Dispose tears down outstanding work without leaking.
+        /// </summary>
+        [Test]
+        public void Dispose_CancelsInFlightFetch()
+        {
+            var tcs        = new TaskCompletionSource<TileResponse>();
+            bool cancellationObserved = false;
+            var fakeSource = new FakeDataSourceCt((id, ct) =>
+            {
+                ct.Register(() => { cancellationObserved = true; tcs.TrySetCanceled(); });
+                return tcs.Task;
+            });
+
+            var cache     = new TileCache(capacity: 10);
+            var scheduler = new TileScheduler(fakeSource, cache);
+            var tileId    = new TileId(8, 8, 8);
+
+            var pending = scheduler.Request(tileId);
+            Assert.AreEqual(1, scheduler.InFlightCount, "One fetch should be in-flight");
+
+            scheduler.Dispose();
+
+            // The in-flight CTS was cancelled by Dispose; the source observes it.
+            try { pending.GetAwaiter().GetResult(); }
+            catch (OperationCanceledException) { /* expected */ }
+
+            Assert.IsTrue(cancellationObserved,
+                "Dispose must cancel the in-flight fetch's per-tile CTS (the source observed cancellation).");
+        }
+
+        /// <summary>A clock whose value is advanced explicitly by the test (no wall-clock dependency).</summary>
+        private sealed class FakeClock
+        {
+            private DateTime _now;
+            public FakeClock(DateTime start) { _now = start; }
+            public DateTime Now() => _now;
+            public void Advance(TimeSpan by) { _now += by; }
+        }
+
+        /// <summary>Data source that records whether Dispose was called on it.</summary>
+        private sealed class DisposeSpySource : IDataSource
+        {
+            public bool WasDisposed { get; private set; }
+            public TileEncoding Encoding => TileEncoding.Mvt;
+            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+                => Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            public void Dispose() { WasDisposed = true; }
+        }
+
+        // -----------------------------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------------------------
 

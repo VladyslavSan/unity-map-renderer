@@ -28,6 +28,29 @@ namespace MapRenderer.Core.Data
     /// <b>Thread-safety:</b> the cache, in-flight map, and CTS map are guarded by a single lock.
     /// Continuations run on threadpool threads (no deadlock risk with <c>ConfigureAwait(false)</c>).
     /// </para>
+    /// <para>
+    /// <b>Negative caching (S06 gated item b):</b> a fetch that reports <c>HasData=false</c> (HTTP
+    /// 404/204, missing file) is NOT written to the LRU <see cref="TileCache"/>. Instead it is recorded
+    /// in a small scheduler-level negative cache with a <b>short TTL</b> (<see cref="_negativeTtl"/>).
+    /// Within the TTL a re-request returns an absent response without hitting the source; after the TTL
+    /// expires the tile is re-fetched. This avoids two failure modes: (1) caching an absent tile in the
+    /// LRU with no expiry, where a transient 404 sticks until LRU eviction; and (2) skipping the cache
+    /// entirely, which re-fetches a permanently-missing <i>visible</i> tile every single frame. A short
+    /// TTL is the correct middle ground — it lets a recovered tile re-appear while suppressing per-frame
+    /// re-fetch storms. The clock is injectable so tests advance time deterministically (no wall-clock
+    /// sleeps).
+    /// </para>
+    /// <para>
+    /// <b>Dispose ownership (S06 gated item c):</b> the scheduler is a <i>non-owning</i> coordinator. It
+    /// does NOT dispose the injected <see cref="IDataSource"/> or <see cref="TileCache"/> — the caller
+    /// that constructed and injected them owns their lifetime (they may be shared across schedulers or
+    /// outlive one). <see cref="Dispose"/> cancels + disposes the per-tile CTSs and clears the maps, but
+    /// does NOT block to drain/await in-flight fetches: a blocking drain in Dispose risks deadlock when
+    /// called from the main thread while a continuation needs it. In-flight fetches are cancelled
+    /// (best-effort) and their late completions are harmless (the CTS-identity guard skips the cache).
+    /// A future caller that genuinely needs to await outstanding fetches should add an explicit
+    /// <c>DrainAsync()</c>, not overload <c>Dispose</c>.
+    /// </para>
     /// </summary>
     public sealed class TileScheduler : IDisposable
     {
@@ -36,15 +59,40 @@ namespace MapRenderer.Core.Data
         private readonly Dictionary<TileId, Task<TileResponse>>     _inFlight;
         // Per-tile CTS — created on Request, cancelled on Release, disposed on completion.
         private readonly Dictionary<TileId, CancellationTokenSource> _cts;
+        // Negative cache: absent tile id → wall-clock instant after which it may be re-fetched.
+        private readonly Dictionary<TileId, DateTime>               _absentUntil;
+        private readonly Func<DateTime>                             _clock;
+        private readonly TimeSpan                                   _negativeTtl;
         private readonly object                                     _lock = new object();
         private          bool                                       _disposed;
 
-        public TileScheduler(IDataSource source, TileCache cache)
+        /// <summary>Default negative-cache TTL for absent tiles (HTTP 404/204, missing file).</summary>
+        public static readonly TimeSpan DefaultNegativeTtl = TimeSpan.FromSeconds(5);
+
+        /// <param name="source">Tile byte source. NOT owned/disposed by the scheduler (see class docs).</param>
+        /// <param name="cache">LRU cache for present tiles. NOT owned/disposed by the scheduler.</param>
+        /// <param name="negativeTtl">
+        /// How long an absent (HasData=false) response suppresses re-fetch. Defaults to
+        /// <see cref="DefaultNegativeTtl"/>. Pass <see cref="TimeSpan.Zero"/> to disable negative caching
+        /// (every request re-fetches absent tiles).
+        /// </param>
+        /// <param name="clock">
+        /// Injectable clock for the negative-cache TTL. Defaults to <c>() =&gt; DateTime.UtcNow</c>.
+        /// Tests pass a fake clock to advance time deterministically.
+        /// </param>
+        public TileScheduler(
+            IDataSource source,
+            TileCache cache,
+            TimeSpan? negativeTtl = null,
+            Func<DateTime> clock = null)
         {
-            _source   = source ?? throw new ArgumentNullException(nameof(source));
-            _cache    = cache  ?? throw new ArgumentNullException(nameof(cache));
-            _inFlight = new Dictionary<TileId, Task<TileResponse>>();
-            _cts      = new Dictionary<TileId, CancellationTokenSource>();
+            _source      = source ?? throw new ArgumentNullException(nameof(source));
+            _cache       = cache  ?? throw new ArgumentNullException(nameof(cache));
+            _inFlight    = new Dictionary<TileId, Task<TileResponse>>();
+            _cts         = new Dictionary<TileId, CancellationTokenSource>();
+            _absentUntil = new Dictionary<TileId, DateTime>();
+            _negativeTtl = negativeTtl ?? DefaultNegativeTtl;
+            _clock       = clock ?? (() => DateTime.UtcNow);
         }
 
         /// <summary>
@@ -69,6 +117,16 @@ namespace MapRenderer.Core.Data
                 // Cache hit — fast path.
                 if (_cache.TryGet(id, out var cached))
                     return Task.FromResult(cached);
+
+                // Negative-cache hit — a recent fetch reported this tile absent and the TTL has not
+                // expired. Return an absent response without re-issuing a fetch. (S06 gated item b.)
+                if (_absentUntil.TryGetValue(id, out var until))
+                {
+                    if (_clock() < until)
+                        return Task.FromResult(TileResponse.Absent(_source.Encoding));
+                    // TTL expired — drop the stale entry and fall through to re-fetch.
+                    _absentUntil.Remove(id);
+                }
 
                 // Already in-flight — share the existing task.
                 if (_inFlight.TryGetValue(id, out var existing))
@@ -102,6 +160,7 @@ namespace MapRenderer.Core.Data
             {
                 _cache.Remove(id);
                 _inFlight.Remove(id);
+                _absentUntil.Remove(id);   // a released tile should re-fetch on next request, not stay suppressed
                 if (_cts.TryGetValue(id, out ctsToCancel))
                     _cts.Remove(id);
             }
@@ -155,10 +214,23 @@ namespace MapRenderer.Core.Data
             {
                 // Only cache the result if this CTS is still the registered one for this tile.
                 // If Release() was called between fetch-start and fetch-complete, _cts[id] was
-                // removed (and the old CTS cancelled + disposed), so this guard skips Put.
+                // removed (and the old CTS cancelled + disposed), so this guard skips caching.
                 if (_cts.TryGetValue(id, out var currentCts) && currentCts == tileCts)
                 {
-                    _cache.Put(id, response);
+                    if (response.HasData)
+                    {
+                        // Present tile → LRU cache (the well-tested path).
+                        _cache.Put(id, response);
+                    }
+                    else if (_negativeTtl > TimeSpan.Zero)
+                    {
+                        // Absent tile (404/204/missing) → short-TTL negative cache, NOT the LRU.
+                        // Avoids caching an absent tile indefinitely while suppressing per-frame
+                        // re-fetch of a permanently-missing visible tile. (S06 gated item b.)
+                        _absentUntil[id] = _clock() + _negativeTtl;
+                    }
+                    // else: negative caching disabled (ttl == 0) — absent tile is neither cached
+                    // nor suppressed; the next request re-fetches.
                     _inFlight.Remove(id);
                     _cts.Remove(id);
                 }
@@ -198,6 +270,7 @@ namespace MapRenderer.Core.Data
                     _cts.Clear();
                     _inFlight.Clear();
                 }
+                _absentUntil.Clear();
             }
             if (ctsToDispose != null)
             {
@@ -207,8 +280,13 @@ namespace MapRenderer.Core.Data
                     try { cts.Dispose(); } catch { /* best-effort */ }
                 }
             }
-            // Note: TileScheduler does not own the IDataSource or TileCache lifetime.
-            // Dispose ownership is tracked at follow-ups.md (item 57-59) — out of scope for S04.
+            // Ownership (S06 gated item c — DECIDED): TileScheduler is a NON-OWNING coordinator. It does
+            // NOT dispose the injected IDataSource or TileCache — the caller owns their lifetime (they may
+            // be shared across schedulers or outlive one). Dispose cancels + disposes the per-tile CTSs
+            // and clears the maps, but does NOT block to drain/await in-flight fetches (a blocking drain in
+            // Dispose risks deadlock from the main thread). In-flight fetches are cancelled best-effort and
+            // their late completions are harmless (the CTS-identity guard skips the cache). A future caller
+            // needing to await outstanding work should add an explicit DrainAsync(), not overload Dispose.
         }
     }
 }
