@@ -5,6 +5,7 @@ using UnityEngine;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Unity;
@@ -40,6 +41,24 @@ namespace MapRenderer.Tests.Visual
             public void Dispose() { }
         }
 
+        // Minimal one-fill-layer style for snapshot testing (constant red, countries source-layer).
+        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""name"": ""SnapTest"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""countries-fill"",
+                    ""type"": ""fill"",
+                    ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-color"": [""rgba"", 200, 80, 80, 1] }
+                }
+            ]
+        }");
+
         [Test]
         public void MapViewLiveLoop_RendersMultiTileFill_NonBlank()
         {
@@ -70,7 +89,7 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 3.0), ownsSource: false);
+                view.Initialise(src, new ViewState(0, 0, 3.0), ownsSource: false, style: MinimalStyle());
                 // Pump to settle all tiles.
                 for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
                 {

@@ -1,0 +1,210 @@
+using System.IO;
+using UnityEngine;
+using MapRenderer.Core.Data;
+using MapRenderer.Core.Style;
+using MapRenderer.Core.View;
+
+namespace MapRenderer.Unity
+{
+    /// <summary>
+    /// S41 map-root bootstrap and wire-up hub. Lives on the <b>MapRoot</b> GameObject, which is the
+    /// scene owner of the map subsystem (<see cref="MapView"/> + <see cref="MapController"/>).
+    ///
+    /// <para>The Main Camera is a separate plain camera GameObject (tagged <c>MainCamera</c>); this
+    /// component finds it at startup via <c>Camera.main</c> and wires it into <see cref="MapController"/>.</para>
+    ///
+    /// <para>Two wiring entry points are provided:</para>
+    /// <list type="bullet">
+    ///   <item><see cref="Start"/> — the runtime entry (MonoBehaviour lifecycle; reads inspector fields,
+    ///   builds the data source + style, calls <see cref="Wire"/>).</item>
+    ///   <item><see cref="Wire(GameObject, Camera)"/> — static, testable entry that performs the component
+    ///   graph wiring without touching the file system or HTTP. This is what EditMode tests drive.</item>
+    /// </list>
+    ///
+    /// <para>If the Main Camera is absent, <see cref="Wire"/> logs a warning and returns without NRE
+    /// (the map won't pan/zoom but also won't crash).</para>
+    ///
+    /// Inspector fields:
+    ///   <see cref="TileUrlTemplate"/>   — HTTP URL template with {z}/{x}/{y} tokens.
+    ///   <see cref="StyleAssetPath"/>    — path to the style JSON, relative to Assets/.
+    ///   <see cref="InitialLatitude"/>   — initial map center latitude.
+    ///   <see cref="InitialLongitude"/>  — initial map center longitude.
+    ///   <see cref="InitialZoom"/>       — initial zoom level.
+    ///
+    /// Lines rendering: deferred to S14. Line layers in the style are silently skipped by MapView;
+    /// the demo shows fills only (country fills). Coastlines, borders, geolines are not drawn.
+    ///
+    /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
+    /// </summary>
+    [RequireComponent(typeof(MapView))]
+    [RequireComponent(typeof(MapController))]
+    public sealed class MapRoot : MonoBehaviour
+    {
+        [Tooltip("MVT tile URL template. Tokens: {z} {x} {y}. " +
+                 "Default: MapLibre demotiles (Natural Earth, public domain).")]
+        public string TileUrlTemplate =
+            "https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf";
+
+        [Tooltip("Path to the style document JSON, relative to Assets/. " +
+                 "Default: Fixtures/maplibre-demo-style.json (committed demo style).")]
+        public string StyleAssetPath = "Fixtures/maplibre-demo-style.json";
+
+        [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
+        public double InitialLatitude = 20.0;
+
+        [Tooltip("Initial map center longitude (decimal degrees, WGS-84).")]
+        public double InitialLongitude = 0.0;
+
+        [Tooltip("Initial zoom level (0 = world view).")]
+        public double InitialZoom = 2.0;
+
+        private void Start()
+        {
+            // 1. Load and parse the style document.
+            StyleDocument style = LoadStyle();
+
+            // 2. Create the tile data source (owned — MapView will dispose on OnDestroy).
+            var source = new HttpDataSource(TileUrlTemplate);
+
+            // 3. Build the initial view state.
+            var initialView = new ViewState(InitialLongitude, InitialLatitude, InitialZoom);
+
+            // 4. Wire: sets MapController.Camera, MapController.Map, and calls MapView.Initialise.
+            Wire(gameObject, Camera.main, source, initialView, ownsSource: true, style: style);
+
+            // 5. Ensure a directional light exists in the scene (for URP Lit fill shader).
+            EnsureDirectionalLight();
+
+            // 6. Apply initial camera framing (perspective, altitude-from-zoom, overhead at pitch=0).
+            //    Delegates to ApplyCameraTransform so frame-0 framing matches the runtime path and
+            //    InitialZoom is respected (zoom 2 → continent scale, zoom 16 → street scale).
+            var ctrl = GetComponent<MapController>();
+            if (ctrl != null && ctrl.Camera != null)
+            {
+                ctrl.ApplyCameraTransform(initialView);
+                if (ctrl.Camera.backgroundColor == default)
+                    ctrl.Camera.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
+            }
+
+            var mapView = GetComponent<MapView>();
+            Debug.Log($"[MapRoot] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
+                      $"center=({InitialLatitude:F2},{InitialLongitude:F2}), " +
+                      $"style layers={mapView.FillLayerCount} fill layers.");
+        }
+
+        // ── Static wire-up entry (testable without Play mode) ─────────────────────────────────────
+
+        /// <summary>
+        /// Wires the map subsystem on <paramref name="root"/>: finds <see cref="MapController"/> and
+        /// <see cref="MapView"/> on <paramref name="root"/>, sets <c>MapController.Camera</c> and
+        /// <c>MapController.Map</c>, and calls <see cref="MapView.Initialise"/> with <paramref name="source"/>
+        /// and <paramref name="initialView"/>.
+        ///
+        /// <para>If <paramref name="camera"/> is null the method logs a warning and returns without
+        /// NRE (missing camera is handled gracefully).</para>
+        ///
+        /// <para>This is the single wiring graph entry point. Both the runtime <see cref="Start"/>
+        /// and EditMode wiring tests call this method.</para>
+        /// </summary>
+        /// <param name="root">The MapRoot GameObject (must carry MapView + MapController).</param>
+        /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
+        /// <param name="source">The tile data source (HTTP, file, in-memory…). May be null in tests.</param>
+        /// <param name="initialView">Initial ViewState.</param>
+        /// <param name="ownsSource">If true, MapView will dispose the source on OnDestroy.</param>
+        /// <param name="style">Optional StyleDocument; null renders nothing.</param>
+        public static void Wire(
+            GameObject  root,
+            Camera      camera,
+            IDataSource source      = null,
+            ViewState   initialView = default,
+            bool        ownsSource  = false,
+            StyleDocument style     = null)
+        {
+            if (root == null)
+            {
+                Debug.LogWarning("[MapRoot.Wire] root is null — wire-up skipped.");
+                return;
+            }
+
+            if (camera == null)
+            {
+                Debug.LogWarning("[MapRoot.Wire] No camera provided (Camera.main is null). " +
+                                 "MapController will not drive any camera. Wire-up skipped for camera.");
+                // We still continue to initialise MapView and set Map on the controller.
+            }
+
+            var mapView = root.GetComponent<MapView>();
+            if (mapView == null)
+            {
+                Debug.LogWarning("[MapRoot.Wire] No MapView found on root — wire-up skipped.");
+                return;
+            }
+
+            var ctrl = root.GetComponent<MapController>();
+            if (ctrl == null)
+            {
+                Debug.LogWarning("[MapRoot.Wire] No MapController found on root — wire-up skipped.");
+                return;
+            }
+
+            // Set the camera reference on the controller (may be null — guarded in Update).
+            ctrl.Camera = camera;
+
+            // Initialise MapView first so the scheduler and layer records are built.
+            if (source != null)
+                mapView.Initialise(source, initialView, ownsSource: ownsSource, style: style);
+
+            // Wire the controller to the view.
+            ctrl.Map = mapView;
+        }
+
+        // ── Helpers ──────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Loads and parses the style document from <see cref="StyleAssetPath"/> (relative to Assets/).
+        /// Falls back to an empty StyleDocument if the file is not found (so the demo still launches).
+        /// </summary>
+        private StyleDocument LoadStyle()
+        {
+            string fullPath = Path.Combine(Application.dataPath, StyleAssetPath);
+            if (!File.Exists(fullPath))
+            {
+                Debug.LogWarning($"[MapRoot] Style not found at {fullPath}. " +
+                                 "MapView will render no fills until a style is loaded.");
+                return new StyleDocument();
+            }
+
+            try
+            {
+                string json = File.ReadAllText(fullPath);
+                StyleDocument doc = StyleParser.Parse(json);
+                Debug.Log($"[MapRoot] Loaded style: {doc.Name ?? "(unnamed)"}, " +
+                          $"{doc.Layers.Count} layers.");
+                return doc;
+            }
+            catch (System.Exception ex)
+            {
+                Debug.LogError($"[MapRoot] Failed to parse style at {fullPath}: {ex.Message}");
+                return new StyleDocument();
+            }
+        }
+
+        /// <summary>
+        /// Ensures at least one directional light is present in the scene so the URP Lit fill shader
+        /// produces visible output (not all-black). Creates one if none exists.
+        /// </summary>
+        private static void EnsureDirectionalLight()
+        {
+            var existing = Object.FindObjectOfType<Light>();
+            if (existing != null && existing.type == LightType.Directional)
+                return;
+
+            var lightGo = new GameObject("MapDirectionalLight");
+            var light   = lightGo.AddComponent<Light>();
+            light.type      = LightType.Directional;
+            light.intensity = 1.0f;
+            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+            Debug.Log("[MapRoot] Created directional light (none found in scene).");
+        }
+    }
+}

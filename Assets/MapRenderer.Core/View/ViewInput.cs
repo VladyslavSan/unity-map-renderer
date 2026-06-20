@@ -4,7 +4,7 @@ namespace MapRenderer.Core.View
 {
     /// <summary>
     /// Pure (engine-free, allocation-free) input → <see cref="ViewState"/> mutation helpers. Factored out
-    /// of <see cref="MapCameraController"/> so the pan/zoom/tilt logic is unit-testable headless — reading
+    /// of <c>MapController</c> so the pan/zoom/tilt logic is unit-testable headless — reading
     /// <c>UnityEngine.Input</c> in <c>Update()</c> directly would have zero test coverage.
     ///
     /// Conventions:

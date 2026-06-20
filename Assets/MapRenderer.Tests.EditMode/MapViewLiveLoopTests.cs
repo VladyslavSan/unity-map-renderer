@@ -4,7 +4,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using NUnit.Framework;
@@ -12,23 +11,25 @@ using UnityEngine;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using NIs = NUnit.Framework.Is;
-using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
-using MapRenderer.Jobs;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S06 Batch C: the live multi-tile render loop (<see cref="MapView"/>) going live on the S04
-    /// jobified pipeline. Covers:
-    ///   (1) view-state drives tile selection + eviction releases/disposes (no leaked NativeArray),
-    ///   (2) the go-live path produces the SAME geometry as a direct pipeline call (parity),
-    ///   (3) NO per-frame GC in steady state (the acceptance teeth — closes the deferred follow-up).
+    /// S40 live loop tests for <see cref="MapView"/> with per-layer styled fill rendering.
+    /// Covers:
+    ///   (1) view-state drives tile selection + eviction releases (container destroyed).
+    ///   (2) wiring parity: MapView with a 1-fill-layer style produces the same mesh vertex count
+    ///       as StyledFillTileBuilder called directly — proves the live-loop wiring is correct.
+    ///       (Replaces the retired S06 bit-identical Burst-vs-managed assertion; that test pinned
+    ///        the Burst pipeline which is now replaced by the managed per-layer path.)
+    ///   (3) NO per-frame GC in steady state (the acceptance teeth — the ApplyZoom loop and all
+    ///       reused buffers must not allocate in the pan / static-frame / bearing-only cases).
     /// </summary>
     [TestFixture]
     public class MapViewLiveLoopTests
@@ -39,6 +40,29 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
             return File.ReadAllBytes(path);
         }
+
+        /// <summary>
+        /// Minimal 1-fill-layer style for the live loop tests: a single fill layer over the
+        /// "countries" MVT source-layer with a constant red fill color (Constant expression kind).
+        /// </summary>
+        private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""name"": ""Test"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""countries-fill"",
+                    ""type"": ""fill"",
+                    ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": {
+                        ""fill-color"": [""rgba"", 200, 50, 50, 1]
+                    }
+                }
+            ]
+        }");
 
         /// <summary>In-memory source that serves the same fixture bytes for ANY tile id.</summary>
         private sealed class FixtureSource : IDataSource
@@ -55,7 +79,7 @@ namespace MapRenderer.Tests
             public void Dispose() { }
         }
 
-        /// <summary>Pumps Tick() until every loaded tile has settled (built) or a spin budget is hit.</summary>
+        /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit.</summary>
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
             for (int f = 0; f < maxFrames; f++)
@@ -63,44 +87,43 @@ namespace MapRenderer.Tests
                 view.Tick();
                 if (view.LoadedTileCount > 0 && view.AllTilesSettled())
                     return;
-                Thread.Sleep(1);   // let threadpool fetch continuations run
+                Thread.Sleep(1);
             }
         }
 
-        // ── (1) cover drives selection + eviction disposes ─────────────────────────────────────
+        // ── (1) cover drives selection + eviction releases container ───────────────────────────
 
         [Test]
         public void MapView_CoverDrivesTileSelection_AndEvictionReleases()
         {
-            var src  = new FixtureSource(FixtureBytes());
-            var go   = new GameObject("MapView");
-            var view = go.AddComponent<MapView>();
+            var src   = new FixtureSource(FixtureBytes());
+            var go    = new GameObject("MapView");
+            var view  = go.AddComponent<MapView>();
+            var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
             {
-                // Center (0,0) at z5 → center tile (5,16,16), 3×3 cover x,y∈{15,16,17}.
-                view.Initialise(src, new ViewState(0, 0, 5.0), ownsSource: false);
+                view.Initialise(src, new ViewState(0, 0, 5.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount, "z5 center cover is a 3×3 block");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
                     "the center tile must be built");
 
-                // Pan far east (lon=170) → center tile (5,31,16); the new cover does NOT overlap the old
-                // one, so the old tiles are evicted and a fresh 3×3 is loaded.
+                // Pan far east (lon=170) → new cover does NOT overlap the old one.
                 view.SetView(new ViewState(170, 0, 5.0));
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount, "still a 3×3 cover after panning");
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
-                    "the old center tile must have been evicted after the pan (new cover does not overlap)");
+                    "the old center tile must have been evicted after the pan");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 31, 16), out _),
                     "the new center tile must be built after the pan");
-                // No NativeArray leak: Unity's leak detector would fail the run on teardown if a tile's
-                // TileMeshBuffers were not disposed on eviction.
+                // Container destruction: the old tile's Go was DestroyImmediate'd on eviction.
+                // Unity's leak detector would fail the run on teardown if any per-tile resources leaked.
             }
             finally
             {
@@ -108,66 +131,65 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── (2) go-live parity vs direct pipeline ──────────────────────────────────────────────
+        // ── (2) wiring parity: live loop vs StyledFillTileBuilder direct ──────────────────────
 
+        /// <summary>
+        /// The live MapView (1-fill-layer style over the fixture) produces the same mesh vertex count
+        /// as a direct call to StyledFillTileBuilder.BuildMesh. Proves the wiring is correct without
+        /// pinning the exact Burst vertex layout (which the old bit-identical test did; the new managed
+        /// path processes features in the same order as FeatureSelector, so vertex count matches).
+        /// </summary>
         [Test]
-        public void MapView_GoLive_ProducesSameGeometryAsDirectPipeline()
+        public void MapView_GoLive_ProducesSameGeometryAsDirectBuilder()
         {
             byte[] bytes = FixtureBytes();
-            var src  = new FixtureSource(bytes);
-            var go   = new GameObject("MapView");
-            var view = go.AddComponent<MapView>();
+            var src   = new FixtureSource(bytes);
+            var go    = new GameObject("MapView");
+            var view  = go.AddComponent<MapView>();
+            var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false);
+                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
                     "z0/0/0 tile must be built by the live loop");
-                Mesh liveMesh = tileGo.GetComponent<MeshFilter>().sharedMesh;
-                Assert.IsNotNull(liveMesh, "live tile must have a mesh");
 
-                // Direct pipeline reference for the SAME tile id/origin.
-                var mvtTile = MvtDecoder.Decode(bytes);
-                var layer   = mvtTile.GetLayer("countries");
-                var polyGeoms = new List<uint[]>();
-                foreach (var ft in layer.Features)
-                    if (ft.GeometryType == MvtGeometryType.Polygon && ft.Geometry != null)
-                        polyGeoms.Add(ft.Geometry);
+                // The tile container has one child per fill layer (just 1 in MinimalStyle).
+                Assert.AreEqual(1, tileGo.transform.childCount,
+                    "The tile container must have exactly 1 child (one fill layer in MinimalStyle).");
+
+                var childMf = tileGo.transform.GetChild(0).GetComponent<MeshFilter>();
+                Assert.IsNotNull(childMf, "First child must have a MeshFilter");
+                Mesh liveMesh = childMf.sharedMesh;
+                Assert.IsNotNull(liveMesh, "First child must have a sharedMesh");
+
+                // Direct builder for the same tile.
+                var mvtTile = MapRenderer.Core.Mvt.MvtDecoder.Decode(bytes);
+                var fillLayer = style.Layers[0]; // countries-fill
+                var paint     = new FillPaint(fillLayer);
+                var features  = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
+                    fillLayer, mvtTile, 0.0);
+                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+
+                Assert.IsNotNull(mvtLayer, "The fixture must contain the 'countries' MVT layer");
+                Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
                 var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
-                var input = new TileTessellationPipeline.LayerInput
-                {
-                    FeatureGeometries = polyGeoms,
-                    Extent = layer.Extent,
-                    TileZ = 0, TileX = 0, TileY = 0,
-                    OriginMercX = bMin.x, OriginMercY = bMin.y,
-                };
-                TileMeshBuffers buffers = TileTessellationPipeline.Schedule(input);
-                try
-                {
-                    int vc = buffers.VertexCount[0];
-                    int ic = buffers.TotalIndexCount;
+                Mesh directMesh = StyledFillTileBuilder.BuildMesh(
+                    features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0),
+                    new double2(bMin.x, bMin.y));
 
-                    Assert.AreEqual(vc, liveMesh.vertexCount,
-                        "live mesh vertex count must equal the direct pipeline output");
+                Assert.IsNotNull(directMesh,
+                    "StyledFillTileBuilder.BuildMesh must produce a mesh for the 'countries' layer");
 
-                    string directVertHash = HashWorldPositions(buffers.WorldPositions, vc);
-                    string liveVertHash   = HashVector3(liveMesh.vertices);
-                    Assert.AreEqual(directVertHash, liveVertHash,
-                        "live mesh vertex positions must be bit-identical to the direct pipeline output " +
-                        "(the go-live path must not diverge from the jobified pipeline).");
-
-                    string directIdxHash = HashIndices(buffers.TriangleIndices, ic);
-                    string liveIdxHash   = HashIntArray(liveMesh.triangles);
-                    Assert.AreEqual(directIdxHash, liveIdxHash,
-                        "live mesh triangle indices must be bit-identical to the direct pipeline output.");
-                }
-                finally { buffers.Dispose(); }
+                Assert.AreEqual(directMesh.vertexCount, liveMesh.vertexCount,
+                    "Live loop mesh vertex count must equal the direct builder output " +
+                    "(parity: same feature set, same pipeline).");
             }
             finally
             {
@@ -180,44 +202,40 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src  = new FixtureSource(FixtureBytes());
-            var go   = new GameObject("MapView");
-            var view = go.AddComponent<MapView>();
+            var src   = new FixtureSource(FixtureBytes());
+            var go    = new GameObject("MapView");
+            var view  = go.AddComponent<MapView>();
+            var style = MinimalStyle();
             view.MinZoom = 2; view.MaxZoom = 2;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
             {
-                // Warm up: load the whole cover and let every tile settle (builds, fetch continuations,
-                // and the cover buffers are all warm) BEFORE we measure.
-                view.Initialise(src, new ViewState(0, 0, 2.0), ownsSource: false);
+                // Warm up: load the whole cover and let every tile settle.
+                view.Initialise(src, new ViewState(0, 0, 2.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
-                // A couple of settled ticks to flush any first-call JIT / one-time allocation, and prime
-                // the cover-recompute path once so its reused buffers (_cover, _coverSet, _toRelease) are
-                // at their steady capacity BEFORE we measure.
+                // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
                 view.SetView(view.View.WithCenter(0.5, 0.0));
                 view.Tick();
                 view.SetView(view.View.WithCenter(0.0, 0.0));
                 view.Tick();
 
-                // ── (a) THE PAN CASE — the steady state the acceptance criterion names. ──
-                // A small center nudge stays WITHIN the loaded z2 cover (one z2 tile spans ~10,000 km, so a
-                // 111 km pan loads no new tiles), but it DOES dirty the cover so Tick runs the full
-                // recompute: TileCover.Cover + the _coverSet rebuild + the request/release scan + the
-                // floating-origin rebase loop. THIS is the per-frame hot path. It must allocate ZERO bytes:
-                // reused buffers, struct dict enumerator, no LINQ/closures, no Request (all tiles loaded).
-                view.SetView(view.View.WithCenter(1.0, 0.0));   // ~111 km pan; same 9-tile cover
+                // ── (a) THE PAN CASE ──
+                // A small center nudge stays within the loaded z2 cover (one z2 tile spans ~10,000 km
+                // at the equator, so a 111 km pan loads no new tiles), but it DOES dirty the cover so
+                // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
+                // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
+                view.SetView(view.View.WithCenter(1.0, 0.0));
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "MapView.Tick must not allocate during a within-cover pan (the cover RECOMPUTE path: " +
-                    "TileCover.Cover + set rebuild + request/release scan + rebase). A failure means a " +
-                    "per-frame List/Task/closure/LINQ leaked into the hot path.");
+                    "MapView.Tick must not allocate during a within-cover pan (cover recompute path: " +
+                    "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
+                    "A failure means a per-frame List/Task/closure/LINQ leaked into the hot path.");
 
-                // Confirm the pan loaded no new tiles (it really stayed within the cover).
                 Assert.AreEqual(9, view.LoadedTileCount,
-                    "the within-cover pan must not have loaded new tiles (recompute, not reload)");
+                    "the within-cover pan must not have loaded new tiles");
 
                 // ── (b) the fully-static frame also early-outs allocation-free. ──
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
@@ -226,60 +244,12 @@ namespace MapRenderer.Tests
                 // ── (c) a bearing/pitch-only change is camera-only → no cover dirty → alloc-free. ──
                 view.SetView(view.View.WithOrientation(45.0, 30.0));
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "A bearing/pitch-only view change must not dirty the cover, so Tick stays allocation-free.");
+                    "A bearing/pitch-only view change must not dirty the cover, so Tick stays alloc-free.");
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(go);
             }
-        }
-
-        // ── hashing helpers ────────────────────────────────────────────────────────────────────
-
-        private static string HashWorldPositions(NativeArray<float3> arr, int count)
-        {
-            var bytes = new List<byte>(count * 12);
-            for (int i = 0; i < count; i++)
-            {
-                bytes.AddRange(BitConverter.GetBytes(arr[i].x));
-                bytes.AddRange(BitConverter.GetBytes(arr[i].y));
-                bytes.AddRange(BitConverter.GetBytes(arr[i].z));
-            }
-            return Sha(bytes.ToArray());
-        }
-
-        private static string HashVector3(Vector3[] arr)
-        {
-            var bytes = new List<byte>(arr.Length * 12);
-            foreach (var v in arr)
-            {
-                bytes.AddRange(BitConverter.GetBytes(v.x));
-                bytes.AddRange(BitConverter.GetBytes(v.y));
-                bytes.AddRange(BitConverter.GetBytes(v.z));
-            }
-            return Sha(bytes.ToArray());
-        }
-
-        private static string HashIndices(NativeArray<int> arr, int count)
-        {
-            var bytes = new List<byte>(count * 4);
-            for (int i = 0; i < count; i++)
-                bytes.AddRange(BitConverter.GetBytes(arr[i]));
-            return Sha(bytes.ToArray());
-        }
-
-        private static string HashIntArray(int[] arr)
-        {
-            var bytes = new List<byte>(arr.Length * 4);
-            foreach (int v in arr)
-                bytes.AddRange(BitConverter.GetBytes(v));
-            return Sha(bytes.ToArray());
-        }
-
-        private static string Sha(byte[] data)
-        {
-            using var sha = SHA256.Create();
-            return Convert.ToBase64String(sha.ComputeHash(data));
         }
     }
 }

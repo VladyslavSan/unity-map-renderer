@@ -14,6 +14,16 @@ the current milestone. Proprietary / all rights reserved.
 
 ## Way of working
 
+### Driving the parity loop — read `docs/loop-operations.md` first
+If you are launching/monitoring `.claude/workflows/parity-loop.js` runs (the autonomous
+manager→planner→developer↔reviewer loop), the operator playbook is **`docs/loop-operations.md`** — read it.
+The rules that each cost a multi-hour failure to learn: **one run at a time** (stop prior runs); the **Unity
+Editor must be closed** (else every headless validation silently exits 3); **monitor every run** with the
+stall+bloat watchdog and **advance only on workflow-completion**, not on a HEAD-move; **when you hand-commit a
+stage, mark it `done` in `docs/feature-parity.md`** or the manager re-runs it as an unmet dependency; commit
+your own infra/backlog edits as a separate `chore` so they don't ride into the stage commit. Model policy is
+sonnet-first, opus only on genuine failure. (In-loop agent lessons live in `docs/lessons.md`.)
+
 ### Run tests yourself — don't ask the user to click in the Editor
 Unity's Test Framework runs headless from the CLI in batch mode. Prefer this for every logic change;
 it verifies **compilation and tests** without the GUI. Only fall back to asking the user to use the

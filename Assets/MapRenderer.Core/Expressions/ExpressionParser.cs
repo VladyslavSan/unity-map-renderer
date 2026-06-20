@@ -57,7 +57,13 @@ namespace MapRenderer.Core.Expressions
                 case JsonKind.String:
                     return new LiteralExpression(Value.String(node.AsString()));
                 case JsonKind.Object:
-                    // A bare object is a literal object value.
+                    // MapLibre Style Spec v7 "legacy stops" format:
+                    // { "stops": [[z0,v0],[z1,v1],...], "base": b } where each stop pair is [zoom, value].
+                    // Equivalent modern expression: ["interpolate",["exponential",b],["zoom"],z0,v0,...].
+                    // The parser converts this to an InterpolateExpression so the kind is correctly Zoom.
+                    if (node.TryGet("stops", out var stopsNode) && stopsNode.IsArray && stopsNode.Items.Count >= 2)
+                        return ParseLegacyStopsObject(node, stopsNode, scope);
+                    // A bare object without "stops" is a literal object value.
                     return new LiteralExpression(JsonToValue(node));
                 case JsonKind.Array:
                     return ParseArray(node, scope, zoomAllowed);
@@ -575,6 +581,60 @@ namespace MapRenderer.Core.Expressions
                     throw new ExpressionParseException(
                         $"\"array\" element type must be \"boolean\", \"number\", or \"string\"; got \"{node.AsString()}\".");
             }
+        }
+
+        // ---- legacy stops-object format (MapLibre Style Spec v7 compatibility) --------------------
+
+        /// <summary>
+        /// Parses a MapLibre v7 legacy stops object <c>{ "stops": [[z0,v0],[z1,v1],...], "base": b }</c>
+        /// as a modern <c>interpolate</c> / <c>step</c> expression with a <c>["zoom"]</c> input.
+        ///
+        /// Semantics (clean-room from the MapLibre Style Spec):
+        ///   • Each stop is a [zoom, value] pair. Stops must be arrays of length ≥ 2.
+        ///   • "base" (optional, default 1.0) is the exponential interpolation base:
+        ///       base == 1.0 → linear interpolation (equivalent to ["interpolate",["linear"],["zoom"],...])
+        ///       base != 1.0 → exponential interpolation with the given base.
+        ///   • Output values may be numbers or colors (parsed via ParseNode with zoomAllowed=false).
+        ///   • Invalid stops (non-number zoom key, non-ascending, &lt;2 stops) fall back to a constant null.
+        /// </summary>
+        private Expression ParseLegacyStopsObject(JsonValue node, JsonValue stopsArr, Scope scope)
+        {
+            double baseVal = node.GetDouble("base", 1.0);
+
+            // Parse each [zoom, value] pair.
+            var items = stopsArr.Items;
+            int n = items.Count;
+
+            var stopZooms  = new double[n];
+            var stopOuts   = new Expression[n];
+            double prev = double.NegativeInfinity;
+
+            for (int i = 0; i < n; i++)
+            {
+                var pair = items[i];
+                if (!pair.IsArray || pair.Items.Count < 2)
+                    return new LiteralExpression(Value.Null); // malformed stop
+                var zoomNode = pair.Items[0];
+                if (zoomNode.Kind != JsonKind.Number)
+                    return new LiteralExpression(Value.Null); // non-numeric zoom key
+                double z = zoomNode.AsDouble();
+                if (z <= prev)
+                    return new LiteralExpression(Value.Null); // non-ascending
+                prev = z;
+                stopZooms[i] = z;
+                stopOuts[i]  = FoldConstant(ParseNode(pair.Items[1], scope, zoomAllowed: false));
+            }
+
+            var zoom = new ZoomExpression();
+            var curve = (baseVal != 1.0)
+                ? InterpolationKind.Exponential
+                : InterpolationKind.Linear;
+
+            return new InterpolateExpression(
+                curve, InterpolationSpace.Default,
+                baseVal,
+                0.0, 0.0, 0.0, 0.0,   // cubic-bezier control points (unused for linear/exponential)
+                zoom, stopZooms, stopOuts);
         }
 
         // ---- constant-folding helper (used by step/interpolate for stop outputs) -----------------

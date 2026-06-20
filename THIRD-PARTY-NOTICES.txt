@@ -57,3 +57,23 @@ Assets/Fixtures/sample-tile.bytes
   Underlying geometry: Natural Earth — public domain (no attribution required).
   Sources: https://demotiles.maplibre.org/  •  https://www.naturalearthdata.com/
   Bundled as an offline, deterministic test fixture.
+
+Assets/Fixtures/maplibre-demo-style.json
+  A MapLibre GL JS style document describing the "demotiles" basemap.
+  Committed as the demo style for MapDemo.unity (S40) and as a test fixture
+  for the styled-fill pipeline (MapViewStyledFillTests).
+  Underlying data: Natural Earth — public domain (no attribution required).
+  Source: https://demotiles.maplibre.org/style.json
+  License: the style JSON itself is considered data/configuration, not a
+  copyrighted work under MapLibre's Apache-2.0 license (which applies to
+  MapLibre GL JS source code, not the style schemas or Natural Earth data).
+
+LIVE NETWORK ENDPOINT (runtime only)
+-------------------------------------
+https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf
+  The MapLibre demotiles vector tile endpoint used by MapViewBootstrap at runtime.
+  Tiles are NOT bundled in this repo. Fetched over HTTP only when the MapDemo.unity
+  scene is run in Play mode. This is a free public endpoint.
+  Underlying geometry: Natural Earth — public domain (no attribution required).
+  Endpoint maintained by: MapLibre contributors.
+  Subject to the endpoint's terms of service and fair-use policy.
