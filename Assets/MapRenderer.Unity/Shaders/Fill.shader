@@ -10,7 +10,12 @@
 //   • Full URP Lit property set (base/normal/metallic/occlusion/emission/detail maps, etc.)
 //     plus _MapColor/_Opacity map paint properties.
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
-//   • Render state: hardcoded Cull Off (winding follow-up) / ZWrite On.
+//   • Render state: hardcoded Cull Off (winding follow-up). ZWrite is driven by [_ZWrite]
+//     (default 1.0 = opaque depth write, identical to stock URP Lit) so painter's-algorithm
+//     flat layers (S07) can set _ZWrite=0 + renderQueue=base+index for coplanar compositing.
+//     This restores stock URP Lit's `ZWrite [_ZWrite]` on the forward pass; the prior hardcoded
+//     `ZWrite On` was the S34 deviation. Passes 2-5 (ShadowCaster/GBuffer/DepthOnly/DepthNormals)
+//     keep their own `ZWrite On` — they must write depth regardless of the forward-pass setting.
 //
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
 // Authored for URP 17.5 / Unity 6000.x.
@@ -110,9 +115,12 @@ Shader "MapRenderer/Fill"
         LOD 300
 
         // Cull Off: winding correctness is a deliberate follow-up (see ARCHITECTURE §2 / follow-ups.md).
-        // ZWrite On: opaque geometry must write depth.
+        // ZWrite [_ZWrite]: default 1.0 → opaque geometry writes depth (stock URP Lit behaviour);
+        //   S07 painter's-algorithm flat layers set _ZWrite=0 at runtime + renderQueue=base+index so
+        //   coplanar fills/lines composite in declared order with no z-fighting (ARCHITECTURE §2).
+        //   Only the ForwardLit pass inherits this; the depth/shadow/GBuffer passes force ZWrite On.
         Cull Off
-        ZWrite On
+        ZWrite [_ZWrite]
         ZTest LEqual
 
         // ─────────────────────────────────────────────────────────────────────

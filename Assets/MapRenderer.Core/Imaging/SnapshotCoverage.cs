@@ -283,5 +283,118 @@ namespace MapRenderer.Core.Imaging
             int    bgG,
             int    bgB)
             => MeanLuminanceOfNonBackground(pixels, width, height, (byte)bgR, (byte)bgG, (byte)bgB);
+
+        // ─────────────────────────────────────────────────────────────────────────────
+        // S07 — region samplers for the multi-layer draw-order snapshot test.
+        //
+        // The painter's-algorithm reorder test samples a fixed screen rectangle where two
+        // layers overlap, then asserts (a) the top layer's colour dominates the region mean
+        // and (b) the region has near-zero colour variance (a clean composite, no coplanar
+        // z-fighting speckle). Both operate on the RGBA32 top-left-origin buffer convention
+        // used throughout this file; engine-free (plain ints), so they unit-test under dotnet.
+        // ─────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Mean (R, G, B) of all pixels inside the inclusive-exclusive rectangle
+        /// [<paramref name="x0"/>, <paramref name="x1"/>) × [<paramref name="y0"/>, <paramref name="y1"/>),
+        /// returned as a 3-element double array in [0,1] (channel / 255).
+        ///
+        /// Coordinates are clamped to the image bounds; an empty region returns (0,0,0).
+        /// Top-left origin, row-major RGBA32 — matches <c>Texture2D.GetRawTextureData()</c> readback.
+        /// </summary>
+        public static double[] SampleRegionMeanColor(
+            byte[] pixels, int width, int height,
+            int x0, int y0, int x1, int y1)
+        {
+            if (pixels == null) throw new ArgumentNullException(nameof(pixels));
+            int total = width * height;
+            if (pixels.Length < total * 4)
+                throw new ArgumentException(
+                    $"pixels.Length ({pixels.Length}) < width*height*4 ({total * 4}).");
+
+            ClampRect(ref x0, ref y0, ref x1, ref y1, width, height);
+
+            long sumR = 0, sumG = 0, sumB = 0;
+            int count = 0;
+            for (int y = y0; y < y1; y++)
+            {
+                int row = y * width;
+                for (int x = x0; x < x1; x++)
+                {
+                    int b = (row + x) * 4;
+                    sumR += pixels[b];
+                    sumG += pixels[b + 1];
+                    sumB += pixels[b + 2];
+                    count++;
+                }
+            }
+
+            if (count == 0) return new double[] { 0.0, 0.0, 0.0 };
+            return new double[]
+            {
+                (double)sumR / count / 255.0,
+                (double)sumG / count / 255.0,
+                (double)sumB / count / 255.0,
+            };
+        }
+
+        /// <summary>
+        /// Total colour variance inside the rectangle: the sum of the per-channel variances of R, G, B
+        /// (each normalised to [0,1] before squaring). A flat, single-colour region → ~0; a speckled /
+        /// z-fighting region → noticeably positive. Empty region returns 0.
+        ///
+        /// Used by the S07 reorder snapshot to assert a CLEAN composite (no coplanar z-fight): a coplanar
+        /// ZWrite-On stack would alternate between two layers' colours per pixel and inflate this value;
+        /// the ZWrite-Off painter's stack composites flat → near-zero.
+        /// </summary>
+        public static double RegionColorVariance(
+            byte[] pixels, int width, int height,
+            int x0, int y0, int x1, int y1)
+        {
+            if (pixels == null) throw new ArgumentNullException(nameof(pixels));
+            int total = width * height;
+            if (pixels.Length < total * 4)
+                throw new ArgumentException(
+                    $"pixels.Length ({pixels.Length}) < width*height*4 ({total * 4}).");
+
+            ClampRect(ref x0, ref y0, ref x1, ref y1, width, height);
+
+            // Two passes: mean, then variance. Region is small (sample sub-rect), so cost is negligible.
+            double[] mean = SampleRegionMeanColor(pixels, width, height, x0, y0, x1, y1);
+
+            double sumSqR = 0, sumSqG = 0, sumSqB = 0;
+            int count = 0;
+            for (int y = y0; y < y1; y++)
+            {
+                int row = y * width;
+                for (int x = x0; x < x1; x++)
+                {
+                    int b  = (row + x) * 4;
+                    double dr = pixels[b]     / 255.0 - mean[0];
+                    double dg = pixels[b + 1] / 255.0 - mean[1];
+                    double db = pixels[b + 2] / 255.0 - mean[2];
+                    sumSqR += dr * dr;
+                    sumSqG += dg * dg;
+                    sumSqB += db * db;
+                    count++;
+                }
+            }
+
+            if (count == 0) return 0.0;
+            return (sumSqR + sumSqG + sumSqB) / count;
+        }
+
+        /// <summary>
+        /// Clamp a rectangle to [0,width] × [0,height] and normalise so x0&lt;=x1, y0&lt;=y1.
+        /// </summary>
+        private static void ClampRect(ref int x0, ref int y0, ref int x1, ref int y1, int width, int height)
+        {
+            if (x1 < x0) (x0, x1) = (x1, x0);
+            if (y1 < y0) (y0, y1) = (y1, y0);
+            x0 = Math.Max(0, Math.Min(x0, width));
+            x1 = Math.Max(0, Math.Min(x1, width));
+            y0 = Math.Max(0, Math.Min(y0, height));
+            y1 = Math.Max(0, Math.Min(y1, height));
+        }
     }
 }

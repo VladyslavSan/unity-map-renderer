@@ -61,6 +61,9 @@
     <Compile Include="../../Assets/MapRenderer.Core/Geometry/LineVertex.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Geometry/LineTessellator.cs" />
 
+    <!-- S07: painter's-algorithm layer draw-order (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Rendering/LayerDrawOrder.cs" />
+
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
@@ -69,5 +72,9 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewMathTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewInputTests.cs" />
+
+    <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LayerDrawOrderTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/SnapshotColorTests.cs" />
   </ItemGroup>
 </Project>
