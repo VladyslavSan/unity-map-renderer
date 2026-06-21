@@ -1,51 +1,39 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity
 {
     /// <summary>
-    /// S42: Translates user input (pan / zoom / tilt) into <see cref="ViewState"/> mutations and drives
-    /// the <see cref="MapView"/>, applying bearing/pitch/altitude to the driven camera's transform.
-    /// A thin shell over the pure, unit-tested <see cref="ViewInput"/> helpers — all the math lives there
-    /// so it has headless coverage; this class only reads input and pushes the result.
+    /// S45: Thin input → <see cref="CameraPropertiesUpdate"/> patch translator. Supersedes the
+    /// S42 god-MonoBehaviour: all pose math has moved to <see cref="CameraPoseMath"/> (Core) and
+    /// <see cref="MapCamera"/> (Unity sync). This class reads <c>Mouse.current</c> /
+    /// <c>Keyboard.current</c> and calls <see cref="MapView.Camera"/>.Apply with instant patches.
     ///
-    /// <para><b>Input backend: new Input System (<c>UnityEngine.InputSystem</c>).</b> The project's
-    /// <c>activeInputHandler</c> is 1 (new only). Reads <c>Mouse.current</c> and <c>Keyboard.current</c>
-    /// directly (immediate-mode polling; no InputActions asset). Controls: left-drag = pan, scroll = zoom,
-    /// right-drag = tilt (vertical → pitch, horizontal → bearing), +/=/Q = zoom in, -/E = zoom out.</para>
+    /// <para><b>Input backend: new Input System (<c>UnityEngine.InputSystem</c>).</b>
+    ///   Reads <c>Mouse.current</c> and <c>Keyboard.current</c> directly (no legacy
+    ///   <c>UnityEngine.Input</c>). Controls: left-drag = pan, scroll = zoom, right-drag = tilt/bearing,
+    ///   +/=/Q = zoom in, −/E = zoom out.</para>
     ///
-    /// <para><b>Scroll normalization (S42, D4):</b>
-    ///   Mouse.current.scroll.y delivers ±120 units/notch for a physical wheel; trackpads deliver
-    ///   continuous, lower-magnitude values. We normalize by <see cref="WheelNotchUnits"/> (= 120)
-    ///   so that one physical notch ≈ 1.0 normalized unit and trackpad continuous scroll scales
-    ///   proportionally. <see cref="ZoomSensitivity"/> then converts normalized units to zoom levels.
-    ///   Default: 0.25/notch → comfortable step that works the same on wheel and trackpad.</para>
+    /// <para><b>Scroll normalization (S42 D4 preserved):</b> <see cref="WheelNotchUnits"/> = 120 so
+    ///   one physical wheel notch ≈ 1 normalized unit.</para>
     ///
-    /// <para><b>Altitude-from-zoom (S42, D2):</b>
-    ///   Camera altitude is derived from <c>v.Zoom</c> using the standard Web-Mercator relation:
-    ///   <c>metersPerPixel = 40075016.686 / (256 * 2^zoom)</c>; for a perspective camera,
-    ///   <c>altitude = (viewportHeightPx * metersPerPixel) / (2 * tan(verticalFOV/2))</c>.
-    ///   <see cref="ReferenceViewportHeightPx"/> is a serialized deterministic height (not
-    ///   <c>Camera.pixelHeight</c>, which is non-reproducible headless) so unit tests can pin the
-    ///   exact formula output. An optional <see cref="AltitudeMultiplier"/> scales the result.</para>
+    /// <para><b>D5 — Ordering:</b> this Update only queues patches on the camera system. The actual
+    ///   camera advance + tile loop runs in <see cref="MapView.Update"/> (via
+    ///   <see cref="MapView.UpdateFrame"/>). Unity does NOT guarantee the ordering of sibling
+    ///   MonoBehaviour Updates, but the result is still correct: patches set the instant-path
+    ///   current props which MapView.Advance picks up either this frame or next. For deterministic
+    ///   ordering with no per-frame latency, <see cref="Map"/> should wire the camera via
+    ///   <see cref="MapView.SetCamera"/> and call <see cref="ApplyCameraTransform"/> from within a
+    ///   controlled context — used by tests.</para>
     ///
-    /// <para><b>Camera placement (S42, D1):</b>
-    ///   pitch=0 ⇒ camera directly above origin (position.y = altitude), forward ≈ (0,-1,0).
-    ///   Increasing pitch tilts toward the horizon; bearing rotates about +Y.</para>
+    /// <para><b>Camera-transform helpers:</b>
+    ///   <see cref="ApplyCameraTransform(CameraProperties)"/> and <see cref="AltitudeForZoom"/> are
+    ///   thin delegates to the Core pose math, used by <c>MapRoot</c> frame-0 framing and by
+    ///   <c>CameraTransformTests</c>.</para>
     ///
-    /// <para><b>Clip planes (S42, D3):</b>
-    ///   near = altitude × 0.01; far = altitude × 4 (covers tilt up to ~75° with headroom).
-    ///   Scales with altitude so the world is not clipped at zoom 2 and precision is sane at zoom 16.</para>
-    ///
-    /// <para>Lives on <b>MapRoot</b> (not on the Camera); drives the <see cref="Camera"/> field's
-    /// transform. Both <see cref="Camera"/> and <see cref="Map"/> are set by the wire-up bootstrap at
-    /// runtime via <see cref="MapRoot.Wire"/>. Do NOT put this component on the Camera GameObject.</para>
-    ///
-    /// <para>Bearing/pitch live on the CAMERA transform only — tile/scene-root transforms stay
-    /// translation-only (preserving +Y fill normals), per the S06 scope decision.</para>
-    ///
-    /// <para>Allocation-free <see cref="Update"/>: no LINQ, no closures, no per-frame allocation.</para>
+    /// <para>Allocation-free <see cref="Update"/>: struct patches, no LINQ, no closures.</para>
     /// </summary>
     public sealed class MapController : MonoBehaviour
     {
@@ -55,7 +43,7 @@ namespace MapRenderer.Unity
         [Tooltip("The camera this controller positions (set by MapRoot.Wire at runtime).")]
         public Camera Camera;
 
-        // ── Sensitivity (new Input System calibration — see class doc) ───────────────────────────
+        // ── Sensitivity (new Input System calibration) ────────────────────────────────────────────
         [Header("Sensitivity (new Input System — see class doc for calibration notes)")]
 
         [Tooltip("Zoom sensitivity. One normalized scroll unit (= one wheel notch via WheelNotchUnits) " +
@@ -71,13 +59,13 @@ namespace MapRenderer.Unity
         [Tooltip("Pitch sensitivity (raw px/frame → degrees). 0.3 matches the legacy feel.")]
         public float PitchSensitivity   = 0.3f;
 
-        public float MaxPitch           = 60f;
+        public float MaxPitch = 60f;
 
         [Header("Zoom clamp")]
         public float MinZoom = 0f;
         public float MaxZoom = 22f;
 
-        // ── Camera framing — altitude is DERIVED from zoom (S42 D2) ─────────────────────────────
+        // ── Camera framing (bridge — altitude derived from zoom, S42 D2) ──────────────────────────
         [Header("Camera framing — altitude derived from zoom (S42 D2)")]
 
         /// <summary>
@@ -88,32 +76,25 @@ namespace MapRenderer.Unity
         public const float WheelNotchUnits = 120f;
 
         [Tooltip("Deterministic viewport height fed to the altitude formula (not Camera.pixelHeight, " +
-                 "which is non-reproducible in headless/test mode). Affects the absolute altitude; " +
-                 "monotonicity holds for any positive value.")]
+                 "which is non-reproducible in headless/test mode).")]
         public float ReferenceViewportHeightPx = 1080f;
 
-        [Tooltip("Vertical field-of-view for the perspective camera (degrees). " +
-                 "Pushed to Camera.fieldOfView each frame.")]
+        [Tooltip("Vertical field-of-view for the perspective camera (degrees).")]
         public float VerticalFovDeg = 60f;
 
-        [Tooltip("Optional multiplier on the derived altitude (default 1). Tunable for art direction " +
-                 "without changing the framing formula.")]
+        [Tooltip("Optional multiplier on the derived altitude (default 1).")]
         public float AltitudeMultiplier = 1f;
 
-        // ── Web-Mercator framing constant ─────────────────────────────────────────────────────────
-        // Clean-room: standard web-map relation. Earth equatorial circumference in metres (IAU/WGS-84).
-        private const double EarthCircumferenceMetres = 40075016.686;
-
-        // ── Private state ─────────────────────────────────────────────────────────────────────────
-        // (none needed beyond inspector fields; ViewState is value-pulled from MapView each frame)
+        // ── Update: produce CameraPropertiesUpdate patches ────────────────────────────────────────
 
         private void Update()
         {
-            if (Map == null || Camera == null) return;
+            if (Map == null || Map.Camera == null) return;
 
-            ViewState v = Map.View;
+            CameraPropertiesUpdate patch = default;
+            bool anyChange = false;
 
-            // ── Zoom (scroll wheel / trackpad) ────────────────────────────────────────────────────
+            // ── Zoom (scroll wheel / trackpad) ───────────────────────────────────────────────────
             // Null-guard Mouse.current (absent in headless / test builds — no NRE).
             var mouse = Mouse.current;
             if (mouse != null)
@@ -121,31 +102,53 @@ namespace MapRenderer.Unity
                 float scroll = mouse.scroll.ReadValue().y;
                 if (scroll != 0f)
                 {
-                    // Normalize: divide raw scroll by WheelNotchUnits so one physical wheel notch ≈ 1.0;
-                    // trackpad continuous values scale proportionally. Then apply ZoomSensitivity.
+                    // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
                     float normalizedScroll = scroll / WheelNotchUnits;
-                    v = ViewInput.ApplyZoom(v, normalizedScroll, ZoomSensitivity, MinZoom, MaxZoom);
+                    double newZoom = (Map.Camera.Current.Zoom + normalizedScroll * ZoomSensitivity);
+                    newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, newZoom));
+                    patch.Zoom = newZoom;
+                    anyChange  = true;
                 }
 
-                // ── Pan (left-drag) ───────────────────────────────────────────────────────────────
-                // delta.ReadValue() = raw accumulated pixel displacement this frame (no smoothing).
+                // ── Pan (left-drag, D6a — Y-sign correct for new Input System) ─────────────────
+                // Mouse.current.delta.y is +up in the new Input System. ViewInput.ApplyPan (shared,
+                // engine-free) treats dy>0 as a downward drag (screen +y → +lat). So we negate delta.y
+                // here at the translator: a +Y drag (drag UP) → ApplyPan(..., -dy) → center moves SOUTH
+                // = content follows the cursor. The negation keeps ViewInput unchanged (it also runs the
+                // core-tests suite, where the D6a tests pin this exact sign flip).
                 if (mouse.leftButton.isPressed)
                 {
                     Vector2 delta = mouse.delta.ReadValue();
                     if (delta.x != 0f || delta.y != 0f)
-                        v = ViewInput.ApplyPan(v, delta.x, delta.y);
+                    {
+                        CameraPropertiesUpdate pan = ViewInput.ApplyPan(Map.Camera.Current, delta.x, -delta.y);
+                        if (pan.Lon.HasValue) { patch.Lon = pan.Lon; anyChange = true; }
+                        if (pan.Lat.HasValue) { patch.Lat = pan.Lat; anyChange = true; }
+                    }
                 }
 
-                // ── Tilt / bearing (right-drag) ───────────────────────────────────────────────────
+                // ── Tilt / bearing (right-drag, D6 — Y-sign matches the pan convention) ───────────
+                // Same sign flip as pan: Mouse.current.delta.y is +up in the new Input System, but
+                // ViewInput.ApplyTilt adds dy·sensitivity to the current tilt. Negating delta.y means a
+                // +Y drag (drag UP) → ApplyTilt(..., -dy) → pitch DECREASES → camera tilts toward overhead
+                // (content follows the cursor). Pinned headless by the D6 tilt-Y tests in
+                // CameraPropertiesTests. (Final direction is a maintainer play-test call per S50 D6.)
                 if (mouse.rightButton.isPressed)
                 {
                     Vector2 delta = mouse.delta.ReadValue();
                     if (delta.x != 0f || delta.y != 0f)
-                        v = ViewInput.ApplyTilt(v, delta.x, delta.y, BearingSensitivity, PitchSensitivity, MaxPitch);
+                    {
+                        CameraPropertiesUpdate tilt = ViewInput.ApplyTilt(
+                            Map.Camera.Current, delta.x, -delta.y,
+                            BearingSensitivity, PitchSensitivity, MaxPitch);
+                        patch.Heading = tilt.Heading;
+                        patch.Tilt    = tilt.Tilt;
+                        anyChange = true;
+                    }
                 }
             }
 
-            // ── Keyboard zoom (+/= / Q  →  zoom in;  -  / E  →  zoom out) ───────────────────────
+            // ── Keyboard zoom (+/= / Q → zoom in; − / E → zoom out) ─────────────────────────────
             // Null-guarded separately from Mouse.current (each device can be absent independently).
             var kb = Keyboard.current;
             if (kb != null)
@@ -153,89 +156,45 @@ namespace MapRenderer.Unity
                 float kbStep = KeyboardZoomStep * Time.deltaTime;
                 bool zoomIn  = kb.equalsKey.isPressed || kb.numpadPlusKey.isPressed  || kb.qKey.isPressed;
                 bool zoomOut = kb.minusKey.isPressed  || kb.numpadMinusKey.isPressed || kb.eKey.isPressed;
-                if (zoomIn)
-                    v = ViewInput.ApplyZoom(v, kbStep,  1.0f, MinZoom, MaxZoom);
-                else if (zoomOut)
-                    v = ViewInput.ApplyZoom(v, -kbStep, 1.0f, MinZoom, MaxZoom);
+                if (zoomIn || zoomOut)
+                {
+                    double base_ = patch.Zoom ?? Map.Camera.Current.Zoom;
+                    double delta = zoomIn ? kbStep : -kbStep;
+                    double newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, base_ + delta));
+                    patch.Zoom = newZoom;
+                    anyChange  = true;
+                }
             }
 
-            Map.SetView(v);
-            ApplyCameraTransform(v);
+            if (anyChange)
+                Map.Camera.Apply(patch, CameraAnimation.Instant);
         }
 
+        // ── Camera-transform bridge (CameraTransformTests + MapRoot frame-0 framing) ─────────────
+
         /// <summary>
-        /// Positions/orients the driven <see cref="Camera"/> from the view state (D1 + D2 + D3, S42).
-        ///
-        /// <para><b>D1 — Overhead at pitch 0:</b> camera is placed at <c>(0, altitude, 0)</c> looking
-        /// straight down. Increasing pitch tilts toward the horizon; bearing rotates about +Y. The
-        /// orbit formula: <c>offset = Rot(bearing,Y) * Rot(pitch,X) * (0, altitude, 0)</c>; at pitch=0
-        /// the inner rotation is identity so offset = (0, altitude, 0) and forward = (0, -1, 0).</para>
-        ///
-        /// <para><b>D2 — Altitude from zoom:</b> see <see cref="AltitudeForZoom"/>.</para>
-        ///
-        /// <para><b>D3 — Clip planes:</b> near = altitude × 0.01, far = altitude × 4. Covers tilt up to
-        /// ~75° (MaxPitch = 60°; at 60° the slant distance is altitude / cos(60°) = 2 × altitude, well
-        /// inside the 4× far plane).</para>
+        /// Positions/orients the driven <see cref="Camera"/> from a <see cref="CameraProperties"/>.
+        /// Delegates to <see cref="MapCamera"/> using the Core pose math (S42 D1/D2/D3). Used by
+        /// <c>MapRoot</c> for the frame-0 framing and by <c>CameraTransformTests</c>.
         ///
         /// <para>Made <c>public</c> so unit tests can call it directly; null-guards internally.</para>
         /// </summary>
-        public void ApplyCameraTransform(ViewState v)
+        public void ApplyCameraTransform(CameraProperties props)
         {
             if (Camera == null) return;
 
-            // Set up perspective.
-            Camera.orthographic = false;
-            Camera.fieldOfView  = VerticalFovDeg;
+            // Delegate to MapCamera (Core pose math) via a temporary MapCamera wrapper.
+            var mc = new MapCamera(Camera, ReferenceViewportHeightPx, VerticalFovDeg);
+            mc.AltitudeMultiplier = AltitudeMultiplier;
 
-            float altitude = AltitudeForZoom(v.Zoom, ReferenceViewportHeightPx, VerticalFovDeg)
-                             * AltitudeMultiplier;
-
-            // Clamp altitude to a sensible minimum so clip planes don't collapse.
-            if (altitude < 0.1f) altitude = 0.1f;
-
-            float bearing = (float)v.BearingDeg;
-            float pitch   = (float)v.PitchDeg;
-
-            // Orbit on a sphere of radius = altitude around the scene origin.
-            // AngleAxis(bearing, up):  rotate about +Y (clockwise = east when bearing > 0)
-            // AngleAxis(pitch, right): tilt from overhead toward the horizon
-            // At pitch=0, Rot(pitch,X) is identity → offset = (0, altitude, 0) → y > 0, forward = (0,-1,0)
-            Quaternion orient = Quaternion.AngleAxis(bearing, Vector3.up)
-                              * Quaternion.AngleAxis(pitch,   Vector3.right);
-            Vector3 offset    = orient * (Vector3.up * altitude);
-
-            Camera.transform.position = offset;
-            // Look at origin from the offset position. LookRotation(-offset.normalized) sets
-            // forward = (origin - camera_pos).normalized, i.e. pointing toward the origin.
-            Camera.transform.rotation = Quaternion.LookRotation(-offset.normalized, Vector3.up);
-
-            // D3 — Clip planes scale with altitude (world not clipped at z2; precision OK at z16).
-            Camera.nearClipPlane = Mathf.Max(0.1f, altitude * 0.01f);
-            Camera.farClipPlane  = altitude * 4f;
+            mc.SyncFromProperties(props, ReferenceViewportHeightPx, VerticalFovDeg, AltitudeMultiplier);
         }
 
         /// <summary>
-        /// Computes camera altitude in render-space metres from a fractional zoom level (S42 D2).
-        ///
-        /// <para>Web-Mercator ground resolution: <c>metersPerPixel = 40075016.686 / (256 × 2^zoom)</c>.
-        /// For a perspective camera with vertical FOV looking straight down at the map plane,
-        /// the altitude that frames exactly <c>viewportHeightPx</c> pixels of ground is:
-        /// <c>altitude = (viewportHeightPx × metersPerPixel) / (2 × tan(verticalFovDeg/2))</c>.</para>
-        ///
-        /// <para>Made <c>public static</c> (pure, no side effects) so unit tests can pin the exact
-        /// formula and verify monotonicity/magnitude against hand-computed expected values.</para>
+        /// S42/S45 bridge: computes camera altitude from zoom. Delegates to <see cref="CameraPoseMath"/>.
+        /// Kept <c>public static</c> for <c>CameraTransformTests</c> backward compatibility (tooth 6).
         /// </summary>
-        /// <param name="zoom">Fractional zoom level (MapLibre semantics; higher = more zoomed in).</param>
-        /// <param name="viewportHeightPx">Deterministic viewport height in pixels (use
-        ///   <see cref="ReferenceViewportHeightPx"/>, not <c>Camera.pixelHeight</c>).</param>
-        /// <param name="verticalFovDeg">Vertical field-of-view in degrees.</param>
-        /// <returns>Camera altitude in metres (same units as Web-Mercator render space).</returns>
         public static float AltitudeForZoom(double zoom, float viewportHeightPx, float verticalFovDeg)
-        {
-            double metersPerPixel = EarthCircumferenceMetres / (ViewInput.TilePixelSize * System.Math.Pow(2.0, zoom));
-            double halfFovRad     = verticalFovDeg * 0.5 * System.Math.PI / 180.0;
-            double altitude       = (viewportHeightPx * metersPerPixel) / (2.0 * System.Math.Tan(halfFovRad));
-            return (float)altitude;
-        }
+            => (float)CameraPoseMath.AltitudeForZoom(zoom, viewportHeightPx, verticalFovDeg);
     }
 }

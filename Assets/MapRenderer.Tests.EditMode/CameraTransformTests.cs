@@ -9,7 +9,7 @@
 
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
@@ -20,6 +20,10 @@ namespace MapRenderer.Tests
         // Shared deterministic viewport height so formula results are reproducible across machines.
         private const float TestViewportHeight = 1080f;
         private const float TestFovDeg         = 60f;
+
+        private static CameraProperties Cam(double lon, double lat, double zoom,
+                                            double heading = 0.0, double tilt = 0.0)
+            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, heading, tilt);
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────
 
@@ -60,7 +64,7 @@ namespace MapRenderer.Tests
             var (ctrl, cam, rootGo, camGo) = CreatePair();
             try
             {
-                var view = new ViewState(0.0, 0.0, 8.0, bearingDeg: 0.0, pitchDeg: 0.0);
+                var view = Cam(0.0, 0.0, 8.0, heading: 0.0, tilt: 0.0);
                 ctrl.ApplyCameraTransform(view);
 
                 Assert.Greater(cam.transform.position.y, 0f,
@@ -90,8 +94,8 @@ namespace MapRenderer.Tests
             var (ctrl, cam, rootGo, camGo) = CreatePair();
             try
             {
-                var viewLow  = new ViewState(0.0, 0.0, 2.0);
-                var viewHigh = new ViewState(0.0, 0.0, 16.0);
+                var viewLow  = Cam(0.0, 0.0, 2.0);
+                var viewHigh = Cam(0.0, 0.0, 16.0);
 
                 ctrl.ApplyCameraTransform(viewLow);
                 float yLow = cam.transform.position.y;
@@ -174,7 +178,7 @@ namespace MapRenderer.Tests
             var (ctrl, cam, rootGo, camGo) = CreatePair();
             try
             {
-                var view = new ViewState(0.0, 0.0, 2.0);
+                var view = Cam(0.0, 0.0, 2.0);
                 ctrl.ApplyCameraTransform(view);
 
                 float altitude = cam.transform.position.y;
@@ -208,7 +212,7 @@ namespace MapRenderer.Tests
             var (ctrl, cam, rootGo, camGo) = CreatePair();
             try
             {
-                var view = new ViewState(0.0, 0.0, 8.0, bearingDeg: 0.0, pitchDeg: 45.0);
+                var view = Cam(0.0, 0.0, 8.0, heading: 0.0, tilt: 45.0);
                 ctrl.ApplyCameraTransform(view);
 
                 Assert.Greater(cam.transform.position.y, 0f,
@@ -242,14 +246,14 @@ namespace MapRenderer.Tests
             try
             {
                 // Reference: bearing=0, pitch=45 → camera is above+in-front of origin
-                var viewNorth = new ViewState(0.0, 0.0, 8.0, bearingDeg:  0.0, pitchDeg: 45.0);
+                var viewNorth = Cam(0.0, 0.0, 8.0, heading:  0.0, tilt: 45.0);
                 ctrl.ApplyCameraTransform(viewNorth);
                 float xNorth = cam.transform.position.x;
                 float zNorth = cam.transform.position.z;
                 float yNorth = cam.transform.position.y;
 
                 // Rotate bearing 90°, same pitch
-                var viewEast = new ViewState(0.0, 0.0, 8.0, bearingDeg: 90.0, pitchDeg: 45.0);
+                var viewEast = Cam(0.0, 0.0, 8.0, heading: 90.0, tilt: 45.0);
                 ctrl.ApplyCameraTransform(viewEast);
                 float xEast = cam.transform.position.x;
                 float zEast = cam.transform.position.z;
@@ -285,7 +289,7 @@ namespace MapRenderer.Tests
             try
             {
                 cam.orthographic = true; // simulate scene-asset default
-                var view = new ViewState(0.0, 0.0, 8.0);
+                var view = Cam(0.0, 0.0, 8.0);
                 ctrl.ApplyCameraTransform(view);
 
                 Assert.IsFalse(cam.orthographic,

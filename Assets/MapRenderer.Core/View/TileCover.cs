@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
+using Unity.Mathematics;
 using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.View
 {
     /// <summary>
-    /// Selects the set of tiles (<see cref="TileId"/>) that cover a <see cref="ViewState"/> at its integer
-    /// zoom. Allocation-free in steady state: the caller supplies a reused result buffer that
+    /// Selects the set of tiles (<see cref="TileId"/>) that cover a <see cref="CameraProperties"/> at its
+    /// integer zoom. Allocation-free in steady state: the caller supplies a reused result buffer that
     /// <see cref="Cover"/> clears and refills (no LINQ, no per-call allocation).
     ///
     /// <para><b>S06 scope — a generous rectangle, not a precise frustum.</b> Frustum/tilt-aware tile
@@ -23,8 +25,9 @@ namespace MapRenderer.Core.View
         /// <summary>
         /// Fills <paramref name="reuseBuffer"/> with the tiles covering <paramref name="view"/>.
         /// </summary>
-        /// <param name="view">The view to cover. Its <see cref="ViewState.IntegerZoom"/> is clamped to
-        ///   <paramref name="minZoom"/>..<paramref name="maxZoom"/>.</param>
+        /// <param name="view">The camera to cover. Its <see cref="CameraProperties.IntegerZoom"/> is clamped
+        ///   to <paramref name="minZoom"/>..<paramref name="maxZoom"/>; its center comes from
+        ///   <see cref="CameraProperties.CenterMercator"/>.</param>
         /// <param name="viewportAspect">Viewport width / height. &gt; 1 widens the x-span.</param>
         /// <param name="padFactor">Multiplier on the base half-span (≥ 1). Absorbs viewport size and pitch
         ///   over-select. 1 selects roughly the center tile and its immediate neighbours.</param>
@@ -33,7 +36,7 @@ namespace MapRenderer.Core.View
         /// <param name="reuseBuffer">Caller-owned result buffer. Cleared then refilled (no allocation in
         ///   steady state once its capacity is warm).</param>
         public static void Cover(
-            ViewState view,
+            CameraProperties view,
             double viewportAspect,
             double padFactor,
             int minZoom,
@@ -50,14 +53,12 @@ namespace MapRenderer.Core.View
             long n = 1L << z;                    // tiles per axis at zoom z
             if (n <= 0) n = 1;
 
-            // Center → fractional tile coordinates (origin top-left, y increases southward).
-            double lat = Math.Max(-ViewState.MaxMercatorLat, Math.Min(ViewState.MaxMercatorLat, view.CenterLat));
-            double lonNorm = (view.CenterLon + 180.0) / 360.0;             // [0,1] west→east
-            double latRad  = lat * Math.PI / 180.0;
-            double yNorm   = (1.0 - Math.Log(Math.Tan(latRad) + 1.0 / Math.Cos(latRad)) / Math.PI) / 2.0; // [0,1] north→south
-
-            double cxTile = lonNorm * n;
-            double cyTile = yNorm   * n;
+            // Center → fractional tile coordinates (origin top-left, y increases southward). Derived from
+            // the Web-Mercator center (CenterMercator already clamps latitude to the projection limit).
+            double2 merc = view.CenterMercator();
+            double worldExtent = WebMercator.WorldExtent;
+            double cxTile = (merc.x + worldExtent) / (2.0 * worldExtent) * n;   // [0,n] west→east
+            double cyTile = (worldExtent - merc.y) / (2.0 * worldExtent) * n;   // [0,n] north→south
 
             // Half-span in tiles. Base span = 1 tile each way; padFactor and aspect widen it.
             double pad = padFactor < 1.0 ? 1.0 : padFactor;

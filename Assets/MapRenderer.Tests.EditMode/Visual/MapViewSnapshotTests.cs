@@ -7,6 +7,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Unity;
 
@@ -89,7 +90,7 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 3.0), ownsSource: false, style: MinimalStyle());
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
                 // Pump to settle all tiles.
                 for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
                 {

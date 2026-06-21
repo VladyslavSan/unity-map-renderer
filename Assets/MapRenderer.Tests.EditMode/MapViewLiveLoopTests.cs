@@ -16,6 +16,7 @@ using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
@@ -40,6 +41,9 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
             return File.ReadAllBytes(path);
         }
+
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
 
         /// <summary>
         /// Minimal 1-fill-layer style for the live loop tests: a single fill layer over the
@@ -106,7 +110,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 5.0), ownsSource: false, style: style);
+                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount, "z5 center cover is a 3×3 block");
@@ -114,7 +118,7 @@ namespace MapRenderer.Tests
                     "the center tile must be built");
 
                 // Pan far east (lon=170) → new cover does NOT overlap the old one.
-                view.SetView(new ViewState(170, 0, 5.0));
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170, Lat = 0 }, CameraAnimation.Instant);
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount, "still a 3×3 cover after panning");
@@ -153,7 +157,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
+                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
@@ -213,14 +217,14 @@ namespace MapRenderer.Tests
             try
             {
                 // Warm up: load the whole cover and let every tile settle.
-                view.Initialise(src, new ViewState(0, 0, 2.0), ownsSource: false, style: style);
+                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
-                view.SetView(view.View.WithCenter(0.5, 0.0));
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.5, Lat = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
-                view.SetView(view.View.WithCenter(0.0, 0.0));
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.0, Lat = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
 
                 // ── (a) THE PAN CASE ──
@@ -228,7 +232,7 @@ namespace MapRenderer.Tests
                 // at the equator, so a 111 km pan loads no new tiles), but it DOES dirty the cover so
                 // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
                 // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
-                view.SetView(view.View.WithCenter(1.0, 0.0));
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "MapView.Tick must not allocate during a within-cover pan (cover recompute path: " +
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
@@ -241,10 +245,10 @@ namespace MapRenderer.Tests
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
-                // ── (c) a bearing/pitch-only change is camera-only → no cover dirty → alloc-free. ──
-                view.SetView(view.View.WithOrientation(45.0, 30.0));
+                // ── (c) a heading/tilt-only change is camera-only → no cover dirty → alloc-free. ──
+                view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "A bearing/pitch-only view change must not dirty the cover, so Tick stays alloc-free.");
+                    "A heading/tilt-only camera change must not dirty the cover, so Tick stays alloc-free.");
             }
             finally
             {

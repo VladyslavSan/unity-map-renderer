@@ -46,11 +46,17 @@
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
 
-    <!-- S06: view-state / tile cover / floating-origin / input math (Core, engine-free) -->
-    <Compile Include="../../Assets/MapRenderer.Core/View/ViewState.cs" />
+    <!-- S06: tile cover / floating-origin / input math (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/View/TileCover.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
+
+    <!-- S45: Camera system (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraProperties.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPropertiesUpdate.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraAnimation.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPoseMath.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSystem.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/FileDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/HttpDataSource.cs" />
@@ -104,6 +110,7 @@
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraPropertiesTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />

@@ -1,11 +1,17 @@
 using System;
+using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.View
 {
     /// <summary>
-    /// Pure (engine-free, allocation-free) input → <see cref="ViewState"/> mutation helpers. Factored out
-    /// of <c>MapController</c> so the pan/zoom/tilt logic is unit-testable headless — reading
+    /// Pure (engine-free, allocation-free) input → <see cref="CameraPropertiesUpdate"/> patch helpers.
+    /// Factored out of <c>MapController</c> so the pan/zoom/tilt logic is unit-testable headless — reading
     /// <c>UnityEngine.Input</c> in <c>Update()</c> directly would have zero test coverage.
+    ///
+    /// <para><b>S50 — patch producers (D2).</b> Each method takes the current
+    /// <see cref="CameraProperties"/> and returns a <see cref="CameraPropertiesUpdate"/> patch that sets
+    /// only the fields it changes (the rest stay null). This aligns the whole input path with the S45
+    /// patch model — <c>MapController</c> merges the returned patch directly, no parallel mutation path.</para>
     ///
     /// Conventions:
     ///   - <b>Zoom</b> from scroll: positive scroll zooms in (z increases), with a sensitivity factor.
@@ -22,17 +28,18 @@ namespace MapRenderer.Core.View
         public const double TilePixelSize = 256.0;
 
         /// <summary>
-        /// Applies a scroll delta to the view's zoom. <paramref name="scrollDelta"/> is the raw scroll
+        /// Applies a scroll delta to the camera's zoom. <paramref name="scrollDelta"/> is the raw scroll
         /// (e.g. <c>Input.mouseScrollDelta.y</c>); <paramref name="sensitivity"/> scales it to zoom levels.
         /// Result is clamped to [<paramref name="minZoom"/>, <paramref name="maxZoom"/>].
         /// </summary>
-        public static ViewState ApplyZoom(ViewState v, double scrollDelta, double sensitivity,
-                                          double minZoom, double maxZoom)
+        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Zoom"/>.</returns>
+        public static CameraPropertiesUpdate ApplyZoom(CameraProperties current, double scrollDelta,
+                                                       double sensitivity, double minZoom, double maxZoom)
         {
-            double z = v.Zoom + scrollDelta * sensitivity;
+            double z = current.Zoom + scrollDelta * sensitivity;
             if (z < minZoom) z = minZoom;
             if (z > maxZoom) z = maxZoom;
-            return v.WithZoom(z);
+            return new CameraPropertiesUpdate { Zoom = z };
         }
 
         /// <summary>
@@ -40,41 +47,47 @@ namespace MapRenderer.Core.View
         /// with the cursor: dragging right (positive <paramref name="dxPixels"/>) shifts the center west.
         /// The pixel→degree conversion uses the ground resolution at the current zoom and latitude.
         /// </summary>
-        public static ViewState ApplyPan(ViewState v, double dxPixels, double dyPixels)
+        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Lon"/> and
+        ///   <see cref="CameraPropertiesUpdate.Lat"/>.</returns>
+        public static CameraPropertiesUpdate ApplyPan(CameraProperties current, double dxPixels, double dyPixels)
         {
-            double n = Math.Pow(2.0, v.Zoom);
+            double n = Math.Pow(2.0, current.Zoom);
             double worldPixels = TilePixelSize * n;          // pixels spanning 360° of longitude
             double degPerPixelLon = 360.0 / worldPixels;
 
             // Latitude degrees-per-pixel shrinks toward the poles (Mercator). Use the local cos(lat)
             // factor so vertical drags track the cursor at the current latitude.
-            double latRad = Clamp(v.CenterLat, -ViewState.MaxMercatorLat, ViewState.MaxMercatorLat) * Math.PI / 180.0;
+            double curLat = current.LookAt.Lat;
+            double latRad = Clamp(curLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat)
+                            * Math.PI / 180.0;
             double degPerPixelLat = degPerPixelLon * Math.Cos(latRad);
 
             // Drag-right (dx>0) → center moves west (−lon). Drag-down (screen dy>0) → center moves north.
-            double newLon = v.CenterLon - dxPixels * degPerPixelLon;
-            double newLat = v.CenterLat + dyPixels * degPerPixelLat;
+            double newLon = current.LookAt.Lon - dxPixels * degPerPixelLon;
+            double newLat = curLat + dyPixels * degPerPixelLat;
 
             newLon = WrapLon(newLon);
-            newLat = Clamp(newLat, -ViewState.MaxMercatorLat, ViewState.MaxMercatorLat);
-            return v.WithCenter(newLon, newLat);
+            newLat = Clamp(newLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat);
+            return new CameraPropertiesUpdate { Lon = newLon, Lat = newLat };
         }
 
         /// <summary>
         /// Applies a screen-space drag to bearing (horizontal) and pitch (vertical). Pitch is clamped to
         /// [0, <paramref name="maxPitch"/>]; bearing wraps to [0,360).
         /// </summary>
-        public static ViewState ApplyTilt(ViewState v, double dxPixels, double dyPixels,
-                                          double bearingSensitivity, double pitchSensitivity,
-                                          double maxPitch)
+        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Heading"/> and
+        ///   <see cref="CameraPropertiesUpdate.Tilt"/>.</returns>
+        public static CameraPropertiesUpdate ApplyTilt(CameraProperties current, double dxPixels, double dyPixels,
+                                                       double bearingSensitivity, double pitchSensitivity,
+                                                       double maxPitch)
         {
-            double bearing = v.BearingDeg + dxPixels * bearingSensitivity;
-            double pitch   = v.PitchDeg   + dyPixels * pitchSensitivity;
+            double bearing = current.Heading + dxPixels * bearingSensitivity;
+            double pitch   = current.Tilt    + dyPixels * pitchSensitivity;
 
             bearing %= 360.0;
             if (bearing < 0) bearing += 360.0;
             pitch = Clamp(pitch, 0.0, maxPitch);
-            return v.WithOrientation(bearing, pitch);
+            return new CameraPropertiesUpdate { Heading = bearing, Tilt = pitch };
         }
 
         private static double Clamp(double x, double lo, double hi)

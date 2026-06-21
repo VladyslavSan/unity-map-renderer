@@ -8,6 +8,7 @@ using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 // MapRenderer.Jobs not used directly in MapView — StyledFillTileBuilder owns the Burst job.
 
 namespace MapRenderer.Unity
@@ -85,7 +86,12 @@ namespace MapRenderer.Unity
         private IDataSource   _source;
         private bool          _ownsSource;
 
-        private ViewState _view;
+        // ── S50: Core camera system + Unity sync layer (owned by MapView, D4) ─────────────────
+        // _cameraSystem is the canonical, single camera-state holder. Tick reads
+        // _cameraSystem.Current directly. _mapCamera is the Unity transform syncer. Both are owned by
+        // this MapView (constructed in Initialise; injectable via SetCamera for the test rig).
+        private CameraSystem _cameraSystem;
+        private MapCamera    _mapCamera;
 
         private StyleDocument _style;
 
@@ -102,6 +108,15 @@ namespace MapRenderer.Unity
         private bool    _sceneOriginInitialised;
         private bool    _coverDirty = true;
 
+        // ── S50: tile-selection key (scalar fields, no boxing) ─────────────────────────────────
+        // Tracks the camera state that affects WHICH tiles load (center + integer zoom). Heading/tilt
+        // are deliberately EXCLUDED so an orientation-only Apply stays alloc-free (no cover dirty).
+        // Seeded on the first dirty pass; compared each frame to decide whether to re-run the cover.
+        private double _coverKeyLon;
+        private double _coverKeyLat;
+        private int    _coverKeyIntegerZoom;
+        private bool   _coverKeyInitialised;
+
         /// <summary>Per-tile live record: the in-flight request and the built tile container GameObject.</summary>
         private struct LoadedTile
         {
@@ -114,26 +129,36 @@ namespace MapRenderer.Unity
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Injects the data source, style document, and initial view (call before the first
+        /// Injects the data source, style document, and initial camera (call before the first
         /// <see cref="Tick"/>). If <paramref name="ownsSource"/> is true, <see cref="OnDestroy"/>
         /// disposes the source. The scheduler is always owned by this MapView.
+        ///
+        /// <para><b>S50 (D4/DD1):</b> MapView owns a <see cref="CameraSystem"/>. If one has not already
+        /// been wired via <see cref="SetCamera"/>, this constructs a default-framed one from
+        /// <paramref name="initialView"/> so <see cref="Tick"/> never reads a null system. The runtime
+        /// path (<see cref="MapRoot.Wire"/>) replaces it with a fully-configured system + sync layer.</para>
         ///
         /// When <paramref name="style"/> is null, MapView renders nothing (no fill layers).
         /// Used by both runtime wiring and headless tests.
         /// </summary>
-        public void Initialise(IDataSource source, ViewState initialView,
+        public void Initialise(IDataSource source, CameraProperties initialView,
             bool ownsSource = false, StyleDocument style = null)
         {
             _source     = source;
             _ownsSource = ownsSource;
-            _view       = initialView;
             _style      = style;
             _scheduler  = new TileScheduler(source, new TileCache(capacity: 256));
 
-            _sceneOriginInitialised = false;
-            _coverDirty = true;
+            // Ensure a camera system exists (DD1: Tick must never read a null system). A camera wired
+            // earlier via SetCamera is kept; otherwise build a default-framed system from initialView.
+            if (_cameraSystem == null)
+                _cameraSystem = new CameraSystem(initialView);
 
-            // Build per-fill-layer records from the style document.
+            _sceneOriginInitialised = false;
+            _coverDirty             = true;
+            _coverKeyInitialised    = false;
+
+            // Build per-fill-layer records from the style document (reads _cameraSystem.Current.Zoom).
             BuildLayerRecords();
         }
 
@@ -143,8 +168,11 @@ namespace MapRenderer.Unity
         /// </summary>
         public bool IsInitialised => _scheduler != null;
 
-        /// <summary>Current view state (read-only externally; mutate via <see cref="SetView"/>).</summary>
-        public ViewState View => _view;
+        /// <summary>
+        /// Current camera state (read-only). S50: this is <see cref="CameraSystem.Current"/> directly —
+        /// the single camera-state type. Mutate via <c>Camera.Apply(...)</c>.
+        /// </summary>
+        public CameraProperties View => _cameraSystem != null ? _cameraSystem.Current : CameraProperties.Default;
 
         /// <summary>Number of currently loaded (or loading) tiles. Exposed for tests.</summary>
         public int LoadedTileCount => _loaded.Count;
@@ -157,6 +185,26 @@ namespace MapRenderer.Unity
 
         /// <summary>Number of fill style layers in the loaded style. Exposed for tests.</summary>
         public int FillLayerCount => _layerRecords.Count;
+
+        // ── S45/S50: Camera system accessors ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// The Core camera system, owned by this MapView. The single source of camera state (S50).
+        /// Set by <see cref="Initialise"/> or <see cref="SetCamera"/>.
+        /// </summary>
+        public CameraSystem Camera => _cameraSystem;
+
+        /// <summary>
+        /// Injects a fully-configured <see cref="CameraSystem"/> + <see cref="MapCamera"/> sync layer.
+        /// Called by <see cref="MapRoot.Wire"/> (with the controller's framing) or by the test rig
+        /// (which skips <see cref="Initialise"/> and drives the camera path only).
+        /// </summary>
+        public void SetCamera(MapCamera mapCamera, CameraSystem cameraSystem)
+        {
+            _mapCamera     = mapCamera;
+            _cameraSystem  = cameraSystem;
+            _coverKeyInitialised = false; // re-seed the cover key against the new camera
+        }
 
         /// <summary>
         /// Test-only: returns true and the built tile's container GameObject when the tile is loaded
@@ -181,49 +229,78 @@ namespace MapRenderer.Unity
             return true;
         }
 
-        /// <summary>
-        /// Updates the view. Marks the cover dirty only if the integer-zoom tile selection could change;
-        /// pure bearing/pitch changes (camera-only) do NOT dirty the cover, so tilting is allocation-free.
-        /// </summary>
-        public void SetView(ViewState v)
-        {
-            bool selectionChanged =
-                v.CenterLon != _view.CenterLon ||
-                v.CenterLat != _view.CenterLat ||
-                v.IntegerZoom != _view.IntegerZoom;
-            _view = v;
-            if (selectionChanged) _coverDirty = true;
-        }
-
         // ── The live loop ──────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// S45 D5 / S50 D4 — Deterministic frame update. Called from <see cref="Update"/>
+        /// (MonoBehaviour) with <c>Time.deltaTime</c>. Also callable from tests with explicit dt.
+        ///
+        /// <para><b>STEP 1: Advance camera</b> — calls <c>_cameraSystem.Advance(dt)</c>, then syncs the
+        /// Unity camera transform. This ensures all tile-selection and pose consumers in the same frame
+        /// see the POST-update camera (the D5 determinism fix).</para>
+        ///
+        /// <para><b>STEP 2: Tile loop</b> — calls <see cref="Tick"/>, which reads
+        /// <c>_cameraSystem.Current</c> directly (no derived-adapter bridge).</para>
+        /// </summary>
+        public void UpdateFrame(double dt)
+        {
+            // STEP 1: Advance camera (D5 — must run before tile selection reads the camera).
+            if (_cameraSystem != null)
+            {
+                _cameraSystem.Advance(dt);
+                _mapCamera?.Sync(_cameraSystem);
+            }
+
+            // STEP 2: Tile loop (reads the now-advanced _cameraSystem.Current).
+            Tick();
+        }
 
         /// <summary>
         /// One frame of the live loop. Allocation-free in steady state.
         ///
-        /// ApplyZoom runs FIRST (before the early-out) so zoom-dependent uniforms are always
-        /// up-to-date, even on frames where the cover is unchanged (e.g. fractional-zoom / camera tilt).
+        /// <para>ApplyZoom runs FIRST (before the early-out) so zoom-dependent uniforms are always
+        /// up-to-date, even on frames where the cover is unchanged (e.g. fractional-zoom / camera tilt).</para>
+        ///
+        /// <para><b>S50:</b> reads <see cref="CameraSystem.Current"/> directly. Cover-dirty is detected
+        /// here by comparing the tile-selection key (center lon/lat + integer zoom) against the last
+        /// cover pass — heading/tilt are excluded, so an orientation-only change never dirties the cover
+        /// and stays allocation-free.</para>
         /// </summary>
         public void Tick()
         {
             if (_scheduler == null) return;
 
+            // Read the canonical camera state by value (readonly struct → no heap allocation).
+            CameraProperties cam = _cameraSystem.Current;
+
+            // Dirty the cover only when the tile-selection-relevant state changed (center + integer
+            // zoom). Scalar field compare — no boxing, no tuple allocation.
+            int integerZoom = cam.IntegerZoom;
+            if (!_coverKeyInitialised ||
+                cam.LookAt.Lon != _coverKeyLon ||
+                cam.LookAt.Lat != _coverKeyLat ||
+                integerZoom    != _coverKeyIntegerZoom)
+            {
+                _coverDirty = true;
+            }
+
             // ApplyZoom first — before any early-out — so fractional-zoom changes always push uniforms.
             // Plain for-loop over List (struct enumerator, no allocation).
             for (int i = 0; i < _layerRecords.Count; i++)
-                _layerRecords[i].Applier.ApplyZoom(_view.Zoom);
+                _layerRecords[i].Applier.ApplyZoom(cam.Zoom);
 
             // Rebase the scene origin toward the camera if it has drifted too far.
-            UpdateSceneOrigin();
+            UpdateSceneOrigin(cam);
 
             // Pump any in-flight tile builds that have completed.
-            int pending = PumpPendingBuilds();
+            int pending = PumpPendingBuilds(cam);
 
             // Steady-state early-out: cover is clean and nothing is loading → no work, no allocation.
             if (!_coverDirty && pending == 0)
                 return;
 
             // Recompute the cover (reuses _cover; no allocation once warm).
-            TileCover.Cover(_view, ViewportAspect, PadFactor, MinZoom, MaxZoom, _cover);
+            TileCover.Cover(cam, ViewportAspect, PadFactor, MinZoom, MaxZoom, _cover);
 
             _coverSet.Clear();
             for (int i = 0; i < _cover.Count; i++)
@@ -253,6 +330,12 @@ namespace MapRenderer.Unity
             for (int i = 0; i < _toRelease.Count; i++)
                 ReleaseTile(_toRelease[i]);
 
+            // Record the tile-selection key this cover was computed for (scalar — no allocation).
+            _coverKeyLon         = cam.LookAt.Lon;
+            _coverKeyLat         = cam.LookAt.Lat;
+            _coverKeyIntegerZoom = integerZoom;
+            _coverKeyInitialised = true;
+
             _coverDirty = false;
         }
 
@@ -260,7 +343,7 @@ namespace MapRenderer.Unity
         /// Polls in-flight requests; for each completed, tessellates + builds the tile meshes
         /// (capped at MaxBuildsPerTick). Returns the number of tiles still pending a build.
         /// </summary>
-        private int PumpPendingBuilds()
+        private int PumpPendingBuilds(CameraProperties cam)
         {
             int builds  = 0;
             int pending = 0;
@@ -293,7 +376,7 @@ namespace MapRenderer.Unity
                 if (req.Status == System.Threading.Tasks.TaskStatus.RanToCompletion &&
                     req.Result.HasData && req.Result.Bytes != null)
                 {
-                    BuildTile(ref lt, id, req.Result.Bytes);
+                    BuildTile(ref lt, id, req.Result.Bytes, cam);
                     builds++;
                 }
 
@@ -310,7 +393,7 @@ namespace MapRenderer.Unity
         /// Each child renderer uses the SHARED per-layer Material instance (_layerRecords[i].Material)
         /// so data-driven color lives in the vertex stream while material uniforms are zoom-driven.
         /// </summary>
-        private void BuildTile(ref LoadedTile lt, TileId id, byte[] mvtBytes)
+        private void BuildTile(ref LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam)
         {
             if (_layerRecords.Count == 0) return;
 
@@ -330,7 +413,7 @@ namespace MapRenderer.Unity
 
                 // Select features via FeatureSelector (source-layer + filter).
                 IReadOnlyList<MvtFeature> features =
-                    FeatureSelector.SelectFeatures(rec.StyleLayer, mvtTile, _view.Zoom);
+                    FeatureSelector.SelectFeatures(rec.StyleLayer, mvtTile, cam.Zoom);
                 if (features.Count == 0) continue;
 
                 // Resolve the MVT layer to get the tile extent.
@@ -340,7 +423,7 @@ namespace MapRenderer.Unity
                 double extent = mvtLayer.Extent;
 
                 Mesh mesh = StyledFillTileBuilder.BuildMesh(
-                    features, rec.Paint, _view.Zoom, extent, id, lt.TileOriginMerc);
+                    features, rec.Paint, cam.Zoom, extent, id, lt.TileOriginMerc);
                 if (mesh == null) continue;
 
                 // One child per fill layer.
@@ -389,9 +472,9 @@ namespace MapRenderer.Unity
         /// Initialises or rebases the scene origin to the camera's Mercator position.
         /// On rebase, shifts every loaded tile's local position by the rebase delta.
         /// </summary>
-        private void UpdateSceneOrigin()
+        private void UpdateSceneOrigin(CameraProperties cam)
         {
-            double2 cameraMerc = _view.CenterMercator();
+            double2 cameraMerc = cam.CenterMercator();
 
             if (!_sceneOriginInitialised)
             {
@@ -453,7 +536,7 @@ namespace MapRenderer.Unity
 
                 var applier = new ZoomStyleApplier(mat);
                 BindFillPaintToApplier(paint, applier, mat);
-                applier.ApplyZoom(_view.Zoom); // initial push
+                applier.ApplyZoom(_cameraSystem != null ? _cameraSystem.Current.Zoom : 0.0); // initial push
 
                 _layerRecords.Add(new FillLayerRecord
                 {
@@ -539,7 +622,9 @@ namespace MapRenderer.Unity
 
         private void Update()
         {
-            Tick();
+            // S45 D5: UpdateFrame is the unified entry — advances the camera (step 1) then Tick.
+            // Before Initialise/SetCamera (no camera system yet) it skips the advance and Tick early-outs.
+            UpdateFrame(Time.deltaTime);
         }
 
         private void OnDestroy()

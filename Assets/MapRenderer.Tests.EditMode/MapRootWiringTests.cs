@@ -6,7 +6,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
@@ -42,7 +42,7 @@ namespace MapRenderer.Tests
 
             // A minimal in-memory data source.
             var source = new FixtureSource();
-            var initialView = new ViewState(0.0, 20.0, 2.0);
+            var initialView = new CameraProperties(new LookAtPoint(0.0, 20.0, 0), 2.0, 0, 0);
 
             try
             {
@@ -85,7 +85,7 @@ namespace MapRenderer.Tests
             {
                 // Must not throw.
                 Assert.DoesNotThrow(
-                    () => MapRoot.Wire(rootGo, null, source, new ViewState(0, 0, 2), ownsSource: false, style: null),
+                    () => MapRoot.Wire(rootGo, null, source, new CameraProperties(new LookAtPoint(0, 0, 0), 2, 0, 0), ownsSource: false, style: null),
                     "Wire(root, null) must not throw even when the camera is missing.");
 
                 var ctrl    = rootGo.GetComponent<MapController>();

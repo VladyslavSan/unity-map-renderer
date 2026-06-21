@@ -3,6 +3,7 @@ using UnityEngine;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity
 {
@@ -66,10 +67,12 @@ namespace MapRenderer.Unity
             // 2. Create the tile data source (owned — MapView will dispose on OnDestroy).
             var source = new HttpDataSource(TileUrlTemplate);
 
-            // 3. Build the initial view state.
-            var initialView = new ViewState(InitialLongitude, InitialLatitude, InitialZoom);
+            // 3. Build the initial camera state.
+            var initialView = new CameraProperties(
+                new LookAtPoint(InitialLongitude, InitialLatitude, 0), InitialZoom, 0, 0);
 
-            // 4. Wire: sets MapController.Camera, MapController.Map, and calls MapView.Initialise.
+            // 4. Wire: sets MapController.Camera, MapController.Map, calls MapView.Initialise,
+            //    and wires the S45 CameraSystem + MapCamera.
             Wire(gameObject, Camera.main, source, initialView, ownsSource: true, style: style);
 
             // 5. Ensure a directional light exists in the scene (for URP Lit fill shader).
@@ -109,16 +112,16 @@ namespace MapRenderer.Unity
         /// <param name="root">The MapRoot GameObject (must carry MapView + MapController).</param>
         /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
         /// <param name="source">The tile data source (HTTP, file, in-memory…). May be null in tests.</param>
-        /// <param name="initialView">Initial ViewState.</param>
+        /// <param name="initialView">Initial camera state.</param>
         /// <param name="ownsSource">If true, MapView will dispose the source on OnDestroy.</param>
         /// <param name="style">Optional StyleDocument; null renders nothing.</param>
         public static void Wire(
-            GameObject  root,
-            Camera      camera,
-            IDataSource source      = null,
-            ViewState   initialView = default,
-            bool        ownsSource  = false,
-            StyleDocument style     = null)
+            GameObject       root,
+            Camera           camera,
+            IDataSource      source      = null,
+            CameraProperties initialView = default,
+            bool             ownsSource  = false,
+            StyleDocument    style       = null)
         {
             if (root == null)
             {
@@ -150,7 +153,23 @@ namespace MapRenderer.Unity
             // Set the camera reference on the controller (may be null — guarded in Update).
             ctrl.Camera = camera;
 
-            // Initialise MapView first so the scheduler and layer records are built.
+            // ── S45/S50: Wire CameraSystem + MapCamera onto MapView (D4) ────────────────────────
+            // MapView owns the (single) CameraSystem. Wire it BEFORE Initialise so the layer-record
+            // build reads this fully-framed system (not a default one). When camera is null, MapCamera
+            // sync is a no-op (guarded inside MapCamera.Sync).
+            var cameraSystem = new CameraSystem(
+                initialView,
+                referenceViewportHeightPx: ctrl.ReferenceViewportHeightPx,
+                verticalFovDeg:             ctrl.VerticalFovDeg);
+
+            var mapCamera = camera != null
+                ? new MapCamera(camera, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg)
+                : new MapCamera(null,   ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
+            mapCamera.AltitudeMultiplier = ctrl.AltitudeMultiplier;
+
+            mapView.SetCamera(mapCamera, cameraSystem);
+
+            // Initialise MapView so the scheduler and layer records are built (keeps the wired camera).
             if (source != null)
                 mapView.Initialise(source, initialView, ownsSource: ownsSource, style: style);
 

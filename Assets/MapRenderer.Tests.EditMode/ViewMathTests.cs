@@ -9,6 +9,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Tests
 {
@@ -17,22 +18,25 @@ namespace MapRenderer.Tests
     {
         private const double Eps = 1e-9;
 
-        // ── ViewState ─────────────────────────────────────────────────────────────────────────
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+
+        // ── CameraProperties (tile-selection helpers) ───────────────────────────────────────────
 
         [Test]
-        public void ViewState_ZoomToIntegerZoom_FloorsAndClampsAtZero()
+        public void Camera_ZoomToIntegerZoom_FloorsAndClampsAtZero()
         {
-            Assert.AreEqual(3, new ViewState(0, 0, 3.0).IntegerZoom);
-            Assert.AreEqual(3, new ViewState(0, 0, 3.99).IntegerZoom);
-            Assert.AreEqual(0, new ViewState(0, 0, 0.0).IntegerZoom);
-            Assert.AreEqual(0, new ViewState(0, 0, -2.0).IntegerZoom, "negative zoom clamps to 0");
-            Assert.AreEqual(14, new ViewState(0, 0, 14.5).IntegerZoom);
+            Assert.AreEqual(3, Cam(0, 0, 3.0).IntegerZoom);
+            Assert.AreEqual(3, Cam(0, 0, 3.99).IntegerZoom);
+            Assert.AreEqual(0, Cam(0, 0, 0.0).IntegerZoom);
+            Assert.AreEqual(0, Cam(0, 0, -2.0).IntegerZoom, "negative zoom clamps to 0");
+            Assert.AreEqual(14, Cam(0, 0, 14.5).IntegerZoom);
         }
 
         [Test]
-        public void ViewState_CenterMercator_MatchesWebMercator()
+        public void Camera_CenterMercator_MatchesWebMercator()
         {
-            var v = new ViewState(13.405, 52.52, 10.0);   // Berlin
+            var v = Cam(13.405, 52.52, 10.0);   // Berlin
             double2 expected = WebMercator.FromLonLat(13.405, 52.52);
             double2 actual   = v.CenterMercator();
             Assert.AreEqual(expected.x, actual.x, 1e-6);
@@ -40,14 +44,14 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void ViewState_CenterMercator_ClampsExtremeLatitude()
+        public void Camera_CenterMercator_ClampsExtremeLatitude()
         {
             // A latitude beyond the Mercator limit must be clamped, not produce inf/NaN.
-            var v = new ViewState(0, 89.9, 5.0);
+            var v = Cam(0, 89.9, 5.0);
             double2 m = v.CenterMercator();
             Assert.IsFalse(double.IsNaN(m.y) || double.IsInfinity(m.y),
                 "Clamped latitude must yield a finite Mercator y.");
-            double2 atLimit = WebMercator.FromLonLat(0, ViewState.MaxMercatorLat);
+            double2 atLimit = WebMercator.FromLonLat(0, CameraProperties.MaxMercatorLat);
             Assert.AreEqual(atLimit.y, m.y, 1e-6, "Extreme latitude clamps to the Mercator limit.");
         }
 
@@ -57,7 +61,9 @@ namespace MapRenderer.Tests
         public void TileCover_KnownCenter_SelectsExpected3x3()
         {
             // Center (lon=0, lat=0) at z2: cxTile=cyTile=2.0, pad=1 → x,y in {1,2,3}.
-            var view = new ViewState(0, 0, 2.0);
+            // This is the no-regression oracle (S50 D3): the CameraProperties/CenterMercator cover set
+            // must equal the pre-migration slippy-formula set for the same center+zoom.
+            var view = Cam(0, 0, 2.0);
             var buf  = new List<TileId>();
             TileCover.Cover(view, viewportAspect: 1.0, padFactor: 1.0, minZoom: 0, maxZoom: 22, buf);
 
@@ -74,7 +80,7 @@ namespace MapRenderer.Tests
         [Test]
         public void TileCover_ClampsSelectionZoom()
         {
-            var view = new ViewState(0, 0, 20.0);
+            var view = Cam(0, 0, 20.0);
             var buf  = new List<TileId>();
             TileCover.Cover(view, 1.0, 1.0, minZoom: 0, maxZoom: 14, buf);
             foreach (var t in buf)
@@ -86,7 +92,7 @@ namespace MapRenderer.Tests
         public void TileCover_WrapsLongitudeAtAntimeridian()
         {
             // Center near +180° at z2 (n=4): x-span straddles the antimeridian → x wraps to include 0.
-            var view = new ViewState(179.9, 0, 2.0);
+            var view = Cam(179.9, 0, 2.0);
             var buf  = new List<TileId>();
             TileCover.Cover(view, 1.0, 1.0, 0, 22, buf);
 
@@ -102,7 +108,7 @@ namespace MapRenderer.Tests
         public void TileCover_ClampsLatitudeRange_NoNegativeOrOverflowY()
         {
             // Near the north pole at z3 (n=8): y must clamp to [0,7], never negative.
-            var view = new ViewState(0, 85.0, 3.0);
+            var view = Cam(0, 85.0, 3.0);
             var buf  = new List<TileId>();
             TileCover.Cover(view, 1.0, 2.0, 0, 22, buf);
             foreach (var t in buf)
@@ -112,7 +118,7 @@ namespace MapRenderer.Tests
         [Test]
         public void TileCover_ReusesBuffer_NoGrowthOnRepeat()
         {
-            var view = new ViewState(0, 0, 5.0);
+            var view = Cam(0, 0, 5.0);
             var buf  = new List<TileId>();
             TileCover.Cover(view, 1.5, 2.0, 0, 22, buf);
             int firstCount = buf.Count;
@@ -195,7 +201,7 @@ namespace MapRenderer.Tests
         /// threshold = <see cref="RebaseThresholdMeters"/> (2000 m), cover pad/aspect = the MapView
         /// defaults (1.5/1.5). The farthest cover-edge vertex sits ≈ 11.5 km from the scene origin; the
         /// measured worst round-trip error across a dense camera sweep is ≈ 0.36 mm — sub-millimetre.
-        /// Latitude is clamped to the Mercator limit exactly as <see cref="ViewState"/>/
+        /// Latitude is clamped to the Mercator limit exactly as <see cref="CameraProperties"/>/
         /// <see cref="TileCover"/> clamp it; the camera never reaches the polar singularity where a single
         /// Mercator tile's span is unbounded.
         ///
@@ -228,7 +234,7 @@ namespace MapRenderer.Tests
                 double camLon = -160.0 + li * 20.0;
                 for (int la = 0; la <= 20; la++)
                 {
-                    double camLat = -ViewState.MaxMercatorLat + la * (2.0 * ViewState.MaxMercatorLat / 20.0);
+                    double camLat = -CameraProperties.MaxMercatorLat + la * (2.0 * CameraProperties.MaxMercatorLat / 20.0);
 
                     // Scene origin rebased to the camera; camera drifted up to the threshold away.
                     double2 sceneOrigin = WebMercator.FromLonLat(camLon, camLat);
@@ -236,7 +242,7 @@ namespace MapRenderer.Tests
                     double2 camLL       = WebMercator.ToLonLat(cameraMerc.x, cameraMerc.y);
 
                     // Enumerate the SAME cover the live loop would select for this camera.
-                    var camView = new ViewState(camLL.x, camLL.y, LiveZoom);
+                    var camView = Cam(camLL.x, camLL.y, LiveZoom);
                     TileCover.Cover(camView, LiveAspect, LivePad, 0, LiveZoom, cover);
 
                     for (int t = 0; t < cover.Count; t++)
@@ -314,7 +320,7 @@ namespace MapRenderer.Tests
         {
             double2 ll = WebMercator.ToLonLat(merc.x, merc.y);
             double lon = Math.Max(-179.9999, Math.Min(179.9999, ll.x));
-            double lat = Math.Max(-ViewState.MaxMercatorLat, Math.Min(ViewState.MaxMercatorLat, ll.y));
+            double lat = Math.Max(-CameraProperties.MaxMercatorLat, Math.Min(CameraProperties.MaxMercatorLat, ll.y));
             long n = 1L << z;
             int x = (int)Math.Floor((lon + 180.0) / 360.0 * n);
             double latRad = lat * Math.PI / 180.0;

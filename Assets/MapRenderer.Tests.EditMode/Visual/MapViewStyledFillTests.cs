@@ -23,6 +23,7 @@ using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests.Visual
@@ -139,7 +140,7 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
@@ -230,7 +231,7 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
@@ -335,7 +336,7 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
@@ -483,7 +484,7 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new ViewState(0, 0, 0.0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
 
                 // ── DECISIVE: FillLayerCount = 1 after Initialise ─────────────────────────────
                 Assert.AreEqual(1, view.FillLayerCount,
