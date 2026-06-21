@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
+using Unity.Profiling;
 using MapRenderer.Core.Geometry;
 
 namespace MapRenderer.Unity
@@ -41,6 +42,9 @@ namespace MapRenderer.Unity
     /// </summary>
     public sealed class LineMeshBuilder
     {
+        // MapRenderer.Line.MeshBuild — wraps the line mesh assembly + upload in Build().
+        private static readonly ProfilerMarker PmLineMeshBuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Line.MeshBuild");
+
         // Raw attribute arrays — filled per vertex in POSITION/NORMAL/TEXCOORD0/TEXCOORD1/TEXCOORD2 order.
         private readonly List<Vector3> _positions   = new List<Vector3>();
         private readonly List<Vector3> _lightNormals = new List<Vector3>(); // NORMAL: constant +Y lighting normal (S33)
@@ -90,6 +94,8 @@ namespace MapRenderer.Unity
         {
             if (_positions.Count == 0)
                 return null;
+
+            using var sLineMeshBuild = PmLineMeshBuild.Auto();
 
             var mesh = new Mesh
             {

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using Unity.Profiling;
 
 namespace MapRenderer.Jobs
 {
@@ -31,6 +32,14 @@ namespace MapRenderer.Jobs
     /// </summary>
     public static class TileTessellationPipeline
     {
+        // Pipeline-stage profiler markers (MapRenderer.Pipeline.*).
+        // These sit on the schedule-then-Complete main-thread path — exactly the stall the perf epic measures.
+        // Separate path from the live MapView loop; wired for the Profiler window, not for the recorder test.
+        private static readonly ProfilerMarker PmPipelineDecode      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Decode");
+        private static readonly ProfilerMarker PmPipelineRingAssembly = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.RingAssembly");
+        private static readonly ProfilerMarker PmPipelineEarcut      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Earcut");
+        private static readonly ProfilerMarker PmPipelineProject     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Project");
+
         // MVT command IDs (per MVT spec §4.3) — must match MvtDecodeJob's constants.
         private const uint MoveTo = 1;
         private const uint LineTo = 2;
@@ -195,17 +204,20 @@ namespace MapRenderer.Jobs
             var vertCountArr = new NativeArray<int>(1,              Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
             // ── Stage 1: decode. ───────────────────────────────────────────────────────────────────
-            new MvtDecodeJob
             {
-                Commands            = commands,
-                FeatureOffsets      = featOffsets,
-                FeatureLengths      = featLengths,
-                OutVertices         = tileVerts,
-                OutRingOffsets      = ringOffsets,
-                OutRingFeatureIndex = ringFeatIdx,
-                OutRingCount        = ringCountArr,
-                OutVertexCount      = vertCountArr,
-            }.Schedule().Complete();
+                using var sPipelineDecode = PmPipelineDecode.Auto();
+                new MvtDecodeJob
+                {
+                    Commands            = commands,
+                    FeatureOffsets      = featOffsets,
+                    FeatureLengths      = featLengths,
+                    OutVertices         = tileVerts,
+                    OutRingOffsets      = ringOffsets,
+                    OutRingFeatureIndex = ringFeatIdx,
+                    OutRingCount        = ringCountArr,
+                    OutVertexCount      = vertCountArr,
+                }.Schedule().Complete();
+            }
 
             commands.Dispose();
             featOffsets.Dispose();
@@ -230,19 +242,22 @@ namespace MapRenderer.Jobs
             var polyCountArr  = new NativeArray<int>(1,           Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var holeCountArr  = new NativeArray<int>(1,           Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
-            new RingAssemblyJob
             {
-                Vertices             = tileVerts,
-                RingOffsets          = ringOffsets,
-                RingFeatureIdx       = ringFeatIdx,
-                RingCount            = ringCount,
-                OutPolyOuterRingIdx  = polyOuterIdx,
-                OutPolyHoleListStart = polyHoleStart,
-                OutPolyHoleCount     = polyHoleCount,
-                OutHoleRingIdxs      = holeRingIdxs,
-                OutPolygonCount      = polyCountArr,
-                OutHoleCount         = holeCountArr,
-            }.Schedule().Complete();
+                using var sPipelineRingAssembly = PmPipelineRingAssembly.Auto();
+                new RingAssemblyJob
+                {
+                    Vertices             = tileVerts,
+                    RingOffsets          = ringOffsets,
+                    RingFeatureIdx       = ringFeatIdx,
+                    RingCount            = ringCount,
+                    OutPolyOuterRingIdx  = polyOuterIdx,
+                    OutPolyHoleListStart = polyHoleStart,
+                    OutPolyHoleCount     = polyHoleCount,
+                    OutHoleRingIdxs      = holeRingIdxs,
+                    OutPolygonCount      = polyCountArr,
+                    OutHoleCount         = holeCountArr,
+                }.Schedule().Complete();
+            }
 
             int polyCount    = polyCountArr[0];
             int totalHoles   = holeCountArr[0];
@@ -348,32 +363,35 @@ namespace MapRenderer.Jobs
             }
 
             // Schedule all earcut jobs (parallel across polygons).
-            var earcutHandles = new NativeArray<JobHandle>(polyCount, Allocator.Temp);
-            for (int pi = 0; pi < polyCount; pi++)
             {
-                int outerLen  = ringOffsets[polyOuterIdx[pi] + 1] - ringOffsets[polyOuterIdx[pi]];
-                int holeCount = polyHoleCount[pi];
-                earcutHandles[pi] = new EarcutJob
+                using var sPipelineEarcut = PmPipelineEarcut.Auto();
+                var earcutHandles = new NativeArray<JobHandle>(polyCount, Allocator.Temp);
+                for (int pi = 0; pi < polyCount; pi++)
                 {
-                    PolyVertices      = perPolyVerts[pi],
-                    OuterCount        = outerLen,
-                    SortedHoleCounts  = perPolySortedHoleCnt[pi],
-                    HoleCount         = holeCount,
-                    OutIndices        = perPolyIdxArrays[pi],
-                    OutIndexOffset    = 0,
-                    OutIndexCount     = perPolyIdxCount[pi],
-                    OutForceClipCount = perPolyForceClip[pi],
-                    Vx                = scratchVx[pi],
-                    Vy                = scratchVy[pi],
-                    Prev              = scratchPrev[pi],
-                    Next              = scratchNext[pi],
-                    IsBridgeCopy      = scratchIsBridge[pi],
-                    Removed           = scratchRemoved[pi],
-                    IsEar             = scratchIsEar[pi],
-                }.Schedule();
+                    int outerLen  = ringOffsets[polyOuterIdx[pi] + 1] - ringOffsets[polyOuterIdx[pi]];
+                    int holeCount = polyHoleCount[pi];
+                    earcutHandles[pi] = new EarcutJob
+                    {
+                        PolyVertices      = perPolyVerts[pi],
+                        OuterCount        = outerLen,
+                        SortedHoleCounts  = perPolySortedHoleCnt[pi],
+                        HoleCount         = holeCount,
+                        OutIndices        = perPolyIdxArrays[pi],
+                        OutIndexOffset    = 0,
+                        OutIndexCount     = perPolyIdxCount[pi],
+                        OutForceClipCount = perPolyForceClip[pi],
+                        Vx                = scratchVx[pi],
+                        Vy                = scratchVy[pi],
+                        Prev              = scratchPrev[pi],
+                        Next              = scratchNext[pi],
+                        IsBridgeCopy      = scratchIsBridge[pi],
+                        Removed           = scratchRemoved[pi],
+                        IsEar             = scratchIsEar[pi],
+                    }.Schedule();
+                }
+                JobHandle.CompleteAll(earcutHandles);
+                earcutHandles.Dispose();
             }
-            JobHandle.CompleteAll(earcutHandles);
-            earcutHandles.Dispose();
 
             // No longer need ring/assembly data.
             tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
@@ -430,17 +448,20 @@ namespace MapRenderer.Jobs
             }
 
             // ── Stage 4: project merged vertices to world space. ──────────────────────────────────
-            new ProjectTileVerticesJob
             {
-                TileZ          = input.TileZ,
-                TileX          = input.TileX,
-                TileY          = input.TileY,
-                Extent         = input.Extent,
-                OriginMercX    = input.OriginMercX,
-                OriginMercY    = input.OriginMercY,
-                TileCoords     = outMergedVerts,
-                WorldPositions = outWorldPos,
-            }.Schedule(totalMergedVerts, 64).Complete();
+                using var sPipelineProject = PmPipelineProject.Auto();
+                new ProjectTileVerticesJob
+                {
+                    TileZ          = input.TileZ,
+                    TileX          = input.TileX,
+                    TileY          = input.TileY,
+                    Extent         = input.Extent,
+                    OriginMercX    = input.OriginMercX,
+                    OriginMercY    = input.OriginMercY,
+                    TileCoords     = outMergedVerts,
+                    WorldPositions = outWorldPos,
+                }.Schedule(totalMergedVerts, 64).Complete();
+            }
 
             // ── Build output TileMeshBuffers. ─────────────────────────────────────────────────────
             var vertCountFinal = new NativeArray<int>(1, Allocator.Persistent);

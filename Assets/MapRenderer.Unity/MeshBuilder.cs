@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
+using Unity.Profiling;
 
 namespace MapRenderer.Unity
 {
@@ -45,6 +46,9 @@ namespace MapRenderer.Unity
     /// </summary>
     public sealed class MeshBuilder
     {
+        // MapRenderer.Mesh.Build — wraps the mesh assembly + vertex/index upload in Build().
+        private static readonly ProfilerMarker PmMeshBuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Mesh.Build");
+
         private readonly List<Vector3> _vertices  = new List<Vector3>();
         private readonly List<Vector3> _normals   = new List<Vector3>();
         private readonly List<Vector2> _uvs       = new List<Vector2>();
@@ -136,6 +140,8 @@ namespace MapRenderer.Unity
         {
             if (_vertices.Count == 0)
                 return null;
+
+            using var sMeshBuild = PmMeshBuild.Auto();
 
             var mesh = new Mesh
             {

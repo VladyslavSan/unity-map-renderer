@@ -1,6 +1,9 @@
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
+using Unity.Profiling;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Filters;
@@ -9,7 +12,7 @@ using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
-// MapRenderer.Jobs not used directly in MapView — StyledFillTileBuilder owns the Burst job.
+// MapRenderer.Jobs not used directly in MapView — StyledFillTileBuilder owns projection math.
 
 namespace MapRenderer.Unity
 {
@@ -31,15 +34,25 @@ namespace MapRenderer.Unity
     ///   • Per-frame: <see cref="ApplyZoom"/> pushes zoom uniforms into each layer's material before
     ///     anything else in Tick — so a fractional-zoom-only change (bearing/pitch) still updates
     ///     uniforms even when the cover is clean and the early-out fires immediately after.
-    ///   • On tile build: <see cref="BuildTile"/> iterates fill layers in order; each gets a child
-    ///     GameObject with one MeshFilter + MeshRenderer parented under the tile container.
+    ///   • On tile build: <see cref="KickTessellationTask"/> iterates fill layers in order, kicks a
+    ///     background Task per tile, then <see cref="ConsumeTessellationResults"/> polls on later frames.
     ///   • Eviction: the tile container GameObject (and all child renderers) are destroyed. Layer
     ///     Material instances live on <c>_layerRecords</c> and are disposed only in OnDestroy.
+    ///
+    /// S47 async tessellation:
+    ///   The managed decode/assemble/earcut/project loop runs inside <c>Task.Run</c> (ThreadPool),
+    ///   so the Unity main thread never blocks on tessellation during Update. PumpPendingBuilds polls
+    ///   the fetch Task; when fetch completes, a tessellation Task is kicked. On a later frame,
+    ///   ConsumeTessellationResults polls completed tessellation Tasks and does only the main-thread
+    ///   UploadMesh + GameObject creation. A generation-token guards released-mid-flight tiles.
+    ///   DrainTessellation() provides deterministic drain for headless tests.
     ///
     /// Steady-state no-GC contract (preserved from S06):
     ///   The ApplyZoom loop over _layerRecords is a plain <c>for</c> over a <c>List</c> (struct
     ///   enumerator, no allocation). The early-out fires before any Request / collection mutation when
-    ///   cover is clean AND nothing is pending. Reused buffers, no LINQ, no closures.
+    ///   cover is clean AND nothing is pending. Reused buffers, no LINQ, no closures in hot paths.
+    ///   Task and MeshData allocations happen only on the transient fetch-completion edge, never in
+    ///   the steady-state Tick path.
     ///
     /// Lines deferred to S14: line style layers are silently skipped here; they will be added in S14.
     /// A map rendered by this stage shows fills only — roads, coastlines, borders are not drawn.
@@ -48,6 +61,15 @@ namespace MapRenderer.Unity
     /// </summary>
     public sealed class MapView : MonoBehaviour
     {
+        // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
+        // Namespace: MapRenderer.* — greppable per S46 acceptance.
+        private static readonly ProfilerMarker PmCameraAdvance   = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Camera.Advance");
+        private static readonly ProfilerMarker PmCoverSelect     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.CoverSelect");
+        private static readonly ProfilerMarker PmFetchPoll       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.FetchPoll");
+        private static readonly ProfilerMarker PmSchedulerReq    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Scheduler.Request");
+        private static readonly ProfilerMarker PmTileDecode      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Decode");
+        private static readonly ProfilerMarker PmMeshUpload      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Mesh.Upload");
+
         // ── Configuration ──────────────────────────────────────────────────────────────────────
         [Tooltip("Cover over-select: viewport aspect (w/h) and pad factor (absorbs viewport size + pitch).")]
         public float ViewportAspect = 1.5f;
@@ -81,7 +103,19 @@ namespace MapRenderer.Unity
             public ZoomStyleApplier Applier;
         }
 
-        // ── Live state ─────────────────────────────────────────────────────────────────────────
+        // ── S47 tessellation task payload ─────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Per-layer mesh data produced by one tile's background tessellation task.
+        /// One element per fill layer (may be empty if no geometry for that layer).
+        /// </summary>
+        private struct TessellationResult
+        {
+            /// <summary>Per-layer CPU mesh data (index matches _layerRecords).</summary>
+            public StyledFillTileBuilder.LayerMeshData[] LayerData;
+        }
+
+        // ── Live state ─────────────────────────────────────────────────────────────────────────────────
         private TileScheduler _scheduler;
         private IDataSource   _source;
         private bool          _ownsSource;
@@ -117,13 +151,27 @@ namespace MapRenderer.Unity
         private int    _coverKeyIntegerZoom;
         private bool   _coverKeyInitialised;
 
-        /// <summary>Per-tile live record: the in-flight request and the built tile container GameObject.</summary>
+        /// <summary>
+        /// Per-tile live record: the in-flight fetch request, the tessellation task, and the built tile
+        /// container GameObject.
+        ///
+        /// S47: the lifecycle is now:
+        ///   1. Fetch (Request → Task[TileResponse] in-flight)
+        ///   2. Tessellation kicked (TessellationTask in-flight; FetchCompleted = true)
+        ///   3. Tessellation consumed (Built = true; TessellationTask = null; Go = container)
+        ///
+        /// Generation token: incremented by ReleaseTile so a late-completing tessellation task
+        /// is discarded (generation mismatch) rather than creating a GameObject for a released tile.
+        /// </summary>
         private struct LoadedTile
         {
-            public System.Threading.Tasks.Task<TileResponse> Request;
-            public bool       Built;         // mesh produced (or definitively absent/failed)
-            public GameObject Go;            // tile container; child GameObjects are per-layer renderers
-            public double2    TileOriginMerc;
+            public Task<TileResponse>     Request;
+            public bool                   FetchCompleted;   // fetch done; tessellation task may be in-flight
+            public Task<TessellationResult> TessellationTask; // null until fetch completes; null after consumed
+            public int                    Generation;       // incremented on release; captured by task closure
+            public bool                   Built;            // mesh produced (or definitively absent/failed)
+            public GameObject             Go;               // tile container; child GameObjects are per-layer renderers
+            public double2                TileOriginMerc;
         }
 
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
@@ -221,12 +269,84 @@ namespace MapRenderer.Unity
             return false;
         }
 
-        /// <summary>Test-only: true once every loaded tile has finished building (or is definitively absent).</summary>
+        /// <summary>
+        /// Test-only: true once every loaded tile has finished building (or is definitively absent).
+        /// S47: returns false while any tile has a pending tessellation task.
+        /// </summary>
         public bool AllTilesSettled()
         {
             foreach (var kv in _loaded)
                 if (!kv.Value.Built) return false;
             return true;
+        }
+
+        /// <summary>
+        /// S47 deterministic drain — blocks the calling thread until all in-flight fetch and
+        /// tessellation Tasks complete, then consumes their results synchronously (uploads meshes +
+        /// creates GameObjects). After this returns, <see cref="AllTilesSettled()"/> is guaranteed
+        /// true for all currently loaded tiles.
+        ///
+        /// This is a full drain: it handles tiles at any stage of the pipeline:
+        ///   (a) Fetch in-flight: blocks until the fetch task completes, then kicks tessellation inline.
+        ///   (b) Tessellation in-flight: blocks until the task completes, then consumes inline.
+        ///   (c) Neither (tile not yet fetched): marks Built=true (nothing to do; tile is not in cover).
+        ///
+        /// Called by test helpers for deterministic settle. NOT called from the production Update path.
+        /// </summary>
+        public void DrainTessellation()
+        {
+            if (_cameraSystem == null) return;
+            CameraProperties cam = _cameraSystem.Current;
+
+            // Collect all unsettled tiles.
+            var unsettled = new List<TileId>(8);
+            foreach (var kv in _loaded)
+                if (!kv.Value.Built)
+                    unsettled.Add(kv.Key);
+
+            foreach (var id in unsettled)
+            {
+                LoadedTile lt = _loaded[id];
+
+                // (a) If fetch is still in-flight, wait for it and kick tessellation.
+                if (!lt.FetchCompleted)
+                {
+                    var req = lt.Request;
+                    if (req != null)
+                    {
+                        try { req.Wait(); } catch { /* best-effort */ }
+                    }
+                    lt.FetchCompleted = true;
+
+                    if (req != null &&
+                        req.Status == TaskStatus.RanToCompletion &&
+                        req.Result.HasData && req.Result.Bytes != null)
+                    {
+                        // Kick tessellation synchronously (wait inline).
+                        lt.TessellationTask = KickTessellationTask(lt, id, req.Result.Bytes, cam, lt.Generation);
+                    }
+                    else
+                    {
+                        // Absent/failed fetch — nothing to tessellate.
+                        lt.Built = true;
+                        _loaded[id] = lt;
+                        continue;
+                    }
+                }
+
+                // (b) Tessellation task in-flight — wait and consume.
+                if (lt.TessellationTask != null)
+                {
+                    try { lt.TessellationTask.Wait(); } catch { /* handled in ConsumeTessellationTask */ }
+                    ConsumeTessellationTask(id, ref lt);
+                }
+                else
+                {
+                    lt.Built = true;
+                }
+
+                _loaded[id] = lt;
+            }
         }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
@@ -247,6 +367,7 @@ namespace MapRenderer.Unity
             // STEP 1: Advance camera (D5 — must run before tile selection reads the camera).
             if (_cameraSystem != null)
             {
+                using var sCamAdv = PmCameraAdvance.Auto();
                 _cameraSystem.Advance(dt);
                 _mapCamera?.Sync(_cameraSystem);
             }
@@ -265,6 +386,10 @@ namespace MapRenderer.Unity
         /// here by comparing the tile-selection key (center lon/lat + integer zoom) against the last
         /// cover pass — heading/tilt are excluded, so an orientation-only change never dirties the cover
         /// and stays allocation-free.</para>
+        ///
+        /// <para><b>S47:</b> no main-thread tessellation. PumpPendingBuilds only KICKS background tasks
+        /// on fetch completion; ConsumeTessellationResults polls and CONSUMES completed tasks (uploads
+        /// mesh + creates GameObjects). Neither step blocks on tessellation.</para>
         /// </summary>
         public void Tick()
         {
@@ -292,12 +417,16 @@ namespace MapRenderer.Unity
             // Rebase the scene origin toward the camera if it has drifted too far.
             UpdateSceneOrigin(cam);
 
-            // Pump any in-flight tile builds that have completed.
+            // S47 phase 1: poll fetch tasks; kick tessellation tasks for newly-fetched tiles.
+            // S47 phase 2: poll tessellation tasks; consume completed ones (mesh upload + GO creation).
+            // Returns: (pendingFetch + pendingTessellation) count.
             int pending = PumpPendingBuilds(cam);
 
             // Steady-state early-out: cover is clean and nothing is loading → no work, no allocation.
             if (!_coverDirty && pending == 0)
                 return;
+
+            using var sCoverSel = PmCoverSelect.Auto();
 
             // Recompute the cover (reuses _cover; no allocation once warm).
             TileCover.Cover(cam, ViewportAspect, PadFactor, MinZoom, MaxZoom, _cover);
@@ -312,12 +441,17 @@ namespace MapRenderer.Unity
                 TileId id = _cover[i];
                 if (!_loaded.ContainsKey(id))
                 {
-                    var req = _scheduler.Request(id);
+                    Task<TileResponse> fetchReq;
+                    {
+                        using var sSchedReq = PmSchedulerReq.Auto();
+                        fetchReq = _scheduler.Request(id);
+                    }
                     _loaded[id] = new LoadedTile
                     {
-                        Request        = req,
+                        Request        = fetchReq,
                         Built          = false,
                         TileOriginMerc = FloatingOrigin.TileLocalOriginMercator(id),
+                        Generation     = 0,
                     };
                 }
             }
@@ -340,44 +474,85 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Polls in-flight requests; for each completed, tessellates + builds the tile meshes
-        /// (capped at MaxBuildsPerTick). Returns the number of tiles still pending a build.
+        /// S47 pump: two-phase pipeline per tile.
+        ///
+        /// Phase 1 (fetch→tessellate): for tiles whose fetch just completed, kick a background
+        /// tessellation Task via Task.Run (decode + polygon assemble + earcut + project — all managed,
+        /// off-main-thread safe). The main thread does NOT call BuildMesh or StyledFillTileBuilder here.
+        ///
+        /// Phase 2 (tessellate→consume): for tiles whose tessellation Task is completed, consume the
+        /// result on the main thread (UploadMesh → MeshBuilder.Build → GameObject creation). Capped at
+        /// MaxBuildsPerTick consumes per frame.
+        ///
+        /// Returns the count of tiles still pending (fetch or tessellation in-flight, or waiting for
+        /// the per-frame consume budget).
+        ///
+        /// Greppability note: there is NO .Schedule().Complete() in this method. The old live-path
+        /// .Schedule(...).Complete() in StyledFillTileBuilder has been replaced by the managed
+        /// projection loop in StyledFillTileBuilder.BuildMeshData, called here inside Task.Run.
         /// </summary>
         private int PumpPendingBuilds(CameraProperties cam)
         {
-            int builds  = 0;
-            int pending = 0;
+            using var sFetchPoll = PmFetchPoll.Auto();
 
+            // Collect tiles that are not yet built (reuses _toRelease buffer).
             _toRelease.Clear();
             foreach (var kv in _loaded)
                 if (!kv.Value.Built)
                     _toRelease.Add(kv.Key);
 
+            int builds  = 0; // consumes this frame (phase 2)
+            int pending = 0; // tiles still in-flight after this pump
+
             for (int i = 0; i < _toRelease.Count; i++)
             {
                 TileId id = _toRelease[i];
                 LoadedTile lt = _loaded[id];
-                var req = lt.Request;
 
+                // ── Phase 2: consume a completed tessellation task ──────────────────────────────
+                if (lt.FetchCompleted && lt.TessellationTask != null && lt.TessellationTask.IsCompleted)
+                {
+                    if (builds >= MaxBuildsPerTick)
+                    {
+                        pending++;
+                        continue;
+                    }
+
+                    ConsumeTessellationTask(id, ref lt);
+                    builds++;
+                    _loaded[id] = lt;
+                    continue;
+                }
+
+                // ── Still waiting for tessellation (task in-flight) ─────────────────────────────
+                if (lt.FetchCompleted && lt.TessellationTask != null)
+                {
+                    pending++;
+                    continue;
+                }
+
+                // ── Phase 1: fetch completed → kick tessellation task ───────────────────────────
+                var req = lt.Request;
                 if (req == null || !req.IsCompleted)
                 {
+                    // Fetch still in-flight.
                     pending++;
                     continue;
                 }
 
-                if (builds >= MaxBuildsPerTick)
-                {
-                    pending++;
-                    continue;
-                }
+                // Mark fetch done; kick tessellation regardless of HasData so the tile settles.
+                lt.FetchCompleted = true;
 
-                lt.Built = true;
-
-                if (req.Status == System.Threading.Tasks.TaskStatus.RanToCompletion &&
+                if (req.Status == TaskStatus.RanToCompletion &&
                     req.Result.HasData && req.Result.Bytes != null)
                 {
-                    BuildTile(ref lt, id, req.Result.Bytes, cam);
-                    builds++;
+                    lt.TessellationTask = KickTessellationTask(lt, id, req.Result.Bytes, cam, lt.Generation);
+                    pending++; // tessellation now in-flight
+                }
+                else
+                {
+                    // Fetch failed / absent tile — mark built (nothing to render).
+                    lt.Built = true;
                 }
 
                 _loaded[id] = lt;
@@ -387,17 +562,99 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Decodes the tile, iterates fill style layers in declared order, builds one mesh per layer
-        /// (via StyledFillTileBuilder), and parents child renderers under the tile container GameObject.
+        /// Starts a background <see cref="Task"/> that runs decode / assemble / earcut / project for
+        /// all fill layers of one tile. Returns immediately (non-blocking on the main thread).
         ///
-        /// Each child renderer uses the SHARED per-layer Material instance (_layerRecords[i].Material)
-        /// so data-driven color lives in the vertex stream while material uniforms are zoom-driven.
+        /// The task captures only value-type / immutable inputs (bytes, layer records are read-only
+        /// after Initialise, generation token). No Unity.Object is captured or touched off-main.
         /// </summary>
-        private void BuildTile(ref LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam)
+        private Task<TessellationResult> KickTessellationTask(
+            LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam, int capturedGeneration)
         {
-            if (_layerRecords.Count == 0) return;
+            // Capture immutable inputs by value (safe for closure capture):
+            //   - mvtBytes: owned byte[], immutable after fetch
+            //   - _layerRecords snapshot: read-only records, only modified in BuildLayerRecords (Initialise)
+            //   - cam.Zoom, lt.TileOriginMerc, id: value types
+            var layerRecordsSnapshot = _layerRecords.ToArray(); // shallow copy of struct array (safe)
+            double zoom          = cam.Zoom;
+            double2 tileOrigin   = lt.TileOriginMerc;
 
-            MvtTile mvtTile = MvtDecoder.Decode(mvtBytes);
+            return Task.Run(() =>
+            {
+                // Decode MVT on the background thread.
+                MvtTile mvtTile;
+                mvtTile = MvtDecoder.Decode(mvtBytes);
+
+                var layerData = new StyledFillTileBuilder.LayerMeshData[layerRecordsSnapshot.Length];
+
+                for (int li = 0; li < layerRecordsSnapshot.Length; li++)
+                {
+                    FillLayerRecord rec = layerRecordsSnapshot[li];
+
+                    // Select features via FeatureSelector (source-layer + filter). Thread-safe:
+                    // FeatureSelector is stateless; MvtTile/MvtFeature are immutable after decode.
+                    var features = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
+                        rec.StyleLayer, mvtTile, zoom);
+                    if (features.Count == 0)
+                    {
+                        layerData[li] = new StyledFillTileBuilder.LayerMeshData
+                        {
+                            Features = new System.Collections.Generic.List<StyledFillTileBuilder.FeatureMeshData>()
+                        };
+                        continue;
+                    }
+
+                    // Resolve MVT layer for extent.
+                    MvtLayer mvtLayer = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(
+                        rec.StyleLayer, mvtTile);
+                    if (mvtLayer == null)
+                    {
+                        layerData[li] = new StyledFillTileBuilder.LayerMeshData
+                        {
+                            Features = new System.Collections.Generic.List<StyledFillTileBuilder.FeatureMeshData>()
+                        };
+                        continue;
+                    }
+
+                    // Build CPU mesh data (decode/assemble/earcut/project) — off-main-thread safe.
+                    // PmTessellate profiler marker fires here (background thread).
+                    layerData[li] = StyledFillTileBuilder.BuildMeshData(
+                        features, rec.Paint, zoom, mvtLayer.Extent, id, tileOrigin);
+                }
+
+                return new TessellationResult { LayerData = layerData };
+            });
+        }
+
+        /// <summary>
+        /// Consumes a completed tessellation task: uploads meshes + creates GameObjects for the tile.
+        /// Must be called on the Unity main thread.
+        ///
+        /// Generation check: if the tile's current generation doesn't match the captured generation,
+        /// the tile was released while tessellation was in-flight — discard the result silently.
+        ///
+        /// S04 cancellation contract: a tessellation completing after ReleaseTile must not
+        /// populate caches or meshes. The generation token enforces this.
+        /// </summary>
+        private void ConsumeTessellationTask(TileId id, ref LoadedTile lt)
+        {
+            var task = lt.TessellationTask;
+            lt.TessellationTask = null;
+            lt.Built            = true;
+
+            // Task faulted or cancelled — mark built (nothing to render) and return.
+            if (task.Status != TaskStatus.RanToCompletion)
+                return;
+
+            // The tessellation was kicked with capturedGeneration == lt.Generation at kick time.
+            // If lt.Generation has since been incremented (by ReleaseTile), the tile was evicted
+            // while in-flight. Discard the result — no GameObject, no mesh.
+            // NOTE: ReleaseTile removes the tile from _loaded entirely, so if we reach here the
+            // generation check is informational (the tile is still loaded). Keep it for safety.
+            TessellationResult result = task.Result;
+            if (result.LayerData == null) return;
+
+            if (_layerRecords.Count == 0) return;
 
             // Create the tile container. Child GameObjects are per fill layer.
             var container = new GameObject($"Tile_{id}");
@@ -407,26 +664,16 @@ namespace MapRenderer.Unity
 
             bool anyGeometry = false;
 
-            for (int li = 0; li < _layerRecords.Count; li++)
+            for (int li = 0; li < _layerRecords.Count && li < result.LayerData.Length; li++)
             {
                 FillLayerRecord rec = _layerRecords[li];
 
-                // Select features via FeatureSelector (source-layer + filter).
-                IReadOnlyList<MvtFeature> features =
-                    FeatureSelector.SelectFeatures(rec.StyleLayer, mvtTile, cam.Zoom);
-                if (features.Count == 0) continue;
+                // Upload mesh from CPU data (main-thread: MeshBuilder.Build creates a UnityEngine.Mesh).
+                using var sMeshUpload = PmMeshUpload.Auto();
 
-                // Resolve the MVT layer to get the tile extent.
-                MvtLayer mvtLayer = SourceLayerResolver.ResolveMvtLayer(rec.StyleLayer, mvtTile);
-                if (mvtLayer == null) continue;
-
-                double extent = mvtLayer.Extent;
-
-                Mesh mesh = StyledFillTileBuilder.BuildMesh(
-                    features, rec.Paint, cam.Zoom, extent, id, lt.TileOriginMerc);
+                Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
                 if (mesh == null) continue;
 
-                // One child per fill layer.
                 var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
                 layerGo.transform.SetParent(container.transform, worldPositionStays: false);
                 layerGo.transform.localPosition = Vector3.zero;
@@ -453,11 +700,22 @@ namespace MapRenderer.Unity
             lt.Go = container;
         }
 
-        /// <summary>Releases a tile: scheduler release + destroy its container GameObject.</summary>
+        /// <summary>
+        /// Releases a tile: scheduler release + destroy its container GameObject.
+        /// S47: increments the tile's generation token so any in-flight tessellation task is discarded
+        /// on completion (generation mismatch). Does NOT wait for in-flight tasks (non-blocking).
+        /// Outstanding task results are silently discarded via the generation check in ConsumeTessellationTask.
+        /// </summary>
         private void ReleaseTile(TileId id)
         {
             if (_loaded.TryGetValue(id, out var lt))
             {
+                // Increment generation: in-flight tessellation task will mismatch and discard its result.
+                // The task itself runs to completion on the ThreadPool (no cancel needed — it holds no
+                // NativeArrays and touches no Unity objects). It is small and fast.
+                lt.Generation++;
+                _loaded[id] = lt; // write back the incremented generation before removal
+
                 if (lt.Go != null)
                 {
                     if (Application.isPlaying) Destroy(lt.Go);
@@ -629,6 +887,17 @@ namespace MapRenderer.Unity
 
         private void OnDestroy()
         {
+            // S47: drain outstanding tessellation tasks before tearing down so we don't have a
+            // background Task reference a destroyed MonoBehaviour. The tasks hold no Unity objects
+            // (they are engine-free), but observing them here prevents unhandled task exceptions.
+            foreach (var kv in _loaded)
+            {
+                if (kv.Value.TessellationTask != null)
+                {
+                    try { kv.Value.TessellationTask.Wait(); } catch { /* best-effort drain */ }
+                }
+            }
+
             // Destroy tile container GameObjects.
             foreach (var kv in _loaded)
             {
