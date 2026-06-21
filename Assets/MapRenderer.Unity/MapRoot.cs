@@ -33,8 +33,8 @@ namespace MapRenderer.Unity
     ///   <see cref="InitialLongitude"/>  — initial map center longitude.
     ///   <see cref="InitialZoom"/>       — initial zoom level.
     ///
-    /// Lines rendering: deferred to S14. Line layers in the style are silently skipped by MapView;
-    /// the demo shows fills only (country fills). Coastlines, borders, geolines are not drawn.
+    /// Rendered layer types: fill, line (with casing), and background. Symbol (labels/icons), raster,
+    /// and fill-extrusion layers present in a style are silently skipped until those features land.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -42,23 +42,37 @@ namespace MapRenderer.Unity
     [RequireComponent(typeof(MapController))]
     public sealed class MapRoot : MonoBehaviour
     {
+        // Demo data source: the free, no-key OpenFreeMap OSM tiles (OpenMapTiles schema) rendered with
+        // the OpenFreeMap "liberty" style (Assets/Fixtures/liberty.json). The maplibre demotiles only
+        // carry a single country-fill layer up to ~z5; OpenFreeMap goes to z14 with water/roads/landuse/
+        // buildings. We render liberty's fill + line layers (water, landuse, the full road hierarchy with
+        // casings, boundaries); symbol (labels), raster (hillshade) and fill-extrusion layers are skipped
+        // until those features land. A simpler hand-authored alternative lives at Fixtures/openfreemap-
+        // style.json.
+        //
+        // NOTE: the "20260614_080001_pt" segment is a DATED tile-set version that OpenFreeMap rotates
+        // periodically. If tiles start 404ing, fetch the current path from the TileJSON:
+        //   curl -s https://tiles.openfreemap.org/planet | jq -r '.tiles[0]'
+        // (The robust fix — recommended before relying on this in CI/demos — is to read that TileJSON at
+        // startup rather than hardcode the version segment.)
         [Tooltip("MVT tile URL template. Tokens: {z} {x} {y}. " +
-                 "Default: MapLibre demotiles (Natural Earth, public domain).")]
+                 "OpenFreeMap free OSM tiles (OpenMapTiles schema). Versioned path — see code note.")]
         public string TileUrlTemplate =
-            "https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf";
+            "https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf";
 
         [Tooltip("Path to the style document JSON, relative to Assets/. " +
-                 "Default: Fixtures/maplibre-demo-style.json (committed demo style).")]
-        public string StyleAssetPath = "Fixtures/maplibre-demo-style.json";
+                 "OpenFreeMap 'liberty' style (water/landuse/roads-with-casing/boundaries; labels not yet rendered).")]
+        public string StyleAssetPath = "Fixtures/liberty.json";
 
         [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
-        public double InitialLatitude = 20.0;
+        public double InitialLatitude = 52.52;   // Berlin
 
         [Tooltip("Initial map center longitude (decimal degrees, WGS-84).")]
-        public double InitialLongitude = 0.0;
+        public double InitialLongitude = 13.405;  // Berlin
 
-        [Tooltip("Initial zoom level (0 = world view).")]
-        public double InitialZoom = 2.0;
+        [Tooltip("Initial zoom level (0 = world view). z14 is OpenFreeMap's maxzoom — densest data " +
+                 "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
+        public double InitialZoom = 14.0;
 
         private void Start()
         {
@@ -216,7 +230,7 @@ namespace MapRenderer.Unity
         /// </summary>
         private static void EnsureDirectionalLight()
         {
-            var existing = Object.FindObjectOfType<Light>();
+            var existing = Object.FindAnyObjectByType<Light>();
             if (existing != null && existing.type == LightType.Directional)
                 return;
 

@@ -426,11 +426,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: ad261931632ac433d81df864138e16ab, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapRoot
-  TileUrlTemplate: https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf
-  StyleAssetPath: Fixtures/maplibre-demo-style.json
-  InitialLatitude: 20
-  InitialLongitude: 0
-  InitialZoom: 2
+  TileUrlTemplate: https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf
+  StyleAssetPath: Fixtures/liberty.json
+  InitialLatitude: 52.52
+  InitialLongitude: 13.405
+  InitialZoom: 14
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
