@@ -4,6 +4,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+// S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.
 
 namespace MapRenderer.Unity
 {
@@ -65,7 +66,8 @@ namespace MapRenderer.Unity
             StyleDocument style = LoadStyle();
 
             // 2. Create the tile data source (owned — MapView will dispose on OnDestroy).
-            var source = new HttpDataSource(TileUrlTemplate);
+            // S51: HttpDataSource removed from Core; UnityWebRequestDataSource is the production HTTP source.
+            var source = new UnityWebRequestDataSource(TileUrlTemplate);
 
             // 3. Build the initial camera state.
             var initialView = new CameraProperties(

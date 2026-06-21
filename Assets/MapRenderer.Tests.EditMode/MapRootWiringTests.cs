@@ -4,6 +4,7 @@
 
 using NUnit.Framework;
 using UnityEngine;
+using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.View.Camera;
@@ -129,10 +130,10 @@ namespace MapRenderer.Tests
         {
             public TileEncoding Encoding => TileEncoding.Mvt;
 
-            public System.Threading.Tasks.Task<TileResponse> FetchAsync(
+            public UniTask<TileResponse> FetchAsync(
                 TileId id,
                 System.Threading.CancellationToken ct = default)
-                => System.Threading.Tasks.Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+                => UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
 
             public void Dispose() { }
         }

@@ -44,8 +44,8 @@ namespace MapRenderer.Unity
     {
         // MapRenderer.Tile.Tessellate — wraps the decode/assemble/earcut/project loop per BuildMesh call.
         // S46 acceptance: proved-wired target for the profiler recorder test (tooth 1b).
-        // S47: this marker now fires on a background ThreadPool thread when called from BuildMeshData
-        // inside Task.Run. The ProfilerMarkerTests [UnityTest] (tooth 1b) has been updated to use
+        // S47/S51: this marker now fires on a background ThreadPool thread when called from BuildMeshData
+        // inside UniTask.Run. The ProfilerMarkerTests [UnityTest] (tooth 1b) uses
         // ProfilerRecorderOptions.Default (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
         private static readonly ProfilerMarker PmTessellate = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Tessellate");
 
@@ -86,7 +86,7 @@ namespace MapRenderer.Unity
         /// CPU-only half: decode/assemble/earcut/project all features for one style layer, producing
         /// a <see cref="LayerMeshData"/> payload that contains no Unity engine objects.
         ///
-        /// Safe to call from a <see cref="System.Threading.Tasks.Task"/> (ThreadPool thread):
+        /// Safe to call from a ThreadPool thread (e.g. inside UniTask.Run):
         /// all code paths use only pure-managed, stateless Core logic (no NativeArray, no Unity.Object).
         ///
         /// The <see cref="PmTessellate"/> profiler marker wraps this call. In the async path (S47),
@@ -110,7 +110,7 @@ namespace MapRenderer.Unity
 
             // MapRenderer.Tile.Tessellate — wraps the full decode/assemble/earcut/project loop.
             // S46 acceptance: proves-wired marker for profiler recorder test (tooth 1b).
-            // S47: fires on a background thread when called inside Task.Run from MapView.
+            // S47/S51: fires on a background thread when called inside UniTask.Run from MapView.
             using var sTessellate = PmTessellate.Auto();
 
             foreach (var feature in selectedFeatures)

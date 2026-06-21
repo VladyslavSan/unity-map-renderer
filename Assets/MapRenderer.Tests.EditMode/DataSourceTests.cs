@@ -1,14 +1,16 @@
 // Engine-free: this file is compiled verbatim by both the Unity EditMode runner
 // (Assets/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+//
+// S51: migrated from Task/TaskCompletionSource to UniTask/UniTaskCompletionSource.
+// HttpDataSource tests removed (HttpDataSource deleted from Core; HTTP moved to Unity layer
+// as UnityWebRequestDataSource). Scheduler tests converted to async Task + await.
 
 using System;
 using System.IO;
-using System.Net;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Collections.Generic;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
@@ -18,11 +20,14 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// S03 acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,
-    /// byte-identity across sources, absent-vs-error, and cancellation.
+    /// byte-identity (FileDataSource only — HttpDataSource moved to Unity layer in S51),
+    /// absent-vs-error, and cancellation.
     ///
     /// All tests are deterministic and offline (no public endpoints, no Thread.Sleep).
-    /// The HTTP source is exercised against a stub <see cref="HttpMessageHandler"/>.
-    /// Timing is controlled via <see cref="TaskCompletionSource{T}"/>.
+    /// Timing is controlled via <see cref="UniTaskCompletionSource{T}"/>.
+    ///
+    /// S51: UniTask replaces Task throughout. Tests that called scheduler.Request().GetAwaiter().GetResult()
+    /// are now async Task + await (UniTask.GetAwaiter().GetResult() is NOT a blocking wait).
     /// </summary>
     [TestFixture]
     public class DataSourceTests
@@ -60,62 +65,41 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------
-        // 1. Byte identity: FileDataSource and HttpDataSource serve the same bytes
+        // 1. Byte identity: FileDataSource serves correct bytes
+        //    (HttpDataSource removed from Core in S51 — HTTP moved to UnityWebRequestDataSource)
         // -----------------------------------------------------------------------------------------
 
         [Test]
-        public void ByteIdentity_FileAndHttpSources_ReturnSameBytesAndEncoding()
+        public async Task ByteIdentity_FileSource_ReturnsSameBytesAsFixture()
         {
             byte[] fixtureBytes = LoadFixtureBytes();
             var tileId = new TileId(0, 0, 0);
-            string dir = Path.GetTempPath();
 
             // Write fixture into a temp dir so FileDataSource can read it.
-            string tempRoot = Path.Combine(dir, Guid.NewGuid().ToString("N"));
+            string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             string tilePath = Path.Combine(tempRoot, "0", "0", "0.mvt");
             Directory.CreateDirectory(Path.GetDirectoryName(tilePath));
             File.WriteAllBytes(tilePath, fixtureBytes);
 
             try
             {
-                // FileDataSource
                 TileResponse fileResponse;
                 using (var fileSource = new FileDataSource(tempRoot))
                 {
-                    fileResponse = fileSource.FetchAsync(tileId).GetAwaiter().GetResult();
+                    fileResponse = await fileSource.FetchAsync(tileId);
                 }
 
-                // HttpDataSource with a stub handler returning the fixture bytes
-                TileResponse httpResponse;
-                var handler = new StubHttpHandler(HttpStatusCode.OK, fixtureBytes);
-                using (var httpClient = new HttpClient(handler))
-                using (var httpSource = new HttpDataSource(httpClient, "http://fake/{z}/{x}/{y}.mvt"))
-                {
-                    httpResponse = httpSource.FetchAsync(tileId).GetAwaiter().GetResult();
-                }
-
-                // Both must have data and report Mvt encoding
                 Assert.IsTrue(fileResponse.HasData,  "FileDataSource: HasData must be true");
-                Assert.IsTrue(httpResponse.HasData,   "HttpDataSource: HasData must be true");
                 Assert.AreEqual(TileEncoding.Mvt, fileResponse.Encoding, "File Encoding");
-                Assert.AreEqual(TileEncoding.Mvt, httpResponse.Encoding, "Http Encoding");
 
                 // Byte-for-byte identical
                 Assert.AreEqual(fixtureBytes.Length, fileResponse.Bytes.Length, "File byte count");
-                Assert.AreEqual(fixtureBytes.Length, httpResponse.Bytes.Length, "Http byte count");
-                CollectionAssert.AreEqual(fixtureBytes, fileResponse.Bytes,  "File bytes match");
-                CollectionAssert.AreEqual(fixtureBytes, httpResponse.Bytes,  "Http bytes match");
+                CollectionAssert.AreEqual(fixtureBytes, fileResponse.Bytes, "File bytes match");
 
-                // Both decode to the same layer/feature structure
+                // Decodes to the same layer/feature structure as the raw fixture
                 MvtTile fileTile = MvtDecoder.Decode(fileResponse.Bytes);
-                MvtTile httpTile = MvtDecoder.Decode(httpResponse.Bytes);
-
-                Assert.AreEqual(fileTile.GetLayer("countries").Features.Count,
-                                httpTile.GetLayer("countries").Features.Count,
-                                "countries feature count must match between sources");
-                Assert.AreEqual(fileTile.GetLayer("geolines").Features.Count,
-                                httpTile.GetLayer("geolines").Features.Count,
-                                "geolines feature count must match between sources");
+                Assert.Greater(fileTile.GetLayer("countries").Features.Count, 0,
+                    "countries layer must have features");
             }
             finally
             {
@@ -129,14 +113,14 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
 
         [Test]
-        public void FileSource_MissingFile_ReturnsHasDataFalse()
+        public async Task FileSource_MissingFile_ReturnsHasDataFalse()
         {
             string emptyRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(emptyRoot);
             try
             {
                 using var source = new FileDataSource(emptyRoot);
-                var response = source.FetchAsync(new TileId(5, 10, 15)).GetAwaiter().GetResult();
+                var response = await source.FetchAsync(new TileId(5, 10, 15));
                 Assert.IsFalse(response.HasData,   "Missing file → HasData must be false");
                 Assert.IsNull(response.Bytes,       "Missing file → Bytes must be null");
                 Assert.AreEqual(TileEncoding.Mvt, response.Encoding);
@@ -145,42 +129,6 @@ namespace MapRenderer.Tests
             {
                 Directory.Delete(emptyRoot, recursive: true);
             }
-        }
-
-        [Test]
-        public void HttpSource_404_ReturnsHasDataFalse()
-        {
-            var handler = new StubHttpHandler(HttpStatusCode.NotFound, null);
-            using var client = new HttpClient(handler);
-            using var source = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt");
-
-            var response = source.FetchAsync(new TileId(1, 0, 0)).GetAwaiter().GetResult();
-            Assert.IsFalse(response.HasData,   "HTTP 404 → HasData must be false");
-            Assert.IsNull(response.Bytes,       "HTTP 404 → Bytes must be null");
-            Assert.AreEqual(TileEncoding.Mvt, response.Encoding);
-        }
-
-        [Test]
-        public void HttpSource_204_ReturnsHasDataFalse()
-        {
-            var handler = new StubHttpHandler(HttpStatusCode.NoContent, null);
-            using var client = new HttpClient(handler);
-            using var source = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt");
-
-            var response = source.FetchAsync(new TileId(1, 0, 0)).GetAwaiter().GetResult();
-            Assert.IsFalse(response.HasData, "HTTP 204 → HasData must be false");
-        }
-
-        [Test]
-        public void HttpSource_500_Throws()
-        {
-            var handler = new StubHttpHandler(HttpStatusCode.InternalServerError, null);
-            using var client = new HttpClient(handler);
-            using var source = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt");
-
-            Assert.Throws<HttpRequestException>(() =>
-                source.FetchAsync(new TileId(1, 0, 0)).GetAwaiter().GetResult(),
-                "HTTP 500 must throw HttpRequestException");
         }
 
         // -----------------------------------------------------------------------------------------
@@ -255,9 +203,9 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
 
         [Test]
-        public void Scheduler_Dedupe_ConcurrentRequests_IssueSingleFetch()
+        public async Task Scheduler_Dedupe_ConcurrentRequests_IssueSingleFetch()
         {
-            var tcs  = new TaskCompletionSource<TileResponse>();
+            var tcs  = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
@@ -278,11 +226,11 @@ namespace MapRenderer.Tests
 
             // Complete the fetch.
             var expectedResponse = MakeResponse(42);
-            tcs.SetResult(expectedResponse);
+            tcs.TrySetResult(expectedResponse);
 
             // Both awaiters get the same bytes.
-            var res1 = req1.GetAwaiter().GetResult();
-            var res2 = req2.GetAwaiter().GetResult();
+            var res1 = await req1;
+            var res2 = await req2;
 
             Assert.AreEqual(1, fetchCount, "Fetch count must still be 1 after both awaiters resolve");
             Assert.IsTrue(res1.HasData && res2.HasData);
@@ -291,13 +239,13 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void Scheduler_AfterFetch_CacheHit_NoSecondFetch()
+        public async Task Scheduler_AfterFetch_CacheHit_NoSecondFetch()
         {
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return Task.FromResult(MakeResponse(7));
+                return UniTask.FromResult(MakeResponse(7));
             });
 
             var cache     = new TileCache(capacity: 10);
@@ -305,12 +253,12 @@ namespace MapRenderer.Tests
             var tileId    = new TileId(2, 3, 4);
 
             // First request — triggers a fetch.
-            var res1 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            var res1 = await scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount);
             Assert.IsTrue(res1.HasData);
 
             // Second request — must come from cache (fetch count unchanged).
-            var res2 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            var res2 = await scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount, "Second request for the same tile must be a cache hit");
             Assert.AreEqual(res1.Bytes[0], res2.Bytes[0]);
         }
@@ -320,24 +268,18 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// When the source's task is cancelled (e.g. the underlying network/IO layer propagates
-        /// cancellation), the scheduler's awaiter observes OperationCanceledException.
-        ///
-        /// NOTE: TileScheduler.Release() drops the dictionary reference (best-effort cleanup) but
-        /// does NOT cancel the underlying fetch task — it holds no per-tile CancellationTokenSource.
-        /// Full per-tile fetch cancellation via Release() is a S04 follow-up (tracked: latent issue).
-        /// This test verifies only that a cancelled source task propagates through the scheduler
-        /// correctly; it is NOT an end-to-end test of Release-driven cancellation.
+        /// When the source's UniTask is cancelled, the scheduler's awaiter observes
+        /// OperationCanceledException.
         /// </summary>
         [Test]
-        public void Scheduler_SourceCancellation_Propagates_ToAwaiter()
+        public async Task Scheduler_SourceCancellation_Propagates_ToAwaiter()
         {
-            var tcs        = new TaskCompletionSource<TileResponse>();
+            var tcs        = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return tcs.Task;  // Returns pending task; will be cancelled below.
+                return tcs.Task;  // Returns pending UniTask; will be cancelled below.
             });
 
             var cache     = new TileCache(capacity: 10);
@@ -348,19 +290,23 @@ namespace MapRenderer.Tests
             var requestTask = scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount, "Exactly one fetch should be in-flight");
 
-            // Simulate the source cancelling (e.g., network abort). The scheduler awaiter
-            // must propagate OperationCanceledException (or its subclass TaskCanceledException).
+            // Simulate the source cancelling.
             tcs.TrySetCanceled();
 
-            // TaskCanceledException is a subclass of OperationCanceledException; use Catch so that
-            // both are accepted (Assert.Throws<T> in NUnit 3.x requires an exact type match).
-            Assert.Catch<OperationCanceledException>(() =>
-                requestTask.GetAwaiter().GetResult(),
-                "Cancelled source task must propagate as OperationCanceledException to the awaiter");
+            // The awaiter must propagate OperationCanceledException.
+            try
+            {
+                await requestTask;
+                Assert.Fail("Cancelled source UniTask must propagate as OperationCanceledException to the awaiter");
+            }
+            catch (OperationCanceledException)
+            {
+                // Expected — test passes.
+            }
         }
 
         [Test]
-        public void Scheduler_Release_DropsReference_SubsequentRequestReFetches()
+        public async Task Scheduler_Release_DropsReference_SubsequentRequestReFetches()
         {
             // Release() drops the cache entry and the in-flight reference. After release,
             // a new Request() must trigger a fresh fetch (not serve a stale cached result).
@@ -368,7 +314,7 @@ namespace MapRenderer.Tests
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return Task.FromResult(MakeResponse((byte)(fetchCount * 10)));
+                return UniTask.FromResult(MakeResponse((byte)(fetchCount * 10)));
             });
 
             var cache     = new TileCache(capacity: 10);
@@ -376,14 +322,14 @@ namespace MapRenderer.Tests
             var tileId    = new TileId(4, 4, 4);
 
             // First fetch — populates cache.
-            scheduler.Request(tileId).GetAwaiter().GetResult();
+            await scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount, "First request triggers one fetch");
 
             // Release — evicts from cache.
             scheduler.Release(tileId);
 
             // Second request after release — must re-fetch (cache was evicted).
-            scheduler.Request(tileId).GetAwaiter().GetResult();
+            await scheduler.Request(tileId);
             Assert.AreEqual(2, fetchCount, "Request after Release must re-fetch (not serve cache)");
         }
 
@@ -393,13 +339,12 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Release() cancels the in-flight fetch (via per-tile CTS) and the result is NOT cached.
-        /// Asserts on the ORIGINAL scheduler's cache to confirm the cancelled result was discarded.
         /// </summary>
         [Test]
-        public void Release_CancelsInFlightFetch_TileNotCached()
+        public async Task Release_CancelsInFlightFetch_TileNotCached()
         {
             // Source blocks until manually signalled, to model a real in-flight HTTP fetch.
-            var tcs   = new TaskCompletionSource<TileResponse>();
+            var tcs   = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
             var fakeSource = new FakeDataSourceCt((id, ct) =>
             {
@@ -422,7 +367,7 @@ namespace MapRenderer.Tests
             scheduler.Release(tileId);
 
             // Wait for the pending task to observe the cancellation.
-            try { pendingTask.GetAwaiter().GetResult(); }
+            try { await pendingTask; }
             catch (OperationCanceledException) { /* expected */ }
 
             // The ORIGINAL cache must NOT contain the tile (cancelled result must be discarded).
@@ -434,16 +379,15 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// A fetch completing SUCCESSFULLY after Release() must NOT populate the original cache.
-        /// This exercises the CTS-identity guard in FetchAndCacheAsync (success path, lines 159-164
-        /// of TileScheduler.cs): when Release() removes the CTS before the fetch completes, the
-        /// guard detects the mismatch and skips TileCache.Put.
+        /// This exercises the CTS-identity guard in FetchAndCacheAsync: when Release() removes the CTS
+        /// before the fetch completes, the guard detects the mismatch and skips TileCache.Put.
         /// </summary>
         [Test]
-        public void Release_SourceIgnoresToken_CompletesSuccessfully_ResultNotCached()
+        public async Task Release_SourceIgnoresToken_CompletesSuccessfully_ResultNotCached()
         {
             // Source does NOT honour the cancellation token — it blocks and eventually returns
-            // a successful result regardless of cancellation. FakeDataSource drops ct entirely.
-            var tcs        = new TaskCompletionSource<TileResponse>();
+            // a successful result regardless of cancellation.
+            var tcs        = new UniTaskCompletionSource<TileResponse>();
             var fakeSource = new FakeDataSource(id => tcs.Task);
 
             var cache     = new TileCache(capacity: 10);
@@ -457,34 +401,33 @@ namespace MapRenderer.Tests
             scheduler.Release(tileId);
 
             // Now the source "returns" successfully (ignoring cancellation).
-            tcs.SetResult(MakeResponse(55));
+            tcs.TrySetResult(MakeResponse(55));
 
             // Await the pending task — it completes normally (no exception), because the source
             // did not honour the token.
-            pendingTask.GetAwaiter().GetResult();
+            await pendingTask;
 
             // The CTS-identity guard must have detected the mismatch and skipped Put.
             Assert.IsFalse(cache.TryGet(tileId, out _),
                 "Cache must NOT contain the tile when the source ignores the token and completes " +
-                "successfully after Release() — exercises the CTS-identity guard (lines 159-164).");
+                "successfully after Release() — exercises the CTS-identity guard.");
             Assert.AreEqual(0, scheduler.InFlightCount,
                 "In-flight map must be empty after the late-completing fetch returns.");
         }
 
         /// <summary>
-        /// When a source returns an already-completed Task (Task.FromResult), the sync-completion
+        /// When a source returns an already-completed UniTask (UniTask.FromResult), the sync-completion
         /// path must NOT leave a stale in-flight entry after Request() returns.
-        /// Guards item (c) from follow-ups.md.
         /// </summary>
         [Test]
-        public void SyncCompletingSource_NoStaleInFlightEntry()
+        public async Task SyncCompletingSource_NoStaleInFlightEntry()
         {
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                // Sync completion: returns an already-resolved Task.
-                return Task.FromResult(MakeResponse(77));
+                // Sync completion: returns an already-resolved UniTask.
+                return UniTask.FromResult(MakeResponse(77));
             });
 
             var cache     = new TileCache(capacity: 10);
@@ -495,103 +438,12 @@ namespace MapRenderer.Tests
             var fetchTask = scheduler.Request(tileId);
 
             // Await completion so the async continuation has run.
-            fetchTask.GetAwaiter().GetResult();
+            await fetchTask;
 
             // After completion the in-flight map must be empty for this tile.
             Assert.AreEqual(0, scheduler.InFlightCount,
                 "In-flight map must be empty after a sync-completing fetch completes. " +
-                "A stale entry means the Task.Yield() guard is missing or broken.");
-        }
-
-        /// <summary>
-        /// HttpDataSource threads ct through the body read where the overload is available.
-        /// Under NET5_0_OR_GREATER ReadAsByteArrayAsync(ct) is used; under netstandard2.1 (Unity 6)
-        /// the body read falls back to the no-ct overload with ThrowIfCancellationRequested as a
-        /// pre-read guard — mid-read cancellation is not guaranteed there (stated limitation).
-        ///
-        /// This test uses a streaming content that checks ct on ReadAsync, so it is only meaningful
-        /// when the NET5_0_OR_GREATER branch compiles (core-tests runs net10; Unity takes the #else
-        /// branch and the body read is not mid-read cancellable). The test is marked Explicit so
-        /// that the Unity EditMode run skips it (Unity netstandard2.1 would not exhibit mid-read
-        /// cancel from the content stream). The core-tests run always exercises the NET5 branch.
-        ///
-        /// Limitation note: under Unity (netstandard2.1) mid-read cancellation requires the caller
-        /// to cancel before the response body read or to use a streaming API — this is acceptable
-        /// for S04; a full mid-read cancellable path is a follow-up if needed.
-        /// </summary>
-        [Test]
-        public void HttpBodyRead_CancellableStream_TokenThreadedThrough()
-        {
-            // Stub handler returns a StreamContent backed by a CancellationToken-checking stream.
-            using var cts = new CancellationTokenSource();
-            var handler = new StubHttpHandlerWithCancellableContent(cts.Token);
-            using var client = new HttpClient(handler);
-            using var source = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt");
-
-            // Cancel the token so the stream read throws immediately.
-            cts.Cancel();
-
-            // The OperationCanceledException propagates from ReadAsByteArrayAsync(ct) (NET5 branch)
-            // or from the stream's own token check. Either way, the fetch must throw.
-            Assert.Catch<OperationCanceledException>(() =>
-                source.FetchAsync(new TileId(0, 0, 0), cts.Token).GetAwaiter().GetResult(),
-                "FetchAsync must propagate OperationCanceledException when the cancellation token " +
-                "is cancelled during the body read (verifies ct is threaded into ReadAsByteArrayAsync).");
-        }
-
-        /// <summary>
-        /// Stub HTTP handler that returns a StreamContent backed by a stream that throws
-        /// OperationCanceledException on ReadAsync when the associated token is cancelled.
-        /// Used to verify that ct is threaded to the body read.
-        /// </summary>
-        private sealed class StubHttpHandlerWithCancellableContent : HttpMessageHandler
-        {
-            private readonly CancellationToken _ct;
-            public StubHttpHandlerWithCancellableContent(CancellationToken ct) { _ct = ct; }
-
-            protected override Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request, CancellationToken cancellationToken)
-            {
-                var msg = new HttpResponseMessage(HttpStatusCode.OK);
-                msg.Content = new StreamContent(new CancellableStream(_ct));
-                return Task.FromResult(msg);
-            }
-        }
-
-        /// <summary>
-        /// Stream that throws OperationCanceledException on ReadAsync when the token is cancelled.
-        /// This allows tests to verify that ReadAsByteArrayAsync(ct) actually uses the token.
-        /// </summary>
-        private sealed class CancellableStream : System.IO.Stream
-        {
-            private readonly CancellationToken _ct;
-            public CancellableStream(CancellationToken ct) { _ct = ct; }
-
-            public override bool CanRead  => true;
-            public override bool CanSeek  => false;
-            public override bool CanWrite => false;
-            public override long Length   => throw new NotSupportedException();
-            public override long Position
-            {
-                get => throw new NotSupportedException();
-                set => throw new NotSupportedException();
-            }
-            public override void Flush() { }
-            public override int Read(byte[] buffer, int offset, int count)
-            {
-                _ct.ThrowIfCancellationRequested();
-                return 0; // EOF
-            }
-            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken ct)
-            {
-                // Check both the stream's token and the passed-in token.
-                _ct.ThrowIfCancellationRequested();
-                ct.ThrowIfCancellationRequested();
-                return Task.FromResult(0);
-            }
-            public override long Seek(long offset, System.IO.SeekOrigin origin) => throw new NotSupportedException();
-            public override void SetLength(long value)   => throw new NotSupportedException();
-            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+                "A stale entry means the UniTask.SwitchToThreadPool guard is missing or broken.");
         }
 
         // -----------------------------------------------------------------------------------------
@@ -599,17 +451,16 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// An absent tile (HasData=false) is NOT re-fetched within the negative-cache TTL: a second
-        /// request inside the TTL is served from the negative cache without a second source fetch.
+        /// An absent tile (HasData=false) is NOT re-fetched within the negative-cache TTL.
         /// </summary>
         [Test]
-        public void NegativeCache_AbsentTile_NotRefetchedWithinTtl()
+        public async Task NegativeCache_AbsentTile_NotRefetchedWithinTtl()
         {
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
             });
 
             var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -620,7 +471,7 @@ namespace MapRenderer.Tests
             var tileId = new TileId(9, 1, 1);
 
             // First request — issues a fetch that reports absent.
-            var r1 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            var r1 = await scheduler.Request(tileId);
             Assert.IsFalse(r1.HasData, "First response must be absent");
             Assert.AreEqual(1, fetchCount, "First request issues exactly one fetch");
 
@@ -628,7 +479,7 @@ namespace MapRenderer.Tests
             clock.Advance(TimeSpan.FromSeconds(2));
 
             // Second request — must be served from the negative cache, NOT re-fetched.
-            var r2 = scheduler.Request(tileId).GetAwaiter().GetResult();
+            var r2 = await scheduler.Request(tileId);
             Assert.IsFalse(r2.HasData, "Second response must still be absent");
             Assert.AreEqual(1, fetchCount,
                 "Absent tile must NOT be re-fetched within the negative-cache TTL (item b).");
@@ -639,17 +490,16 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// After the negative-cache TTL expires, an absent tile IS re-fetched — a recovered tile can
-        /// re-appear. Time is advanced via the fake clock (deterministic, no Thread.Sleep).
+        /// After the negative-cache TTL expires, an absent tile IS re-fetched.
         /// </summary>
         [Test]
-        public void NegativeCache_RefetchesAfterTtlExpiry()
+        public async Task NegativeCache_RefetchesAfterTtlExpiry()
         {
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
             });
 
             var now    = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -659,29 +509,28 @@ namespace MapRenderer.Tests
                 negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
             var tileId = new TileId(9, 2, 2);
 
-            scheduler.Request(tileId).GetAwaiter().GetResult();
+            await scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount, "First request issues one fetch");
 
             // Advance past the TTL.
             clock.Advance(TimeSpan.FromSeconds(6));
 
-            scheduler.Request(tileId).GetAwaiter().GetResult();
+            await scheduler.Request(tileId);
             Assert.AreEqual(2, fetchCount,
                 "Absent tile must be re-fetched once the negative-cache TTL has expired (item b).");
         }
 
         /// <summary>
-        /// A negative TTL of zero disables negative caching entirely: every request for an absent tile
-        /// re-fetches (the opt-out path, useful where the caller wants no suppression).
+        /// A negative TTL of zero disables negative caching entirely.
         /// </summary>
         [Test]
-        public void NegativeCache_ZeroTtl_AlwaysRefetches()
+        public async Task NegativeCache_ZeroTtl_AlwaysRefetches()
         {
             int fetchCount = 0;
             var fakeSource = new FakeDataSource(id =>
             {
                 Interlocked.Increment(ref fetchCount);
-                return Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+                return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
             });
 
             var clock  = new FakeClock(new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc));
@@ -690,8 +539,8 @@ namespace MapRenderer.Tests
                 negativeTtl: TimeSpan.Zero, clock: clock.Now);
             var tileId = new TileId(9, 3, 3);
 
-            scheduler.Request(tileId).GetAwaiter().GetResult();
-            scheduler.Request(tileId).GetAwaiter().GetResult();
+            await scheduler.Request(tileId);
+            await scheduler.Request(tileId);
             Assert.AreEqual(2, fetchCount,
                 "With negativeTtl == TimeSpan.Zero, an absent tile is re-fetched every request.");
         }
@@ -701,8 +550,7 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
-        /// Dispose must NOT dispose the injected IDataSource — the scheduler is a non-owning coordinator
-        /// (the caller owns the source's lifetime). Documents and pins the ownership decision (item c).
+        /// Dispose must NOT dispose the injected IDataSource — the scheduler is a non-owning coordinator.
         /// </summary>
         [Test]
         public void Dispose_DoesNotDisposeInjectedSource()
@@ -720,12 +568,12 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Dispose cancels an in-flight fetch (its per-tile CTS is cancelled) so a source honouring the
-        /// token observes cancellation. Confirms Dispose tears down outstanding work without leaking.
+        /// token observes cancellation.
         /// </summary>
         [Test]
-        public void Dispose_CancelsInFlightFetch()
+        public async Task Dispose_CancelsInFlightFetch()
         {
-            var tcs        = new TaskCompletionSource<TileResponse>();
+            var tcs        = new UniTaskCompletionSource<TileResponse>();
             bool cancellationObserved = false;
             var fakeSource = new FakeDataSourceCt((id, ct) =>
             {
@@ -743,7 +591,7 @@ namespace MapRenderer.Tests
             scheduler.Dispose();
 
             // The in-flight CTS was cancelled by Dispose; the source observes it.
-            try { pending.GetAwaiter().GetResult(); }
+            try { await pending; }
             catch (OperationCanceledException) { /* expected */ }
 
             Assert.IsTrue(cancellationObserved,
@@ -764,8 +612,9 @@ namespace MapRenderer.Tests
         {
             public bool WasDisposed { get; private set; }
             public TileEncoding Encoding => TileEncoding.Mvt;
-            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => Task.FromResult(TileResponse.Absent(TileEncoding.Mvt));
+            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+                => UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
             public void Dispose() { WasDisposed = true; }
         }
 
@@ -777,46 +626,22 @@ namespace MapRenderer.Tests
             => new TileResponse(new byte[] { seed, (byte)(seed + 1), (byte)(seed + 2) }, TileEncoding.Mvt);
 
         // -----------------------------------------------------------------------------------------
-        // Stub HTTP handler
-        // -----------------------------------------------------------------------------------------
-
-        private sealed class StubHttpHandler : HttpMessageHandler
-        {
-            private readonly HttpStatusCode _statusCode;
-            private readonly byte[]         _content;
-
-            public StubHttpHandler(HttpStatusCode statusCode, byte[] content)
-            {
-                _statusCode = statusCode;
-                _content    = content;
-            }
-
-            protected override Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request, CancellationToken cancellationToken)
-            {
-                var msg = new HttpResponseMessage(_statusCode);
-                if (_content != null)
-                    msg.Content = new ByteArrayContent(_content);
-                return Task.FromResult(msg);
-            }
-        }
-
-        // -----------------------------------------------------------------------------------------
-        // Fake data source for scheduler tests
+        // Fake data sources for scheduler tests
         // -----------------------------------------------------------------------------------------
 
         private sealed class FakeDataSource : IDataSource
         {
-            private readonly Func<TileId, Task<TileResponse>> _fetch;
+            private readonly Func<TileId, UniTask<TileResponse>> _fetch;
 
             public TileEncoding Encoding => TileEncoding.Mvt;
 
-            public FakeDataSource(Func<TileId, Task<TileResponse>> fetch)
+            public FakeDataSource(Func<TileId, UniTask<TileResponse>> fetch)
             {
                 _fetch = fetch;
             }
 
-            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
                 => _fetch(id);
 
             public void Dispose() { }
@@ -824,20 +649,21 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Fake data source variant that exposes the CancellationToken to the fetch delegate,
-        /// so tests can register cancellation callbacks (needed for Release_CancelsInFlightFetch test).
+        /// so tests can register cancellation callbacks.
         /// </summary>
         private sealed class FakeDataSourceCt : IDataSource
         {
-            private readonly Func<TileId, CancellationToken, Task<TileResponse>> _fetch;
+            private readonly Func<TileId, CancellationToken, UniTask<TileResponse>> _fetch;
 
             public TileEncoding Encoding => TileEncoding.Mvt;
 
-            public FakeDataSourceCt(Func<TileId, CancellationToken, Task<TileResponse>> fetch)
+            public FakeDataSourceCt(Func<TileId, CancellationToken, UniTask<TileResponse>> fetch)
             {
                 _fetch = fetch;
             }
 
-            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
                 => _fetch(id, ct);
 
             public void Dispose() { }

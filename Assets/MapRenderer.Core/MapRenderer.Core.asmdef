@@ -2,7 +2,8 @@
     "name": "MapRenderer.Core",
     "rootNamespace": "MapRenderer.Core",
     "references": [
-        "Unity.Mathematics"
+        "Unity.Mathematics",
+        "UniTask"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

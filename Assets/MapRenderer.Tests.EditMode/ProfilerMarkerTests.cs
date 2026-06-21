@@ -16,6 +16,7 @@
 using System.Collections;
 using System.IO;
 using System.Threading;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -68,8 +69,8 @@ namespace MapRenderer.Tests
             private readonly byte[] _bytes;
             public FixtureSource(byte[] bytes) { _bytes = bytes; }
             public TileEncoding Encoding => TileEncoding.Mvt;
-            public System.Threading.Tasks.Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => System.Threading.Tasks.Task.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
             public void Dispose() { }
         }
 

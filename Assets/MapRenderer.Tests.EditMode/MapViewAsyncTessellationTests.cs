@@ -15,6 +15,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -80,16 +81,18 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// In-memory source that serves the same fixture bytes for ANY tile id.
-        /// Task.FromResult makes the fetch synchronously-completing so PumpUntilSettled
-        /// can drain tessellation tasks within a small number of spins + Thread.Sleep(1) calls.
+        /// UniTask.FromResult makes the fetch synchronously-completing so PumpUntilSettled
+        /// can drain tessellation UniTasks within a small number of spins + Thread.Sleep(1) calls.
+        /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (was Task&lt;TileResponse&gt;).
         /// </summary>
         private sealed class FixtureSource : IDataSource
         {
             private readonly byte[] _bytes;
             public FixtureSource(byte[] bytes) { _bytes = bytes; }
             public TileEncoding Encoding => TileEncoding.Mvt;
-            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => Task.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
+            // S51: UniTask.FromResult — no Task.
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
             public void Dispose() { }
         }
 
@@ -419,7 +422,8 @@ namespace MapRenderer.Tests
         ///   - IMMEDIATELY pan far east (lon=170) — the cover is now around (5,31,16).
         ///     The two covers are non-overlapping, so all original tiles are evicted.
         ///   - The eviction Tick releases all original tiles. Their tessellation tasks may still
-        ///     be running or just completed. The generation-token mechanism discards any late results.
+        ///     be running or just completed. ReleaseTile removes them from _loaded so subsequent
+        ///     PumpPendingBuilds snapshots exclude them — ConsumeTessellationTask is never called.
         ///   - After full settle, original tiles must NOT be accessible as built tiles.
         /// </summary>
         [Test]

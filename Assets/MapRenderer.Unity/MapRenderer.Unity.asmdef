@@ -8,7 +8,8 @@
         "Unity.Collections",
         "Unity.Burst",
         "Unity.Jobs",
-        "Unity.InputSystem"
+        "Unity.InputSystem",
+        "UniTask"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

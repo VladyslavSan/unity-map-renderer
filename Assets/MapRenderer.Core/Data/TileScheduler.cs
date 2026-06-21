@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Coordinates;
 
 namespace MapRenderer.Core.Data
@@ -15,7 +15,8 @@ namespace MapRenderer.Core.Data
     /// </para>
     /// <para>
     /// <b>In-flight deduplication:</b> if two callers concurrently request the same tile,
-    /// only one network/disk fetch is issued. Both callers await the same <see cref="Task{T}"/>.
+    /// only one network/disk fetch is issued. Both callers await the same preserved
+    /// <see cref="UniTask{T}"/> (.Preserve() allows multiple awaiters on a UniTask struct).
     /// Once the fetch completes, the result is stored in the cache so future requests are cache hits.
     /// </para>
     /// <para>
@@ -26,7 +27,7 @@ namespace MapRenderer.Core.Data
     /// </para>
     /// <para>
     /// <b>Thread-safety:</b> the cache, in-flight map, and CTS map are guarded by a single lock.
-    /// Continuations run on threadpool threads (no deadlock risk with <c>ConfigureAwait(false)</c>).
+    /// Continuations run on threadpool threads (UniTask default for RunOnThreadPool completions).
     /// </para>
     /// <para>
     /// <b>Negative caching (S06 gated item b):</b> a fetch that reports <c>HasData=false</c> (HTTP
@@ -51,12 +52,16 @@ namespace MapRenderer.Core.Data
     /// A future caller that genuinely needs to await outstanding fetches should add an explicit
     /// <c>DrainAsync()</c>, not overload <c>Dispose</c>.
     /// </para>
+    ///
+    /// S51: migrated from Task&lt;TileResponse&gt; to UniTask&lt;TileResponse&gt;.
+    /// No Task.Run, no Task.FromResult, no interop extensions.
     /// </summary>
     public sealed class TileScheduler : IDisposable
     {
         private readonly IDataSource                                _source;
         private readonly TileCache                                  _cache;
-        private readonly Dictionary<TileId, Task<TileResponse>>     _inFlight;
+        // .Preserve() is called before storing so multiple callers can await the same UniTask struct.
+        private readonly Dictionary<TileId, UniTask<TileResponse>>  _inFlight;
         // Per-tile CTS — created on Request, cancelled on Release, disposed on completion.
         private readonly Dictionary<TileId, CancellationTokenSource> _cts;
         // Negative cache: absent tile id → wall-clock instant after which it may be re-fetched.
@@ -88,7 +93,7 @@ namespace MapRenderer.Core.Data
         {
             _source      = source ?? throw new ArgumentNullException(nameof(source));
             _cache       = cache  ?? throw new ArgumentNullException(nameof(cache));
-            _inFlight    = new Dictionary<TileId, Task<TileResponse>>();
+            _inFlight    = new Dictionary<TileId, UniTask<TileResponse>>();
             _cts         = new Dictionary<TileId, CancellationTokenSource>();
             _absentUntil = new Dictionary<TileId, DateTime>();
             _negativeTtl = negativeTtl ?? DefaultNegativeTtl;
@@ -108,7 +113,7 @@ namespace MapRenderer.Core.Data
         /// Requests a tile. Returns from cache immediately if present; otherwise deduplicates the
         /// in-flight request and fetches from the source exactly once, storing the result in cache.
         /// </summary>
-        public Task<TileResponse> Request(TileId id, CancellationToken ct = default)
+        public UniTask<TileResponse> Request(TileId id, CancellationToken ct = default)
         {
             if (_disposed) throw new ObjectDisposedException(nameof(TileScheduler));
 
@@ -116,19 +121,19 @@ namespace MapRenderer.Core.Data
             {
                 // Cache hit — fast path.
                 if (_cache.TryGet(id, out var cached))
-                    return Task.FromResult(cached);
+                    return UniTask.FromResult(cached);
 
                 // Negative-cache hit — a recent fetch reported this tile absent and the TTL has not
                 // expired. Return an absent response without re-issuing a fetch. (S06 gated item b.)
                 if (_absentUntil.TryGetValue(id, out var until))
                 {
                     if (_clock() < until)
-                        return Task.FromResult(TileResponse.Absent(_source.Encoding));
+                        return UniTask.FromResult(TileResponse.Absent(_source.Encoding));
                     // TTL expired — drop the stale entry and fall through to re-fetch.
                     _absentUntil.Remove(id);
                 }
 
-                // Already in-flight — share the existing task.
+                // Already in-flight — share the existing preserved UniTask.
                 if (_inFlight.TryGetValue(id, out var existing))
                     return existing;
 
@@ -137,12 +142,13 @@ namespace MapRenderer.Core.Data
                 var tileCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 _cts[id] = tileCts;
 
-                // Start the fetch. Invariant: _inFlight[id] is assigned BEFORE FetchAndCacheAsync
-                // can observe the Remove / Put path, because after the source fetch the async
-                // method hops to the ThreadPool (Task.Run) before touching _inFlight. This
-                // guarantees the assignment below completes before the Remove runs, even when the
-                // source returns an already-completed Task (sync-completion in-flight leak).
-                var fetchTask = FetchAndCacheAsync(id, tileCts);
+                // Start the fetch. .Preserve() allows multiple callers to await the same UniTask struct.
+                // Invariant: _inFlight[id] is assigned BEFORE FetchAndCacheAsync can observe the
+                // Remove / Put path, because after the source fetch the async method hops to the
+                // ThreadPool (UniTask.SwitchToThreadPool) before touching _inFlight. This guarantees
+                // the assignment below completes before the Remove runs, even when the source returns
+                // an already-completed UniTask (sync-completion in-flight leak guard).
+                var fetchTask = FetchAndCacheAsync(id, tileCts).Preserve();
                 _inFlight[id] = fetchTask;
                 return fetchTask;
             }
@@ -176,14 +182,14 @@ namespace MapRenderer.Core.Data
         // Internal
         // -----------------------------------------------------------------------------------------
 
-        private async Task<TileResponse> FetchAndCacheAsync(TileId id, CancellationTokenSource tileCts)
+        private async UniTask<TileResponse> FetchAndCacheAsync(TileId id, CancellationTokenSource tileCts)
         {
             TileResponse response = default;
             try
             {
                 // Fetch first — this increments any caller-side fetchCount immediately, preserving
                 // the existing test invariant (fetchCount == 1 right after Request returns).
-                response = await _source.FetchAsync(id, tileCts.Token).ConfigureAwait(false);
+                response = await _source.FetchAsync(id, tileCts.Token);
             }
             catch
             {
@@ -203,12 +209,10 @@ namespace MapRenderer.Core.Data
             // Sync-completion guard: force continuation onto the ThreadPool AFTER the fetch but
             // BEFORE the lock+cache work. This guarantees:
             // 1. _inFlight[id] = fetchTask has been assigned before the Remove runs (even when
-            //    the source returns an already-completed Task — Task.FromResult sync-completion).
-            // 2. No deadlock when the test calls GetAwaiter().GetResult() on the main thread:
-            //    Task.Yield() would capture UnitySynchronizationContext and schedule back onto
-            //    the main thread, which is already blocked — deadlock. Task.Run forces the
-            //    ThreadPool, so the continuation runs freely.
-            await Task.Run(() => { }).ConfigureAwait(false);
+            //    the source returns an already-completed UniTask — UniTask.FromResult sync-completion).
+            // 2. No deadlock when the test calls .GetAwaiter().GetResult() on the main thread:
+            //    UniTask.SwitchToThreadPool forces the ThreadPool, so the continuation runs freely.
+            await UniTask.SwitchToThreadPool();
 
             lock (_lock)
             {

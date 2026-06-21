@@ -1,0 +1,120 @@
+# Async architecture — UniTask, no `System.Threading.Tasks`
+
+**Status:** decided 2026-06-21. Drives stage **S51** (the migration) and constrains all later async work.
+Clean-room: our own architecture + standard async patterns; UniTask is a vendored MIT third-party library.
+
+## TL;DR (the decisions)
+
+1. **No `System.Threading.Tasks.Task` in shipped code** — Core *or* Unity. `Task` (and `Task.Run`) is banned.
+2. **UniTask is the async primitive**, not Unity's `Awaitable`. Reason below — it's the *only* option that keeps
+   `MapRenderer.Core` engine-free **and** lets the async code compile/run in the headless `dotnet test` path.
+3. **Threading lives in the Unity layer**; Core stays pure. `UnityEngine.Object` (`Mesh`, `GameObject`) is
+   created and destroyed **only on the main thread**.
+4. **Data source is dependency-inverted**: an engine-free `UniTask`-returning interface, a highly-efficient
+   `UnityWebRequest` production implementation in the Unity layer, and a trivial engine-free test/fixture impl.
+5. **The migration is one atomic stage** (S51), not an incremental split — see "Why one stage".
+
+## Problem
+
+- Raw `Task`/`Task.Run` in Unity is harmful: continuations don't marshal back to the main thread (you can
+  touch Unity APIs off-thread by accident), it allocates/pressures GC, the .NET threadpool isn't Unity-aware
+  (threads can outlive play-mode exit / domain reload; exceptions get swallowed), and there's no
+  destroy-driven cancellation.
+- But `MapRenderer.Core` is **engine-free by design** — its asmdef references only `Unity.Mathematics`, and
+  `Tools/core-tests` compiles the *real* Core `.cs` files with a 2-field math shim and **no UnityEngine**, for
+  a ~0.3 s headless test loop (`docs/` + `CLAUDE.md`). Today the Core data layer (`IDataSource.FetchAsync`,
+  `FileDataSource`, `HttpDataSource`, `TileScheduler`) is `Task`-based precisely because `Task` is BCL
+  (engine-free) and the obvious Unity replacement, `Awaitable`, is not.
+
+## Why UniTask, not `Awaitable`
+
+| | `UnityEngine.Awaitable` | **UniTask** |
+|---|---|---|
+| Lives in | `UnityEngine` only | `Cysharp.Threading.Tasks`; **NetCore NuGet build** exists (PlayerLoop-stripped subset, netstandard2.1/net6.0) |
+| Usable in engine-free Core + `dotnet test`? | **No** — pulls UnityEngine, breaks the headless test path | **Yes** — Core compiles against the NetCore build headless and the vendored Unity build in-editor (same `UniTask<T>` API) |
+| Allocation | pooled, but more than UniTask | allocation-free in typical use |
+| Cancellation | always throws on cancel | first-class `CancellationToken` + `SuppressCancellationThrow()` |
+| API breadth | small (no `WhenAll`/timing) | full (`WhenAll`/`WhenAny`, `RunOnThreadPool`, PlayerLoop timings) |
+| License | — | MIT |
+
+`Awaitable` *cannot* give us "zero-Task **and** engine-free Core" — it would force `Task` to stay in Core.
+UniTask is the only primitive that satisfies every constraint. (Sources: Cysharp/UniTask repo; issue #33
+"UniTask outside Unity"; issue #716 "engine-free `AsUniTask` CS0012"; Unity 6 Awaitable manual.)
+
+### Caveats baked into the plan
+- **Issue #716:** on UniTask 2.5.11+/Unity 2023.1+, the `Task↔UniTask` interop extensions share the
+  `Cysharp.Threading.Tasks` namespace and drag `UnityEngine.Awaitable` into overload resolution for engine-free
+  callers (`CS0012`). **Mitigation:** we remove `Task` entirely, so we never call the interop extensions.
+- **`SwitchToMainThread`/PlayerLoop timings are Unity-only** (stripped from NetCore). Core may use **only** the
+  PlayerLoop-independent subset (`UniTask<T>`, `RunOnThreadPool`/`SwitchToThreadPool`, `CancellationToken`,
+  `UniTaskCompletionSource`, `WhenAll`). Main-thread marshalling is a Unity-layer concern.
+
+## Target architecture
+
+```
+MapRenderer.Core (engine-free, headless-testable; UniTask via NetCore build)
+  IDataSource : UniTask<TileResponse> FetchAsync(TileId, CancellationToken)   ← Task-free contract
+  FileDataSource    : sync File.ReadAllBytes wrapped in UniTask.RunOnThreadPool (no Task)
+  InMemory/Fixture  : UniTask.FromResult / UniTaskCompletionSource (tests)
+  TileScheduler     : UniTask orchestration + cache
+  decode/tessellate/geometry: pure, sync
+
+MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Object lifecycle)
+  UnityWebRequestDataSource : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
+  MapView tessellation/consume : UniTask.RunOnThreadPool → SwitchToMainThread
+  Mesh/GameObject create + Object.Destroy : MAIN THREAD ONLY
+  cancellation : destroyCancellationToken
+```
+
+**Dependency inversion for HTTP** resolves the last Task-in-Core problem: `HttpClient.GetAsync` is inherently
+`Task` and there's no Task-free HTTP in engine-free BCL — so real HTTP moves to the Unity
+`UnityWebRequestDataSource`, while Core defines only the `UniTask` contract and ships a Task-free file/fixture
+impl. A test-only impl *may* fall back to `Task`/`HttpClient` as an explicit escape hatch, but we don't need it.
+
+## Disposal & cancellation contract (where these renderers leak)
+
+Two resource classes, two rules:
+- **IDisposable unmanaged (`NativeArray`, `Mesh.MeshDataArray`):** dispose may happen on any thread, but it
+  **must** happen on every exit path — wrap allocations in `try/finally`/`using` so a cancellation
+  (`OperationCanceledException`) still frees them.
+- **`UnityEngine.Object` (`Mesh`, `GameObject`, `Material`):** *not* IDisposable — needs `Object.Destroy`
+  (play) / `DestroyImmediate` (edit), **main thread only**. Therefore **never created off-thread**: async work
+  produces only disposable *data*; the Mesh/GameObject is created and destroyed exclusively on the main thread.
+
+**Cancellation ≠ cleanup.** A `CancellationToken` stops the *work*; allocated resources still need explicit
+disposal at all four exits: (1) **consumed** → dispose after main-thread upload; (2) **released-while-in-flight**
+→ the discard path must `Dispose()` the result, not drop it (today's generation check silently drops — safe
+only because the result is managed; it becomes a leak the moment `NativeArray`s land); (3) **cancelled mid-work**
+→ off-thread `try/finally` frees what was allocated; (4) **teardown** (`OnDestroy`) → await outstanding, then
+dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. With UniTask the await
+continuation resumes on the main thread — the single choke-point that owns the upload-vs-dispose branch.
+
+**Leak-guard test (teeth):** drive N tiles through load→release including the race (release a tile whose
+tessellation result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
+`NativeLeakDetection`/alloc-vs-dispose counts) and **zero orphaned `Mesh`** (created-vs-destroyed count).
+
+## Packaging
+
+- **Editor build:** vendor UniTask under `Assets/ThirdParty/UniTask/` (committed, version-pinned,
+  self-contained) + `THIRD-PARTY-NOTICES.txt` entry. **Not UPM** — UPM resolves into the gitignored
+  `Library/PackageCache` only when Unity runs, so a UPM dependency is unbuildable without Unity, defeating the
+  engine-free goal.
+- **`dotnet test` build:** UniTask **NetCore NuGet** `PackageReference` in `Tools/core-tests` (the Unity source
+  won't compile headless — the NetCore build is the PlayerLoop-stripped subset built for exactly this).
+- **Pin both distributions to the same UniTask version tag** (Cysharp releases UPM + NuGet in lockstep) so the
+  headless and editor builds can't drift on API.
+
+## Why one stage (no intermediate steps)
+
+The chain `IDataSource.FetchAsync → TileScheduler → MapView consume` is one connected contract. Migrating Core
+to `UniTask` while leaving the Unity consumer on `Task` would require a temporary `.AsUniTask()`/`.AsTask()`
+bridge at the seam — which is throwaway **and** is the exact API that trips the #716 engine-free `CS0012` trap.
+So the whole chain moves in one reviewed commit. (The developer may sequence internally — add the package, then
+migrate — but it lands atomically.)
+
+## Out of scope (separate, composes after)
+
+- **S48** — advanced `NativeArray`/`Mesh.MeshDataArray` upload API for fills. Different axis (upload
+  efficiency, not the async model); composes on the clean UniTask base. Its `NativeArray`s extend the
+  leak-guard above.
+- ECS/BRG batched rendering (S49); the deferred low-zoom frustum-precision decision.

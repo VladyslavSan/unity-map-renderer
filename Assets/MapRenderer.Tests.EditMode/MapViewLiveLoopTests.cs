@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools.Constraints;
@@ -75,10 +75,10 @@ namespace MapRenderer.Tests
             public int FetchCount;
             public FixtureSource(byte[] bytes) { _bytes = bytes; }
             public TileEncoding Encoding => TileEncoding.Mvt;
-            public Task<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
+            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
             {
                 Interlocked.Increment(ref FetchCount);
-                return Task.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
+                return UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
             }
             public void Dispose() { }
         }

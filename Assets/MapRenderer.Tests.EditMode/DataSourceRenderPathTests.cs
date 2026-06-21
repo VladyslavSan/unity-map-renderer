@@ -1,13 +1,16 @@
 // Unity EditMode only — uses UnityEngine.Application and MapRenderer.Unity.MeshBuilder.
 // NOT included in Tools/core-tests/core-tests.csproj.
+//
+// S51: HttpDataSource removed from Core (HTTP moved to UnityWebRequestDataSource in Unity layer).
+// This test now covers FileDataSource → render pipeline only; the HTTP → render path parity
+// is covered at integration level via MapViewLiveLoopTests (which uses FixtureSource, equivalent).
 
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Net;
-using System.Net.Http;
 using System.Security.Cryptography;
-using System.Threading.Tasks;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
@@ -18,27 +21,27 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
-using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Proves that both <see cref="FileDataSource"/> and <see cref="HttpDataSource"/> feed the
-    /// render path identically: same bytes → same decoded tile → same vertex/index CONTENT HASH
-    /// (not just count) from the full decode→assemble→earcut→MeshBuilder pipeline.
+    /// Proves that <see cref="FileDataSource"/> feeds the render path correctly: bytes round-trip
+    /// through the source and produce an identical vertex/index CONTENT HASH
+    /// (not just count) from the full decode→assemble→earcut→job pipeline.
     ///
     /// S04 upgrade: asserts buffer content hashes (SHA-256 over vertex positions and index arrays)
     /// rather than just counts. A count-only comparison is blind to divergent vertex positions —
     /// two pipelines could produce the same count with completely different geometry. Content hash
     /// guards against any regression in decode / assembly / triangulation across sources.
     ///
-    /// This subsumes the S03 "count-only" follow-up from docs/follow-ups.md (line 46-48).
+    /// This subsumes the earlier S03 "count-only" follow-up.
+    /// S51: HttpDataSource deleted from Core; HTTP is now UnityWebRequestDataSource (Unity layer).
     /// </summary>
     [TestFixture]
     public class DataSourceRenderPathTests
     {
         [Test]
-        public void FileSource_And_HttpSource_FeedRenderPath_ProduceSameVertexAndIndexContentHash()
+        public void FileSource_FeedsRenderPath_VertexAndIndexContentHashMatchesBaseline()
         {
             string fixturePath = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(fixturePath), $"Fixture missing: {fixturePath}");
@@ -54,7 +57,17 @@ namespace MapRenderer.Tests
             try
             {
                 using var fileSource = new FileDataSource(tempRoot);
-                var fileResp = fileSource.FetchAsync(new TileId(0, 0, 0)).GetAwaiter().GetResult();
+                // S51: FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
+                // synchronously, so calling .GetAwaiter().GetResult() immediately throws
+                // "Not yet completed". Spin-wait until the UniTask completes on the ThreadPool.
+                // Thread.Sleep(1) yields real CPU time so the ThreadPool can run the continuation.
+                var fetchTask = fileSource.FetchAsync(new TileId(0, 0, 0));
+                int spins = 0;
+                while (!fetchTask.Status.IsCompleted() && spins++ < 10000)
+                    Thread.Sleep(1);
+                Assert.IsTrue(fetchTask.Status.IsCompleted(),
+                    "FileDataSource.FetchAsync must complete within 10 seconds (10000 × 1ms).");
+                var fileResp = fetchTask.GetAwaiter().GetResult();
                 Assert.IsTrue(fileResp.HasData, "FileDataSource must return HasData=true");
                 fileBytes = fileResp.Bytes;
             }
@@ -64,35 +77,18 @@ namespace MapRenderer.Tests
                     Directory.Delete(tempRoot, recursive: true);
             }
 
-            // 2. Feed bytes via HttpDataSource (stub handler).
-            byte[] httpBytes;
-            using (var handler = new TestStubHttpHandler(HttpStatusCode.OK, fixtureBytes))
-            using (var client  = new HttpClient(handler))
-            using (var httpSource = new HttpDataSource(client, "http://fake/{z}/{x}/{y}.mvt"))
-            {
-                var httpResp = httpSource.FetchAsync(new TileId(0, 0, 0)).GetAwaiter().GetResult();
-                Assert.IsTrue(httpResp.HasData, "HttpDataSource must return HasData=true");
-                httpBytes = httpResp.Bytes;
-            }
-
-            // 3. Run the full render pipeline on each source's bytes; compare CONTENT HASHES.
+            // 2. Run the full render pipeline on each source's bytes; compare CONTENT HASHES.
             // Hash includes vertex positions and triangle indices (not just counts).
             var (baselineVH, baselineIH) = BuildContentHashes(fixtureBytes);
             var (fileVH,     fileIH)     = BuildContentHashes(fileBytes);
-            var (httpVH,     httpIH)     = BuildContentHashes(httpBytes);
 
             Assert.AreEqual(baselineVH, fileVH,
                 "FileDataSource render path vertex content hash must match the direct baseline. " +
                 "A mismatch means the file source returns different bytes or the decode path is non-deterministic.");
             Assert.AreEqual(baselineIH, fileIH,
                 "FileDataSource render path index content hash must match the direct baseline.");
-            Assert.AreEqual(baselineVH, httpVH,
-                "HttpDataSource render path vertex content hash must match the direct baseline. " +
-                "A mismatch means the HTTP source returns different bytes or decode is non-deterministic.");
-            Assert.AreEqual(baselineIH, httpIH,
-                "HttpDataSource render path index content hash must match the direct baseline.");
 
-            Debug.Log($"[DataSourceRenderPathTests] All three sources produce identical vertex+index content hashes: {baselineVH[..16]}...");
+            Debug.Log($"[DataSourceRenderPathTests] FileDataSource produces identical vertex+index content hashes: {baselineVH[..16]}...");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
@@ -180,29 +176,6 @@ namespace MapRenderer.Tests
             string vh = Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
             string ih = Convert.ToBase64String(sha256.ComputeHash(idxBytes.ToArray()));
             return (vh, ih);
-        }
-
-        // ── Stub HTTP handler (local, EditMode-only) ──────────────────────────────────────────
-
-        private sealed class TestStubHttpHandler : HttpMessageHandler
-        {
-            private readonly HttpStatusCode _status;
-            private readonly byte[]         _content;
-
-            public TestStubHttpHandler(HttpStatusCode status, byte[] content)
-            {
-                _status  = status;
-                _content = content;
-            }
-
-            protected override Task<HttpResponseMessage> SendAsync(
-                HttpRequestMessage request, System.Threading.CancellationToken ct)
-            {
-                var msg = new HttpResponseMessage(_status);
-                if (_content != null)
-                    msg.Content = new ByteArrayContent(_content);
-                return Task.FromResult(msg);
-            }
         }
     }
 }

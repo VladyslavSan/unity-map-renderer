@@ -12,7 +12,8 @@
         "Unity.Burst",
         "Unity.Jobs",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner"
+        "UnityEditor.TestRunner",
+        "UniTask"
     ],
     "includePlatforms": [
         "Editor"

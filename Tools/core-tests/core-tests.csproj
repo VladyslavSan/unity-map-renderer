@@ -24,6 +24,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="NUnit" Version="3.14.0" />
     <PackageReference Include="NUnit3TestAdapter" Version="4.6.0" />
+    <!-- S51: UniTask NetCore build (PlayerLoop-stripped subset) — same version as vendored Unity build.
+         Provides UniTask<T>, RunOnThreadPool, SwitchToThreadPool, UniTaskCompletionSource, WhenAll.
+         No .AsUniTask()/.AsTask() interop — avoids CS0012 trap (issue #716). -->
+    <PackageReference Include="UniTask" Version="2.5.10" />
   </ItemGroup>
 
   <ItemGroup>
@@ -59,7 +63,8 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSystem.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/FileDataSource.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/Data/HttpDataSource.cs" />
+    <!-- HttpDataSource removed from Core (S51): HttpClient is inherently Task-based.
+         HTTP moves to MapRenderer.Unity as UnityWebRequestDataSource. -->
     <Compile Include="../../Assets/MapRenderer.Core/Data/TileCache.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/TileScheduler.cs" />
 
