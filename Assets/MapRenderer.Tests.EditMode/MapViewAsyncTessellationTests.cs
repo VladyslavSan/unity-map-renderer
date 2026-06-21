@@ -208,12 +208,25 @@ namespace MapRenderer.Tests
 
             StyledFillTileBuilder.LayerMeshData data = task.GetAwaiter().GetResult();
 
-            Assert.AreNotEqual(mainThreadId, capturedThreadId,
-                "Tooth 2: BuildMeshData must run on a background ThreadPool thread (not the main thread). " +
-                $"Main thread id: {mainThreadId}, captured thread id: {capturedThreadId}.");
+            try
+            {
+                Assert.AreNotEqual(mainThreadId, capturedThreadId,
+                    "Tooth 2: BuildMeshData must run on a background ThreadPool thread (not the main thread). " +
+                    $"Main thread id: {mainThreadId}, captured thread id: {capturedThreadId}.");
 
-            Assert.IsNotNull(data.Features, "BuildMeshData must produce features");
-            Assert.Greater(data.Features.Count, 0, "BuildMeshData must produce at least one feature");
+                // S48: use IsCreated / VertexCount instead of the managed Features list
+                // (Features is retained for legacy compat; prefer stream-based assertions).
+                Assert.IsTrue(data.IsCreated, "BuildMeshData must produce geometry (IsCreated = true)");
+                Assert.Greater(data.VertexCount, 0, "BuildMeshData must produce at least one vertex");
+                // Also check legacy Features list is populated (backward compat).
+                Assert.IsNotNull(data.Features, "BuildMeshData must populate Features list");
+                Assert.Greater(data.Features.Count, 0, "BuildMeshData must produce at least one feature");
+            }
+            finally
+            {
+                // S48: must dispose NativeArrays produced by BuildMeshData.
+                data.Dispose();
+            }
         }
 
         // ── Tooth 2b: S46 profiler-marker harness — main-thread PmTessellate count == 0 ────────
@@ -597,9 +610,18 @@ namespace MapRenderer.Tests
                 features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
 
             // Split path: CPU data (off-main safe) + upload (main-thread).
-            var data  = StyledFillTileBuilder.BuildMeshData(
+            // S48: BuildMeshData returns NativeArrays; must Dispose after upload.
+            var data = StyledFillTileBuilder.BuildMeshData(
                 features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
-            Mesh splitMesh = StyledFillTileBuilder.UploadMesh(data);
+            Mesh splitMesh;
+            try
+            {
+                splitMesh = StyledFillTileBuilder.UploadMesh(data);
+            }
+            finally
+            {
+                data.Dispose(); // S48: dispose NativeArrays after upload
+            }
 
             Assert.IsNotNull(syncMesh,  "Sync BuildMesh must return a mesh for the fixture");
             Assert.IsNotNull(splitMesh, "Split BuildMeshData+UploadMesh must return a mesh for the fixture");

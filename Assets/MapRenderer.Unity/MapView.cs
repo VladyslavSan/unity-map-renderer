@@ -154,6 +154,17 @@ namespace MapRenderer.Unity
         // && !Built). Exposed for tests to prove the race actually occurred. See S51 tooth 5b.
         private int _releasedMidFlightCount;
 
+        // ── S48 mid-flight discard holding pen ────────────────────────────────────────────────
+        // When a tile is released mid-flight (ReleaseTile while TessellationTask is still running),
+        // the UniTask has already been captured but not yet produced a result. We cannot dispose the
+        // NativeArrays immediately — they don't exist yet. Instead we stash the UniTask here; each
+        // Tick drains completed tasks, disposing their NativeArray payloads. Teardown spins to
+        // completion and disposes everything remaining.
+        //
+        // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Teardown
+        // are all main-thread). No locking is required.
+        private readonly List<UniTask<TessellationResult>> _pendingDisposal = new List<UniTask<TessellationResult>>(8);
+
         /// <summary>
         /// Per-tile live record: the in-flight fetch request, the tessellation UniTask, and the built tile
         /// container GameObject.
@@ -424,6 +435,9 @@ namespace MapRenderer.Unity
 
             UpdateSceneOrigin(cam);
 
+            // S48: drain any completed mid-flight-discard tasks so their NativeArrays are freed.
+            DrainPendingDisposal();
+
             int pending = PumpPendingBuilds(cam);
 
             if (!_coverDirty && pending == 0)
@@ -655,63 +669,89 @@ namespace MapRenderer.Unity
 
             // .GetResult() is safe: IsCompleted was true before ConsumeTessellationTask was called.
             TessellationResult result = task.GetAwaiter().GetResult();
-            if (result.LayerData == null) return;
 
-            if (_layerRecords.Count == 0) return;
-
-            // Create the tile container. Child GameObjects are per fill layer.
-            var container = new GameObject($"Tile_{id}");
-            container.transform.SetParent(transform, worldPositionStays: false);
-            container.transform.localPosition =
-                (Vector3)(float3ToVector(FloatingOrigin.TileLocalToScene(lt.TileOriginMerc, _sceneOrigin)));
-
-            bool anyGeometry = false;
-            // S51 leak guard: track created Mesh assets so they can be explicitly destroyed on release.
-            // Unity does NOT destroy MeshFilter.sharedMesh when the owning GameObject is destroyed.
-            var createdMeshes = new System.Collections.Generic.List<Mesh>(4);
-
-            for (int li = 0; li < _layerRecords.Count && li < result.LayerData.Length; li++)
+            // S48 DECISIVE: dispose ALL LayerMeshData NativeArrays on EVERY exit path.
+            // UploadMesh copies data into the Mesh (SetVertexBufferData); the source NativeArrays
+            // are no longer needed after upload. The finally block disposes regardless of exceptions
+            // or early returns — guaranteeing no NativeArray leak for consumed results.
+            try
             {
-                FillLayerRecord rec = _layerRecords[li];
+                if (result.LayerData == null) return;
 
-                using var sMeshUpload = PmMeshUpload.Auto();
+                if (_layerRecords.Count == 0) return;
 
-                Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
-                if (mesh == null) continue;
+                // Create the tile container. Child GameObjects are per fill layer.
+                var container = new GameObject($"Tile_{id}");
+                container.transform.SetParent(transform, worldPositionStays: false);
+                container.transform.localPosition =
+                    (Vector3)(float3ToVector(FloatingOrigin.TileLocalToScene(lt.TileOriginMerc, _sceneOrigin)));
 
-                createdMeshes.Add(mesh); // S51: track for explicit destruction on release/teardown
+                bool anyGeometry = false;
+                // S51 leak guard: track created Mesh assets so they can be explicitly destroyed on release.
+                // Unity does NOT destroy MeshFilter.sharedMesh when the owning GameObject is destroyed.
+                var createdMeshes = new System.Collections.Generic.List<Mesh>(4);
 
-                var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
-                layerGo.transform.SetParent(container.transform, worldPositionStays: false);
-                layerGo.transform.localPosition = Vector3.zero;
+                for (int li = 0; li < _layerRecords.Count && li < result.LayerData.Length; li++)
+                {
+                    FillLayerRecord rec = _layerRecords[li];
 
-                var mf = layerGo.AddComponent<MeshFilter>();
-                mf.sharedMesh = mesh;
+                    using var sMeshUpload = PmMeshUpload.Auto();
 
-                var mr = layerGo.AddComponent<MeshRenderer>();
-                mr.sharedMaterial = rec.Material;
-                mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
-                mr.receiveShadows     = false;
+                    // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
+                    // It does NOT dispose data — we dispose in the finally block after the loop.
+                    Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
+                    if (mesh == null) continue;
 
-                anyGeometry = true;
+                    createdMeshes.Add(mesh); // S51: track for explicit destruction on release/teardown
+
+                    var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
+                    layerGo.transform.SetParent(container.transform, worldPositionStays: false);
+                    layerGo.transform.localPosition = Vector3.zero;
+
+                    var mf = layerGo.AddComponent<MeshFilter>();
+                    mf.sharedMesh = mesh;
+
+                    var mr = layerGo.AddComponent<MeshRenderer>();
+                    mr.sharedMaterial = rec.Material;
+                    mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    mr.receiveShadows     = false;
+
+                    anyGeometry = true;
+                }
+
+                if (!anyGeometry)
+                {
+                    if (Application.isPlaying) Destroy(container);
+                    else                       DestroyImmediate(container);
+                    return;
+                }
+
+                lt.Go     = container;
+                lt.Meshes = createdMeshes.Count > 0 ? createdMeshes.ToArray() : null;
             }
-
-            if (!anyGeometry)
+            finally
             {
-                if (Application.isPlaying) Destroy(container);
-                else                       DestroyImmediate(container);
-                return;
+                // S48 DECISIVE: dispose all LayerMeshData NativeArrays after upload (or on any exit).
+                // This covers: normal consume, early return (LayerData null, no layers, no geometry).
+                // Dispose() is idempotent (IsCreated guard) so double-dispose is safe.
+                if (result.LayerData != null)
+                {
+                    for (int li = 0; li < result.LayerData.Length; li++)
+                        result.LayerData[li].Dispose();
+                }
             }
-
-            lt.Go     = container;
-            lt.Meshes = createdMeshes.Count > 0 ? createdMeshes.ToArray() : null;
         }
 
         /// <summary>
         /// Releases a tile: scheduler release + destroy its container GameObject.
-        /// Does NOT wait for in-flight work (non-blocking). Mid-flight tessellation is discarded
-        /// automatically because ReleaseTile removes the tile from _loaded immediately — PumpPendingBuilds
-        /// and DrainTessellation iterate _loaded and will never visit a removed tile.
+        /// Does NOT wait for in-flight work (non-blocking). Mid-flight tessellation is removed
+        /// from _loaded immediately so PumpPendingBuilds/DrainTessellation never visit it again.
+        ///
+        /// S48 holding pen: when a tessellation UniTask is still in-flight at release time, its
+        /// NativeArray payload has not yet been produced (it will be allocated on the ThreadPool
+        /// after this method returns). We stash the UniTask in <see cref="_pendingDisposal"/>;
+        /// <see cref="DrainPendingDisposal"/> polls it each Tick and disposes the payload when the
+        /// task completes. This guarantees no NativeArray leak for mid-flight-released tiles.
         /// </summary>
         private void ReleaseTile(TileId id)
         {
@@ -720,7 +760,15 @@ namespace MapRenderer.Unity
                 // Track tiles released mid-flight (tessellation in-flight but not yet consumed).
                 // This counter is read by S51 tooth 5b to prove the race genuinely occurred.
                 if (lt.HasTessellationTask && !lt.Built)
+                {
                     _releasedMidFlightCount++;
+
+                    // S48 DECISIVE: stash the in-flight UniTask in the holding pen.
+                    // The tessellation may still be running on the ThreadPool — its NativeArrays
+                    // don't exist yet. DrainPendingDisposal() polls this task on subsequent Ticks
+                    // and disposes the payload when it completes.
+                    _pendingDisposal.Add(lt.TessellationTask);
+                }
 
                 // S51 leak guard: destroy tracked Mesh assets explicitly.
                 // Unity does NOT destroy MeshFilter.sharedMesh when a GameObject is destroyed.
@@ -735,6 +783,40 @@ namespace MapRenderer.Unity
                 _loaded.Remove(id);
             }
             _scheduler.Release(id);
+        }
+
+        /// <summary>
+        /// S48: Drains completed tasks from the mid-flight-discard holding pen, disposing their
+        /// NativeArray payloads. Called once per Tick and in Teardown.
+        ///
+        /// Tasks not yet complete remain in the list for the next drain. This is a non-blocking
+        /// poll — no spinning, no blocking.
+        /// </summary>
+        private void DrainPendingDisposal()
+        {
+            if (_pendingDisposal.Count == 0) return;
+
+            // Iterate backwards so we can remove in-place without index shifting.
+            for (int i = _pendingDisposal.Count - 1; i >= 0; i--)
+            {
+                var task = _pendingDisposal[i];
+                if (!task.Status.IsCompleted())
+                    continue; // still in-flight; check again next Tick
+
+                // Task completed (succeeded, faulted, or cancelled).
+                if (task.Status == UniTaskStatus.Succeeded)
+                {
+                    TessellationResult result = task.GetAwaiter().GetResult();
+                    if (result.LayerData != null)
+                    {
+                        for (int li = 0; li < result.LayerData.Length; li++)
+                            result.LayerData[li].Dispose();
+                    }
+                }
+                // Faulted/cancelled: no LayerData produced, nothing to dispose.
+
+                _pendingDisposal.RemoveAt(i);
+            }
         }
 
         /// <summary>
@@ -946,10 +1028,14 @@ namespace MapRenderer.Unity
         {
             if (_scheduler == null) return; // already torn down (idempotent guard)
 
-            // S51: drain outstanding tessellation UniTasks before tearing down.
+            // S51/S48: drain outstanding tessellation UniTasks before tearing down.
             // Safe spin: tessellation UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
             // so IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning
             // here on the main thread is therefore deadlock-free.
+            //
+            // S48: after spinning, dispose the NativeArray payload — we're tearing down and must
+            // not leak. (These are tiles still in _loaded; mid-flight-released tiles are in
+            // _pendingDisposal, drained separately below.)
             foreach (var kv in _loaded)
             {
                 if (kv.Value.HasTessellationTask)
@@ -959,9 +1045,39 @@ namespace MapRenderer.Unity
                     int spins = 0;
                     while (!tessTask.Status.IsCompleted() && spins++ < 10000)
                         Thread.Sleep(1);
-                    // Result is intentionally discarded — we're tearing down.
+
+                    // S48: dispose the produced NativeArrays (or no-op if faulted/cancelled).
+                    if (tessTask.Status == UniTaskStatus.Succeeded)
+                    {
+                        TessellationResult result = tessTask.GetAwaiter().GetResult();
+                        if (result.LayerData != null)
+                        {
+                            for (int li = 0; li < result.LayerData.Length; li++)
+                                result.LayerData[li].Dispose();
+                        }
+                    }
                 }
             }
+
+            // S48: drain the mid-flight-discard holding pen — spin to completion, then dispose.
+            for (int i = 0; i < _pendingDisposal.Count; i++)
+            {
+                var task = _pendingDisposal[i];
+                int spins = 0;
+                while (!task.Status.IsCompleted() && spins++ < 10000)
+                    Thread.Sleep(1);
+
+                if (task.Status == UniTaskStatus.Succeeded)
+                {
+                    TessellationResult result = task.GetAwaiter().GetResult();
+                    if (result.LayerData != null)
+                    {
+                        for (int li = 0; li < result.LayerData.Length; li++)
+                            result.LayerData[li].Dispose();
+                    }
+                }
+            }
+            _pendingDisposal.Clear();
 
             // Destroy sharedMesh assets for each tile container, then destroy the container.
             //

@@ -3,16 +3,20 @@
 // Drives load→release of N tiles including the race (release a tile whose tessellation
 // completed but wasn't consumed) and asserts zero orphaned Mesh objects.
 //
-// TessellationResult holds only managed arrays (no NativeArray today), so NativeArray
-// leak detection is vacuously zero. The meaningful assertion is zero orphaned Mesh:
-//   - count Mesh objects before + after, assert delta == 0.
-//   - A tile released mid-flight MUST NOT leave a Mesh behind (ReleaseTile removes the tile from
-//     _loaded; PumpPendingBuilds iterates _loaded, so the released tile is absent from the next
-//     snapshot and ConsumeTessellationTask is never reached for it — no Mesh created).
-//   - A tile built then released MUST have its Mesh destroyed.
+// S48 extension: TessellationResult now holds NativeArray-backed LayerMeshData payloads.
+// The NativeArray leak guard is NON-VACUOUS:
+//   - StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount tracks live allocations.
+//   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
+//   - A deliberately-leaked NativeArray MUST produce a non-zero counter (positive control).
 //
-// This test is Unity-only (uses MonoBehaviour, Object.FindObjectsOfTypeAll, Mesh creation).
-// It does NOT compile in the headless dotnet-test path (excluded from core-tests.csproj).
+// Meaningful assertions:
+//   - Mesh delta: zero orphaned Mesh after load+release (carried over from S51).
+//   - NativeArray balance: DebugLiveAllocCount == 0 after every load+release cycle.
+//   - Positive control: a deliberately-leaked LayerMeshData produces DebugLiveAllocCount > 0.
+//   - Race path: mid-flight-released tile's NativeArrays are disposed via _pendingDisposal.
+//
+// This test is Unity-only (uses MonoBehaviour, Object.FindObjectsOfTypeAll, Mesh creation,
+// NativeArray). It does NOT compile in the headless dotnet-test path (excluded from core-tests.csproj).
 
 using System.Collections.Generic;
 using System.IO;
@@ -20,8 +24,11 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Mathematics;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
+using MapRenderer.Core.Filters;
+using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
@@ -263,6 +270,226 @@ namespace MapRenderer.Tests
                     "ReleaseTile must remove evicted tiles from _loaded so PumpPendingBuilds excludes them " +
                     "from the next iteration snapshot — ConsumeTessellationTask must never be called for " +
                     "them. OnDestroy must destroy all remaining tile Meshes. Zero orphaned Mesh required.");
+            }
+            finally
+            {
+                if (go != null)
+                {
+                    view.Teardown();
+                    Object.DestroyImmediate(go);
+                }
+            }
+        }
+
+        // ── Tooth 5-NativeArray-Positive: deliberate leak produces non-zero counter ─────────────
+
+        /// <summary>
+        /// S48 Non-vacuous positive control: deliberately allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
+        /// (backed by NativeArrays) via <see cref="StyledFillTileBuilder.BuildMeshData"/> and do NOT
+        /// dispose it. Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/> is
+        /// non-zero, proving the counter has teeth — a deliberately-leaked NativeArray is detected.
+        ///
+        /// The payload is disposed at test end so it does not pollute subsequent tests.
+        /// </summary>
+        [Test]
+        public void NativeArray_PositiveControl_LeakedAlloc_CounterNonZero()
+        {
+            byte[] bytes    = FixtureBytes();
+            var mvtTile     = MvtDecoder.Decode(bytes);
+            var style       = MinimalStyle();
+            var fillLayer   = style.Layers[0];
+            var paint       = new FillPaint(fillLayer);
+            var features    = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
+            var mvtLayer    = SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+
+            Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer");
+            Assert.Greater(features.Count, 0, "Fixture must produce at least one feature");
+
+            var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+            var tileOrigin = new double2(bMin.x, bMin.y);
+
+            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+
+            // Allocate — deliberately do NOT dispose.
+            var leaked = StyledFillTileBuilder.BuildMeshData(
+                features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
+
+            Assert.IsTrue(leaked.IsCreated,
+                "Positive control requires IsCreated=true (NativeArrays allocated). " +
+                "If no geometry was produced the counter test would be vacuous.");
+
+            long countAfterAlloc = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+
+            // Assert the counter reflects the un-Disposed allocation.
+            Assert.Greater(countAfterAlloc, countBefore,
+                $"S48 positive control FAILED: DebugLiveAllocCount did not increase after BuildMeshData " +
+                $"(before={countBefore}, after={countAfterAlloc}). The leak guard is vacuous — a " +
+                "deliberately-leaked NativeArray must be detected (counter must be non-zero relative to baseline). " +
+                "Check that Interlocked.Increment is called in BuildMeshData after NativeArray allocation.");
+
+            // Clean up: dispose the leaked payload so it doesn't affect subsequent tests.
+            leaked.Dispose();
+
+            long countAfterDispose = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            Assert.AreEqual(countBefore, countAfterDispose,
+                $"After explicit Dispose, counter must return to baseline " +
+                $"(baseline={countBefore}, after dispose={countAfterDispose}).");
+        }
+
+        // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
+
+        /// <summary>
+        /// S48 DECISIVE race test: a tile released mid-flight (tessellation in-flight, NativeArrays
+        /// not yet produced at release time) must have its NativeArrays disposed via the
+        /// <c>_pendingDisposal</c> holding pen after the tessellation task completes.
+        ///
+        /// Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/> returns to
+        /// baseline after the full race cycle, proving no NativeArray leak.
+        /// </summary>
+        [Test]
+        public void NativeArray_ReleaseMidFlight_NoLeakedNativeArray()
+        {
+            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+
+            var src   = new FixtureSource(FixtureBytes());
+            var go    = new GameObject("MapView_NativeArrayLeak_Race");
+            var view  = go.AddComponent<MapView>();
+            var style = MinimalStyle();
+            view.MinZoom = 5; view.MaxZoom = 5;
+            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
+            // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
+            view.MaxBuildsPerTick = 0;
+
+            try
+            {
+                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+
+                // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
+                view.Tick();
+                Thread.Sleep(5);
+                // Second Tick: fetch complete → tessellation tasks are kicked (Phase-1). Not consumed.
+                view.Tick();
+
+                // Pan far east — evicting the original tiles while tessellation is in-flight.
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170 }, CameraAnimation.Instant);
+                view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
+
+                // Positive control: at least one tile must have been released mid-flight.
+                Assert.Greater(view.ReleasedMidFlightCount, 0,
+                    "Positive control: at least one tile must have been released while its tessellation " +
+                    "was still in-flight. If this is 0, the race did not occur and the NativeArray balance " +
+                    "assertion would be vacuously true.");
+
+                // ── Non-vacuous holding-pen assertion (DECISIVE — acceptance tooth #4) ────────────
+                // Spin on the ThreadPool until the stashed tessellation task completes and allocates
+                // its NativeArray payload (Interlocked.Increment inside BuildMeshData, line 318 of
+                // StyledFillTileBuilder). While the payload sits undisposed in _pendingDisposal,
+                // DebugLiveAllocCount must be > countBefore — proving a real allocation passed
+                // through the holding pen.
+                //
+                // CRITICAL: do NOT call Tick() here. Tick() calls DrainPendingDisposal() which
+                // would dispose the payload and decrement the counter before we can observe it —
+                // defeating the purpose of this assertion.
+                //
+                // The spin mirrors the DrainTessellation / Teardown patterns (Thread.Sleep(1) to
+                // yield real CPU time to the ThreadPool; bounded by spins < 10000 to avoid infinite
+                // wait on unexpected failure).
+                long held = countBefore;
+                {
+                    int spins = 0;
+                    while ((held = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount) <= countBefore
+                           && spins++ < 10000)
+                        Thread.Sleep(1);
+                }
+
+                Assert.Greater(held, countBefore,
+                    $"Non-vacuous leak guard (DECISIVE): DebugLiveAllocCount must be > countBefore " +
+                    $"(baseline={countBefore}, held={held}) while the stashed tessellation payload sits " +
+                    "undisposed in _pendingDisposal. This proves a real NativeArray allocation passed " +
+                    "through the holding pen — deleting _pendingDisposal.Add in ReleaseTile or the " +
+                    "disposal in DrainPendingDisposal would not make this assertion vacuous. " +
+                    "If this fails with held==countBefore, the z5 fixture produced no geometry " +
+                    "(confirm NativeArray_PositiveControl_LeakedAlloc_CounterNonZero still passes).");
+
+                // Restore MaxBuildsPerTick so the new cover can settle.
+                view.MaxBuildsPerTick = 64;
+
+                // Let the ThreadPool tessellation tasks complete, then pump until the new cover settles.
+                // DrainPendingDisposal() is called inside each Tick — released tiles' NativeArrays are
+                // disposed as their tasks complete.
+                PumpUntilSettled(view, maxFrames: 500);
+
+                // Final drain: ensure all pending disposal tasks have been processed.
+                // (Teardown() spins them to completion; calling it here before asserting the counter.)
+                view.Teardown();
+                Object.DestroyImmediate(go);
+                go = null;
+
+                long countAfter = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                Assert.AreEqual(countBefore, countAfter,
+                    $"S48 DECISIVE: DebugLiveAllocCount must return to baseline after load+mid-flight-release cycle. " +
+                    $"Baseline: {countBefore}, After cycle: {countAfter}. " +
+                    $"Delta of {countAfter - countBefore} means {countAfter - countBefore} LayerMeshData payload(s) " +
+                    "were allocated but not Disposed. Check: (a) _pendingDisposal holding pen in ReleaseTile, " +
+                    "(b) DrainPendingDisposal() called in Tick, (c) Teardown() spins+disposes pending tasks.");
+            }
+            finally
+            {
+                if (go != null)
+                {
+                    view.Teardown();
+                    Object.DestroyImmediate(go);
+                }
+            }
+        }
+
+        // ── Tooth 5-NativeArray-Consume: normal consume disposes NativeArrays ────────────────
+
+        /// <summary>
+        /// S48 consume-path NativeArray balance: build tiles to completion (normal consume path),
+        /// then teardown. Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/>
+        /// returns to baseline after the full load+destroy cycle.
+        /// </summary>
+        [Test]
+        public void NativeArray_BuildAndRelease_NoLeakedNativeArray()
+        {
+            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+
+            var src   = new FixtureSource(FixtureBytes());
+            var go    = new GameObject("MapView_NativeArrayLeak_Consume");
+            var view  = go.AddComponent<MapView>();
+            var style = MinimalStyle();
+            view.MinZoom = 0; view.MaxZoom = 0;
+            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MaxBuildsPerTick = 64;
+
+            try
+            {
+                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                PumpUntilSettled(view);
+
+                Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing NativeArray balance.");
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                    "z0/0/0 tile must be built (real load required for meaningful leak test).");
+
+                // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
+                // should have been disposed (in ConsumeTessellationTask's finally block after UploadMesh).
+                // Counter must already be at baseline (consume-path disposes immediately after upload).
+                long countAfterConsume = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                Assert.AreEqual(countBefore, countAfterConsume,
+                    $"After normal consume (ConsumeTessellationTask), NativeArray counter must equal baseline. " +
+                    $"Baseline={countBefore}, After consume={countAfterConsume}. " +
+                    "ConsumeTessellationTask must dispose all LayerMeshData in its finally block.");
+
+                view.Teardown();
+                Object.DestroyImmediate(go);
+                go = null;
+
+                long countAfterTeardown = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                Assert.AreEqual(countBefore, countAfterTeardown,
+                    $"After Teardown, NativeArray counter must equal baseline. " +
+                    $"Baseline={countBefore}, After teardown={countAfterTeardown}.");
             }
             finally
             {
