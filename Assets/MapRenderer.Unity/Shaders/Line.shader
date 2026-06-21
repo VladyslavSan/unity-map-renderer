@@ -104,6 +104,22 @@ Shader "MapRenderer/Line"
         _WidthIsPixels  ("Width In Pixels", Float)    = 0.0
         _MetersPerPixel ("Meters Per Pixel", Float)   = 1.0
         _Blur           ("Blur (AA feather)", Range(0, 4)) = 1.0
+
+        // S14: line-gap-width — hollow/cased line. 0 = solid (default). Units = pixels (same as _Width).
+        _GapWidth       ("Gap Width (px)", Float)     = 0.0
+        // S14: line-translate — pixel offset for the rendered ribbon.
+        _LineTranslate  ("Line Translate (px xy)", Vector) = (0, 0, 0, 0)
+        // S14: line-translate-anchor — 0 = map (world-space), 1 = viewport (screen-space).
+        _LineTranslateAnchor ("Translate Anchor", Float) = 0.0
+        // S14: line-pattern hook — 0 = solid color fallback, 1 = pattern (real sampling deferred to S17).
+        _LinePattern    ("Line Pattern (hook)", Float) = 0.0
+        // S43: line-dasharray — on/off lengths in line-width units (up to 4 values packed into a Vector).
+        // _DashCount = 0 → solid identity (no dashing). _DashCount = 2 → [on, off] pair, etc.
+        _DashArray      ("Dash Array (4 on/off, width units)", Vector) = (0,0,0,0)
+        _DashCount      ("Dash Entry Count", Float) = 0.0
+        // S44: line-offset — perpendicular band-center shift in pixels (same units as _Width).
+        // 0 = no shift (default). Positive = left of travel direction.
+        _LineOffset     ("Line Offset (px)", Float) = 0.0
     }
 
     SubShader

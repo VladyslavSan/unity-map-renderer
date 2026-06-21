@@ -36,7 +36,6 @@ namespace MapRenderer.Tests.Visual
         private const float CamY    = 200f;
 
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
-        private static readonly byte  BgR8    = 26, BgG8 = 28, BgB8 = 38;
 
         // Saturated layer colours whose dominant channel is unambiguous regardless of lighting intensity.
         private static readonly Color FillBottom = new Color(0.10f, 0.85f, 0.10f, 1f); // GREEN  (G dominates)

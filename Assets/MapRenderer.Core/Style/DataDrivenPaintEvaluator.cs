@@ -53,7 +53,7 @@ namespace MapRenderer.Core.Style
         public Color EvaluateColor(double zoom, IFeature feature)
         {
             var ctx = new EvaluationContext(zoom, feature);
-            return _expr.Evaluate(ctx).AsColor();
+            return _expr.Evaluate(ctx).AsColorCoerced();
         }
 
         // ---- number evaluation -------------------------------------------------------------------

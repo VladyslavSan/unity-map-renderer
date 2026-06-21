@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Mathematics;
 using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity
@@ -71,13 +72,26 @@ namespace MapRenderer.Unity
         /// <para>Converts Core <see cref="Double3"/> vectors to Unity <c>Vector3</c> and applies
         /// <c>Quaternion.LookRotation(fwd, up)</c>. Sets perspective, FOV, and clip planes.</para>
         /// </summary>
-        public void Sync(CameraSystem sys)
+        public void Sync(CameraSystem sys) => Sync(sys, default);
+
+        /// <summary>
+        /// Camera-relative sync: positions the camera at the orbit pose PLUS the look-at's render-space
+        /// ground position <paramref name="lookAtRenderOffset"/> = (lookAtMercator − sceneOrigin), mapped
+        /// east→+X / north→+Z. This is what makes panning work: the look-at moves over the (stable,
+        /// scene-origin-relative) tile field, so the camera tracks it every frame instead of being pinned
+        /// to the render origin. It is rebase-invariant — camera-minus-tile = orbitOffset + lookAtMerc −
+        /// tileMerc carries no sceneOrigin term, so a scene-origin rebase shifts camera and tiles together
+        /// with no visible snap. Offset defaults to zero (look-at at the render origin) for callers/tests
+        /// that don't supply a scene origin.
+        /// </summary>
+        public void Sync(CameraSystem sys, double2 lookAtRenderOffset)
         {
             if (_camera == null || sys == null) return;
             SyncFromProperties(sys.Current,
                                (double)ReferenceViewportHeightPx,
                                (double)VerticalFovDeg,
-                               (double)AltitudeMultiplier);
+                               (double)AltitudeMultiplier,
+                               lookAtRenderOffset);
         }
 
         /// <summary>
@@ -87,7 +101,8 @@ namespace MapRenderer.Unity
         public void SyncFromProperties(CameraProperties props,
                                        double viewportHeightPx,
                                        double fovDeg,
-                                       double altMultiplier = 1.0)
+                                       double altMultiplier = 1.0,
+                                       double2 lookAtRenderOffset = default)
         {
             if (_camera == null) return;
 
@@ -106,7 +121,12 @@ namespace MapRenderer.Unity
             _camera.orthographic = false;
             _camera.fieldOfView  = (float)fovDeg;
 
-            _camera.transform.position = new Vector3((float)pos.X, (float)pos.Y, (float)pos.Z);
+            // Camera-relative: add the look-at's render-space ground position (east→+X, north→+Z) so the
+            // camera tracks the panned look-at over the stable tile field. Zero offset = look-at at origin.
+            _camera.transform.position = new Vector3(
+                (float)(pos.X + lookAtRenderOffset.x),
+                (float)pos.Y,
+                (float)(pos.Z + lookAtRenderOffset.y));
 
             // LookRotation(forward, up): forward = direction the camera looks (toward look-at).
             // Core already orthogonalized up vs. fwd (Gram-Schmidt) so this is always valid.

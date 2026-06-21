@@ -59,7 +59,9 @@ namespace MapRenderer.Core.Style
                     _constantNumber = v.AsNumber();
                 else if (v.Type == ValueType.Color)
                     _constantColor = v.AsColor();
-                // Null/string/bool: caller will evaluate and handle as needed.
+                else if (v.Type == ValueType.String && Coercions.TryToColor(v, out Color cc))
+                    _constantColor = cc; // constant CSS color string (hex/rgb/hsl/named)
+                // Null/non-color-string/bool: caller will evaluate and handle as needed.
             }
         }
 
@@ -92,7 +94,7 @@ namespace MapRenderer.Core.Style
         public Color EvaluateColor(double zoom)
         {
             if (_isConstant) return _constantColor;
-            return _expr.Evaluate(new EvaluationContext(zoom, null)).AsColor();
+            return _expr.Evaluate(new EvaluationContext(zoom, null)).AsColorCoerced();
         }
 
         // ---- guard -------------------------------------------------------------------------------

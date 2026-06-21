@@ -32,6 +32,18 @@ namespace MapRenderer.Core.View.Camera
         // ── Altitude ↔ Zoom ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
+        /// Web-Mercator ground resolution: metres per pixel at a given fractional zoom level.
+        ///
+        /// <para>Formula (S42 D2 / S43 D2): metersPerPixel = EarthCircumference / (TilePixelSize × 2^zoom).
+        /// This is the single source of truth for the px→m conversion used everywhere (altitude
+        /// calculation, line-width scaling, zoom-stability tests).</para>
+        /// </summary>
+        /// <param name="zoom">Fractional zoom level.</param>
+        /// <returns>Ground resolution in metres per pixel.</returns>
+        public static double MetersPerPixel(double zoom)
+            => EarthCircumferenceMetres / (TilePixelSize * Math.Pow(2.0, zoom));
+
+        /// <summary>
         /// Computes camera altitude in render-space metres from a fractional zoom level (S42 D2).
         ///
         /// <para>Exact same formula as the retired <c>MapController.AltitudeForZoom</c>; pinned by
@@ -43,7 +55,7 @@ namespace MapRenderer.Core.View.Camera
         /// <returns>Camera altitude in metres.</returns>
         public static double AltitudeForZoom(double zoom, double viewportHeightPx, double verticalFovDeg)
         {
-            double metersPerPixel = EarthCircumferenceMetres / (TilePixelSize * Math.Pow(2.0, zoom));
+            double metersPerPixel = MetersPerPixel(zoom);
             double halfFovRad     = verticalFovDeg * 0.5 * Math.PI / 180.0;
             return (viewportHeightPx * metersPerPixel) / (2.0 * Math.Tan(halfFovRad));
         }

@@ -81,6 +81,22 @@ namespace MapRenderer.Core.Expressions
             return _color;
         }
 
+        /// <summary>
+        /// Color accessor for color-typed contexts (paint colors, interpolate/match/step color outputs),
+        /// applying the spec's <c>to-color</c> coercion: a Color passes through; a CSS color <b>string</b>
+        /// (hex / rgb(a) / hsl(a) / named) is parsed. Production styles (e.g. OpenFreeMap "liberty") emit
+        /// color expressions whose branch/stop literals are strings, so strict <see cref="AsColor"/> there
+        /// throws "Expected color but found string". Use this at color seams; keep <see cref="AsColor"/>
+        /// for strict type checks.
+        /// </summary>
+        public Color AsColorCoerced()
+        {
+            if (Type == ValueType.Color) return _color;
+            if (Coercions.TryToColor(this, out Color c)) return c;
+            throw new ExpressionEvaluationException(
+                $"Expected color (or a color string) but found {ValueTypes.TypeOfName(Type)}.");
+        }
+
         public IReadOnlyList<Value> AsArray()
         {
             if (Type != ValueType.Array)

@@ -136,8 +136,12 @@ namespace MapRenderer.Core.Expressions.Ops
             if (a.Type == ValueType.Number && b.Type == ValueType.Number)
                 return Value.Number(a.AsNumber() + (b.AsNumber() - a.AsNumber()) * t);
 
-            if (a.Type == ValueType.Color && b.Type == ValueType.Color)
-                return LerpColor(a.AsColor(), b.AsColor(), t);
+            // Color interpolation — accept Color stops OR CSS color strings (production styles like
+            // "liberty" use string color stops in interpolate). Number is handled above, so a numeric
+            // string won't reach here; ColorParser only matches real color syntax, so arbitrary strings
+            // won't be mis-coerced.
+            if (Coercions.TryToColor(a, out Color ca) && Coercions.TryToColor(b, out Color cb))
+                return LerpColor(ca, cb, t);
 
             if (a.Type == ValueType.Array && b.Type == ValueType.Array)
             {

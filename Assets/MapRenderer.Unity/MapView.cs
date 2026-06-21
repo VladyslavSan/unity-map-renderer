@@ -58,8 +58,9 @@ namespace MapRenderer.Unity
     ///   UniTask and MeshData allocations happen only on the transient fetch-completion edge, never in
     ///   the steady-state Tick path.
     ///
-    /// Lines deferred to S14: line style layers are silently skipped here; they will be added in S14.
-    /// A map rendered by this stage shows fills only — roads, coastlines, borders are not drawn.
+    /// S14: line style layers are now rendered via the same per-layer styled path as fills.
+    /// One <see cref="LineLayerRecord"/> per line layer, using the <c>MapRenderer/Line</c> shader
+    /// and <see cref="StyledLineTileBuilder"/> for tessellation.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -107,16 +108,34 @@ namespace MapRenderer.Unity
             public ZoomStyleApplier Applier;
         }
 
+        /// <summary>One record per line style layer in declared order.</summary>
+        private struct LineLayerRecord
+        {
+            /// <summary>The parsed line paint for this layer.</summary>
+            public LinePaint Paint;
+
+            /// <summary>The style layer (needed by FeatureSelector for source-layer + filter).</summary>
+            public StyleLayer StyleLayer;
+
+            /// <summary>Shared Material instance. renderQueue = TransparentQueue + layerIndex.</summary>
+            public Material Material;
+
+            /// <summary>Applies zoom-dependent paint uniforms to Material each frame.</summary>
+            public ZoomStyleApplier Applier;
+        }
+
         // ── S47 tessellation payload (S51: Task → UniTask) ────────────────────────────────────
 
         /// <summary>
         /// Per-layer mesh data produced by one tile's background tessellation.
-        /// One element per fill layer (may be empty if no geometry for that layer).
+        /// One element per fill layer, one element per line layer.
         /// </summary>
         private struct TessellationResult
         {
-            /// <summary>Per-layer CPU mesh data (index matches _layerRecords).</summary>
+            /// <summary>Per-fill-layer CPU mesh data (index matches _layerRecords).</summary>
             public StyledFillTileBuilder.LayerMeshData[] LayerData;
+            /// <summary>S14: per-line-layer CPU mesh data (index matches _lineRecords).</summary>
+            public StyledLineTileBuilder.LayerMeshData[] LineLayerData;
         }
 
         // ── Live state ─────────────────────────────────────────────────────────────────────────────────
@@ -131,7 +150,9 @@ namespace MapRenderer.Unity
         private StyleDocument _style;
 
         // Per-fill-layer records (built once at Initialise).
-        private readonly List<FillLayerRecord> _layerRecords = new List<FillLayerRecord>(16);
+        private readonly List<FillLayerRecord> _layerRecords     = new List<FillLayerRecord>(16);
+        // S14: per-line-layer records (built once at Initialise).
+        private readonly List<LineLayerRecord> _lineRecords      = new List<LineLayerRecord>(16);
 
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId>                   _cover     = new List<TileId>(64);
@@ -247,6 +268,9 @@ namespace MapRenderer.Unity
 
         /// <summary>Number of fill style layers in the loaded style. Exposed for tests.</summary>
         public int FillLayerCount => _layerRecords.Count;
+
+        /// <summary>Number of line style layers in the loaded style. Exposed for tests (S14).</summary>
+        public int LineLayerCount => _lineRecords.Count;
 
         /// <summary>
         /// Number of tiles released while their tessellation was still in-flight (HasTessellationTask
@@ -397,7 +421,18 @@ namespace MapRenderer.Unity
             {
                 using var sCamAdv = PmCameraAdvance.Auto();
                 _cameraSystem.Advance(dt);
-                _mapCamera?.Sync(_cameraSystem);
+
+                // Refresh the scene origin BEFORE positioning the camera so camera and tiles share one
+                // origin this frame (no rebase-frame glitch). Then sync the camera CAMERA-RELATIVE: pass
+                // the look-at's render-space ground offset (lookAtMercator − sceneOrigin) so the camera
+                // tracks the panned look-at over the stable tile field. This is the actual pan fix — the
+                // camera was previously pinned to the render origin, so a sub-rebase pan moved nothing.
+                CameraProperties curCam = _cameraSystem.Current;
+                UpdateSceneOrigin(curCam);
+                double2 lookAtMerc = curCam.CenterMercator();
+                double2 lookAtRenderOffset = new double2(
+                    lookAtMerc.x - _sceneOrigin.x, lookAtMerc.y - _sceneOrigin.y);
+                _mapCamera?.Sync(_cameraSystem, lookAtRenderOffset);
             }
 
             // STEP 2: Tile loop (reads the now-advanced _cameraSystem.Current).
@@ -432,6 +467,20 @@ namespace MapRenderer.Unity
             // ApplyZoom first — before any early-out — so fractional-zoom changes always push uniforms.
             for (int i = 0; i < _layerRecords.Count; i++)
                 _layerRecords[i].Applier.ApplyZoom(cam.Zoom);
+            // S14: apply zoom uniforms to line layers too.
+            // S43: also re-evaluate line-dasharray (zoom-step arrays re-evaluate per-frame).
+            // Pixel-mode line width needs the live ground resolution: the shader computes
+            //   widthM = _Width(px) * _MetersPerPixel
+            // and the world is in Web-Mercator metres, so _MetersPerPixel must track the current zoom.
+            // (Previously _MetersPerPixel was left at its initial 1.0 → every pixel-spec width rendered
+            //  as that-many metres ≈ 9.5x too thin at z14, ~1000s× too thin when zoomed out.)
+            float metersPerPixel = (float)CameraPoseMath.MetersPerPixel(cam.Zoom);
+            for (int i = 0; i < _lineRecords.Count; i++)
+            {
+                _lineRecords[i].Applier.ApplyZoom(cam.Zoom);
+                _lineRecords[i].Material.SetFloat("_MetersPerPixel", metersPerPixel);
+                ApplyLineDashArray(_lineRecords[i].Paint, _lineRecords[i].Material, cam.Zoom);
+            }
 
             UpdateSceneOrigin(cam);
 
@@ -601,7 +650,8 @@ namespace MapRenderer.Unity
         private UniTask<TessellationResult> KickTessellationTask(
             LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam)
         {
-            var layerRecordsSnapshot = _layerRecords.ToArray();
+            var layerRecordsSnapshot     = _layerRecords.ToArray();
+            var lineRecordsSnapshot      = _lineRecords.ToArray();
             double zoom          = cam.Zoom;
             double2 tileOrigin   = lt.TileOriginMerc;
 
@@ -609,6 +659,7 @@ namespace MapRenderer.Unity
             {
                 MvtTile mvtTile = MvtDecoder.Decode(mvtBytes);
 
+                // ── Fill layers ────────────────────────────────────────────────
                 var layerData = new StyledFillTileBuilder.LayerMeshData[layerRecordsSnapshot.Length];
 
                 for (int li = 0; li < layerRecordsSnapshot.Length; li++)
@@ -641,7 +692,29 @@ namespace MapRenderer.Unity
                         features, rec.Paint, zoom, mvtLayer.Extent, id, tileOrigin);
                 }
 
-                return new TessellationResult { LayerData = layerData };
+                // ── S14: Line layers ───────────────────────────────────────────
+                // Feature selection routes through SourceLayerResolver seam (tooth #6 — same as fills).
+                var lineLayerData = new StyledLineTileBuilder.LayerMeshData[lineRecordsSnapshot.Length];
+
+                for (int li = 0; li < lineRecordsSnapshot.Length; li++)
+                {
+                    LineLayerRecord rec = lineRecordsSnapshot[li];
+
+                    var features = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
+                        rec.StyleLayer, mvtTile, zoom);
+                    if (features.Count == 0)
+                        continue; // IsCreated=false, no dispose needed
+
+                    MvtLayer mvtLayer = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(
+                        rec.StyleLayer, mvtTile);
+                    if (mvtLayer == null)
+                        continue;
+
+                    lineLayerData[li] = StyledLineTileBuilder.BuildMeshData(
+                        features, rec.Paint, zoom, mvtLayer.Extent, id, tileOrigin);
+                }
+
+                return new TessellationResult { LayerData = layerData, LineLayerData = lineLayerData };
             }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
         }
 
@@ -676,11 +749,13 @@ namespace MapRenderer.Unity
             // or early returns — guaranteeing no NativeArray leak for consumed results.
             try
             {
-                if (result.LayerData == null) return;
+                if (result.LayerData == null && result.LineLayerData == null) return;
 
-                if (_layerRecords.Count == 0) return;
+                bool hasFillLayers = _layerRecords.Count > 0;
+                bool hasLineLayers = _lineRecords.Count > 0;
+                if (!hasFillLayers && !hasLineLayers) return;
 
-                // Create the tile container. Child GameObjects are per fill layer.
+                // Create the tile container. Child GameObjects are per fill/line layer.
                 var container = new GameObject($"Tile_{id}");
                 container.transform.SetParent(transform, worldPositionStays: false);
                 container.transform.localPosition =
@@ -689,34 +764,68 @@ namespace MapRenderer.Unity
                 bool anyGeometry = false;
                 // S51 leak guard: track created Mesh assets so they can be explicitly destroyed on release.
                 // Unity does NOT destroy MeshFilter.sharedMesh when the owning GameObject is destroyed.
-                var createdMeshes = new System.Collections.Generic.List<Mesh>(4);
+                var createdMeshes = new System.Collections.Generic.List<Mesh>(8);
 
-                for (int li = 0; li < _layerRecords.Count && li < result.LayerData.Length; li++)
+                // ── Fill layers ────────────────────────────────────────────────
+                if (result.LayerData != null)
                 {
-                    FillLayerRecord rec = _layerRecords[li];
+                    for (int li = 0; li < _layerRecords.Count && li < result.LayerData.Length; li++)
+                    {
+                        FillLayerRecord rec = _layerRecords[li];
 
-                    using var sMeshUpload = PmMeshUpload.Auto();
+                        using var sMeshUpload = PmMeshUpload.Auto();
 
-                    // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
-                    // It does NOT dispose data — we dispose in the finally block after the loop.
-                    Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
-                    if (mesh == null) continue;
+                        // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
+                        // It does NOT dispose data — we dispose in the finally block after the loop.
+                        Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
+                        if (mesh == null) continue;
 
-                    createdMeshes.Add(mesh); // S51: track for explicit destruction on release/teardown
+                        createdMeshes.Add(mesh); // S51: track for explicit destruction on release/teardown
 
-                    var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
-                    layerGo.transform.SetParent(container.transform, worldPositionStays: false);
-                    layerGo.transform.localPosition = Vector3.zero;
+                        var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
+                        layerGo.transform.SetParent(container.transform, worldPositionStays: false);
+                        layerGo.transform.localPosition = Vector3.zero;
 
-                    var mf = layerGo.AddComponent<MeshFilter>();
-                    mf.sharedMesh = mesh;
+                        var mf = layerGo.AddComponent<MeshFilter>();
+                        mf.sharedMesh = mesh;
 
-                    var mr = layerGo.AddComponent<MeshRenderer>();
-                    mr.sharedMaterial = rec.Material;
-                    mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
-                    mr.receiveShadows     = false;
+                        var mr = layerGo.AddComponent<MeshRenderer>();
+                        mr.sharedMaterial = rec.Material;
+                        mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        mr.receiveShadows     = false;
 
-                    anyGeometry = true;
+                        anyGeometry = true;
+                    }
+                }
+
+                // ── S14: Line layers ───────────────────────────────────────────
+                if (result.LineLayerData != null)
+                {
+                    for (int li = 0; li < _lineRecords.Count && li < result.LineLayerData.Length; li++)
+                    {
+                        LineLayerRecord rec = _lineRecords[li];
+
+                        using var sMeshUpload = PmMeshUpload.Auto();
+
+                        Mesh mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
+                        if (mesh == null) continue;
+
+                        createdMeshes.Add(mesh);
+
+                        var layerGo = new GameObject($"LineLayer_{li}_{rec.StyleLayer.Id}");
+                        layerGo.transform.SetParent(container.transform, worldPositionStays: false);
+                        layerGo.transform.localPosition = Vector3.zero;
+
+                        var mf = layerGo.AddComponent<MeshFilter>();
+                        mf.sharedMesh = mesh;
+
+                        var mr = layerGo.AddComponent<MeshRenderer>();
+                        mr.sharedMaterial = rec.Material;
+                        mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+                        mr.receiveShadows     = false;
+
+                        anyGeometry = true;
+                    }
                 }
 
                 if (!anyGeometry)
@@ -738,6 +847,12 @@ namespace MapRenderer.Unity
                 {
                     for (int li = 0; li < result.LayerData.Length; li++)
                         result.LayerData[li].Dispose();
+                }
+                // S14: dispose line layer NativeArrays.
+                if (result.LineLayerData != null)
+                {
+                    for (int li = 0; li < result.LineLayerData.Length; li++)
+                        result.LineLayerData[li].Dispose();
                 }
             }
         }
@@ -811,6 +926,12 @@ namespace MapRenderer.Unity
                     {
                         for (int li = 0; li < result.LayerData.Length; li++)
                             result.LayerData[li].Dispose();
+                    }
+                    // S14: dispose line layer NativeArrays too.
+                    if (result.LineLayerData != null)
+                    {
+                        for (int li = 0; li < result.LineLayerData.Length; li++)
+                            result.LineLayerData[li].Dispose();
                     }
                 }
                 // Faulted/cancelled: no LayerData produced, nothing to dispose.
@@ -902,7 +1023,7 @@ namespace MapRenderer.Unity
         private static Vector3 float3ToVector(float3 v) => new Vector3(v.x, v.y, v.z);
 
         /// <summary>
-        /// Builds per-fill-layer records from the style document. Called once at Initialise.
+        /// Builds per-fill-layer and per-line-layer records from the style document. Called once at Initialise.
         /// </summary>
         private void BuildLayerRecords()
         {
@@ -911,33 +1032,72 @@ namespace MapRenderer.Unity
             if (_style == null) return;
 
             var fillLayers = new List<StyleLayer>(8);
+            var lineLayers = new List<StyleLayer>(8);
             foreach (var layer in _style.Layers)
-                if (layer.LayerType == StyleLayerType.Fill)
-                    fillLayers.Add(layer);
-
-            if (fillLayers.Count == 0) return;
-
-            int[] queues = LayerDrawOrder.ComputeQueues(fillLayers.Count);
-
-            for (int i = 0; i < fillLayers.Count; i++)
             {
-                StyleLayer sl = fillLayers[i];
-                FillPaint paint = new FillPaint(sl);
+                if (layer.LayerType == StyleLayerType.Fill) fillLayers.Add(layer);
+                else if (layer.LayerType == StyleLayerType.Line) lineLayers.Add(layer);
+            }
 
-                Material mat = CreateFillMaterial();
-                mat.renderQueue = queues[i];
+            // ── Fill layers ────────────────────────────────────────────────────
+            if (fillLayers.Count > 0)
+            {
+                int[] queues = LayerDrawOrder.ComputeQueues(fillLayers.Count);
 
-                var applier = new ZoomStyleApplier(mat);
-                BindFillPaintToApplier(paint, applier, mat);
-                applier.ApplyZoom(_cameraSystem != null ? _cameraSystem.Current.Zoom : 0.0);
-
-                _layerRecords.Add(new FillLayerRecord
+                for (int i = 0; i < fillLayers.Count; i++)
                 {
-                    Paint      = paint,
-                    StyleLayer = sl,
-                    Material   = mat,
-                    Applier    = applier,
-                });
+                    StyleLayer sl = fillLayers[i];
+                    FillPaint paint = new FillPaint(sl);
+
+                    Material mat = CreateFillMaterial();
+                    mat.renderQueue = queues[i];
+
+                    var applier = new ZoomStyleApplier(mat);
+                    BindFillPaintToApplier(paint, applier, mat);
+                    applier.ApplyZoom(_cameraSystem != null ? _cameraSystem.Current.Zoom : 0.0);
+
+                    _layerRecords.Add(new FillLayerRecord
+                    {
+                        Paint      = paint,
+                        StyleLayer = sl,
+                        Material   = mat,
+                        Applier    = applier,
+                    });
+                }
+            }
+
+            // ── S14: Line layers ───────────────────────────────────────────────
+            if (lineLayers.Count > 0)
+            {
+                // Line layers use the Transparent render queue + layer offset, placed IMMEDIATELY
+                // ABOVE the fill band so lines composite on top of fills by default (painter's intent).
+                // Fills occupy [TransparentQueue .. TransparentQueue + fillCount - 1] (ComputeQueues uses
+                // base TransparentQueue = 3000), so the line band must start at TransparentQueue + fillCount.
+                // (Previously this was 2501 + fillCount, which placed lines BELOW the 3000-based fill band —
+                //  fills then overpainted every road. Surfaced by the OpenFreeMap experiment: roads vanished
+                //  under landuse/landcover/water on a city tile.)
+                int lineQueueBase = LayerDrawOrder.TransparentQueue + fillLayers.Count;
+
+                for (int i = 0; i < lineLayers.Count; i++)
+                {
+                    StyleLayer sl = lineLayers[i];
+                    LinePaint paint = new LinePaint(sl);
+
+                    Material mat = CreateLineMaterial();
+                    mat.renderQueue = lineQueueBase + i;
+
+                    var applier = new ZoomStyleApplier(mat);
+                    BindLinePaintToApplier(paint, applier, mat);
+                    applier.ApplyZoom(_cameraSystem != null ? _cameraSystem.Current.Zoom : 0.0);
+
+                    _lineRecords.Add(new LineLayerRecord
+                    {
+                        Paint      = paint,
+                        StyleLayer = sl,
+                        Material   = mat,
+                        Applier    = applier,
+                    });
+                }
             }
         }
 
@@ -984,7 +1144,134 @@ namespace MapRenderer.Unity
                 applier.BindFloat(paint.TranslateAnchor, "_FillTranslateAnchor");
         }
 
-        /// <summary>Dispose all layer Material instances.</summary>
+        /// <summary>
+        /// Creates a base line Material for a style layer using the MapRenderer/Line shader.
+        /// </summary>
+        private static Material CreateLineMaterial()
+        {
+            var shader = Shader.Find("MapRenderer/Line");
+            if (shader != null)
+            {
+                var mat = new Material(shader) { name = "MapView_Line" };
+                mat.SetColor("_MapColor",         Color.white);
+                mat.SetColor("_BaseColor",         Color.white);
+                mat.SetFloat("_Opacity",           1f);
+                mat.SetFloat("_Width",             2f);
+                mat.SetFloat("_WidthIsPixels",     1f); // line-width is in pixels per spec
+                mat.SetFloat("_MetersPerPixel",    1f);
+                mat.SetFloat("_Blur",              1f);
+                mat.SetFloat("_GapWidth",          0f);
+                mat.SetVector("_LineTranslate",    Vector4.zero);
+                mat.SetFloat("_LineTranslateAnchor", 0f);
+                mat.SetFloat("_LinePattern",       0f);
+                // S43: line-dasharray defaults — solid identity (_DashCount=0).
+                mat.SetVector("_DashArray",        Vector4.zero);
+                mat.SetFloat("_DashCount",         0f);
+                // S44: line-offset default — no perpendicular shift.
+                mat.SetFloat("_LineOffset",        0f);
+                mat.SetFloat("_Metallic",          0f);
+                mat.SetFloat("_Smoothness",        0f);
+                mat.SetFloat("_ZWrite",            0f);
+                return mat;
+            }
+            Debug.LogWarning("[MapView] MapRenderer/Line shader not found — using Sprites/Default fallback.");
+            return new Material(Shader.Find("Sprites/Default")) { name = "MapView_LineFallback" };
+        }
+
+        /// <summary>
+        /// Binds constant/zoom line paint properties from <paramref name="paint"/> to the material.
+        /// Data-driven properties (Feature/Composite color) are handled by StyledLineTileBuilder bake;
+        /// only Constant/Zoom-kind properties are bound here as uniforms.
+        /// </summary>
+        private static void BindLinePaintToApplier(LinePaint paint, ZoomStyleApplier applier, Material mat)
+        {
+            // line-color: bind only for non-data-driven (Constant/Zoom). Data-driven → vertex bake.
+            if (paint.Color != null)
+                applier.BindColor(paint.Color, "_MapColor");
+
+            // line-opacity.
+            if (paint.Opacity != null)
+                applier.BindFloat(paint.Opacity, "_Opacity");
+
+            // line-width (in pixels per MapLibre spec).
+            // Convention (data-driven width): when WidthKind depends on feature, the evaluated width
+            // is baked into WidthScale (stream 3) by StyledLineTileBuilder. Set _Width = 1.0 so
+            // the shader formula (_Width × WidthScale) yields the full baked width directly.
+            // For Constant/Zoom kind, Width is non-null → bind normally as a uniform.
+            if (MapRenderer.Core.Expressions.ExpressionKinds.DependsOnFeature(paint.WidthKind))
+                mat.SetFloat("_Width", 1f); // base = 1; evaluated width baked into WidthScale per feature
+            else if (paint.Width != null)
+                applier.BindFloat(paint.Width, "_Width");
+            // Ensure WidthIsPixels=1 so the shader interprets width as pixels.
+            mat.SetFloat("_WidthIsPixels", 1f);
+
+            // line-blur.
+            if (paint.Blur != null)
+                applier.BindFloat(paint.Blur, "_Blur");
+
+            // line-gap-width.
+            if (paint.GapWidth != null)
+                applier.BindFloat(paint.GapWidth, "_GapWidth");
+
+            // line-offset (S44).
+            if (paint.Offset != null)
+                applier.BindFloat(paint.Offset, "_LineOffset");
+
+            // line-translate: constant components baked into material vector.
+            float tx = (float)paint.TranslateX.EvaluateNumber(0.0);
+            float ty = (float)paint.TranslateY.EvaluateNumber(0.0);
+            mat.SetVector("_LineTranslate", new Vector4(tx, ty, 0f, 0f));
+
+            // line-translate-anchor.
+            if (paint.TranslateAnchor != null)
+                applier.BindFloat(paint.TranslateAnchor, "_LineTranslateAnchor");
+
+            // line-pattern hook: set flag; solid fallback until S17.
+            // S14_LINE_PATTERN_HOOK: _LinePattern=1 signals a pattern layer; renders solid _MapColor fallback.
+            mat.SetFloat("_LinePattern", paint.PatternName != null ? 1f : 0f);
+
+            // S43: line-dasharray initial bind (constant or first zoom-step evaluation at zoom=0).
+            // Per-frame re-evaluation for zoom-step patterns is done by ApplyLineDashArray in ApplyZoom.
+            // Feature-dependent dasharray is out of scope; constant + zoom-step are the supported forms.
+            // S43_DEFER_LIVE_ZOOM_STEP: zoom-step dasharray re-evaluates per-frame via ApplyLineDashArray;
+            // static bind here is for constant arrays only (zoom=0 is a safe initial value).
+            ApplyLineDashArray(paint, mat, 0.0);
+        }
+
+        /// <summary>
+        /// S43: Evaluates the line-dasharray expression at <paramref name="zoom"/> and sets
+        /// <c>_DashArray</c>/<c>_DashCount</c> on the material. Called both at bind time and
+        /// per-frame (for zoom-step patterns). When absent or degenerate, sets _DashCount=0
+        /// (solid identity — no change to rendering path).
+        ///
+        /// Not routed through ZoomStyleApplier (scalar/color only). Array evaluation uses
+        /// <see cref="LineDash.TryEvaluateDashArray"/> directly.
+        /// </summary>
+        private static void ApplyLineDashArray(LinePaint paint, Material mat, double zoom)
+        {
+            if (!paint.HasDashArray)
+            {
+                // No dasharray: ensure solid identity (guard against stale values).
+                mat.SetVector("_DashArray", Vector4.zero);
+                mat.SetFloat("_DashCount",  0f);
+                return;
+            }
+
+            if (LineDash.TryEvaluateDashArray(paint.DashArrayJson, zoom, out float[] pattern))
+            {
+                var (x, y, z, w, count) = LineDash.Pack(pattern);
+                mat.SetVector("_DashArray", new Vector4(x, y, z, w));
+                mat.SetFloat("_DashCount",  count);
+            }
+            else
+            {
+                // Parse failed: solid fallback.
+                mat.SetVector("_DashArray", Vector4.zero);
+                mat.SetFloat("_DashCount",  0f);
+            }
+        }
+
+        /// <summary>Dispose all fill and line layer Material instances.</summary>
         private void DisposeLayerRecords()
         {
             for (int i = 0; i < _layerRecords.Count; i++)
@@ -997,6 +1284,18 @@ namespace MapRenderer.Unity
                 }
             }
             _layerRecords.Clear();
+
+            // S14: dispose line material instances.
+            for (int i = 0; i < _lineRecords.Count; i++)
+            {
+                var mat = _lineRecords[i].Material;
+                if (mat != null)
+                {
+                    if (Application.isPlaying) Destroy(mat);
+                    else                       DestroyImmediate(mat);
+                }
+            }
+            _lineRecords.Clear();
         }
 
         private void Update()
@@ -1055,6 +1354,12 @@ namespace MapRenderer.Unity
                             for (int li = 0; li < result.LayerData.Length; li++)
                                 result.LayerData[li].Dispose();
                         }
+                        // S14: dispose line NativeArrays.
+                        if (result.LineLayerData != null)
+                        {
+                            for (int li = 0; li < result.LineLayerData.Length; li++)
+                                result.LineLayerData[li].Dispose();
+                        }
                     }
                 }
             }
@@ -1074,6 +1379,12 @@ namespace MapRenderer.Unity
                     {
                         for (int li = 0; li < result.LayerData.Length; li++)
                             result.LayerData[li].Dispose();
+                    }
+                    // S14: dispose line NativeArrays.
+                    if (result.LineLayerData != null)
+                    {
+                        for (int li = 0; li < result.LineLayerData.Length; li++)
+                            result.LineLayerData[li].Dispose();
                     }
                 }
             }

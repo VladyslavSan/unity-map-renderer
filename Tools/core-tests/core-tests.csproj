@@ -137,6 +137,7 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/LookupTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/DecisionTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/RampCurveTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ColorCoercionTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
@@ -180,5 +181,23 @@
 
     <!-- S13: Engine-free tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/FillPaintTests.cs" />
+
+    <!-- S14: LinePaint aggregator (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/LinePaint.cs" />
+
+    <!-- S14: Engine-free tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/LinePaintTests.cs" />
+
+    <!-- S43: LineDash (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/LineDash.cs" />
+
+    <!-- S43: Engine-free tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/LineDashTests.cs" />
+
+    <!-- S44: LineOffset (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/LineOffset.cs" />
+
+    <!-- S44: Engine-free tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/LineOffsetTests.cs" />
   </ItemGroup>
 </Project>
