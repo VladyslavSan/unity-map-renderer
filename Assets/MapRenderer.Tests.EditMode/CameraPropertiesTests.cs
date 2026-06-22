@@ -98,13 +98,13 @@ namespace MapRenderer.Tests
             Assert.IsTrue(sys.IsAnimating, "Animation must be in flight.");
 
             // Advance by half the duration.
-            sys.Advance(D / 2.0);
+            sys.Update(D / 2.0);
 
             // At t=0.5, smoothStep(0.5) = 0.5^2 * (3 - 2*0.5) = 0.25 * 2 = 0.5
             // So the eased t is also 0.5 at t_linear=0.5 for smooth-step.
             double expectedZoom = startZoom + (targetZoom - startZoom) * 0.5;
 
-            Assert.AreEqual(expectedZoom, sys.Current.Zoom, 0.01,
+            Assert.AreEqual(expectedZoom, sys.CurrentProperties.Zoom, 0.01,
                 $"At D/2, zoom must be halfway between {startZoom} and {targetZoom} in zoom-space.");
             Assert.IsTrue(sys.IsAnimating, "Animation must still be in flight at halfway.");
         }
@@ -124,10 +124,10 @@ namespace MapRenderer.Tests
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Zoom = targetZoom }, new CameraAnimation(D));
-            sys.Advance(D); // full duration
+            sys.Update(D); // full duration
 
             Assert.IsFalse(sys.IsAnimating, "IsAnimating must clear after full duration.");
-            Assert.AreEqual(targetZoom, sys.Current.Zoom, 1e-9,
+            Assert.AreEqual(targetZoom, sys.CurrentProperties.Zoom, 1e-9,
                 "Zoom must exactly equal target after full duration.");
         }
 
@@ -146,10 +146,10 @@ namespace MapRenderer.Tests
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Heading = targetHeading }, new CameraAnimation(D));
-            sys.Advance(D); // full duration
+            sys.Update(D); // full duration
 
             // Must reach 10° by the +20° path.
-            Assert.AreEqual(10.0, sys.Current.Heading, 1.0,
+            Assert.AreEqual(10.0, sys.CurrentProperties.Heading, 1.0,
                 "Heading must ease 350→10 via the short +20° path, landing at 10°.");
         }
 
@@ -165,10 +165,10 @@ namespace MapRenderer.Tests
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Heading = 10.0 }, new CameraAnimation(D));
-            sys.Advance(D / 2.0);
+            sys.Update(D / 2.0);
 
             // At t=0.5, eased t=0.5, heading = 350 + 20*0.5 = 360 ≡ 0.
-            double heading = sys.Current.Heading;
+            double heading = sys.CurrentProperties.Heading;
             bool nearZeroOrFull = heading < 5.0 || heading > 355.0;
             Assert.IsTrue(nearZeroOrFull,
                 $"At 50% progress, 350→10 heading must be near 0°/360° (short path). Got {heading:F2}°.");
@@ -192,7 +192,7 @@ namespace MapRenderer.Tests
             sys.Apply(new CameraPropertiesUpdate { Zoom = 8.0 }, CameraAnimation.Instant);
 
             Assert.IsFalse(sys.IsAnimating, "No animation after instant Apply.");
-            Assert.AreEqual(8.0, sys.Current.Zoom, 1e-9, "Zoom must be set immediately.");
+            Assert.AreEqual(8.0, sys.CurrentProperties.Zoom, 1e-9, "Zoom must be set immediately.");
         }
 
         // ── Altitude formula (S45 non-regression, absorbed from CameraTransformTests) ─────────────
@@ -341,9 +341,9 @@ namespace MapRenderer.Tests
 
             // Start an animation toward zoom 14.
             sys.Apply(new CameraPropertiesUpdate { Zoom = midTarget }, new CameraAnimation(D));
-            sys.Advance(D / 4.0); // advance 25% → zoom ≈ 5.0 (smoothStep(0.25) = 0.15625 → 2+12*0.15625≈3.875)
+            sys.Update(D / 4.0); // advance 25% → zoom ≈ 5.0 (smoothStep(0.25) = 0.15625 → 2+12*0.15625≈3.875)
 
-            double zoomAtInterrupt = sys.Current.Zoom;
+            double zoomAtInterrupt = sys.CurrentProperties.Zoom;
             Assert.Greater(zoomAtInterrupt, startZoom, "Zoom must have increased from start.");
             Assert.Less(zoomAtInterrupt,    midTarget,  "Zoom must not have reached target yet.");
 
@@ -353,8 +353,8 @@ namespace MapRenderer.Tests
 
             // The starting point of the new animation must be the current (interpolated) zoom.
             // Advancing a tiny bit: zoom must be very close to zoomAtInterrupt (not jump to startZoom).
-            sys.Advance(0.01);
-            Assert.AreEqual(zoomAtInterrupt, sys.Current.Zoom, 0.1,
+            sys.Update(0.01);
+            Assert.AreEqual(zoomAtInterrupt, sys.CurrentProperties.Zoom, 0.1,
                 "After interruption, zoom must start from current interpolated value (not the original start).");
         }
 
@@ -370,7 +370,7 @@ namespace MapRenderer.Tests
             sys.OnAnimationComplete = () => callCount++;
 
             sys.Apply(new CameraPropertiesUpdate { Zoom = 10.0 }, new CameraAnimation(1.0));
-            sys.Advance(1.0); // completes the animation
+            sys.Update(1.0); // completes the animation
 
             Assert.AreEqual(1, callCount, "OnAnimationComplete must be called exactly once.");
             Assert.IsFalse(sys.IsAnimating, "IsAnimating must clear after completion.");
@@ -396,7 +396,7 @@ namespace MapRenderer.Tests
         /// The new Input System gives delta.y>0 for UPWARD mouse movement.
         ///
         /// At the MapController input translator layer (MapController.Update), the sign is negated:
-        ///   ApplyPan(Map.Camera.Current, delta.x, -delta.y)
+        ///   ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y)
         ///
         /// This test pins the EXPECTED behavior after sign flip:
         ///   +Y drag (new IS = drag UP) → negate dy → ViewInput.ApplyPan(v, 0, -positive) → lat DECREASES

@@ -18,7 +18,8 @@ namespace MapRenderer.Core.View
     ///     spans at most one tile (≈ <c>4.0075e7 / 2^z</c> m), so its float32 ULP shrinks with zoom.</item>
     ///   <item><b>The tile GameObject local position is scene-origin-relative.</b> Its transform carries
     ///     <c>(tileOrigin − sceneOrigin)</c> cast to float32 (<see cref="TileLocalToScene"/>), where
-    ///     <c>sceneOrigin</c> is snapped near the camera and rebased as the camera moves.</item>
+    ///     <c>sceneOrigin</c> is the camera's look-at point, re-snapped every frame (camera-relative
+    ///     rendering — the look-at always sits at the render origin).</item>
     /// </list>
     ///
     /// <para><b>Why two levels compose correctly.</b> The GPU adds the two floats:
@@ -26,10 +27,10 @@ namespace MapRenderer.Core.View
     /// <c>tileOrigin</c> term cancels analytically, so the rendered position is
     /// <c>≈ merc_vertex − sceneOrigin</c>. Precision is therefore governed entirely by how far the
     /// farthest visible vertex's true Mercator position lies from <c>sceneOrigin</c>:
-    /// <c>≤ |camera − sceneOrigin| + coverRadius</c>. Rebasing keeps <c>|camera − sceneOrigin|</c> below
-    /// <see cref="ShouldRebase"/>'s threshold; <see cref="TileCover"/> bounds <c>coverRadius</c>; and the
-    /// per-tile in-tile span is bounded by the zoom. Pick the threshold + zoom so the worst-case
-    /// rendered magnitude stays within the desired float32 ULP budget (≈ 8.4 km ⇒ sub-mm).</para>
+    /// <c>≤ |camera − sceneOrigin| + coverRadius</c>. With <c>sceneOrigin ≡ look-at</c> each frame,
+    /// <c>|camera − sceneOrigin|</c> is ~0 (the camera orbits the render origin); <see cref="TileCover"/>
+    /// bounds <c>coverRadius</c>; and the per-tile in-tile span is bounded by the zoom. The worst-case
+    /// rendered magnitude stays within the float32 ULP budget (≈ 8.4 km ⇒ sub-mm) by a wide margin.</para>
     ///
     /// <para>All inputs/outputs are Web-Mercator meters except <see cref="TileLocalToScene"/>, which
     /// returns the small float32 render-space offset (east=+X, height=+Y, north=+Z per docs §7).</para>
@@ -46,28 +47,6 @@ namespace MapRenderer.Core.View
             var (min, _) = tile.MercatorBounds();
             return min;
         }
-
-        /// <summary>
-        /// True when the camera has drifted farther than <paramref name="thresholdMeters"/> from the
-        /// current scene origin — i.e. it is time to re-snap <c>sceneOrigin</c> to the camera. Uses the
-        /// squared distance to avoid a sqrt.
-        /// </summary>
-        public static bool ShouldRebase(double2 sceneOriginMerc, double2 cameraMerc, double thresholdMeters)
-        {
-            double dx = cameraMerc.x - sceneOriginMerc.x;
-            double dy = cameraMerc.y - sceneOriginMerc.y;
-            return (dx * dx + dy * dy) > (thresholdMeters * thresholdMeters);
-        }
-
-        /// <summary>
-        /// The shift (in Mercator meters) that every tile transform must be offset by when the scene
-        /// origin moves from <paramref name="oldOrigin"/> to <paramref name="newOrigin"/>. Equal to
-        /// <c>oldOrigin − newOrigin</c>: a tile previously at scene position <c>(tileOrigin − oldOrigin)</c>
-        /// moves to <c>(tileOrigin − newOrigin) = previous + (oldOrigin − newOrigin)</c>, preserving its
-        /// absolute world position.
-        /// </summary>
-        public static double2 RebaseDelta(double2 oldOrigin, double2 newOrigin)
-            => new double2(oldOrigin.x - newOrigin.x, oldOrigin.y - newOrigin.y);
 
         /// <summary>
         /// The tile GameObject's local position in render space: <c>(tileOrigin − sceneOrigin)</c> cast to

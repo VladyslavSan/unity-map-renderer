@@ -38,7 +38,7 @@ namespace MapRenderer.Core.View.Camera
         // ── Completion callback seam (D7) ─────────────────────────────────────────────────────────
         /// <summary>
         /// Optional callback invoked when an animation finishes (elapsed >= duration).
-        /// Called from <see cref="Advance"/> on the frame it completes.
+        /// Called from <see cref="Update"/> on the frame it completes.
         /// Seam for chaining; full chaining is a follow-up.
         /// </summary>
         public Action OnAnimationComplete;
@@ -57,7 +57,7 @@ namespace MapRenderer.Core.View.Camera
         // ── Public state ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>The current (possibly mid-animation) camera properties.</summary>
-        public CameraProperties Current => _current;
+        public CameraProperties CurrentProperties => _current;
 
         /// <summary>True while an animation is in flight (elapsed &lt; duration).</summary>
         public bool IsAnimating => _animation != null;
@@ -67,7 +67,7 @@ namespace MapRenderer.Core.View.Camera
         /// <summary>
         /// Applies a <see cref="CameraPropertiesUpdate"/> patch with the given animation.
         ///
-        /// <para><b>Instant path (Duration==0):</b> merges the patch over <see cref="Current"/>,
+        /// <para><b>Instant path (Duration==0):</b> merges the patch over <see cref="CurrentProperties"/>,
         /// clears any in-flight animation. Struct-only path — no heap allocation.</para>
         ///
         /// <para><b>Animated path (Duration&gt;0):</b> resolves the TARGET props from the current
@@ -97,19 +97,20 @@ namespace MapRenderer.Core.View.Camera
             }
         }
 
-        // ── Advance ───────────────────────────────────────────────────────────────────────────────
+        // ── Update ────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Advances the camera by <paramref name="dt"/> seconds. Call this as the first step in
-        /// MapView.UpdateFrame so the pose consumers see the post-update camera (D5).
+        /// Updates the camera state by <paramref name="dt"/> seconds (advances any in-flight animation).
+        /// Call this as the first step in MapView.UpdateFrame so the pose consumers see the post-update
+        /// camera (D5).
         ///
         /// <para>If no animation is in flight, this is a no-op (steady-state free path).</para>
         ///
-        /// <para>When an animation reaches its target (<c>elapsed &ge; duration</c>), <see cref="Current"/>
+        /// <para>When an animation reaches its target (<c>elapsed &ge; duration</c>), <see cref="CurrentProperties"/>
         /// snaps to the target and <see cref="IsAnimating"/> clears. The optional
         /// <see cref="OnAnimationComplete"/> callback is invoked once.</para>
         /// </summary>
-        public void Advance(double dt)
+        public void Update(double dt)
         {
             if (_animation == null) return;
 
@@ -133,18 +134,6 @@ namespace MapRenderer.Core.View.Camera
                 _current = CameraPoseMath.Interpolate(_animation.From, _animation.Target, easedT);
             }
         }
-
-        // ── Clip plane helpers ────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Computes near clip plane from altitude (S42 D3: near = altitude * 0.01, min 0.1).
-        /// </summary>
-        public static double NearClip(double altitude) => Math.Max(0.1, altitude * 0.01);
-
-        /// <summary>
-        /// Computes far clip plane from altitude (S42 D3: far = altitude * 4).
-        /// </summary>
-        public static double FarClip(double altitude) => altitude * 4.0;
 
         // ── Animation state (heap object, one-per-animation) ──────────────────────────────────────
         /// <summary>In-flight animation state. Heap-allocated once per animated Apply.</summary>

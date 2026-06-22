@@ -180,6 +180,72 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
+        // ─── Interleaved fill/line draw order follows STYLE order, not type (regression) ──────────
+        // A [fill, line, fill] style: the middle line must composite BETWEEN the two fills, i.e.
+        // queue(fill-bottom) < queue(line-mid) < queue(fill-top). The old code bucketed records by
+        // type (all fills, then all lines), producing queue(fill-bottom) < queue(fill-top) < queue(line-mid)
+        // — a line declared between two fills wrongly drew on top of BOTH. The style's layer order is SSOT.
+
+        private static StyleDocument FillLineFillStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""name"": ""FillLineFill"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""fill-bottom"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 255, 0, 0, 1] } },
+                { ""id"": ""line-mid"",    ""type"": ""line"", ""source"": ""maplibre"", ""source-layer"": ""geolines"", ""paint"": { ""line-color"": [""rgba"", 0, 255, 0, 1] } },
+                { ""id"": ""fill-top"",    ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 0, 255, 1] } }
+            ]
+        }");
+
+        [Test]
+        public void MapView_InterleavedFillLineFill_QueuesFollowStyleOrderNotType()
+        {
+            var src  = new FixtureSource(FixtureBytes());
+            var go   = new GameObject("MapView");
+            var view = go.AddComponent<MapView>();
+            view.MinZoom = 0; view.MaxZoom = 0;
+            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MaxBuildsPerTick = 64;
+
+            try
+            {
+                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0),
+                                ownsSource: false, style: FillLineFillStyle());
+                PumpUntilSettled(view);
+
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                    "z0/0/0 tile must be built");
+
+                // Map each layer id -> its material renderQueue by scanning the tile's child renderers
+                // (fill children are named "Layer_*_<id>", line children "LineLayer_*_<id>").
+                var queueById = new Dictionary<string, int>();
+                for (int i = 0; i < tileGo.transform.childCount; i++)
+                {
+                    var child = tileGo.transform.GetChild(i);
+                    var mr = child.GetComponent<MeshRenderer>();
+                    if (mr == null || mr.sharedMaterial == null) continue;
+                    foreach (var id in new[] { "fill-bottom", "line-mid", "fill-top" })
+                        if (child.name.Contains(id)) queueById[id] = mr.sharedMaterial.renderQueue;
+                }
+
+                Assert.IsTrue(
+                    queueById.ContainsKey("fill-bottom") && queueById.ContainsKey("line-mid") && queueById.ContainsKey("fill-top"),
+                    $"All three layers must produce a child renderer. Found: [{string.Join(",", queueById.Keys)}]");
+
+                // DECISIVE: the line declared BETWEEN the two fills must sit BETWEEN them in draw order.
+                Assert.Less(queueById["fill-bottom"], queueById["line-mid"],
+                    $"fill-bottom ({queueById["fill-bottom"]}) must be < line-mid ({queueById["line-mid"]}) — style order.");
+                Assert.Less(queueById["line-mid"], queueById["fill-top"],
+                    $"line-mid ({queueById["line-mid"]}) must be < fill-top ({queueById["fill-top"]}). " +
+                    "If line-mid > fill-top, records are bucketed by type (all fills, then all lines) " +
+                    "instead of following the style's declared layer order.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
         // ─── #3: ≥2 distinct baked vertex colors (DECISIVE) ──────────────────────────────────────
         //
         // Uses a fill-color match expression on "CONTINENT" — the property that the fixture tile's
@@ -487,18 +553,19 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
 
-                // ── DECISIVE: FillLayerCount = 1 after Initialise ─────────────────────────────
-                Assert.AreEqual(1, view.FillLayerCount,
-                    "MapView must create 1 FillLayerRecord for the zoom-opacity style. " +
-                    "If 0, BuildLayerRecords is not creating records for zoom-dependent layers.");
+                // ── DECISIVE: fill layer count = 1 after Initialise ───────────────────────────
+                // (FillLayerCount() is a test-only extension over MapView internals — see MapViewTestExtensions.)
+                Assert.AreEqual(1, view.FillLayerCount(),
+                    "MapView must build 1 fill render bundle for the zoom-opacity style. " +
+                    "If 0, StyledLayerSet.Build is not creating bundles for zoom-dependent layers.");
 
                 // Tick once to pump tiles and fire ApplyZoom.
                 view.Tick();
 
                 // ── DECISIVE: ApplyZoom is called in Tick — proven by ZoomStyleApplier test above.
-                // Structural assertion: Tick does not throw, FillLayerCount is still 1 after Tick.
-                Assert.AreEqual(1, view.FillLayerCount,
-                    "FillLayerCount must remain 1 after Tick (records must not be cleared on Tick).");
+                // Structural assertion: Tick does not throw, the fill bundle count is still 1 after Tick.
+                Assert.AreEqual(1, view.FillLayerCount(),
+                    "fill bundle count must remain 1 after Tick (bundles must not be cleared on Tick).");
             }
             finally
             {

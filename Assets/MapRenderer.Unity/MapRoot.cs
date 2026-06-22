@@ -108,7 +108,7 @@ namespace MapRenderer.Unity
             var mapView = GetComponent<MapView>();
             Debug.Log($"[MapRoot] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
                       $"center=({InitialLatitude:F2},{InitialLongitude:F2}), " +
-                      $"style layers={mapView.FillLayerCount} fill layers.");
+                      $"style layers={mapView.Layers.FillCount} fill layers.");
         }
 
         // ── Static wire-up entry (testable without Play mode) ─────────────────────────────────────

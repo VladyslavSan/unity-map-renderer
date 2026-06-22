@@ -104,7 +104,7 @@ namespace MapRenderer.Unity
                 {
                     // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
                     float normalizedScroll = scroll / WheelNotchUnits;
-                    double newZoom = (Map.Camera.Current.Zoom + normalizedScroll * ZoomSensitivity);
+                    double newZoom = (Map.Camera.CurrentProperties.Zoom + normalizedScroll * ZoomSensitivity);
                     newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, newZoom));
                     patch.Zoom = newZoom;
                     anyChange  = true;
@@ -121,7 +121,7 @@ namespace MapRenderer.Unity
                     Vector2 delta = mouse.delta.ReadValue();
                     if (delta.x != 0f || delta.y != 0f)
                     {
-                        CameraPropertiesUpdate pan = ViewInput.ApplyPan(Map.Camera.Current, delta.x, -delta.y);
+                        CameraPropertiesUpdate pan = ViewInput.ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y);
                         if (pan.Lon.HasValue) { patch.Lon = pan.Lon; anyChange = true; }
                         if (pan.Lat.HasValue) { patch.Lat = pan.Lat; anyChange = true; }
                     }
@@ -139,7 +139,7 @@ namespace MapRenderer.Unity
                     if (delta.x != 0f || delta.y != 0f)
                     {
                         CameraPropertiesUpdate tilt = ViewInput.ApplyTilt(
-                            Map.Camera.Current, delta.x, -delta.y,
+                            Map.Camera.CurrentProperties, delta.x, -delta.y,
                             BearingSensitivity, PitchSensitivity, MaxPitch);
                         patch.Heading = tilt.Heading;
                         patch.Tilt    = tilt.Tilt;
@@ -158,7 +158,7 @@ namespace MapRenderer.Unity
                 bool zoomOut = kb.minusKey.isPressed  || kb.numpadMinusKey.isPressed || kb.eKey.isPressed;
                 if (zoomIn || zoomOut)
                 {
-                    double base_ = patch.Zoom ?? Map.Camera.Current.Zoom;
+                    double base_ = patch.Zoom ?? Map.Camera.CurrentProperties.Zoom;
                     double delta = zoomIn ? kbStep : -kbStep;
                     double newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, base_ + delta));
                     patch.Zoom = newZoom;
@@ -187,7 +187,7 @@ namespace MapRenderer.Unity
             var mc = new MapCamera(Camera, ReferenceViewportHeightPx, VerticalFovDeg);
             mc.AltitudeMultiplier = AltitudeMultiplier;
 
-            mc.SyncFromProperties(props, ReferenceViewportHeightPx, VerticalFovDeg, AltitudeMultiplier);
+            mc.ApplyCameraProperties(props);
         }
 
         /// <summary>

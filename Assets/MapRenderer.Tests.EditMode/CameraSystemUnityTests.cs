@@ -88,7 +88,7 @@ namespace MapRenderer.Tests
                 view.UpdateFrame(0.016); // simulate one ~60fps frame
 
                 // POST-update: the camera system must show the target zoom.
-                Assert.AreEqual(targetZoom, camSys.Current.Zoom, 1e-6,
+                Assert.AreEqual(targetZoom, camSys.CurrentProperties.Zoom, 1e-6,
                     "CameraSystem.Current must reflect the post-update zoom after UpdateFrame.");
 
                 // The camera state exposed by MapView.View must also reflect the new zoom (it reads
@@ -126,7 +126,7 @@ namespace MapRenderer.Tests
                 // smoothStep(0.5) = 0.5 → midpoint
                 double expectedZoom = startZoom + (targetZoom - startZoom) * 0.5;
 
-                Assert.AreEqual(expectedZoom, camSys.Current.Zoom, 0.05,
+                Assert.AreEqual(expectedZoom, camSys.CurrentProperties.Zoom, 0.05,
                     "CameraSystem.Current.Zoom must be near midpoint after dt=D/2.");
                 Assert.AreEqual(expectedZoom, view.View.Zoom, 0.05,
                     "MapView.View.Zoom must reflect the mid-animation zoom within the same UpdateFrame call " +
@@ -180,7 +180,7 @@ namespace MapRenderer.Tests
             var (_, camSys, mapCam, cam, rootGo, camGo) = CreateCameraRig(initial);
             try
             {
-                mapCam.Sync(camSys);
+                mapCam.ApplyCameraProperties(camSys.CurrentProperties);
 
                 Assert.Greater(cam.transform.position.y, 0f,
                     "Camera must be above the origin (position.y > 0) at tilt=0.");
@@ -205,13 +205,13 @@ namespace MapRenderer.Tests
             {
                 // Bearing = 0
                 var propsN = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0,   0.0);
-                mapCam.SyncFromProperties(propsN, TestViewportHeight, TestFovDeg);
+                mapCam.ApplyCameraProperties(propsN);
                 Vector3 upNorth = cam.transform.up;
                 Vector3 fwdN    = cam.transform.forward;
 
                 // Bearing = 90
                 var propsE = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 90.0, 0.0);
-                mapCam.SyncFromProperties(propsE, TestViewportHeight, TestFovDeg);
+                mapCam.ApplyCameraProperties(propsE);
                 Vector3 upEast = cam.transform.up;
                 Vector3 fwdE   = cam.transform.forward;
 
@@ -241,9 +241,8 @@ namespace MapRenderer.Tests
                 new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0));
             try
             {
-                mapCam.Sync(new CameraSystem(
-                    new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0),
-                    TestViewportHeight, TestFovDeg));
+                mapCam.ApplyCameraProperties(
+                    new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0));
 
                 Assert.Greater(cam.transform.position.y, 0f,
                     "Camera must still be above origin at tilt=45.");
@@ -263,7 +262,7 @@ namespace MapRenderer.Tests
                 new CameraProperties(new LookAtPoint(0,0,0), 2.0, 0, 0));
             try
             {
-                mapCam.Sync(camSys);
+                mapCam.ApplyCameraProperties(camSys.CurrentProperties);
 
                 float altitude = cam.transform.position.y;
                 Assert.Greater(cam.farClipPlane,  altitude, "farClipPlane must exceed altitude at low zoom.");
@@ -283,11 +282,11 @@ namespace MapRenderer.Tests
             try
             {
                 var propsN = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0,  45.0);
-                mapCam.SyncFromProperties(propsN, TestViewportHeight, TestFovDeg);
+                mapCam.ApplyCameraProperties(propsN);
                 Vector3 posN = cam.transform.position;
 
                 var propsE = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 90.0, 45.0);
-                mapCam.SyncFromProperties(propsE, TestViewportHeight, TestFovDeg);
+                mapCam.ApplyCameraProperties(propsE);
                 Vector3 posE = cam.transform.position;
 
                 Assert.Greater(posN.y, 0f, "Camera above origin at bearing=0 pitch=45.");
@@ -310,7 +309,7 @@ namespace MapRenderer.Tests
             try
             {
                 cam.orthographic = true;
-                mapCam.Sync(camSys);
+                mapCam.ApplyCameraProperties(camSys.CurrentProperties);
 
                 Assert.IsFalse(cam.orthographic, "Camera must be set to perspective (orthographic=false).");
                 Assert.AreEqual(TestFovDeg, cam.fieldOfView, 0.001f,

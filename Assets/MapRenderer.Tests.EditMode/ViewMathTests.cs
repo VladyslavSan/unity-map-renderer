@@ -145,36 +145,9 @@ namespace MapRenderer.Tests
             Assert.AreEqual(min.y, o.y, Eps);
         }
 
-        [Test]
-        public void FloatingOrigin_ShouldRebase_TrueOnlyBeyondThreshold()
-        {
-            var scene = new double2(1_000_000, 2_000_000);
-            var near  = new double2(1_000_100, 2_000_000);   // 100 m away
-            var far   = new double2(1_005_000, 2_000_000);   // 5000 m away
-            Assert.IsFalse(FloatingOrigin.ShouldRebase(scene, near, 2000.0), "100 m < 2000 m threshold");
-            Assert.IsTrue (FloatingOrigin.ShouldRebase(scene, far,  2000.0), "5000 m > 2000 m threshold");
-        }
-
-        [Test]
-        public void FloatingOrigin_RebaseDelta_PreservesWorldPositions()
-        {
-            // A tile at absolute origin O placed under scene origin S sits at (O − S). After rebasing the
-            // scene origin to S', the tile must sit at (O − S'); the delta (oldS − newS) added to the old
-            // placement must equal the new placement (no absolute drift).
-            var tileOrigin = new double2(12_345_678, -3_456_789);
-            var oldScene   = new double2(12_300_000, -3_400_000);
-            var newScene   = new double2(12_340_000, -3_450_000);
-
-            float3 oldPlacement = FloatingOrigin.TileLocalToScene(tileOrigin, oldScene);
-            float3 newPlacement = FloatingOrigin.TileLocalToScene(tileOrigin, newScene);
-            double2 delta       = FloatingOrigin.RebaseDelta(oldScene, newScene);
-
-            // old placement + delta == new placement (within float precision at this small magnitude).
-            Assert.AreEqual(newPlacement.x, oldPlacement.x + (float)delta.x, 1e-2,
-                "Rebase delta applied to the old tile placement must equal the new placement (x).");
-            Assert.AreEqual(newPlacement.z, oldPlacement.z + (float)delta.y, 1e-2,
-                "Rebase delta applied to the old tile placement must equal the new placement (z).");
-        }
+        // S52: FloatingOrigin.ShouldRebase / RebaseDelta were removed — the scene origin now tracks the
+        // look-at every frame (camera-relative rendering), so there is no threshold to cross and no rebase
+        // delta to apply. The two-level RTC composition itself is still pinned by the jitter gate below.
 
         // ── FloatingOrigin: the JITTER gate (headline acceptance teeth) ────────────────────────
 
@@ -197,9 +170,10 @@ namespace MapRenderer.Tests
         /// measures the far corner of EVERY cover tile — taking the worst. Measuring only the camera tile
         /// would understate the real jitter (the closest tile is best-case).</para>
         ///
-        /// Parameters (computed, not guessed): zoom = <see cref="LiveZoom"/> (tile span ≈ 2446 m), rebase
-        /// threshold = <see cref="RebaseThresholdMeters"/> (2000 m), cover pad/aspect = the MapView
-        /// defaults (1.5/1.5). The farthest cover-edge vertex sits ≈ 11.5 km from the scene origin; the
+        /// Parameters (computed, not guessed): zoom = <see cref="LiveZoom"/> (tile span ≈ 2446 m), a
+        /// conservative modeled camera drift of 2000 m (S52: the scene origin now tracks the look-at every
+        /// frame, so real drift is ~0 — modeling 2000 m keeps the gate strict), cover pad/aspect = the
+        /// MapView defaults (1.5/1.5). The farthest cover-edge vertex sits ≈ 11.5 km from the scene origin; the
         /// measured worst round-trip error across a dense camera sweep is ≈ 0.36 mm — sub-millimetre.
         /// Latitude is clamped to the Mercator limit exactly as <see cref="CameraProperties"/>/
         /// <see cref="TileCover"/> clamp it; the camera never reaches the polar singularity where a single
@@ -216,9 +190,9 @@ namespace MapRenderer.Tests
         [Test]
         public void FloatingOrigin_ExtremeMercator_CoverEdgeRenderCoordsBounded_SubMillimetre()
         {
-            const int    LiveZoom              = 14;
-            const double RebaseThresholdMeters = 2000.0;
-            const double SubMmBudgetMeters     = 1e-3;   // sub-millimetre
+            const int    LiveZoom                = 14;
+            const double ModeledCameraDriftMeters = 2000.0; // S52: conservative; real drift is ~0 (origin ≡ look-at)
+            const double SubMmBudgetMeters       = 1e-3;   // sub-millimetre
             // MapView defaults — the cover the LIVE loop actually selects.
             const double LivePad    = 1.5;
             const double LiveAspect = 1.5;
@@ -236,9 +210,9 @@ namespace MapRenderer.Tests
                 {
                     double camLat = -CameraProperties.MaxMercatorLat + la * (2.0 * CameraProperties.MaxMercatorLat / 20.0);
 
-                    // Scene origin rebased to the camera; camera drifted up to the threshold away.
+                    // Scene origin at the look-at; model a conservative camera drift to keep the gate strict.
                     double2 sceneOrigin = WebMercator.FromLonLat(camLon, camLat);
-                    double2 cameraMerc  = new double2(sceneOrigin.x + RebaseThresholdMeters, sceneOrigin.y);
+                    double2 cameraMerc  = new double2(sceneOrigin.x + ModeledCameraDriftMeters, sceneOrigin.y);
                     double2 camLL       = WebMercator.ToLonLat(cameraMerc.x, cameraMerc.y);
 
                     // Enumerate the SAME cover the live loop would select for this camera.

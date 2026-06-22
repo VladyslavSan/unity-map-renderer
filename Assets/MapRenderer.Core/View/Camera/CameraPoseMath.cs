@@ -74,6 +74,14 @@ namespace MapRenderer.Core.View.Camera
             return Math.Log(EarthCircumferenceMetres / (TilePixelSize * metersPerPixel), 2.0);
         }
 
+        // ── Clip planes (derived from altitude — S42 D3) ──────────────────────────────────────────
+
+        /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
+        public static double NearClip(double altitude) => Math.Max(0.1, altitude * 0.01);
+
+        /// <summary>Far clip plane from altitude (S42 D3: far = altitude · 4).</summary>
+        public static double FarClip(double altitude) => altitude * 4.0;
+
         // ── Pose computation ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
