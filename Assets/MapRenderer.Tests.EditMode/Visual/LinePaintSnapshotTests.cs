@@ -95,10 +95,7 @@ namespace MapRenderer.Tests.Visual
                 new double2(-40, 0),
                 new double2( 40, 0),
             };
-            var result  = LineTessellator.Triangulate(pts, JoinType.Miter, CapType.Butt);
-            var builder = new LineMeshBuilder();
-            builder.AddLineResult(result);
-            var mesh = builder.Build();
+            var mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
 
             var go = new GameObject("HLine_LinePaintSnap");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;

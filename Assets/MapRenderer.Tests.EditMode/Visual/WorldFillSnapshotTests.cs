@@ -2,7 +2,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Imaging;
-using MapRenderer.Unity;
+// S54: MapFillBootstrap retired; FillSceneHelper replaces it.
 
 namespace MapRenderer.Tests.Visual
 {
@@ -209,12 +209,12 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Builds the full S02 scene: MapFillBootstrap + camera + directional light, ready to render.
+        /// Builds the fill scene: FillSceneHelper + camera + directional light, ready to render.
         /// Returns (mapGameObject, camera, cameraGameObject). Caller must destroy both GOs.
         ///
-        /// Directional light: required because MapFillBootstrap now uses MapRenderer/Fill (URP Lit).
-        /// Without a light the fill renders near-black (ambient only) and coverage fails.
-        /// The light is oriented slightly off-vertical so top-down geometry (facing +Y) receives it.
+        /// S54: MapFillBootstrap retired; uses FillSceneHelper (StyledFillTileBuilder-backed).
+        /// Directional light: required because MapRenderer/Fill (URP Lit) renders near-black
+        /// at ambient-only.
         /// </summary>
         private static (GameObject mapGo, Camera camera, GameObject cameraGo) BuildScene()
         {
@@ -225,17 +225,10 @@ namespace MapRenderer.Tests.Visual
             var light   = lightGo.AddComponent<Light>();
             light.type      = LightType.Directional;
             light.intensity = 1f;
-            // Slightly off-vertical (pointing mostly down onto the XZ fill plane).
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
 
-            // Build the map fill using the same pipeline as MapFillBootstrap.Build().
-            // Leave FillMaterial null → Bootstrap creates MapRenderer/Fill lit material.
-            var mapGo  = new GameObject("MapFill");
-            var boot   = mapGo.AddComponent<MapFillBootstrap>();
-            boot.FitToView = true;
-            boot.ViewSize  = 100f;
-            // Tile == null → Bootstrap falls back to loading from Assets/Fixtures/sample-tile.bytes.
-            boot.Build();
+            // Build the map fill via FillSceneHelper (StyledFillTileBuilder + fixture tile).
+            var (mapGo, _) = FillSceneHelper.BuildFillGo(viewSize: 100f);
 
             // Attach the light to mapGo for unified cleanup (caller destroys mapGo + cameraGo).
             lightGo.transform.SetParent(mapGo.transform);

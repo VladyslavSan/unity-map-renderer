@@ -93,3 +93,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
   in the Editor (a step the user runs).
 - Vendored third-party code goes under `Assets/ThirdParty/<name>/` with its license, and an entry in
   `THIRD-PARTY-NOTICES.txt`. Avoid copyleft (see `ARCHITECTURE.md` §4).
+- **Type-explicit builder naming.** A type that builds or owns a single geometry kind must name it
+  explicitly (`StyledFillTileBuilder`, `StyledLineTileBuilder`); generic names (`MeshBuilder`,
+  `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers. (S54 — the retired
+  Gen-1 `MeshBuilder`/`TileMeshFactory` were the naming offenders this rule targets.)

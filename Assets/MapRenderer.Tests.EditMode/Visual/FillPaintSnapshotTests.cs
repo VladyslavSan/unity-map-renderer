@@ -8,6 +8,7 @@ using MapRenderer.Unity;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
+// S54: MapFillBootstrap retired; build helpers migrated to FillSceneHelper.
 
 namespace MapRenderer.Tests.Visual
 {
@@ -80,25 +81,18 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ── Build a fill mesh with a given color expression and material setup ──
+        // S54: replaces MapFillBootstrap with FillSceneHelper (StyledFillTileBuilder-backed).
 
         private static (GameObject go, Mesh mesh, Material mat) BuildFillWithColor(
             string colorExpr, Action<Material> matSetup = null)
         {
-            var mapGo = new GameObject("FillPaintTest");
-            var boot  = mapGo.AddComponent<MapFillBootstrap>();
-            boot.FitToView           = true;
-            boot.ViewSize            = 100f;
-            boot.FillColorExpression = colorExpr;
-            boot.StyleZoom           = 0.0;
-            boot.FillMaterial        = null; // let Bootstrap auto-create
-            boot.Build();
-
-            var mf  = mapGo.GetComponent<MeshFilter>();
-            var mr  = mapGo.GetComponent<MeshRenderer>();
-            var mat = mr.sharedMaterial;
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(
+                fillColorExpression: colorExpr,
+                styleZoom: 0.0,
+                viewSize: 100f);
             if (mat != null) matSetup?.Invoke(mat);
-
-            return (mapGo, mf.sharedMesh, mat);
+            var mf = mapGo.GetComponent<MeshFilter>();
+            return (mapGo, mf != null ? mf.sharedMesh : null, mat);
         }
 
         // ── #3: Opacity no-rebuild ─────────────────────────────────────────────
@@ -270,23 +264,23 @@ namespace MapRenderer.Tests.Visual
             RenderSettings.ambientLight = prevAmbientLight;
         }
 
-        // ── #7: MeshBuilder.SetColors linearizes vertex colors (D2 fix) ────────
+        // ── #7: StyledFillTileBuilder linearizes vertex colors (D2 fix) ────────
+        // S54: migrated from MapFillBootstrap / MeshBuilder to StyledFillTileBuilder.
+        // StyledFillTileBuilder stores colors in stream-3 via SetVertexBufferData<Vector4>,
+        // so we read them back with Mesh.GetColors (reads the COLOR attribute on any stream).
 
         [Test]
         public void DataDrivenVertexColor_IsLinearized_BeforeSetColors()
         {
-            // Verify that MeshBuilder.Build() applied Color.linear to baked vertex colors.
-            // We can test this without GPU rendering by inspecting the mesh color channel directly.
+            // Verify that StyledFillTileBuilder.BuildMeshData() applied Color.linear to baked
+            // vertex colors (D2 gamma fix). Inspect the mesh Color stream directly.
             //
-            // A baked sRGB red (R=1,G=0,B=0,A=1) in Unity's Linear project:
-            //   Color.white.linear = white (unchanged; white is its own linear value).
-            //   Color.red (sRGB) = (1,0,0,1). red.linear = (1,0,0,1) (red is also its own linear).
-            //   Color(0.5,0,0,1).linear ≈ (0.214,0,0,1) — visibly different from (0.5,0,0,1).
+            // A baked sRGB (127/255≈0.498, 0, 0, 1):
+            //   sRGB R ≈ 0.498 → linear R ≈ ((0.498+0.055)/1.055)^2.4 ≈ 0.212.
             //
-            // We build a mesh with a constant baked color of (0.5,0,0,1) and verify the mesh's
-            // stored vertex color is ≈ (0.214,0,0,1), not (0.5,0,0,1).
+            // We build a mesh with a constant baked color of (127,0,0,1) and verify the mesh's
+            // stored Color-stream R is ≈ 0.212, not ≈ 0.498.
 
-            // Use a match expression that gives every feature the same color (0.5, 0, 0, 1).
             const string halfRedExpr =
                 "[\"match\",[\"get\",\"__NEVER_MATCHES__\"]," +
                 "\"x\",[\"rgba\",255,0,0,1]," +   // unreachable
@@ -306,23 +300,20 @@ namespace MapRenderer.Tests.Visual
                     return;
                 }
 
-                var colors = new System.Collections.Generic.List<Color>();
-                mesh.GetColors(colors);
-
-                if (colors.Count == 0)
+                // S54: StyledFillTileBuilder bakes the linearized fill color into the COLOR vertex
+                // stream (stream-3). Mesh.GetColors reads the COLOR attribute regardless of which
+                // stream it lives on, so it reflects the raw stored float values (NOT re-gamma'd).
+                var colorList = new System.Collections.Generic.List<Color>();
+                mesh.GetColors(colorList);
+                if (colorList.Count == 0)
                 {
-                    Assert.Inconclusive("No vertex colors in mesh (expected at least one).");
+                    Assert.Inconclusive("No Color-stream data in mesh (expected at least one vertex).");
                     return;
                 }
 
-                // The first vertex color should be the linearized version of sRGB (127/255, 0, 0, 1).
-                // sRGB R ≈ 0.498 → linear R ≈ ((0.498+0.055)/1.055)^2.4 ≈ 0.212 (IEC 61966-2-1).
-                float storedR = colors[0].r;
-                const float srgbR = 127f / 255f; // ≈ 0.498 (what Core Color.R would be)
+                float storedR = colorList[0].r; // Color.r = Red channel
 
-                // D2 fix assertion: stored R must NOT be the raw sRGB value (≈0.498).
-                // It must be the linearized value (≈0.212).
-                // Threshold: if stored R is closer to sRGB (0.498) than linear (0.212), linearization was skipped.
+                const float srgbR = 127f / 255f; // ≈ 0.498
                 const float expectedLinearR = 0.212f;
                 float distToSrgb   = Math.Abs(storedR - srgbR);
                 float distToLinear = Math.Abs(storedR - expectedLinearR);
@@ -330,10 +321,10 @@ namespace MapRenderer.Tests.Visual
                 Debug.Log($"[FillPaintSnapshotTests] Stored R={storedR:F4}, sRGB={srgbR:F4}, expectedLinear={expectedLinearR:F4}");
 
                 Assert.Less(distToLinear, distToSrgb,
-                    $"MeshBuilder.Build() must linearize vertex colors before Mesh.SetColors (D2 fix). " +
+                    $"StyledFillTileBuilder must linearize vertex colors off the main thread (D2 fix). " +
                     $"Stored R={storedR:F4} should be closer to linear ({expectedLinearR:F4}) than sRGB ({srgbR:F4}). " +
                     $"distToLinear={distToLinear:F4}, distToSrgb={distToSrgb:F4}. " +
-                    "If distToSrgb < distToLinear, Color.linear was not applied before SetColors.");
+                    "If distToSrgb < distToLinear, Color.linear was not applied before stream assembly.");
             }
             finally
             {

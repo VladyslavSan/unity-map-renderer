@@ -4,10 +4,8 @@ using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
-using UnityEngine.Rendering;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
-using MapRenderer.Unity;
 
 namespace MapRenderer.Tests
 {
@@ -24,7 +22,8 @@ namespace MapRenderer.Tests
     ///       / expected &lt; 1%. Holed polygons are skipped only when ALL rings (outer + every hole)
     ///       are proved self-intersecting via HasSelfIntersection(). Well-formed holed polygons
     ///       (all rings clean) must conserve area.
-    ///   (d) MeshBuilder produces a mesh with UInt32 index format.
+    ///   (d) [removed in S54] the Gen-1 sync mesh-builder index-format check; the async
+    ///       StyledFillTileBuilder upload path is covered by MapViewAsyncTessellationTests.
     ///
     /// KNOWN SKIP POLYGONS (sample-tile fixture, all confirmed degenerate by HasSelfIntersection):
     ///   Four tiny clip-boundary slivers with self-intersecting rings (MVT tile-boundary artefacts).
@@ -312,43 +311,10 @@ namespace MapRenderer.Tests
         }
 
         // -----------------------------------------------------------------------------------------
-        // (d) MeshBuilder: UInt32 index format
-        // -----------------------------------------------------------------------------------------
-
-        [Test]
-        public void MeshBuilder_ProducesUInt32Mesh()
-        {
-            var builder = new MeshBuilder();
-            builder.AddFeature(
-                new float3[] { new float3(0,0,0), new float3(1,0,0), new float3(0,0,1) },
-                new int[] { 0, 1, 2 });
-
-            var mesh = builder.Build();
-            Assert.IsNotNull(mesh);
-            Assert.AreEqual(IndexFormat.UInt32, mesh.indexFormat);
-            Assert.AreEqual(3, mesh.vertexCount);
-            Assert.AreEqual(3, mesh.triangles.Length);
-        }
-
-        [Test]
-        public void MeshBuilder_VertexAndIndexCountsMatch()
-        {
-            var builder = new MeshBuilder();
-            builder.AddFeature(
-                new float3[] { new float3(0,0,0), new float3(1,0,0), new float3(0,0,1) },
-                new int[] { 0, 1, 2 });
-            builder.AddFeature(
-                new float3[] { new float3(2,0,0), new float3(3,0,0), new float3(2,0,1), new float3(3,0,1) },
-                new int[] { 0, 1, 2, 0, 2, 3 });
-
-            Assert.AreEqual(7, builder.VertexCount);
-            Assert.AreEqual(9, builder.IndexCount);
-
-            var mesh = builder.Build();
-            Assert.AreEqual(7, mesh.vertexCount);
-            Assert.AreEqual(9, mesh.triangles.Length);
-        }
-
+        // (d) Gen-1 MeshBuilder tests removed in S54 (MeshBuilder retired).
+        //     UInt32 index format and vertex/index count are covered by
+        //     MapViewAsyncTessellationTests.BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh
+        //     and StyledFillTileBuilder tests (same assertions via StyledFillTileBuilder.BuildMesh).
         // -----------------------------------------------------------------------------------------
         // Helpers
         // -----------------------------------------------------------------------------------------

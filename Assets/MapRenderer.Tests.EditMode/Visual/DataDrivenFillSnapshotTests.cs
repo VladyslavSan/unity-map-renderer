@@ -4,7 +4,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Imaging;
-using MapRenderer.Unity;
+// S54: MapFillBootstrap retired; FillSceneHelper replaces it.
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -78,27 +78,16 @@ namespace MapRenderer.Tests.Visual
             return (go, camera);
         }
 
+        // S54: replaces MapFillBootstrap with FillSceneHelper (StyledFillTileBuilder-backed).
         private static (GameObject mapGo, Material liveMaterial) BuildFillGo(
             string colorExpr = null)
         {
-            var mapGo = new GameObject("DataDrivenFillTest");
-            var boot  = mapGo.AddComponent<MapFillBootstrap>();
-            boot.FitToView          = true;
-            boot.ViewSize           = 100f;
-            boot.FillColorExpression = colorExpr; // null → white vertex colors (S11 fallback)
-            boot.StyleZoom          = 0.0;
-
-            // Let Bootstrap create the material automatically from the Fill shader.
-            boot.FillMaterial = null;
-            boot.Build();
-
-            var mat = mapGo.GetComponent<MeshRenderer>().sharedMaterial;
-
-            // Set a neutral white _MapColor so vertex color is the primary color signal.
-            // This isolates the per-vertex baked color as the color source.
-            if (mat != null)
-                mat.SetColor("_MapColor", Color.white);
-
+            var (mapGo, mat) = FillSceneHelper.BuildFillGo(
+                fillColorExpression: colorExpr,
+                styleZoom: 0.0,
+                viewSize: 100f);
+            // Neutral _MapColor so vertex color is the primary color signal.
+            if (mat != null) mat.SetColor("_MapColor", Color.white);
             return (mapGo, mat);
         }
 
@@ -228,8 +217,8 @@ namespace MapRenderer.Tests.Visual
                         $"Data-driven color expression produced only {clusters} color cluster(s) in the render. " +
                         "Expected ≥2 (reddish for Asia features, bluish for South America features, gray default). " +
                         "The fixture has both Asia and South America features; they should produce distinct vertex colors. " +
-                        "Check: 1) FillColorExpression is being passed through MapFillBootstrap; " +
-                        "2) MeshBuilder.SetColors is called; " +
+                        "Check: 1) the fill-color expression is being passed through the StyledFillTileBuilder paint; " +
+                        "2) per-feature vertex colors are baked into the color stream; " +
                         "3) The shader's vColor channel is wired to the COLOR semantic.");
                 }
 

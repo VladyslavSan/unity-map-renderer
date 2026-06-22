@@ -97,10 +97,7 @@ namespace MapRenderer.Tests.Visual
                 new double2(-40, 0),
                 new double2( 40, 0),
             };
-            var result  = LineTessellator.Triangulate(pts, JoinType.Miter, CapType.Butt);
-            var builder = new LineMeshBuilder();
-            builder.AddLineResult(result);
-            var mesh = builder.Build();
+            var mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
 
             var go = new GameObject("HLine_LitTest");
             if (parent != null) go.transform.SetParent(parent.transform, worldPositionStays: false);
@@ -222,15 +219,21 @@ namespace MapRenderer.Tests.Visual
             Assert.That(src, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"),
                 "Line.shader must have standard alpha blend.");
 
-            // 7. LineMeshBuilder emits NORMAL stream (not overloaded with extrusion).
-            string builderPath = System.IO.Path.Combine(
-                System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
-                "Assets/MapRenderer.Unity/LineMeshBuilder.cs");
-            string builderSrc = System.IO.File.ReadAllText(builderPath);
-            Assert.That(builderSrc, Does.Contain("VertexAttribute.Normal"),
-                "LineMeshBuilder must emit a NORMAL stream (+Y) for the lit shader.");
-            Assert.That(builderSrc, Does.Contain("Vector3.up").Or.Contain("(0,1,0)").Or.Contain("new Vector3(0f, 1f, 0f)").Or.Contain("new Vector3(0, 1, 0)"),
-                "LineMeshBuilder NORMAL must be +Y (0,1,0).");
+            // 7. The line mesh emits a NORMAL stream of +Y (0,1,0) for the lit shader.
+            // S54: assert on the live StyledLineTileBuilder output directly (the retired
+            // LineMeshBuilder source-text check is gone). Falsifiable identically: a non-+Y
+            // normal stream would scramble the lit luminance delta.
+            var normalProbeMesh = SyntheticLineMesh.BuildFromPoints(
+                new List<double2> { new double2(-40, 0), new double2(40, 0) },
+                JoinType.Miter, CapType.Butt);
+            Assert.IsNotNull(normalProbeMesh, "StyledLineTileBuilder must produce a line mesh.");
+            var probeNormals = normalProbeMesh.normals;
+            Assert.That(probeNormals.Length, Is.GreaterThan(0),
+                "Line mesh must emit a NORMAL stream (+Y) for the lit shader.");
+            foreach (var n in probeNormals)
+                Assert.That(n, Is.EqualTo(Vector3.up),
+                    "Line mesh NORMAL must be +Y (0,1,0) on every vertex.");
+            Object.DestroyImmediate(normalProbeMesh);
 #else
             Assert.Inconclusive("Structural checks require Unity Editor.");
 #endif
@@ -582,21 +585,16 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LitLine_CoplanarFillAndLine_NoZFighting()
         {
-            // Build a fill (MapFillBootstrap) and a line on the same XZ plane.
+            // Build a fill (StyledFillTileBuilder via FillSceneHelper) and a line on the same XZ plane.
             // Both must be visible on the same scanline — the Y lift in MapLineForwardPass
             // (0.001m) plus ZWrite Off / Queue ordering prevents z-fighting.
             var (cameraGo, camera) = BuildCamera();
             var sceneGo            = new GameObject("LitLineZFightScene");
 
-            // Fill (opaque, Queue=Geometry).
-            var fillGo = new GameObject("ZFightFill");
-            fillGo.transform.SetParent(sceneGo.transform);
-            var fillBoot = fillGo.AddComponent<MapFillBootstrap>();
-            fillBoot.FitToView = true;
-            fillBoot.ViewSize  = 100f;
-            fillBoot.Build();
+            // Fill (opaque, Queue=Geometry) — built through the live Styled path.
+            var (fillGo, fillMat) = FillSceneHelper.BuildFillGo(viewSize: 100f);
+            fillGo.transform.SetParent(sceneGo.transform, worldPositionStays: false);
             // Give fill a distinctive color.
-            var fillMat = fillGo.GetComponent<MeshRenderer>().sharedMaterial;
             if (fillMat != null) fillMat.SetColor("_MapColor", new Color(0.2f, 0.8f, 0.2f, 1f)); // green
 
             // Line (transparent, Queue=Transparent, tiny Y lift).

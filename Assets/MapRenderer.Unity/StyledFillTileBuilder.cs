@@ -17,9 +17,9 @@ using CoreColor = MapRenderer.Core.Expressions.Color;
 namespace MapRenderer.Unity
 {
     /// <summary>
-    /// S40 managed per-layer fill mesh builder. Extracted from <see cref="MapFillBootstrap.BuildMesh"/>
-    /// and generalized to receive real <see cref="TileId"/> + origin, a set of pre-selected features,
-    /// and a <see cref="FillPaint"/> describing the style.
+    /// S40 managed per-layer fill mesh builder. Extracted from the S02-era MapFillBootstrap.BuildMesh
+    /// (retired in S54) and generalized to receive real <see cref="TileId"/> + origin, a set of
+    /// pre-selected features, and a <see cref="FillPaint"/> describing the style.
     ///
     /// Pipeline per feature:
     ///   MvtGeometry.Decode → PolygonAssembler.Assemble → Earcut.Triangulate
@@ -69,13 +69,16 @@ namespace MapRenderer.Unity
         // UploadMesh does not allocate per-tile on the main thread (S48 no-per-tile-GC contract).
         // Layout: 4 streams (Unity max). Stream 0 = Position+Normal interleaved. Stream 1 = UV.
         // Stream 2 = Tangent. Stream 3 = Color. See class XML doc.
+        // Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Tangent=2, Color=3,
+        // TexCoord0=4) eliminates the Unity "non-standard order" warning. Each attribute is on its
+        // own stream so the reorder does not change any stream's byte offset.
         private static readonly VertexAttributeDescriptor[] FillVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
             new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.Tangent,   VertexAttributeFormat.Float32, 4, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
         };
 
         // Constant tangent: +X direction, +1 bitangent sign (right-handed), valid for flat +Y-normal fill.
@@ -325,7 +328,7 @@ namespace MapRenderer.Unity
                 double extentInv = f.Extent > 0.0 ? 1.0 / f.Extent : 0.0;
 
                 // S13 D2 gamma fix (moved off main thread — S48): convert sRGB→linear here.
-                // Color.linear applies the IEC 61966-2-1 ramp (same function MeshBuilder.Build used on main thread).
+                // Color.linear applies the IEC 61966-2-1 ramp.
                 // white.linear == white: S11 uniform-color behavior is preserved.
                 // Thread-safe: Color.linear is pure math (no engine access).
                 Color linearColor = f.FeatureColor.linear;

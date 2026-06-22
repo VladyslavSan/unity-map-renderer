@@ -2,10 +2,10 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Imaging;
-using MapRenderer.Unity;
 using MapRenderer.Core.Geometry;
 using System.Collections.Generic;
 using Unity.Mathematics;
+// S54: LineBootstrap and LineMeshBuilder retired; SyntheticLineMesh replaces them.
 
 namespace MapRenderer.Tests.Visual
 {
@@ -75,59 +75,52 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Build ALL golden test lines using LineBootstrap (horizontal + L-shape + diagonal)
-        /// and return the GameObject. Used for the coverage / visual test.
+        /// Build ALL golden test lines (horizontal + L-shape + diagonal) using SyntheticLineMesh.
+        /// S54: replaces LineBootstrap + LineMeshBuilder.
         /// </summary>
-        private static GameObject BuildLineScene(float widthMeters, out LineBootstrap boot)
+        private static GameObject BuildLineScene(float widthMeters, out Material mat,
+            JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
         {
+            var mesh = SyntheticLineMesh.BuildGoldenShapes(join, cap);
             var go = new GameObject("LineTest");
-            boot = go.AddComponent<LineBootstrap>();
-            boot.Width          = widthMeters;
-            boot.WidthIsPixels  = false;
-            boot.MetersPerPixel = MetersPerPx;
-            boot.LineColor      = new Color(0.9f, 0.5f, 0.1f, 1f); // vivid orange (not black, not bg)
-            boot.Opacity        = 1f;
-            boot.Blur           = 1f;
-            boot.Join           = JoinType.Miter;
-            boot.Cap            = CapType.Butt;
-            boot.Build();
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            mat = new Material(shader) { name = "LineTestMat" };
+            mat.SetFloat("_Width",         widthMeters);
+            mat.SetFloat("_WidthIsPixels", 0f);
+            mat.SetFloat("_MetersPerPixel", MetersPerPx);
+            mat.SetColor("_MapColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetFloat("_Opacity",       1f);
+            mat.SetFloat("_Blur",          1f);
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
         }
 
         /// <summary>
         /// Build a SINGLE horizontal line for width-measurement tests.
-        /// Uses the Core tessellator + LineMeshBuilder directly (not LineBootstrap.Build) so only
-        /// the horizontal line is in the mesh — no L-shape or diagonal to confuse the scanline.
+        /// S54: replaces LineMeshBuilder with SyntheticLineMesh.
         /// </summary>
         private static GameObject BuildSingleHorizontalLine(float widthMeters, out Material mat)
         {
-            // Build the mesh from Core directly.
             var pts = new List<double2>
             {
                 new double2(-40, 0),
                 new double2( 40, 0),
             };
-            var result  = MapRenderer.Core.Geometry.LineTessellator.Triangulate(
-                pts, JoinType.Miter, CapType.Butt);
-            var builder = new LineMeshBuilder();
-            builder.AddLineResult(result);
-            var mesh = builder.Build();
+            var mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
 
             var go = new GameObject("HLine");
-            var mf = go.AddComponent<MeshFilter>();
-            var mr = go.AddComponent<MeshRenderer>();
-            mf.sharedMesh = mesh;
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var shader = Shader.Find("MapRenderer/Line");
-            if (shader == null) shader = Shader.Find("Sprites/Default");
+            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
             mat = new Material(shader) { name = "HLineMat" };
-            mat.SetFloat("_Width",          widthMeters);
-            mat.SetFloat("_WidthIsPixels",  0f);
+            mat.SetFloat("_Width",         widthMeters);
+            mat.SetFloat("_WidthIsPixels", 0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
-            mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_Blur",           1f);
-            mr.sharedMaterial = mat;
+            mat.SetColor("_MapColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetFloat("_Opacity",       1f);
+            mat.SetFloat("_Blur",          1f);
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
         }
 
@@ -377,17 +370,8 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildCamera();
 
             // Build all golden shapes with Round cap + Round join.
-            var go = new GameObject("LineTestRoundCap");
-            var boot = go.AddComponent<LineBootstrap>();
-            boot.Width          = LineWidthMeters;
-            boot.WidthIsPixels  = false;
-            boot.MetersPerPixel = MetersPerPx;
-            boot.LineColor      = new Color(0.9f, 0.5f, 0.1f, 1f);
-            boot.Opacity        = 1f;
-            boot.Blur           = 1f;
-            boot.Join           = JoinType.Round;
-            boot.Cap            = CapType.Round;
-            boot.Build();
+            var go = BuildLineScene(LineWidthMeters, out _, JoinType.Round, CapType.Round);
+            go.name = "LineTestRoundCap";
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
@@ -437,17 +421,8 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildCamera();
 
             // Build all golden shapes with Square cap + Miter join.
-            var go = new GameObject("LineTestSquareCap");
-            var boot = go.AddComponent<LineBootstrap>();
-            boot.Width          = LineWidthMeters;
-            boot.WidthIsPixels  = false;
-            boot.MetersPerPixel = MetersPerPx;
-            boot.LineColor      = new Color(0.9f, 0.5f, 0.1f, 1f);
-            boot.Opacity        = 1f;
-            boot.Blur           = 1f;
-            boot.Join           = JoinType.Miter;
-            boot.Cap            = CapType.Square;
-            boot.Build();
+            var go = BuildLineScene(LineWidthMeters, out _, JoinType.Miter, CapType.Square);
+            go.name = "LineTestSquareCap";
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try

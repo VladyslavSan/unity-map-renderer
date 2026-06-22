@@ -2,28 +2,29 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
+using Unity.Mathematics;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Rendering;
+using MapRenderer.Core.Geometry;
 using MapRenderer.Unity;
 
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
-    /// S07 — multi-layer painter's-algorithm reorder snapshot test.
+    /// S07 — multi-layer painter's-algorithm "clean composite" snapshot test.
     ///
-    /// Stands up a synthetic stack of overlapping coplanar layers (a FILL declared on top of a LINE —
-    /// the discriminating case for the keystone "one transparent band" constraint) and proves the
-    /// S07 acceptance teeth with HARD assertions on real pixels:
+    /// S54 migration: the retired LayerStack MonoBehaviour drove the original three teeth
+    /// (draw-order dominance, reorder-flip, clean composite). The dominance + reorder-flip teeth
+    /// are now covered live by <c>BrgBackendSnapshotTests</c> (Tooth 2 pixel — fill-over-line
+    /// declared-order flip, falsifiable) and the queue-mechanism tooth by Tooth 2
+    /// (ascending renderQueue in declared order). The ONLY tooth without a Gen-2 survivor is the
+    /// no-z-fighting clean-composite (low region-color variance), so it is migrated here onto the
+    /// live material path (MaterialFactory + LayerDrawOrder + SyntheticLineMesh), with a synthetic
+    /// uniform fill quad so the sample region is a single flat colour (a fixture fill would straddle
+    /// polygon edges and inflate variance for reasons unrelated to z-fighting).
     ///
-    ///   • Order tooth: in declared order the TOP layer's colour dominates the overlap region; after
-    ///     SetOrder reverses the stack the OTHER layer's colour dominates. A colour flip caused ONLY by
-    ///     a renderQueue reassignment (same geometry, same colours) proves we own + can reorder draw order.
-    ///   • No-z-fighting tooth: the overlap region's colour variance is below a tight threshold (a clean
-    ///     composite). The broken coplanar ZWrite-On approach would speckle and inflate this.
-    ///
-    /// GPU-context guard: if renders come back all-black (no GPU context in batch EditMode), the test
-    /// goes Inconclusive (not a failure), mirroring WorldFillSnapshotTests. The order/variance assertions
-    /// stay HARD when pixels are real (no unbounded skip — docs/lessons.md).
+    /// GPU-context guard: if renders come back all-black (no GPU context in batch EditMode), the
+    /// test goes Inconclusive (not a failure). The variance assertion stays HARD on real pixels.
     ///
     /// Camera: top-down ortho (512×512, Y=200, orthoSize=70), dark-slate background.
     /// </summary>
@@ -38,88 +39,83 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
 
         // Saturated layer colours whose dominant channel is unambiguous regardless of lighting intensity.
-        private static readonly Color FillBottom = new Color(0.10f, 0.85f, 0.10f, 1f); // GREEN  (G dominates)
-        private static readonly Color LineMid    = new Color(0.10f, 0.10f, 0.90f, 1f); // BLUE   (B dominates)
-        private static readonly Color FillTop    = new Color(0.90f, 0.10f, 0.10f, 1f); // RED    (R dominates)
+        private static readonly Color FillBottom = new Color(0.10f, 0.85f, 0.10f, 1f); // GREEN
+        private static readonly Color LineMid    = new Color(0.10f, 0.10f, 0.90f, 1f); // BLUE
+        private static readonly Color FillTop    = new Color(0.90f, 0.10f, 0.10f, 1f); // RED
 
-        // The three layers all overlap a central rectangle on the XZ plane. The line is a WIDE ribbon
-        // running through the centre so it densely covers the sample region (sample its clean interior).
+        // The layers all overlap a central rectangle on the XZ plane. The line is a WIDE ribbon
+        // through the centre so it densely covers the sample region.
         private const float OverlapHalf   = 18f;  // overlap rectangle half-extent (world meters)
-        private const float LineHalfWidth = 22f;  // line half-width (m) — wider than the overlap so it fills it
+        private const float LineHalfWidth = 22f;  // line half-width (m) — wider than the overlap
 
-        // Central sample sub-rect (pixels) — well inside the projected overlap, away from quad/feather edges.
-        // Overlap is ±18m at orthoSize 70 → ±18/70 of half the frame ≈ ±66px around centre (256). Sample ±40px.
+        // Central sample sub-rect (pixels) — well inside the projected overlap, away from edges.
         private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
 
-        // Variance threshold for a clean composite. Calibrated against the measured clean value (logged),
-        // with headroom; a coplanar z-fight speckle between two saturated colours would far exceed this.
+        // Variance threshold for a clean composite. Calibrated against the measured clean value
+        // (logged) with headroom; a coplanar z-fight speckle between two saturated colours far exceeds this.
         private const double CleanVarianceMax = 0.02;
 
         [Test]
-        public void ReorderingLayers_FlipsTopColor_WithCleanComposite()
+        public void CoplanarLayers_CompositeCleanly_LowVariance()
         {
             int prevQuality = QualitySettings.GetQualityLevel();
             QualitySettings.SetQualityLevel(0, false);
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
-            // Bright flat ambient so the unlit-ish saturated colours read back strongly without
-            // depending on a single directional light's angle (the colours, not lighting, are the signal).
+            // Bright flat ambient so the saturated colours read back strongly without depending on a
+            // single light's angle (the clean composite, not lighting, is the signal).
             RenderSettings.ambientMode  = AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
 
             var (cameraGo, camera) = BuildCamera();
-            var stackGo  = new GameObject("LayerStack");
-            var stack    = stackGo.AddComponent<LayerStack>();
+            var sceneGo = new GameObject("CoplanarLayerScene");
 
-            // A bit of directional light so the Lit fills are not pure ambient (belt and suspenders).
             var lightGo = new GameObject("DirLight");
-            lightGo.transform.SetParent(stackGo.transform);
+            lightGo.transform.SetParent(sceneGo.transform);
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             var light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
             light.intensity = 1f;
 
-            // Declared order: [0]=green fill (bottom), [1]=blue line (mid), [2]=red fill (top).
-            // FILL-ON-TOP-OF-LINE is present (index 2 fill over index 1 line) — the keystone case.
-            var specs = new List<LayerStack.LayerSpec>
-            {
-                LayerStack.LayerSpec.Fill("green-bottom", FillBottom, -OverlapHalf, OverlapHalf, -OverlapHalf, OverlapHalf),
-                LayerStack.LayerSpec.Line("blue-mid",     LineMid,    -OverlapHalf, OverlapHalf, 0f, LineHalfWidth),
-                LayerStack.LayerSpec.Fill("red-top",      FillTop,    -OverlapHalf, OverlapHalf, -OverlapHalf, OverlapHalf),
-            };
-
-            using var snapDeclared = new SnapshotRenderer(SnapW, SnapH);
-            using var snapReversed = new SnapshotRenderer(SnapW, SnapH);
+            var disposables = new List<Object>();
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                stack.Build(specs); // declared order: red fill on top
+                // Declared draw order via renderQueue (painter's algorithm, single transparent band):
+                //   [0]=green fill (bottom), [1]=blue line (mid), [2]=red fill (top).
+                // FILL-ON-TOP-OF-LINE is present (index 2 fill over index 1 line) — the keystone case.
+                int[] queues = LayerDrawOrder.ComputeQueues(3);
 
-                snapDeclared.Render(camera);
-                snapDeclared.WritePng("layer-order-declared.png");
+                BuildFillQuad(sceneGo, FillBottom, OverlapHalf, queues[0], disposables);
+                BuildWideLine(sceneGo, LineMid, LineHalfWidth, queues[1], disposables);
+                BuildFillQuad(sceneGo, FillTop, OverlapHalf, queues[2], disposables);
+
+                snap.Render(camera);
+                snap.WritePng("layer-order-clean-composite.png");
 
                 // GPU-context guard.
-                if (snapDeclared.IsAllBlack())
+                if (snap.IsAllBlack())
                 {
                     using var blank = RenderBlank();
                     if (blank.IsAllBlack())
                     {
                         Assert.Inconclusive(
-                            "Layer-order render and blank-control are all-black: no GPU context in " +
+                            "Coplanar-layer render and blank-control are all-black: no GPU context in " +
                             "batch EditMode. Re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
                         return;
                     }
                 }
 
-                double[] declaredMean = SnapshotCoverage.SampleRegionMeanColor(
-                    snapDeclared.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
-                double declaredVar = SnapshotCoverage.RegionColorVariance(
-                    snapDeclared.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
+                double[] mean = SnapshotCoverage.SampleRegionMeanColor(
+                    snap.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
+                double variance = SnapshotCoverage.RegionColorVariance(
+                    snap.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
 
-                Debug.Log($"[LayerOrderSnapshot] DECLARED (red on top): " +
-                          $"meanRGB=({declaredMean[0]:F3},{declaredMean[1]:F3},{declaredMean[2]:F3}), var={declaredVar:F5}");
+                Debug.Log($"[LayerOrderSnapshot] clean composite: " +
+                          $"meanRGB=({mean[0]:F3},{mean[1]:F3},{mean[2]:F3}), var={variance:F5}");
 
                 // Sanity: the region must actually have rendered something (not background slate).
-                if (declaredMean[0] + declaredMean[1] + declaredMean[2] < 0.05)
+                if (mean[0] + mean[1] + mean[2] < 0.05)
                 {
                     Assert.Inconclusive(
                         "Overlap region is ~background — layers did not render into the sample rect. " +
@@ -127,55 +123,17 @@ namespace MapRenderer.Tests.Visual
                     return;
                 }
 
-                // ── Order tooth (part 1): RED (top fill) dominates in declared order. ──
-                Assert.That(declaredMean[0], Is.GreaterThan(declaredMean[1]),
-                    $"Declared order: RED top fill must dominate — mean R ({declaredMean[0]:F3}) > G ({declaredMean[1]:F3}). " +
-                    "If GREEN or BLUE shows through, the fill declared on TOP of the line did not composite last — " +
-                    "the keystone single-transparent-band constraint is broken.");
-                Assert.That(declaredMean[0], Is.GreaterThan(declaredMean[2]),
-                    $"Declared order: mean R ({declaredMean[0]:F3}) must exceed B ({declaredMean[2]:F3}).");
-
-                // ── No-z-fighting tooth (declared): clean composite, low variance. ──
-                Assert.That(declaredVar, Is.LessThan(CleanVarianceMax),
-                    $"Declared-order overlap variance ({declaredVar:F5}) must be < {CleanVarianceMax} (clean composite). " +
-                    "Coplanar ZWrite-On layers would speckle and inflate this.");
-
-                // ── Reorder: reverse the stack (top↔bottom) by changing ONLY renderQueue. ──
-                // Reversed stack position order = [2,1,0] → spec 0 (green) drawn last/on top.
-                stack.SetOrder(new[] { 2, 1, 0 });
-
-                snapReversed.Render(camera);
-                snapReversed.WritePng("layer-order-reversed.png");
-
-                double[] reversedMean = SnapshotCoverage.SampleRegionMeanColor(
-                    snapReversed.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
-                double reversedVar = SnapshotCoverage.RegionColorVariance(
-                    snapReversed.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
-
-                Debug.Log($"[LayerOrderSnapshot] REVERSED (green on top): " +
-                          $"meanRGB=({reversedMean[0]:F3},{reversedMean[1]:F3},{reversedMean[2]:F3}), var={reversedVar:F5}");
-
-                // ── Order tooth (part 2): GREEN (now top) dominates after the reorder. ──
-                Assert.That(reversedMean[1], Is.GreaterThan(reversedMean[0]),
-                    $"Reversed order: GREEN bottom fill is now on top — mean G ({reversedMean[1]:F3}) must exceed " +
-                    $"R ({reversedMean[0]:F3}). If RED still dominates, the reorder did not change draw order " +
-                    "(Unity's automatic sort would be in control, not ours).");
-                Assert.That(reversedMean[1], Is.GreaterThan(reversedMean[2]),
-                    $"Reversed order: mean G ({reversedMean[1]:F3}) must exceed B ({reversedMean[2]:F3}).");
-
-                // ── The flip itself: dominant channel changed from R to G purely via renderQueue. ──
-                Assert.That(declaredMean[0], Is.GreaterThan(reversedMean[0]),
-                    $"Reorder must REDUCE red dominance: declared R ({declaredMean[0]:F3}) > reversed R ({reversedMean[0]:F3}).");
-                Assert.That(reversedMean[1], Is.GreaterThan(declaredMean[1]),
-                    $"Reorder must INCREASE green dominance: reversed G ({reversedMean[1]:F3}) > declared G ({declaredMean[1]:F3}).");
-
-                // ── No-z-fighting tooth (reversed): still a clean composite. ──
-                Assert.That(reversedVar, Is.LessThan(CleanVarianceMax),
-                    $"Reversed-order overlap variance ({reversedVar:F5}) must be < {CleanVarianceMax} (clean composite).");
+                // ── No-z-fighting tooth: a clean composite has low colour variance. ──
+                // A coplanar ZWrite-On approach would speckle between the saturated layer colours
+                // and inflate this far past the threshold.
+                Assert.That(variance, Is.LessThan(CleanVarianceMax),
+                    $"Coplanar overlap variance ({variance:F5}) must be < {CleanVarianceMax} (clean composite). " +
+                    "Coplanar ZWrite-On layers would speckle (z-fight) and inflate this.");
             }
             finally
             {
-                Object.DestroyImmediate(stackGo);
+                foreach (var d in disposables) if (d != null) Object.DestroyImmediate(d);
+                Object.DestroyImmediate(sceneGo);
                 Object.DestroyImmediate(cameraGo);
                 QualitySettings.SetQualityLevel(prevQuality, false);
                 RenderSettings.ambientMode  = prevAmbientMode;
@@ -183,55 +141,75 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
+        // ─── Layer builders ──────────────────────────────────────────────────────────
+
         /// <summary>
-        /// Mechanism tooth (GPU-independent): the painter's stack assigns DISTINCT render queues in
-        /// declared order, all in the transparent band, with ZWrite off — i.e. our explicit order, not
-        /// Unity's automatic queue→distance→depth sort. Runs even when no GPU context is available.
+        /// Build a uniform-colour flat fill quad on the XZ plane (±half meters), drawn with a live
+        /// MapRenderer/Fill material at the given renderQueue. The mesh uses the simple managed Mesh
+        /// API (Unity lays attributes out canonically — no non-standard-order warning) with a white
+        /// COLOR channel (identity) and a flat +Y normal; the layer colour is the _MapColor uniform.
         /// </summary>
-        [Test]
-        public void Stack_AssignsDistinctTransparentQueues_InDeclaredOrder()
+        private static void BuildFillQuad(GameObject parent, Color color, float half, int renderQueue,
+            List<Object> disposables)
         {
-            var stackGo = new GameObject("LayerStackQueues");
-            var stack   = stackGo.AddComponent<LayerStack>();
-            try
+            var mesh = new Mesh { name = "LayerOrderFillQuad" };
+            mesh.vertices = new[]
             {
-                var specs = new List<LayerStack.LayerSpec>
-                {
-                    LayerStack.LayerSpec.Fill("f0", FillBottom, -10, 10, -10, 10),
-                    LayerStack.LayerSpec.Line("l1", LineMid,    -10, 10, 0f, 5f),
-                    LayerStack.LayerSpec.Fill("f2", FillTop,    -10, 10, -10, 10),
-                };
-                stack.Build(specs);
-
-                int[] expected = LayerDrawOrder.ComputeQueues(3, stack.BaseQueue);
-                for (int i = 0; i < 3; i++)
-                {
-                    Material m = stack.MaterialAt(i);
-                    Assert.That(m.renderQueue, Is.EqualTo(expected[i]),
-                        $"Layer {i} material.renderQueue ({m.renderQueue}) must equal base+index ({expected[i]}).");
-                    Assert.That(m.renderQueue, Is.GreaterThanOrEqualTo(LayerDrawOrder.TransparentBandStart),
-                        $"Layer {i} must be in the transparent band (>= {LayerDrawOrder.TransparentBandStart}).");
-                    // ZWrite off on every painter's layer (the fill sets _ZWrite=0; the line shader hardcodes it).
-                    if (m.HasProperty("_ZWrite"))
-                        Assert.That(m.GetFloat("_ZWrite"), Is.EqualTo(0f),
-                            $"Layer {i} must have ZWrite off (_ZWrite=0) for painter's-algorithm compositing.");
-                }
-
-                // Strictly monotonic + distinct across the actual materials.
-                Assert.That(stack.MaterialAt(1).renderQueue, Is.GreaterThan(stack.MaterialAt(0).renderQueue));
-                Assert.That(stack.MaterialAt(2).renderQueue, Is.GreaterThan(stack.MaterialAt(1).renderQueue));
-
-                // SetOrder must change ONLY queues: reversing puts spec 0 at the top position queue.
-                stack.SetOrder(new[] { 2, 1, 0 });
-                Assert.That(stack.MaterialAt(0).renderQueue, Is.EqualTo(expected[2]),
-                    "After reverse, spec 0 must be drawn at the TOP position's queue.");
-                Assert.That(stack.MaterialAt(2).renderQueue, Is.EqualTo(expected[0]),
-                    "After reverse, spec 2 must be drawn at the BOTTOM position's queue.");
-            }
-            finally
+                new Vector3(-half, 0f, -half),
+                new Vector3( half, 0f, -half),
+                new Vector3( half, 0f,  half),
+                new Vector3(-half, 0f,  half),
+            };
+            mesh.normals = new[] { Vector3.up, Vector3.up, Vector3.up, Vector3.up };
+            mesh.tangents = new[]
             {
-                Object.DestroyImmediate(stackGo);
-            }
+                new Vector4(1f, 0f, 0f, 1f), new Vector4(1f, 0f, 0f, 1f),
+                new Vector4(1f, 0f, 0f, 1f), new Vector4(1f, 0f, 0f, 1f),
+            };
+            mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
+            mesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            mesh.RecalculateBounds();
+
+            var go = new GameObject("FillQuad");
+            go.transform.SetParent(parent.transform, worldPositionStays: false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            var mat = MaterialFactory.CreateFillMaterial();
+            mat.SetColor("_MapColor", color);
+            mat.SetFloat("_Opacity", 1f);
+            mat.renderQueue = renderQueue;
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+
+            disposables.Add(mesh);
+            disposables.Add(mat);
+        }
+
+        /// <summary>
+        /// Build a wide horizontal line ribbon through the centre via SyntheticLineMesh, drawn with a
+        /// live MapRenderer/Line material at the given renderQueue.
+        /// </summary>
+        private static void BuildWideLine(GameObject parent, Color color, float halfWidthM, int renderQueue,
+            List<Object> disposables)
+        {
+            var mesh = SyntheticLineMesh.BuildFromPoints(
+                new List<double2> { new double2(-OverlapHalf, 0), new double2(OverlapHalf, 0) },
+                JoinType.Miter, CapType.Butt);
+
+            var go = new GameObject("WideLine");
+            go.transform.SetParent(parent.transform, worldPositionStays: false);
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+
+            var mat = MaterialFactory.CreateLineMaterial();
+            mat.SetColor("_MapColor", color);
+            mat.SetFloat("_Width", halfWidthM * 2f);   // full width in meters
+            mat.SetFloat("_WidthIsPixels", 0f);
+            mat.SetFloat("_Opacity", 1f);
+            mat.renderQueue = renderQueue;
+            go.AddComponent<MeshRenderer>().sharedMaterial = mat;
+
+            disposables.Add(mesh);
+            disposables.Add(mat);
         }
 
         // ─── Helpers ───────────────────────────────────────────────────────────────

@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Visual
                 mesh.GetColors(colors);
 
                 Assert.Greater(colors.Count, 0,
-                    "Mesh must have vertex colors (MeshBuilder always sets the color channel).");
+                    "Mesh must have vertex colors (StyledFillTileBuilder always sets the color channel).");
 
                 // Count distinct colors (linear space; within float tolerance).
                 const float colorTol = 0.02f;
@@ -433,11 +433,11 @@ namespace MapRenderer.Tests.Visual
 
                 // ── DECISIVE: stored R must be closer to linear than to sRGB ─────────────────
                 Assert.Less(distToLinear, distToSrgb,
-                    $"MeshBuilder.Build() must linearize vertex colors (D2 gamma fix). " +
+                    $"StyledFillTileBuilder must linearize vertex colors (D2 gamma fix). " +
                     $"Stored R={storedR:F4}. Expected closer to linear ({expectedLinR:F4}) " +
                     $"than to sRGB ({srgbR:F4}). distToLinear={distToLinear:F4}, " +
                     $"distToSrgb={distToSrgb:F4}. " +
-                    "If distToSrgb < distToLinear, Color.linear was not applied in MeshBuilder.");
+                    "If distToSrgb < distToLinear, Color.linear was not applied in StyledFillTileBuilder.");
             }
             finally
             {

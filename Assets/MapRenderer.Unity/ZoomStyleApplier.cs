@@ -20,7 +20,7 @@ namespace MapRenderer.Unity
     /// <see cref="List{T}"/>, which uses a struct enumerator and has no closure overhead.
     ///
     /// Color conversion from <see cref="CoreColor"/> to <see cref="UnityEngine.Color"/> is a direct
-    /// component copy at float precision, matching <see cref="LayerStack"/>'s existing convention.
+    /// component copy at float precision.
     ///
     /// Clean-room: design follows the S11 plan and the public MapLibre Style Spec.
     /// </summary>
@@ -128,8 +128,7 @@ namespace MapRenderer.Unity
 
         /// <summary>
         /// Convert a Core expression <see cref="CoreColor"/> (sRGB [0,1] doubles) to a
-        /// <see cref="UnityEngine.Color"/> (sRGB [0,1] floats).  Matching the existing
-        /// <see cref="LayerStack"/> convention: direct component cast, no gamma conversion.
+        /// <see cref="UnityEngine.Color"/> (sRGB [0,1] floats): direct component cast, no gamma conversion.
         /// </summary>
         public static UnityEngine.Color ToUnityColor(CoreColor c)
             => new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);

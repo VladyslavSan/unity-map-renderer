@@ -34,7 +34,7 @@ namespace MapRenderer.Unity
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, +Y) interleaved via <see cref="LinePositionNormal"/>.
     ///   Stream 1 — TexCoord0: extrusion normal (Float32x2).
     ///   Stream 2 — TexCoord1: side + distanceAlong (Float32x2).
-    ///   Stream 3 — TexCoord2: widthScale (Float32x1) + Color (Float32x4) interleaved via <see cref="LineWidthColor"/>. 20B stride.
+    ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
     ///
     /// Color (D1): per-feature sRGB color baked via <see cref="DataDrivenPaintEvaluator"/>; converted
@@ -62,27 +62,33 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// S14: WidthScale + Color interleaved on stream 3.
-        /// Stride = 4 (float) + 16 (float4) = 20 bytes.
+        /// S14: Color + WidthScale interleaved on stream 3.
+        /// Canonical field order matches the canonical descriptor order (Color enum=3 before
+        /// TexCoord2 enum=6), so stream-3 byte offsets are Color@0, WidthScale@16.
+        /// Stride = 16 (float4) + 4 (float) = 20 bytes.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         public struct LineWidthColor
         {
-            public float   WidthScale;
             public Vector4 Color;
+            public float   WidthScale;
         }
 
         // ── Hoisted vertex attribute descriptor ─────────────────────────────────
 
         // Constructed once (static readonly) so UploadMesh does not allocate per-tile.
+        // Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Color=3,
+        // TexCoord0=4, TexCoord1=5, TexCoord2=6) eliminates the Unity "non-standard order" warning.
+        // Stream-3 interleave: Color (Float32x4, 16 bytes) then TexCoord2/WidthScale (Float32x1, 4 bytes),
+        // matching LineWidthColor struct field order { Vector4 Color; float WidthScale }.
         private static readonly VertexAttributeDescriptor[] LineVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
             new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 1, stream: 3),
-            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
         };
 
         // Constant +Y normal for all line vertices.

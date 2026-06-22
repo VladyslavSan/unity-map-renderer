@@ -3,7 +3,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Imaging;
-using MapRenderer.Unity;
+// S54: MapFillBootstrap retired; FillSceneHelper replaces it.
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -65,20 +65,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Build the fill GO with MapFillBootstrap. FillMaterial is left null so the Bootstrap
-        /// creates the MapRenderer/Fill lit material automatically.
+        /// Build the fill GO via FillSceneHelper (StyledFillTileBuilder-backed, S54).
         /// Returns (mapGO, the live lit material on the MeshRenderer).
         /// </summary>
         private static (GameObject mapGo, Material liveMaterial) BuildFillGo()
-        {
-            var mapGo = new GameObject("LitFillTest");
-            var boot  = mapGo.AddComponent<MapFillBootstrap>();
-            boot.FitToView = true;
-            boot.ViewSize  = 100f;
-            boot.Build();
-            var mat = mapGo.GetComponent<MeshRenderer>().sharedMaterial;
-            return (mapGo, mat);
-        }
+            => FillSceneHelper.BuildFillGo();
 
         /// <summary>
         /// Add a directional light as a child of the given parent. Returns the Light component.

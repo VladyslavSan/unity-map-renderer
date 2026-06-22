@@ -50,7 +50,7 @@ namespace MapRenderer.Core.Geometry
     /// <summary>
     /// Per-vertex output of <see cref="LineTessellator"/>.
     ///
-    /// Mesh/shader contract (channel layout documented in LineMeshBuilder):
+    /// Mesh/shader contract (channel layout documented in StyledLineTileBuilder):
     /// <list type="bullet">
     ///   <item><description><see cref="Position"/> — centerline point in the tessellation space (world meters for S05).</description></item>
     ///   <item><description><see cref="Normal"/> — 2D extrusion normal in the same space. For straight segments and bevel/round
