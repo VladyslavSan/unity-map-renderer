@@ -147,7 +147,7 @@ namespace MapRenderer.Tests.Visual
         /// Build a uniform-colour flat fill quad on the XZ plane (±half meters), drawn with a live
         /// MapRenderer/Fill material at the given renderQueue. The mesh uses the simple managed Mesh
         /// API (Unity lays attributes out canonically — no non-standard-order warning) with a white
-        /// COLOR channel (identity) and a flat +Y normal; the layer colour is the _MapColor uniform.
+        /// COLOR channel (identity) and a flat +Y normal; the layer colour is the _BaseColor uniform.
         /// </summary>
         private static void BuildFillQuad(GameObject parent, Color color, float half, int renderQueue,
             List<Object> disposables)
@@ -175,8 +175,8 @@ namespace MapRenderer.Tests.Visual
             go.transform.SetParent(parent.transform, worldPositionStays: false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var mat = MaterialFactory.CreateFillMaterial();
-            mat.SetColor("_MapColor", color);
+            var mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            mat.SetColor("_BaseColor", color);
             mat.SetFloat("_Opacity", 1f);
             mat.renderQueue = renderQueue;
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -200,8 +200,8 @@ namespace MapRenderer.Tests.Visual
             go.transform.SetParent(parent.transform, worldPositionStays: false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var mat = MaterialFactory.CreateLineMaterial();
-            mat.SetColor("_MapColor", color);
+            var mat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
+            mat.SetColor("_BaseColor", color);
             mat.SetFloat("_Width", halfWidthM * 2f);   // full width in meters
             mat.SetFloat("_WidthIsPixels", 0f);
             mat.SetFloat("_Opacity", 1f);

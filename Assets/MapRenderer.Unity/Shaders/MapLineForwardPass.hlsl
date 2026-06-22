@@ -441,16 +441,17 @@ void LinePassFragment(
     }
 
     // ── Surface data ──────────────────────────────────────────────────────────
-    // uv=0 → _BaseMap="white" returns (1,1,1,1), so albedo is modulated purely by _MapColor × vColor.
+    // uv=0 → _BaseMap="white" returns (1,1,1,1); _BaseColor (applied in InitializeStandardLitSurfaceData)
+    // carries the constant line color, so albedo here is just _BaseColor × vColor.
     SurfaceData surfaceData;
     InitializeStandardLitSurfaceData(float2(0, 0), surfaceData);
 
-    // [LINE DELTA S14] Modulate albedo by: vColor (per-vertex baked, data-driven) × _MapColor.
-    // vColor default = white (identity) when not data-driven; _MapColor = white for data-driven layers.
+    // [LINE DELTA S14] Modulate albedo by vColor (per-vertex baked, data-driven tint). vColor default =
+    // white (identity) when not data-driven; the constant line color rides _BaseColor (applied above).
     // init-then-modulate: never hand-assembled (S34 design rule + reviewer grep).
     // S14_LINE_PATTERN_HOOK: _LinePattern is read but only falls back to solid color (no sprite sampling
-    // until S17). The multiply below covers both solid and pattern-hook paths with solid _MapColor.
-    surfaceData.albedo *= input.vColor.rgb * _MapColor.rgb;
+    // until S17). The multiply below covers both solid and pattern-hook paths.
+    surfaceData.albedo *= input.vColor.rgb;
     // Alpha: coverage (outer+inner edge AA) × _Opacity × vertex alpha.
     // NOT surfaceData.alpha *= coverage (that multiplied the BaseMap alpha, always 1; multiply directly).
     float alpha = coverage * _Opacity * input.vColor.a;

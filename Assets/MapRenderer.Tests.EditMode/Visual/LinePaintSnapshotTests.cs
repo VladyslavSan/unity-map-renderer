@@ -24,7 +24,7 @@ namespace MapRenderer.Tests.Visual
     ///   the ribbon's measured center row by ≈ N image pixels. No mesh rebuild.
     ///
     /// Tooth #5 (line-pattern hook honest): with <c>_LinePattern=1</c> (hook active) the line still
-    ///   renders non-blank (falls back to solid <c>_MapColor</c>), proving the hook does not black
+    ///   renders non-blank (falls back to solid <c>_BaseColor</c>), proving the hook does not black
     ///   out the line.
     ///
     /// GPU context guard: all render tests degrade to Inconclusive (not Fail) when the GPU context
@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_WidthIsPixels",  1f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetFloat("_GapWidth",       gapPx);
-            mat.SetColor("_MapColor",       color ?? new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetColor("_BaseColor",       color ?? new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
             mat.SetFloat("_Blur",           1f);
             mat.SetVector("_LineTranslate", Vector4.zero);
@@ -371,7 +371,7 @@ namespace MapRenderer.Tests.Visual
         public void LinePattern_HookActive_LineStillRendersNonBlank()
         {
             // With _LinePattern=1 the S14 hook is "active" (pattern layer flagged).
-            // The fallback must still render solid _MapColor — the line must NOT vanish.
+            // The fallback must still render solid _BaseColor — the line must NOT vanish.
 
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
@@ -430,7 +430,7 @@ namespace MapRenderer.Tests.Visual
                     "_LinePattern=1 must NOT blank the line. FindLineCenterRow returned -1 " +
                     "(no visible band detected). The S14 hook must fall back to solid line-color " +
                     "(no sprite sampling until S17). If this fails, the hook is incorrectly " +
-                    "discarding all pixels instead of rendering solid _MapColor.");
+                    "discarding all pixels instead of rendering solid _BaseColor.");
 
                 // Secondary: filled fraction must be greater than a minimal threshold.
                 // A 8px-wide line in a 512x512 image fills ≈ 8*512 / (512*512) ≈ 1.6%.

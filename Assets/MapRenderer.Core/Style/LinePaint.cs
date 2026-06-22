@@ -182,7 +182,7 @@ namespace MapRenderer.Core.Style
         /// <summary>
         /// The line-pattern value (sprite name / string), or null when absent.
         /// When non-null, the renderer falls back to solid line-color until S17.
-        /// <!-- S14_LINE_PATTERN_HOOK: parse+plumb only, no sprite sampling. Fallback to solid _MapColor. -->
+        /// <!-- S14_LINE_PATTERN_HOOK: parse+plumb only, no sprite sampling. Fallback to solid _BaseColor. -->
         /// </summary>
         public string PatternName { get; }
 
@@ -332,7 +332,7 @@ namespace MapRenderer.Core.Style
             }
 
             // ── line-pattern (hook only) ────────────────────────────────────────
-            // S14_LINE_PATTERN_HOOK: parse+plumb only; fallback to solid _MapColor until S17.
+            // S14_LINE_PATTERN_HOOK: parse+plumb only; fallback to solid _BaseColor until S17.
             JsonValue patternJson = paint?.Get("line-pattern");
             if (patternJson != null)
             {

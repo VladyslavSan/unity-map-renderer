@@ -1,62 +1,47 @@
-// S35 acceptance test (tooth 1, STRUCTURAL) — MapLitShaderGUI base type.
+// S58 acceptance (STRUCTURAL) — the map material inspectors subclass the RAW UnityEditor.ShaderGUI.
 //
-// Asserts that the shared material inspector DERIVES from URP's BaseShaderGUI, NOT from the raw
-// UnityEditor.ShaderGUI. This is the loop-closable half of S35: the manual gate (tooth 4 — the
-// inspector actually rendering URP's full Lit UI plus the Map Paint section) cannot be verified
-// headlessly and is reported as outstanding-manual, never claimed as passed here.
-//
-// The base type is checked against the actual URP type objects (the test asmdef references the URP
-// editor assembly), not by string — URP declares BaseShaderGUI in namespace `UnityEditor`, so a
-// FullName string would be `UnityEditor.BaseShaderGUI` and ambiguous with the raw ShaderGUI family.
-// Comparing Type objects is unambiguous. The compile gate (tooth 2) is the editor assembly itself
-// compiling against the URP editor asmdef reference.
+// Replaces the S35 test that asserted MapLitShaderGUI : URP BaseShaderGUI. S58 retired the
+// UCL-derived MapLitShaderGUI; the inspectors now subclass the raw ShaderGUI directly (no URP
+// editor dependency — the test asmdef no longer references Unity.RenderPipelines.Universal.Editor).
+// The inspector LAYOUT itself is a manual in-editor check; this only pins the type hierarchy.
 using NUnit.Framework;
 #if UNITY_EDITOR
 using UnityEditor;                 // raw ShaderGUI
-using MapRenderer.Unity.Editor;    // MapLitShaderGUI
-using UrpBaseShaderGUI = UnityEditor.BaseShaderGUI; // URP's public, subclass-designed material GUI base
+using MapRenderer.Unity.Editor;    // MapShaderGUI / FillShaderGUI / LineShaderGUI
 #endif
 
 namespace MapRenderer.Tests
 {
     [TestFixture]
-    public class MapLitShaderGUITests
+    public class MapShaderGUITests
     {
 #if UNITY_EDITOR
         [Test]
-        public void MapLitShaderGUI_DerivesFromUrpBaseShaderGUI()
+        public void BaseShaderGUI_SubclassesRawShaderGUI_Directly()
         {
-            var baseType = typeof(MapLitShaderGUI).BaseType;
-            Assert.That(baseType, Is.Not.Null, "MapLitShaderGUI must have a base type.");
-            Assert.That(baseType, Is.EqualTo(typeof(UrpBaseShaderGUI)),
-                "MapLitShaderGUI must DERIVE from URP's BaseShaderGUI (S35), not the raw UnityEditor.ShaderGUI. " +
-                $"Found immediate base '{baseType.FullName}'.");
+            Assert.AreEqual(typeof(ShaderGUI), typeof(MapRenderer.Unity.Editor.BaseShaderGUI).BaseType,
+                "Our BaseShaderGUI must subclass the RAW UnityEditor.ShaderGUI directly (S58) — it is our own " +
+                "type, distinct from URP's UnityEditor.BaseShaderGUI (no longer referenced).");
         }
 
         [Test]
-        public void MapLitShaderGUI_DoesNotDeriveDirectlyFromRawShaderGUI()
+        public void Hierarchy_IsBase_Lit_Feature()
         {
-            var baseType = typeof(MapLitShaderGUI).BaseType;
-            Assert.That(baseType, Is.Not.Null, "MapLitShaderGUI must have a base type.");
-            Assert.That(baseType, Is.Not.EqualTo(typeof(ShaderGUI)),
-                "MapLitShaderGUI must not derive directly from raw UnityEditor.ShaderGUI — it must go through " +
-                "URP's BaseShaderGUI so the inspector gains URP's full Lit UI and keyword sync.");
-            // Sanity: it must still BE a ShaderGUI (URP's BaseShaderGUI : ShaderGUI), just not directly.
-            Assert.That(typeof(ShaderGUI).IsAssignableFrom(typeof(MapLitShaderGUI)), Is.True,
-                "MapLitShaderGUI must ultimately be a ShaderGUI (URP's BaseShaderGUI derives from it).");
+            // Three-level hierarchy mirroring URP's BaseShaderGUI → LitShader → feature:
+            //   BaseShaderGUI (Surface Options/Inputs/Advanced) → LitShaderGUI (Detail) → Fill/LineShaderGUI.
+            Assert.AreEqual(typeof(MapRenderer.Unity.Editor.BaseShaderGUI), typeof(LitShaderGUI).BaseType,
+                "LitShaderGUI must derive from our BaseShaderGUI.");
+            Assert.AreEqual(typeof(LitShaderGUI), typeof(FillShaderGUI).BaseType,
+                "FillShaderGUI must derive from LitShaderGUI.");
+            Assert.AreEqual(typeof(LitShaderGUI), typeof(LineShaderGUI).BaseType,
+                "LineShaderGUI must derive from LitShaderGUI.");
+            Assert.IsTrue(typeof(ShaderGUI).IsAssignableFrom(typeof(FillShaderGUI)));
+            Assert.IsTrue(typeof(ShaderGUI).IsAssignableFrom(typeof(LineShaderGUI)));
         }
 #else
         [Test]
-        public void MapLitShaderGUI_DerivesFromUrpBaseShaderGUI()
-        {
-            Assert.Inconclusive("MapLitShaderGUI is an editor-only type (EditMode tests only).");
-        }
-
-        [Test]
-        public void MapLitShaderGUI_DoesNotDeriveDirectlyFromRawShaderGUI()
-        {
-            Assert.Inconclusive("MapLitShaderGUI is an editor-only type (EditMode tests only).");
-        }
+        public void MapShaderGUI_SubclassesRawShaderGUI_Directly()
+            => Assert.Inconclusive("ShaderGUI types are editor-only (EditMode tests only).");
 #endif
     }
 }

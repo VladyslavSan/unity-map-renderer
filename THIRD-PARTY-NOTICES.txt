@@ -30,23 +30,6 @@ Unity Universal Render Pipeline (URP) shader files — derivative works
   The Unity Companion License is NOT copyleft — it does not affect our proprietary code.
   Only the copied/derived files themselves are subject to the UCL terms.
 
-Unity Universal Render Pipeline (URP) editor ShaderGUI — partial derivative work
-  The following file in Assets/MapRenderer.Unity/Editor/ replicates protected override bodies
-  from a Unity URP editor source file (com.unity.render-pipelines.universal version 17.5.0):
-
-    MapLitShaderGUI.cs        ← derived from LitShader.cs (Editor/ShaderGUI/Shaders/LitShader.cs)
-
-  Scope of the derivation: only the bodies of DrawSurfaceOptions, DrawSurfaceInputs, and
-  DrawAdvancedOptions replicate URP LitShader's protected override expressions (URP exposes no
-  hook to reach them without copying). The rest of the file (the Map Paint foldout and wiring)
-  is original. The file carries a UCL attribution header.
-
-  com.unity.render-pipelines.universal copyright © 2020 Unity Technologies ApS
-  Licensed under the Unity Companion License for Unity-dependent projects.
-  License text: Assets/ThirdParty/UnityCompanionLicense.txt
-  Online: http://www.unity3d.com/legal/licenses/Unity_Companion_License
-  The Unity Companion License is NOT copyleft — it does not affect our proprietary code.
-
 Fill triangulation is a clean-room implementation of the ear-clipping algorithm. The Mapbox
 "earcut" project (ISC) was consulted only as an algorithm reference; no source was copied.
 

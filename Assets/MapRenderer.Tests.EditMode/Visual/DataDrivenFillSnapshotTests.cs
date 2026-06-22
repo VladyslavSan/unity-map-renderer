@@ -27,7 +27,7 @@ namespace MapRenderer.Tests.Visual
     ///           key → all features fall through to default → render is single-cluster / uniform.
     ///           Proves the data-driven path without breaking when vertex colors are all the same.
     ///   Test 3: White-fallback regression — no FillColorExpression → vertex colors default to white
-    ///           → behavior identical to S11 (uniform fill from _MapColor). Mesh must still build.
+    ///           → behavior identical to S11 (uniform fill from _BaseColor). Mesh must still build.
     ///
     /// Camera: top-down ortho 512×512, Y=200, orthoSize=70.
     /// Background: distinctive dark slate (same as LitFillSnapshotTests).
@@ -86,8 +86,8 @@ namespace MapRenderer.Tests.Visual
                 fillColorExpression: colorExpr,
                 styleZoom: 0.0,
                 viewSize: 100f);
-            // Neutral _MapColor so vertex color is the primary color signal.
-            if (mat != null) mat.SetColor("_MapColor", Color.white);
+            // Neutral _BaseColor so vertex color is the primary color signal.
+            if (mat != null) mat.SetColor("_BaseColor", Color.white);
             return (mapGo, mat);
         }
 

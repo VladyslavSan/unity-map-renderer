@@ -19,8 +19,8 @@ namespace MapRenderer.Tests.Visual
     ///
     /// Tooth A — LineWidthColor flip is FALSIFIABLE through the REAL stream-3 interleave:
     ///   • Color sub-tooth: a non-white per-vertex colour baked into <c>LineWidthColor.Color</c> shows
-    ///     in the rendered pixel (lit MapRenderer/Line shader: albedo *= vColor.rgb * _MapColor.rgb,
-    ///     _MapColor=white → vColor IS the signal). We bake CYAN (0,1,1,1) with WidthScale=2 and assert
+    ///     in the rendered pixel (lit MapRenderer/Line shader: albedo *= vColor.rgb * _BaseColor.rgb,
+    ///     _BaseColor=white → vColor IS the signal). We bake CYAN (0,1,1,1) with WidthScale=2 and assert
     ///     the centre band is cyan-dominant (g>r AND b>r). A struct-order revert (the pre-flip
     ///     {WidthScale; Color}) with the canonical descriptors fixed would make the GPU read
     ///     vColor = (WidthScale=2→1, r, g, b) = (1,0,1,1) → MAGENTA (r max) with alpha still 1 (visible,
@@ -64,7 +64,7 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera) = BuildCamera();
 
             // CYAN vertex colour (0,1,1,1) with NON-UNIT WidthScale=2 baked into stream-3.
-            // _MapColor=white so the baked vColor is the only colour signal.
+            // _BaseColor=white so the baked vColor is the only colour signal.
             var pts  = new List<double2> { new double2(-40, 0), new double2(40, 0) };
             var mesh = SyntheticLineMesh.BuildFromPoints(pts, new Vector4(0f, 1f, 1f, 1f), 2f,
                 JoinType.Miter, CapType.Butt);
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",       Color.white);  // identity → vColor is the signal
+            mat.SetColor("_BaseColor",       Color.white);  // identity → vColor is the signal
             mat.SetFloat("_Opacity",        1f);
             mat.SetFloat("_Blur",           1f);
             lineGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -270,7 +270,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",       new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetColor("_BaseColor",       new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
             mat.SetFloat("_Blur",           1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;

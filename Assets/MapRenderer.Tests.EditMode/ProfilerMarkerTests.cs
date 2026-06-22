@@ -145,7 +145,7 @@ namespace MapRenderer.Tests
             const string bogusName     = "MapRenderer.__NoSuchMarker__";
 
             var go   = new GameObject("MapView_ProfilerTest");
-            var view = go.AddComponent<MapView>();
+            var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;

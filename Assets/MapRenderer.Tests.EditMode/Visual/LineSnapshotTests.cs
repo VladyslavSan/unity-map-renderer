@@ -89,7 +89,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Width",         widthMeters);
             mat.SetFloat("_WidthIsPixels", 0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetColor("_BaseColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",       1f);
             mat.SetFloat("_Blur",          1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Width",         widthMeters);
             mat.SetFloat("_WidthIsPixels", 0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetColor("_BaseColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",       1f);
             mat.SetFloat("_Blur",          1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;

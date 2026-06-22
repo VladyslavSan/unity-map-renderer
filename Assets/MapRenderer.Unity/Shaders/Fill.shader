@@ -3,12 +3,12 @@
 // Lit fill shader for unity-map-renderer.
 // Mirrors URP Lit.shader's pass list (ForwardLit / ShadowCaster / GBuffer / DepthOnly /
 // DepthNormals); each pass delegates to our mirror-copied building blocks which carry
-// the full URP material surface + map paint additions (_MapColor, _Opacity).
+// the full URP material surface + map paint additions (the standard _BaseColor tint, _Opacity).
 //
 // Key design points (S34):
 //   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData.
 //   • Full URP Lit property set (base/normal/metallic/occlusion/emission/detail maps, etc.)
-//     plus _MapColor/_Opacity map paint properties.
+//     plus the _Opacity map paint property (the layer color is the standard _BaseColor).
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • Render state: hardcoded Cull Off (winding follow-up). ZWrite is driven by [_ZWrite]
 //     (default 1.0 = opaque depth write, identical to stock URP Lit) so painter's-algorithm
@@ -27,20 +27,16 @@ Shader "MapRenderer/Fill"
     Properties
     {
         // ── Standard URP Lit properties (mirrors URP Lit.shader) ─────────────
-        // Specular vs Metallic workflow
         _WorkflowMode("WorkflowMode", Float) = 1.0
 
         [MainTexture] _BaseMap("Albedo", 2D) = "white" {}
-        [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
+        [MainColor] _BaseColor("Color", Color) = (0.4, 0.7, 0.4, 1)
 
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
-
         _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
         _SmoothnessTextureChannel("Smoothness texture channel", Float) = 0
-
         _Metallic("Metallic", Range(0.0, 1.0)) = 0.0
         _MetallicGlossMap("Metallic", 2D) = "white" {}
-
         _SpecColor("Specular", Color) = (0.2, 0.2, 0.2)
         _SpecGlossMap("Specular", 2D) = "white" {}
 
@@ -65,22 +61,37 @@ Shader "MapRenderer/Fill"
         _DetailNormalMapScale("Scale", Range(0.0, 2.0)) = 1.0
         [Normal] _DetailNormalMap("Normal Map", 2D) = "bump" {}
 
-        // SRP batching compatibility for Clear Coat (Not used in Lit)
         [HideInInspector] _ClearCoatMask("_ClearCoatMask", Float) = 0.0
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
-        // Blending state (set by ShaderGUI; defaults = opaque)
-        _Surface("__surface", Float) = 0.0
+        // ── Blending state (mirrors URP Lit.shader; consumed by URP's ValidateMaterial) ──
+        // S37: the line is intrinsically transparent (ShaderLab hardcodes Blend/ZWrite Off/
+        // Queue=Transparent). These props must be DECLARED here so material.HasProperty(...)
+        // is true and URP's ValidateMaterial (run on every import via MapLitShaderGUI :
+        // BaseShaderGUI) resolves the queue from _Surface/_QueueControl. Without them
+        // ValidateMaterial defaults the material to opaque and forces queue 2000, clobbering
+        // the SubShader's Queue=Transparent on import (the S37 regression). Defaults =
+        // transparent (_Surface=1, _Blend=0 alpha, _SrcBlend=SrcAlpha, _DstBlend=OneMinusSrcAlpha,
+        // _ZWrite off) so a default-constructed line material is import-stable at Queue>=2501.
+        // These do NOT fight the fixed ShaderLab render state — they only feed queue resolution.
+        _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0
-        [HideInInspector] _SrcBlend("__src", Float) = 1.0
-        [HideInInspector] _DstBlend("__dst", Float) = 0.0
-        [HideInInspector] _SrcBlendAlpha("__srcA", Float) = 1.0
-        [HideInInspector] _DstBlendAlpha("__dstA", Float) = 0.0
-        [HideInInspector] _ZWrite("__zw", Float) = 1.0
-        [HideInInspector] _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
-        [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
-        [HideInInspector] _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
+        _SrcBlend("__src", Float) = 5.0
+        _DstBlend("__dst", Float) = 10.0
+        _SrcBlendAlpha("__srcA", Float) = 1.0
+        _DstBlendAlpha("__dstA", Float) = 10.0
+        _ZWrite("__zw", Float) = 0.0
+        // S58: forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
+        // Defaults reproduce the previously-hardcoded line state: ZTest LEqual(4), Cull Off(0), BlendOp Add(0).
+        // (_SrcBlend=5 SrcAlpha / _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 already match the old hardcode.)
+        _ZTest("__ztest", Float) = 4.0
+        _Cull("__cull", Float) = 0.0
+        _BlendOp("__blendop", Float) = 0.0
+        _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
+        _AlphaToMask("__alphaToMask", Float) = 0.0
+        _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
+        _XRMotionVectorsPass("_XRMotionVectorsPass", Float) = 1.0
 
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue offset", Float) = 0.0
@@ -97,8 +108,7 @@ Shader "MapRenderer/Fill"
 
         // ── Map paint properties (S34/S13 additions) ─────────────────────────
         // These are the MapLibre-style styling knobs; they modulate the URP surface.
-        // _MapColor modulates albedo; _Opacity modulates alpha (active in transparent queue).
-        _MapColor  ("Map Color", Color) = (0.4, 0.7, 0.4, 1)
+        // The layer color is the standard _BaseColor above; _Opacity modulates alpha.
         _Opacity   ("Opacity", Range(0, 1)) = 1.0
 
         // S13 fill paint properties (MapLibre Style Spec fill layer):
@@ -143,10 +153,16 @@ Shader "MapRenderer/Fill"
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
 
-            // Blend state driven by _SrcBlend/_DstBlend (set by ShaderGUI or C# for transparent queue).
-            // Default values (1,0 / 1,0) = opaque. Set _Surface=1 for transparent mode.
-            // AlphaToMask parity with URP Lit.shader ForwardLit pass.
+            // Forward-pass render state — fully parameterized (S58). Defaults reproduce the prior
+            // behaviour: Blend driven by _SrcBlend/_DstBlend (1,0 = opaque), BlendOp Add, ZWrite [_ZWrite]
+            // (1 opaque; painter's-algorithm flat layers set 0), ZTest LEqual, Cull Off. Driven from C#
+            // via the typed tweaker layer and surfaced in the modular ShaderGUI. Only the forward pass is
+            // parameterized — the ShadowCaster/GBuffer/DepthOnly/DepthNormals passes keep their forced state.
             Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+            BlendOp [_BlendOp]
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Cull [_Cull]
             AlphaToMask [_AlphaToMask]
 
             HLSLPROGRAM
@@ -388,5 +404,5 @@ Shader "MapRenderer/Fill"
     }
 
     FallBack "Hidden/Universal Render Pipeline/FallbackError"
-    CustomEditor "MapRenderer.Unity.Editor.MapLitShaderGUI"
+    CustomEditor "MapRenderer.Unity.Editor.FillShaderGUI"
 }

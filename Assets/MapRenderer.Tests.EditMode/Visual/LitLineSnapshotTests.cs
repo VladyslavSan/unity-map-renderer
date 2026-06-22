@@ -109,7 +109,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_Width",          widthMeters);
             mat.SetFloat("_WidthIsPixels",  0f);
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
-            mat.SetColor("_MapColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
+            mat.SetColor("_BaseColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
             mat.SetFloat("_Blur",           1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -254,7 +254,7 @@ namespace MapRenderer.Tests.Visual
             var (cameraGo, camera)  = BuildCamera();
             var lineParent          = new GameObject("LitLineParent_Lum");
             var (lineGo, mat)       = BuildSingleHorizontalLine(LineWidthM, lineParent);
-            mat.SetColor("_MapColor", new Color(0.7f, 0.7f, 0.7f, 1f)); // near-white for clear lum delta
+            mat.SetColor("_BaseColor", new Color(0.7f, 0.7f, 0.7f, 1f)); // near-white for clear lum delta
 
             Light light = AddDirectionalLight(lineParent, 3f, Quaternion.Euler(45f, 0f, 0f));
 
@@ -595,11 +595,11 @@ namespace MapRenderer.Tests.Visual
             var (fillGo, fillMat) = FillSceneHelper.BuildFillGo(viewSize: 100f);
             fillGo.transform.SetParent(sceneGo.transform, worldPositionStays: false);
             // Give fill a distinctive color.
-            if (fillMat != null) fillMat.SetColor("_MapColor", new Color(0.2f, 0.8f, 0.2f, 1f)); // green
+            if (fillMat != null) fillMat.SetColor("_BaseColor", new Color(0.2f, 0.8f, 0.2f, 1f)); // green
 
             // Line (transparent, Queue=Transparent, tiny Y lift).
             var (lineGo, lineMat) = BuildSingleHorizontalLine(LineWidthM, sceneGo);
-            lineMat.SetColor("_MapColor", new Color(1f, 0.2f, 0.2f, 1f)); // red line on green fill
+            lineMat.SetColor("_BaseColor", new Color(1f, 0.2f, 0.2f, 1f)); // red line on green fill
 
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try

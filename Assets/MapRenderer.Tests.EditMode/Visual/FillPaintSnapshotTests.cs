@@ -23,11 +23,11 @@ namespace MapRenderer.Tests.Visual
     ///       rebuilding the mesh. Asserts SAME mesh instance reference + vertexCount unchanged +
     ///       RGB-toward-background (lower composite luminance at opacity=0 than at opacity=1).
     ///
-    ///   #6: Non-white _MapColor gamma calibration — baked vertex colors (sRGB via Core) are
-    ///       linearized before Mesh.SetColors (D2 fix). With _MapColor=white, the channel multiply
+    ///   #6: Non-white _BaseColor gamma calibration — baked vertex colors (sRGB via Core) are
+    ///       linearized before Mesh.SetColors (D2 fix). With _BaseColor=white, the channel multiply
     ///       is identity and the rendered color matches the baked vertex color (in linear space).
-    ///       With _MapColor=gray (0.5,0.5,0.5 sRGB), the composite is darkened. This test
-    ///       confirms the vertex color × _MapColor product is lower than vertex color alone —
+    ///       With _BaseColor=gray (0.5,0.5,0.5 sRGB), the composite is darkened. This test
+    ///       confirms the vertex color × _BaseColor product is lower than vertex color alone —
     ///       verifying the GPU multiply is in the correct (linear) color space.
     ///
     ///   #7: MeshBuilder.SetColors linearizes — with a data-driven red vertex color, the rendered
@@ -107,10 +107,10 @@ namespace MapRenderer.Tests.Visual
 
             var (cameraGo, camera) = BuildCamera();
 
-            // Build with opacity=1 (opaque, _MapColor=green so fill is visible).
+            // Build with opacity=1 (opaque, _BaseColor=green so fill is visible).
             var (mapGo, meshAtBuild, mat) = BuildFillWithColor(null, m =>
             {
-                m.SetColor("_MapColor", Color.green);
+                m.SetColor("_BaseColor", Color.green);
                 m.SetFloat("_Opacity", 1f);
             });
 
@@ -178,10 +178,10 @@ namespace MapRenderer.Tests.Visual
             RenderSettings.ambientLight = prevAmbientLight;
         }
 
-        // ── #6: Non-white _MapColor gamma calibration ─────────────────────────
+        // ── #6: Non-white _BaseColor gamma calibration ─────────────────────────
 
         [Test]
-        public void MapColor_Gray_DarkensRenderVsWhite()
+        public void BaseColor_Gray_DarkensRenderVsWhite()
         {
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
@@ -190,10 +190,10 @@ namespace MapRenderer.Tests.Visual
 
             var (cameraGo, camera) = BuildCamera();
 
-            // Render with _MapColor=white (neutral — vertex color drives output).
+            // Render with _BaseColor=white (neutral — vertex color drives output).
             var (mapGoWhite, meshWhite, matWhite) = BuildFillWithColor(null, m =>
             {
-                m.SetColor("_MapColor", Color.white);
+                m.SetColor("_BaseColor", Color.white);
                 m.SetFloat("_Opacity",  1f);
             });
 
@@ -216,19 +216,19 @@ namespace MapRenderer.Tests.Visual
                 {
                     UnityEngine.Object.DestroyImmediate(cameraGo);
                     UnityEngine.Object.DestroyImmediate(mapGoWhite);
-                    Assert.Inconclusive("No GPU context. _MapColor gamma test skipped.");
+                    Assert.Inconclusive("No GPU context. _BaseColor gamma test skipped.");
                     return;
                 }
             }
 
             UnityEngine.Object.DestroyImmediate(mapGoWhite);
 
-            // Render with _MapColor=gray (0.5 sRGB). In linear space: Unity linearizes
+            // Render with _BaseColor=gray (0.5 sRGB). In linear space: Unity linearizes
             // material.SetColor → 0.5 sRGB ≈ 0.214 linear. Multiply with vertex color
-            // (white.linear = 1.0) → 0.214. Output should be darker than white _MapColor case.
+            // (white.linear = 1.0) → 0.214. Output should be darker than white _BaseColor case.
             var (mapGoGray, meshGray, matGray) = BuildFillWithColor(null, m =>
             {
-                m.SetColor("_MapColor", new Color(0.5f, 0.5f, 0.5f, 1f));
+                m.SetColor("_BaseColor", new Color(0.5f, 0.5f, 0.5f, 1f));
                 m.SetFloat("_Opacity",  1f);
             });
 
@@ -236,7 +236,7 @@ namespace MapRenderer.Tests.Visual
             {
                 UnityEngine.Object.DestroyImmediate(cameraGo);
                 UnityEngine.Object.DestroyImmediate(mapGoGray);
-                Assert.Inconclusive("Gray _MapColor mesh not built.");
+                Assert.Inconclusive("Gray _BaseColor mesh not built.");
                 return;
             }
 
@@ -249,14 +249,14 @@ namespace MapRenderer.Tests.Visual
             double lumGray  = SnapshotCoverage.MeanLuminanceOfNonBackground(
                 snapGray.RawPixels, SnapW, SnapH, BgR8, BgG8, BgB8);
 
-            Debug.Log($"[FillPaintSnapshotTests] _MapColor=white lum={lumWhite:F4}, _MapColor=gray lum={lumGray:F4}");
+            Debug.Log($"[FillPaintSnapshotTests] _BaseColor=white lum={lumWhite:F4}, _BaseColor=gray lum={lumGray:F4}");
 
-            // Gray _MapColor must produce a darker render than white (GPU multiply darkens).
+            // Gray _BaseColor must produce a darker render than white (GPU multiply darkens).
             // We use a modest margin to handle lighting/ambient variation.
             Assert.Less(lumGray, lumWhite,
-                $"_MapColor=gray (0.5 sRGB) must produce a darker render than _MapColor=white. " +
+                $"_BaseColor=gray (0.5 sRGB) must produce a darker render than _BaseColor=white. " +
                 $"white lum={lumWhite:F4}, gray lum={lumGray:F4}. " +
-                "If gray ≥ white, the _MapColor uniform is not driving the albedo correctly.");
+                "If gray ≥ white, the _BaseColor uniform is not driving the albedo correctly.");
 
             UnityEngine.Object.DestroyImmediate(cameraGo);
             UnityEngine.Object.DestroyImmediate(mapGoGray);
@@ -288,7 +288,7 @@ namespace MapRenderer.Tests.Visual
 
             var (mapGo, mesh, mat) = BuildFillWithColor(halfRedExpr, m =>
             {
-                m.SetColor("_MapColor", Color.white); // neutral
+                m.SetColor("_BaseColor", Color.white); // neutral
                 m.SetFloat("_Opacity", 1f);
             });
 

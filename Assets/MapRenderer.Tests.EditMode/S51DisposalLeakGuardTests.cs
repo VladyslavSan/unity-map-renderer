@@ -130,7 +130,7 @@ namespace MapRenderer.Tests
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_A");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -201,7 +201,7 @@ namespace MapRenderer.Tests
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_B");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -353,7 +353,7 @@ namespace MapRenderer.Tests
 
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -458,7 +458,7 @@ namespace MapRenderer.Tests
 
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -516,7 +516,7 @@ namespace MapRenderer.Tests
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_C");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;

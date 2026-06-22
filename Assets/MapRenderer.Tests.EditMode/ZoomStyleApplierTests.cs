@@ -56,7 +56,7 @@ namespace MapRenderer.Tests
         {
             var style = StyleParser.Parse(TwoLayerStyleJson);
             var set = new StyledLayerSet();
-            set.Build(style, initialZoom);
+            set.Build(style, initialZoom, MapMaterialSetTestUtil.Load());
             return set;
         }
 
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests
             // rebuilt when zoom changes — only the material's width uniform is pushed. We bind a
             // line material to an applier and assert the (separately-built) mesh reference held by a
             // MeshFilter is unchanged across ApplyZoom calls while _Width tracks the zoom expression.
-            Material lineMat = MaterialFactory.CreateLineMaterial();
+            Material lineMat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
 
             var lineMesh = SyntheticLineMesh.BuildFromPoints(
                 new List<double2> { new double2(-40, 0), new double2(40, 0) },
@@ -113,7 +113,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ApplyZoom_Color_MatchesPremultipliedAlphaEvaluator()
         {
-            Material fillMat = MaterialFactory.CreateFillMaterial();
+            Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
                 // rgba(0,0,0,0) → rgba(255,255,255,1) — the canonical premult discriminating case.
@@ -121,11 +121,11 @@ namespace MapRenderer.Tests
                     "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                     "0,[\"rgba\",0,0,0,0],1,[\"rgba\",255,255,255,1]]");
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorEv, "_MapColor");
+                applier.BindColor(colorEv, "_BaseColor");
 
                 // Apply at zoom=0.5 (t=0.5 between stops 0 and 1).
                 applier.ApplyZoom(0.5);
-                Color unity = fillMat.GetColor("_MapColor");
+                Color unity = fillMat.GetColor("_BaseColor");
 
                 // Derive the expected value from the Core evaluator with the SAME converter.
                 CoreColor core = colorEv.EvaluateColor(0.5);
@@ -190,7 +190,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ApplyZoom_SweepingZoom_FloatBinding_AllocatesZeroGCMemory()
         {
-            Material lineMat = MaterialFactory.CreateLineMaterial();
+            Material lineMat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
             try
             {
                 var widthEv = new PaintPropertyEvaluator(
@@ -223,14 +223,14 @@ namespace MapRenderer.Tests
         [Test]
         public void ApplyZoom_SweepingZoom_ColorBinding_AllocatesZeroGCMemory()
         {
-            Material fillMat = MaterialFactory.CreateFillMaterial();
+            Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
                 var colorEv = new PaintPropertyEvaluator(
                     "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                     "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]");
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorEv, "_MapColor");
+                applier.BindColor(colorEv, "_BaseColor");
 
                 for (int w = 0; w < 20; w++)
                     applier.ApplyZoom(5.0 + (w % 10) * 1.0);

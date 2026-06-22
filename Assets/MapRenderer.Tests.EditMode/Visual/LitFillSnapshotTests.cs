@@ -109,7 +109,7 @@ namespace MapRenderer.Tests.Visual
 
             var (cameraGo, camera) = BuildCamera();
             var (mapGo, mat)       = BuildFillGo();
-            if (mat != null) mat.SetColor("_MapColor", new Color(0.5f, 0.9f, 0.3f, 1f));
+            if (mat != null) mat.SetColor("_BaseColor", new Color(0.5f, 0.9f, 0.3f, 1f));
 
             Light light = AddDirectionalLight(mapGo, 2f, Quaternion.Euler(45f, 0f, 0f));
 
@@ -185,12 +185,12 @@ namespace MapRenderer.Tests.Visual
             using var snap2 = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                if (mat != null) mat.SetColor("_MapColor", new Color(0.2f, 0.8f, 0.2f, 1f));
+                if (mat != null) mat.SetColor("_BaseColor", new Color(0.2f, 0.8f, 0.2f, 1f));
                 snap1.Render(camera);
                 snap1.WritePng("lit-fill-color-green.png");
 
                 // ── No-rebuild proof (CPU — always runs) ──
-                if (mat != null) mat.SetColor("_MapColor", new Color(0.9f, 0.1f, 0.1f, 1f));
+                if (mat != null) mat.SetColor("_BaseColor", new Color(0.9f, 0.1f, 0.1f, 1f));
 
                 var meshAfter = meshFilter.sharedMesh;
                 Assert.AreSame(meshBefore, meshAfter,
@@ -296,7 +296,7 @@ namespace MapRenderer.Tests.Visual
             }
 
             // Use a bright lit material so the normal effect is visible.
-            mat.SetColor("_MapColor", new Color(0.8f, 0.8f, 0.8f, 1f));
+            mat.SetColor("_BaseColor", new Color(0.8f, 0.8f, 0.8f, 1f));
             mat.SetFloat("_Metallic",   0f);
             mat.SetFloat("_Smoothness", 0.3f);
 
@@ -417,7 +417,7 @@ namespace MapRenderer.Tests.Visual
                 return;
             }
 
-            mat.SetColor("_MapColor",      Color.white); // neutral — let base map color dominate
+            mat.SetColor("_BaseColor",      Color.white); // neutral — let base map color dominate
             mat.SetColor("_BaseColor",  Color.white);
             mat.SetFloat("_Metallic",   0f);
             mat.SetFloat("_Smoothness", 0.1f);
@@ -518,7 +518,7 @@ namespace MapRenderer.Tests.Visual
             }
 
             // White base color so specular shows clearly.
-            mat.SetColor("_MapColor",     Color.white);
+            mat.SetColor("_BaseColor",     Color.white);
             mat.SetColor("_BaseColor", Color.white);
 
             // Bright directional light aimed at a glancing angle so specular is strong.

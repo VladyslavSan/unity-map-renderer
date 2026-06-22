@@ -102,7 +102,7 @@ namespace MapRenderer.Tests
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -149,7 +149,7 @@ namespace MapRenderer.Tests
             byte[] bytes = FixtureBytes();
             var src   = new FixtureSource(bytes);
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -208,7 +208,7 @@ namespace MapRenderer.Tests
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 2; view.MaxZoom = 2;
             view.PadFactor = 1f; view.ViewportAspect = 1f;

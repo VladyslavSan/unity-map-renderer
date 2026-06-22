@@ -17,7 +17,7 @@ namespace MapRenderer.Core.Style
     /// <c>Mesh.SetColors</c> (D2 fix). This linearisation step is required because
     /// <c>material.SetColor</c> linearises sRGB→linear at the material boundary (in Linear color
     /// space), but <c>Mesh.SetColors</c> does NOT — so the caller must linearise explicitly before
-    /// upload to keep the vertex COLOR stream and <c>_MapColor</c> in the same linear space for
+    /// upload to keep the vertex COLOR stream and <c>_BaseColor</c> in the same linear space for
     /// the shader multiply.
     ///
     /// Missing property: when ["get","key"] references a property absent on a feature, the expression

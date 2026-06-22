@@ -14,5 +14,17 @@ namespace MapRenderer.Tests
 
         /// <summary>Number of line render bundles MapView built from the style.</summary>
         public static int LineLayerCount(this MapView view) => view.Layers.LineCount;
+
+        /// <summary>
+        /// Assigns the committed production <see cref="MapMaterialSet"/> so the view can build per-layer
+        /// materials. Required since S58 retired the <c>Shader.Find</c> fallback — without a config the
+        /// factory returns null and <see cref="StyledLayerSet"/> builds zero layers. Returns the view for
+        /// chaining: <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
+        /// </summary>
+        public static MapView WithTestMaterials(this MapView view)
+        {
+            view.MaterialSet = MapMaterialSetTestUtil.Load();
+            return view;
+        }
     }
 }

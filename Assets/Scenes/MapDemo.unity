@@ -347,9 +347,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 300000002}
+  - component: {fileID: 300000005}
   - component: {fileID: 300000003}
   - component: {fileID: 300000004}
-  - component: {fileID: 300000005}
   m_Layer: 0
   m_Name: MapRoot
   m_TagString: Untagged
@@ -388,8 +388,9 @@ MonoBehaviour:
   PadFactor: 1.5
   MinZoom: 0
   MaxZoom: 14
-  RebaseThresholdMeters: 2000
   MaxBuildsPerTick: 4
+  Backend: 0
+  MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
 --- !u!114 &300000004
 MonoBehaviour:
   m_ObjectHideFlags: 0

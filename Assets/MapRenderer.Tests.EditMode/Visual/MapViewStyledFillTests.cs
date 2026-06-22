@@ -133,7 +133,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = TwoFillLayerStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -202,7 +202,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src  = new FixtureSource(FixtureBytes());
             var go   = new GameObject("MapView");
-            var view = go.AddComponent<MapView>();
+            var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
@@ -290,7 +290,7 @@ namespace MapRenderer.Tests.Visual
             var bytes = FixtureBytes();
             var src   = new FixtureSource(bytes);
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = ContinentFillStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -395,7 +395,7 @@ namespace MapRenderer.Tests.Visual
 
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -543,7 +543,7 @@ namespace MapRenderer.Tests.Visual
 
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;

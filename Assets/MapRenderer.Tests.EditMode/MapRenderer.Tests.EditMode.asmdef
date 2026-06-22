@@ -6,7 +6,6 @@
         "MapRenderer.Jobs",
         "MapRenderer.Unity",
         "MapRenderer.Unity.Editor",
-        "Unity.RenderPipelines.Universal.Editor",
         "Unity.Mathematics",
         "Unity.Collections",
         "Unity.Burst",

@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Visual
             var src = new FixtureSource(File.ReadAllBytes(fixturePath));
 
             var mapGo = new GameObject("MapView");
-            var view  = mapGo.AddComponent<MapView>();
+            var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 3; view.MaxZoom = 3;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;

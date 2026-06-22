@@ -1,5 +1,6 @@
 using UnityEngine;
 using MapRenderer.Core.Style;
+using MapRenderer.Unity.Rendering;
 
 namespace MapRenderer.Unity
 {
@@ -14,23 +15,30 @@ namespace MapRenderer.Unity
     /// </summary>
     internal static class MaterialFactory
     {
-        /// <summary>Creates a base fill Material for a style layer.</summary>
-        public static Material CreateFillMaterial()
+        /// <summary>
+        /// Creates a per-style-layer fill Material by cloning <paramref name="settings"/>'s base fill
+        /// material (a Material Variant in the Editor — see <see cref="MaterialExtensions.CloneWithParent"/>),
+        /// so the base asset is the single editable source of styling. The clone inherits the base's
+        /// import-baked keywords; <see cref="FillMaterialTweaker.ApplyPainterContract"/> then re-asserts the
+        /// code-owned render-state + color-identity contract.
+        ///
+        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — there is
+        /// no shader-name fallback (S58 retired <c>Shader.Find</c>); production wires a <see cref="MapMaterialSet"/>.</para>
+        /// </summary>
+        public static Material CreateFillMaterial(MapMaterialSet settings)
         {
-            var shader = Shader.Find("MapRenderer/Fill");
-            if (shader != null)
+            Material baseMat = settings != null ? settings.FillMaterial : null;
+            if (baseMat == null)
             {
-                var mat = new Material(shader) { name = "MapView_Fill" };
-                mat.SetColor("_MapColor",   Color.white);
-                mat.SetColor("_BaseColor",  Color.white);
-                mat.SetFloat("_Opacity",    1f);
-                mat.SetFloat("_Metallic",   0f);
-                mat.SetFloat("_Smoothness", 0f);
-                mat.SetFloat("_ZWrite",     0f);
-                return mat;
+                Debug.LogWarning("[MaterialFactory] No fill base material configured (MapMaterialSet.FillMaterial " +
+                                 "is null) — fill layers will not render. Assign a Material Set on the map component.");
+                return null;
             }
-            Debug.LogWarning("[MaterialFactory] MapRenderer/Fill shader not found — using Sprites/Default fallback.");
-            return new Material(Shader.Find("Sprites/Default")) { name = "MapView_Fallback" };
+
+            var mat = baseMat.CloneWithParent();
+            mat.name = "MapView_Fill";
+            FillMaterialTweaker.ApplyPainterContract(mat);
+            return mat;
         }
 
         /// <summary>
@@ -56,37 +64,29 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Creates a base line Material for a style layer using the MapRenderer/Line shader.
+        /// Creates a per-style-layer line Material by cloning <paramref name="settings"/>'s base line
+        /// material (a Material Variant in the Editor — see <see cref="MaterialExtensions.CloneWithParent"/>),
+        /// so the base asset is the single editable source of styling. The clone inherits the base's
+        /// import-baked keywords; <see cref="LineMaterialTweaker.ApplyPainterContract"/> then re-asserts the
+        /// code-owned render-state + color-identity contract.
+        ///
+        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — there is
+        /// no shader-name fallback (S58 retired <c>Shader.Find</c>); production wires a <see cref="MapMaterialSet"/>.</para>
         /// </summary>
-        public static Material CreateLineMaterial()
+        public static Material CreateLineMaterial(MapMaterialSet settings)
         {
-            var shader = Shader.Find("MapRenderer/Line");
-            if (shader != null)
+            Material baseMat = settings != null ? settings.LineMaterial : null;
+            if (baseMat == null)
             {
-                var mat = new Material(shader) { name = "MapView_Line" };
-                mat.SetColor("_MapColor",         Color.white);
-                mat.SetColor("_BaseColor",         Color.white);
-                mat.SetFloat("_Opacity",           1f);
-                mat.SetFloat("_Width",             2f);
-                mat.SetFloat("_WidthIsPixels",     1f); // line-width is in pixels per spec
-                mat.SetFloat("_MetersPerPixel",    1f);
-                mat.SetFloat("_Blur",              1f);
-                mat.SetFloat("_GapWidth",          0f);
-                mat.SetVector("_LineTranslate",    Vector4.zero);
-                mat.SetFloat("_LineTranslateAnchor", 0f);
-                mat.SetFloat("_LinePattern",       0f);
-                // S43: line-dasharray defaults — solid identity (_DashCount=0).
-                mat.SetVector("_DashArray",        Vector4.zero);
-                mat.SetFloat("_DashCount",         0f);
-                // S44: line-offset default — no perpendicular shift.
-                mat.SetFloat("_LineOffset",        0f);
-                mat.SetFloat("_Metallic",          0f);
-                mat.SetFloat("_Smoothness",        0f);
-                mat.SetFloat("_ZWrite",            0f);
-                return mat;
+                Debug.LogWarning("[MaterialFactory] No line base material configured (MapMaterialSet.LineMaterial " +
+                                 "is null) — line layers will not render. Assign a Material Set on the map component.");
+                return null;
             }
-            Debug.LogWarning("[MaterialFactory] MapRenderer/Line shader not found — using Sprites/Default fallback.");
-            return new Material(Shader.Find("Sprites/Default")) { name = "MapView_LineFallback" };
+
+            var mat = baseMat.CloneWithParent();
+            mat.name = "MapView_Line";
+            LineMaterialTweaker.ApplyPainterContract(mat);
+            return mat;
         }
 
         /// <summary>
@@ -97,8 +97,9 @@ namespace MapRenderer.Unity
         public static void BindLinePaintToApplier(LinePaint paint, ZoomStyleApplier applier, Material mat)
         {
             // line-color: bind only for non-data-driven (Constant/Zoom). Data-driven → vertex bake.
+            // The color rides the standard _BaseColor (S58 collapsed the redundant _MapColor into it).
             if (paint.Color != null)
-                applier.BindColor(paint.Color, "_MapColor");
+                applier.BindColor(paint.Color, ShaderProperties.BaseColor);
 
             // line-opacity.
             if (paint.Opacity != null)
@@ -138,7 +139,7 @@ namespace MapRenderer.Unity
                 applier.BindFloat(paint.TranslateAnchor, "_LineTranslateAnchor");
 
             // line-pattern hook: set flag; solid fallback until S17.
-            // S14_LINE_PATTERN_HOOK: _LinePattern=1 signals a pattern layer; renders solid _MapColor fallback.
+            // S14_LINE_PATTERN_HOOK: _LinePattern=1 signals a pattern layer; renders solid _BaseColor fallback.
             mat.SetFloat("_LinePattern", paint.PatternName != null ? 1f : 0f);
 
             // S43: line-dasharray initial bind (constant or first zoom-step evaluation at zoom=0).

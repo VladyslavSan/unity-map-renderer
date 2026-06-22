@@ -8,7 +8,7 @@
 //               overlap region; reversing the declared order flips the dominant colour (FALSIFIABLE —
 //               wrong order must produce a detectably different result). The comparison between style A
 //               and style B is the proof; a broken renderQueue sort makes A == B and the assertion fails.
-//   Tooth 3 — per-layer paint on BRG: _MapColor non-white → red fill red-channel dominates green/blue
+//   Tooth 3 — per-layer paint on BRG: _BaseColor non-white → red fill red-channel dominates green/blue
 //               in the fill region (not just coverage). Zoom-dependent line width renders on BRG pixels
 //               and produces more fill when width is larger (S11/S13/S14 intact on BRG path).
 //   Tooth 4 — floating-origin (GPU-independent): instance matrix translation == TileLocalToScene.
@@ -190,7 +190,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src  = new FixtureSource(FixtureBytes());
             var go   = new GameObject("MapView_Tooth1");
-            var view = go.AddComponent<MapView>();
+            var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -234,7 +234,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_Tooth2");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -354,7 +354,7 @@ namespace MapRenderer.Tests.Visual
                 {
                     var src  = new FixtureSource(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderA");
-                    var view  = mapGo.AddComponent<MapView>();
+                    var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.MinZoom = 3; view.MaxZoom = 3;
                     view.PadFactor = 1f; view.ViewportAspect = 1f;
                     view.MaxBuildsPerTick = 64;
@@ -403,7 +403,7 @@ namespace MapRenderer.Tests.Visual
                 {
                     var src   = new FixtureSource(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderB");
-                    var view  = mapGo.AddComponent<MapView>();
+                    var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.MinZoom = 3; view.MaxZoom = 3;
                     view.PadFactor = 1f; view.ViewportAspect = 1f;
                     view.MaxBuildsPerTick = 64;
@@ -584,7 +584,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_Tooth4");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -689,7 +689,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_Tooth5");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
@@ -750,7 +750,7 @@ namespace MapRenderer.Tests.Visual
         {
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_NoAlloc");
-            var view  = go.AddComponent<MapView>();
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
@@ -805,7 +805,7 @@ namespace MapRenderer.Tests.Visual
         ///   1. Non-blank coverage (same gate as MapViewSnapshotTests).
         ///   2. The fill is rgba(200,80,80) — RED. The non-background pixel mean red channel must
         ///      DOMINATE green and blue in the fill region. A plain white fill passes the coverage
-        ///      gate but would have R≈G≈B, so this assertion is falsifiable: a non-red _MapColor
+        ///      gate but would have R≈G≈B, so this assertion is falsifiable: a non-red _BaseColor
         ///      (e.g., white or wrong color) FAILS this assertion.
         ///
         /// The Assert.Ignore escape hatch from the original implementation is REMOVED. When
@@ -827,7 +827,7 @@ namespace MapRenderer.Tests.Visual
 
             var src   = new FixtureSource(FixtureBytes());
             var mapGo = new GameObject("MapView_BrgPixel");
-            var view  = mapGo.AddComponent<MapView>();
+            var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 3; view.MaxZoom = 3;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
@@ -974,7 +974,7 @@ namespace MapRenderer.Tests.Visual
                 // ── Tooth 3: per-layer paint color assertion (FALSIFIABLE) ────────────────────
                 // The fill uses rgba(200,80,80,1) — a saturated RED. Sample the non-background
                 // region mean colour and assert red channel dominates green and blue.
-                // A plain-white fill (wrong _MapColor) would have R≈G≈B and FAIL this assertion.
+                // A plain-white fill (wrong _BaseColor) would have R≈G≈B and FAIL this assertion.
                 double[] fillMean = SnapshotCoverage.SampleRegionMeanColor(
                     snap.RawPixels, SnapW, SnapH, ColorSX0, ColorSY0, ColorSX1, ColorSY1);
                 Debug.Log($"[BrgBackendSnapshot] fill region mean RGB=({fillMean[0]:F3},{fillMean[1]:F3},{fillMean[2]:F3})");
@@ -985,8 +985,8 @@ namespace MapRenderer.Tests.Visual
                     Assert.That(fillMean[0], Is.GreaterThan(fillMean[1]),
                         $"Tooth 3 (per-layer paint): fill is rgba(200,80,80) — RED must dominate GREEN. " +
                         $"mean R={fillMean[0]:F3} must > mean G={fillMean[1]:F3}. " +
-                        "A plain-white _MapColor would have R≈G and FAIL here. " +
-                        "If this fails, the BRG path is not propagating _MapColor from the material.");
+                        "A plain-white _BaseColor would have R≈G and FAIL here. " +
+                        "If this fails, the BRG path is not propagating _BaseColor from the material.");
                     Assert.That(fillMean[0], Is.GreaterThan(fillMean[2]),
                         $"Tooth 3 (per-layer paint): fill is rgba(200,80,80) — RED must dominate BLUE. " +
                         $"mean R={fillMean[0]:F3} must > mean B={fillMean[2]:F3}.");
@@ -1065,7 +1065,7 @@ namespace MapRenderer.Tests.Visual
                 {
                     var src   = new FixtureSource(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomLow");
-                    var view  = mapGo.AddComponent<MapView>();
+                    var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.MinZoom = 0; view.MaxZoom = 2;
                     view.PadFactor = 1f; view.ViewportAspect = 1f;
                     view.MaxBuildsPerTick = 64;
@@ -1116,7 +1116,7 @@ namespace MapRenderer.Tests.Visual
                 {
                     var src   = new FixtureSource(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomHigh");
-                    var view  = mapGo.AddComponent<MapView>();
+                    var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.MinZoom = 4; view.MaxZoom = 6;
                     view.PadFactor = 1f; view.ViewportAspect = 1f;
                     view.MaxBuildsPerTick = 64;

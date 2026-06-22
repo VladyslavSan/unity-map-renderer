@@ -43,14 +43,13 @@ namespace MapRenderer.Unity
     ///   _ClearCoatSmoothness: N×172 (N×1 float)
     ///   _DetailAlbedoMapScale: N×176 (N×1 float)
     ///   _DetailNormalMapScale: N×180 (N×1 float)
-    ///   _MapColor    : N×184     (N×4 floats)
-    ///   _Opacity     : N×200     (N×1 float)
-    ///   _FillOutlineColor: N×204 (N×4 floats)
-    ///   _FillTranslate: N×220    (N×4 floats)
-    ///   _FillAntialias: N×236    (N×1 float)
-    ///   _FillTranslateAnchor: N×240 (N×1 float)
-    ///   _FillPattern : N×244     (N×1 float)
-    ///   TOTAL        : N×248 bytes (N×62 floats) — same total as AoS, different arrangement.
+    ///   _Opacity     : N×184     (N×1 float)
+    ///   _FillOutlineColor: N×188 (N×4 floats)
+    ///   _FillTranslate: N×204    (N×4 floats)
+    ///   _FillAntialias: N×220    (N×1 float)
+    ///   _FillTranslateAnchor: N×224 (N×1 float)
+    ///   _FillPattern : N×228     (N×1 float)
+    ///   TOTAL        : N×232 bytes (N×58 floats). (S58 dropped _MapColor; the layer color rides _BaseColor.)
     ///
     /// IMPORTANT: byte offsets depend on N → batch must be re-registered whenever instance count changes.
     ///
@@ -83,16 +82,15 @@ namespace MapRenderer.Unity
         //   _CCSmoothness:  1
         //   _DetailAlb:     1
         //   _DetailNorm:    1
-        //   _MapColor:      4
         //   _Opacity:       1
         //   _FillOutlineColor: 4
         //   _FillTranslate: 4
         //   _FillAA:        1
         //   _FillTrAnch:    1
         //   _FillPattern:   1
-        //   TOTAL: 62 floats per instance (same as AoS — SoA just reorders them)
+        //   TOTAL: 58 floats per instance (the layer color rides _BaseColor; S58 dropped _MapColor's 4 floats)
 
-        private const int FloatsPerInstance = 62;
+        private const int FloatsPerInstance = 58;
 
         // Float-count prefix sums for each SoA array (= starting float index for property P's array,
         // in units of "per-instance floats", i.e. the actual start = prefix[P] * N).
@@ -112,13 +110,12 @@ namespace MapRenderer.Unity
         private const int Pfx_CCSmoothness = 43; // 42 + 1
         private const int Pfx_DetailAlb    = 44; // 43 + 1
         private const int Pfx_DetailNorm   = 45; // 44 + 1
-        private const int Pfx_MapColor     = 46; // 45 + 1
-        private const int Pfx_Opacity      = 50; // 46 + 4
-        private const int Pfx_FillOutline  = 51; // 50 + 1
-        private const int Pfx_FillTrans    = 55; // 51 + 4
-        private const int Pfx_FillAA       = 59; // 55 + 4
-        private const int Pfx_FillTrAnch   = 60; // 59 + 1
-        private const int Pfx_FillPattern  = 61; // 60 + 1
+        private const int Pfx_Opacity      = 46; // 45 + 1
+        private const int Pfx_FillOutline  = 47; // 46 + 1
+        private const int Pfx_FillTrans    = 51; // 47 + 4
+        private const int Pfx_FillAA       = 55; // 51 + 4
+        private const int Pfx_FillTrAnch   = 56; // 55 + 1
+        private const int Pfx_FillPattern  = 57; // 56 + 1
         // 61 + 1 = 62 = FloatsPerInstance ✓
 
         // ── Per-draw-item record ─────────────────────────────────────────────────────────────
@@ -429,7 +426,6 @@ namespace MapRenderer.Unity
             Color   baseColor  = mat.HasProperty("_BaseColor")           ? mat.GetColor("_BaseColor")           : Color.white;
             Color   specColor  = mat.HasProperty("_SpecColor")           ? mat.GetColor("_SpecColor")           : Color.white;
             Color   emission   = mat.HasProperty("_EmissionColor")       ? mat.GetColor("_EmissionColor")       : Color.black;
-            Color   mapColor   = mat.HasProperty("_MapColor")            ? mat.GetColor("_MapColor")            : Color.white;
             Color   outline    = mat.HasProperty("_FillOutlineColor")    ? mat.GetColor("_FillOutlineColor")    : Color.clear;
             Vector4 fillTrans  = mat.HasProperty("_FillTranslate")       ? mat.GetVector("_FillTranslate")      : Vector4.zero;
 
@@ -479,12 +475,6 @@ namespace MapRenderer.Unity
             _cpuBuffer[Pfx_CCSmoothness * count + index] = ccSmooth;
             _cpuBuffer[Pfx_DetailAlb    * count + index] = detailAlb;
             _cpuBuffer[Pfx_DetailNorm   * count + index] = detailNorm;
-
-            int mc4 = Pfx_MapColor * count + index * 4;
-            _cpuBuffer[mc4 + 0] = mapColor.r;
-            _cpuBuffer[mc4 + 1] = mapColor.g;
-            _cpuBuffer[mc4 + 2] = mapColor.b;
-            _cpuBuffer[mc4 + 3] = mapColor.a;
 
             _cpuBuffer[Pfx_Opacity * count + index] = opacity;
 
@@ -558,7 +548,7 @@ namespace MapRenderer.Unity
             // byte_offset(P) = Pfx_P * instanceCount * 4
             int N = instanceCount;
 
-            const int MetaCount = 22; // O2W, W2O + 20 material props
+            const int MetaCount = 21; // O2W, W2O + 19 material props (S58 dropped _MapColor)
             var meta = new NativeArray<MetadataValue>(MetaCount, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             try
             {
@@ -586,7 +576,6 @@ namespace MapRenderer.Unity
                 meta[idx++] = M(Shader.PropertyToID("_ClearCoatSmoothness"),   Pfx_CCSmoothness * N * 4);
                 meta[idx++] = M(Shader.PropertyToID("_DetailAlbedoMapScale"),  Pfx_DetailAlb    * N * 4);
                 meta[idx++] = M(Shader.PropertyToID("_DetailNormalMapScale"),  Pfx_DetailNorm   * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_MapColor"),              Pfx_MapColor     * N * 4);
                 meta[idx++] = M(Shader.PropertyToID("_Opacity"),               Pfx_Opacity      * N * 4);
                 meta[idx++] = M(Shader.PropertyToID("_FillOutlineColor"),      Pfx_FillOutline  * N * 4);
                 meta[idx++] = M(Shader.PropertyToID("_FillTranslate"),         Pfx_FillTrans    * N * 4);

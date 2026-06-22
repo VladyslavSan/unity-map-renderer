@@ -27,7 +27,7 @@ Shader "MapRenderer/Line"
         _WorkflowMode("WorkflowMode", Float) = 1.0
 
         [MainTexture] _BaseMap("Albedo", 2D) = "white" {}
-        [MainColor] _BaseColor("Color", Color) = (1,1,1,1)
+        [MainColor] _BaseColor("Color", Color) = (0.3, 0.5, 1.0, 1)
 
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
         _Smoothness("Smoothness", Range(0.0, 1.0)) = 0.5
@@ -74,14 +74,21 @@ Shader "MapRenderer/Line"
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0
-        [HideInInspector] _SrcBlend("__src", Float) = 5.0
-        [HideInInspector] _DstBlend("__dst", Float) = 10.0
-        [HideInInspector] _SrcBlendAlpha("__srcA", Float) = 1.0
-        [HideInInspector] _DstBlendAlpha("__dstA", Float) = 10.0
-        [HideInInspector] _ZWrite("__zw", Float) = 0.0
-        [HideInInspector] _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
-        [HideInInspector] _AlphaToMask("__alphaToMask", Float) = 0.0
-        [HideInInspector] _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
+        _SrcBlend("__src", Float) = 5.0
+        _DstBlend("__dst", Float) = 10.0
+        _SrcBlendAlpha("__srcA", Float) = 1.0
+        _DstBlendAlpha("__dstA", Float) = 10.0
+        _ZWrite("__zw", Float) = 0.0
+        // S58: forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
+        // Defaults reproduce the previously-hardcoded line state: ZTest LEqual(4), Cull Off(0), BlendOp Add(0).
+        // (_SrcBlend=5 SrcAlpha / _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 already match the old hardcode.)
+        _ZTest("__ztest", Float) = 4.0
+        _Cull("__cull", Float) = 0.0
+        _BlendOp("__blendop", Float) = 0.0
+        _BlendModePreserveSpecular("_BlendModePreserveSpecular", Float) = 1.0
+        _AlphaToMask("__alphaToMask", Float) = 0.0
+        _AddPrecomputedVelocity("_AddPrecomputedVelocity", Float) = 0.0
+        _XRMotionVectorsPass("_XRMotionVectorsPass", Float) = 1.0
 
         [ToggleUI] _ReceiveShadows("Receive Shadows", Float) = 1.0
         _QueueOffset("Queue offset", Float) = 0.0
@@ -96,7 +103,7 @@ Shader "MapRenderer/Line"
         [HideInInspector][NoScaleOffset]unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
 
         // ── Map paint / line-specific properties ─────────────────────────────
-        _MapColor       ("Map Color", Color)    = (0.3, 0.5, 1.0, 1)
+        // The line color is the standard _BaseColor above; _Opacity modulates alpha.
         _Opacity        ("Opacity", Range(0, 1)) = 1.0
 
         _Width          ("Width (m or px)", Float)    = 2.0
@@ -136,9 +143,10 @@ Shader "MapRenderer/Line"
         LOD 300
 
         // Two-sided ribbon; no depth write (coplanar layer ordering via render queue).
-        Cull Off
-        ZWrite Off
-        ZTest LEqual
+        // S58: parameterized — defaults (Cull Off / ZWrite Off / ZTest LEqual) reproduce the prior state.
+        Cull [_Cull]
+        ZWrite [_ZWrite]
+        ZTest [_ZTest]
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: UniversalForward — lit forward-transparent pixels.
@@ -149,9 +157,13 @@ Shader "MapRenderer/Line"
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
 
-            Blend SrcAlpha OneMinusSrcAlpha
-            ZWrite Off
-            Cull Off
+            // S58: fully parameterized forward render state. Defaults reproduce the prior hardcode
+            // (Blend SrcAlpha OneMinusSrcAlpha / ZWrite Off / ZTest LEqual / Cull Off / BlendOp Add).
+            Blend [_SrcBlend] [_DstBlend]
+            BlendOp [_BlendOp]
+            ZWrite [_ZWrite]
+            ZTest [_ZTest]
+            Cull [_Cull]
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -214,5 +226,5 @@ Shader "MapRenderer/Line"
     }
 
     FallBack "Hidden/Universal Render Pipeline/FallbackError"
-    CustomEditor "MapRenderer.Unity.Editor.MapLitShaderGUI"
+    CustomEditor "MapRenderer.Unity.Editor.LineShaderGUI"
 }

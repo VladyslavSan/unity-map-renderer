@@ -347,7 +347,7 @@ namespace MapRenderer.Tests
         [Test]
         public void LinePaint_PatternName_IsParsed()
         {
-            // S14_LINE_PATTERN_HOOK: parse+plumb only; fallback to solid _MapColor until S17.
+            // S14_LINE_PATTERN_HOOK: parse+plumb only; fallback to solid _BaseColor until S17.
             var layer = MakeLineLayer("{\"line-pattern\":\"road_shield\"}");
             var lp    = new LinePaint(layer);
 

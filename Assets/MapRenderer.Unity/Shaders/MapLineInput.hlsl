@@ -5,7 +5,7 @@
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream: full UnityPerMaterial + line-specific paint properties
-//   (_MapColor, _Opacity, _Width, _WidthIsPixels, _MetersPerPixel, _Blur);
+//   (_Opacity, _Width, _WidthIsPixels, _MetersPerPixel, _Blur; color rides standard _BaseColor);
 //   DOTS bridge extended for line props; InitializeStandardLitSurfaceData preserved verbatim.
 //
 // S33: This is a DELIBERATE FORK of MapLitInput.hlsl for the line layer.
@@ -55,8 +55,9 @@ half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // ── Map paint properties (S33 line additions) ─────────────────────────────────
-// _MapColor — line color, multiplied onto albedo. Named _MapColor (not _Color) so URP's
-//            legacy _BaseColor alias has no bare _Color to clobber to {1,1,1} on import.
+// The per-layer line color is the standard URP _BaseColor (declared above): rgb→albedo, a→alpha,
+// like stock Lit. (S58 retired the redundant _MapColor, which duplicated _BaseColor's rgb tint
+// while ignoring its alpha.)
 // _Opacity — overall opacity [0,1], multiplied onto fwidth AA coverage.
 // _Width   — line width in pixels (WidthIsPixels=1) or meters (WidthIsPixels=0).
 // _WidthIsPixels   — 0 = meters, 1 = pixels.
@@ -72,7 +73,6 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // _LineOffset      — S44: perpendicular band-center shift in pixels (same units as _Width).
 //                    0 = no shift (default). Positive = left of travel direction.
 //                    Converted to meters via same px→m path as _Width.
-float4 _MapColor;
 float  _Opacity;
 float  _Width;
 float  _WidthIsPixels;
@@ -105,7 +105,6 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
     // Line paint additions:
-    UNITY_DOTS_INSTANCED_PROP(float4, _MapColor)
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float , _Width)
     UNITY_DOTS_INSTANCED_PROP(float , _WidthIsPixels)
@@ -134,7 +133,6 @@ static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
 // Line paint statics:
-static float4 unity_DOTS_Sampled_MapColor;
 static float  unity_DOTS_Sampled_Opacity;
 static float  unity_DOTS_Sampled_Width;
 static float  unity_DOTS_Sampled_WidthIsPixels;
@@ -163,7 +161,6 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_ClearCoatSmoothness  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _ClearCoatSmoothness);
     unity_DOTS_Sampled_DetailAlbedoMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoMapScale);
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
-    unity_DOTS_Sampled_MapColor             = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _MapColor);
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
     unity_DOTS_Sampled_Width                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Width);
     unity_DOTS_Sampled_WidthIsPixels        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
@@ -195,7 +192,6 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
 // Line paint redirects:
-#define _MapColor               unity_DOTS_Sampled_MapColor
 #define _Opacity                unity_DOTS_Sampled_Opacity
 #define _Width                  unity_DOTS_Sampled_Width
 #define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels
@@ -323,7 +319,8 @@ half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask)
 
 // ── InitializeStandardLitSurfaceData ─────────────────────────────────────────
 // Verbatim from LitInput.hlsl; used by MapLineForwardPass.
-// After calling, the fragment applies: surfaceData.albedo *= _MapColor.rgb;
+// _BaseColor (rgb→albedo, a→alpha) is applied INSIDE this function; after calling, the fragment
+// applies the per-feature tint: surfaceData.albedo *= input.vColor.rgb.
 // NEVER hand-assemble SurfaceData field-by-field.
 inline void InitializeStandardLitSurfaceData(float2 uv, out SurfaceData outSurfaceData)
 {

@@ -60,7 +60,7 @@ namespace MapRenderer.Unity
         /// transparent band (ZWrite off), so the renderQueue offset alone decides order — see
         /// <see cref="LayerDrawOrder"/>. Disposes any previously-built bundles first.
         /// </summary>
-        public void Build(StyleDocument style, double initialZoom)
+        public void Build(StyleDocument style, double initialZoom, MapMaterialSet settings = null)
         {
             Dispose();
             if (style == null) return;
@@ -71,7 +71,8 @@ namespace MapRenderer.Unity
                 if (sl.LayerType == StyleLayerType.Fill)
                 {
                     FillPaint paint = new FillPaint(sl);
-                    Material mat = MaterialFactory.CreateFillMaterial();
+                    Material mat = MaterialFactory.CreateFillMaterial(settings);
+                    if (mat == null) continue;   // unconfigured material set — warned by the factory; skip the layer
                     mat.renderQueue = LayerDrawOrder.TransparentQueue + drawIndex;
 
                     var applier = new ZoomStyleApplier(mat);
@@ -87,7 +88,8 @@ namespace MapRenderer.Unity
                 else if (sl.LayerType == StyleLayerType.Line)
                 {
                     LinePaint paint = new LinePaint(sl);
-                    Material mat = MaterialFactory.CreateLineMaterial();
+                    Material mat = MaterialFactory.CreateLineMaterial(settings);
+                    if (mat == null) continue;   // unconfigured material set — warned by the factory; skip the layer
                     mat.renderQueue = LayerDrawOrder.TransparentQueue + drawIndex;
 
                     var applier = new ZoomStyleApplier(mat);

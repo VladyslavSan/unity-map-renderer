@@ -80,6 +80,12 @@ namespace MapRenderer.Unity
 
         private StyleDocument _style;
 
+        [Tooltip("Optional: base materials per rendering technique (MapMaterialSet asset). When set, each " +
+                 "per-layer material is a CLONE of the matching base — a Material Variant in the Editor, so " +
+                 "editing the base .mat in Play live-tunes every layer. When unset, legacy shader-built defaults " +
+                 "are used.")]
+        public MapMaterialSet MaterialSet;
+
         // Per-style-layer render bundles (fills + lines), built once at Initialise. Owns the materials.
         private readonly StyledLayerSet _layers = new StyledLayerSet();
 
@@ -106,7 +112,7 @@ namespace MapRenderer.Unity
             if (_cameraSystem == null)
                 _cameraSystem = new CameraSystem(initialView);
 
-            _layers.Build(_style, _cameraSystem != null ? _cameraSystem.CurrentProperties.Zoom : 0.0);
+            _layers.Build(_style, _cameraSystem != null ? _cameraSystem.CurrentProperties.Zoom : 0.0, MaterialSet);
 
             if (_tileManager == null)
                 _tileManager = new TileManager(transform, _layers);

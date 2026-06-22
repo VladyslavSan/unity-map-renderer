@@ -46,8 +46,8 @@ namespace MapRenderer.Unity
     ///   Index buffer — UInt32.
     ///
     /// Color (D2): per-feature sRGB color baked via <see cref="DataDrivenPaintEvaluator"/>; converted
-    /// to linear via <c>Color.linear</c> off the main thread (S48). <c>_MapColor=white</c> on the Material
-    /// (identity multiply). Never set <c>_MapColor</c> to the style color — that would double-apply gamma.
+    /// to linear via <c>Color.linear</c> off the main thread (S48). <c>_BaseColor=white</c> on the Material
+    /// (identity multiply). Never set <c>_BaseColor</c> to the style color — that would double-apply gamma.
     ///
     /// Thread-safety: <see cref="BuildMeshData"/> touches only pure-managed, stateless Core code
     /// (MvtGeometry.Decode, PolygonAssembler.Assemble, Earcut.Triangulate, DataDrivenPaintEvaluator,
@@ -255,7 +255,7 @@ namespace MapRenderer.Unity
 
                 // Bake per-feature vertex color from the data-driven paint expression.
                 // Color space (D2): Core Color is sRGB [0,1]; converted to linear below (S48).
-                // _MapColor=white on material → identity multiply → no double-gamma.
+                // _BaseColor=white on material → identity multiply → no double-gamma.
                 Color featureColor = Color.white;
                 var adapter = new MvtFeatureAdapter(feature);
                 if (paint.DataDrivenColor.TryEvaluateColor(zoom, adapter, out CoreColor c))

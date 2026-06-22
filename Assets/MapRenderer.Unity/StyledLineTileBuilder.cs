@@ -38,8 +38,8 @@ namespace MapRenderer.Unity
     ///   Index buffer — UInt32.
     ///
     /// Color (D1): per-feature sRGB color baked via <see cref="DataDrivenPaintEvaluator"/>; converted
-    /// to linear via <c>Color.linear</c> off the main thread. <c>_MapColor=white</c> on the Material
-    /// (identity multiply). Never set <c>_MapColor</c> to the style color for data-driven layers.
+    /// to linear via <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material
+    /// (identity multiply). Never set <c>_BaseColor</c> to the style color for data-driven layers.
     ///
     /// Thread-safety: <see cref="BuildMeshData"/> touches only pure-managed, stateless Core code.
     /// All paths are allocation-local with no shared mutable static state.
@@ -191,7 +191,7 @@ namespace MapRenderer.Unity
 
                 // Bake per-feature vertex color from the data-driven paint expression.
                 // Color space: Core Color is sRGB [0,1]; convert to linear here (off-main-thread).
-                // _MapColor=white on the material → identity multiply (D1 / fills convention).
+                // _BaseColor=white on the material → identity multiply (D1 / fills convention).
                 Vector4 featureColor = WhiteColor;
                 var adapter = new MvtFeatureAdapter(feature);
                 if (paint.DataDrivenColor.TryEvaluateColor(zoom, adapter, out CoreColor c))

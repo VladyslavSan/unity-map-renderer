@@ -233,11 +233,11 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
     InitializeStandardLitSurfaceData(input.uv, surfaceData);
 
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
-    // [MAP DELTA S12] Composite data-driven × zoom:
+    // [MAP DELTA S12] Composite data-driven × constant:
     //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
-    //   _MapColor.rgb    = zoom-level or constant color (S11 uniform dimension)
+    //   _BaseColor.rgb   = zoom-level or constant color (S11 uniform dimension, applied above)
     //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
-    surfaceData.albedo *= input.vColor.rgb * _MapColor.rgb;
+    surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 
 #ifdef LOD_FADE_CROSSFADE

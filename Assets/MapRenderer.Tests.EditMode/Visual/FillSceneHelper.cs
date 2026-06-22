@@ -10,6 +10,7 @@ using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity;
+using MapRenderer.Unity.Rendering;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -23,7 +24,7 @@ namespace MapRenderer.Tests.Visual
     /// the old <see cref="MapFillBootstrap.FitToView"/> behaviour).
     ///
     /// The returned material is created from <c>MaterialFactory.CreateFillMaterial</c> so
-    /// all shader properties (<c>_MapColor</c>, <c>_Opacity</c>, etc.) are available.
+    /// all shader properties (<c>_BaseColor</c>, <c>_Opacity</c>, etc.) are available.
     ///
     /// Callers must <c>Object.DestroyImmediate</c> the returned GameObject when done.
     /// </summary>
@@ -46,7 +47,7 @@ namespace MapRenderer.Tests.Visual
         /// Build a fill GameObject from the fixture using the <c>countries</c> layer.
         /// Optionally pass a data-driven <paramref name="fillColorExpression"/> (null for white).
         /// Returns <c>(mapGo, liveMaterial)</c>. mapGo has MeshFilter + MeshRenderer attached.
-        /// Material default: <c>_MapColor=white</c>, <c>_Opacity=1</c>.
+        /// Material default: <c>_BaseColor=white</c>, <c>_Opacity=1</c>.
         /// The transform is scaled/centred to <paramref name="viewSize"/> world units (FitToView).
         /// </summary>
         public static (GameObject mapGo, Material liveMaterial) BuildFillGo(
@@ -87,9 +88,14 @@ namespace MapRenderer.Tests.Visual
             var mr = mapGo.AddComponent<MeshRenderer>();
             mf.sharedMesh = mesh;
 
-            // Material — use MaterialFactory so all Fill shader uniforms are initialised.
-            var mat = MaterialFactory.CreateFillMaterial();
-            mat.SetColor("_MapColor", Color.white);
+            // Material — a PLAIN material on the Fill shader (NOT a Material Variant): this snapshot helper
+            // toggles local shader keywords at runtime (e.g. _NORMALMAP), which does not take effect on a
+            // runtime variant clone. Apply the painter contract via the tweaker to reproduce the per-layer
+            // material state (white identity, ZWrite off) without the variant linkage. (S58.)
+            var fillShader = MapMaterialSetTestUtil.Load().FillMaterial.shader;
+            var mat = new Material(fillShader) { name = "FillSceneHelper_Fill" };
+            FillMaterialTweaker.ApplyPainterContract(mat);
+            mat.SetColor("_BaseColor", Color.white);
             mat.SetFloat("_Opacity",  1f);
             mr.sharedMaterial = mat;
 
