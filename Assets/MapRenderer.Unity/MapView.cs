@@ -36,6 +36,20 @@ namespace MapRenderer.Unity
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
+    /// <summary>
+    /// S49: selects the render submission backend.
+    /// Default is <see cref="GameObject"/> (the existing per-layer GameObject path, unchanged).
+    /// Set to <see cref="Brg"/> to submit tile meshes via <see cref="BrgTileRenderer"/> instead.
+    /// The GameObject path is preserved in full when <see cref="GameObject"/> is selected (tooth 1).
+    /// </summary>
+    public enum RenderBackend
+    {
+        /// <summary>Default: per-layer GameObject + MeshRenderer (existing path, unchanged).</summary>
+        GameObject = 0,
+        /// <summary>S49 BRG path: draw tile meshes via BatchRendererGroup.</summary>
+        Brg        = 1,
+    }
+
     public sealed class MapView : MonoBehaviour
     {
         // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
@@ -53,6 +67,12 @@ namespace MapRenderer.Unity
 
         [Tooltip("Max tile pipeline builds per Tick (load smoothing).")]
         public int MaxBuildsPerTick = 4;
+
+        // ── S49: render backend selector ─────────────────────────────────────────────────────
+        [Tooltip("S49: render submission backend. GameObject (default) = existing per-layer MonoBehaviour path. " +
+                 "Brg = BatchRendererGroup path. The GameObject path is byte-for-byte unchanged when this is " +
+                 "set to GameObject.")]
+        public RenderBackend Backend = RenderBackend.GameObject;
 
         // ── S50: Core camera system + Unity sync layer (owned by MapView, D4) ─────────────────
         private CameraSystem _cameraSystem;
@@ -90,7 +110,7 @@ namespace MapRenderer.Unity
 
             if (_tileManager == null)
                 _tileManager = new TileManager(transform, _layers);
-            _tileManager.Initialise(source, ownsSource);
+            _tileManager.Initialise(source, ownsSource, Backend == RenderBackend.Brg ? _layers : null);
         }
 
         /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
@@ -124,6 +144,12 @@ namespace MapRenderer.Unity
         /// actually occurred in <see cref="S51DisposalLeakGuardTests"/>.
         /// </summary>
         public int ReleasedMidFlightCount => _tileManager != null ? _tileManager.ReleasedMidFlightCount : 0;
+
+        /// <summary>
+        /// S49 test observability: the live BRG renderer (null when Backend == GameObject or not yet
+        /// initialised). Exposed so tests can read instance buffer state without GPU readback.
+        /// </summary>
+        internal BrgTileRenderer BrgRenderer => _tileManager?.BrgRenderer;
 
         // ── S45/S50: Camera system accessors ───────────────────────────────────────────────────
 
@@ -213,7 +239,11 @@ namespace MapRenderer.Unity
             // camera, which orbits the origin), and visible tiles + camera stay at their smallest possible
             // coordinates — best float precision, no threshold/rebase machinery.
             _sceneOrigin = cam.CenterMercator();
-            _tileManager.RebaseTiles(_sceneOrigin);
+
+            if (Backend == RenderBackend.Brg)
+                _tileManager.BrgRebuild(_sceneOrigin);
+            else
+                _tileManager.RebaseTiles(_sceneOrigin);
 
             _tileManager.Tick(cam, _sceneOrigin, BuildTileSelectionConfig());
         }
