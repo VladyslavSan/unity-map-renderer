@@ -28,7 +28,8 @@ namespace MapRenderer.Unity
     ///
     /// Inspector fields:
     ///   <see cref="TileUrlTemplate"/>   — HTTP URL template with {z}/{x}/{y} tokens.
-    ///   <see cref="StyleAssetPath"/>    — path to the style JSON, relative to Assets/.
+    ///   <see cref="StyleAssetPath"/>    — path to the style JSON, relative to Assets/StreamingAssets/
+    ///                                     (ships in builds; Editor falls back to Assets/).
     ///   <see cref="InitialLatitude"/>   — initial map center latitude.
     ///   <see cref="InitialLongitude"/>  — initial map center longitude.
     ///   <see cref="InitialZoom"/>       — initial zoom level.
@@ -43,7 +44,8 @@ namespace MapRenderer.Unity
     public sealed class MapRoot : MonoBehaviour
     {
         // Demo data source: the free, no-key OpenFreeMap OSM tiles (OpenMapTiles schema) rendered with
-        // the OpenFreeMap "liberty" style (Assets/Fixtures/liberty.json). The maplibre demotiles only
+        // the OpenFreeMap "liberty" style (Assets/StreamingAssets/Fixtures/liberty.json — under
+        // StreamingAssets so it ships in standalone builds). The maplibre demotiles only
         // carry a single country-fill layer up to ~z5; OpenFreeMap goes to z14 with water/roads/landuse/
         // buildings. We render liberty's fill + line layers (water, landuse, the full road hierarchy with
         // casings, boundaries); symbol (labels), raster (hillshade) and fill-extrusion layers are skipped
@@ -60,8 +62,9 @@ namespace MapRenderer.Unity
         public string TileUrlTemplate =
             "https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf";
 
-        [Tooltip("Path to the style document JSON, relative to Assets/. " +
-                 "OpenFreeMap 'liberty' style (water/landuse/roads-with-casing/boundaries; labels not yet rendered).")]
+        [Tooltip("Path to the style document JSON, relative to Assets/StreamingAssets/ (so it ships in builds; " +
+                 "Editor falls back to Assets/). OpenFreeMap 'liberty' style " +
+                 "(water/landuse/roads-with-casing/boundaries; labels not yet rendered).")]
         public string StyleAssetPath = "Fixtures/liberty.json";
 
         [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
@@ -196,16 +199,38 @@ namespace MapRenderer.Unity
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Loads and parses the style document from <see cref="StyleAssetPath"/> (relative to Assets/).
-        /// Falls back to an empty StyleDocument if the file is not found (so the demo still launches).
+        /// Loads and parses the style document from <see cref="StyleAssetPath"/>.
+        ///
+        /// <para>Resolved against <c>Application.streamingAssetsPath</c> first: files under
+        /// <c>Assets/StreamingAssets/</c> are the only loose files Unity copies verbatim into a built
+        /// player, so this is what makes the style available at runtime in a standalone build. A raw file
+        /// under <c>Assets/</c> read via <c>Application.dataPath</c> exists ONLY in the Editor (where
+        /// dataPath = the project's <c>Assets</c> folder); in a build dataPath points inside the app bundle
+        /// and the file is absent — which is why an earlier dataPath-based load rendered an empty map.</para>
+        ///
+        /// <para>An Editor/back-compat fallback to <c>Application.dataPath</c> is kept so any legacy path
+        /// still resolves. Note: <c>File.ReadAllText</c> on streamingAssetsPath works on standalone
+        /// (macOS/Windows/Linux) and in the Editor; Android/WebGL would need a UnityWebRequest read.</para>
+        ///
+        /// <para>Falls back to an empty StyleDocument if the file is not found (so the demo still launches).</para>
         /// </summary>
         private StyleDocument LoadStyle()
         {
-            string fullPath = Path.Combine(Application.dataPath, StyleAssetPath);
+            // StreamingAssets ships into the built player; the Editor-only dataPath/Assets copy does not.
+            string fullPath = Path.Combine(Application.streamingAssetsPath, StyleAssetPath);
             if (!File.Exists(fullPath))
             {
-                Debug.LogWarning($"[MapRoot] Style not found at {fullPath}. " +
-                                 "MapView will render no fills until a style is loaded.");
+                string editorPath = Path.Combine(Application.dataPath, StyleAssetPath);
+                if (File.Exists(editorPath))
+                    fullPath = editorPath;
+            }
+
+            if (!File.Exists(fullPath))
+            {
+                Debug.LogWarning($"[MapRoot] Style not found at {fullPath} " +
+                                 $"(StreamingAssets: {Path.Combine(Application.streamingAssetsPath, StyleAssetPath)}). " +
+                                 "MapView will render no fills until a style is loaded. " +
+                                 "In a build, the style must live under Assets/StreamingAssets/.");
                 return new StyleDocument();
             }
 

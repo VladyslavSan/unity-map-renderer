@@ -5,6 +5,7 @@ using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.View;
@@ -74,6 +75,26 @@ namespace MapRenderer.Unity
         private ComponentSystemBase _initGroup, _simGroup, _presGroup;
         private int  _nextHandle;
         private bool _disposed;
+
+        // ── Profiler markers — split the per-frame EG drive so a MapView.Update spike is attributable ──
+        // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
+        // InitGroup/SimGroup/PresGroup: the three system-group ticks. PresGroup runs EntitiesGraphicsSystem
+        // (instance-data upload + BRG batch (re)registration) and is the usual culprit when tiles churn.
+        private static readonly ProfilerMarker PmRootTransforms = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.RootTransforms");
+        private static readonly ProfilerMarker PmInitGroup      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.InitGroup");
+        private static readonly ProfilerMarker PmSimGroup       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.SimGroup");
+        private static readonly ProfilerMarker PmPresGroup      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.PresGroup");
+
+        // ── AddTileLayer sub-phases (nested under MapRenderer.Tile.AddLayer) ──
+        // The per-tile-load spike on the render thread is hypothesised to be EG batch registration. Split
+        // AddTileLayer so the live profiler attributes the cost to its real source:
+        //   Root     — GetOrCreateRoot (creates the tile-root entity on first layer of a tile).
+        //   Register — new RenderMeshArray + RenderMeshUtility.AddComponents — the EG mesh/material batch
+        //              registration. PRIME SUSPECT for the zoom stall (per-tile RenderMeshArray, see follow-ups).
+        //   Parent   — the Parent+LocalTransform structural change + the LocalToWorld/bounds sets.
+        private static readonly ProfilerMarker PmAddRoot     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Root");
+        private static readonly ProfilerMarker PmAddRegister = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Register");
+        private static readonly ProfilerMarker PmAddParent   = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Parent");
 
         // Last scene origin seen by Rebuild. A new tile-layer is consumed AFTER the frame's Rebuild
         // has already run (MapView.Tick: InstancedRebuild → TileManager.Tick → AddTileLayer), so without
@@ -241,25 +262,39 @@ namespace MapRenderer.Unity
                 throw new ArgumentOutOfRangeException(nameof(materialIndex));
 
             Material mat  = _layerMaterials[materialIndex];
-            Entity   root = GetOrCreateRoot(tileId, tileOriginMerc);
+            Entity   root;
+            using (PmAddRoot.Auto())
+                root = GetOrCreateRoot(tileId, tileOriginMerc);
 
-            var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
-            var rma  = new RenderMeshArray(new Material[] { mat }, new Mesh[] { mesh });
+            Entity e;
+            using (PmAddRegister.Auto())
+            {
+                var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
+                var rma  = new RenderMeshArray(new Material[] { mat }, new Mesh[] { mesh });
 
-            Entity e = _em.CreateEntity();
-            RenderMeshUtility.AddComponents(
-                e, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+                e = _em.CreateEntity();
+                RenderMeshUtility.AddComponents(
+                    e, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+            }
 
+            using (PmAddParent.Auto())
+            {
             // Parent under the tile root with an identity local transform: LocalToWorldSystem then
             // computes this entity's LocalToWorld = root.LocalToWorld each Rebuild tick. (RenderMeshUtility
-            // adds LocalToWorld but NOT LocalTransform — we add it so the transform system drives us.)
-            _em.AddComponentData(e, new Parent { Value = root });
-            _em.AddComponentData(e, LocalTransform.Identity);
+            // adds LocalToWorld but NOT Parent/LocalTransform — we add those so the transform system drives us.)
+            // Add both in ONE structural change (ComponentTypeSet) instead of two separate AddComponentData
+            // calls: each add migrates the entity to a new archetype/chunk, and tile churn during a zoom makes
+            // that per-entity cost a measured spike (MapRenderer.Tile.AddLayer). One migration, then set values.
+            _em.AddComponent(e, new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
+            _em.SetComponentData(e, new Parent { Value = root });
+            _em.SetComponentData(e, LocalTransform.Identity);
 
             // Set LocalToWorld directly for the frame BEFORE the first transform tick (the consume happens
             // after this frame's Rebuild), so the tile renders at the right place immediately — no origin
             // blink. The next Rebuild's LocalToWorldSystem re-derives the identical value from the root.
-            _em.AddComponentData(e, new LocalToWorld { Value = float4x4.Translate(InitialScenePos(tileOriginMerc)) });
+            // (LocalToWorld is already present from RenderMeshUtility.AddComponents, so this is a set, not a
+            // migration.)
+            _em.SetComponentData(e, new LocalToWorld { Value = float4x4.Translate(InitialScenePos(tileOriginMerc)) });
 
             // Generous bounds: floating-origin keeps tiles near the origin and the camera frames them,
             // so we never want frustum culling to silently drop a tile in a headless single-shot render.
@@ -271,6 +306,7 @@ namespace MapRenderer.Unity
 #if UNITY_EDITOR
             _em.SetName(e, ToEntityName(mat.name));
 #endif
+            }
 
             var rec = _tileRoots[tileId];
             rec.ChildCount++;
@@ -336,22 +372,29 @@ namespace MapRenderer.Unity
             _lastSceneOrigin = sceneOrigin;
             _hasSceneOrigin  = true;
 
-            foreach (var kv in _tileRoots)
+            using (PmRootTransforms.Auto())
             {
-                Entity root = kv.Value.Root;
-                if (!_em.Exists(root)) continue;
-                float3 pos = FloatingOrigin.TileLocalToScene(kv.Value.TileOriginMerc, sceneOrigin);
-                _em.SetComponentData(root, LocalTransform.FromPosition(pos));
-                _em.SetComponentData(root, new LocalToWorld { Value = float4x4.Translate(pos) });
+                foreach (var kv in _tileRoots)
+                {
+                    Entity root = kv.Value.Root;
+                    if (!_em.Exists(root)) continue;
+                    float3 pos = FloatingOrigin.TileLocalToScene(kv.Value.TileOriginMerc, sceneOrigin);
+                    _em.SetComponentData(root, LocalTransform.FromPosition(pos));
+                    _em.SetComponentData(root, new LocalToWorld { Value = float4x4.Translate(pos) });
+                }
             }
 
             // Drive the Entities-Graphics systems (no automatic player-loop tick — bootstrap disabled).
             // SimulationSystemGroup contains TransformSystemGroup (parents → child LocalToWorld);
             // PresentationSystemGroup contains EntitiesGraphicsSystem (uploads instance data + registers
             // the BRG batch); the actual draw is emitted during the camera's render via SRP culling.
-            _initGroup?.Update();
-            _simGroup?.Update();
-            _presGroup?.Update();
+            // Markered separately so the profiler shows which group owns a per-frame spike.
+            using (PmInitGroup.Auto())
+                _initGroup?.Update();
+            using (PmSimGroup.Auto())
+                _simGroup?.Update();
+            using (PmPresGroup.Auto())
+                _presGroup?.Update();
         }
 
         // ── Teardown ────────────────────────────────────────────────────────────────────────────────

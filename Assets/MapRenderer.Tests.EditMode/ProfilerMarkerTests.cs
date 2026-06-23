@@ -110,6 +110,21 @@ namespace MapRenderer.Tests
                 "MapRenderer.Pipeline.RingAssembly",
                 "MapRenderer.Pipeline.Earcut",
                 "MapRenderer.Pipeline.Project",
+                // Per-frame MapView.Update sub-phases + EG-drive split (added to localise live zoom spikes).
+                "MapRenderer.View.ApplyZoom",
+                "MapRenderer.View.ApplyZoom.Fills",
+                "MapRenderer.View.ApplyZoom.Lines",
+                "MapRenderer.View.ApplyZoom.LineDash",
+                "MapRenderer.View.InstancedRebuild",
+                "MapRenderer.Tile.ManagerTick",
+                "MapRenderer.Tile.AddLayer",
+                "MapRenderer.Tile.AddLayer.Root",
+                "MapRenderer.Tile.AddLayer.Register",
+                "MapRenderer.Tile.AddLayer.Parent",
+                "MapRenderer.ECS.RootTransforms",
+                "MapRenderer.ECS.InitGroup",
+                "MapRenderer.ECS.SimGroup",
+                "MapRenderer.ECS.PresGroup",
             };
 
             foreach (string name in expectedNames)

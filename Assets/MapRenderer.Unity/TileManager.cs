@@ -48,6 +48,10 @@ namespace MapRenderer.Unity
         private static readonly ProfilerMarker PmSchedulerReq = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Scheduler.Request");
         private static readonly ProfilerMarker PmTileDecode   = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Decode");
         private static readonly ProfilerMarker PmMeshUpload    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Mesh.Upload");
+        // Split out from Mesh.Upload: registering the mesh with the backend (Entities = create entity +
+        // RenderMeshUtility.AddComponents + EG batch registration; BRG = add a draw item). Separated so a
+        // build-time spike is attributable to GPU upload vs ECS structural-change/batch churn.
+        private static readonly ProfilerMarker PmAddTileLayer  = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer");
 
         /// <summary>
         /// Tile-selection knobs read from MapView's serialized (inspector-editable) fields and passed in
@@ -691,16 +695,18 @@ namespace MapRenderer.Unity
                 {
                     for (int li = 0; li < _layers.FillCount && li < result.LayerData.Length; li++)
                     {
-                        using var sMeshUpload = PmMeshUpload.Auto();
-
                         // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
                         // It does NOT dispose data — we dispose in the finally block after the loop.
-                        Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
+                        Mesh mesh;
+                        using (PmMeshUpload.Auto())
+                            mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
                         if (mesh == null) continue;
 
                         createdMeshes.Add(mesh); // S51: track Mesh assets for explicit destruction
 
-                        int handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, li, id);
+                        int handle;
+                        using (PmAddTileLayer.Auto())
+                            handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, li, id);
                         drawHandles.Add(handle);
                         anyGeometry = true;
                     }
@@ -711,14 +717,16 @@ namespace MapRenderer.Unity
                 {
                     for (int li = 0; li < _layers.LineCount && li < result.LineLayerData.Length; li++)
                     {
-                        using var sMeshUpload = PmMeshUpload.Auto();
-
-                        Mesh mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
+                        Mesh mesh;
+                        using (PmMeshUpload.Auto())
+                            mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
                         if (mesh == null) continue;
 
                         createdMeshes.Add(mesh);
 
-                        int handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, _layers.FillCount + li, id);
+                        int handle;
+                        using (PmAddTileLayer.Auto())
+                            handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, _layers.FillCount + li, id);
                         drawHandles.Add(handle);
                         anyGeometry = true;
                     }

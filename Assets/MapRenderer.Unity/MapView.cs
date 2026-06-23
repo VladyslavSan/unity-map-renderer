@@ -56,8 +56,16 @@ namespace MapRenderer.Unity
     public sealed class MapView : MonoBehaviour
     {
         // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
-        // The tile-pipeline markers moved with TileManager; MapView keeps only the camera-advance marker.
-        private static readonly ProfilerMarker PmCameraAdvance = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Camera.Advance");
+        // The tile-pipeline markers moved with TileManager; MapView keeps the per-frame Tick sub-phases so a
+        // spike inside MapView.Update is attributable to a specific stage instead of the whole Update blob:
+        //   ApplyZoom        — push zoom uniforms into every layer material (scales with layer count).
+        //   InstancedRebuild — drive the render backend per frame (on Entities this ticks the EG system
+        //                      groups; split further inside EntitiesTileRenderer.Rebuild).
+        //   ManagerTick      — cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
+        private static readonly ProfilerMarker PmCameraAdvance    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Camera.Advance");
+        private static readonly ProfilerMarker PmApplyZoom        = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom");
+        private static readonly ProfilerMarker PmInstancedRebuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.InstancedRebuild");
+        private static readonly ProfilerMarker PmManagerTick      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.ManagerTick");
 
         // ── Configuration (serialized — inspector-editable; read every Tick, never snapshotted) ──
         [Tooltip("Cover over-select: viewport aspect (w/h) and pad factor (absorbs viewport size + pitch).")]
@@ -254,7 +262,8 @@ namespace MapRenderer.Unity
 
             // ApplyZoom first — before the TileManager early-out — so fractional-zoom changes always push
             // uniforms (fill/line zoom paint, live _MetersPerPixel for pixel line width, zoom-step dasharrays).
-            _layers.ApplyZoom(cam.Zoom);
+            using (PmApplyZoom.Auto())
+                _layers.ApplyZoom(cam.Zoom);
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it. The look-at therefore sits at the render origin (matching the
@@ -264,9 +273,11 @@ namespace MapRenderer.Unity
 
             // Reposition all loaded tiles relative to the new origin (one transform write per tile on the
             // Entities backend, per-instance on BRG), then select/build/evict cover.
-            _tileManager.InstancedRebuild(_sceneOrigin);
+            using (PmInstancedRebuild.Auto())
+                _tileManager.InstancedRebuild(_sceneOrigin);
 
-            _tileManager.Tick(cam, BuildTileSelectionConfig());
+            using (PmManagerTick.Auto())
+                _tileManager.Tick(cam, BuildTileSelectionConfig());
         }
 
         private TileManager.TileSelectionConfig BuildTileSelectionConfig() => new TileManager.TileSelectionConfig

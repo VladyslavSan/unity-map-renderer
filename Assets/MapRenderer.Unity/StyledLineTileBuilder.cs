@@ -337,11 +337,18 @@ namespace MapRenderer.Unity
             mesh.SetVertexBufferData(data.Stream2SideAndDist,    0, 0, data.VertexCount, stream: 2);
             mesh.SetVertexBufferData(data.Stream3WidthColor,     0, 0, data.VertexCount, stream: 3);
 
+            // Skip main-thread index validation (trusted Burst tessellation indices); see
+            // StyledFillTileBuilder.UploadMesh. DontRecalculateBounds just avoids a redundant intermediate
+            // compute — canonical bounds come from RecalculateBounds() below.
+            const MeshUpdateFlags NoValidate = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
             mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
-            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount);
+            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
 
             mesh.subMeshCount = 1;
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles));
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
+            // Accurate bounds: render tests frustum-cull on mesh.bounds (see StyledFillTileBuilder). Cost is
+            // irrelevant vs the real hot path (Tile.AddLayer). TODO(perf): tight geometry AABB at generation
+            // time — filed follow-up.
             mesh.RecalculateBounds();
 
             return mesh;

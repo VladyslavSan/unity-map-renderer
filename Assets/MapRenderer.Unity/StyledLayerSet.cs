@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Profiling;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View.Camera;
@@ -41,6 +42,16 @@ namespace MapRenderer.Unity
 
         private readonly List<FillLayerRecord> _fills = new List<FillLayerRecord>(16);
         private readonly List<LineLayerRecord> _lines = new List<LineLayerRecord>(16);
+
+        // ── ApplyZoom sub-phase markers (nested under MapRenderer.View.ApplyZoom) ──
+        // Split the per-frame zoom push so the live profiler attributes the cost to its real source:
+        //   Fills    — fill applier loop (expression eval → material SetFloat/SetColor), scales with fill count.
+        //   Lines    — line applier loop (eval + _MetersPerPixel + per-line dash re-eval), scales with line count.
+        //   LineDash — just the per-line zoom-step dasharray re-evaluation (the line-specific extra work,
+        //              prime suspect when the Lines loop dominates). Fires once per line per frame.
+        private static readonly ProfilerMarker PmZoomFills    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.Fills");
+        private static readonly ProfilerMarker PmZoomLines    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.Lines");
+        private static readonly ProfilerMarker PmZoomLineDash = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.LineDash");
 
         public int FillCount => _fills.Count;
         public int LineCount => _lines.Count;
@@ -113,18 +124,25 @@ namespace MapRenderer.Unity
         /// </summary>
         public void ApplyZoom(double zoom)
         {
-            for (int i = 0; i < _fills.Count; i++)
-                _fills[i].Applier.ApplyZoom(zoom);
+            using (PmZoomFills.Auto())
+            {
+                for (int i = 0; i < _fills.Count; i++)
+                    _fills[i].Applier.ApplyZoom(zoom);
+            }
 
             // Pixel-mode line width needs the live ground resolution: the shader computes
             //   widthM = _Width(px) * _MetersPerPixel
             // and the world is in Web-Mercator metres, so _MetersPerPixel must track the current zoom.
             float metersPerPixel = (float)CameraPoseMath.MetersPerPixel(zoom);
-            for (int i = 0; i < _lines.Count; i++)
+            using (PmZoomLines.Auto())
             {
-                _lines[i].Applier.ApplyZoom(zoom);
-                _lines[i].Material.SetFloat("_MetersPerPixel", metersPerPixel);
-                MaterialFactory.ApplyLineDashArray(_lines[i].Paint, _lines[i].Material, zoom);
+                for (int i = 0; i < _lines.Count; i++)
+                {
+                    _lines[i].Applier.ApplyZoom(zoom);
+                    _lines[i].Material.SetFloat("_MetersPerPixel", metersPerPixel);
+                    using (PmZoomLineDash.Auto())
+                        MaterialFactory.ApplyLineDashArray(_lines[i].Paint, _lines[i].Material, zoom);
+                }
             }
         }
 

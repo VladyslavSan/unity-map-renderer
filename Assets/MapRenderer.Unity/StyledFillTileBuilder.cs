@@ -403,14 +403,23 @@ namespace MapRenderer.Unity
             mesh.SetVertexBufferData(data.Stream2Tangent,        0, 0, data.VertexCount, stream: 2);
             mesh.SetVertexBufferData(data.Stream3Color,          0, 0, data.VertexCount, stream: 3);
 
-            // Index buffer.
+            // Index buffer. Skip Unity's main-thread index validation (O(indices)): the indices come from
+            // the Burst earcut/tessellation job and are covered by tests, so re-validating every index per
+            // tile upload is wasted work. DontRecalculateBounds just avoids a redundant intermediate compute
+            // here — the canonical bounds are set by RecalculateBounds() below.
+            const MeshUpdateFlags NoValidate = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
             mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
-            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount);
+            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
 
             // One sub-mesh covering all triangles.
             mesh.subMeshCount = 1;
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles));
+            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
 
+            // Accurate bounds matter: the snapshot/render tests frustum-cull on the renderer's mesh.bounds,
+            // so a loose placeholder breaks fill coverage. RecalculateBounds() is correct and its cost is
+            // irrelevant to the real hot path (tile-load is dominated by Tile.AddLayer, not Mesh.Upload).
+            // TODO(perf): compute the tight geometry AABB at generation time (accumulate vertex min/max in
+            // ProjectVerticesManaged) to skip this scan AND enable tight frustum culling — filed follow-up.
             mesh.RecalculateBounds();
             return mesh;
         }
