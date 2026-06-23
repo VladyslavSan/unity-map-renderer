@@ -19,7 +19,7 @@ namespace MapRenderer.Tests.Visual
     ///
     /// Tooth A — LineWidthColor flip is FALSIFIABLE through the REAL stream-3 interleave:
     ///   • Color sub-tooth: a non-white per-vertex colour baked into <c>LineWidthColor.Color</c> shows
-    ///     in the rendered pixel (lit MapRenderer/Line shader: albedo *= vColor.rgb * _BaseColor.rgb,
+    ///     in the rendered pixel (lit Map/Line shader: albedo *= vColor.rgb * _BaseColor.rgb,
     ///     _BaseColor=white → vColor IS the signal). We bake CYAN (0,1,1,1) with WidthScale=2 and assert
     ///     the centre band is cyan-dominant (g>r AND b>r). A struct-order revert (the pre-flip
     ///     {WidthScale; Color}) with the canonical descriptors fixed would make the GPU read
@@ -71,7 +71,7 @@ namespace MapRenderer.Tests.Visual
 
             var lineGo = new GameObject("CyanLine");
             lineGo.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             var mat = new Material(shader) { name = "CyanLineMat" };
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests.Visual
         {
             var go = new GameObject(name);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             var mat = new Material(shader) { name = name + "Mat" };
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);

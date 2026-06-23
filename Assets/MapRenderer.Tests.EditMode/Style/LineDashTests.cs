@@ -376,7 +376,7 @@ namespace MapRenderer.Tests
                 for (int i = 0; i < 16 && dir != null; i++)
                 {
                     string candidate = Path.Combine(dir,
-                        "Assets", "MapRenderer.Unity", "Shaders", "MapLineForwardPass.hlsl");
+                        "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line", "MapLineForwardPass.hlsl");
                     if (File.Exists(candidate)) { hlslPath = candidate; break; }
                     dir = Directory.GetParent(dir)?.FullName;
                 }

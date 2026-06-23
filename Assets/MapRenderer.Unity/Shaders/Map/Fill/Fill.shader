@@ -1,4 +1,4 @@
-// Fill.shader — MapRenderer/Fill (S34 structural parity with URP Lit.shader)
+// Fill.shader — Map/Fill (S34 structural parity with URP Lit.shader)
 //
 // Lit fill shader for unity-map-renderer.
 // Mirrors URP Lit.shader's pass list (ForwardLit / ShadowCaster / GBuffer / DepthOnly /
@@ -22,7 +22,7 @@
 //
 // See docs/lit-rendering-design.md for the full design rationale.
 // See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
-Shader "MapRenderer/Fill"
+Shader "Map/Fill"
 {
     Properties
     {
@@ -225,7 +225,7 @@ Shader "MapRenderer/Fill"
 
             // Include order: pass body first (brings MapLitInput.hlsl + MapLitCore.hlsl
             // which declare MapVertexModify); then Fill_Input.hlsl which defines the body.
-            #include "MapLitForwardPass.hlsl"
+            #include "../../Common/MapLitForwardPass.hlsl"
             #include "Fill_Input.hlsl"
             ENDHLSL
         }
@@ -258,7 +258,7 @@ Shader "MapRenderer/Fill"
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
-            #include "MapShadowCasterPass.hlsl"
+            #include "../../Common/MapShadowCasterPass.hlsl"
             #include "Fill_Input.hlsl"
             ENDHLSL
         }
@@ -330,7 +330,7 @@ Shader "MapRenderer/Fill"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "MapLitGBufferPass.hlsl"
+            #include "../../Common/MapLitGBufferPass.hlsl"
             #include "Fill_Input.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutputFormat.hlsl"
             ENDHLSL
@@ -362,7 +362,7 @@ Shader "MapRenderer/Fill"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "MapDepthOnlyPass.hlsl"
+            #include "../../Common/MapDepthOnlyPass.hlsl"
             #include "Fill_Input.hlsl"
             ENDHLSL
         }
@@ -397,7 +397,7 @@ Shader "MapRenderer/Fill"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "MapDepthNormalsPass.hlsl"
+            #include "../../Common/MapDepthNormalsPass.hlsl"
             #include "Fill_Input.hlsl"
             ENDHLSL
         }

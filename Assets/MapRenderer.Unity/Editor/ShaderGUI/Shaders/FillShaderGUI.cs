@@ -5,7 +5,7 @@ using MapRenderer.Unity.Rendering;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>MapRenderer/Fill</c> (S58). The final successor in the hierarchy
+    /// Inspector for <c>Map/Fill</c> (S58). The final successor in the hierarchy
     /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): inherits the full Lit layout
     /// (Surface Options / Surface Inputs / Detail Inputs / Advanced) and adds a fill-specific foldout.
     /// The fill declares no extra shader-feature keywords, so it inherits <see cref="LitShaderGUI"/>'s full

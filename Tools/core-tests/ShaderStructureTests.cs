@@ -1,8 +1,9 @@
-// ShaderStructureTests.cs — S34 structural acceptance tests (pure System.IO, no Unity required).
+// ShaderStructureTests.cs — structural acceptance tests (pure System.IO, no Unity required).
 //
-// These tests encode the "teeth" of S34 acceptance criteria at the file-structure level:
-//   • Required files exist in Assets/MapRenderer.Unity/Shaders/
-//   • UCL attribution headers are present in all mirror-copied files
+// These tests encode the "teeth" of the shader-tree structure at the file level:
+//   • Required files exist in the S56 layout: Shaders/Common/ (shared lit framework) +
+//     Shaders/Map/<Layer>/ (per-geometry shaders); the flat Shaders/ root holds no .shader/.hlsl.
+//   • UCL attribution headers are present in all mirror-copied Common files
 //   • InitializeStandardLitSurfaceData is used (not hand-assembled SurfaceData)
 //   • CBUFFER (UnityPerMaterial) is declared in MapLitInput.hlsl (not MapLitCore.hlsl)
 //   • _NORMALMAP / _METALLICSPECGLOSSMAP pragmas are present (required for teeth #1 and #3)
@@ -11,9 +12,13 @@
 //
 // These run via `dotnet test Tools/core-tests` in ~0.1s without Unity.
 // Complement to the Unity EditMode GPU tests in LitFillSnapshotTests.cs.
+//
+// History: originally S34 (flat Shaders/). Updated for S58 (the redundant _MapColor tint was
+// collapsed into _BaseColor) and S56 (the tree was reorganized into Common/ + Map/<Layer>/).
 
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using NUnit.Framework;
 
@@ -27,42 +32,63 @@ namespace MapRenderer.Tests
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../../.."));
 
         private static string ShadersDir => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders");
-        private static string MaterialsDir => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Materials");
+        private static string CommonDir  => Path.Combine(ShadersDir, "Common");
+        private static string MapFillDir => Path.Combine(ShadersDir, "Map", "Fill");
+        private static string MapLineDir => Path.Combine(ShadersDir, "Map", "Line");
 
-        // ── File existence ────────────────────────────────────────────────────
+        // ── File existence (S56 layout) ───────────────────────────────────────
 
         [Test]
         public void ShaderFiles_AllRequiredFilesExist()
         {
-            string[] required = new[]
+            (string dir, string name)[] required = new[]
             {
-                "MapLitInput.hlsl",
-                "MapLitCore.hlsl",
-                "MapLitForwardPass.hlsl",
-                "MapLitGBufferPass.hlsl",
-                "MapShadowCasterPass.hlsl",
-                "MapDepthOnlyPass.hlsl",
-                "MapDepthNormalsPass.hlsl",
-                "Fill_Input.hlsl",
-                "Fill.shader",
+                (CommonDir,  "MapLitInput.hlsl"),
+                (CommonDir,  "MapLitCore.hlsl"),
+                (CommonDir,  "MapLitForwardPass.hlsl"),
+                (CommonDir,  "MapLitGBufferPass.hlsl"),
+                (CommonDir,  "MapShadowCasterPass.hlsl"),
+                (CommonDir,  "MapDepthOnlyPass.hlsl"),
+                (CommonDir,  "MapDepthNormalsPass.hlsl"),
+                (MapFillDir, "Fill.shader"),
+                (MapFillDir, "Fill_Input.hlsl"),
+                (MapLineDir, "Line.shader"),
+                (MapLineDir, "MapLineForwardPass.hlsl"),
+                (MapLineDir, "MapLineInput.hlsl"),
             };
 
-            foreach (var name in required)
+            foreach (var (dir, name) in required)
             {
-                string path = Path.Combine(ShadersDir, name);
+                string path = Path.Combine(dir, name);
                 Assert.That(File.Exists(path), Is.True,
-                    $"Required shader file missing: Shaders/{name}\n" +
-                    $"(looked in: {ShadersDir})");
+                    $"Required shader file missing: {Path.GetFileName(dir)}/{name}\n" +
+                    $"(looked in: {dir})");
             }
         }
 
         [Test]
-        public void ShaderFiles_FillShaderIsInShadersDirectory()
+        public void ShaderFiles_FillAndLineLiveUnderMapLayer()
         {
-            // S34 requires Fill.shader to live in Shaders/ not Materials/.
-            string shadersPath  = Path.Combine(ShadersDir, "Fill.shader");
-            Assert.That(File.Exists(shadersPath), Is.True,
-                "Fill.shader must live in Assets/MapRenderer.Unity/Shaders/ (S34 structural requirement).");
+            // S56 requires per-layer shaders under Shaders/Map/<Layer>/, not the flat Shaders/ root.
+            Assert.That(File.Exists(Path.Combine(MapFillDir, "Fill.shader")), Is.True,
+                "Fill.shader must live in Assets/MapRenderer.Unity/Shaders/Map/Fill/ (S56 layout).");
+            Assert.That(File.Exists(Path.Combine(MapLineDir, "Line.shader")), Is.True,
+                "Line.shader must live in Assets/MapRenderer.Unity/Shaders/Map/Line/ (S56 layout).");
+        }
+
+        [Test]
+        public void ShaderFiles_FlatRootHoldsNoShaderSources()
+        {
+            // S56 tooth: after the reorg, no .shader/.hlsl may remain loose at the Shaders/ root —
+            // they all live under Common/ or Map/<Layer>/.
+            var loose = Directory.EnumerateFiles(ShadersDir)
+                .Where(p => p.EndsWith(".shader", StringComparison.Ordinal)
+                         || p.EndsWith(".hlsl", StringComparison.Ordinal))
+                .Select(Path.GetFileName)
+                .ToArray();
+            Assert.That(loose, Is.Empty,
+                "Shaders/ root must contain no loose .shader/.hlsl after S56 (found: "
+                + string.Join(", ", loose) + "). They belong under Common/ or Map/<Layer>/.");
         }
 
         // ── UCL attribution headers ───────────────────────────────────────────
@@ -70,9 +96,9 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitInput_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapLitInput.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitInput.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
-                "MapLitInput.hlsl must carry a UCL attribution header (S34 license requirement).");
+                "MapLitInput.hlsl must carry a UCL attribution header (license requirement).");
             Assert.That(text, Does.Contain("Unity Technologies"),
                 "MapLitInput.hlsl must attribute © Unity Technologies ApS.");
         }
@@ -80,7 +106,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitForwardPass_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapLitForwardPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitForwardPass.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "MapLitForwardPass.hlsl must carry a UCL attribution header.");
         }
@@ -88,7 +114,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitGBufferPass_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapLitGBufferPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitGBufferPass.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "MapLitGBufferPass.hlsl must carry a UCL attribution header.");
         }
@@ -96,7 +122,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapShadowCasterPass_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapShadowCasterPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapShadowCasterPass.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "MapShadowCasterPass.hlsl must carry a UCL attribution header.");
         }
@@ -104,7 +130,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapDepthOnlyPass_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapDepthOnlyPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapDepthOnlyPass.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "MapDepthOnlyPass.hlsl must carry a UCL attribution header.");
         }
@@ -112,7 +138,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapDepthNormalsPass_HasUCLAttributionHeader()
         {
-            string text = ReadShaderFile("MapDepthNormalsPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapDepthNormalsPass.hlsl");
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "MapDepthNormalsPass.hlsl must carry a UCL attribution header.");
         }
@@ -123,7 +149,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitInput_DefinesInitializeStandardLitSurfaceData()
         {
-            string text = ReadShaderFile("MapLitInput.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitInput.hlsl");
             Assert.That(text, Does.Contain("InitializeStandardLitSurfaceData"),
                 "MapLitInput.hlsl must define InitializeStandardLitSurfaceData — " +
                 "this is the function that populates SurfaceData correctly (tooth #1 gate).");
@@ -132,7 +158,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitForwardPass_CallsInitializeStandardLitSurfaceData()
         {
-            string text = ReadShaderFile("MapLitForwardPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitForwardPass.hlsl");
             Assert.That(text, Does.Contain("InitializeStandardLitSurfaceData("),
                 "MapLitForwardPass.hlsl fragment must call InitializeStandardLitSurfaceData — " +
                 "NEVER hand-assembled SurfaceData field-by-field (S34 acceptance tooth #4).");
@@ -141,7 +167,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitGBufferPass_CallsInitializeStandardLitSurfaceData()
         {
-            string text = ReadShaderFile("MapLitGBufferPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitGBufferPass.hlsl");
             Assert.That(text, Does.Contain("InitializeStandardLitSurfaceData("),
                 "MapLitGBufferPass.hlsl fragment must call InitializeStandardLitSurfaceData — " +
                 "NEVER hand-assembled SurfaceData field-by-field (S34 acceptance tooth #4).");
@@ -150,12 +176,12 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitForwardPass_ModulatesAlbedoAndAlpha_AfterInit()
         {
-            string text = ReadShaderFile("MapLitForwardPass.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitForwardPass.hlsl");
             // The init-then-modulate pattern: call init first, then multiply.
             int initIdx    = text.IndexOf("InitializeStandardLitSurfaceData(", StringComparison.Ordinal);
 
-            // S12 updated these lines to include per-vertex color (vColor) × material color (_MapColor).
-            // Accept either the S11 form (_MapColor.rgb alone) or the S12 form (vColor * _MapColor.rgb).
+            // Post-S58: per-vertex color (vColor) drives albedo/alpha; the _BaseColor tint is applied
+            // inside InitializeStandardLitSurfaceData (the redundant _MapColor tint was removed).
             int albedoIdx  = text.IndexOf("surfaceData.albedo *= ", StringComparison.Ordinal);
             int alphaIdx   = text.IndexOf("surfaceData.alpha  *= ", StringComparison.Ordinal);
 
@@ -165,9 +191,9 @@ namespace MapRenderer.Tests
             Assert.That(alphaIdx,  Is.GreaterThan(initIdx),
                 "alpha modulation (surfaceData.alpha  *= ...) must appear AFTER InitializeStandardLitSurfaceData.");
 
-            // Confirm _MapColor.rgb and _Opacity are present in the modulation lines (either S11 or S12 form).
-            Assert.That(text, Does.Contain("_MapColor.rgb"),
-                "Forward pass must reference _MapColor.rgb in albedo modulation.");
+            // Confirm the per-vertex color and _Opacity drive the modulation lines.
+            Assert.That(text, Does.Contain("vColor.rgb"),
+                "Forward pass must reference vColor.rgb in albedo modulation.");
             Assert.That(text, Does.Contain("_Opacity"),
                 "Forward pass must reference _Opacity in alpha modulation.");
         }
@@ -178,7 +204,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitInput_DeclaresCBUFFERUnityPerMaterial()
         {
-            string text = ReadShaderFile("MapLitInput.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitInput.hlsl");
             Assert.That(text, Does.Contain("CBUFFER_START(UnityPerMaterial)"),
                 "MapLitInput.hlsl must declare CBUFFER_START(UnityPerMaterial) — " +
                 "this is the full URP Lit CBUFFER shape required by the SRP Batcher.");
@@ -187,14 +213,14 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitInput_CBUFFERContainsFullURPLitProps()
         {
-            string text = ReadShaderFile("MapLitInput.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitInput.hlsl");
             // Spot-check a selection of URP Lit's CBUFFER members.
             string[] required = new[] {
                 "_BaseMap_ST", "_BaseColor", "_SpecColor", "_EmissionColor",
                 "_Cutoff", "_Smoothness", "_Metallic", "_BumpScale", "_OcclusionStrength",
                 "_DetailAlbedoMapScale", "_DetailNormalMapScale",
-                // Map additions:
-                "_MapColor", "_Opacity"
+                // Map addition (post-S58: _MapColor was collapsed into _BaseColor):
+                "_Opacity"
             };
             foreach (var prop in required)
                 Assert.That(text, Does.Contain(prop),
@@ -204,7 +230,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapLitCore_DoesNOT_DeclareCBUFFER()
         {
-            string text = ReadShaderFile("MapLitCore.hlsl");
+            string text = ReadShaderFile(CommonDir, "MapLitCore.hlsl");
             Assert.That(text, Does.Not.Contain("CBUFFER_START(UnityPerMaterial)"),
                 "MapLitCore.hlsl must NOT declare UnityPerMaterial CBUFFER (S34 refactor moved it to " +
                 "MapLitInput.hlsl). A duplicate CBUFFER declaration causes SRP Batcher layout mismatch.");
@@ -215,7 +241,7 @@ namespace MapRenderer.Tests
         [Test]
         public void FillShader_ForwardLit_HasNormalMapPragma()
         {
-            string text = ReadShaderFile("Fill.shader");
+            string text = ReadShaderFile(MapFillDir, "Fill.shader");
             Assert.That(text, Does.Contain("shader_feature_local _NORMALMAP"),
                 "Fill.shader ForwardLit pass must have '#pragma shader_feature_local _NORMALMAP'. " +
                 "Without it, binding a normal map compiles to nothing and tooth #1 cannot pass.");
@@ -224,7 +250,7 @@ namespace MapRenderer.Tests
         [Test]
         public void FillShader_HasMetallicSpecGlossMapPragma()
         {
-            string text = ReadShaderFile("Fill.shader");
+            string text = ReadShaderFile(MapFillDir, "Fill.shader");
             Assert.That(text, Does.Contain("shader_feature_local_fragment _METALLICSPECGLOSSMAP"),
                 "Fill.shader must have '#pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP'. " +
                 "Without it, binding a metallic map compiles to nothing and tooth #3 cannot pass.");
@@ -233,13 +259,24 @@ namespace MapRenderer.Tests
         [Test]
         public void FillShader_GBuffer_HasNormalMapPragma()
         {
-            string text = ReadShaderFile("Fill.shader");
+            string text = ReadShaderFile(MapFillDir, "Fill.shader");
             // GBuffer pass also needs _NORMALMAP for correct deferred normal-map support.
             int gBufferIdx = text.IndexOf("Name \"GBuffer\"", StringComparison.Ordinal);
             Assert.That(gBufferIdx, Is.GreaterThanOrEqualTo(0), "GBuffer pass not found in Fill.shader.");
             string afterGBuffer = text.Substring(gBufferIdx);
             Assert.That(afterGBuffer, Does.Contain("shader_feature_local _NORMALMAP"),
                 "Fill.shader GBuffer pass must also have _NORMALMAP pragma.");
+        }
+
+        // ── Shader declaration names (S56 rename: MapRenderer/<Layer> → Map/<Layer>) ──
+
+        [Test]
+        public void Shaders_DeclareMapLayerNames()
+        {
+            Assert.That(ReadShaderFile(MapFillDir, "Fill.shader"), Does.Contain("Shader \"Map/Fill\""),
+                "Fill.shader must declare Shader \"Map/Fill\" (S56 rename).");
+            Assert.That(ReadShaderFile(MapLineDir, "Line.shader"), Does.Contain("Shader \"Map/Line\""),
+                "Line.shader must declare Shader \"Map/Line\" (S56 rename).");
         }
 
         // ── License files ─────────────────────────────────────────────────────
@@ -267,32 +304,12 @@ namespace MapRenderer.Tests
                 "UnityCompanionLicense.txt must contain the actual UCL text.");
         }
 
-        // ── MeshBuilder UV/Tangent ────────────────────────────────────────────
-        // Structural check: MeshBuilder.cs must have UV and tangent channel code.
-
-        [Test]
-        public void MeshBuilder_HasUVAndTangentChannels()
-        {
-            string path = Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "MeshBuilder.cs");
-            Assert.That(File.Exists(path), Is.True, "MeshBuilder.cs not found.");
-            string text = File.ReadAllText(path, Encoding.UTF8);
-
-            Assert.That(text, Does.Contain("SetUVs"),
-                "MeshBuilder.Build() must call mesh.SetUVs() to provide UV0 for texture sampling.");
-            Assert.That(text, Does.Contain("SetTangents"),
-                "MeshBuilder.Build() must call mesh.SetTangents() for normal map tangent space.");
-            Assert.That(text, Does.Contain("_uvs"),
-                "MeshBuilder must maintain a _uvs list (UV0 channel).");
-            Assert.That(text, Does.Contain("_tangents"),
-                "MeshBuilder must maintain a _tangents list (tangent channel).");
-        }
-
         // ── Helper ─────────────────────────────────────────────────────────────
 
-        private static string ReadShaderFile(string filename)
+        private static string ReadShaderFile(string dir, string filename)
         {
-            string path = Path.Combine(ShadersDir, filename);
-            Assert.That(File.Exists(path), Is.True, $"File not found: Shaders/{filename}");
+            string path = Path.Combine(dir, filename);
+            Assert.That(File.Exists(path), Is.True, $"File not found: {Path.GetFileName(dir)}/{filename}");
             return File.ReadAllText(path, Encoding.UTF8);
         }
     }

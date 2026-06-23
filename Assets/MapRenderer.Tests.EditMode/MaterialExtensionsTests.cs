@@ -16,7 +16,7 @@ namespace MapRenderer.Tests.EditMode
         {
             // Use the live line shader (transparent) if present, else any available shader — the test only
             // needs a concrete material; it asserts cloning behaviour, not shader specifics.
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             Assert.IsNotNull(shader, "No shader available to construct a test material.");
             return new Material(shader);
         }

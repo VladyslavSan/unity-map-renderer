@@ -5,7 +5,7 @@ using MapRenderer.Unity.Rendering;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>MapRenderer/Line</c> (S58). The final successor
+    /// Inspector for <c>Map/Line</c> (S58). The final successor
     /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): inherits the full Lit layout
     /// and adds a line-specific foldout (width / blur / gap / offset / dash). The line declares no extra
     /// shader-feature keywords, so it inherits <see cref="LitShaderGUI"/>'s full keyword sync unchanged; its

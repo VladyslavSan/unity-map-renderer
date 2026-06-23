@@ -1,6 +1,6 @@
 // S58 acceptance — the typed render-state layer maps Unity rendering enums → the underlying ShaderLab
 // int properties (_ZWrite/_ZTest/_Cull/_SrcBlend/_DstBlend/_BlendOp). Pure property round-trip on a
-// MapRenderer/Fill material; no GUI, no scene.
+// Map/Fill material; no GUI, no scene.
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -16,8 +16,8 @@ namespace MapRenderer.Tests
         [SetUp]
         public void SetUp()
         {
-            var shader = Shader.Find("MapRenderer/Fill");
-            Assert.IsNotNull(shader, "MapRenderer/Fill shader must be present.");
+            var shader = Shader.Find("Map/Fill");
+            Assert.IsNotNull(shader, "Map/Fill shader must be present.");
             _mat = new Material(shader);
         }
 

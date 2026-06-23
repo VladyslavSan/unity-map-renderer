@@ -448,7 +448,7 @@ namespace MapRenderer.Tests.Visual
         // ─── #5: ZoomStyleApplier wired — zoom-dependent paint changes at different zoom levels ──
         //
         // Directly tests ZoomStyleApplier + FillPaint in isolation (not via MapView shader path).
-        // This avoids the headless shader-unavailability issue: in batch mode the MapRenderer/Fill
+        // This avoids the headless shader-unavailability issue: in batch mode the Map/Fill
         // shader may not compile, falling back to Sprites/Default which lacks _Opacity. Instead we
         // create a Standard shader material (guaranteed available in Unity) and assert the ZoomStyleApplier
         // pushes different float values as zoom changes. This tests the WIRING of ApplyZoom directly.

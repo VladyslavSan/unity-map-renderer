@@ -18,7 +18,7 @@ namespace MapRenderer.Tests.Visual
     ///   Test 2: Restyle with no mesh rebuild (acceptance #2).
     ///
     /// S34 teeth (new — a shallow/stripped shader CANNOT pass these):
-    ///   Test 3: Shader validity — MapRenderer/Fill compiles without shader errors.
+    ///   Test 3: Shader validity — Map/Fill compiles without shader errors.
     ///   Test 4: Normal map changes shading (tooth #1).
     ///   Test 5: Base map samples (tooth #2).
     ///   Test 6: Metallic/smoothness produce specular delta (tooth #3).
@@ -247,9 +247,9 @@ namespace MapRenderer.Tests.Visual
         public void LitFill_FillShader_CompilesWithoutErrors()
         {
 #if UNITY_EDITOR
-            var shader = Shader.Find("MapRenderer/Fill");
+            var shader = Shader.Find("Map/Fill");
             Assert.That(shader, Is.Not.Null,
-                "MapRenderer/Fill shader not found. Check that Assets/MapRenderer.Unity/Shaders/Fill.shader " +
+                "Map/Fill shader not found. Check that Assets/MapRenderer.Unity/Shaders/Map/Fill/Fill.shader " +
                 "exists and Unity has imported it.");
 
             bool hasErrors = ShaderUtil.ShaderHasError(shader);
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.Visual
             {
                 var msgs = ShaderUtil.GetShaderMessages(shader);
                 var sb = new System.Text.StringBuilder();
-                sb.AppendLine($"MapRenderer/Fill shader has {msgs.Length} compile error(s):");
+                sb.AppendLine($"Map/Fill shader has {msgs.Length} compile error(s):");
                 foreach (var m in msgs)
                     sb.AppendLine($"  [{m.severity}] {m.message} (file:{m.file} line:{m.line})");
                 Assert.Fail(sb.ToString());

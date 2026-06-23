@@ -145,7 +145,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Build a uniform-colour flat fill quad on the XZ plane (±half meters), drawn with a live
-        /// MapRenderer/Fill material at the given renderQueue. The mesh uses the simple managed Mesh
+        /// Map/Fill material at the given renderQueue. The mesh uses the simple managed Mesh
         /// API (Unity lays attributes out canonically — no non-standard-order warning) with a white
         /// COLOR channel (identity) and a flat +Y normal; the layer colour is the _BaseColor uniform.
         /// </summary>
@@ -187,7 +187,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Build a wide horizontal line ribbon through the centre via SyntheticLineMesh, drawn with a
-        /// live MapRenderer/Line material at the given renderQueue.
+        /// live Map/Line material at the given renderQueue.
         /// </summary>
         private static void BuildWideLine(GameObject parent, Color color, float halfWidthM, int renderQueue,
             List<Object> disposables)

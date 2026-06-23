@@ -84,7 +84,7 @@ namespace MapRenderer.Tests.Visual
             var mesh = SyntheticLineMesh.BuildGoldenShapes(join, cap);
             var go = new GameObject("LineTest");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             mat = new Material(shader) { name = "LineTestMat" };
             mat.SetFloat("_Width",         widthMeters);
             mat.SetFloat("_WidthIsPixels", 0f);
@@ -112,7 +112,7 @@ namespace MapRenderer.Tests.Visual
             var go = new GameObject("HLine");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             mat = new Material(shader) { name = "HLineMat" };
             mat.SetFloat("_Width",         widthMeters);
             mat.SetFloat("_WidthIsPixels", 0f);

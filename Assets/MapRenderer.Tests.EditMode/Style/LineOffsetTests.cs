@@ -359,7 +359,7 @@ namespace MapRenderer.Tests
 
             string repoRoot   = GetRepoRoot();
             string hlslPath   = Path.Combine(repoRoot, "Assets", "MapRenderer.Unity", "Shaders",
-                                             "MapLineForwardPass.hlsl");
+                                             "Map", "Line", "MapLineForwardPass.hlsl");
 
             Assert.That(File.Exists(hlslPath), Is.True,
                 $"MapLineForwardPass.hlsl not found at: {hlslPath}");
@@ -376,7 +376,7 @@ namespace MapRenderer.Tests
 
             // Also confirm _LineOffset is declared in MapLineInput.hlsl.
             string inputPath = Path.Combine(repoRoot, "Assets", "MapRenderer.Unity", "Shaders",
-                                            "MapLineInput.hlsl");
+                                            "Map", "Line", "MapLineInput.hlsl");
             Assert.That(File.Exists(inputPath), Is.True,
                 $"MapLineInput.hlsl not found at: {inputPath}");
 

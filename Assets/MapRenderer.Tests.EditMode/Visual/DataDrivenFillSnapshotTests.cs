@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Visual
 
 #if UNITY_EDITOR
                 // Confirm Fill shader still compiles (same test as LitFillSnapshotTests Test 3).
-                var shader = Shader.Find("MapRenderer/Fill");
+                var shader = Shader.Find("Map/Fill");
                 if (shader != null)
                 {
                     bool hasErrors = ShaderUtil.ShaderHasError(shader);
@@ -332,7 +332,7 @@ namespace MapRenderer.Tests.Visual
                     {
                         var msgs = ShaderUtil.GetShaderMessages(shader);
                         var sb = new System.Text.StringBuilder();
-                        sb.AppendLine("MapRenderer/Fill shader has compile error(s) after S12 shader edits:");
+                        sb.AppendLine("Map/Fill shader has compile error(s) after S12 shader edits:");
                         foreach (var m in msgs)
                             sb.AppendLine($"  [{m.severity}] {m.message} (file:{m.file} line:{m.line})");
                         Assert.Fail(sb.ToString());

@@ -213,7 +213,7 @@ namespace MapRenderer.Tests.Visual
         /// Returns (mapGameObject, camera, cameraGameObject). Caller must destroy both GOs.
         ///
         /// S54: MapFillBootstrap retired; uses FillSceneHelper (StyledFillTileBuilder-backed).
-        /// Directional light: required because MapRenderer/Fill (URP Lit) renders near-black
+        /// Directional light: required because Map/Fill (URP Lit) renders near-black
         /// at ambient-only.
         /// </summary>
         private static (GameObject mapGo, Camera camera, GameObject cameraGo) BuildScene()

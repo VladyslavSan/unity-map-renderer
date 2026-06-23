@@ -18,8 +18,8 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class MaterialTweakerTests
     {
-        private static Material NewFill() => new Material(Shader.Find("MapRenderer/Fill"));
-        private static Material NewLine() => new Material(Shader.Find("MapRenderer/Line"));
+        private static Material NewFill() => new Material(Shader.Find("Map/Fill"));
+        private static Material NewLine() => new Material(Shader.Find("Map/Line"));
 
         private static void AssertWhite(Color c, string what)
         {

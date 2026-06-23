@@ -2,7 +2,7 @@ namespace MapRenderer.Unity.Rendering
 {
     /// <summary>
     /// Single source of truth for the shader <b>property</b> names used by the map shaders
-    /// (<c>MapRenderer/Fill</c>, <c>MapRenderer/Line</c>).
+    /// (<c>Map/Fill</c>, <c>Map/Line</c>).
     ///
     /// <para>Referenced by the typed render-state layer (<see cref="MaterialRenderStateExtensions"/>),
     /// the runtime material tweakers (<see cref="BaseMaterialTweaker"/> / <c>Fill</c> / <c>Line</c>), and the

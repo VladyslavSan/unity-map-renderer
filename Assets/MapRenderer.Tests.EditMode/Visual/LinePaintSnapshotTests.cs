@@ -81,7 +81,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Build a single horizontal line with the MapRenderer/Line shader.
+        /// Build a single horizontal line with the Map/Line shader.
         /// The line runs along world X from -40m to +40m, centered at world origin.
         /// _WidthIsPixels=1, _MetersPerPixel=MetersPerPx.
         /// Returns (GameObject, live material). Caller must DestroyImmediate both.
@@ -100,7 +100,7 @@ namespace MapRenderer.Tests.Visual
             var go = new GameObject("HLine_LinePaintSnap");
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var shader = Shader.Find("MapRenderer/Line") ?? Shader.Find("Sprites/Default");
+            var shader = Shader.Find("Map/Line") ?? Shader.Find("Sprites/Default");
             var mat = new Material(shader) { name = "LinePaintSnapMat" };
 
             // Pixel-width mode so widthPx / gapPx map directly to shader pixels.

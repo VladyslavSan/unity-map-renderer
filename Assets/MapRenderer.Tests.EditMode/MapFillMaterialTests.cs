@@ -2,7 +2,7 @@
 //
 // Validates that:
 //   1. MapFill.mat exists at its required path.
-//   2. It references the authoritative MapRenderer/Fill shader (not the deprecated Hidden/ variant).
+//   2. It references the authoritative Map/Fill shader (not the deprecated Hidden/ variant).
 //   3. Key map paint and URP Lit properties are present with sensible defaults.
 //
 // This test is GPU-independent (pure asset/property inspection) and always runs in EditMode.
@@ -19,7 +19,7 @@ namespace MapRenderer.Tests
     public class MapFillMaterialTests
     {
         private const string MatPath     = "Assets/MapRenderer.Unity/Materials/MapFill.mat";
-        private const string ShaderName  = "MapRenderer/Fill";
+        private const string ShaderName  = "Map/Fill";
         private const string LineMatPath = "Assets/MapRenderer.Unity/Materials/MapLine.mat";
 
         // Tolerance for the styled RGBA assertions (per channel). Tight enough that a white
@@ -46,7 +46,7 @@ namespace MapRenderer.Tests
                 "MapFill.mat shader reference must not be null.");
             Assert.That(mat.shader.name, Is.EqualTo(ShaderName),
                 $"MapFill.mat must reference shader '{ShaderName}', not '{mat.shader?.name}'. " +
-                "Check that the GUID in MapFill.mat matches Assets/MapRenderer.Unity/Shaders/Fill.shader.meta.");
+                "Check that the GUID in MapFill.mat matches Assets/MapRenderer.Unity/Shaders/Map/Fill/Fill.shader.meta.");
         }
 
         [Test]

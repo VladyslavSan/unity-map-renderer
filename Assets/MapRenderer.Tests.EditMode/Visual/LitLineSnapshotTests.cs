@@ -15,7 +15,7 @@ namespace MapRenderer.Tests.Visual
     /// <summary>
     /// S33 acceptance tests — Lit forward-transparent line shader.
     ///
-    /// Test #1 (structural): MapRenderer/Line shader exists, compiles without errors, has
+    /// Test #1 (structural): Map/Line shader exists, compiles without errors, has
     ///   exactly one pass (UniversalForward), no GBuffer/ShadowCaster/DepthOnly/DepthNormals,
     ///   and includes MapLineInput.hlsl. NORMAL stream = +Y, extrudeN on separate TEXCOORD.
     ///
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Visual
             if (parent != null) go.transform.SetParent(parent.transform, worldPositionStays: false);
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
 
-            var shader = Shader.Find("MapRenderer/Line");
+            var shader = Shader.Find("Map/Line");
             if (shader == null) shader = Shader.Find("Sprites/Default");
             var mat = new Material(shader) { name = "HLineLitMat" };
             mat.SetFloat("_Width",          widthMeters);
@@ -159,15 +159,15 @@ namespace MapRenderer.Tests.Visual
         public void LitLine_Shader_StructuralValidity()
         {
 #if UNITY_EDITOR
-            var shader = Shader.Find("MapRenderer/Line");
+            var shader = Shader.Find("Map/Line");
             Assert.That(shader, Is.Not.Null,
-                "MapRenderer/Line shader not found. Check Shaders/Line.shader.");
+                "Map/Line shader not found. Check Shaders/Map/Line/Line.shader.");
 
             if (ShaderUtil.ShaderHasError(shader))
             {
                 var msgs = ShaderUtil.GetShaderMessages(shader);
                 var sb   = new System.Text.StringBuilder();
-                sb.AppendLine("MapRenderer/Line has compile errors:");
+                sb.AppendLine("Map/Line has compile errors:");
                 foreach (var m in msgs)
                     sb.AppendLine($"  [{m.severity}] {m.message} (file:{m.file} line:{m.line})");
                 Assert.Fail(sb.ToString());
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests.Visual
 
             // 1. Only UniversalForward pass present.
             Assert.That(src, Does.Contain("\"UniversalForward\""),
-                "Shaders/Line.shader must have a UniversalForward pass.");
+                "Shaders/Map/Line/Line.shader must have a UniversalForward pass.");
 
             // 2. No dead passes for transparent material.
             Assert.That(src, Does.Not.Contain("\"ShadowCaster\""),
@@ -206,7 +206,7 @@ namespace MapRenderer.Tests.Visual
             // 5. MapLineForwardPass uses MapLineInput (CBUFFER fork) and InitializeStandardLitSurfaceData.
             string passPath = System.IO.Path.Combine(
                 System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
-                "Assets/MapRenderer.Unity/Shaders/MapLineForwardPass.hlsl");
+                "Assets/MapRenderer.Unity/Shaders/Map/Line/MapLineForwardPass.hlsl");
             string passSrc = System.IO.File.ReadAllText(passPath);
             Assert.That(passSrc, Does.Contain("MapLineInput.hlsl"),
                 "MapLineForwardPass.hlsl must #include MapLineInput.hlsl (CBUFFER fork).");

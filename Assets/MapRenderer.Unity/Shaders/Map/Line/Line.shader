@@ -1,4 +1,4 @@
-// Line.shader — MapRenderer/Line (S33: lit, forward-transparent, world-space extrusion)
+// Line.shader — Map/Line (S33: lit, forward-transparent, world-space extrusion)
 //
 // Lit line shader for unity-map-renderer.
 // ONE pass only: UniversalForward (forward-transparent, Queue=Transparent>=2501).
@@ -14,12 +14,12 @@
 //   • Tiny +Y lift (0.001m) in vertex shader for coplanar fill/line z-fighting (#7).
 //   • Blend SrcAlpha OneMinusSrcAlpha, ZWrite Off, Cull Off.
 //
-// Shader name: MapRenderer/Line (replaces Hidden/MapRenderer/Line_S05_Deprecated in Materials/).
+// Shader name: Map/Line (replaces Hidden/Map/Line_S05_Deprecated in Materials/).
 //
 // See docs/lit-rendering-design.md §"Line specifics (S33)" for full design rationale.
 // See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
 // Authored for URP 17.5 / Unity 6000.x. Clean-room URP integration (not MapLibre source).
-Shader "MapRenderer/Line"
+Shader "Map/Line"
 {
     Properties
     {
