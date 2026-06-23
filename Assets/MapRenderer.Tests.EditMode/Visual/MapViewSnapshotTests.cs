@@ -101,8 +101,10 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
                     "live loop must load + build the tile cover");
 
-                // Frame the camera on the combined render-space bounds of the loaded tile meshes.
-                Bounds b = ComputeChildBounds(mapGo);
+                // Frame the camera on the render-space bounds of the loaded tiles (backend-agnostic;
+                // the instanced backends create no GameObjects to bound). tileSize = world extent at z3.
+                float tileSize = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
+                Bounds b = view.ComputeSceneBounds(tileSize);
                 Assert.Greater(b.size.magnitude, 0f, "loaded tiles must have non-degenerate bounds");
                 camera.transform.position = new Vector3(b.center.x, b.center.y + 200f, b.center.z);
                 camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);   // top-down
@@ -132,21 +134,11 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(cameraGo);
                 UnityEngine.Object.DestroyImmediate(lightGo);
                 UnityEngine.Object.DestroyImmediate(mapGo);
             }
-        }
-
-        /// <summary>Combined world-space bounds of every child MeshRenderer under <paramref name="root"/>.</summary>
-        private static Bounds ComputeChildBounds(GameObject root)
-        {
-            var renderers = root.GetComponentsInChildren<MeshRenderer>();
-            if (renderers.Length == 0) return new Bounds(Vector3.zero, Vector3.zero);
-            Bounds b = renderers[0].bounds;
-            for (int i = 1; i < renderers.Length; i++)
-                b.Encapsulate(renderers[i].bounds);
-            return b;
         }
     }
 }

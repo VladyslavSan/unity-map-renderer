@@ -28,11 +28,13 @@ namespace MapRenderer.Unity
     ///   <item>the scene origin (Mercator) for tile placement,</item>
     ///   <item>tile-selection config (<see cref="TileSelectionConfig"/>) read from MapView's serialized fields.</item>
     /// </list>
-    /// The <see cref="StyledLayerSet"/> (render bundles) and the parent <see cref="Transform"/> are stable
-    /// for the object's life, so they're injected at construction.</para>
+    /// The <see cref="StyledLayerSet"/> (render bundles) is stable for the object's life, so it's injected
+    /// at construction.</para>
     ///
-    /// <para>The consume→GameObject step (<see cref="ConsumeTessellationTask"/>) is the render-backend seam:
-    /// a future <c>Graphics.RenderMesh</c> / BRG swap replaces the per-layer GameObject creation here.</para>
+    /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as an
+    /// instanced draw item via the selected <see cref="IInstancedTileBackend"/> (BRG or Entities). The
+    /// original per-layer GameObject backend was retired in S53c — there is no longer a non-instanced
+    /// path.</para>
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -99,25 +101,22 @@ namespace MapRenderer.Unity
             public UniTask<TessellationResult> TessellationTask; // default until fetch completes; default after consumed
             public bool                      HasTessellationTask; // true when TessellationTask is valid
             public bool                      Built;            // mesh produced (or definitively absent/failed)
-            public GameObject                Go;               // tile container; child GameObjects are per-layer
             public double2                   TileOriginMerc;
             /// <summary>
-            /// S51 leak guard: per-fill-layer Mesh assets created by ConsumeTessellationTask.
-            /// Must be explicitly destroyed on release/teardown because Unity does NOT destroy
-            /// MeshFilter.sharedMesh when the GameObject is destroyed.
-            /// Null until the tile is consumed; set by ConsumeTessellationTask.
+            /// S51 leak guard: per-layer Mesh assets created by ConsumeTessellationTask. Must be
+            /// explicitly destroyed on release/teardown (Unity does not destroy a Mesh asset just because
+            /// nothing references it). Null until the tile is consumed; set by ConsumeTessellationTask.
             /// </summary>
             public Mesh[]                    Meshes;
             /// <summary>
-            /// S49 BRG path: BRG instance handles for each tile-layer draw item registered with
-            /// <see cref="BrgTileRenderer"/>. Null on the GameObject path. Set by ConsumeTessellationTask
-            /// when Backend == Brg; used by ReleaseTile to unregister the draw items.
+            /// Instanced-backend draw-item handles for each tile-layer mesh registered with the
+            /// <see cref="IInstancedTileBackend"/> (BRG or Entities). Set by ConsumeTessellationTask;
+            /// used by ReleaseTile to unregister the draw items.
             /// </summary>
-            public int[]                     BrgHandles;
+            public int[]                     DrawHandles;
         }
 
         // ── Injected collaborators (stable for life) ─────────────────────────────────────────
-        private readonly Transform      _parent; // tile containers are parented here (MapView's transform)
         private readonly StyledLayerSet _layers; // owned by MapView; this reads bundles/materials/counts
 
         // ── Live state ─────────────────────────────────────────────────────────────────────────────────
@@ -125,8 +124,8 @@ namespace MapRenderer.Unity
         private IDataSource     _source;
         private bool            _ownsSource;
 
-        // ── S49 BRG backend (null on the default GameObject path) ─────────────────────────────
-        private BrgTileRenderer _brg; // non-null only when initialised with brgLayers != null
+        // ── Instanced render backend (BRG or Entities) — constructed in Initialise ────────────
+        private IInstancedTileBackend _instanced; // null only before Initialise / after Dispose
 
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId>                   _cover     = new List<TileId>(64);
@@ -158,9 +157,8 @@ namespace MapRenderer.Unity
         // are all main-thread). No locking is required.
         private readonly List<UniTask<TessellationResult>> _pendingDisposal = new List<UniTask<TessellationResult>>(8);
 
-        public TileManager(Transform parent, StyledLayerSet layers)
+        public TileManager(StyledLayerSet layers)
         {
-            _parent = parent;
             _layers = layers;
         }
 
@@ -170,10 +168,12 @@ namespace MapRenderer.Unity
         /// Creates the scheduler over <paramref name="source"/> and resets selection state. If
         /// <paramref name="ownsSource"/> is true, <see cref="Dispose"/> disposes the source.
         ///
-        /// S49: when <paramref name="brgLayers"/> is non-null, creates a <see cref="BrgTileRenderer"/>
-        /// for the BRG backend. When null (default), the existing GameObject path is used unchanged.
+        /// Constructs the instanced backend for <paramref name="backend"/>: a <see cref="BrgTileRenderer"/>
+        /// (Brg) or an <see cref="EntitiesTileRenderer"/> (Entities, the default), both built from the
+        /// styled layer set passed at construction.
         /// </summary>
-        public void Initialise(IDataSource source, bool ownsSource, StyledLayerSet brgLayers = null)
+        public void Initialise(IDataSource source, bool ownsSource,
+            RenderBackend backend = RenderBackend.Entities)
         {
             _source     = source;
             _ownsSource = ownsSource;
@@ -182,9 +182,24 @@ namespace MapRenderer.Unity
             _coverDirty          = true;
             _coverKeyInitialised = false;
 
-            // S49: construct BRG renderer when the BRG backend is selected.
-            _brg?.Dispose(); // dispose any prior BRG (e.g. re-initialise after teardown)
-            _brg = brgLayers != null ? new BrgTileRenderer(brgLayers) : null;
+            // Construct the instanced backend (built from the styled layer set passed at construction).
+            // The default arm is Entities so any unknown/legacy serialized value resolves safely.
+            _instanced?.Dispose(); // dispose any prior backend (e.g. re-initialise after teardown)
+            _instanced = backend switch
+            {
+                RenderBackend.Brg => new BrgTileRenderer(_layers),
+                _                 => new EntitiesTileRenderer(FlattenLayerMaterials(_layers)),
+            };
+        }
+
+        /// <summary>Flattens the styled layer set's materials (fills in declared order, then lines) — the
+        /// material list both instanced backends index by <c>materialIndex</c>.</summary>
+        private static System.Collections.Generic.List<Material> FlattenLayerMaterials(StyledLayerSet layers)
+        {
+            var mats = new System.Collections.Generic.List<Material>(layers.FillCount + layers.LineCount);
+            for (int i = 0; i < layers.FillCount; i++) mats.Add(layers.Fills[i].Material);
+            for (int i = 0; i < layers.LineCount; i++) mats.Add(layers.Lines[i].Material);
+            return mats;
         }
 
         /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
@@ -204,10 +219,16 @@ namespace MapRenderer.Unity
         public int ReleasedMidFlightCount => _releasedMidFlightCount;
 
         /// <summary>
-        /// S49 test observability: the live BRG renderer. Null when on the GameObject path or before
+        /// S49 test observability: the live BRG renderer. Null when not on the BRG backend or before
         /// <see cref="Initialise"/>. Exposed so tests can read instance buffer state without GPU readback.
         /// </summary>
-        internal BrgTileRenderer BrgRenderer => _brg;
+        internal BrgTileRenderer BrgRenderer => _instanced as BrgTileRenderer;
+
+        /// <summary>
+        /// S53b test observability: the live Entities-Graphics renderer. Null when not on the Entities
+        /// backend or before <see cref="Initialise"/>.
+        /// </summary>
+        internal EntitiesTileRenderer EntitiesRenderer => _instanced as EntitiesTileRenderer;
 
         /// <summary>
         /// Invalidates the cached cover-selection key so the next <see cref="Tick"/> re-selects the cover.
@@ -216,42 +237,49 @@ namespace MapRenderer.Unity
         public void InvalidateCover() => _coverKeyInitialised = false;
 
         /// <summary>
-        /// S49 BRG path: rebuilds the BRG instance buffer (per-instance objectToWorld + material props)
-        /// from all loaded tiles. Called by MapView once per frame when Backend == Brg, replacing
-        /// <see cref="RebaseTiles"/> (which is the GameObject path).
-        ///
-        /// No-op when the BRG is null (i.e. on the GameObject path).
+        /// Rebuilds the per-tile object-to-world transforms (and refreshes backend state) for all loaded
+        /// tiles from <paramref name="sceneOrigin"/> (S52 camera-relative rendering: the origin tracks the
+        /// look-at). Called by MapView once per frame.
         /// </summary>
-        public void BrgRebuild(double2 sceneOrigin)
+        public void InstancedRebuild(double2 sceneOrigin)
         {
-            _brg?.Rebuild(sceneOrigin);
+            _instanced?.Rebuild(sceneOrigin);
         }
 
         /// <summary>
         /// Test-only: returns true and the built tile's container GameObject when the tile is loaded
         /// AND its mesh has been produced.
         ///
-        /// S49 BRG path: on the BRG backend the container GameObject is null (no child GameObjects
-        /// are created), but the tile is still considered "built" if lt.Built == true AND
-        /// (lt.Go != null OR lt.BrgHandles != null OR lt.Meshes != null). Returns true with go=null
-        /// on the BRG path so callers can detect BRG-built tiles.
+        /// Backend-agnostic: the instanced backends create no GameObjects, so <paramref name="go"/> is
+        /// always null; the tile counts as built when lt.Built == true AND it produced geometry
+        /// (lt.DrawHandles != null OR lt.Meshes != null). The <c>out</c> parameter is retained for
+        /// source-compatibility with existing test callers.
         /// </summary>
         public bool TryGetBuiltTile(TileId id, out GameObject go)
         {
             go = null;
             if (_loaded.TryGetValue(id, out var lt) && lt.Built)
             {
-                if (lt.Go != null)
-                {
-                    go = lt.Go;
-                    return true;
-                }
-                // BRG path: Built == true and BrgHandles or Meshes set (geometry was produced).
-                if (lt.BrgHandles != null || lt.Meshes != null)
+                // Geometry was produced (handles registered with the backend, or meshes tracked).
+                if (lt.DrawHandles != null || lt.Meshes != null)
                     return true;
             }
             return false;
         }
+
+        /// <summary>
+        /// Test-only, backend-agnostic: the <see cref="Mesh"/> assets built for a loaded tile (one per
+        /// rendered layer, fills then lines), or null if the tile is not built / produced no geometry.
+        /// Replaces the old "inspect the tile's child GameObjects" probe.
+        /// </summary>
+        internal Mesh[] GetTileMeshes(TileId id)
+            => _loaded.TryGetValue(id, out var lt) ? lt.Meshes : null;
+
+        /// <summary>Test-only: scene-space bounds of all live tile draw items (for camera framing), via
+        /// the instanced backend. <paramref name="tileSizeWorld"/> is the tile's world extent at the
+        /// current zoom. Returns <c>default</c> if no backend / no tiles.</summary>
+        internal Bounds ComputeSceneBounds(float tileSizeWorld)
+            => _instanced != null ? _instanced.ComputeSceneBounds(tileSizeWorld) : default;
 
         /// <summary>
         /// Test-only: true once every loaded tile has finished building (or is definitively absent).
@@ -276,7 +304,7 @@ namespace MapRenderer.Unity
         /// The caller (MapView) runs <see cref="StyledLayerSet.ApplyZoom"/> and refreshes the scene
         /// origin BEFORE this — the origin is passed in so tile placement and camera sync share it.
         /// </summary>
-        public void Tick(CameraProperties cam, double2 sceneOrigin, TileSelectionConfig cfg)
+        public void Tick(CameraProperties cam, TileSelectionConfig cfg)
         {
             if (_scheduler == null) return;
 
@@ -292,7 +320,7 @@ namespace MapRenderer.Unity
             // S48: drain any completed mid-flight-discard tasks so their NativeArrays are freed.
             DrainPendingDisposal();
 
-            int pending = PumpPendingBuilds(cam, sceneOrigin, cfg.MaxBuildsPerTick);
+            int pending = PumpPendingBuilds(cam, cfg.MaxBuildsPerTick);
 
             if (!_coverDirty && pending == 0)
                 return;
@@ -360,7 +388,7 @@ namespace MapRenderer.Unity
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
         /// </summary>
-        public void DrainTessellation(CameraProperties cam, double2 sceneOrigin)
+        public void DrainTessellation(CameraProperties cam)
         {
             // Collect all unsettled tiles.
             var unsettled = new List<TileId>(8);
@@ -416,7 +444,7 @@ namespace MapRenderer.Unity
                     int spins = 0;
                     while (!tessTask.Status.IsCompleted() && spins++ < 10000)
                         Thread.Sleep(1);
-                    ConsumeTessellationTask(id, ref lt, sceneOrigin);
+                    ConsumeTessellationTask(id, ref lt);
                 }
                 else
                 {
@@ -442,7 +470,7 @@ namespace MapRenderer.Unity
         ///
         /// Greppability note: there is NO .Schedule().Complete() in this method.
         /// </summary>
-        private int PumpPendingBuilds(CameraProperties cam, double2 sceneOrigin, int maxBuildsPerTick)
+        private int PumpPendingBuilds(CameraProperties cam, int maxBuildsPerTick)
         {
             using var sFetchPoll = PmFetchPoll.Auto();
 
@@ -468,7 +496,7 @@ namespace MapRenderer.Unity
                         continue;
                     }
 
-                    ConsumeTessellationTask(id, ref lt, sceneOrigin);
+                    ConsumeTessellationTask(id, ref lt);
                     builds++;
                     _loaded[id] = lt;
                     continue;
@@ -609,7 +637,8 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Consumes a completed tessellation: uploads meshes + creates GameObjects for the tile.
+        /// Consumes a completed tessellation: uploads each layer's mesh and registers it as an instanced
+        /// draw item with the backend (BRG or Entities). No GameObjects.
         /// Must be called on the Unity main thread. Called only when TessellationTask.IsCompleted.
         ///
         /// S51: reads UniTaskStatus.Succeeded (was TaskStatus.RanToCompletion).
@@ -619,7 +648,7 @@ namespace MapRenderer.Unity
         /// DrainTessellation never call this method for a released tile — no explicit generation check
         /// is needed. The real discard protection is the _loaded-removal in ReleaseTile.
         /// </summary>
-        private void ConsumeTessellationTask(TileId id, ref LoadedTile lt, double2 sceneOrigin)
+        private void ConsumeTessellationTask(TileId id, ref LoadedTile lt)
         {
             var task = lt.TessellationTask;
             lt.HasTessellationTask = false;
@@ -646,147 +675,59 @@ namespace MapRenderer.Unity
                 if (!hasFillLayers && !hasLineLayers) return;
 
                 bool anyGeometry = false;
-                // S51 leak guard: track created Mesh assets so they can be explicitly destroyed on release.
-                // Unity does NOT destroy MeshFilter.sharedMesh when the owning GameObject is destroyed.
+                // S51 leak guard: track created Mesh assets so they can be explicitly destroyed on release
+                // (Unity does not free a Mesh asset just because nothing references it).
                 var createdMeshes = new System.Collections.Generic.List<Mesh>(8);
 
-                // S49 BRG path: collect BRG instance handles (one per tile-layer draw item).
-                System.Collections.Generic.List<int> brgHandles =
-                    _brg != null ? new System.Collections.Generic.List<int>(8) : null;
+                // Instanced-backend draw-item handles (one per tile-layer mesh).
+                var drawHandles = new System.Collections.Generic.List<int>(8);
 
-                // ── S49: branch on render backend ─────────────────────────────────────────────
-                if (_brg == null)
+                // Register each tile-layer mesh with the instanced backend (BRG or Entities). No
+                // GameObjects. Material index = fill index, then FillCount + line index (matching the
+                // flattened layer-material order both backends index by).
+
+                // ── Fill layers ───────────────────────────────────────────
+                if (result.LayerData != null)
                 {
-                    // ── GameObject path (default, unchanged) ──────────────────────────────────
-                    // Create the tile container. Child GameObjects are per fill/line layer.
-                    var container = new GameObject($"Tile_{id}");
-                    container.transform.SetParent(_parent, worldPositionStays: false);
-                    container.transform.localPosition =
-                        (Vector3)(float3ToVector(FloatingOrigin.TileLocalToScene(lt.TileOriginMerc, sceneOrigin)));
-
-                    // ── Fill layers ───────────────────────────────────────────
-                    if (result.LayerData != null)
+                    for (int li = 0; li < _layers.FillCount && li < result.LayerData.Length; li++)
                     {
-                        for (int li = 0; li < _layers.FillCount && li < result.LayerData.Length; li++)
-                        {
-                            var rec = _layers.Fills[li];
+                        using var sMeshUpload = PmMeshUpload.Auto();
 
-                            using var sMeshUpload = PmMeshUpload.Auto();
+                        // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
+                        // It does NOT dispose data — we dispose in the finally block after the loop.
+                        Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
+                        if (mesh == null) continue;
 
-                            // S48: UploadMesh uses the advanced NativeArray API (no managed Set* calls).
-                            // It does NOT dispose data — we dispose in the finally block after the loop.
-                            Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
-                            if (mesh == null) continue;
+                        createdMeshes.Add(mesh); // S51: track Mesh assets for explicit destruction
 
-                            createdMeshes.Add(mesh); // S51: track for explicit destruction on release/teardown
-
-                            var layerGo = new GameObject($"Layer_{li}_{rec.StyleLayer.Id}");
-                            layerGo.transform.SetParent(container.transform, worldPositionStays: false);
-                            layerGo.transform.localPosition = Vector3.zero;
-
-                            var mf = layerGo.AddComponent<MeshFilter>();
-                            mf.sharedMesh = mesh;
-
-                            var mr = layerGo.AddComponent<MeshRenderer>();
-                            mr.sharedMaterial = rec.Material;
-                            mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
-                            mr.receiveShadows     = false;
-
-                            anyGeometry = true;
-                        }
+                        int handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, li, id);
+                        drawHandles.Add(handle);
+                        anyGeometry = true;
                     }
-
-                    // ── S14: Line layers ──────────────────────────────────────
-                    if (result.LineLayerData != null)
-                    {
-                        for (int li = 0; li < _layers.LineCount && li < result.LineLayerData.Length; li++)
-                        {
-                            var rec = _layers.Lines[li];
-
-                            using var sMeshUpload = PmMeshUpload.Auto();
-
-                            Mesh mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
-                            if (mesh == null) continue;
-
-                            createdMeshes.Add(mesh);
-
-                            var layerGo = new GameObject($"LineLayer_{li}_{rec.StyleLayer.Id}");
-                            layerGo.transform.SetParent(container.transform, worldPositionStays: false);
-                            layerGo.transform.localPosition = Vector3.zero;
-
-                            var mf = layerGo.AddComponent<MeshFilter>();
-                            mf.sharedMesh = mesh;
-
-                            var mr = layerGo.AddComponent<MeshRenderer>();
-                            mr.sharedMaterial = rec.Material;
-                            mr.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
-                            mr.receiveShadows     = false;
-
-                            anyGeometry = true;
-                        }
-                    }
-
-                    if (!anyGeometry)
-                    {
-                        if (Application.isPlaying) Object.Destroy(container);
-                        else                       Object.DestroyImmediate(container);
-                        return;
-                    }
-
-                    lt.Go = container;
-                }
-                else
-                {
-                    // ── S49 BRG path ──────────────────────────────────────────────────────────
-                    // Upload meshes (same as GameObject path — BRG draws the same Mesh assets).
-                    // Register each mesh with the BRG (AddTileLayer). No GameObjects created.
-                    // Material index = fill index (fills first, then lines, matching _layerMaterials order).
-
-                    // ── Fill layers ───────────────────────────────────────────
-                    if (result.LayerData != null)
-                    {
-                        for (int li = 0; li < _layers.FillCount && li < result.LayerData.Length; li++)
-                        {
-                            using var sMeshUpload = PmMeshUpload.Auto();
-
-                            Mesh mesh = StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
-                            if (mesh == null) continue;
-
-                            createdMeshes.Add(mesh); // S51: still track Mesh assets for explicit destruction
-
-                            // Material index for fills = li (fills registered 0..FillCount-1 at BRG init).
-                            int handle = _brg.AddTileLayer(mesh, lt.TileOriginMerc, li);
-                            brgHandles!.Add(handle);
-                            anyGeometry = true;
-                        }
-                    }
-
-                    // ── S14: Line layers ──────────────────────────────────────
-                    if (result.LineLayerData != null)
-                    {
-                        for (int li = 0; li < _layers.LineCount && li < result.LineLayerData.Length; li++)
-                        {
-                            using var sMeshUpload = PmMeshUpload.Auto();
-
-                            Mesh mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
-                            if (mesh == null) continue;
-
-                            createdMeshes.Add(mesh);
-
-                            // Material index for lines = FillCount + li (lines registered after fills).
-                            int handle = _brg.AddTileLayer(mesh, lt.TileOriginMerc, _layers.FillCount + li);
-                            brgHandles!.Add(handle);
-                            anyGeometry = true;
-                        }
-                    }
-
-                    if (!anyGeometry) return;
-
-                    // No container GameObject on the BRG path; lt.Go stays null.
                 }
 
-                lt.Meshes     = createdMeshes.Count > 0 ? createdMeshes.ToArray() : null;
-                lt.BrgHandles = brgHandles != null && brgHandles.Count > 0 ? brgHandles.ToArray() : null;
+                // ── S14: Line layers ──────────────────────────────────────
+                if (result.LineLayerData != null)
+                {
+                    for (int li = 0; li < _layers.LineCount && li < result.LineLayerData.Length; li++)
+                    {
+                        using var sMeshUpload = PmMeshUpload.Auto();
+
+                        Mesh mesh = StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
+                        if (mesh == null) continue;
+
+                        createdMeshes.Add(mesh);
+
+                        int handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, _layers.FillCount + li, id);
+                        drawHandles.Add(handle);
+                        anyGeometry = true;
+                    }
+                }
+
+                if (!anyGeometry) return;
+
+                lt.Meshes      = createdMeshes.Count > 0 ? createdMeshes.ToArray() : null;
+                lt.DrawHandles = drawHandles.Count > 0 ? drawHandles.ToArray() : null;
             }
             finally
             {
@@ -808,7 +749,7 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Releases a tile: scheduler release + destroy its container GameObject.
+        /// Releases a tile: scheduler release + unregister its instanced draw items + free its meshes.
         /// Does NOT wait for in-flight work (non-blocking). Mid-flight tessellation is removed
         /// from _loaded immediately so PumpPendingBuilds/DrainTessellation never visit it again.
         ///
@@ -835,25 +776,19 @@ namespace MapRenderer.Unity
                     _pendingDisposal.Add(lt.TessellationTask);
                 }
 
-                // S49: remove BRG draw items before destroying Mesh assets.
-                // BRG.RemoveItem removes the draw item from the BRG's internal list; the Mesh asset
-                // is then freed below via DestroyTrackedMeshes.
-                if (_brg != null && lt.BrgHandles != null)
+                // Unregister the instanced draw items before destroying Mesh assets. RemoveItem drops the
+                // draw item (and, on Entities, its layer entity + the tile root once empty); the Mesh
+                // asset is then freed below via DestroyTrackedMeshes.
+                if (_instanced != null && lt.DrawHandles != null)
                 {
-                    for (int hi = 0; hi < lt.BrgHandles.Length; hi++)
-                        _brg.RemoveItem(lt.BrgHandles[hi]);
+                    for (int hi = 0; hi < lt.DrawHandles.Length; hi++)
+                        _instanced.RemoveItem(lt.DrawHandles[hi]);
                 }
 
-                // S51 leak guard: destroy tracked Mesh assets explicitly.
-                // Unity does NOT destroy MeshFilter.sharedMesh when a GameObject is destroyed.
-                // lt.Meshes holds direct references to created Mesh assets for reliable destruction.
+                // S51 leak guard: destroy tracked Mesh assets explicitly (Unity does not free a Mesh
+                // asset just because nothing references it). lt.Meshes holds direct references.
                 DestroyTrackedMeshes(ref lt);
 
-                if (lt.Go != null)
-                {
-                    if (Application.isPlaying) Object.Destroy(lt.Go);
-                    else                       Object.DestroyImmediate(lt.Go);
-                }
                 _loaded.Remove(id);
             }
             _scheduler.Release(id);
@@ -900,29 +835,12 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Positions every loaded tile's container relative to <paramref name="sceneOrigin"/>. Called by
-        /// MapView each frame (S52 camera-relative rendering): the scene origin tracks the look-at, so the
-        /// loaded tiles are re-placed against the new origin every tick.
-        /// </summary>
-        public void RebaseTiles(double2 sceneOrigin)
-        {
-            foreach (var kv in _loaded)
-            {
-                var lt = kv.Value;
-                if (lt.Go != null)
-                    lt.Go.transform.localPosition = float3ToVector(
-                        FloatingOrigin.TileLocalToScene(lt.TileOriginMerc, sceneOrigin));
-            }
-        }
-
-        /// <summary>
         /// Explicitly destroys all <see cref="Mesh"/> assets tracked in <paramref name="lt"/>.Meshes.
         ///
-        /// S51 leak guard: Unity does NOT automatically destroy <c>sharedMesh</c> when a MeshFilter
-        /// or its parent GameObject is destroyed. <see cref="ConsumeTessellationTask"/> populates
-        /// <c>lt.Meshes</c> with direct references to every Mesh it creates; this method iterates
-        /// that array for reliable, deterministic destruction. After destruction, <c>lt.Meshes</c>
-        /// is nulled to prevent double-free.
+        /// S51 leak guard: a Mesh asset is NOT freed just because nothing references it.
+        /// <see cref="ConsumeTessellationTask"/> populates <c>lt.Meshes</c> with direct references to
+        /// every Mesh it creates; this method iterates that array for reliable, deterministic destruction.
+        /// After destruction, <c>lt.Meshes</c> is nulled to prevent double-free.
         /// Must be called on the Unity main thread (Object.Destroy constraint).
         /// </summary>
         private void DestroyTrackedMeshes(ref LoadedTile lt)
@@ -938,32 +856,6 @@ namespace MapRenderer.Unity
             }
             lt.Meshes = null;
         }
-
-        /// <summary>
-        /// Explicitly destroys all <see cref="Mesh"/> assets referenced by
-        /// <see cref="MeshFilter.sharedMesh"/> on any child of <paramref name="container"/>.
-        ///
-        /// Retained as a fallback; prefer <see cref="DestroyTrackedMeshes"/> when <c>lt.Meshes</c>
-        /// is available. Unity does NOT automatically destroy <c>sharedMesh</c> when a MeshFilter
-        /// or its parent GameObject is destroyed — shared meshes are treated as assets.
-        /// Must be called on the Unity main thread (Object.Destroy constraint).
-        /// </summary>
-        private void DestroyTileMeshes(GameObject container)
-        {
-            if (container == null) return;
-            var mfs = container.GetComponentsInChildren<MeshFilter>(includeInactive: true);
-            for (int i = 0; i < mfs.Length; i++)
-            {
-                var mesh = mfs[i].sharedMesh;
-                if (mesh != null)
-                {
-                    if (Application.isPlaying) Object.Destroy(mesh);
-                    else                       Object.DestroyImmediate(mesh, allowDestroyingAssets: true);
-                }
-            }
-        }
-
-        private static Vector3 float3ToVector(float3 v) => new Vector3(v.x, v.y, v.z);
 
         /// <summary>
         /// Releases all tile GameObjects and Mesh assets, drains tessellation tasks, and disposes the
@@ -1040,36 +932,27 @@ namespace MapRenderer.Unity
             }
             _pendingDisposal.Clear();
 
-            // Destroy sharedMesh assets for each tile container, then destroy the container.
+            // Destroy each tile's tracked Mesh assets.
             //
-            // S51 leak guard: Mesh assets set as MeshFilter.sharedMesh are NOT destroyed when the
-            // containing GameObject is destroyed — Unity treats sharedMesh as a shared asset, not
-            // a component-owned one. lt.Meshes holds direct Mesh references (set by ConsumeTessellationTask)
-            // for reliable, index-safe destruction. DestroyTrackedMeshes iterates lt.Meshes directly,
-            // avoiding the GetComponentsInChildren approach (which requires a live GameObject hierarchy).
+            // S51 leak guard: a Mesh asset is NOT freed just because nothing references it. lt.Meshes
+            // holds direct Mesh references (set by ConsumeTessellationTask) for reliable, index-safe
+            // destruction; DestroyTrackedMeshes iterates that array directly.
             //
-            // Order: destroy meshes → destroy container → (Unity destroys parent → children recursively).
+            // Order: destroy meshes → dispose the backend (below), so the backend never references a
+            // freed Mesh.
             foreach (var kv in _loaded)
             {
                 var lt = kv.Value;
                 // DestroyTrackedMeshes takes ref — use a local copy (foreach var is read-only).
                 DestroyTrackedMeshes(ref lt);
-                if (lt.Go != null)
-                {
-                    if (Application.isPlaying) Object.Destroy(lt.Go);
-                    else                       Object.DestroyImmediate(lt.Go);
-                }
-                // S49: BRG handles are already invalidated by DestroyTrackedMeshes (mesh assets freed),
-                // but remove them from the BRG draw list for cleanliness.
-                // We dispose the BRG below, which clears all items anyway.
             }
             _loaded.Clear();
 
-            // S49: dispose the BRG renderer AFTER destroying all tile meshes (BRG references mesh IDs
-            // which become invalid when the Mesh assets are destroyed; disposing in this order ensures
-            // the BRG doesn't attempt to draw freed meshes). S49 tooth 5: BRG + GraphicsBuffer released.
-            _brg?.Dispose();
-            _brg = null;
+            // Dispose the instanced backend AFTER destroying all tile meshes (it references mesh IDs that
+            // become invalid when the Mesh assets are destroyed; this order keeps it from drawing freed
+            // meshes). S49 tooth 5: BRG + GraphicsBuffer released; S53b: Entities World disposed.
+            _instanced?.Dispose();
+            _instanced = null;
 
             _scheduler?.Dispose();
             _scheduler = null; // idempotent guard

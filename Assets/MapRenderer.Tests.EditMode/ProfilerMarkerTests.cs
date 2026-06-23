@@ -204,6 +204,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }

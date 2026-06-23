@@ -126,11 +126,12 @@ namespace MapRenderer.Tests
                     "the old center tile must have been evicted after the pan");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 31, 16), out _),
                     "the new center tile must be built after the pan");
-                // Container destruction: the old tile's Go was DestroyImmediate'd on eviction.
-                // Unity's leak detector would fail the run on teardown if any per-tile resources leaked.
+                // Eviction unregisters the tile's instanced draw items (and, on Entities, destroys its
+                // layer entities + tile root). Unity's leak detector fails the run on teardown if leaked.
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
@@ -160,17 +161,16 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built by the live loop");
 
-                // The tile container has one child per fill layer (just 1 in MinimalStyle).
-                Assert.AreEqual(1, tileGo.transform.childCount,
-                    "The tile container must have exactly 1 child (one fill layer in MinimalStyle).");
-
-                var childMf = tileGo.transform.GetChild(0).GetComponent<MeshFilter>();
-                Assert.IsNotNull(childMf, "First child must have a MeshFilter");
-                Mesh liveMesh = childMf.sharedMesh;
-                Assert.IsNotNull(liveMesh, "First child must have a sharedMesh");
+                // Backend-agnostic: one Mesh per fill layer (just 1 in MinimalStyle).
+                Mesh[] liveMeshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Assert.IsNotNull(liveMeshes, "The built tile must expose its layer meshes.");
+                Assert.AreEqual(1, liveMeshes.Length,
+                    "The tile must have exactly 1 layer mesh (one fill layer in MinimalStyle).");
+                Mesh liveMesh = liveMeshes[0];
+                Assert.IsNotNull(liveMesh, "The fill layer must have a built mesh");
 
                 // Direct builder for the same tile.
                 var mvtTile = MapRenderer.Core.Mvt.MvtDecoder.Decode(bytes);
@@ -197,11 +197,16 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown();
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
         // ── (3) NO per-frame GC in steady state (acceptance teeth) ─────────────────────────────
+        // Zero-allocation per-frame is the BRG backend's contract. The Entities default does allocate GC
+        // intermittently over many frames (verified by MapView_SteadyStateTick_Entities_AllocationVerdict
+        // below, via the same GC.Alloc-recorder instrument) — magnitude unverified; the once-quoted
+        // "~409 B/frame" came from a since-debunked GC.GetTotalMemory measure. Pin BRG: this asserts a BRG property.
 
         [Test]
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
@@ -210,6 +215,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
+            view.Backend = RenderBackend.Brg; // zero-alloc path under test
             view.MinZoom = 2; view.MaxZoom = 2;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
@@ -249,9 +255,83 @@ namespace MapRenderer.Tests
                 view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "A heading/tilt-only camera change must not dirty the cover, so Tick stays alloc-free.");
+
+                // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
+                // This is the symmetric counterpart to MapView_SteadyStateTick_Entities_AllocationVerdict,
+                // which trips the GC.Alloc recorder over N Ticks while a single Entities Tick is clean. BRG
+                // must stay clean at the SAME N — otherwise the divergence would be shared-Tick-path churn,
+                // not EG-specific. (Same N as the Entities verdict so the comparison is genuine.)
+                const int N = 50;
+                Assert.That(() => { for (int i = 0; i < N; i++) view.Tick(); }, Is.Not.AllocatingGCMemory(),
+                    $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
+                    "contract holds at the scale where the Entities backend trips the recorder.");
             }
             finally
             {
+                view.Teardown();
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        // ── (3b) Entities backend allocation VERDICT (informational, not a hard tooth) ──────────────
+        // Mirrors the BRG test above exactly — same within-cover pan on the same loaded cover, same
+        // GC.Alloc-recorder instrument (Is.Not.AllocatingGCMemory) — but with the default Entities backend.
+        // This is the apples-to-apples answer to "do the EG system groups allocate in the live Tick path?"
+        // (the claim the BRG pin is justified on). It REPORTS the verdict rather than asserting zero, because
+        // whether Entities-allocates-per-frame is a measured trade-off, not a contract. The figure the
+        // constraint carries is a COUNT of GC.Alloc calls, not bytes — reported as such.
+        [Test]
+        public void MapView_SteadyStateTick_Entities_AllocationVerdict()
+        {
+            var src   = new FixtureSource(FixtureBytes());
+            var go    = new GameObject("MapView");
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
+            var style = MinimalStyle();
+            view.Backend = RenderBackend.Entities; // the default backend under measurement
+            view.MinZoom = 2; view.MaxZoom = 2;
+            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MaxBuildsPerTick = 64;
+
+            try
+            {
+                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
+
+                // Prime reused buffers, identical to the BRG test.
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.5, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Tick();
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Tick();
+
+                // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
+                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Tick(); // consume the pan; now steady.
+                Assert.AreEqual(9, view.LoadedTileCount, "the within-cover pan must not have loaded new tiles");
+
+                // Measure over MANY frames, not one. A single Entities Tick is alloc-free, but EG's system
+                // groups allocate INTERMITTENTLY (the isolated Rebuild×50 test trips the recorder) — so a
+                // 1-frame sample under-reports. Looping N static Ticks (InstancedRebuild fires every frame)
+                // is the honest "does sitting still leak GC over time" characterization of the live path.
+                const int N = 50;
+                string verdict;
+                try
+                {
+                    Assert.That(() => { for (int i = 0; i < N; i++) view.Tick(); },
+                                Is.Not.AllocatingGCMemory());
+                    verdict = $"NO GC allocation across {N} steady-state Ticks";
+                }
+                catch (AssertionException)
+                {
+                    // Trips on ≥1 GC.Alloc sampler call over the run; the constraint's byte/count actual
+                    // prints blank here, so report the trip (intermittent: a single Tick does not trip).
+                    verdict = $"ALLOCATES across {N} Ticks (GC.Alloc recorder tripped; intermittent)";
+                }
+                TestContext.WriteLine($"[S53b alloc] MapView.Tick (Backend=Entities) steady-state: {verdict}");
+            }
+            finally
+            {
+                view.Teardown();
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }

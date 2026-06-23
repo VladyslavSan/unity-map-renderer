@@ -161,6 +161,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }
@@ -329,6 +330,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }
@@ -364,17 +366,16 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built by the async live loop");
 
-                // The tile container should have 1 child (1 fill layer in MinimalStyle).
-                Assert.AreEqual(1, tileGo.transform.childCount,
-                    "Tile container must have exactly 1 child (1 fill layer in MinimalStyle).");
-
-                var childMf   = tileGo.transform.GetChild(0).GetComponent<MeshFilter>();
-                Assert.IsNotNull(childMf, "First child must have a MeshFilter");
-                Mesh asyncMesh = childMf.sharedMesh;
-                Assert.IsNotNull(asyncMesh, "First child must have a sharedMesh from the async path");
+                // Backend-agnostic: one Mesh per fill layer (1 in MinimalStyle).
+                Mesh[] asyncMeshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Assert.IsNotNull(asyncMeshes, "The built tile must expose its layer meshes.");
+                Assert.AreEqual(1, asyncMeshes.Length,
+                    "Tile must have exactly 1 layer mesh (1 fill layer in MinimalStyle).");
+                Mesh asyncMesh = asyncMeshes[0];
+                Assert.IsNotNull(asyncMesh, "The async path must have built a mesh");
 
                 // Direct sync path for reference.
                 var mvtTile  = MvtDecoder.Decode(bytes);
@@ -416,6 +417,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }
@@ -486,6 +488,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }
@@ -524,6 +527,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }
@@ -544,6 +548,7 @@ namespace MapRenderer.Tests
             var src   = new FixtureSource(FixtureBytes());
             var go    = new GameObject("MapView_T6");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
+            view.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
             view.MinZoom = 2; view.MaxZoom = 2;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
@@ -575,6 +580,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 Object.DestroyImmediate(go);
             }
         }

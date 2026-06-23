@@ -8,6 +8,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.View;
+using MapRenderer.Core.Coordinates;
 
 namespace MapRenderer.Unity
 {
@@ -61,7 +62,7 @@ namespace MapRenderer.Unity
     ///
     /// Clean-room: design follows the MapLibre Style Spec and Unity BRG documentation.
     /// </summary>
-    internal sealed class BrgTileRenderer : IDisposable
+    internal sealed class BrgTileRenderer : IInstancedTileBackend
     {
         // ── Per-instance property counts (number of floats per property per instance) ─────────
         // These are stride multipliers used when packing the SoA CPU buffer.
@@ -288,9 +289,11 @@ namespace MapRenderer.Unity
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
         /// <paramref name="materialIndex"/> indexes into the material list built at construction
-        /// (fills in declared order, then lines in declared order).
+        /// (fills in declared order, then lines in declared order). <paramref name="tileId"/> is part of
+        /// the shared <see cref="IInstancedTileBackend"/> contract for the Entities backend's per-tile
+        /// hierarchy; BRG draws a flat instance buffer and does not use it.
         /// </summary>
-        public int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex)
+        public int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex, TileId tileId)
         {
             if (_disposed)   throw new ObjectDisposedException(nameof(BrgTileRenderer));
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));

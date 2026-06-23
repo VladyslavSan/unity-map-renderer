@@ -22,7 +22,85 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `UNITY_DOTS_INSTANCING` block (+ sampled statics + `#define`s), and any BRG SoA packing
   (`BrgTileRenderer` `Pfx_*` offsets + `FloatsPerInstance` + `MetaCount`). Miss one → wrong-offset reads.
 
+## DOTS / Entities Graphics
+
+- **An Entities-Graphics entity renders NOTHING in a headless EditMode test until you tick its system
+  groups manually.** EG submits draws from `EntitiesGraphicsSystem`, which runs in the player-loop
+  presentation group — and that loop does not tick in EditMode (`camera.Render()` alone won't drive it).
+  The manual-BRG backend works headless because it calls `BatchRendererGroup` directly; EG does not. The
+  driving sequence that works: `DefaultWorldInitialization.Initialize(name, editorWorld:false)` → set
+  `World.DefaultGameObjectInjectionWorld` → tick `InitializationSystemGroup` / `SimulationSystemGroup` /
+  `PresentationSystemGroup` (EG lives in Presentation; uploads instance data + registers the BRG batch) →
+  *then* `camera.Render()` (SRP culling invokes EG's `OnPerformCulling`, which emits the draws). At
+  runtime the player loop does this for you. (Seen: S53a spike.)
+
+- **Disable Entities' automatic default-world bootstrap** with the `UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP`
+  scripting define (Player settings) in a project that only uses ECS for one optional subsystem. Two
+  reasons: (1) correct architecture — create the world on demand when the ECS path is selected, so the
+  non-ECS shipping path pays nothing; (2) the auto-created **editor** world's systems tick on editor
+  update and perturb fragile zero-tolerance `Is.Not.AllocatingGCMemory()` tests (a stray allocation lands
+  in the measurement window). The define is compile-time and cascades to the editor-world gate;
+  `ICustomBootstrap` is runtime-only and does NOT stop the editor world. Create worlds manually via
+  `DefaultWorldInitialization.Initialize` thereafter. (Seen: S53a — adding Entities flipped a no-GC test
+  until the define was set; verified 0 automatic worlds created afterward.)
+
+- **An Entities-Graphics World draws into EVERY camera until it is disposed.** EG registers a
+  `BatchRendererGroup` owned by `EntitiesGraphicsSystem`; while the World lives, its entities render in
+  any `camera.Render()` — including later, unrelated tests. A leaked Entities World therefore bleeds
+  geometry into other tests (it broke a "blank render must be blank" assertion). Dispose the World on
+  teardown (`World.Dispose()` runs the EG system's `OnDestroy`, unregistering the BRG). In EditMode tests,
+  `OnDestroy` does NOT fire on `Object.DestroyImmediate` — call the explicit teardown
+  (`MapView.Teardown()`) before destroying the GameObject. (Seen: S53b.)
+
+- **`Is.Not.AllocatingGCMemory()` tests are flaky under a heavier domain.** They assert *exactly* zero
+  allocation, so any stray allocation from added assemblies / background activity fails them — under the
+  full suite, not in isolation, and the failing set rotates run-to-run. Before treating one as a
+  regression, re-run it **in isolation**; a logic regression fails deterministically and in isolation too.
+  (Seen: S53a — installing the Entities packages made 1–4 such tests flake per full run; all passed in
+  isolation.)
+
+- **A render backend that draws on instance/entity creation must POSITION it at creation — not next
+  frame.** `MapView.Tick` recomputes transforms (`InstancedRebuild`) *before* it consumes newly-built
+  tiles, so an entity created with `LocalToWorld.identity` renders at the world origin for one frame until
+  the next Rebuild moves it — a visible blink during zoom. The GameObject backend never showed this (it
+  sets the container transform at creation) and BRG never showed it (it defers all drawing to Rebuild, so
+  a new instance is simply absent for a frame, never misplaced). Only the Entities backend, whose entity
+  is immediately live with render components + generous bounds, flashed. Fix: cache the last scene origin
+  in `Rebuild` and place each entity at its correct position the instant it is created. (Seen: S53b
+  follow-up.)
+
+- **`Child` is `ICleanupBufferElementData`, so destroying a transform-parent leaves a cleanup-zombie.**
+  `ParentSystem` adds a `Child` buffer to any entity that becomes a parent; because it is a *cleanup*
+  buffer, `EntityManager.DestroyEntity` on that parent does not finalize it — the entity lingers (and
+  `EntityManager.Exists` still returns true) until a later `ParentSystem` tick removes the component. If
+  you maintain your own handle/parent bookkeeping, treat your own dictionary as the source of truth and
+  remove the entry on destroy, so the transient `Exists` staleness never leaks into your public lifecycle
+  API. Destroy children before the parent (we ref-count layers per tile root and destroy the root only
+  when its last layer goes), so no live child is ever orphaned. (Seen: S53b follow-up — per-tile root
+  entities.)
+
 ## Test workflow
+
+- **Measuring per-frame GC allocation: only NUnit's `Is.Not.AllocatingGCMemory` is trustworthy here; the
+  two obvious `System.GC` counters both lie on this Unity Mono runtime.** Verified during the S53b
+  re-measurement (2026-06-23):
+  - `GC.GetTotalMemory(forceFullCollection: false)` measures *net heap delta*, not allocation traffic — it
+    is GC-timing-dependent and swings wildly: the same Entities `Rebuild` loop reported **0** and **~409
+    bytes/frame** on back-to-back runs of identical code. (This is the source of the now-retracted "409
+    B/frame" Entities figure.) `forceFullCollection: true` only reports *retained* memory, hiding the
+    transient churn you are usually hunting.
+  - `GC.GetAllocatedBytesForCurrentThread()` returns a **constant 0** on this build — a self-check
+    allocating a known 80 KB registered 0 bytes. Any "0 allocations" from it is a broken-instrument
+    artifact, not a real zero. **Always canary an allocation API before trusting a 0 from it.**
+  - Use `UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory()` (the same instrument the BRG
+    zero-alloc tooth uses) — it samples the `GC.Alloc` profiler recorder, so it sees transient churn and is
+    immune to GC timing. Caveat: it reports a *count of allocation calls*, not a byte total (and its "But
+    was:" actual prints blank here), so it answers "allocates: yes/no", not "how many bytes". For a byte
+    figure use `Unity.Profiling.ProfilerRecorder` ("GC Allocated In Frame"). Also: a **single** Tick can be
+    alloc-free while a **run of N** Ticks trips the recorder — EG allocates intermittently, so measure over
+    many frames or you will under-report. (Beware the `Is` name collision: alias
+    `using Is = UnityEngine.TestTools.Constraints.Is;` + `using NIs = NUnit.Framework.Is;`, or instantiate
+    `new AllocatingGCMemoryConstraint()` and wrap in `NUnit.Framework.Constraints.NotConstraint`.)
 
 - **Unity batch `-runTests` does not reliably generate/persist `.meta` for new or renamed files.** A new
   `.cs`/`.asmdef` may run once without a committed `.meta`. Force generation with a dedicated

@@ -37,17 +37,20 @@ namespace MapRenderer.Unity
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
     /// <summary>
-    /// S49: selects the render submission backend.
-    /// Default is <see cref="GameObject"/> (the existing per-layer GameObject path, unchanged).
-    /// Set to <see cref="Brg"/> to submit tile meshes via <see cref="BrgTileRenderer"/> instead.
-    /// The GameObject path is preserved in full when <see cref="GameObject"/> is selected (tooth 1).
+    /// Selects the instanced render submission backend. Both backends register tile-layer meshes as
+    /// instanced draw items behind <see cref="IInstancedTileBackend"/> (no per-tile GameObjects); only the
+    /// submission differs. (The original per-layer GameObject backend was retired in S53c.)
     /// </summary>
     public enum RenderBackend
     {
-        /// <summary>Default: per-layer GameObject + MeshRenderer (existing path, unchanged).</summary>
-        GameObject = 0,
-        /// <summary>S49 BRG path: draw tile meshes via BatchRendererGroup.</summary>
-        Brg        = 1,
+        /// <summary>Default (S53c): each tile-layer draw item is an <see cref="EntitiesTileRenderer"/>
+        /// entity rendered via Entities Graphics (BatchRendererGroup under the hood), grouped per tile and
+        /// inspectable/disable-able in the Entities Hierarchy. Value 0 so scenes serialized with the old
+        /// default deserialize to Entities.</summary>
+        Entities = 0,
+        /// <summary>S49 BRG path: draw tile meshes via a hand-packed <see cref="BrgTileRenderer"/>
+        /// BatchRendererGroup. The zero-allocation production path.</summary>
+        Brg      = 1,
     }
 
     public sealed class MapView : MonoBehaviour
@@ -68,11 +71,11 @@ namespace MapRenderer.Unity
         [Tooltip("Max tile pipeline builds per Tick (load smoothing).")]
         public int MaxBuildsPerTick = 4;
 
-        // ── S49: render backend selector ─────────────────────────────────────────────────────
-        [Tooltip("S49: render submission backend. GameObject (default) = existing per-layer MonoBehaviour path. " +
-                 "Brg = BatchRendererGroup path. The GameObject path is byte-for-byte unchanged when this is " +
-                 "set to GameObject.")]
-        public RenderBackend Backend = RenderBackend.GameObject;
+        // ── Render backend selector ──────────────────────────────────────────────────────────
+        [Tooltip("Render submission backend. Entities (default) = per-tile entity hierarchy via Entities " +
+                 "Graphics, inspectable in the Entities Hierarchy. Brg = hand-packed BatchRendererGroup, " +
+                 "the zero-allocation production path. Both are instanced (no per-tile GameObjects).")]
+        public RenderBackend Backend = RenderBackend.Entities;
 
         // ── S50: Core camera system + Unity sync layer (owned by MapView, D4) ─────────────────
         private CameraSystem _cameraSystem;
@@ -115,8 +118,8 @@ namespace MapRenderer.Unity
             _layers.Build(_style, _cameraSystem != null ? _cameraSystem.CurrentProperties.Zoom : 0.0, MaterialSet);
 
             if (_tileManager == null)
-                _tileManager = new TileManager(transform, _layers);
-            _tileManager.Initialise(source, ownsSource, Backend == RenderBackend.Brg ? _layers : null);
+                _tileManager = new TileManager(_layers);
+            _tileManager.Initialise(source, ownsSource, Backend);
         }
 
         /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
@@ -152,10 +155,14 @@ namespace MapRenderer.Unity
         public int ReleasedMidFlightCount => _tileManager != null ? _tileManager.ReleasedMidFlightCount : 0;
 
         /// <summary>
-        /// S49 test observability: the live BRG renderer (null when Backend == GameObject or not yet
-        /// initialised). Exposed so tests can read instance buffer state without GPU readback.
+        /// S49 test observability: the live BRG renderer (null unless <see cref="Backend"/> == Brg and
+        /// after <see cref="Initialise"/>). Exposed so tests can read instance buffer state without GPU readback.
         /// </summary>
         internal BrgTileRenderer BrgRenderer => _tileManager?.BrgRenderer;
+
+        /// <summary>S53b test observability: the live Entities-Graphics renderer (null unless
+        /// <see cref="Backend"/> == Entities and after <see cref="Initialise"/>).</summary>
+        internal EntitiesTileRenderer EntitiesRenderer => _tileManager?.EntitiesRenderer;
 
         // ── S45/S50: Camera system accessors ───────────────────────────────────────────────────
 
@@ -173,8 +180,8 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Test-only: returns true and the built tile's container GameObject when the tile is loaded
-        /// AND its mesh has been produced.
+        /// Test-only: true when the tile is loaded AND its mesh has been produced. Backend-agnostic; the
+        /// <c>out</c> GameObject is always null (the instanced backends create no GameObjects).
         /// </summary>
         public bool TryGetBuiltTile(TileId id, out GameObject go)
         {
@@ -183,6 +190,15 @@ namespace MapRenderer.Unity
             go = null;
             return false;
         }
+
+        /// <summary>Test-only, backend-agnostic: the Mesh assets built for a loaded tile (one per rendered
+        /// layer), or null if not built. Replaces inspecting a tile's child GameObjects.</summary>
+        internal Mesh[] GetTileMeshes(TileId id) => _tileManager?.GetTileMeshes(id);
+
+        /// <summary>Test-only, backend-agnostic: scene-space bounds of the live tiles (for framing a
+        /// snapshot camera). <paramref name="tileSizeWorld"/> is the tile's world extent at the current
+        /// zoom. Replaces computing bounds from child MeshRenderers.</summary>
+        internal Bounds ComputeSceneBounds(float tileSizeWorld) => _tileManager?.ComputeSceneBounds(tileSizeWorld) ?? default;
 
         /// <summary>
         /// Test-only: true once every loaded tile has finished building (or is definitively absent).
@@ -200,7 +216,7 @@ namespace MapRenderer.Unity
         public void DrainTessellation()
         {
             if (_cameraSystem == null || _tileManager == null) return;
-            _tileManager.DrainTessellation(_cameraSystem.CurrentProperties, _sceneOrigin);
+            _tileManager.DrainTessellation(_cameraSystem.CurrentProperties);
         }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
@@ -246,12 +262,11 @@ namespace MapRenderer.Unity
             // coordinates — best float precision, no threshold/rebase machinery.
             _sceneOrigin = cam.CenterMercator();
 
-            if (Backend == RenderBackend.Brg)
-                _tileManager.BrgRebuild(_sceneOrigin);
-            else
-                _tileManager.RebaseTiles(_sceneOrigin);
+            // Reposition all loaded tiles relative to the new origin (one transform write per tile on the
+            // Entities backend, per-instance on BRG), then select/build/evict cover.
+            _tileManager.InstancedRebuild(_sceneOrigin);
 
-            _tileManager.Tick(cam, _sceneOrigin, BuildTileSelectionConfig());
+            _tileManager.Tick(cam, BuildTileSelectionConfig());
         }
 
         private TileManager.TileSelectionConfig BuildTileSelectionConfig() => new TileManager.TileSelectionConfig

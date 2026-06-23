@@ -144,24 +144,22 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built");
 
-                // ── DECISIVE: exactly 2 child renderers ────────────────────────────────────────
-                Assert.AreEqual(2, tileGo.transform.childCount,
-                    "The tile container must have exactly 2 children (one per fill style layer). " +
+                // ── DECISIVE: per-layer iteration — exactly 2 layer meshes (one per fill style layer) ──
+                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
+                Assert.AreEqual(2, meshes.Length,
+                    "The tile must have exactly 2 layer meshes (one per fill style layer). " +
                     "If this is 0 or 1, the per-layer iteration is broken.");
 
-                // ── DECISIVE: each child has a MeshRenderer with a distinct Material ──────────
-                var mr0 = tileGo.transform.GetChild(0).GetComponent<MeshRenderer>();
-                var mr1 = tileGo.transform.GetChild(1).GetComponent<MeshRenderer>();
-                Assert.IsNotNull(mr0, "Child 0 must have a MeshRenderer");
-                Assert.IsNotNull(mr1, "Child 1 must have a MeshRenderer");
-
-                Material mat0 = mr0.sharedMaterial;
-                Material mat1 = mr1.sharedMaterial;
-                Assert.IsNotNull(mat0, "Child 0 MeshRenderer must have a sharedMaterial");
-                Assert.IsNotNull(mat1, "Child 1 MeshRenderer must have a sharedMaterial");
+                // ── DECISIVE: distinct Material per layer (backend-agnostic, from the StyledLayerSet) ──
+                Assert.AreEqual(2, view.Layers.FillCount, "Two fill style layers must produce two records.");
+                Material mat0 = view.Layers.Fills[0].Material;
+                Material mat1 = view.Layers.Fills[1].Material;
+                Assert.IsNotNull(mat0, "Fill layer 0 must have a Material");
+                Assert.IsNotNull(mat1, "Fill layer 1 must have a Material");
 
                 Assert.AreNotSame(mat0, mat1,
                     "Fill layer 0 and fill layer 1 must use DISTINCT Material instances. " +
@@ -176,6 +174,7 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
@@ -213,24 +212,18 @@ namespace MapRenderer.Tests.Visual
                                 ownsSource: false, style: FillLineFillStyle());
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built");
 
-                // Map each layer id -> its material renderQueue by scanning the tile's child renderers
-                // (fill children are named "Layer_*_<id>", line children "LineLayer_*_<id>").
+                // Map each layer id -> its material renderQueue from the StyledLayerSet (backend-agnostic;
+                // the renderQueue is assigned by the layer's style index, which encodes paint order).
                 var queueById = new Dictionary<string, int>();
-                for (int i = 0; i < tileGo.transform.childCount; i++)
-                {
-                    var child = tileGo.transform.GetChild(i);
-                    var mr = child.GetComponent<MeshRenderer>();
-                    if (mr == null || mr.sharedMaterial == null) continue;
-                    foreach (var id in new[] { "fill-bottom", "line-mid", "fill-top" })
-                        if (child.name.Contains(id)) queueById[id] = mr.sharedMaterial.renderQueue;
-                }
+                foreach (var rec in view.Layers.Fills) queueById[rec.StyleLayer.Id] = rec.Material.renderQueue;
+                foreach (var rec in view.Layers.Lines) queueById[rec.StyleLayer.Id] = rec.Material.renderQueue;
 
                 Assert.IsTrue(
                     queueById.ContainsKey("fill-bottom") && queueById.ContainsKey("line-mid") && queueById.ContainsKey("fill-top"),
-                    $"All three layers must produce a child renderer. Found: [{string.Join(",", queueById.Keys)}]");
+                    $"All three layers must produce a styled-layer record. Found: [{string.Join(",", queueById.Keys)}]");
 
                 // DECISIVE: the line declared BETWEEN the two fills must sit BETWEEN them in draw order.
                 Assert.Less(queueById["fill-bottom"], queueById["line-mid"],
@@ -242,6 +235,7 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
@@ -301,16 +295,16 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built");
 
-                // The first (and only) child is the continent-fill layer.
-                Assert.AreEqual(1, tileGo.transform.childCount,
-                    "Expect exactly 1 fill-layer child (ContinentFillStyle has 1 fill layer)");
+                // The first (and only) layer mesh is the continent-fill layer.
+                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
+                Assert.AreEqual(1, meshes.Length,
+                    "Expect exactly 1 fill-layer mesh (ContinentFillStyle has 1 fill layer)");
 
-                var mf = tileGo.transform.GetChild(0).GetComponent<MeshFilter>();
-                Assert.IsNotNull(mf, "Child must have MeshFilter");
-                Mesh mesh = mf.sharedMesh;
+                Mesh mesh = meshes[0];
                 Assert.IsNotNull(mesh, "Fill mesh must not be null");
                 Assert.Greater(mesh.vertexCount, 0, "Fill mesh must have vertices");
 
@@ -359,6 +353,7 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
@@ -406,14 +401,14 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out var tileGo),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
                     "z0/0/0 tile must be built");
-                Assert.AreEqual(1, tileGo.transform.childCount, "Expect 1 fill layer child");
 
-                var mf = tileGo.transform.GetChild(0).GetComponent<MeshFilter>();
-                Assert.IsNotNull(mf, "Child must have MeshFilter");
+                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
+                Assert.AreEqual(1, meshes.Length, "Expect 1 fill layer mesh");
 
-                Mesh mesh = mf.sharedMesh;
+                Mesh mesh = meshes[0];
                 Assert.IsNotNull(mesh, "Fill mesh must not be null");
 
                 var colors = new List<Color>();
@@ -441,6 +436,7 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }
@@ -569,6 +565,7 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
+                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }

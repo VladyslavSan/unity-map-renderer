@@ -10,6 +10,10 @@
         "Unity.Collections",
         "Unity.Burst",
         "Unity.Jobs",
+        "Unity.Entities",
+        "Unity.Entities.Graphics",
+        "Unity.Transforms",
+        "Unity.Mathematics.Extensions",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "UniTask"

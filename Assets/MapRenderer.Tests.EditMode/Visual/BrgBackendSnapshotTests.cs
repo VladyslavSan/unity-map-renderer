@@ -181,12 +181,12 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 1: toggle OFF (default) → BRG never constructed ─────────────────────────────
 
         /// <summary>
-        /// Toggle OFF parity: with Backend = GameObject (default), BrgRenderer must be null —
-        /// the BRG backend is never constructed. This ensures the default path is byte-for-byte
-        /// the existing GO path and S49 does not silently break zero-regression tooth 1.
+        /// Backend selection: with the DEFAULT backend (Entities, S53c), BrgRenderer must be null and the
+        /// EntitiesRenderer must be constructed — i.e. the BRG backend is only built when explicitly
+        /// selected. (Replaces the S49 GameObject-default toggle-off test; the GO backend was retired.)
         /// </summary>
         [Test]
-        public void Backend_GameObject_BrgRendererIsNull()
+        public void Backend_Default_IsEntities_NotBrg()
         {
             var src  = new FixtureSource(FixtureBytes());
             var go   = new GameObject("MapView_Tooth1");
@@ -195,22 +195,24 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadFactor = 1f; view.ViewportAspect = 1f;
             view.MaxBuildsPerTick = 64;
-            // Backend defaults to GameObject — do NOT set it to Brg.
+            // Backend defaults to Entities (S53c) — do NOT set it to Brg.
 
             try
             {
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: style);
 
                 Assert.IsNull(view.BrgRenderer,
-                    "Backend=GameObject must NOT construct a BrgTileRenderer. " +
-                    "BrgRenderer must be null so the existing GO path is used unchanged (tooth 1).");
+                    "The default (Entities) backend must NOT construct a BrgTileRenderer; " +
+                    "BRG is only built when Backend == Brg.");
+                Assert.IsNotNull(view.EntitiesRenderer,
+                    "The default backend must construct the EntitiesTileRenderer.");
 
-                // Also verify the tile settles normally (GO path not broken).
+                // Also verify the tile settles normally on the default path.
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(),
-                    "Tiles must settle on the GameObject path when BRG is OFF.");
+                    "Tiles must settle on the default (Entities) backend.");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
-                    "z0/0/0 tile must be built by the GO path when BRG toggle is OFF.");
+                    "z0/0/0 tile must be built on the default backend.");
             }
             finally
             {
