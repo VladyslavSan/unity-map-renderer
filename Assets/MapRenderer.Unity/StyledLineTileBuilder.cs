@@ -12,6 +12,7 @@ using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Style;
+using Line = MapRenderer.Core.Style.Line;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 
 namespace MapRenderer.Unity
@@ -37,7 +38,7 @@ namespace MapRenderer.Unity
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
     ///
-    /// Color (D1): per-feature sRGB color baked via <see cref="DataDrivenPaintEvaluator"/>; converted
+    /// Color (D1): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted
     /// to linear via <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material
     /// (identity multiply). Never set <c>_BaseColor</c> to the style color for data-driven layers.
     ///
@@ -162,7 +163,8 @@ namespace MapRenderer.Unity
         /// </summary>
         public static LayerMeshData BuildMeshData(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            LinePaint paint,
+            Line.PaintProperties paint,
+            Line.LayoutProperties layout,
             double zoom,
             double extent,
             TileId id,
@@ -173,9 +175,9 @@ namespace MapRenderer.Unity
             if (selectedFeatures == null || selectedFeatures.Count == 0)
                 return empty;
 
-            // Parse join/cap from paint (layout properties, D4).
-            JoinType joinType = ParseJoinType(paint.LineJoin);
-            CapType  capType  = ParseCapType(paint.LineCap);
+            // S60: Join/Cap are already parsed enums on LayoutProperties (no per-build string switch).
+            JoinType joinType = layout.Join;
+            CapType  capType  = layout.Cap;
 
             // Phase 1: tessellate all features into temporary managed lists.
             var tempVerts0  = new List<LinePositionNormal>(512);
@@ -194,7 +196,8 @@ namespace MapRenderer.Unity
                 // _BaseColor=white on the material → identity multiply (D1 / fills convention).
                 Vector4 featureColor = WhiteColor;
                 var adapter = new MvtFeatureAdapter(feature);
-                if (paint.DataDrivenColor.TryEvaluateColor(zoom, adapter, out CoreColor c))
+                // S60: Color is now StyleProperty<CoreColor>; use TryEvaluate bake path.
+                if (paint.Color.TryEvaluate(zoom, adapter, out CoreColor c))
                 {
                     // sRGB→linear: use UnityEngine.Color.linear via cast.
                     var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
@@ -206,14 +209,15 @@ namespace MapRenderer.Unity
                 // Gate: only when OpacityKind depends on feature (Feature or Composite).
                 // For Constant/Zoom opacity, _Opacity uniform is already bound by BindLinePaintToApplier;
                 // baking here would double-apply it (shader multiplies vColor.a × _Opacity).
-                if (ExpressionKinds.DependsOnFeature(paint.OpacityKind))
+                // S60: OpacityKind → paint.Opacity.DependsOnFeature; DataDrivenOpacity → Opacity.TryEvaluate.
+                if (paint.Opacity.DependsOnFeature)
                 {
-                    if (paint.DataDrivenOpacity.TryEvaluateNumber(zoom, adapter, out double opacityVal))
+                    if (paint.Opacity.TryEvaluate(zoom, adapter, out float opacityVal))
                     {
                         // featureColor.w starts at 1.0 (from WhiteColor or color bake above).
                         // Multiply by the evaluated opacity so the shader's (vColor.a × _Opacity=1)
                         // produces the correct per-feature alpha.
-                        featureColor.w *= (float)opacityVal;
+                        featureColor.w *= opacityVal;
                     }
                 }
 
@@ -224,13 +228,14 @@ namespace MapRenderer.Unity
                 // default 1) and _Width uniform carries the width.
                 // WidthScale is per-vertex at loop time; store the per-feature scale and apply below.
                 float featureWidthScale = 1f;
-                if (ExpressionKinds.DependsOnFeature(paint.WidthKind))
+                // S60: WidthKind → paint.Width.DependsOnFeature; DataDrivenWidth → Width.TryEvaluate.
+                if (paint.Width.DependsOnFeature)
                 {
-                    if (paint.DataDrivenWidth.TryEvaluateNumber(zoom, adapter, out double widthVal))
+                    if (paint.Width.TryEvaluate(zoom, adapter, out float widthVal))
                     {
                         // widthVal is the evaluated width in pixels. Since _Width=1.0, WidthScale
                         // = v.WidthScale (tessellator miter factor) × widthVal gives final width.
-                        featureWidthScale = (float)System.Math.Max(0.0, widthVal);
+                        featureWidthScale = System.Math.Max(0f, widthVal);
                     }
                 }
 
@@ -400,26 +405,6 @@ namespace MapRenderer.Unity
             return result;
         }
 
-        private static JoinType ParseJoinType(string join)
-        {
-            if (join == null) return JoinType.Miter;
-            switch (join.ToLowerInvariant())
-            {
-                case "round": return JoinType.Round;
-                case "bevel": return JoinType.Bevel;
-                default:      return JoinType.Miter;
-            }
-        }
-
-        private static CapType ParseCapType(string cap)
-        {
-            if (cap == null) return CapType.Butt;
-            switch (cap.ToLowerInvariant())
-            {
-                case "round":  return CapType.Round;
-                case "square": return CapType.Square;
-                default:       return CapType.Butt;
-            }
-        }
+        // S60: ParseJoinType/ParseCapType deleted — Join/Cap are now typed enums on LayoutProperties.
     }
 }

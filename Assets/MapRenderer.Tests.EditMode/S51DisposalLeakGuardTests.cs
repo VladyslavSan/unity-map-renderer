@@ -30,6 +30,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
@@ -298,7 +299,7 @@ namespace MapRenderer.Tests
             var mvtTile     = MvtDecoder.Decode(bytes);
             var style       = MinimalStyle();
             var fillLayer   = style.Layers[0];
-            var paint       = new FillPaint(fillLayer);
+            var paint       = new Fill.PaintProperties(fillLayer);
             var features    = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
             var mvtLayer    = SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
 

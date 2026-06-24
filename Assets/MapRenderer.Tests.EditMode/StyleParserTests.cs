@@ -110,9 +110,9 @@ namespace MapRenderer.Tests
             // A raw paint/layout sub-tree from the real style is retained for later stages.
             StyleLayer fill = null;
             foreach (var l in doc.Layers)
-                if (l.LayerType == StyleLayerType.Fill && l.Paint != null) { fill = l; break; }
+                if (l.LayerType == StyleLayerType.Fill && l.PaintJson != null) { fill = l; break; }
             Assert.IsNotNull(fill, "a fill layer with a paint block exists in the real style");
-            Assert.IsTrue(fill.Paint.IsObject, "real paint sub-tree retained as queryable JSON");
+            Assert.IsTrue(fill.PaintJson.IsObject, "real paint sub-tree retained as queryable JSON");
         }
 
         // =========================================================================================
@@ -187,7 +187,7 @@ namespace MapRenderer.Tests
             Assert.IsNull(layer.MaxZoom, "layer maxzoom has no spec default → null");
             // And present values are read through:
             Assert.IsNull(layer.Filter);
-            Assert.IsNull(layer.Paint);
+            Assert.IsNull(layer.PaintJson);
         }
 
         [Test]
@@ -304,10 +304,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(42, flk.AsInt());
 
             // Unknown paint/layout props retained inside the raw subtrees.
-            Assert.IsNotNull(doc.Layers[0].Paint);
-            Assert.AreEqual("#fff", doc.Layers[0].Paint.GetString("future-paint-prop"));
-            Assert.IsNotNull(doc.Layers[0].Layout);
-            Assert.AreEqual("visible", doc.Layers[0].Layout.GetString("future-layout-prop"));
+            Assert.IsNotNull(doc.Layers[0].PaintJson);
+            Assert.AreEqual("#fff", doc.Layers[0].PaintJson.GetString("future-paint-prop"));
+            Assert.IsNotNull(doc.Layers[0].LayoutJson);
+            Assert.AreEqual("visible", doc.Layers[0].LayoutJson.GetString("future-layout-prop"));
         }
 
         [Test]
@@ -403,13 +403,13 @@ namespace MapRenderer.Tests
             Assert.IsTrue(layer.Filter.IsArray, "legacy filter retained as raw array");
             Assert.AreEqual("==", layer.Filter.Items[0].AsString());
 
-            Assert.IsNotNull(layer.Layout);
-            Assert.AreEqual("round", layer.Layout.GetString("line-cap"));
-            Assert.AreEqual("round", layer.Layout.GetString("line-join"));
+            Assert.IsNotNull(layer.LayoutJson);
+            Assert.AreEqual("round", layer.LayoutJson.GetString("line-cap"));
+            Assert.AreEqual("round", layer.LayoutJson.GetString("line-join"));
 
-            Assert.IsNotNull(layer.Paint);
-            Assert.AreEqual("#ff0000", layer.Paint.GetString("line-color"));
-            Assert.AreEqual(2.0, layer.Paint.GetDouble("line-width"), 1e-9);
+            Assert.IsNotNull(layer.PaintJson);
+            Assert.AreEqual("#ff0000", layer.PaintJson.GetString("line-color"));
+            Assert.AreEqual(2.0, layer.PaintJson.GetDouble("line-width"), 1e-9);
         }
 
         // =========================================================================================

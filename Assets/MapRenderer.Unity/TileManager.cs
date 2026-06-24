@@ -633,7 +633,7 @@ namespace MapRenderer.Unity
                         continue;
 
                     lineLayerData[li] = StyledLineTileBuilder.BuildMeshData(
-                        features, rec.Paint, zoom, mvtLayer.Extent, id, tileOrigin);
+                        features, rec.Paint, rec.Layout, zoom, mvtLayer.Extent, id, tileOrigin);
                 }
 
                 return new TessellationResult { LayerData = layerData, LineLayerData = lineLayerData };

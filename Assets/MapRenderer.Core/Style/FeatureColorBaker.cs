@@ -4,8 +4,8 @@ using MapRenderer.Core.Expressions;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// Engine-free bake helper: given a <see cref="DataDrivenPaintEvaluator"/>, a zoom, and a sequence
-    /// of <see cref="IFeature"/>, returns one <see cref="Color"/> per feature.
+    /// Engine-free bake helper: given a <see cref="StyleProperty{T}"/>, a zoom, and a sequence
+    /// of <see cref="IFeature"/>, returns one typed value per feature.
     ///
     /// This is the single source of truth for "evaluate-and-bake" — tested without a GPU in both
     /// <c>dotnet test</c> and the Unity EditMode runner.  The Unity bootstrap (MapFillBootstrap)
@@ -29,17 +29,17 @@ namespace MapRenderer.Core.Style
     public static class FeatureColorBaker
     {
         /// <summary>
-        /// Evaluate <paramref name="evaluator"/> for each feature at the given zoom and return a list of
+        /// Evaluate <paramref name="prop"/> for each feature at the given zoom and return a list of
         /// per-feature baked colors.  Each element corresponds to the same-index feature in
         /// <paramref name="features"/>.
         /// </summary>
-        /// <param name="evaluator">Data-driven color expression (may be Constant, Zoom, Feature, or Composite).</param>
+        /// <param name="prop">Color <see cref="StyleProperty{T}"/> (may be Constant, Zoom, Feature, or Composite).</param>
         /// <param name="zoom">Map zoom level to pass to the evaluator (for zoom-dependent stops).</param>
         /// <param name="features">Sequence of features to evaluate against.</param>
         /// <param name="fallback">Color to use when evaluation fails (e.g. expression error, wrong type).</param>
         /// <returns>A new list with one <see cref="Color"/> per feature in input order.</returns>
         public static List<Color> BakeColors(
-            DataDrivenPaintEvaluator evaluator,
+            StyleProperty<Color> prop,
             double zoom,
             IEnumerable<IFeature> features,
             Color fallback = default)
@@ -47,7 +47,7 @@ namespace MapRenderer.Core.Style
             var result = new List<Color>();
             foreach (var feature in features)
             {
-                if (evaluator.TryEvaluateColor(zoom, feature, out Color c))
+                if (prop.TryEvaluate(zoom, feature, out Color c))
                     result.Add(c);
                 else
                     result.Add(fallback);
@@ -56,11 +56,11 @@ namespace MapRenderer.Core.Style
         }
 
         /// <summary>
-        /// Evaluate <paramref name="evaluator"/> for each feature at the given zoom and return per-feature
-        /// baked numbers.
+        /// Evaluate <paramref name="prop"/> for each feature at the given zoom and return per-feature
+        /// baked numbers as <c>double</c>.
         /// </summary>
         public static List<double> BakeNumbers(
-            DataDrivenPaintEvaluator evaluator,
+            StyleProperty<float> prop,
             double zoom,
             IEnumerable<IFeature> features,
             double fallback = 0.0)
@@ -68,8 +68,8 @@ namespace MapRenderer.Core.Style
             var result = new List<double>();
             foreach (var feature in features)
             {
-                if (evaluator.TryEvaluateNumber(zoom, feature, out double n))
-                    result.Add(n);
+                if (prop.TryEvaluate(zoom, feature, out float n))
+                    result.Add((double)n);
                 else
                     result.Add(fallback);
             }

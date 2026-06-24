@@ -1,9 +1,10 @@
 # unity-map-renderer — working notes for AI agents
 
 Unity-native (DOTS/ECS, C#) MapLibre-style vector map renderer. Read `ARCHITECTURE.md` for the design
-and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/step-0.md` for
-the current milestone, and **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL
-+ the headless test workflow) — check it before debugging a shader/material/test-harness surprise.
+and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/conventions.md` for
+generic coding conventions, `docs/step-0.md` for the current milestone, and
+**`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
+workflow) — check it before debugging a shader/material/test-harness surprise.
 Proprietary / all rights reserved.
 
 ## Project layout
@@ -89,3 +90,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
   explicitly (`StyledFillTileBuilder`, `StyledLineTileBuilder`); generic names (`MeshBuilder`,
   `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers. (S54 — the retired
   Gen-1 `MeshBuilder`/`TileMeshFactory` were the naming offenders this rule targets.)
+- **Math types: `Unity.Mathematics` only** — `float2/3/4`, `double2/3`, `quaternion`, `math.*`; *not*
+  `UnityEngine.Vector2/3/4` or `Quaternion`. `Core` is engine-free, so `UnityEngine.Vector*` is forbidden
+  there outright. Sole exception: a Unity boundary API that demands a `VectorN` — convert at that call site.
+  Full rationale + examples in **`docs/conventions.md`**. (S60.)

@@ -13,7 +13,8 @@ using MapRenderer.Core.Style;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S12 — <see cref="FeatureColorBaker"/>: bake per-feature colors from the real fixture.
+    /// S12 / S60 — <see cref="FeatureColorBaker"/>: bake per-feature colors from the real fixture.
+    /// Updated for S60: <c>DataDrivenPaintEvaluator</c> is replaced by <c>StyleProperty&lt;T&gt;</c>.
     ///
     /// The fixture (Assets/Fixtures/sample-tile.bytes) contains the "countries" layer with 239 polygon
     /// features and a "CONTINENT" string property (confirmed: 8 distinct values, including "Asia" and
@@ -29,8 +30,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class FeatureColorBakerTests
     {
-        // ── Fixture loader (walk-up from cwd then AppContext — works in Unity batch AND dotnet) ─
-
         private static byte[] LoadFixture()
         {
             string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
@@ -56,9 +55,6 @@ namespace MapRenderer.Tests
             return layer;
         }
 
-        /// <summary>
-        /// Wrap each <see cref="MvtFeature"/> in <see cref="MvtFeatureAdapter"/> and return as IFeature list.
-        /// </summary>
         private static List<IFeature> AdaptFeatures(MvtLayer layer)
         {
             var features = new List<IFeature>(layer.Features.Count);
@@ -67,7 +63,10 @@ namespace MapRenderer.Tests
             return features;
         }
 
-        // Match expression: Asia → reddish, South America → bluish, default → gray
+        private static StyleProperty<Color> ColProp(string json)
+            => new StyleProperty<Color>(
+                MapRenderer.Core.Json.JsonParser.Parse(json), new Color(0, 0, 0, 1), v => v.AsColorCoerced());
+
         private const string MatchExpr =
             "[\"match\",[\"get\",\"CONTINENT\"]," +
             "\"Asia\",[\"rgba\",200,50,50,1]," +
@@ -81,24 +80,20 @@ namespace MapRenderer.Tests
         {
             var layer    = LoadCountries();
             var features = AdaptFeatures(layer);
-            var ev       = new DataDrivenPaintEvaluator(MatchExpr);
+            var prop     = ColProp(MatchExpr);
 
-            List<Color> colors = FeatureColorBaker.BakeColors(ev, 0.0, features);
+            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count,
                 "BakeColors must return one color per input feature.");
 
-            // Collect distinct colors.
             var distinct = new HashSet<(int r, int g, int b)>();
             foreach (var c in colors)
                 distinct.Add(
                     ((int)Math.Round(c.R * 255), (int)Math.Round(c.G * 255), (int)Math.Round(c.B * 255)));
 
-            // Fixture has "Asia" and "South America" features → at minimum 2 distinct colors (Asia, S.America).
-            // Default (gray) is a third. We conservatively assert ≥2.
             Assert.GreaterOrEqual(distinct.Count, 2,
-                $"A match expression on CONTINENT must produce ≥2 distinct colors (got {distinct.Count}). " +
-                "Fixture has Asia and South America features; each should bake to a different color.");
+                $"A match expression on CONTINENT must produce ≥2 distinct colors (got {distinct.Count}).");
         }
 
         // ── 2. Constant-input control → exactly 1 distinct color ─────────────
@@ -106,7 +101,6 @@ namespace MapRenderer.Tests
         [Test]
         public void BakeColors_ConstantControl_ProducesUniformColor()
         {
-            // Match on a key absent from all features → default branch → gray for every feature.
             const string controlExpr =
                 "[\"match\",[\"get\",\"__NONEXISTENT_KEY__\"]," +
                 "\"x\",[\"rgba\",255,0,0,1]," +
@@ -114,9 +108,9 @@ namespace MapRenderer.Tests
 
             var layer    = LoadCountries();
             var features = AdaptFeatures(layer);
-            var ev       = new DataDrivenPaintEvaluator(controlExpr);
+            var prop     = ColProp(controlExpr);
 
-            List<Color> colors = FeatureColorBaker.BakeColors(ev, 0.0, features);
+            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count, "BakeColors must return one color per feature.");
 
@@ -126,9 +120,7 @@ namespace MapRenderer.Tests
                     ((int)Math.Round(c.R * 255), (int)Math.Round(c.G * 255), (int)Math.Round(c.B * 255)));
 
             Assert.AreEqual(1, distinct.Count,
-                $"Constant-input control (match on non-existent key) must produce exactly 1 distinct color " +
-                $"across all {features.Count} features (got {distinct.Count} distinct). " +
-                "All features should fall through to the default branch.");
+                $"Constant-input control must produce exactly 1 distinct color (got {distinct.Count}).");
         }
 
         // ── 3. Constant-kind evaluator → all colors identical ────────────────
@@ -138,21 +130,16 @@ namespace MapRenderer.Tests
         {
             var layer    = LoadCountries();
             var features = AdaptFeatures(layer);
+            var prop     = ColProp("\"#3a8f3a\"");
 
-            // A constant-kind expression: literal color string, no feature dependency.
-            var ev = new DataDrivenPaintEvaluator("\"#3a8f3a\"");
-
-            List<Color> colors = FeatureColorBaker.BakeColors(ev, 0.0, features);
+            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count);
 
-            // Every color must be identical to the first.
             Color expected = colors[0];
             for (int i = 1; i < colors.Count; i++)
                 Assert.AreEqual(expected, colors[i],
-                    $"Constant-kind evaluator must produce the same color for every feature " +
-                    $"(index {i} differs: {colors[i].R:F3},{colors[i].G:F3},{colors[i].B:F3} vs " +
-                    $"{expected.R:F3},{expected.G:F3},{expected.B:F3}).");
+                    $"Constant-kind evaluator must produce the same color for every feature (index {i} differs).");
         }
     }
 }

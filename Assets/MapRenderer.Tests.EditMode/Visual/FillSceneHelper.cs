@@ -9,6 +9,7 @@ using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity;
 using MapRenderer.Unity.Rendering;
 
@@ -63,7 +64,7 @@ namespace MapRenderer.Tests.Visual
             var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression);
             var style = StyleParser.Parse(styleLayerJson);
             var fillStyleLayer = style.Layers[0];
-            var paint = new FillPaint(fillStyleLayer);
+            var paint = new Fill.PaintProperties(fillStyleLayer);
 
             var mvtLayer = SourceLayerResolver.ResolveMvtLayer(fillStyleLayer, mvtTile);
             if (mvtLayer == null)

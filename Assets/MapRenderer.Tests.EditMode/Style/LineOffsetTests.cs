@@ -8,6 +8,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Style.Line;
 
 namespace MapRenderer.Tests
 {

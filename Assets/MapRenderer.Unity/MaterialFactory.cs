@@ -1,5 +1,8 @@
+using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Style;
+using Line = MapRenderer.Core.Style.Line;
+using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering;
 
 namespace MapRenderer.Unity
@@ -12,6 +15,10 @@ namespace MapRenderer.Unity
     /// <para>Step 1 of the MapView decomposition (extracted verbatim from MapView's private statics). In the
     /// eventual ECS shape this is the "bake style layer → GPU material" system; isolating it here makes it
     /// unit-testable and keeps MapView focused on the tile loop.</para>
+    ///
+    /// <para>S60: all bindings now take <see cref="StyleProperty{T}"/> (replaces <c>PaintPropertyEvaluator</c>).
+    /// Data-driven guard: was <c>!= null</c>; now <c>!prop.DependsOnFeature</c>. Translate: was
+    /// TranslateX/Y pair; now <c>Translate.Evaluate(0.0)</c> returning <c>double2</c>.</para>
     /// </summary>
     internal static class MaterialFactory
     {
@@ -43,23 +50,29 @@ namespace MapRenderer.Unity
 
         /// <summary>
         /// Binds constant/zoom paint properties from <paramref name="paint"/> to the material.
+        /// S60: StyleProperty&lt;T&gt; replaces old PaintPropertyEvaluator pairs; null-guard →
+        /// <c>!prop.DependsOnFeature</c>; TranslateX/Y → <c>Translate.Evaluate(0.0)</c>.
         /// </summary>
-        public static void BindFillPaintToApplier(FillPaint paint, ZoomStyleApplier applier, Material mat)
+        public static void BindFillPaintToApplier(Fill.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
-            if (paint.Opacity != null)
+            // fill-opacity: bind for Constant/Zoom (data-driven → vertex bake, not supported for fill yet).
+            if (!paint.Opacity.DependsOnFeature)
                 applier.BindFloat(paint.Opacity, "_Opacity");
 
-            if (paint.OutlineColor != null && !paint.OutlineColorIsFallback)
+            // fill-outline-color: bind only when explicitly set (not a fallback) and non-data-driven.
+            if (!paint.OutlineColorIsFallback && !paint.OutlineColor.DependsOnFeature)
                 applier.BindColor(paint.OutlineColor, "_FillOutlineColor");
 
-            if (paint.Antialias != null)
+            // fill-antialias.
+            if (!paint.Antialias.DependsOnFeature)
                 applier.BindFloat(paint.Antialias, "_FillAntialias");
 
-            float tx = (float)paint.TranslateX.EvaluateNumber(0.0);
-            float ty = (float)paint.TranslateY.EvaluateNumber(0.0);
-            mat.SetVector("_FillTranslate", new Vector4(tx, ty, 0f, 0f));
+            // fill-translate: collapsed to double2 — extract x/y and set as Vector4.
+            var t = paint.Translate.Evaluate(0.0);
+            mat.SetVector("_FillTranslate", new Vector4((float)t.x, (float)t.y, 0f, 0f));
 
-            if (paint.TranslateAnchor != null)
+            // fill-translate-anchor.
+            if (!paint.TranslateAnchor.DependsOnFeature)
                 applier.BindFloat(paint.TranslateAnchor, "_FillTranslateAnchor");
         }
 
@@ -93,91 +106,81 @@ namespace MapRenderer.Unity
         /// Binds constant/zoom line paint properties from <paramref name="paint"/> to the material.
         /// Data-driven properties (Feature/Composite color) are handled by StyledLineTileBuilder bake;
         /// only Constant/Zoom-kind properties are bound here as uniforms.
+        ///
+        /// S60: StyleProperty&lt;T&gt; replaces PaintPropertyEvaluator pairs; data-driven gate →
+        /// <c>.DependsOnFeature</c>; Translate collapsed to <c>double2</c>.
         /// </summary>
-        public static void BindLinePaintToApplier(LinePaint paint, ZoomStyleApplier applier, Material mat)
+        public static void BindLinePaintToApplier(Line.PaintProperties paint, ZoomStyleApplier applier, Material mat)
         {
             // line-color: bind only for non-data-driven (Constant/Zoom). Data-driven → vertex bake.
             // The color rides the standard _BaseColor (S58 collapsed the redundant _MapColor into it).
-            if (paint.Color != null)
+            if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.BaseColor);
 
             // line-opacity.
-            if (paint.Opacity != null)
+            if (!paint.Opacity.DependsOnFeature)
                 applier.BindFloat(paint.Opacity, "_Opacity");
 
             // line-width (in pixels per MapLibre spec).
-            // Convention (data-driven width): when WidthKind depends on feature, the evaluated width
+            // Convention (data-driven width): when Width depends on feature, the evaluated width
             // is baked into WidthScale (stream 3) by StyledLineTileBuilder. Set _Width = 1.0 so
             // the shader formula (_Width × WidthScale) yields the full baked width directly.
-            // For Constant/Zoom kind, Width is non-null → bind normally as a uniform.
-            if (MapRenderer.Core.Expressions.ExpressionKinds.DependsOnFeature(paint.WidthKind))
+            // For Constant/Zoom kind, bind normally as a uniform.
+            if (paint.Width.DependsOnFeature)
                 mat.SetFloat("_Width", 1f); // base = 1; evaluated width baked into WidthScale per feature
-            else if (paint.Width != null)
+            else
                 applier.BindFloat(paint.Width, "_Width");
             // Ensure WidthIsPixels=1 so the shader interprets width as pixels.
             mat.SetFloat("_WidthIsPixels", 1f);
 
             // line-blur.
-            if (paint.Blur != null)
+            if (!paint.Blur.DependsOnFeature)
                 applier.BindFloat(paint.Blur, "_Blur");
 
             // line-gap-width.
-            if (paint.GapWidth != null)
+            if (!paint.GapWidth.DependsOnFeature)
                 applier.BindFloat(paint.GapWidth, "_GapWidth");
 
             // line-offset (S44).
-            if (paint.Offset != null)
+            if (!paint.Offset.DependsOnFeature)
                 applier.BindFloat(paint.Offset, "_LineOffset");
 
-            // line-translate: constant components baked into material vector.
-            float tx = (float)paint.TranslateX.EvaluateNumber(0.0);
-            float ty = (float)paint.TranslateY.EvaluateNumber(0.0);
-            mat.SetVector("_LineTranslate", new Vector4(tx, ty, 0f, 0f));
+            // line-translate: collapsed to double2 — extract x/y and set as Vector4.
+            // Unity boundary cast: double2 → (float)x/(float)y then pack into Vector4.
+            var t = paint.Translate.Evaluate(0.0);
+            mat.SetVector("_LineTranslate", new Vector4((float)t.x, (float)t.y, 0f, 0f));
 
             // line-translate-anchor.
-            if (paint.TranslateAnchor != null)
+            if (!paint.TranslateAnchor.DependsOnFeature)
                 applier.BindFloat(paint.TranslateAnchor, "_LineTranslateAnchor");
 
             // line-pattern hook: set flag; solid fallback until S17.
-            // S14_LINE_PATTERN_HOOK: _LinePattern=1 signals a pattern layer; renders solid _BaseColor fallback.
             mat.SetFloat("_LinePattern", paint.PatternName != null ? 1f : 0f);
 
             // S43: line-dasharray initial bind (constant or first zoom-step evaluation at zoom=0).
-            // Per-frame re-evaluation for zoom-step patterns is done by ApplyLineDashArray in ApplyZoom.
-            // Feature-dependent dasharray is out of scope; constant + zoom-step are the supported forms.
-            // S43_DEFER_LIVE_ZOOM_STEP: zoom-step dasharray re-evaluates per-frame via ApplyLineDashArray;
-            // static bind here is for constant arrays only (zoom=0 is a safe initial value).
             ApplyLineDashArray(paint, mat, 0.0);
         }
 
         /// <summary>
-        /// S43: Evaluates the line-dasharray expression at <paramref name="zoom"/> and sets
-        /// <c>_DashArray</c>/<c>_DashCount</c> on the material. Called both at bind time and
-        /// per-frame (for zoom-step patterns). When absent or degenerate, sets _DashCount=0
-        /// (solid identity — no change to rendering path).
+        /// Evaluates the line-dasharray expression at <paramref name="zoom"/> and sets
+        /// <c>_DashArray</c>/<c>_DashCount</c> on the material. Called at bind time and — only for a
+        /// zoom-dependent dasharray (see <see cref="StyledLayerSet"/>) — per frame. When absent or
+        /// degenerate, sets _DashCount=0 (solid identity — no change to rendering path).
         ///
-        /// Not routed through ZoomStyleApplier (scalar/color only). Array evaluation uses
-        /// <see cref="LineDash.TryEvaluateDashArray"/> directly.
+        /// S60: uses the new alloc-free <see cref="Line.LineDash.TryEvaluatePattern"/> that returns
+        /// <c>float4 + int count</c> instead of <c>float[]</c>.
         /// </summary>
-        public static void ApplyLineDashArray(LinePaint paint, Material mat, double zoom)
+        public static void ApplyLineDashArray(Line.PaintProperties paint, Material mat, double zoom)
         {
-            if (!paint.HasDashArray)
+            if (Line.LineDash.TryEvaluatePattern(paint.DashArray, zoom, out var packed, out int count))
             {
-                // No dasharray: ensure solid identity (guard against stale values).
-                mat.SetVector("_DashArray", Vector4.zero);
-                mat.SetFloat("_DashCount",  0f);
-                return;
-            }
-
-            if (LineDash.TryEvaluateDashArray(paint.DashArrayJson, zoom, out float[] pattern))
-            {
-                var (x, y, z, w, count) = LineDash.Pack(pattern);
-                mat.SetVector("_DashArray", new Vector4(x, y, z, w));
+                // Unity boundary cast: float4 → Vector4 (at the SetVector call site, not upstream).
+                mat.SetVector("_DashArray", new Vector4(packed.x, packed.y, packed.z, packed.w));
                 mat.SetFloat("_DashCount",  count);
             }
             else
             {
-                // Parse failed: solid fallback.
+                // No / unsupported / degenerate dasharray: solid identity.
                 mat.SetVector("_DashArray", Vector4.zero);
                 mat.SetFloat("_DashCount",  0f);
             }

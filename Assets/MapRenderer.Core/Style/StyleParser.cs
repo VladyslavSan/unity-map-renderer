@@ -91,13 +91,26 @@ namespace MapRenderer.Core.Style
 
         private static StyleLayer ParseLayer(JsonValue json)
         {
-            var layer = new StyleLayer { Raw = json };
             if (json == null || !json.IsObject)
-                return layer;
+                return new StyleLayer { Raw = json };
 
+            string rawType = json.GetString("type");
+            StyleLayerType layerType = StyleLayerTypeExtensions.ParseLayerType(rawType);
+
+            // Factory: line/fill get their typed subclass (which exposes parsed Paint/Layout); every other
+            // type uses the generic base. The typed views parse lazily from PaintJson/LayoutJson on access.
+            StyleLayer layer;
+            switch (layerType)
+            {
+                case StyleLayerType.Line: layer = new Line.StyleLayer(); break;
+                case StyleLayerType.Fill: layer = new Fill.StyleLayer(); break;
+                default:                  layer = new StyleLayer();      break;
+            }
+
+            layer.Raw = json;
             layer.Id = json.GetString("id");
-            layer.RawType = json.GetString("type");
-            layer.LayerType = StyleLayerTypeExtensions.ParseLayerType(layer.RawType);
+            layer.RawType = rawType;
+            layer.LayerType = layerType;
             layer.Source = json.GetString("source");
             layer.SourceLayer = json.GetString("source-layer");
 
@@ -105,10 +118,10 @@ namespace MapRenderer.Core.Style
             layer.MinZoom = json.GetNullableDouble("minzoom");
             layer.MaxZoom = json.GetNullableDouble("maxzoom");
 
-            // Raw sub-trees retained verbatim for later stages (null if the key is absent).
+            // Raw sub-trees retained verbatim (null if the key is absent).
             layer.Filter = json.Get("filter");
-            layer.Layout = json.Get("layout");
-            layer.Paint = json.Get("paint");
+            layer.LayoutJson = json.Get("layout");
+            layer.PaintJson = json.Get("paint");
 
             return layer;
         }

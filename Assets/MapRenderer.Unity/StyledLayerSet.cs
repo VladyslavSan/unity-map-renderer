@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using UnityEngine;
 using Unity.Profiling;
 using MapRenderer.Core.Style;
+using Line = MapRenderer.Core.Style.Line;
+using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View.Camera;
 
@@ -25,19 +28,20 @@ namespace MapRenderer.Unity
         /// <summary>One render bundle per fill style layer, in declared order.</summary>
         public struct FillLayerRecord
         {
-            public FillPaint        Paint;       // parsed fill paint
-            public StyleLayer       StyleLayer;  // source-layer + filter, for FeatureSelector
-            public Material         Material;    // renderQueue = TransparentQueue + styleIndex
-            public ZoomStyleApplier Applier;     // pushes zoom-dependent uniforms
+            public Fill.PaintProperties Paint;       // parsed fill paint
+            public StyleLayer           StyleLayer;  // source-layer + filter, for FeatureSelector
+            public Material             Material;    // renderQueue = TransparentQueue + styleIndex
+            public ZoomStyleApplier     Applier;     // pushes zoom-dependent uniforms
         }
 
         /// <summary>One render bundle per line style layer, in declared order.</summary>
         public struct LineLayerRecord
         {
-            public LinePaint        Paint;
-            public StyleLayer       StyleLayer;
-            public Material         Material;
-            public ZoomStyleApplier Applier;
+            public Line.PaintProperties  Paint;
+            public Line.LayoutProperties Layout;     // join/cap/limits, baked at tessellate time
+            public StyleLayer            StyleLayer;
+            public Material              Material;
+            public ZoomStyleApplier      Applier;
         }
 
         private readonly List<FillLayerRecord> _fills = new List<FillLayerRecord>(16);
@@ -79,9 +83,9 @@ namespace MapRenderer.Unity
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                if (sl.LayerType == StyleLayerType.Fill)
+                if (sl is Fill.StyleLayer fillLayer)
                 {
-                    FillPaint paint = new FillPaint(sl);
+                    Fill.PaintProperties paint = fillLayer.Paint;
                     Material mat = MaterialFactory.CreateFillMaterial(settings);
                     if (mat == null) continue;   // unconfigured material set — warned by the factory; skip the layer
                     mat.renderQueue = LayerDrawOrder.TransparentQueue + drawIndex;
@@ -96,9 +100,10 @@ namespace MapRenderer.Unity
                     });
                     drawIndex++;
                 }
-                else if (sl.LayerType == StyleLayerType.Line)
+                else if (sl is Line.StyleLayer lineLayer)
                 {
-                    LinePaint paint = new LinePaint(sl);
+                    Line.PaintProperties  paint  = lineLayer.Paint;
+                    Line.LayoutProperties layout = lineLayer.Layout;
                     Material mat = MaterialFactory.CreateLineMaterial(settings);
                     if (mat == null) continue;   // unconfigured material set — warned by the factory; skip the layer
                     mat.renderQueue = LayerDrawOrder.TransparentQueue + drawIndex;
@@ -109,7 +114,7 @@ namespace MapRenderer.Unity
 
                     _lines.Add(new LineLayerRecord
                     {
-                        Paint = paint, StyleLayer = sl, Material = mat, Applier = applier,
+                        Paint = paint, Layout = layout, StyleLayer = sl, Material = mat, Applier = applier,
                     });
                     drawIndex++;
                 }
@@ -140,8 +145,13 @@ namespace MapRenderer.Unity
                 {
                     _lines[i].Applier.ApplyZoom(zoom);
                     _lines[i].Material.SetFloat("_MetersPerPixel", metersPerPixel);
-                    using (PmZoomLineDash.Auto())
-                        MaterialFactory.ApplyLineDashArray(_lines[i].Paint, _lines[i].Material, zoom);
+
+                    // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom
+                    // (the engine's classification). A constant dash (the common case) is set once at
+                    // bind time and skipped here — no per-frame eval, no allocation.
+                    if (ExpressionKinds.DependsOnZoom(_lines[i].Paint.DashArrayKind))
+                        using (PmZoomLineDash.Auto())
+                            MaterialFactory.ApplyLineDashArray(_lines[i].Paint, _lines[i].Material, zoom);
                 }
             }
         }

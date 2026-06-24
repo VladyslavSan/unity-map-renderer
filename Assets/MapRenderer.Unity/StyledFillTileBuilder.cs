@@ -12,6 +12,7 @@ using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using Fill = MapRenderer.Core.Style.Fill;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 
 namespace MapRenderer.Unity
@@ -19,7 +20,7 @@ namespace MapRenderer.Unity
     /// <summary>
     /// S40 managed per-layer fill mesh builder. Extracted from the S02-era MapFillBootstrap.BuildMesh
     /// (retired in S54) and generalized to receive real <see cref="TileId"/> + origin, a set of
-    /// pre-selected features, and a <see cref="FillPaint"/> describing the style.
+    /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
     /// Pipeline per feature:
     ///   MvtGeometry.Decode → PolygonAssembler.Assemble → Earcut.Triangulate
@@ -45,12 +46,12 @@ namespace MapRenderer.Unity
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
     ///
-    /// Color (D2): per-feature sRGB color baked via <see cref="DataDrivenPaintEvaluator"/>; converted
+    /// Color (D2): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted
     /// to linear via <c>Color.linear</c> off the main thread (S48). <c>_BaseColor=white</c> on the Material
     /// (identity multiply). Never set <c>_BaseColor</c> to the style color — that would double-apply gamma.
     ///
     /// Thread-safety: <see cref="BuildMeshData"/> touches only pure-managed, stateless Core code
-    /// (MvtGeometry.Decode, PolygonAssembler.Assemble, Earcut.Triangulate, DataDrivenPaintEvaluator,
+    /// (MvtGeometry.Decode, PolygonAssembler.Assemble, Earcut.Triangulate, StyleProperty,
     /// MvtFeatureAdapter). All are allocation-local with no shared mutable static state. Safe to run
     /// concurrently on multiple ThreadPool threads (one per tile).
     ///
@@ -220,7 +221,7 @@ namespace MapRenderer.Unity
         /// </summary>
         public static LayerMeshData BuildMeshData(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            FillPaint paint,
+            Fill.PaintProperties paint,
             double zoom,
             double extent,
             TileId id,
@@ -258,8 +259,10 @@ namespace MapRenderer.Unity
                 // _BaseColor=white on material → identity multiply → no double-gamma.
                 Color featureColor = Color.white;
                 var adapter = new MvtFeatureAdapter(feature);
-                if (paint.DataDrivenColor.TryEvaluateColor(zoom, adapter, out CoreColor c))
-                    featureColor = new Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
+                
+                
+                if (paint.Color.TryEvaluate(zoom, adapter, out var color))
+                    featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
                 // Decode rings, assemble polygons, earcut, project.
                 List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
@@ -432,7 +435,7 @@ namespace MapRenderer.Unity
         /// </summary>
         public static Mesh BuildMesh(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            FillPaint paint,
+            Fill.PaintProperties paint,
             double zoom,
             double extent,
             TileId id,

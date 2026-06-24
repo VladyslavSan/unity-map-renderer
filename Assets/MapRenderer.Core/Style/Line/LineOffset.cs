@@ -1,6 +1,6 @@
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Style
+namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
     /// S44: line-offset — engine-free CPU helpers for the perpendicular ribbon shift.

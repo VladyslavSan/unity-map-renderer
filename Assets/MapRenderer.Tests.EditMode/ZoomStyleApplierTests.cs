@@ -14,6 +14,7 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Json;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Unity;
 using MapRenderer.Tests.Visual;
@@ -82,10 +83,11 @@ namespace MapRenderer.Tests
             try
             {
                 // Create a zoom-interpolated width expression.
-                var widthEv = new PaintPropertyEvaluator(
-                    "[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
+                var widthSp = new StyleProperty<float>(
+                    JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]"),
+                    0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
-                applier.BindFloat(widthEv, "_Width");
+                applier.BindFloat(widthSp, "_Width");
 
                 applier.ApplyZoom(5.0);
                 float widthAtZ5 = lineMat.GetFloat("_Width");
@@ -117,18 +119,19 @@ namespace MapRenderer.Tests
             try
             {
                 // rgba(0,0,0,0) → rgba(255,255,255,1) — the canonical premult discriminating case.
-                var colorEv = new PaintPropertyEvaluator(
-                    "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                    "0,[\"rgba\",0,0,0,0],1,[\"rgba\",255,255,255,1]]");
+                var colorSp = new StyleProperty<CoreColor>(
+                    JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                    "0,[\"rgba\",0,0,0,0],1,[\"rgba\",255,255,255,1]]"),
+                    default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorEv, "_BaseColor");
+                applier.BindColor(colorSp, "_BaseColor");
 
                 // Apply at zoom=0.5 (t=0.5 between stops 0 and 1).
                 applier.ApplyZoom(0.5);
                 Color unity = fillMat.GetColor("_BaseColor");
 
                 // Derive the expected value from the Core evaluator with the SAME converter.
-                CoreColor core = colorEv.EvaluateColor(0.5);
+                CoreColor core = colorSp.Evaluate(0.5);
                 Color expected = ZoomStyleApplier.ToUnityColor(core);
 
                 Assert.AreEqual(expected.r, unity.r, 0.01f,
@@ -193,10 +196,11 @@ namespace MapRenderer.Tests
             Material lineMat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
             try
             {
-                var widthEv = new PaintPropertyEvaluator(
-                    "[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]");
+                var widthSp = new StyleProperty<float>(
+                    JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]"),
+                    0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
-                applier.BindFloat(widthEv, "_Width");
+                applier.BindFloat(widthSp, "_Width");
 
                 // Warm up: ensure JIT compilation and shader reflection are done before measuring.
                 for (int w = 0; w < 20; w++)
@@ -226,11 +230,12 @@ namespace MapRenderer.Tests
             Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
-                var colorEv = new PaintPropertyEvaluator(
-                    "[\"interpolate\",[\"linear\"],[\"zoom\"]," +
-                    "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]");
+                var colorSp = new StyleProperty<CoreColor>(
+                    JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"]," +
+                    "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]"),
+                    default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorEv, "_BaseColor");
+                applier.BindColor(colorSp, "_BaseColor");
 
                 for (int w = 0; w < 20; w++)
                     applier.ApplyZoom(5.0 + (w % 10) * 1.0);

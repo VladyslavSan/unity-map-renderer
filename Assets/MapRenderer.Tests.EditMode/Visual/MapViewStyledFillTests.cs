@@ -23,6 +23,7 @@ using UnityEngine;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
+using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
@@ -467,7 +468,7 @@ namespace MapRenderer.Tests.Visual
             }");
 
             StyleLayer sl = styleDoc.Layers[0];
-            FillPaint paint = new FillPaint(sl);
+            Fill.PaintProperties paint = new Fill.PaintProperties(sl);
 
             // Verify the opacity evaluator is zoom-dependent (not constant).
             Assert.IsNotNull(paint.Opacity, "FillPaint.Opacity must be non-null for the stops expression");

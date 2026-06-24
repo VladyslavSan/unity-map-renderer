@@ -15,6 +15,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
+using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
@@ -175,7 +176,7 @@ namespace MapRenderer.Tests
                 // Direct builder for the same tile.
                 var mvtTile = MapRenderer.Core.Mvt.MvtDecoder.Decode(bytes);
                 var fillLayer = style.Layers[0]; // countries-fill
-                var paint     = new FillPaint(fillLayer);
+                var paint     = new Fill.PaintProperties(fillLayer);
                 var features  = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
                     fillLayer, mvtTile, 0.0);
                 var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);

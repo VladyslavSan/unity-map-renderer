@@ -10,6 +10,7 @@ using MapRenderer.Core.Coordinates;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using Line = MapRenderer.Core.Style.Line;
 using MapRenderer.Unity;
 using Unity.Mathematics;
 
@@ -112,16 +113,17 @@ namespace MapRenderer.Tests
                 Id          = "test-geolines",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                Paint       = MapRenderer.Core.Json.JsonParser.Parse(
+                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
                     $"{{\"line-color\":{matchExpr},\"line-width\":4}}"),
             };
-            var paint = new LinePaint(paintLayer);
+            var paint = new Line.PaintProperties(paintLayer);
+            var layout = new Line.LayoutProperties(paintLayer);
 
             StyledLineTileBuilder.LayerMeshData data = default;
             try
             {
                 data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
 
                 Assert.IsTrue(data.IsCreated,
                     "BuildMeshData must produce geometry for geolines features with a match expression.");
@@ -168,16 +170,17 @@ namespace MapRenderer.Tests
                 Id          = "test-constant",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                Paint       = MapRenderer.Core.Json.JsonParser.Parse(
+                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
                     $"{{\"line-color\":{constantExpr},\"line-width\":4}}"),
             };
-            var paint = new LinePaint(paintLayer);
+            var paint = new Line.PaintProperties(paintLayer);
+            var layout = new Line.LayoutProperties(paintLayer);
 
             StyledLineTileBuilder.LayerMeshData data = default;
             try
             {
                 data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
 
                 Assert.IsTrue(data.IsCreated,
                     "BuildMeshData must produce geometry for geolines features with a constant color.");
@@ -228,10 +231,11 @@ namespace MapRenderer.Tests
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-width is data-driven (Feature kind); line-color is constant.
-                Paint       = MapRenderer.Core.Json.JsonParser.Parse(
+                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
                     $"{{\"line-width\":{widthExpr}}}"),
             };
-            var paint = new LinePaint(paintLayer);
+            var paint = new Line.PaintProperties(paintLayer);
+            var layout = new Line.LayoutProperties(paintLayer);
 
             // Confirm the paint classified WidthKind as Feature (gate for the bake).
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.WidthKind,
@@ -241,7 +245,7 @@ namespace MapRenderer.Tests
             try
             {
                 data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
 
                 Assert.IsTrue(data.IsCreated,
                     "BuildMeshData must produce geometry for geolines features with a data-driven width.");
@@ -292,10 +296,11 @@ namespace MapRenderer.Tests
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-opacity is data-driven (Feature kind); other properties at defaults.
-                Paint       = MapRenderer.Core.Json.JsonParser.Parse(
+                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
                     $"{{\"line-opacity\":{opacityExpr}}}"),
             };
-            var paint = new LinePaint(paintLayer);
+            var paint = new Line.PaintProperties(paintLayer);
+            var layout = new Line.LayoutProperties(paintLayer);
 
             // Confirm the paint classified OpacityKind as Feature.
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.OpacityKind,
@@ -305,7 +310,7 @@ namespace MapRenderer.Tests
             try
             {
                 data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
 
                 Assert.IsTrue(data.IsCreated,
                     "BuildMeshData must produce geometry for geolines features with a data-driven opacity.");
