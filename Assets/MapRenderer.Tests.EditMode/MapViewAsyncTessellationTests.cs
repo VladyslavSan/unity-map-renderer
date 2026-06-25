@@ -107,7 +107,7 @@ namespace MapRenderer.Tests
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled())
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
             }
@@ -157,7 +157,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "After draining, all tiles must eventually settle.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "The z0/0/0 tile must be built after draining.");
             }
             finally
@@ -367,7 +367,7 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built by the async live loop");
 
                 // Backend-agnostic: one Mesh per fill layer (1 in MinimalStyle).
@@ -471,7 +471,7 @@ namespace MapRenderer.Tests
                 view.Tick(); // cover recompute → evicts all original (5,16,*) tiles
 
                 // Original center tile must be gone from _loaded.
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
                     "Tooth 4: Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
@@ -479,13 +479,13 @@ namespace MapRenderer.Tests
 
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
                     "Tooth 4: Released tile must not have been re-created as a GameObject " +
                     "even if its tessellation task completed after release.");
 
                 // New cover must be built.
                 Assert.IsTrue(view.AllTilesSettled(), "New cover tiles must all settle.");
-                Assert.IsTrue(view.LoadedTileCount > 0, "New cover tiles must be present.");
+                Assert.IsTrue(view.LoadedTileCount() > 0, "New cover tiles must be present.");
             }
             finally
             {
@@ -523,7 +523,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tooth 5: AllTilesSettled() must be true immediately after DrainTessellation().");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "Tooth 5: The z0/0/0 tile must be built after explicit drain.");
             }
             finally
@@ -573,7 +573,7 @@ namespace MapRenderer.Tests
                     "Tooth 6a: MapView.Tick must not allocate during a within-cover pan. " +
                     "The S47 async polling loop must allocate only on fetch-completion edges, not here.");
 
-                Assert.AreEqual(9, view.LoadedTileCount, "Within-cover pan must not load new tiles.");
+                Assert.AreEqual(9, view.LoadedTileCount(), "Within-cover pan must not load new tiles.");
 
                 // ── (b) static frame early-out ──
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),

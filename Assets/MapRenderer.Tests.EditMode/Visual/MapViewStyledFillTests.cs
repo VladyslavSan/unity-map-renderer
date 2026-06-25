@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Visual
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled())
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
             }
@@ -145,7 +145,7 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built");
 
                 // ── DECISIVE: per-layer iteration — exactly 2 layer meshes (one per fill style layer) ──
@@ -213,7 +213,7 @@ namespace MapRenderer.Tests.Visual
                                 ownsSource: false, style: FillLineFillStyle());
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built");
 
                 // Map each layer id -> its material renderQueue from the StyledLayerSet (backend-agnostic;
@@ -296,7 +296,7 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built");
 
                 // The first (and only) layer mesh is the continent-fill layer.
@@ -402,7 +402,7 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built");
 
                 Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));

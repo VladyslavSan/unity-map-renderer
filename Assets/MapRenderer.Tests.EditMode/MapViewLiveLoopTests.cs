@@ -90,7 +90,7 @@ namespace MapRenderer.Tests
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled())
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
             }
@@ -114,18 +114,18 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.AreEqual(9, view.LoadedTileCount, "z5 center cover is a 3×3 block");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
+                Assert.AreEqual(9, view.LoadedTileCount(), "z5 center cover is a 3×3 block");
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 16, 16)),
                     "the center tile must be built");
 
                 // Pan far east (lon=170) → new cover does NOT overlap the old one.
                 view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170, Lat = 0 }, CameraAnimation.Instant);
                 PumpUntilSettled(view);
 
-                Assert.AreEqual(9, view.LoadedTileCount, "still a 3×3 cover after panning");
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16), out _),
+                Assert.AreEqual(9, view.LoadedTileCount(), "still a 3×3 cover after panning");
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
                     "the old center tile must have been evicted after the pan");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 31, 16), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 31, 16)),
                     "the new center tile must be built after the pan");
                 // Eviction unregisters the tile's instanced draw items (and, on Entities, destroys its
                 // layer entities + tile root). Unity's leak detector fails the run on teardown if leaked.
@@ -162,7 +162,7 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built by the live loop");
 
                 // Backend-agnostic: one Mesh per fill layer (just 1 in MinimalStyle).
@@ -245,7 +245,7 @@ namespace MapRenderer.Tests
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
                     "A failure means a per-frame List/Task/closure/LINQ leaked into the hot path.");
 
-                Assert.AreEqual(9, view.LoadedTileCount,
+                Assert.AreEqual(9, view.LoadedTileCount(),
                     "the within-cover pan must not have loaded new tiles");
 
                 // ── (b) the fully-static frame also early-outs allocation-free. ──
@@ -308,7 +308,7 @@ namespace MapRenderer.Tests
                 // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
                 view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
                 view.Tick(); // consume the pan; now steady.
-                Assert.AreEqual(9, view.LoadedTileCount, "the within-cover pan must not have loaded new tiles");
+                Assert.AreEqual(9, view.LoadedTileCount(), "the within-cover pan must not have loaded new tiles");
 
                 // Measure over MANY frames, not one. A single Entities Tick is alloc-free, but EG's system
                 // groups allocate INTERMITTENTLY (the isolated Rebuild×50 test trips the recorder) — so a

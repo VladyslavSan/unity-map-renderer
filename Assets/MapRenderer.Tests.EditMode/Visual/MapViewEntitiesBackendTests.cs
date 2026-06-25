@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Visual
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled()) return;
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
                 Thread.Sleep(1);
             }
         }
@@ -78,9 +78,11 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
                 PumpUntilSettled(view);
-                Assert.IsNull(view.EntitiesRenderer,
+                Assert.IsNull(view.EntitiesRenderer(),
                     "The BRG backend must NOT construct the Entities renderer (backend selection is exclusive).");
-                Assert.IsNotNull(view.BrgRenderer,
+                Assert.IsNull(view.GameObjectRenderer(),
+                    "The BRG backend must NOT construct the GameObject renderer (backend selection is exclusive).");
+                Assert.IsNotNull(view.BrgRenderer(),
                     "The BRG backend must construct the BrgTileRenderer.");
             }
             finally { view.Teardown(); Object.DestroyImmediate(go); }
@@ -104,11 +106,13 @@ namespace MapRenderer.Tests.Visual
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the Entities backend.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built via the Entities path.");
 
-                var ent = view.EntitiesRenderer;
+                var ent = view.EntitiesRenderer();
                 Assert.IsNotNull(ent, "Entities renderer must be constructed when Backend == Entities.");
+                Assert.IsNull(view.GameObjectRenderer(),
+                    "The Entities backend must NOT construct the GameObject renderer (backend selection is exclusive).");
                 Assert.Greater(ent.DrawItemCount, 0,
                     "ConsumeTessellationTask must have created at least one tile-layer entity.");
 
@@ -189,14 +193,14 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0),
                     ownsSource: false, style: MinimalStyle());
-                for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 { view.Tick(); Thread.Sleep(1); }
-                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "Entities path must load + settle tiles.");
                 view.Tick(); // staleness: one more frame so the last tile's entity is positioned + uploaded
 
                 float tileSizeZ3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
-                var ent = view.EntitiesRenderer;
+                var ent = view.EntitiesRenderer();
                 Assert.IsNotNull(ent, "Entities renderer must be present.");
                 Bounds b = ent.ComputeSceneBounds(tileSizeZ3);
                 Assert.Greater(b.size.magnitude, 0f, "Entities scene bounds must be non-degenerate.");

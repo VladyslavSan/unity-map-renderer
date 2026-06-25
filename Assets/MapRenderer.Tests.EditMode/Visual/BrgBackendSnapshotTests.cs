@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.Visual
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled()) return;
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
                 Thread.Sleep(1);
             }
         }
@@ -201,17 +201,17 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: style);
 
-                Assert.IsNull(view.BrgRenderer,
+                Assert.IsNull(view.BrgRenderer(),
                     "The default (Entities) backend must NOT construct a BrgTileRenderer; " +
                     "BRG is only built when Backend == Brg.");
-                Assert.IsNotNull(view.EntitiesRenderer,
+                Assert.IsNotNull(view.EntitiesRenderer(),
                     "The default backend must construct the EntitiesTileRenderer.");
 
                 // Also verify the tile settles normally on the default path.
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tiles must settle on the default (Entities) backend.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built on the default backend.");
             }
             finally
@@ -247,7 +247,7 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: style);
 
-                Assert.IsNotNull(view.BrgRenderer,
+                Assert.IsNotNull(view.BrgRenderer(),
                     "Backend=Brg must construct a BrgTileRenderer.");
 
                 PumpUntilSettled(view);
@@ -255,9 +255,9 @@ namespace MapRenderer.Tests.Visual
                     "Tiles must settle on the BRG path.");
 
                 // Force a Rebuild to populate the sorted draw list.
-                view.BrgRenderer.Rebuild(default);
+                view.BrgRenderer().Rebuild(default);
 
-                int[] queues = view.BrgRenderer.GetEmittedRenderQueues();
+                int[] queues = view.BrgRenderer().GetEmittedRenderQueues();
                 Assert.Greater(queues.Length, 0,
                     "At least one draw item must have been registered with the BRG after tile settle.");
 
@@ -366,11 +366,11 @@ namespace MapRenderer.Tests.Visual
                         view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0),
                             ownsSource: false, style: StyleLineThenFill());
 
-                        for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                        for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
                             view.Tick(); Thread.Sleep(1);
                         }
-                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style A: BRG must load and settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
@@ -380,7 +380,7 @@ namespace MapRenderer.Tests.Visual
                         // Frame the camera on the actual BRG scene bounds (same for both styles).
                         // Must be computed here (after tiles settle + Rebuild runs in Tick).
                         float tileSize3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
-                        var brgA = view.BrgRenderer;
+                        var brgA = view.BrgRenderer();
                         Assert.IsNotNull(brgA, "BRG renderer must be present on BRG path (Style A).");
                         Bounds sceneB = brgA.ComputeSceneBounds(tileSize3);
                         Assert.Greater(sceneB.size.magnitude, 0f, "Scene bounds must be non-degenerate (Style A).");
@@ -415,11 +415,11 @@ namespace MapRenderer.Tests.Visual
                         view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0),
                             ownsSource: false, style: StyleFillThenLine());
 
-                        for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                        for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
                             view.Tick(); Thread.Sleep(1);
                         }
-                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style B: BRG must load and settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
@@ -431,7 +431,7 @@ namespace MapRenderer.Tests.Visual
                         // each MapView may use a different floating-origin scene placement. Using B's own
                         // bounds ensures the camera is correctly centered on the actual rendered geometry.
                         float tileSize3B = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
-                        var brgB = view.BrgRenderer;
+                        var brgB = view.BrgRenderer();
                         Assert.IsNotNull(brgB, "BRG renderer must be present on BRG path (Style B).");
                         Bounds sceneBB = brgB.ComputeSceneBounds(tileSize3B);
                         Assert.Greater(sceneBB.size.magnitude, 0f, "Scene bounds must be non-degenerate (Style B).");
@@ -600,10 +600,10 @@ namespace MapRenderer.Tests.Visual
 
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built by the BRG path.");
 
-                var brg = view.BrgRenderer;
+                var brg = view.BrgRenderer();
                 Assert.IsNotNull(brg, "BRG renderer must be non-null.");
 
                 // Compute the expected translation for z0/0/0 tile at sceneOrigin = cam0.
@@ -702,11 +702,11 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
                 PumpUntilSettled(view);
 
-                var brg = view.BrgRenderer;
+                var brg = view.BrgRenderer();
                 Assert.IsNotNull(brg, "BRG must be non-null after Initialise with BRG backend.");
 
                 // Verify the BRG has a buffer after tile load.
-                view.BrgRenderer.Rebuild(default);
+                view.BrgRenderer().Rebuild(default);
                 // Note: HasBuffer may be false if no items registered yet (empty scene). Either way,
                 // after Teardown IsDisposed must be true.
 
@@ -763,7 +763,7 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
                 PumpUntilSettled(view);
 
-                var brg = view.BrgRenderer;
+                var brg = view.BrgRenderer();
                 Assert.IsNotNull(brg);
 
                 double2 origin = default;
@@ -861,12 +861,12 @@ namespace MapRenderer.Tests.Visual
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0),
                     ownsSource: false, style: MinimalStyle());
 
-                for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.Tick();
                     Thread.Sleep(1);
                 }
-                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "BRG path must load + settle tiles.");
 
                 // Settle-loop staleness fix: the loop exits as soon as AllTilesSettled() is true,
@@ -880,7 +880,7 @@ namespace MapRenderer.Tests.Visual
                 // Compute the tile size at z=3 (Web Mercator), then query ComputeSceneBounds so the
                 // camera covers all loaded tiles — matches the MapViewSnapshot FitTo approach.
                 float tileSizeZ3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
-                var brg0 = view.BrgRenderer;
+                var brg0 = view.BrgRenderer();
                 Assert.IsNotNull(brg0, "BRG renderer must be present on BRG path.");
                 Bounds b = brg0.ComputeSceneBounds(tileSizeZ3);
                 Assert.Greater(b.size.magnitude, 0f, "BRG scene bounds must be non-degenerate after tiles settle.");
@@ -1077,11 +1077,11 @@ namespace MapRenderer.Tests.Visual
                         view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 1.0, 0, 0),
                             ownsSource: false, style: StyleZoomDependentLine());
 
-                        for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                        for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
                             view.Tick(); Thread.Sleep(1);
                         }
-                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=1 render: BRG must settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
@@ -1090,7 +1090,7 @@ namespace MapRenderer.Tests.Visual
 
                         // Frame camera on zoom=1 scene bounds (large tiles, set once for both renders).
                         float tileSize1 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 1));
-                        var brgLow = view.BrgRenderer;
+                        var brgLow = view.BrgRenderer();
                         Assert.IsNotNull(brgLow, "BRG renderer must be present (zoom=1).");
                         Bounds boundsLow = brgLow.ComputeSceneBounds(tileSize1);
                         Assert.Greater(boundsLow.size.magnitude, 0f, "Scene bounds must be non-degenerate (zoom=1).");
@@ -1128,11 +1128,11 @@ namespace MapRenderer.Tests.Visual
                         view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, 0, 0),
                             ownsSource: false, style: StyleZoomDependentLine());
 
-                        for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                        for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
                             view.Tick(); Thread.Sleep(1);
                         }
-                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                        Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=5 render: BRG must settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
@@ -1144,7 +1144,7 @@ namespace MapRenderer.Tests.Visual
                         // view equally — otherwise the large zoom=1 camera view dwarfs the zoom=5 tile
                         // and the 100x wider line (in pixels) still covers less screen area.
                         float tileSize5 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 5));
-                        var brgHigh = view.BrgRenderer;
+                        var brgHigh = view.BrgRenderer();
                         Assert.IsNotNull(brgHigh, "BRG renderer must be present (zoom=5).");
                         Bounds boundsHigh = brgHigh.ComputeSceneBounds(tileSize5);
                         Assert.Greater(boundsHigh.size.magnitude, 0f, "Scene bounds must be non-degenerate (zoom=5).");

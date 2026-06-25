@@ -71,6 +71,47 @@ namespace MapRenderer.Tests.Visual
             finally { r.Dispose(); }
         }
 
+        // ── Entities Hierarchy naming: layer entity is named after its style layer, not the material ──
+
+        [Test]
+        public void AddTileLayer_NamesEntityAfterStyleLayer_NotMaterial()
+        {
+            var (mesh, mat) = FixtureFill();           // mat.name == "MapView_Fill" (shared, generic)
+            // Two layers sharing one material — the entity name must come from the per-layer id, not the mat.
+            var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" });
+            try
+            {
+                var tid = new TileId(0, 0, 0);
+                double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
+                int hWater = r.AddTileLayer(mesh, o, 0, tid);
+                int hRoad  = r.AddTileLayer(mesh, o, 1, tid);
+
+                Assert.AreEqual("water", r.GetLayerEntityName(hWater),
+                    "Layer entity must be named after its style layer id, not the shared material name.");
+                Assert.AreEqual("road-primary", r.GetLayerEntityName(hRoad),
+                    "Two layers sharing a material must still get distinct, layer-specific names.");
+                Assert.AreNotEqual(mat.name, r.GetLayerEntityName(hWater),
+                    "Regression: the entity must NOT fall back to the material name when an id is supplied.");
+            }
+            finally { r.Dispose(); }
+        }
+
+        [Test]
+        public void AddTileLayer_FallsBackToMaterialName_WhenNoLayerNames()
+        {
+            var (mesh, mat) = FixtureFill();
+            var r = new EntitiesTileRenderer(new[] { mat });   // no names supplied
+            try
+            {
+                var tid = new TileId(0, 0, 0);
+                double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
+                int h = r.AddTileLayer(mesh, o, 0, tid);
+                Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
+                    "With no layer names, the entity name falls back to the material name (back-compat).");
+            }
+            finally { r.Dispose(); }
+        }
+
         // ── Floating-origin rebase (GPU-independent) — same formula as the BRG backend ──────────
 
         [Test]

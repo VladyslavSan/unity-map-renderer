@@ -93,12 +93,12 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
                 // Pump to settle all tiles.
-                for (int f = 0; f < 500 && !(view.LoadedTileCount > 0 && view.AllTilesSettled()); f++)
+                for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.Tick();
                     Thread.Sleep(1);
                 }
-                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount > 0,
+                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "live loop must load + build the tile cover");
 
                 // Frame the camera on the render-space bounds of the loaded tiles (backend-agnostic;
@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.Visual
                 snap.Render(camera);
                 string pngPath = snap.WritePng("mapview-live-cover.png");
                 Assert.IsTrue(File.Exists(pngPath), $"PNG must exist: {pngPath}");
-                Debug.Log($"[MapViewSnapshot] wrote {pngPath}, tiles={view.LoadedTileCount}");
+                Debug.Log($"[MapViewSnapshot] wrote {pngPath}, tiles={view.LoadedTileCount()}");
 
                 if (snap.IsAllBlack())
                 {

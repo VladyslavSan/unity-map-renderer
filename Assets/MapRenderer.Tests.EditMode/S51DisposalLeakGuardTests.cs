@@ -100,7 +100,7 @@ namespace MapRenderer.Tests
             for (int f = 0; f < maxFrames; f++)
             {
                 view.Tick();
-                if (view.LoadedTileCount > 0 && view.AllTilesSettled())
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
             }
@@ -145,7 +145,7 @@ namespace MapRenderer.Tests
             // Drive load: fetch → tessellate → consume (creates Mesh + GameObject).
             PumpUntilSettled(view);
             Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing leak guard.");
-            Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+            Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                 "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
             // Record how many Meshes were created during the load.
@@ -194,7 +194,7 @@ namespace MapRenderer.Tests
         /// mid-flight state deterministically. Phase-1 (fetch→kick) still runs, but Phase-2 (consume)
         /// is gated by MaxBuildsPerTick, so the tessellation task is in-flight when the tile is evicted.
         /// After the eviction Tick, MaxBuildsPerTick is restored so the new cover can settle normally.
-        /// The test asserts view.ReleasedMidFlightCount > 0 to prove the race genuinely occurred
+        /// The test asserts view.ReleasedMidFlightCount() > 0 to prove the race genuinely occurred
         /// (i.e., at least one tile had HasTessellationTask && !Built when released).
         /// </summary>
         [Test]
@@ -234,7 +234,7 @@ namespace MapRenderer.Tests
                 // This is the decisive assertion that separates "race exercised" from "vacuous pass".
                 // ReleasedMidFlightCount is incremented in ReleaseTile when HasTessellationTask &&
                 // !Built — meaning the tessellation was in-flight at the moment of release.
-                Assert.Greater(view.ReleasedMidFlightCount, 0,
+                Assert.Greater(view.ReleasedMidFlightCount(), 0,
                     "Positive control: at least one tile must have been released while its tessellation " +
                     "was still in-flight (HasTessellationTask && !Built at the time of ReleaseTile). " +
                     "If this is 0, the race did not occur — MaxBuildsPerTick=0 did not prevent consumption, " +
@@ -266,7 +266,7 @@ namespace MapRenderer.Tests
                 // After full teardown: mesh count must return to baseline.
                 Assert.LessOrEqual(meshAfterDestroy, meshBefore,
                     $"Orphaned Meshes after mid-flight release race + MapView.OnDestroy. " +
-                    $"Baseline: {meshBefore}, Released mid-flight: {view.ReleasedMidFlightCount}, " +
+                    $"Baseline: {meshBefore}, Released mid-flight: {view.ReleasedMidFlightCount()}, " +
                     $"After settle: {meshAfterSettle}, After destroy: {meshAfterDestroy}. " +
                     "ReleaseTile must remove evicted tiles from _loaded so PumpPendingBuilds excludes them " +
                     "from the next iteration snapshot — ConsumeTessellationTask must never be called for " +
@@ -377,7 +377,7 @@ namespace MapRenderer.Tests
                 view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
 
                 // Positive control: at least one tile must have been released mid-flight.
-                Assert.Greater(view.ReleasedMidFlightCount, 0,
+                Assert.Greater(view.ReleasedMidFlightCount(), 0,
                     "Positive control: at least one tile must have been released while its tessellation " +
                     "was still in-flight. If this is 0, the race did not occur and the NativeArray balance " +
                     "assertion would be vacuously true.");
@@ -471,7 +471,7 @@ namespace MapRenderer.Tests
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing NativeArray balance.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
                 // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
@@ -534,7 +534,7 @@ namespace MapRenderer.Tests
                 view.DrainTessellation();
                 Assert.IsTrue(view.AllTilesSettled(),
                     "DrainTessellation must settle all tiles (tooth 5c positive control).");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0), out _),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
                     "z0/0/0 tile must be built by DrainTessellation (real load required).");
 
                 int meshAfterLoad = CountMeshObjects();

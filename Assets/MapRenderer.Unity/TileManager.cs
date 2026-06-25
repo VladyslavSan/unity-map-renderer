@@ -31,10 +31,9 @@ namespace MapRenderer.Unity
     /// The <see cref="StyledLayerSet"/> (render bundles) is stable for the object's life, so it's injected
     /// at construction.</para>
     ///
-    /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as an
-    /// instanced draw item via the selected <see cref="IInstancedTileBackend"/> (BRG or Entities). The
-    /// original per-layer GameObject backend was retired in S53c — there is no longer a non-instanced
-    /// path.</para>
+    /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as a
+    /// draw item via the selected <see cref="ITileRenderBackend"/> (Entities, BRG, or GameObject). The
+    /// backend is uniform behind that interface — TileManager has no per-backend branching.</para>
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -113,8 +112,8 @@ namespace MapRenderer.Unity
             /// </summary>
             public Mesh[]                    Meshes;
             /// <summary>
-            /// Instanced-backend draw-item handles for each tile-layer mesh registered with the
-            /// <see cref="IInstancedTileBackend"/> (BRG or Entities). Set by ConsumeTessellationTask;
+            /// Backend draw-item handles for each tile-layer mesh registered with the
+            /// <see cref="ITileRenderBackend"/> (Entities, BRG, or GameObject). Set by ConsumeTessellationTask;
             /// used by ReleaseTile to unregister the draw items.
             /// </summary>
             public int[]                     DrawHandles;
@@ -128,8 +127,8 @@ namespace MapRenderer.Unity
         private IDataSource     _source;
         private bool            _ownsSource;
 
-        // ── Instanced render backend (BRG or Entities) — constructed in Initialise ────────────
-        private IInstancedTileBackend _instanced; // null only before Initialise / after Dispose
+        // ── Tile render backend (Entities, BRG, or GameObject) — constructed in Initialise ────
+        private ITileRenderBackend _instanced; // null only before Initialise / after Dispose
 
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId>                   _cover     = new List<TileId>(64);
@@ -172,9 +171,9 @@ namespace MapRenderer.Unity
         /// Creates the scheduler over <paramref name="source"/> and resets selection state. If
         /// <paramref name="ownsSource"/> is true, <see cref="Dispose"/> disposes the source.
         ///
-        /// Constructs the instanced backend for <paramref name="backend"/>: a <see cref="BrgTileRenderer"/>
-        /// (Brg) or an <see cref="EntitiesTileRenderer"/> (Entities, the default), both built from the
-        /// styled layer set passed at construction.
+        /// Constructs the tile render backend for <paramref name="backend"/>: a <see cref="BrgTileRenderer"/>
+        /// (Brg), a <see cref="GameObjectTileRenderer"/> (GameObject), or an <see cref="EntitiesTileRenderer"/>
+        /// (Entities, the default), all built from the styled layer set passed at construction.
         /// </summary>
         public void Initialise(IDataSource source, bool ownsSource,
             RenderBackend backend = RenderBackend.Entities)
@@ -186,18 +185,19 @@ namespace MapRenderer.Unity
             _coverDirty          = true;
             _coverKeyInitialised = false;
 
-            // Construct the instanced backend (built from the styled layer set passed at construction).
+            // Construct the backend (built from the styled layer set passed at construction).
             // The default arm is Entities so any unknown/legacy serialized value resolves safely.
             _instanced?.Dispose(); // dispose any prior backend (e.g. re-initialise after teardown)
             _instanced = backend switch
             {
-                RenderBackend.Brg => new BrgTileRenderer(_layers),
-                _                 => new EntitiesTileRenderer(FlattenLayerMaterials(_layers)),
+                RenderBackend.Brg        => new BrgTileRenderer(_layers),
+                RenderBackend.GameObject => new GameObjectTileRenderer(FlattenLayerMaterials(_layers), FlattenLayerNames(_layers)),
+                _                        => new EntitiesTileRenderer(FlattenLayerMaterials(_layers), FlattenLayerNames(_layers)),
             };
         }
 
         /// <summary>Flattens the styled layer set's materials (fills in declared order, then lines) — the
-        /// material list both instanced backends index by <c>materialIndex</c>.</summary>
+        /// material list every backend indexes by <c>materialIndex</c>.</summary>
         private static System.Collections.Generic.List<Material> FlattenLayerMaterials(StyledLayerSet layers)
         {
             var mats = new System.Collections.Generic.List<Material>(layers.FillCount + layers.LineCount);
@@ -206,33 +206,45 @@ namespace MapRenderer.Unity
             return mats;
         }
 
+        /// <summary>Flattens the per-layer style ids in the same (fills then lines) order as
+        /// <see cref="FlattenLayerMaterials"/>, so the Entities backend can name each layer entity after its
+        /// style layer (e.g. "water") in the Entities Hierarchy instead of the shared material name.</summary>
+        private static System.Collections.Generic.List<string> FlattenLayerNames(StyledLayerSet layers)
+        {
+            var names = new System.Collections.Generic.List<string>(layers.FillCount + layers.LineCount);
+            for (int i = 0; i < layers.FillCount; i++) names.Add(layers.Fills[i].StyleLayer?.Id);
+            for (int i = 0; i < layers.LineCount; i++) names.Add(layers.Lines[i].StyleLayer?.Id);
+            return names;
+        }
+
         /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
         public bool IsInitialised => _scheduler != null;
 
-        /// <summary>The scheduler's in-flight fetch count. Exposed for tests.</summary>
-        public int InFlightCount => _scheduler != null ? _scheduler.InFlightCount : 0;
+        // ── Test observability (internal; surfaced to tests through MapViewTestExtensions, not the
+        //    production API). TileManager is already an internal type, so these stay close to the state
+        //    they read; MapView no longer mirrors them. ───────────────────────────────────────────────
 
-        /// <summary>Number of currently loaded (or loading) tiles. Exposed for tests.</summary>
-        public int LoadedTileCount => _loaded.Count;
+        /// <summary>The scheduler's in-flight fetch count.</summary>
+        internal int InFlightCount => _scheduler != null ? _scheduler.InFlightCount : 0;
+
+        /// <summary>Number of currently loaded (or loading) tiles.</summary>
+        internal int LoadedTileCount => _loaded.Count;
 
         /// <summary>
         /// Number of tiles released while their tessellation was still in-flight (HasTessellationTask
-        /// and not yet Built at the moment of release). Incremented by ReleaseTile. Exposed for tests
-        /// to prove the mid-flight race actually occurred in <see cref="S51DisposalLeakGuardTests"/>.
+        /// and not yet Built at the moment of release). Incremented by ReleaseTile. Read by tests
+        /// to prove the mid-flight race actually occurred in <c>S51DisposalLeakGuardTests</c>.
         /// </summary>
-        public int ReleasedMidFlightCount => _releasedMidFlightCount;
+        internal int ReleasedMidFlightCount => _releasedMidFlightCount;
 
-        /// <summary>
-        /// S49 test observability: the live BRG renderer. Null when not on the BRG backend or before
-        /// <see cref="Initialise"/>. Exposed so tests can read instance buffer state without GPU readback.
-        /// </summary>
+        /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="Initialise"/>.</summary>
         internal BrgTileRenderer BrgRenderer => _instanced as BrgTileRenderer;
 
-        /// <summary>
-        /// S53b test observability: the live Entities-Graphics renderer. Null when not on the Entities
-        /// backend or before <see cref="Initialise"/>.
-        /// </summary>
+        /// <summary>The live Entities-Graphics renderer, or null when not on the Entities backend / before <see cref="Initialise"/>.</summary>
         internal EntitiesTileRenderer EntitiesRenderer => _instanced as EntitiesTileRenderer;
+
+        /// <summary>The live GameObject renderer, or null when not on the GameObject backend / before <see cref="Initialise"/>.</summary>
+        internal GameObjectTileRenderer GameObjectRenderer => _instanced as GameObjectTileRenderer;
 
         /// <summary>
         /// Invalidates the cached cover-selection key so the next <see cref="Tick"/> re-selects the cover.
@@ -251,25 +263,12 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Test-only: returns true and the built tile's container GameObject when the tile is loaded
-        /// AND its mesh has been produced.
-        ///
-        /// Backend-agnostic: the instanced backends create no GameObjects, so <paramref name="go"/> is
-        /// always null; the tile counts as built when lt.Built == true AND it produced geometry
-        /// (lt.DrawHandles != null OR lt.Meshes != null). The <c>out</c> parameter is retained for
-        /// source-compatibility with existing test callers.
+        /// Test-only: true when the tile is loaded AND produced geometry — <c>lt.Built</c> and either draw
+        /// handles were registered with the backend or meshes were tracked. Backend-agnostic: TileManager
+        /// tracks no per-tile GameObject, so there is nothing to hand back but the boolean.
         /// </summary>
-        public bool TryGetBuiltTile(TileId id, out GameObject go)
-        {
-            go = null;
-            if (_loaded.TryGetValue(id, out var lt) && lt.Built)
-            {
-                // Geometry was produced (handles registered with the backend, or meshes tracked).
-                if (lt.DrawHandles != null || lt.Meshes != null)
-                    return true;
-            }
-            return false;
-        }
+        internal bool TryGetBuiltTile(TileId id)
+            => _loaded.TryGetValue(id, out var lt) && lt.Built && (lt.DrawHandles != null || lt.Meshes != null);
 
         /// <summary>
         /// Test-only, backend-agnostic: the <see cref="Mesh"/> assets built for a loaded tile (one per
@@ -289,7 +288,7 @@ namespace MapRenderer.Unity
         /// Test-only: true once every loaded tile has finished building (or is definitively absent).
         /// S47/S51: returns false while any tile has a pending tessellation.
         /// </summary>
-        public bool AllTilesSettled()
+        internal bool AllTilesSettled()
         {
             foreach (var kv in _loaded)
                 if (!kv.Value.Built) return false;
@@ -392,7 +391,7 @@ namespace MapRenderer.Unity
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
         /// </summary>
-        public void DrainTessellation(CameraProperties cam)
+        internal void DrainTessellation(CameraProperties cam)
         {
             // Collect all unsettled tiles.
             var unsettled = new List<TileId>(8);
@@ -641,8 +640,8 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Consumes a completed tessellation: uploads each layer's mesh and registers it as an instanced
-        /// draw item with the backend (BRG or Entities). No GameObjects.
+        /// Consumes a completed tessellation: uploads each layer's mesh and registers it as a draw item
+        /// with the selected backend (Entities, BRG, or GameObject).
         /// Must be called on the Unity main thread. Called only when TessellationTask.IsCompleted.
         ///
         /// S51: reads UniTaskStatus.Succeeded (was TaskStatus.RanToCompletion).
@@ -683,12 +682,12 @@ namespace MapRenderer.Unity
                 // (Unity does not free a Mesh asset just because nothing references it).
                 var createdMeshes = new System.Collections.Generic.List<Mesh>(8);
 
-                // Instanced-backend draw-item handles (one per tile-layer mesh).
+                // Backend draw-item handles (one per tile-layer mesh).
                 var drawHandles = new System.Collections.Generic.List<int>(8);
 
-                // Register each tile-layer mesh with the instanced backend (BRG or Entities). No
-                // GameObjects. Material index = fill index, then FillCount + line index (matching the
-                // flattened layer-material order both backends index by).
+                // Register each tile-layer mesh with the selected backend (Entities, BRG, or GameObject).
+                // Material index = fill index, then FillCount + line index (matching the flattened
+                // layer-material order every backend indexes by).
 
                 // ── Fill layers ───────────────────────────────────────────
                 if (result.LayerData != null)

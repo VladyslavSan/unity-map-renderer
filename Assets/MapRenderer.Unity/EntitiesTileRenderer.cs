@@ -46,7 +46,7 @@ namespace MapRenderer.Unity
     /// Clean-room: design follows the Entities Graphics runtime-entity-creation documentation and the
     /// existing BRG backend's tile-origin math (<see cref="FloatingOrigin.TileLocalToScene"/>).
     /// </summary>
-    internal sealed class EntitiesTileRenderer : IInstancedTileBackend
+    internal sealed class EntitiesTileRenderer : ITileRenderBackend
     {
         // One draw item = one layer entity (a child of its tile's root entity).
         private struct ItemRec
@@ -66,6 +66,10 @@ namespace MapRenderer.Unity
         }
 
         private readonly List<Material>             _layerMaterials = new List<Material>();
+        // Per-layer style id (e.g. "water", "road-primary"), parallel to _layerMaterials. Editor-only debug
+        // aid: it names each layer entity after its style layer in the Entities Hierarchy (matching the old
+        // GameObject backend) instead of the shared material name ("MapView_Fill"). Empty ⇒ fall back to name.
+        private readonly List<string>               _layerNames     = new List<string>();
         private readonly Dictionary<int, ItemRec>   _items          = new Dictionary<int, ItemRec>();
         private readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
 
@@ -104,10 +108,16 @@ namespace MapRenderer.Unity
         private double2 _lastSceneOrigin;
         private bool    _hasSceneOrigin;
 
-        public EntitiesTileRenderer(IReadOnlyList<Material> layerMaterials)
+        /// <param name="layerNames">
+        /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
+        /// layer entities in the Editor's Entities Hierarchy. When null/short, the material name is used.
+        /// </param>
+        public EntitiesTileRenderer(IReadOnlyList<Material> layerMaterials, IReadOnlyList<string> layerNames = null)
         {
             if (layerMaterials == null) throw new ArgumentNullException(nameof(layerMaterials));
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
+            if (layerNames != null)
+                for (int i = 0; i < layerNames.Count; i++) _layerNames.Add(layerNames[i]);
 
             _world           = DefaultWorldInitialization.Initialize("MapEntitiesWorld", editorWorld: false);
             _prevDefaultWorld = World.DefaultGameObjectInjectionWorld;
@@ -157,6 +167,10 @@ namespace MapRenderer.Unity
         /// <summary>Editor-only: the debug name assigned to the tile root, e.g. <c>"Tile 14/8192/5461"</c>.</summary>
         public string GetTileRootName(TileId tileId)
             => _tileRoots.TryGetValue(tileId, out var r) && _em.Exists(r.Root) ? _em.GetName(r.Root) : null;
+
+        /// <summary>Editor-only: the debug name assigned to a layer entity — its style layer id (e.g. "water").</summary>
+        public string GetLayerEntityName(int handle)
+            => _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity) ? _em.GetName(rec.Entity) : null;
 #endif
 
         /// <summary>True once <see cref="Dispose"/> has run.</summary>
@@ -304,7 +318,13 @@ namespace MapRenderer.Unity
                     Value = new AABB { Center = float3.zero, Extents = new float3(1e6f) }
                 });
 #if UNITY_EDITOR
-            _em.SetName(e, ToEntityName(mat.name));
+            // Name the entity after its style layer ("water", "road-primary", …) so the Entities Hierarchy
+            // reads like the old GameObject backend; fall back to the (shared) material name if unavailable.
+            string layerName = (uint)materialIndex < (uint)_layerNames.Count
+                && !string.IsNullOrEmpty(_layerNames[materialIndex])
+                    ? _layerNames[materialIndex]
+                    : mat.name;
+            _em.SetName(e, ToEntityName(layerName));
 #endif
             }
 

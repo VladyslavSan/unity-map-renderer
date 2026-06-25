@@ -62,7 +62,7 @@ namespace MapRenderer.Unity
     ///
     /// Clean-room: design follows the MapLibre Style Spec and Unity BRG documentation.
     /// </summary>
-    internal sealed class BrgTileRenderer : IInstancedTileBackend
+    internal sealed class BrgTileRenderer : ITileRenderBackend
     {
         // ── Per-instance property counts (number of floats per property per instance) ─────────
         // These are stride multipliers used when packing the SoA CPU buffer.
@@ -163,6 +163,10 @@ namespace MapRenderer.Unity
         // from _items — no allocations in steady state.
         private readonly List<(int renderQueue, int handle)> _sortedItems
             = new List<(int, int)>(64);
+
+        // Reusable scratch holding the compacted emit order (indices into _sortedItems that are still live
+        // in _items) for OnPerformCulling. Grown on demand, reused each cull → no per-frame managed alloc.
+        private readonly List<int> _emitScratch = new List<int>(64);
 
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
         private float[] _cpuBuffer = Array.Empty<float>();
@@ -290,7 +294,7 @@ namespace MapRenderer.Unity
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
         /// <paramref name="materialIndex"/> indexes into the material list built at construction
         /// (fills in declared order, then lines in declared order). <paramref name="tileId"/> is part of
-        /// the shared <see cref="IInstancedTileBackend"/> contract for the Entities backend's per-tile
+        /// the shared <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile
         /// hierarchy; BRG draws a flat instance buffer and does not use it.
         /// </summary>
         public int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex, TileId tileId)
@@ -613,35 +617,41 @@ namespace MapRenderer.Unity
             // Track invocations so tests can confirm this path is driven by the render loop.
             Interlocked.Increment(ref CullingCallCount);
 
-            int count = _sortedItems.Count;
-            if (count == 0 || !_batchRegistered) return default;
+            // Compacted emit order: the sorted-item slots whose handle is still live in _items. Handles
+            // removed by RemoveItem since the last Rebuild (tile eviction during zoom) are filtered out
+            // here, so they get NO draw command. This is load-bearing: UnsafeUtility.Malloc does NOT zero
+            // memory, so emitting one command per _sortedItems slot and skipping stale ones in place would
+            // leave uninitialized garbage BatchDrawCommands (invalid batch/mesh/material id) — the source
+            // of the "MeshID <null>" BRG error seen while zooming.
+            int emitted = ComputeEmitOrder(_emitScratch);
+            if (emitted == 0 || !_batchRegistered) return default;
 
             // cullingOutput.drawCommands is a NativeArray<BatchCullingOutputDrawCommands> (length 1).
             var drawCommandsPtr = (BatchCullingOutputDrawCommands*)cullingOutput.drawCommands.GetUnsafePtr();
 
-            // One draw range covering all commands.
+            // Allocate EXACTLY the compacted count — never _sortedItems.Count.
             drawCommandsPtr->drawRangeCount = 1;
             drawCommandsPtr->drawRanges = (BatchDrawRange*)UnsafeUtility.Malloc(
                 sizeof(BatchDrawRange) * 1,
                 UnsafeUtility.AlignOf<BatchDrawRange>(),
                 Allocator.TempJob);
 
-            drawCommandsPtr->drawCommandCount = count;
+            drawCommandsPtr->drawCommandCount = emitted;
             drawCommandsPtr->drawCommands = (BatchDrawCommand*)UnsafeUtility.Malloc(
-                (long)sizeof(BatchDrawCommand) * count,
+                (long)sizeof(BatchDrawCommand) * emitted,
                 UnsafeUtility.AlignOf<BatchDrawCommand>(),
                 Allocator.TempJob);
 
-            drawCommandsPtr->visibleInstanceCount = count;
+            drawCommandsPtr->visibleInstanceCount = emitted;
             drawCommandsPtr->visibleInstances = (int*)UnsafeUtility.Malloc(
-                (long)sizeof(int) * count,
+                (long)sizeof(int) * emitted,
                 UnsafeUtility.AlignOf<int>(),
                 Allocator.TempJob);
 
             drawCommandsPtr->drawRanges[0] = new BatchDrawRange
             {
                 drawCommandsBegin = 0,
-                drawCommandsCount = (uint)count,
+                drawCommandsCount = (uint)emitted,
                 filterSettings    = new BatchFilterSettings
                 {
                     renderingLayerMask = 0xFFFFFFFF,
@@ -654,17 +664,18 @@ namespace MapRenderer.Unity
                 },
             };
 
-            // Emit draw commands in ascending renderQueue (painter's algorithm order).
-            for (int i = 0; i < count; i++)
+            // Fill exactly `emitted` contiguous commands — no holes, by construction. _emitScratch[e] is
+            // the packed instance-buffer slot (Rebuild packed instance i at sorted index i).
+            for (int e = 0; e < emitted; e++)
             {
-                int handle = _sortedItems[i].handle;
-                if (!_items.TryGetValue(handle, out var item)) continue;
+                int i = _emitScratch[e];
+                var item = _items[_sortedItems[i].handle];
 
-                drawCommandsPtr->visibleInstances[i] = i;
+                drawCommandsPtr->visibleInstances[e] = i;
 
-                drawCommandsPtr->drawCommands[i] = new BatchDrawCommand
+                drawCommandsPtr->drawCommands[e] = new BatchDrawCommand
                 {
-                    visibleOffset       = (uint)i,
+                    visibleOffset       = (uint)e,
                     visibleCount        = 1,
                     batchID             = _batchId,
                     materialID          = item.MatId,
@@ -677,6 +688,29 @@ namespace MapRenderer.Unity
             }
 
             return default;
+        }
+
+        /// <summary>
+        /// Builds the compacted draw-command emit order into <paramref name="dst"/>: for each entry in
+        /// <see cref="_sortedItems"/> (ascending renderQueue) whose handle is still live in
+        /// <see cref="_items"/>, appends that entry's index (the packed instance-buffer slot). Handles
+        /// removed by <see cref="RemoveItem"/> since the last <see cref="Rebuild"/> — e.g. tiles evicted
+        /// while zooming, before <c>_sortedItems</c> is rebuilt — are filtered out, so no draw command is
+        /// emitted for a stale slot (which would otherwise be uninitialized garbage: the BRG
+        /// "MeshID &lt;null&gt;" error). Returns the number of live items.
+        ///
+        /// Internal for white-box testing of the eviction/compaction invariant. Allocation-free in steady
+        /// state (reuses <paramref name="dst"/>).
+        /// </summary>
+        internal int ComputeEmitOrder(List<int> dst)
+        {
+            dst.Clear();
+            for (int i = 0; i < _sortedItems.Count; i++)
+            {
+                if (_items.ContainsKey(_sortedItems[i].handle))
+                    dst.Add(i);
+            }
+            return dst.Count;
         }
 
         // ── Dispose ───────────────────────────────────────────────────────────────────────────
