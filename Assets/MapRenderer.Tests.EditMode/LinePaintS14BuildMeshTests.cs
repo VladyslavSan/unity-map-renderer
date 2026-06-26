@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
@@ -81,7 +81,7 @@ namespace MapRenderer.Tests
         }
 
         // Shared build parameters (tile 0/0/0, merc origin=(0,0)).
-        private static readonly TileId TestTileId = new TileId(0, 0, 0);
+        private static readonly TileId TestTileId = new TileId { Z = 0, X = 0, Y = 0 };
         private static readonly double2 TestOriginMerc = new double2(0.0, 0.0);
         private const double TestExtent = 4096.0;
         private const double TestZoom   = 0.0;

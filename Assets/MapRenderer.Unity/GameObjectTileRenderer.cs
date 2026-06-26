@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.View;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity
 {

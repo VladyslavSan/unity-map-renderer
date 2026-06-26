@@ -1,4 +1,5 @@
-using System;
+using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.View
@@ -24,8 +25,7 @@ namespace MapRenderer.Core.View
     /// </summary>
     public static class ViewInput
     {
-        /// <summary>Web-Mercator world circumference in tile pixels at zoom z is 256·2^z (256-px tiles).</summary>
-        public const double TilePixelSize = 256.0;
+        // NOTE: TilePixelSize has been removed (S62). Use WebMercator.TilePixelSize directly.
 
         /// <summary>
         /// Applies a scroll delta to the camera's zoom. <paramref name="scrollDelta"/> is the raw scroll
@@ -47,28 +47,28 @@ namespace MapRenderer.Core.View
         /// with the cursor: dragging right (positive <paramref name="dxPixels"/>) shifts the center west.
         /// The pixel→degree conversion uses the ground resolution at the current zoom and latitude.
         /// </summary>
-        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Lon"/> and
-        ///   <see cref="CameraPropertiesUpdate.Lat"/>.</returns>
+        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Longitude"/> and
+        ///   <see cref="CameraPropertiesUpdate.Latitude"/>.</returns>
         public static CameraPropertiesUpdate ApplyPan(CameraProperties current, double dxPixels, double dyPixels)
         {
-            double n = Math.Pow(2.0, current.Zoom);
-            double worldPixels = TilePixelSize * n;          // pixels spanning 360° of longitude
+            double n = math.pow(2.0, current.Zoom);
+            double worldPixels = WebMercator.TilePixelSize * n;   // pixels spanning 360° of longitude
             double degPerPixelLon = 360.0 / worldPixels;
 
             // Latitude degrees-per-pixel shrinks toward the poles (Mercator). Use the local cos(lat)
             // factor so vertical drags track the cursor at the current latitude.
-            double curLat = current.LookAt.Lat;
+            double curLat = current.LookAt.Latitude;
             double latRad = Clamp(curLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat)
-                            * Math.PI / 180.0;
-            double degPerPixelLat = degPerPixelLon * Math.Cos(latRad);
+                            * math.PI_DBL / 180.0;
+            double degPerPixelLat = degPerPixelLon * math.cos(latRad);
 
             // Drag-right (dx>0) → center moves west (−lon). Drag-down (screen dy>0) → center moves north.
-            double newLon = current.LookAt.Lon - dxPixels * degPerPixelLon;
+            double newLon = current.LookAt.Longitude - dxPixels * degPerPixelLon;
             double newLat = curLat + dyPixels * degPerPixelLat;
 
             newLon = WrapLon(newLon);
             newLat = Clamp(newLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat);
-            return new CameraPropertiesUpdate { Lon = newLon, Lat = newLat };
+            return new CameraPropertiesUpdate { Longitude = newLon, Latitude = newLat };
         }
 
         /// <summary>

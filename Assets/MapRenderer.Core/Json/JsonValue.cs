@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Globalization;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Json
 {
@@ -66,7 +67,7 @@ namespace MapRenderer.Core.Json
         public double AsDouble(double fallback = 0.0) => Kind == JsonKind.Number ? _number : fallback;
 
         public int AsInt(int fallback = 0)
-            => Kind == JsonKind.Number ? (int)System.Math.Round(_number) : fallback;
+            => Kind == JsonKind.Number ? (int)math.round(_number) : fallback;
 
         public string AsString(string fallback = null)
             => Kind == JsonKind.String ? _string : fallback;

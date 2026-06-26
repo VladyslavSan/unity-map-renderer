@@ -18,7 +18,7 @@ namespace MapRenderer.Jobs
     ///   - Triangle indices are local (0..polyMergedVertCount-1) within each polygon.
     ///   - A global flat vertex array and globally-offset index array are accumulated on the main
     ///     thread after all earcut jobs complete.
-    ///   - ProjectTileVerticesJob projects the merged polygon vertices to world space.
+    ///   - ProjectTileToWebMercatorJob projects the merged polygon vertices to world space.
     ///
     /// This gives bit-identical output to the managed path (integer tile-space coords are exact;
     /// same earcut algorithm produces same indices).
@@ -450,7 +450,7 @@ namespace MapRenderer.Jobs
             // ── Stage 4: project merged vertices to world space. ──────────────────────────────────
             {
                 using var sPipelineProject = PmPipelineProject.Auto();
-                new ProjectTileVerticesJob
+                new ProjectTileToWebMercatorJob
                 {
                     TileZ          = input.TileZ,
                     TileX          = input.TileX,

@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
@@ -84,9 +84,9 @@ namespace MapRenderer.Unity
         // matching LineWidthColor struct field order { Vector4 Color; float WidthScale }.
         private static readonly VertexAttributeDescriptor[] LineVertexDescriptors = new[]
         {
-            new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 3),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 1, stream: 3),
@@ -94,6 +94,7 @@ namespace MapRenderer.Unity
 
         // Constant +Y normal for all line vertices.
         private static readonly Vector3 UpNormal = Vector3.up;
+
         // White vertex color = identity multiply.
         private static readonly Vector4 WhiteColor = new Vector4(1f, 1f, 1f, 1f);
 
@@ -112,17 +113,22 @@ namespace MapRenderer.Unity
         {
             // Stream 0: Position + Normal interleaved.
             public NativeArray<LinePositionNormal> Stream0PositionNormal;
+
             // Stream 1: extrusion normal.
             public NativeArray<Vector2> Stream1ExtrudeN;
+
             // Stream 2: side + distanceAlong.
             public NativeArray<Vector2> Stream2SideAndDist;
+
             // Stream 3: widthScale + color interleaved.
             public NativeArray<LineWidthColor> Stream3WidthColor;
+
             // Index buffer.
             public NativeArray<int> Indices;
 
             /// <summary>Vertex count. Zero when no geometry was produced.</summary>
             public int VertexCount;
+
             /// <summary>Index count. Zero when no geometry was produced.</summary>
             public int IndexCount;
 
@@ -143,10 +149,10 @@ namespace MapRenderer.Unity
                 if (!IsCreated) return;
                 IsCreated = false;
                 if (Stream0PositionNormal.IsCreated) Stream0PositionNormal.Dispose();
-                if (Stream1ExtrudeN.IsCreated)       Stream1ExtrudeN.Dispose();
-                if (Stream2SideAndDist.IsCreated)    Stream2SideAndDist.Dispose();
-                if (Stream3WidthColor.IsCreated)     Stream3WidthColor.Dispose();
-                if (Indices.IsCreated)               Indices.Dispose();
+                if (Stream1ExtrudeN.IsCreated) Stream1ExtrudeN.Dispose();
+                if (Stream2SideAndDist.IsCreated) Stream2SideAndDist.Dispose();
+                if (Stream3WidthColor.IsCreated) Stream3WidthColor.Dispose();
+                if (Indices.IsCreated) Indices.Dispose();
                 Interlocked.Decrement(ref LiveAllocCount);
             }
         }
@@ -163,12 +169,12 @@ namespace MapRenderer.Unity
         /// </summary>
         public static LayerMeshData BuildMeshData(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            Line.PaintProperties paint,
-            Line.LayoutProperties layout,
-            double zoom,
-            double extent,
-            TileId id,
-            double2 tileOriginMerc)
+            Line.PaintProperties      paint,
+            Line.LayoutProperties     layout,
+            double                    zoom,
+            double                    extent,
+            TileId                    id,
+            double2                   tileOriginMerc)
         {
             var empty = new LayerMeshData();
 
@@ -195,14 +201,14 @@ namespace MapRenderer.Unity
                 // Color space: Core Color is sRGB [0,1]; convert to linear here (off-main-thread).
                 // _BaseColor=white on the material → identity multiply (D1 / fills convention).
                 Vector4 featureColor = WhiteColor;
-                var adapter = new MvtFeatureAdapter(feature);
+                var     adapter      = new MvtFeatureAdapter(feature);
                 // S60: Color is now StyleProperty<CoreColor>; use TryEvaluate bake path.
                 if (paint.Color.TryEvaluate(zoom, adapter, out CoreColor c))
                 {
                     // sRGB→linear: use UnityEngine.Color.linear via cast.
                     var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
                     var linear     = unityColor.linear;
-                    featureColor   = new Vector4(linear.r, linear.g, linear.b, linear.a);
+                    featureColor = new Vector4(linear.r, linear.g, linear.b, linear.a);
                 }
 
                 // S14 data-driven opacity: bake evaluated opacity into vertex alpha.
@@ -235,7 +241,7 @@ namespace MapRenderer.Unity
                     {
                         // widthVal is the evaluated width in pixels. Since _Width=1.0, WidthScale
                         // = v.WidthScale (tessellator miter factor) × widthVal gives final width.
-                        featureWidthScale = System.Math.Max(0f, widthVal);
+                        featureWidthScale = math.max(0f, widthVal);
                     }
                 }
 
@@ -313,6 +319,7 @@ namespace MapRenderer.Unity
                 payload.Stream2SideAndDist[i]    = tempVerts2[i];
                 payload.Stream3WidthColor[i]     = tempVerts3[i];
             }
+
             for (int i = 0; i < iCount; i++)
                 payload.Indices[i] = tempIndices[i];
 
@@ -338,14 +345,15 @@ namespace MapRenderer.Unity
 
             mesh.SetVertexBufferParams(data.VertexCount, LineVertexDescriptors);
             mesh.SetVertexBufferData(data.Stream0PositionNormal, 0, 0, data.VertexCount, stream: 0);
-            mesh.SetVertexBufferData(data.Stream1ExtrudeN,       0, 0, data.VertexCount, stream: 1);
-            mesh.SetVertexBufferData(data.Stream2SideAndDist,    0, 0, data.VertexCount, stream: 2);
-            mesh.SetVertexBufferData(data.Stream3WidthColor,     0, 0, data.VertexCount, stream: 3);
+            mesh.SetVertexBufferData(data.Stream1ExtrudeN, 0, 0, data.VertexCount, stream: 1);
+            mesh.SetVertexBufferData(data.Stream2SideAndDist, 0, 0, data.VertexCount, stream: 2);
+            mesh.SetVertexBufferData(data.Stream3WidthColor, 0, 0, data.VertexCount, stream: 3);
 
             // Skip main-thread index validation (trusted Burst tessellation indices); see
             // StyledFillTileBuilder.UploadMesh. DontRecalculateBounds just avoids a redundant intermediate
             // compute — canonical bounds come from RecalculateBounds() below.
-            const MeshUpdateFlags NoValidate = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
+            const MeshUpdateFlags NoValidate =
+                MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
             mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
             mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
 
@@ -367,16 +375,15 @@ namespace MapRenderer.Unity
         /// StyledFillTileBuilder.ProjectVerticesManaged — identical precision contract.
         /// </summary>
         private static List<double2> ProjectLineRing(
-            List<double2> ring, int z, int tileX, int tileY, double extent,
-            double originX, double originY)
+            List<double2> ring,    int    z, int tileX, int tileY, double extent,
+            double        originX, double originY)
         {
             if (ring == null || ring.Count < 2) return null;
 
-            const double R = 6378137.0; // Earth radius (Web Mercator / EPSG:3857)
-            const double TwoPi = 2.0 * System.Math.PI;
+            const double TwoPi = 2.0 * math.PI_DBL;
 
-            double pow2z = System.Math.Pow(2.0, z);
-            var result = new List<double2>(ring.Count);
+            double pow2z  = math.pow(2.0, z);
+            var    result = new List<double2>(ring.Count);
 
             foreach (var pt in ring)
             {
@@ -387,21 +394,23 @@ namespace MapRenderer.Unity
                 double u = (tileX + px / extent) / pow2z;
                 double v = (tileY + py / extent) / pow2z;
 
-                // Normalised → lon/lat (radians).
-                double lonRad = u * TwoPi - System.Math.PI;
-                double arg    = System.Math.PI * (1.0 - 2.0 * v);
-                double sinhArg = (System.Math.Exp(arg) - System.Math.Exp(-arg)) * 0.5;
-                double latRad  = System.Math.Atan(sinhArg);
+                // Normalised → lon/lat (radians then degrees for WebMercator.Forward).
+                double longitudeRad = u * TwoPi - math.PI_DBL;
+                double arg          = math.PI_DBL * (1.0 - 2.0 * v);
+                double sinhArg      = (math.exp(arg)     - math.exp(-arg)) * 0.5;
+                double latitudeRad  = math.atan(sinhArg);
 
-                // lon/lat → Web Mercator meters (spherical Mercator).
-                double mercX = R * lonRad;
-                double halfLat = latRad * 0.5;
-                double tanArg  = System.Math.Tan(System.Math.PI * 0.25 + halfLat);
-                double mercY   = R * System.Math.Log(tanArg);
+                double latitudeDeg  = latitudeRad  * (180.0 / math.PI_DBL);
+                double longitudeDeg = longitudeRad * (180.0 / math.PI_DBL);
+
+                // Delegate to the shared math module (single source of Mercator literal, T2).
+                double3 world = WebMercator.Forward(new GeoCoordinate3D
+                    { Longitude = longitudeDeg, Latitude = latitudeDeg, Altitude = 0.0 });
 
                 // Subtract scene origin in double (RTC precision), output double2 for LineTessellator.
-                result.Add(new double2(mercX - originX, mercY - originY));
+                result.Add(new double2(world.x - originX, world.z - originY));
             }
+
             return result;
         }
 

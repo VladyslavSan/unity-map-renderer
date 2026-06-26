@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.View;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity
 {
@@ -515,8 +515,8 @@ namespace MapRenderer.Unity
                 int prevCount = _instanceBuffer?.count ?? 0;
                 _instanceBuffer?.Release();
                 _instanceBuffer = null;
-                int newCount = Math.Max(floatsNeeded, prevCount * 2);
-                newCount = Math.Max(newCount, FloatsPerInstance); // at least one instance
+                int newCount = math.max(floatsNeeded, prevCount * 2);
+                newCount = math.max(newCount, FloatsPerInstance); // at least one instance
                 _instanceBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, newCount, sizeof(float));
                 bufferGrew = true;
             }

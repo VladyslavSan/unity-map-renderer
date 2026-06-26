@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Expressions
 {
@@ -53,19 +54,19 @@ namespace MapRenderer.Core.Expressions
         /// </summary>
         public string ToRgbaString()
         {
-            int r = (int)Math.Round(R * 255.0);
-            int g = (int)Math.Round(G * 255.0);
-            int b = (int)Math.Round(B * 255.0);
+            int r = (int)math.round(R * 255.0);
+            int g = (int)math.round(G * 255.0);
+            int b = (int)math.round(B * 255.0);
             return string.Format(CultureInfo.InvariantCulture, "rgba({0},{1},{2},{3})", r, g, b, A);
         }
 
         // ---- linear sRGB <-> sRGB (IEC 61966-2-1) -------------------------------------------------
 
         private static double SrgbToLinear(double c)
-            => c <= 0.04045 ? c / 12.92 : Math.Pow((c + 0.055) / 1.055, 2.4);
+            => c <= 0.04045 ? c / 12.92 : math.pow((c + 0.055) / 1.055, 2.4);
 
         private static double LinearToSrgb(double c)
-            => c <= 0.0031308 ? c * 12.92 : 1.055 * Math.Pow(c, 1.0 / 2.4) - 0.055;
+            => c <= 0.0031308 ? c * 12.92 : 1.055 * math.pow(c, 1.0 / 2.4) - 0.055;
 
         // ---- sRGB <-> CIE LAB (via linear RGB and XYZ, D65) ---------------------------------------
         // D65 reference white for sRGB.
@@ -75,7 +76,7 @@ namespace MapRenderer.Core.Expressions
         {
             const double delta = 6.0 / 29.0;
             return t > delta * delta * delta
-                ? Math.Cbrt(t)
+                ? math.pow(t, 1.0 / 3.0)   // S62: cbrt(t) → math.pow(t, 1/3) (same result for t>0)
                 : t / (3.0 * delta * delta) + 4.0 / 29.0;
         }
 
@@ -132,8 +133,8 @@ namespace MapRenderer.Core.Expressions
         public (double H, double C, double L, double Alpha) ToHcl()
         {
             var (l, a, b, alpha) = ToLab();
-            double c = Math.Sqrt(a * a + b * b);
-            double h = Math.Atan2(b, a) * 180.0 / Math.PI;
+            double c = math.sqrt(a * a + b * b);
+            double h = math.atan2(b, a) * 180.0 / math.PI_DBL;
             if (h < 0.0) h += 360.0;
             return (h, c, l, alpha);
         }
@@ -141,9 +142,9 @@ namespace MapRenderer.Core.Expressions
         /// <summary>Build a color from HCL (Hue degrees, Chroma, Luminance L*) and alpha.</summary>
         public static Color FromHcl(double h, double c, double l, double alpha)
         {
-            double rad = h * Math.PI / 180.0;
-            double a = Math.Cos(rad) * c;
-            double b = Math.Sin(rad) * c;
+            double rad = h * math.PI_DBL / 180.0;
+            double a = math.cos(rad) * c;
+            double b = math.sin(rad) * c;
             return FromLab(l, a, b, alpha);
         }
 

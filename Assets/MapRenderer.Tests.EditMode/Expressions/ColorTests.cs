@@ -95,5 +95,21 @@ namespace MapRenderer.Tests.Expressions
             Assert.AreEqual(255.0, rgba[0], 1e-9);
             Assert.AreEqual(0.0, rgba[1], 1e-9);
         }
+
+        [Test]
+        public void ToLab_MidGray_ExercisesCbrtBranch()
+        {
+            // Belt-and-suspenders for the Math.Cbrt -> math.pow(t, 1.0/3.0) migration in Color.cs.
+            // Mid-gray (128,128,128) has t = SrgbToLinear(128/255) ≈ 0.2158 >> delta^3 ≈ 0.00886,
+            // so the f(t) = t^(1/3) branch is always exercised.
+            // Expected values pinned from the pre-migration Math.Cbrt output: tolerance 1e-6 is
+            // far tighter than the sub-ULP (~1e-15) difference between Cbrt and pow(t,1/3).
+            var c = Color.From255(128.0, 128.0, 128.0, 1.0);
+            var (L, a, b, alpha) = c.ToLab();
+            Assert.AreEqual(1.0, alpha, 1e-9, "alpha must be preserved");
+            Assert.AreEqual(53.585015771669404, L, 1e-6, "L* for sRGB mid-gray (pre-migration pin)");
+            Assert.AreEqual(-9.997846439624425e-06, a, 1e-9, "a* for neutral gray (near 0)");
+            Assert.AreEqual(3.99913857584977e-06, b, 1e-9, "b* for neutral gray (near 0)");
+        }
     }
 }

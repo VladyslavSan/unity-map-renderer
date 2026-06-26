@@ -1,4 +1,5 @@
 using System;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Imaging
 {
@@ -155,7 +156,7 @@ namespace MapRenderer.Core.Imaging
                     if (r == 0 && g == 0 && b == 0) blackCount++;
 
                     // Background check.
-                    int dist = Math.Abs(r - bgR) + Math.Abs(g - bgG) + Math.Abs(b - bgB);
+                    int dist = math.abs(r - bgR) + math.abs(g - bgG) + math.abs(b - bgB);
                     bool isBg = dist <= Tolerance;
 
                     if (isBg)
@@ -166,8 +167,8 @@ namespace MapRenderer.Core.Imaging
                     {
                         fillCount++;
                         // Assign to grid bucket.
-                        int bx = Math.Min(x * GridN / width,  GridN - 1);
-                        int by = Math.Min(y * GridN / height, GridN - 1);
+                        int bx = math.min(x * GridN / width,  GridN - 1);
+                        int by = math.min(y * GridN / height, GridN - 1);
                         bucketFill[by * GridN + bx]++;
                     }
 
@@ -259,7 +260,7 @@ namespace MapRenderer.Core.Imaging
                 byte g    = pixels[b + 1];
                 byte bCh  = pixels[b + 2];
 
-                int dist = Math.Abs(r - bgR) + Math.Abs(g - bgG) + Math.Abs(bCh - bgB);
+                int dist = math.abs(r - bgR) + math.abs(g - bgG) + math.abs(bCh - bgB);
                 if (dist > Tolerance)
                 {
                     // Rec.709 luminance (linear approx — good enough for delta comparison).
@@ -391,10 +392,10 @@ namespace MapRenderer.Core.Imaging
         {
             if (x1 < x0) (x0, x1) = (x1, x0);
             if (y1 < y0) (y0, y1) = (y1, y0);
-            x0 = Math.Max(0, Math.Min(x0, width));
-            x1 = Math.Max(0, Math.Min(x1, width));
-            y0 = Math.Max(0, Math.Min(y0, height));
-            y1 = Math.Max(0, Math.Min(y1, height));
+            x0 = math.max(0, math.min(x0, width));
+            x1 = math.max(0, math.min(x1, width));
+            y0 = math.max(0, math.min(y0, height));
+            y1 = math.max(0, math.min(y1, height));
         }
     }
 }

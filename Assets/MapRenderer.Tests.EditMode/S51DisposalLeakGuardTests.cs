@@ -25,7 +25,7 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
@@ -57,7 +57,7 @@ namespace MapRenderer.Tests
         }
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -145,7 +145,7 @@ namespace MapRenderer.Tests
             // Drive load: fetch → tessellate → consume (creates Mesh + GameObject).
             PumpUntilSettled(view);
             Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing leak guard.");
-            Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+            Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                 "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
             // Record how many Meshes were created during the load.
@@ -227,7 +227,7 @@ namespace MapRenderer.Tests
 
                 // Pan far east — before tessellation results are consumed.
                 // MaxBuildsPerTick=0 guarantees tiles are still in-flight (HasTessellationTask && !Built).
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
                 view.Tick(); // cover recompute → evicts original tiles while they are in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
@@ -306,14 +306,14 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer");
             Assert.Greater(features.Count, 0, "Fixture must produce at least one feature");
 
-            var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
             long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
 
             // Allocate — deliberately do NOT dispose.
             var leaked = StyledFillTileBuilder.BuildMeshData(
-                features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
+                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
 
             Assert.IsTrue(leaked.IsCreated,
                 "Positive control requires IsCreated=true (NativeArrays allocated). " +
@@ -373,7 +373,7 @@ namespace MapRenderer.Tests
                 view.Tick();
 
                 // Pan far east — evicting the original tiles while tessellation is in-flight.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
                 view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
 
                 // Positive control: at least one tile must have been released mid-flight.
@@ -471,7 +471,7 @@ namespace MapRenderer.Tests
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing NativeArray balance.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
                 // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
@@ -534,7 +534,7 @@ namespace MapRenderer.Tests
                 view.DrainTessellation();
                 Assert.IsTrue(view.AllTilesSettled(),
                     "DrainTessellation must settle all tiles (tooth 5c positive control).");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built by DrainTessellation (real load required).");
 
                 int meshAfterLoad = CountMeshObjects();

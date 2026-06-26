@@ -29,7 +29,7 @@ namespace MapRenderer.Jobs
     /// coordinator schedules one job per polygon. For simple tiles the number of polygons is
     /// small (~tens to ~hundreds); Burst parallelism is across tiles.
     /// </summary>
-    [BurstCompile]
+    [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct EarcutJob : IJob
     {
         // ── Per-polygon input ─────────────────────────────────────────────────────────────────

@@ -5,14 +5,14 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// EditMode tests for ProjectTileVerticesJob.
+    /// EditMode tests for ProjectTileToWebMercatorJob.
     ///
     /// (1) Parity test — job matches TileId.ToMercator − origin for known tile coords,
     ///     including a non-z0 tile to exercise the 2^z path.
@@ -37,7 +37,7 @@ namespace MapRenderer.Tests
             var result = new NativeArray<float3>(1, Allocator.TempJob);
             coords[0] = new double2(px, py);
 
-            new ProjectTileVerticesJob
+            new ProjectTileToWebMercatorJob
             {
                 TileZ = z, TileX = x, TileY = y,
                 Extent = extent,
@@ -60,7 +60,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Parity_JobMatchesCore_Z0()
         {
-            var tile = new TileId(0, 0, 0);
+            var tile = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, _) = tile.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
             double extent = 4096.0;
@@ -104,7 +104,7 @@ namespace MapRenderer.Tests
         {
             // z=5, x=10, y=12 — a realistic non-trivial tile
             int z = 5, tx = 10, ty = 12;
-            var tile = new TileId(z, tx, ty);
+            var tile = new TileId { Z = z, X = tx, Y = ty };
             var (bMin, _) = tile.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
             double extent = 4096.0;
@@ -148,7 +148,7 @@ namespace MapRenderer.Tests
             var layer = mvtTile.GetLayer("countries");
             Assert.IsNotNull(layer);
 
-            var tileId = new TileId(0, 0, 0);
+            var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, bMax) = tileId.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
             double extent = layer.Extent;
@@ -171,7 +171,7 @@ namespace MapRenderer.Tests
                     for (int i = 0; i < ring.Count; i++)
                         coords[i] = ring[i];
 
-                    new ProjectTileVerticesJob
+                    new ProjectTileToWebMercatorJob
                     {
                         TileZ = 0, TileX = 0, TileY = 0,
                         Extent = extent,
@@ -213,7 +213,7 @@ namespace MapRenderer.Tests
             // At z0, the whole-world tile spans ~±20M m in X, ~±20M m in Y.
             // Origin-relative coords from the tile corner should be in [0, ~40M] for x and z.
             // (We subtract the MIN corner, so values range from 0 to the tile width.)
-            var tile = new TileId(0, 0, 0);
+            var tile = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, bMax) = tile.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
             double tileWidth = bMax.x - bMin.x;

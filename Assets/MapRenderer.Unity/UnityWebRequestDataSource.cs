@@ -4,7 +4,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 
 namespace MapRenderer.Unity

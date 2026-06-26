@@ -12,6 +12,7 @@ using UnityEngine;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.View;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
@@ -75,7 +76,7 @@ namespace MapRenderer.Tests
         public void UpdateFrame_AdvancesCamera_BeforeTileSelection_InSameFrame()
         {
             var initial = new CameraProperties(
-                new LookAtPoint(0.0, 0.0, 0), zoom: 5.0, heading: 0, tilt: 0);
+                new GeoCoordinate3D { Longitude = 0.0, Latitude = 0.0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
 
             var (view, camSys, _, _, rootGo, camGo) = CreateCameraRig(initial);
             try
@@ -113,7 +114,7 @@ namespace MapRenderer.Tests
             double dt         = D / 2.0; // advance halfway
 
             var initial = new CameraProperties(
-                new LookAtPoint(0, 0, 0), startZoom, 0, 0);
+                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0);
 
             var (view, camSys, _, _, rootGo, camGo) = CreateCameraRig(initial);
             try
@@ -146,7 +147,7 @@ namespace MapRenderer.Tests
         [Test]
         public void InstantApply_DoesNotAllocateGCMemory()
         {
-            var initial = new CameraProperties(new LookAtPoint(0, 0, 0), zoom: 5.0, heading: 0, tilt: 0);
+            var initial = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
             var (_, camSys, _, _, rootGo, camGo) = CreateCameraRig(initial);
             try
             {
@@ -175,7 +176,7 @@ namespace MapRenderer.Tests
         public void MapCamera_PitchZero_CameraOverhead_LooksDown()
         {
             var initial = new CameraProperties(
-                new LookAtPoint(0, 0, 0), zoom: 8.0, heading: 0.0, tilt: 0.0);
+                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 8.0, heading: 0.0, tilt: 0.0);
 
             var (_, camSys, mapCam, cam, rootGo, camGo) = CreateCameraRig(initial);
             try
@@ -200,17 +201,17 @@ namespace MapRenderer.Tests
         public void MapCamera_PitchZero_DifferentBearings_DifferentUpVectors()
         {
             var (_, _, mapCam, cam, rootGo, camGo) = CreateCameraRig(
-                new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 0.0));
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 0.0));
             try
             {
                 // Bearing = 0
-                var propsN = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0,   0.0);
+                var propsN = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0,   0.0);
                 mapCam.ApplyCameraProperties(propsN);
                 Vector3 upNorth = cam.transform.up;
                 Vector3 fwdN    = cam.transform.forward;
 
                 // Bearing = 90
-                var propsE = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 90.0, 0.0);
+                var propsE = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 90.0, 0.0);
                 mapCam.ApplyCameraProperties(propsE);
                 Vector3 upEast = cam.transform.up;
                 Vector3 fwdE   = cam.transform.forward;
@@ -238,11 +239,11 @@ namespace MapRenderer.Tests
         public void MapCamera_Pitch45_TiltsTowardHorizon()
         {
             var (_, _, mapCam, cam, rootGo, camGo) = CreateCameraRig(
-                new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0));
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
             try
             {
                 mapCam.ApplyCameraProperties(
-                    new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0));
+                    new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
 
                 Assert.Greater(cam.transform.position.y, 0f,
                     "Camera must still be above origin at tilt=45.");
@@ -259,7 +260,7 @@ namespace MapRenderer.Tests
         public void MapCamera_ClipPlanes_ContainViewAtLowZoom()
         {
             var (_, camSys, mapCam, cam, rootGo, camGo) = CreateCameraRig(
-                new CameraProperties(new LookAtPoint(0,0,0), 2.0, 0, 0));
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2.0, 0, 0));
             try
             {
                 mapCam.ApplyCameraProperties(camSys.CurrentProperties);
@@ -278,14 +279,14 @@ namespace MapRenderer.Tests
         public void MapCamera_BearingWithPitch_OrbitsLaterally()
         {
             var (_, _, mapCam, cam, rootGo, camGo) = CreateCameraRig(
-                new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0, 45.0));
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
             try
             {
-                var propsN = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0.0,  45.0);
+                var propsN = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0,  45.0);
                 mapCam.ApplyCameraProperties(propsN);
                 Vector3 posN = cam.transform.position;
 
-                var propsE = new CameraProperties(new LookAtPoint(0,0,0), 8.0, 90.0, 45.0);
+                var propsE = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 90.0, 45.0);
                 mapCam.ApplyCameraProperties(propsE);
                 Vector3 posE = cam.transform.position;
 
@@ -305,7 +306,7 @@ namespace MapRenderer.Tests
         public void MapCamera_SetsCameraToPerspective()
         {
             var (_, camSys, mapCam, cam, rootGo, camGo) = CreateCameraRig(
-                new CameraProperties(new LookAtPoint(0,0,0), 8.0, 0, 0));
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0, 0));
             try
             {
                 cam.orthographic = true;

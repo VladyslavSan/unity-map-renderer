@@ -9,6 +9,7 @@
 
 using NUnit.Framework;
 using UnityEngine;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
 
@@ -23,7 +24,7 @@ namespace MapRenderer.Tests
 
         private static CameraProperties Cam(double lon, double lat, double zoom,
                                             double heading = 0.0, double tilt = 0.0)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, heading, tilt);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, heading, tilt);
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────
 

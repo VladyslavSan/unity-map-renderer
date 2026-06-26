@@ -1,7 +1,7 @@
-using System;
+using System; // IEquatable<T>
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Coordinates
+namespace MapRenderer.Core.Geo
 {
     /// <summary>
     /// A slippy-map tile address (z/x/y) plus conversions from tile-local feature coordinates to
@@ -10,21 +10,18 @@ namespace MapRenderer.Core.Coordinates
     /// </summary>
     public readonly struct TileId : IEquatable<TileId>
     {
-        public readonly int Z, X, Y;
-
-        public TileId(int z, int x, int y)
-        {
-            Z = z; X = x; Y = y;
-        }
+        public int X { get; init; }
+        public int Y { get; init; }
+        public int Z { get; init; }
 
         /// <summary>(px,py) in [0,extent], origin top-left → lon/lat in degrees.</summary>
         public double2 ToLonLat(double px, double py, double extent)
         {
-            double n = Math.Pow(2.0, Z);
-            double u = (X + px / extent) / n;
-            double v = (Y + py / extent) / n;
-            double lon = u * 360.0 - 180.0;
-            double lat = Math.Atan(Math.Sinh(Math.PI * (1.0 - 2.0 * v))) * 180.0 / Math.PI;
+            double n   = math.pow(2.0, Z);
+            double u   = (X + px / extent) / n;
+            double v   = (Y + py / extent) / n;
+            double lon = u                                                   * 360.0 - 180.0;
+            double lat = math.atan(math.sinh(math.PI_DBL * (1.0 - 2.0 * v))) * 180.0 / math.PI_DBL;
             return new double2(lon, lat);
         }
 
@@ -32,7 +29,7 @@ namespace MapRenderer.Core.Coordinates
         public double2 ToMercator(double px, double py, double extent)
         {
             double2 ll = ToLonLat(px, py, extent);
-            return WebMercator.FromLonLat(ll.x, ll.y);
+            return WebMercator.FromLonLat(new GeoCoordinate3D { Latitude = ll.y, Longitude = ll.x });
         }
 
         /// <summary>The tile's Mercator bounding box (min/max corners). Useful for sanity checks.</summary>

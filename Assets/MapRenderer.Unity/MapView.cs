@@ -1,7 +1,7 @@
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;

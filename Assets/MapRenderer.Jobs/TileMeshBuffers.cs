@@ -44,7 +44,7 @@ namespace MapRenderer.Jobs
         /// <summary>
         /// Flat triangle index array (indices into <see cref="TileVertices"/>).
         /// Note: earcut produces indices into the merged ring (outer+bridge+holes). The pipeline
-        /// maps these back to world positions via ProjectTileVerticesJob.
+        /// maps these back to world positions via ProjectTileToWebMercatorJob.
         /// </summary>
         public NativeArray<int> TriangleIndices;
 

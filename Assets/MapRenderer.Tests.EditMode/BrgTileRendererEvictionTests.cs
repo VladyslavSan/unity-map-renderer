@@ -12,7 +12,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity;
 
@@ -51,9 +51,9 @@ namespace MapRenderer.Tests
 
             try
             {
-                int h0 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId(0, 0, 0));
-                int h1 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId(1, 0, 0));
-                int h2 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId(2, 0, 0));
+                int h0 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+                int h1 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 1, X = 0, Y = 0 });
+                int h2 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
 
                 brg.Rebuild(double2.zero);
                 Assert.AreEqual(3, brg.ComputeEmitOrder(scratch),

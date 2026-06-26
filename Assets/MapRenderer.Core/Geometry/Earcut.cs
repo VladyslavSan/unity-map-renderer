@@ -189,7 +189,7 @@ namespace MapRenderer.Core.Geometry
             }
 
             // ---- Ear-clipping loop. ----
-            var indices = new List<int>(Math.Max(0, (total - 2) * 3));
+            var indices = new List<int>(math.max(0, (total - 2) * 3));
             var removed = new bool[total];
             int forceClipCount = 0;
 
@@ -447,14 +447,14 @@ namespace MapRenderer.Core.Geometry
                 // When P is collinear with H and M (candY == hy), the triangle is degenerate.
                 // In that case P is already the best horizontal candidate; scan only for vertices
                 // strictly between M and P on the same horizontal (better x, same angle = 0).
-                if (Math.Abs(sHMP) < 1e-10)
+                if (math.abs(sHMP) < 1e-10)
                 {
                     // Degenerate: P is on y=hy. Pick the rightmost vertex on y=hy in (mx, hx).
                     cur = mergedRingStart;
                     for (int iter = 0; iter < mergedRingCount * 2; iter++)
                     {
                         double qx = vx[cur], qy = vy[cur];
-                        if (cur != holeLM && Math.Abs(qy - hy) < 1e-10 && qx > candX && qx < hx)
+                        if (cur != holeLM && math.abs(qy - hy) < 1e-10 && qx > candX && qx < hx)
                         {
                             bestVert = cur;
                             candX    = qx;
@@ -468,7 +468,7 @@ namespace MapRenderer.Core.Geometry
                     // Non-degenerate: scan for reflex vertices inside the sector triangle (H, M, P).
                     // Tangent of the polar angle from holeLM to the current candidate P.
                     double bestTan = (hx - candX) > 1e-12
-                        ? Math.Abs(candY - hy) / (hx - candX)
+                        ? math.abs(candY - hy) / (hx - candX)
                         : double.MaxValue;
 
                     cur = mergedRingStart;
@@ -501,9 +501,9 @@ namespace MapRenderer.Core.Geometry
                             if (inside)
                             {
                                 double dx  = hx - qx; // > 0 (qx < hx guaranteed by band check)
-                                double tan = dx > 1e-12 ? Math.Abs(qy - hy) / dx : double.MaxValue;
+                                double tan = dx > 1e-12 ? math.abs(qy - hy) / dx : double.MaxValue;
                                 // Prefer smaller polar angle; break ties by larger qx.
-                                if (tan < bestTan || (Math.Abs(tan - bestTan) < 1e-14 && qx > candX))
+                                if (tan < bestTan || (math.abs(tan - bestTan) < 1e-14 && qx > candX))
                                 {
                                     bestTan  = tan;
                                     bestVert = cur;

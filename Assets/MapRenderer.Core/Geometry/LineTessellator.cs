@@ -77,7 +77,7 @@ namespace MapRenderer.Core.Geometry
             {
                 double2 prev = pts[pts.Count - 1];
                 double2 cur  = line[i];
-                if (Math.Abs(cur.x - prev.x) > 1e-12 || Math.Abs(cur.y - prev.y) > 1e-12)
+                if (math.abs(cur.x - prev.x) > 1e-12 || math.abs(cur.y - prev.y) > 1e-12)
                     pts.Add(cur);
             }
 
@@ -220,7 +220,7 @@ namespace MapRenderer.Core.Geometry
 
             // Miter factor = 1 / (miter_unit · n1).  dot = cos(θ/2).
             double dot = mux * n1.x + muy * n1.y;
-            if (Math.Abs(dot) < 1e-12)
+            if (math.abs(dot) < 1e-12)
             {
                 leftN  = n1;
                 rightN = Neg(n1);
@@ -245,7 +245,7 @@ namespace MapRenderer.Core.Geometry
             double mux = mx / mLen;
             double muy = my / mLen;
             double dot = mux * n1.x + muy * n1.y;
-            if (Math.Abs(dot) < 1e-12) return true;
+            if (math.abs(dot) < 1e-12) return true;
             return (1.0 / dot) > miterLimit;
         }
 
@@ -262,7 +262,7 @@ namespace MapRenderer.Core.Geometry
             double mux = mx / mLen;
             double muy = my / mLen;
             double dot = mux * n1.x + muy * n1.y;
-            if (Math.Abs(dot) < 1e-12) return double.MaxValue;
+            if (math.abs(dot) < 1e-12) return double.MaxValue;
             return 1.0 / dot;
         }
 
@@ -354,17 +354,17 @@ namespace MapRenderer.Core.Geometry
             double2 arcEnd   = leftTurn ?  n2 : Neg(n2);
 
             // Angles for arc interpolation (unit circle).
-            double a0 = Math.Atan2(arcStart.y, arcStart.x);
-            double a1 = Math.Atan2(arcEnd.y,   arcEnd.x);
+            double a0 = math.atan2(arcStart.y, arcStart.x);
+            double a1 = math.atan2(arcEnd.y,   arcEnd.x);
             if (leftTurn)
             {
                 // Outer arc goes CCW (a1 ≥ a0 after wrapping).
-                while (a1 < a0) a1 += 2.0 * Math.PI;
+                while (a1 < a0) a1 += 2.0 * math.PI_DBL;
             }
             else
             {
                 // Outer arc goes CW (a1 ≤ a0 after wrapping).
-                while (a1 > a0) a1 -= 2.0 * Math.PI;
+                while (a1 > a0) a1 -= 2.0 * math.PI_DBL;
             }
 
             // Emit inner vertex.
@@ -395,9 +395,9 @@ namespace MapRenderer.Core.Geometry
                 double ang = a0 + t * (a1 - a0);
                 int fanIdx = verts.Count;
                 if (leftTurn)
-                    verts.Add(MakeVertex(p, new double2(Math.Cos(ang), Math.Sin(ang)), dist, +1f));
+                    verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
                 else
-                    verts.Add(MakeVertex(p, new double2(Math.Cos(ang), Math.Sin(ang)), dist, -1f));
+                    verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, -1f));
 
                 if (leftTurn)
                 { indices.Add(prevFanIdx); indices.Add(fanIdx); indices.Add(innerIdx); }
@@ -485,10 +485,10 @@ namespace MapRenderer.Core.Geometry
                     // Fan triangles (CCW, verified by signed-area): center, intermediate[k], intermediate[k-1]
                     //   where intermediate[0] = rightButt.
 
-                    double a0 = Math.Atan2(-segNormal.y, -segNormal.x); // rightButt direction
-                    double a1 = Math.Atan2( segNormal.y,  segNormal.x); // leftButt direction
+                    double a0 = math.atan2(-segNormal.y, -segNormal.x); // rightButt direction
+                    double a1 = math.atan2( segNormal.y,  segNormal.x); // leftButt direction
                     // CW sweep: ensure a1 < a0 (so intermediate angles decrease through −tangent).
-                    while (a1 > a0) a1 -= 2.0 * Math.PI;
+                    while (a1 > a0) a1 -= 2.0 * math.PI_DBL;
 
                     int baseIdx      = verts.Count;
                     int centerIdx    = baseIdx;
@@ -503,7 +503,7 @@ namespace MapRenderer.Core.Geometry
                     {
                         double t   = (double)k / (roundSegments + 1);
                         double ang = a0 + t * (a1 - a0);
-                        verts.Add(MakeVertex(p, new double2(Math.Cos(ang), Math.Sin(ang)), dist, +1f));
+                        verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
                     }
 
                     // Emit leftButt and rightButt LAST to satisfy the [count-2]=left,[count-1]=right contract.
@@ -576,10 +576,10 @@ namespace MapRenderer.Core.Geometry
                     //   where prevFanIdx starts as leftPrev.
                     // Final triangle: center, rightPrev, prevFanIdx (last intermediate).
 
-                    double a0 = Math.Atan2( segNormal.y,  segNormal.x);  // leftPrev direction
-                    double a1 = Math.Atan2(-segNormal.y, -segNormal.x);  // rightPrev direction
+                    double a0 = math.atan2( segNormal.y,  segNormal.x);  // leftPrev direction
+                    double a1 = math.atan2(-segNormal.y, -segNormal.x);  // rightPrev direction
                     // CW sweep (through +tangent = forward): ensure a1 < a0.
-                    while (a1 > a0) a1 -= 2.0 * Math.PI;
+                    while (a1 > a0) a1 -= 2.0 * math.PI_DBL;
 
                     // Center pivot vertex.
                     int centerIdx = verts.Count;
@@ -592,7 +592,7 @@ namespace MapRenderer.Core.Geometry
                         double t   = (double)k / (roundSegments + 1);
                         double ang = a0 + t * (a1 - a0);
                         int fanIdx = verts.Count;
-                        verts.Add(MakeVertex(p, new double2(Math.Cos(ang), Math.Sin(ang)), dist, +1f));
+                        verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
 
                         indices.Add(centerIdx);
                         indices.Add(fanIdx);
@@ -635,8 +635,7 @@ namespace MapRenderer.Core.Geometry
                 WidthScale    = 1.0f,
             };
 
-        // Hand-rolled math (no Unity.Mathematics.math dependency — Shim only provides double2).
-        private static double Sqrt(double x) => Math.Sqrt(x);
+        private static double Sqrt(double x) => math.sqrt(x);
         private static double2 Neg(double2 v) => new double2(-v.x, -v.y);
     }
 }

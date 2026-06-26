@@ -12,7 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Mvt;
 
@@ -73,7 +73,7 @@ namespace MapRenderer.Tests
         public async Task ByteIdentity_FileSource_ReturnsSameBytesAsFixture()
         {
             byte[] fixtureBytes = LoadFixtureBytes();
-            var tileId = new TileId(0, 0, 0);
+            var tileId = new TileId { Z = 0, X = 0, Y = 0 };
 
             // Write fixture into a temp dir so FileDataSource can read it.
             string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -120,7 +120,7 @@ namespace MapRenderer.Tests
             try
             {
                 using var source = new FileDataSource(emptyRoot);
-                var response = await source.FetchAsync(new TileId(5, 10, 15));
+                var response = await source.FetchAsync(new TileId { Z = 5, X = 10, Y = 15 });
                 Assert.IsFalse(response.HasData,   "Missing file → HasData must be false");
                 Assert.IsNull(response.Bytes,       "Missing file → Bytes must be null");
                 Assert.AreEqual(TileEncoding.Mvt, response.Encoding);
@@ -140,9 +140,9 @@ namespace MapRenderer.Tests
         {
             // Capacity 2: put A, B, C → A evicted, B and C survive.
             var cache = new TileCache(capacity: 2);
-            var idA = new TileId(0, 0, 0);
-            var idB = new TileId(0, 1, 0);
-            var idC = new TileId(0, 2, 0);
+            var idA = new TileId { Z = 0, X = 0, Y = 0 };
+            var idB = new TileId { Z = 0, X = 1, Y = 0 };
+            var idC = new TileId { Z = 0, X = 2, Y = 0 };
 
             cache.Put(idA, MakeResponse(1));
             cache.Put(idB, MakeResponse(2));
@@ -159,9 +159,9 @@ namespace MapRenderer.Tests
         {
             // A, B in capacity-2 cache. TryGet(B) makes B MRU. Put(C) → A is evicted (not B).
             var cache = new TileCache(capacity: 2);
-            var idA = new TileId(0, 0, 0);
-            var idB = new TileId(0, 1, 0);
-            var idC = new TileId(0, 2, 0);
+            var idA = new TileId { Z = 0, X = 0, Y = 0 };
+            var idB = new TileId { Z = 0, X = 1, Y = 0 };
+            var idC = new TileId { Z = 0, X = 2, Y = 0 };
 
             cache.Put(idA, MakeResponse(1));
             cache.Put(idB, MakeResponse(2));
@@ -186,15 +186,15 @@ namespace MapRenderer.Tests
             Assert.AreEqual(3, cache.Capacity);
             Assert.AreEqual(0, cache.Count);
 
-            cache.Put(new TileId(0, 0, 0), MakeResponse(1));
+            cache.Put(new TileId { Z = 0, X = 0, Y = 0 }, MakeResponse(1));
             Assert.AreEqual(1, cache.Count);
 
-            cache.Put(new TileId(0, 1, 0), MakeResponse(2));
-            cache.Put(new TileId(0, 2, 0), MakeResponse(3));
+            cache.Put(new TileId { Z = 0, X = 1, Y = 0 }, MakeResponse(2));
+            cache.Put(new TileId { Z = 0, X = 2, Y = 0 }, MakeResponse(3));
             Assert.AreEqual(3, cache.Count);
 
             // Over capacity: count stays at capacity.
-            cache.Put(new TileId(0, 3, 0), MakeResponse(4));
+            cache.Put(new TileId { Z = 0, X = 3, Y = 0 }, MakeResponse(4));
             Assert.AreEqual(3, cache.Count);
         }
 
@@ -215,7 +215,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(1, 2, 3);
+            var tileId    = new TileId { Z = 1, X = 2, Y = 3 };
 
             // Issue two concurrent requests before the fetch completes.
             var req1 = scheduler.Request(tileId);
@@ -250,7 +250,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(2, 3, 4);
+            var tileId    = new TileId { Z = 2, X = 3, Y = 4 };
 
             // First request — triggers a fetch.
             var res1 = await scheduler.Request(tileId);
@@ -284,7 +284,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(3, 3, 3);
+            var tileId    = new TileId { Z = 3, X = 3, Y = 3 };
 
             // Issue a request; fetch is now in-flight (tcs.Task is pending).
             var requestTask = scheduler.Request(tileId);
@@ -319,7 +319,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(4, 4, 4);
+            var tileId    = new TileId { Z = 4, X = 4, Y = 4 };
 
             // First fetch — populates cache.
             await scheduler.Request(tileId);
@@ -357,7 +357,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(5, 5, 5);
+            var tileId    = new TileId { Z = 5, X = 5, Y = 5 };
 
             // Start the fetch — it blocks.
             var pendingTask = scheduler.Request(tileId);
@@ -392,7 +392,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(7, 7, 7);
+            var tileId    = new TileId { Z = 7, X = 7, Y = 7 };
 
             // Start the fetch — blocks on tcs.
             var pendingTask = scheduler.Request(tileId);
@@ -432,7 +432,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(6, 6, 6);
+            var tileId    = new TileId { Z = 6, X = 6, Y = 6 };
 
             // Start the fetch (sync-completing source).
             var fetchTask = scheduler.Request(tileId);
@@ -468,7 +468,7 @@ namespace MapRenderer.Tests
             var cache  = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache,
                 negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
-            var tileId = new TileId(9, 1, 1);
+            var tileId = new TileId { Z = 9, X = 1, Y = 1 };
 
             // First request — issues a fetch that reports absent.
             var r1 = await scheduler.Request(tileId);
@@ -507,7 +507,7 @@ namespace MapRenderer.Tests
             var cache  = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache,
                 negativeTtl: TimeSpan.FromSeconds(5), clock: clock.Now);
-            var tileId = new TileId(9, 2, 2);
+            var tileId = new TileId { Z = 9, X = 2, Y = 2 };
 
             await scheduler.Request(tileId);
             Assert.AreEqual(1, fetchCount, "First request issues one fetch");
@@ -537,7 +537,7 @@ namespace MapRenderer.Tests
             var cache  = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache,
                 negativeTtl: TimeSpan.Zero, clock: clock.Now);
-            var tileId = new TileId(9, 3, 3);
+            var tileId = new TileId { Z = 9, X = 3, Y = 3 };
 
             await scheduler.Request(tileId);
             await scheduler.Request(tileId);
@@ -583,7 +583,7 @@ namespace MapRenderer.Tests
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId(8, 8, 8);
+            var tileId    = new TileId { Z = 8, X = 8, Y = 8 };
 
             var pending = scheduler.Request(tileId);
             Assert.AreEqual(1, scheduler.InFlightCount, "One fetch should be in-flight");

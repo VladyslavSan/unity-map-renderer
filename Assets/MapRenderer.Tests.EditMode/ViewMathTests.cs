@@ -7,7 +7,7 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
@@ -19,7 +19,7 @@ namespace MapRenderer.Tests
         private const double Eps = 1e-9;
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         // ── CameraProperties (tile-selection helpers) ───────────────────────────────────────────
 
@@ -37,7 +37,7 @@ namespace MapRenderer.Tests
         public void Camera_CenterMercator_MatchesWebMercator()
         {
             var v = Cam(13.405, 52.52, 10.0);   // Berlin
-            double2 expected = WebMercator.FromLonLat(13.405, 52.52);
+            double2 expected = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = 13.405, Latitude = 52.52 });
             double2 actual   = v.CenterMercator();
             Assert.AreEqual(expected.x, actual.x, 1e-6);
             Assert.AreEqual(expected.y, actual.y, 1e-6);
@@ -51,7 +51,7 @@ namespace MapRenderer.Tests
             double2 m = v.CenterMercator();
             Assert.IsFalse(double.IsNaN(m.y) || double.IsInfinity(m.y),
                 "Clamped latitude must yield a finite Mercator y.");
-            double2 atLimit = WebMercator.FromLonLat(0, CameraProperties.MaxMercatorLat);
+            double2 atLimit = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = 0, Latitude = CameraProperties.MaxMercatorLat });
             Assert.AreEqual(atLimit.y, m.y, 1e-6, "Extreme latitude clamps to the Mercator limit.");
         }
 
@@ -70,7 +70,7 @@ namespace MapRenderer.Tests
             var expected = new HashSet<TileId>();
             for (int x = 1; x <= 3; x++)
                 for (int y = 1; y <= 3; y++)
-                    expected.Add(new TileId(2, x, y));
+                    expected.Add(new TileId { Z = 2, X = x, Y = y });
 
             Assert.AreEqual(9, buf.Count, "3×3 cover");
             CollectionAssert.AreEquivalent(expected, buf,
@@ -138,7 +138,7 @@ namespace MapRenderer.Tests
         [Test]
         public void FloatingOrigin_TileLocalOrigin_MatchesTileMinCorner()
         {
-            var t = new TileId(14, 8000, 5000);
+            var t = new TileId { Z = 14, X = 8000, Y = 5000 };
             var (min, _) = t.MercatorBounds();
             double2 o = FloatingOrigin.TileLocalOriginMercator(t);
             Assert.AreEqual(min.x, o.x, Eps);
@@ -211,7 +211,7 @@ namespace MapRenderer.Tests
                     double camLat = -CameraProperties.MaxMercatorLat + la * (2.0 * CameraProperties.MaxMercatorLat / 20.0);
 
                     // Scene origin at the look-at; model a conservative camera drift to keep the gate strict.
-                    double2 sceneOrigin = WebMercator.FromLonLat(camLon, camLat);
+                    double2 sceneOrigin = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = camLon, Latitude = camLat });
                     double2 cameraMerc  = new double2(sceneOrigin.x + ModeledCameraDriftMeters, sceneOrigin.y);
                     double2 camLL       = WebMercator.ToLonLat(cameraMerc.x, cameraMerc.y);
 
@@ -272,7 +272,7 @@ namespace MapRenderer.Tests
             const int LiveZoom = 14;
             // Camera far from the world origin; scene origin left at (0,0) (NO rebasing).
             double2 sceneOrigin = new double2(0, 0);
-            double2 camera = WebMercator.FromLonLat(179.0, 0.0);  // ~+19.9M m east
+            double2 camera = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = 179.0, Latitude = 0.0 });  // ~+19.9M m east
 
             TileId tile = TileContaining(camera, LiveZoom);
             double2 tileOrigin = FloatingOrigin.TileLocalOriginMercator(tile);
@@ -297,11 +297,13 @@ namespace MapRenderer.Tests
             double lat = Math.Max(-CameraProperties.MaxMercatorLat, Math.Min(CameraProperties.MaxMercatorLat, ll.y));
             long n = 1L << z;
             int x = (int)Math.Floor((lon + 180.0) / 360.0 * n);
-            double latRad = lat * Math.PI / 180.0;
-            int y = (int)Math.Floor((1.0 - Math.Log(Math.Tan(latRad) + 1.0 / Math.Cos(latRad)) / Math.PI) / 2.0 * n);
+            // Delegate to WebMercator.FromLonLat — the single source of the Mercator formula (T2).
+            // ln(tan(lat)+sec(lat)) == mercY/R (algebraically identical; same numeric ops order).
+            double mercY = WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = lon, Latitude = lat }).y;
+            int y = (int)Math.Floor((1.0 - mercY / WebMercator.R / Math.PI) / 2.0 * n);
             x = (int)Math.Max(0, Math.Min(n - 1, x));
             y = (int)Math.Max(0, Math.Min(n - 1, y));
-            return new TileId(z, x, y);
+            return new TileId { Z = z, X = x, Y = y };
         }
     }
 }

@@ -24,7 +24,7 @@ namespace MapRenderer.Jobs
     ///
     /// Polygon descriptor arrays are pre-sized conservatively (worst case = one polygon per ring).
     /// </summary>
-    [BurstCompile]
+    [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct RingAssemblyJob : IJob
     {
         /// <summary>Rings with |2*area| (shoelace) below this threshold are skipped (degenerate).</summary>

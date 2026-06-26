@@ -9,7 +9,7 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.View;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity
 {

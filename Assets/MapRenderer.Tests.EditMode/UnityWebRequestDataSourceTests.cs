@@ -20,7 +20,7 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity;
 
@@ -118,7 +118,7 @@ namespace MapRenderer.Tests
                 // Run FetchAsync as a coroutine so UnityWebRequest's PlayerLoop hook pumps.
                 // Use void-returning Action<T> to force ContinueWith<T>(Action<T>) overload
                 // (avoids the Func<T,TR> overload that would return UniTask<T> and confuse ToCoroutine).
-                yield return source.FetchAsync(new TileId(0, 0, 0))
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
                     .ContinueWith((Action<TileResponse>)(r => { response = r; }))
                     .ToCoroutine(ex => { caught = ex; });
             }
@@ -153,7 +153,7 @@ namespace MapRenderer.Tests
             try
             {
                 using var source = new UnityWebRequestDataSource(url);
-                yield return source.FetchAsync(new TileId(0, 0, 0))
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
                     .ContinueWith((Action<TileResponse>)(r => { response = r; }))
                     .ToCoroutine(ex => { caught = ex; });
             }

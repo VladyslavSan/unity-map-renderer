@@ -23,7 +23,7 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using Unity.Profiling;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
@@ -59,7 +59,7 @@ namespace MapRenderer.Tests
         }
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -157,7 +157,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "After draining, all tiles must eventually settle.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "The z0/0/0 tile must be built after draining.");
             }
             finally
@@ -194,7 +194,7 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(mvtLayer, "Fixture must contain 'countries' MVT layer");
             Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
-            var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
@@ -205,7 +205,7 @@ namespace MapRenderer.Tests
             {
                 capturedThreadId = Thread.CurrentThread.ManagedThreadId;
                 return StyledFillTileBuilder.BuildMeshData(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
             });
 
             StyledFillTileBuilder.LayerMeshData data = task.GetAwaiter().GetResult();
@@ -342,7 +342,7 @@ namespace MapRenderer.Tests
         /// The async MapView live loop (tessellate off-main + upload on main) must produce the same
         /// vertex count AND vertex positions as a direct synchronous call to StyledFillTileBuilder.BuildMesh.
         ///
-        /// Note: S47 replaced the Burst <c>ProjectTileVerticesJob</c> (which required
+        /// Note: S47 replaced the Burst <c>ProjectTileToWebMercatorJob</c> (which required
         /// <c>.Schedule().Complete()</c> and therefore had main-thread affinity) with a scalar managed C#
         /// loop (<c>ProjectVerticesManaged</c>) that replicates the same double-precision arithmetic.
         /// This test verifies that no ULP difference was introduced: positions must be exactly equal.
@@ -367,11 +367,11 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built by the async live loop");
 
                 // Backend-agnostic: one Mesh per fill layer (1 in MinimalStyle).
-                Mesh[] asyncMeshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Mesh[] asyncMeshes = view.GetTileMeshes(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(asyncMeshes, "The built tile must expose its layer meshes.");
                 Assert.AreEqual(1, asyncMeshes.Length,
                     "Tile must have exactly 1 layer mesh (1 fill layer in MinimalStyle).");
@@ -386,9 +386,9 @@ namespace MapRenderer.Tests
                 var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);
 
-                var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+                var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
                 Mesh syncMesh = StyledFillTileBuilder.BuildMesh(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0),
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
                     new double2(bMin.x, bMin.y));
                 Assert.IsNotNull(syncMesh);
 
@@ -467,11 +467,11 @@ namespace MapRenderer.Tests
 
                 // Pan far east immediately — before tessellation tasks complete.
                 // lon=170, z=5 → center tile (5,31,16), completely non-overlapping cover.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
                 view.Tick(); // cover recompute → evicts all original (5,16,*) tiles
 
                 // Original center tile must be gone from _loaded.
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "Tooth 4: Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
@@ -479,7 +479,7 @@ namespace MapRenderer.Tests
 
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "Tooth 4: Released tile must not have been re-created as a GameObject " +
                     "even if its tessellation task completed after release.");
 
@@ -523,7 +523,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tooth 5: AllTilesSettled() must be true immediately after DrainTessellation().");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "Tooth 5: The z0/0/0 tile must be built after explicit drain.");
             }
             finally
@@ -562,13 +562,13 @@ namespace MapRenderer.Tests
                 Assert.IsTrue(view.AllTilesSettled(), "All tiles must settle before measuring steady state.");
 
                 // Prime reused buffers to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.5, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
 
                 // ── (a) within-cover pan: full recompute, zero allocation ──
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "Tooth 6a: MapView.Tick must not allocate during a within-cover pan. " +
                     "The S47 async polling loop must allocate only on fetch-completion edges, not here.");
@@ -609,17 +609,17 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(mvtLayer);
             Assert.Greater(features.Count, 0);
 
-            var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
             // Sync path.
             Mesh syncMesh = StyledFillTileBuilder.BuildMesh(
-                features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
+                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
 
             // Split path: CPU data (off-main safe) + upload (main-thread).
             // S48: BuildMeshData returns NativeArrays; must Dispose after upload.
             var data = StyledFillTileBuilder.BuildMeshData(
-                features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0), tileOrigin);
+                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
             Mesh splitMesh;
             try
             {

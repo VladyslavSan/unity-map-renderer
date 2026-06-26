@@ -1,4 +1,4 @@
-using System;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.View.Camera
 {
@@ -25,7 +25,7 @@ namespace MapRenderer.Core.View.Camera
 
         public CameraAnimation(double duration, CameraEasing easing = CameraEasing.EaseTo)
         {
-            Duration = Math.Max(0.0, duration);
+            Duration = math.max(0.0, duration);
             Easing   = easing;
         }
 

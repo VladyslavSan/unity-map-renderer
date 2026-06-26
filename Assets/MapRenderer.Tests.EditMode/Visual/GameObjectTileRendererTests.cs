@@ -19,7 +19,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Unity;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
@@ -47,7 +47,7 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 int h0 = r.AddTileLayer(mesh, o, 0, tid);
                 int h1 = r.AddTileLayer(mesh, o, 0, tid);
@@ -87,7 +87,7 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 r.AddTileLayer(mesh, o, 0, tid);
                 r.AddTileLayer(mesh, o, 1, tid);
@@ -110,7 +110,7 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });       // no names supplied
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 r.AddTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.Container(tid).GetChild(0).name,
@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid), 0, tid);
                 Transform layer = r.Container(tid).GetChild(0);
 
@@ -150,9 +150,9 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
-                double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0));
+                double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
                 int h = r.AddTileLayer(mesh, tileOrigin, 0, tid);
 
                 r.Rebuild(sceneOrigin0);
@@ -164,7 +164,7 @@ namespace MapRenderer.Tests.Visual
                     "Container Z must equal TileLocalToScene.z after Rebuild.");
 
                 // Origin shift (a look-at move): position must track the new origin.
-                double2 sceneOrigin1 = FloatingOrigin.TileLocalOriginMercator(new TileId(1, 1, 1));
+                double2 sceneOrigin1 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
                 r.Rebuild(sceneOrigin1);
                 float3 expected1 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
                 var (x1, z1) = r.GetInstanceTranslation(h);
@@ -190,9 +190,9 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin  = FloatingOrigin.TileLocalOriginMercator(tid);
-                double2 sceneOrigin = FloatingOrigin.TileLocalOriginMercator(new TileId(1, 1, 1));
+                double2 sceneOrigin = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
                 float3  expected    = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
 
                 // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.Tick.
@@ -219,7 +219,7 @@ namespace MapRenderer.Tests.Visual
         {
             var (mesh, mat) = FixtureFill();
             var r = new GameObjectTileRenderer(new[] { mat });
-            var tid = new TileId(0, 0, 0);
+            var tid = new TileId { Z = 0, X = 0, Y = 0 };
             r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid), 0, tid);
             Transform root = r.Root;
             Assert.IsNotNull(root, "Root must exist before dispose.");
@@ -250,7 +250,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8, ""name"": ""GoTest"",
@@ -297,7 +297,7 @@ namespace MapRenderer.Tests.Visual
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the GameObject backend.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built via the GameObject path.");
 
                 var gor = view.GameObjectRenderer();
@@ -311,10 +311,10 @@ namespace MapRenderer.Tests.Visual
 
                 // Floating origin: the container position must equal TileLocalToScene(tileOrigin, sceneOrigin).
                 // MapView.Tick set sceneOrigin = cam.CenterMercator() on the last pumped frame.
-                double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0));
+                double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
                 double2 sceneOrigin0 = view.SceneOrigin;
                 float3  expected0    = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
-                Transform container  = gor.Container(new TileId(0, 0, 0));
+                Transform container  = gor.Container(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(container, "A container must exist for the built z0/0/0 tile.");
                 Assert.That(container.position.x, Is.EqualTo(expected0.x).Within(0.1f),
                     $"Container X must equal TileLocalToScene.x ({expected0.x:F3}).");

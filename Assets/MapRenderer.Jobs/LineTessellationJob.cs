@@ -21,7 +21,7 @@ namespace MapRenderer.Jobs
     /// Does NOT reference MapRenderer.Core (keeps System.Math off the Burst path).
     /// Implements the straight-segment case inline for Burst compatibility.
     /// </summary>
-    [BurstCompile]
+    [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct LineTessellationJob : IJob
     {
         // ── Input ─────────────────────────────────────────────────────────────────────────────

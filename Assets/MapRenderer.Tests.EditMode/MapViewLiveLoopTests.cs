@@ -12,7 +12,7 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using NIs = NUnit.Framework.Is;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -44,7 +44,7 @@ namespace MapRenderer.Tests
         }
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         /// <summary>
         /// Minimal 1-fill-layer style for the live loop tests: a single fill layer over the
@@ -115,17 +115,17 @@ namespace MapRenderer.Tests
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount(), "z5 center cover is a 3×3 block");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 16, 16)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "the center tile must be built");
 
                 // Pan far east (lon=170) → new cover does NOT overlap the old one.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 170, Lat = 0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170, Latitude = 0 }, CameraAnimation.Instant);
                 PumpUntilSettled(view);
 
                 Assert.AreEqual(9, view.LoadedTileCount(), "still a 3×3 cover after panning");
-                Assert.IsFalse(view.TryGetBuiltTile(new TileId(5, 16, 16)),
+                Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "the old center tile must have been evicted after the pan");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(5, 31, 16)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 5, X = 31, Y = 16 }),
                     "the new center tile must be built after the pan");
                 // Eviction unregisters the tile's instanced draw items (and, on Entities, destroys its
                 // layer entities + tile root). Unity's leak detector fails the run on teardown if leaked.
@@ -162,11 +162,11 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built by the live loop");
 
                 // Backend-agnostic: one Mesh per fill layer (just 1 in MinimalStyle).
-                Mesh[] liveMeshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Mesh[] liveMeshes = view.GetTileMeshes(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(liveMeshes, "The built tile must expose its layer meshes.");
                 Assert.AreEqual(1, liveMeshes.Length,
                     "The tile must have exactly 1 layer mesh (one fill layer in MinimalStyle).");
@@ -184,9 +184,9 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(mvtLayer, "The fixture must contain the 'countries' MVT layer");
                 Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
-                var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+                var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
                 Mesh directMesh = StyledFillTileBuilder.BuildMesh(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId(0, 0, 0),
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
                     new double2(bMin.x, bMin.y));
 
                 Assert.IsNotNull(directMesh,
@@ -229,9 +229,9 @@ namespace MapRenderer.Tests
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.5, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
 
                 // ── (a) THE PAN CASE ──
@@ -239,7 +239,7 @@ namespace MapRenderer.Tests
                 // at the equator, so a 111 km pan loads no new tiles), but it DOES dirty the cover so
                 // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
                 // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "MapView.Tick must not allocate during a within-cover pan (cover recompute path: " +
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
@@ -300,13 +300,13 @@ namespace MapRenderer.Tests
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // Prime reused buffers, identical to the BRG test.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.5, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 0.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick();
 
                 // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
-                view.Camera.Apply(new CameraPropertiesUpdate { Lon = 1.0, Lat = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick(); // consume the pan; now steady.
                 Assert.AreEqual(9, view.LoadedTileCount(), "the within-cover pan must not have loaded new tiles");
 

@@ -2,6 +2,7 @@
 // (Tools/core-tests). Do NOT add any UnityEngine reference. Tests the pure pan/zoom/tilt input math.
 
 using NUnit.Framework;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
@@ -12,7 +13,7 @@ namespace MapRenderer.Tests
     {
         private static CameraProperties Cam(double lon, double lat, double zoom,
                                             double heading = 0.0, double tilt = 0.0)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, heading, tilt);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, heading, tilt);
 
         [Test]
         public void ApplyZoom_PositiveScroll_ZoomsIn_AndClamps()
@@ -20,8 +21,8 @@ namespace MapRenderer.Tests
             var v = Cam(0, 0, 5.0);
             var z = ViewInput.ApplyZoom(v, scrollDelta: 2.0, sensitivity: 0.5, minZoom: 0, maxZoom: 22);
             Assert.AreEqual(6.0, z.Zoom.Value, 1e-9, "scroll 2 * sens 0.5 = +1 zoom");
-            Assert.IsNull(z.Lon, "ApplyZoom patch must leave Lon null");
-            Assert.IsNull(z.Lat, "ApplyZoom patch must leave Lat null");
+            Assert.IsNull(z.Longitude, "ApplyZoom patch must leave Lon null");
+            Assert.IsNull(z.Latitude, "ApplyZoom patch must leave Lat null");
 
             var hi = ViewInput.ApplyZoom(v, scrollDelta: 100.0, sensitivity: 1.0, minZoom: 0, maxZoom: 14);
             Assert.AreEqual(14.0, hi.Zoom.Value, 1e-9, "clamps to maxZoom");
@@ -35,11 +36,11 @@ namespace MapRenderer.Tests
         {
             var v = Cam(0, 0, 4.0);
             var p = ViewInput.ApplyPan(v, dxPixels: 50.0, dyPixels: 0.0);
-            Assert.IsNotNull(p.Lon, "a pan sets Lon");
-            Assert.IsNotNull(p.Lat, "a pan sets Lat");
+            Assert.IsNotNull(p.Longitude, "a pan sets Lon");
+            Assert.IsNotNull(p.Latitude, "a pan sets Lat");
             Assert.IsNull(p.Zoom, "a pan leaves Zoom null");
-            Assert.Less(p.Lon.Value, v.LookAt.Lon, "drag-right shifts center west (content follows cursor)");
-            Assert.AreEqual(0.0, p.Lat.Value, 1e-9, "no vertical drag → latitude unchanged");
+            Assert.Less(p.Longitude.Value, v.LookAt.Longitude, "drag-right shifts center west (content follows cursor)");
+            Assert.AreEqual(0.0, p.Latitude.Value, 1e-9, "no vertical drag → latitude unchanged");
         }
 
         [Test]
@@ -47,7 +48,7 @@ namespace MapRenderer.Tests
         {
             var v = Cam(0, 0, 4.0);
             var p = ViewInput.ApplyPan(v, dxPixels: 0.0, dyPixels: 30.0);
-            Assert.Greater(p.Lat.Value, v.LookAt.Lat, "drag-up (screen dy>0) shifts center north");
+            Assert.Greater(p.Latitude.Value, v.LookAt.Latitude, "drag-up (screen dy>0) shifts center north");
         }
 
         [Test]
@@ -56,8 +57,8 @@ namespace MapRenderer.Tests
             // The same pixel drag moves the center fewer degrees at a higher zoom (finer ground res).
             var lowZ  = ViewInput.ApplyPan(Cam(0, 0, 2.0), 50.0, 0.0);
             var highZ = ViewInput.ApplyPan(Cam(0, 0, 10.0), 50.0, 0.0);
-            double lowDelta  = System.Math.Abs(lowZ.Lon.Value);
-            double highDelta = System.Math.Abs(highZ.Lon.Value);
+            double lowDelta  = System.Math.Abs(lowZ.Longitude.Value);
+            double highDelta = System.Math.Abs(highZ.Longitude.Value);
             Assert.Greater(lowDelta, highDelta, "a pixel drag moves more degrees at low zoom than high zoom");
         }
 
@@ -66,7 +67,7 @@ namespace MapRenderer.Tests
         {
             var v = Cam(0, 84.0, 2.0);
             var p = ViewInput.ApplyPan(v, 0.0, 100000.0);   // huge upward drag
-            Assert.LessOrEqual(p.Lat.Value, CameraProperties.MaxMercatorLat + 1e-9,
+            Assert.LessOrEqual(p.Latitude.Value, CameraProperties.MaxMercatorLat + 1e-9,
                 "latitude must clamp to the Mercator limit");
         }
 
@@ -78,7 +79,7 @@ namespace MapRenderer.Tests
                 bearingSensitivity: 1.0, pitchSensitivity: 1.0, maxPitch: 60.0);
             Assert.IsNotNull(t.Heading, "a tilt drag sets Heading");
             Assert.IsNotNull(t.Tilt,    "a tilt drag sets Tilt");
-            Assert.IsNull(t.Lon,  "a tilt drag leaves Lon null");
+            Assert.IsNull(t.Longitude,  "a tilt drag leaves Lon null");
             Assert.IsNull(t.Zoom, "a tilt drag leaves Zoom null");
             Assert.AreEqual(10.0, t.Heading.Value, 1e-9, "horizontal drag → bearing");
             Assert.AreEqual(20.0, t.Tilt.Value,    1e-9, "vertical drag → pitch");

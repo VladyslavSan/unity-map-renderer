@@ -1,5 +1,5 @@
-using System;
 using System.Collections.Generic;
+using Unity.Mathematics;
 using MapRenderer.Core.Json;
 
 namespace MapRenderer.Core.Expressions.Ops
@@ -36,7 +36,7 @@ namespace MapRenderer.Core.Expressions.Ops
                 {
                     case "/": return Value.Number(a / b);
                     case "%": return Value.Number(a % b);
-                    case "^": return Value.Number(Math.Pow(a, b));
+                    case "^": return Value.Number(math.pow(a, b));
                     default: throw new ExpressionEvaluationException($"Unknown binary math op {op}.");
                 }
             }, args, ValueType.Number);
@@ -47,20 +47,20 @@ namespace MapRenderer.Core.Expressions.Ops
                 double a = vals[0].AsNumber();
                 switch (op)
                 {
-                    case "abs": return Value.Number(Math.Abs(a));
-                    case "ceil": return Value.Number(Math.Ceiling(a));
-                    case "floor": return Value.Number(Math.Floor(a));
+                    case "abs":   return Value.Number(math.abs(a));
+                    case "ceil":  return Value.Number(math.ceil(a));
+                    case "floor": return Value.Number(math.floor(a));
                     case "round": return Value.Number(RoundHalfAwayFromZero(a));
-                    case "sqrt": return Value.Number(Math.Sqrt(a));
-                    case "sin": return Value.Number(Math.Sin(a));
-                    case "cos": return Value.Number(Math.Cos(a));
-                    case "tan": return Value.Number(Math.Tan(a));
-                    case "asin": return Value.Number(Math.Asin(a));
-                    case "acos": return Value.Number(Math.Acos(a));
-                    case "atan": return Value.Number(Math.Atan(a));
-                    case "ln": return Value.Number(Math.Log(a));
-                    case "log10": return Value.Number(Math.Log10(a));
-                    case "log2": return Value.Number(Math.Log(a, 2.0));
+                    case "sqrt":  return Value.Number(math.sqrt(a));
+                    case "sin":   return Value.Number(math.sin(a));
+                    case "cos":   return Value.Number(math.cos(a));
+                    case "tan":   return Value.Number(math.tan(a));
+                    case "asin":  return Value.Number(math.asin(a));
+                    case "acos":  return Value.Number(math.acos(a));
+                    case "atan":  return Value.Number(math.atan(a));
+                    case "ln":    return Value.Number(math.log(a));
+                    case "log10": return Value.Number(math.log10(a));
+                    case "log2":  return Value.Number(math.log2(a));
                     default: throw new ExpressionEvaluationException($"Unknown unary math op {op}.");
                 }
             }, new[] { arg }, ValueType.Number);
@@ -74,7 +74,7 @@ namespace MapRenderer.Core.Expressions.Ops
                 for (int i = 1; i < vals.Length; i++)
                 {
                     double v = vals[i].AsNumber();
-                    best = op == "min" ? Math.Min(best, v) : Math.Max(best, v);
+                    best = op == "min" ? math.min(best, v) : math.max(best, v);
                 }
                 return Value.Number(best);
             }, args, ValueType.Number);
@@ -86,15 +86,15 @@ namespace MapRenderer.Core.Expressions.Ops
             double v;
             switch (op)
             {
-                case "pi": v = Math.PI; break;
-                case "ln2": v = Math.Log(2.0); break;
-                default: v = Math.E; break; // "e"
+                case "pi":  v = math.PI_DBL; break;
+                case "ln2": v = math.log(2.0); break;
+                default:    v = math.E_DBL; break; // "e"
             }
             return new LiteralExpression(Value.Number(v));
         }
 
         // The spec's round() ties round half away from zero (1.5 -> 2, -1.5 -> -2), unlike .NET banker's.
         private static double RoundHalfAwayFromZero(double a)
-            => Math.Sign(a) * Math.Floor(Math.Abs(a) + 0.5);
+            => math.sign(a) * math.floor(math.abs(a) + 0.5);
     }
 }

@@ -1,7 +1,7 @@
 using System;
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity
 {

@@ -4,7 +4,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Rendering;
@@ -313,8 +313,8 @@ namespace MapRenderer.Unity
 
             int integerZoom = cam.IntegerZoom;
             if (!_coverKeyInitialised ||
-                cam.LookAt.Lon != _coverKeyLon ||
-                cam.LookAt.Lat != _coverKeyLat ||
+                cam.LookAt.Longitude != _coverKeyLon ||
+                cam.LookAt.Latitude != _coverKeyLat ||
                 integerZoom    != _coverKeyIntegerZoom)
             {
                 _coverDirty = true;
@@ -365,8 +365,8 @@ namespace MapRenderer.Unity
             for (int i = 0; i < _toRelease.Count; i++)
                 ReleaseTile(_toRelease[i]);
 
-            _coverKeyLon         = cam.LookAt.Lon;
-            _coverKeyLat         = cam.LookAt.Lat;
+            _coverKeyLon         = cam.LookAt.Longitude;
+            _coverKeyLat         = cam.LookAt.Latitude;
             _coverKeyIntegerZoom = integerZoom;
             _coverKeyInitialised = true;
 

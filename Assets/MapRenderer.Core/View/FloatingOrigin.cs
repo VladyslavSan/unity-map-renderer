@@ -1,6 +1,6 @@
 using System;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Core.View
 {
@@ -13,7 +13,7 @@ namespace MapRenderer.Core.View
     /// <para><b>The two levels — and where each is applied:</b></para>
     /// <list type="number">
     ///   <item><b>Mesh vertices are tile-origin-relative.</b> The projection job
-    ///     (<c>ProjectTileVerticesJob</c>) bakes each vertex as <c>(merc_vertex − tileOrigin)</c> cast to
+    ///     (<c>ProjectTileToWebMercatorJob</c>) bakes each vertex as <c>(merc_vertex − tileOrigin)</c> cast to
     ///     float32, where <c>tileOrigin</c> = <see cref="TileLocalOriginMercator"/>. The in-tile offset
     ///     spans at most one tile (≈ <c>4.0075e7 / 2^z</c> m), so its float32 ULP shrinks with zoom.</item>
     ///   <item><b>The tile GameObject local position is scene-origin-relative.</b> Its transform carries
@@ -38,7 +38,7 @@ namespace MapRenderer.Core.View
     public static class FloatingOrigin
     {
         /// <summary>
-        /// The Mercator min-corner of a tile — the origin that <c>ProjectTileVerticesJob</c> bakes mesh
+        /// The Mercator min-corner of a tile — the origin that <c>ProjectTileToWebMercatorJob</c> bakes mesh
         /// vertices relative to. (Matches <c>MapFillBootstrap</c>/<c>JobifiedPipelineTests</c> which pass
         /// <c>TileId.MercatorBounds().min</c> as the projection origin.)
         /// </summary>
@@ -70,7 +70,7 @@ namespace MapRenderer.Core.View
         /// </summary>
         public static float3 RenderVertex(double2 mercVertex, double2 tileOriginMerc, double2 sceneOriginMerc)
         {
-            // Level 1: mesh vertex baked tile-origin-relative (what ProjectTileVerticesJob writes).
+            // Level 1: mesh vertex baked tile-origin-relative (what ProjectTileToWebMercatorJob writes).
             float vLocalX = (float)(mercVertex.x - tileOriginMerc.x);
             float vLocalZ = (float)(mercVertex.y - tileOriginMerc.y);
 

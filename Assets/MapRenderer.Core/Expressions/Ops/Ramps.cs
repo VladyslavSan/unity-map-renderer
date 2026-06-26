@@ -1,4 +1,4 @@
-using System;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Expressions.Ops
 {
@@ -120,7 +120,7 @@ namespace MapRenderer.Core.Expressions.Ops
                     if (_base == 1.0)
                         normalized = (x - lo) / (hi - lo);
                     else
-                        normalized = (Math.Pow(_base, x - lo) - 1.0) / (Math.Pow(_base, hi - lo) - 1.0);
+                        normalized = (math.pow(_base, x - lo) - 1.0) / (math.pow(_base, hi - lo) - 1.0);
                     return normalized;
                 case InterpolationKind.CubicBezier:
                     normalized = (x - lo) / (hi - lo);
@@ -255,9 +255,9 @@ namespace MapRenderer.Core.Expressions.Ops
             for (int i = 0; i < 8; i++)
             {
                 double xs = SampleX(s, p1x, p2x) - x;
-                if (Math.Abs(xs) < 1e-9) return s;
+                if (math.abs(xs) < 1e-9) return s;
                 double d = SampleDerivativeX(s, p1x, p2x);
-                if (Math.Abs(d) < 1e-9) break;
+                if (math.abs(d) < 1e-9) break;
                 s -= xs / d;
             }
             // Fallback: bisection on [0,1].
@@ -266,7 +266,7 @@ namespace MapRenderer.Core.Expressions.Ops
             for (int i = 0; i < 40; i++)
             {
                 double xs = SampleX(s, p1x, p2x);
-                if (Math.Abs(xs - x) < 1e-9) break;
+                if (math.abs(xs - x) < 1e-9) break;
                 if (xs < x) lo = s; else hi = s;
                 s = 0.5 * (lo + hi);
             }

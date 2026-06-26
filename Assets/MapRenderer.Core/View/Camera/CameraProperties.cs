@@ -1,5 +1,6 @@
 using System;
-using MapRenderer.Core.Coordinates;
+using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Core.View.Camera
 {
@@ -14,7 +15,7 @@ namespace MapRenderer.Core.View.Camera
     /// <para><b>Field semantics:</b>
     /// <list type="bullet">
     ///   <item><see cref="LookAt"/> — geographic coordinate (WGS-84) the camera orbits around.
-    ///     <c>Alt</c> is reserved for terrain; pass <c>0</c> until S25.</item>
+    ///     <c>Altitude</c> is reserved for terrain; pass <c>0</c> until S25.</item>
     ///   <item><see cref="Zoom"/> — fractional MapLibre zoom. Higher = more zoomed in (smaller
     ///     ground footprint). Canonical; drives distance/altitude.</item>
     ///   <item><see cref="Heading"/> — camera bearing, degrees CW from north. [0, 360).</item>
@@ -28,10 +29,10 @@ namespace MapRenderer.Core.View.Camera
     {
         // ── Geographic anchor ────────────────────────────────────────────────────────────────────
         /// <summary>
-        /// The point the camera orbits around (lon, lat, alt).
-        /// Alt is reserved (terrain seam, S25). Use <c>0</c> for now.
+        /// The point the camera orbits around (lon, lat, altitude).
+        /// Altitude is reserved (terrain seam, S25). Use <c>0</c> for now.
         /// </summary>
-        public readonly LookAtPoint LookAt;
+        public readonly GeoCoordinate3D LookAt;
 
         // ── Canonical zoom (D1) ───────────────────────────────────────────────────────────────
         /// <summary>
@@ -48,11 +49,14 @@ namespace MapRenderer.Core.View.Camera
         public readonly double Tilt;
 
         // ── Constants ─────────────────────────────────────────────────────────────────────────
-        /// <summary>Web-Mercator latitude limit (±85.05112878°).</summary>
-        public const double MaxMercatorLat = 85.05112878;
+        /// <summary>
+        /// Web-Mercator latitude limit. Thin alias for <see cref="WebMercator.MaxLatitude"/>;
+        /// single source of truth lives on WebMercator (S62).
+        /// </summary>
+        public const double MaxMercatorLat = WebMercator.MaxLatitude;
 
         // ── Construction ─────────────────────────────────────────────────────────────────────
-        public CameraProperties(LookAtPoint lookAt, double zoom, double heading, double tilt)
+        public CameraProperties(GeoCoordinate3D lookAt, double zoom, double heading, double tilt)
         {
             LookAt  = lookAt;
             Zoom    = zoom;
@@ -61,39 +65,21 @@ namespace MapRenderer.Core.View.Camera
         }
 
         /// <summary>Default (un-initialized) camera at origin, zoom 0, no heading/tilt.</summary>
-        public static CameraProperties Default
-            => new CameraProperties(new LookAtPoint(0, 0, 0), 0, 0, 0);
+        public static CameraProperties Default => new CameraProperties(new GeoCoordinate3D(), 0, 0, 0);
 
         // ── Derived helpers ───────────────────────────────────────────────────────────────────
 
         /// <summary>Integer tile zoom for tile selection: floor(Zoom), min 0.</summary>
-        public int IntegerZoom => Math.Max(0, (int)Math.Floor(Zoom));
+        public int IntegerZoom => math.max(0, (int)math.floor(Zoom));
 
         /// <summary>
         /// Center clamped to Mercator bounds, projected to Web-Mercator meters.
         /// </summary>
-        public Unity.Mathematics.double2 CenterMercator()
+        public double2 CenterMercator()
         {
-            double lat = Math.Max(-MaxMercatorLat, Math.Min(MaxMercatorLat, LookAt.Lat));
-            return WebMercator.FromLonLat(LookAt.Lon, lat);
+            double latitude = math.max(-MaxMercatorLat, math.min(MaxMercatorLat, LookAt.Latitude));
+            return WebMercator.FromLonLat(new GeoCoordinate3D { Latitude = latitude, Longitude = LookAt.Longitude });
         }
-
-        // ── With* helpers (return new instances; value-type semantics) ────────────────────────
-
-        public CameraProperties WithLookAt(LookAtPoint p)
-            => new CameraProperties(p, Zoom, Heading, Tilt);
-
-        public CameraProperties WithZoom(double zoom)
-            => new CameraProperties(LookAt, zoom, Heading, Tilt);
-
-        public CameraProperties WithHeading(double heading)
-            => new CameraProperties(LookAt, Zoom, heading, Tilt);
-
-        public CameraProperties WithTilt(double tilt)
-            => new CameraProperties(LookAt, Zoom, Heading, tilt);
-
-        public CameraProperties WithOrientation(double heading, double tilt)
-            => new CameraProperties(LookAt, Zoom, heading, tilt);
 
         // ── Utilities ────────────────────────────────────────────────────────────────────────
 
@@ -106,29 +92,8 @@ namespace MapRenderer.Core.View.Camera
         }
 
         public override string ToString()
-            => $"CameraProperties(lon={LookAt.Lon:F5}, lat={LookAt.Lat:F5}, z={Zoom:F3}, " +
-               $"heading={Heading:F1}, tilt={Tilt:F1})";
-    }
-
-    /// <summary>
-    /// Geographic anchor point (lon, lat, alt). <c>Alt</c> is reserved for the terrain seam (S25).
-    /// </summary>
-    public readonly struct LookAtPoint
-    {
-        /// <summary>Longitude, degrees [-180, 180].</summary>
-        public readonly double Lon;
-        /// <summary>Latitude, degrees. Clamped to Mercator limit by callers.</summary>
-        public readonly double Lat;
-        /// <summary>Altitude above ground in metres. Reserved; use 0 until S25.</summary>
-        public readonly double Alt;
-
-        public LookAtPoint(double lon, double lat, double alt = 0.0)
         {
-            Lon = lon;
-            Lat = lat;
-            Alt = alt;
+            return $"CameraProperties(LookAt={LookAt}, z={Zoom:F3}, heading={{Heading:F1}}, tilt={{Tilt:F1}})";
         }
-
-        public override string ToString() => $"({Lon:F5}, {Lat:F5}, alt={Alt:F1})";
     }
 }

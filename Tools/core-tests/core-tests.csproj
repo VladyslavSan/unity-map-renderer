@@ -31,7 +31,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="Shim.cs" />
+    <Compile Include="Shim/**/*.cs" />
     <Compile Include="CorePipelineTests.cs" />
     <Compile Include="ShaderStructureTests.cs" />
 
@@ -49,6 +49,14 @@
     <!-- S03: BYO data-source layer (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
+
+    <!-- S62: EarthConstants — pure-geodetic WGS-84 constants, referenced by WebMercator/Ecef/CameraPoseMath -->
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/EarthConstants.cs" />
+
+    <!-- S61: Projection math foundation (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/GeoCoordinate.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/Ecef.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/ProjectionMode.cs" />
 
     <!-- S06: tile cover / floating-origin / input math (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/View/TileCover.cs" />
@@ -118,6 +126,7 @@
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ProjectionMathTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraPropertiesTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />

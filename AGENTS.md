@@ -94,3 +94,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
   `UnityEngine.Vector2/3/4` or `Quaternion`. `Core` is engine-free, so `UnityEngine.Vector*` is forbidden
   there outright. Sole exception: a Unity boundary API that demands a `VectorN` — convert at that call site.
   Full rationale + examples in **`docs/conventions.md`**. (S60.)
+- **`System.Math` is banned in all production code** — use `Unity.Mathematics.math.*` instead (e.g.
+  `math.sin`, `math.sqrt`, `math.abs`, `math.pow`). **Use `math.PI_DBL` for double-precision π** (not
+  `math.PI` which is a float); likewise `math.E_DBL`. Full replacement table in
+  **`docs/conventions.md` §"System.Math is banned"**. (S62.)

@@ -34,7 +34,7 @@ namespace MapRenderer.Core.Geometry
                     continue;
 
                 double area2 = SignedArea.Compute(ring);
-                if (System.Math.Abs(area2) < DegenerateThreshold)
+                if (math.abs(area2) < DegenerateThreshold)
                     continue;  // degenerate ring — skip
 
                 if (exteriorSign == 0.0)

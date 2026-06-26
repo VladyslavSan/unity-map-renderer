@@ -20,7 +20,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -142,14 +142,14 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built");
 
                 // ── DECISIVE: per-layer iteration — exactly 2 layer meshes (one per fill style layer) ──
-                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Mesh[] meshes = view.GetTileMeshes(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
                 Assert.AreEqual(2, meshes.Length,
                     "The tile must have exactly 2 layer meshes (one per fill style layer). " +
@@ -209,11 +209,11 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0),
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0),
                                 ownsSource: false, style: FillLineFillStyle());
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built");
 
                 // Map each layer id -> its material renderQueue from the StyledLayerSet (backend-agnostic;
@@ -293,14 +293,14 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built");
 
                 // The first (and only) layer mesh is the continent-fill layer.
-                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Mesh[] meshes = view.GetTileMeshes(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
                 Assert.AreEqual(1, meshes.Length,
                     "Expect exactly 1 fill-layer mesh (ContinentFillStyle has 1 fill layer)");
@@ -399,13 +399,13 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built");
 
-                Mesh[] meshes = view.GetTileMeshes(new TileId(0, 0, 0));
+                Mesh[] meshes = view.GetTileMeshes(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(meshes, "The built tile must expose its layer meshes.");
                 Assert.AreEqual(1, meshes.Length, "Expect 1 fill layer mesh");
 
@@ -548,7 +548,7 @@ namespace MapRenderer.Tests.Visual
 
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 0.0, 0, 0), ownsSource: false, style: style);
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
 
                 // ── DECISIVE: fill layer count = 1 after Initialise ───────────────────────────
                 // (FillLayerCount() is a test-only extension over MapView internals — see MapViewTestExtensions.)

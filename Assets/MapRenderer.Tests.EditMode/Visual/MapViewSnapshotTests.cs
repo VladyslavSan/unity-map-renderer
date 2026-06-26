@@ -3,7 +3,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
                 // Pump to settle all tiles.
                 for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {

@@ -1,3 +1,4 @@
+using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.View.Camera;
 
@@ -74,22 +75,22 @@ namespace MapRenderer.Unity
             CameraPoseMath.ComputePose(altitude,
                                        props.Heading,
                                        props.Tilt,
-                                       out Double3 pos,
-                                       out Double3 fwd,
-                                       out Double3 up);
+                                       out double3 pos,
+                                       out double3 fwd,
+                                       out double3 up);
 
             _camera.orthographic = false;
             _camera.fieldOfView  = VerticalFovDeg;
 
             // Orbit pose around the render origin (the look-at sits at origin under camera-relative
             // rendering, so there is no scene-origin term here).
-            _camera.transform.position = new Vector3((float)pos.X, (float)pos.Y, (float)pos.Z);
+            _camera.transform.position = new Vector3((float)pos.x, (float)pos.y, (float)pos.z);
 
             // LookRotation(forward, up): forward = direction the camera looks (toward the look-at/origin).
             // Core already orthogonalized up vs. fwd (Gram-Schmidt) so this is always valid.
             _camera.transform.rotation = Quaternion.LookRotation(
-                new Vector3((float)fwd.X, (float)fwd.Y, (float)fwd.Z),
-                new Vector3((float)up.X,  (float)up.Y,  (float)up.Z));
+                new Vector3((float)fwd.x, (float)fwd.y, (float)fwd.z),
+                new Vector3((float)up.x,  (float)up.y,  (float)up.z));
 
             // Clip planes: scale with altitude so the world is not clipped at z2, precision OK at z16.
             _camera.nearClipPlane = Mathf.Max(0.1f, (float)CameraPoseMath.NearClip(altitude));

@@ -10,7 +10,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
@@ -234,7 +234,7 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(layer);
 
             double extent  = layer.Extent;
-            var tileId     = new TileId(0, 0, 0);
+            var tileId     = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, _)  = tileId.MercatorBounds();
             double originX = bMin.x, originY = bMin.y;
 
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests
                 if (f.GeometryType == MvtGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
-            var (bMin, _)  = new TileId(0, 0, 0).MercatorBounds();
+            var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var singleInput = new TileTessellationPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms, Extent = extent,

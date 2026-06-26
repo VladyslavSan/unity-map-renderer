@@ -6,6 +6,8 @@
 
 using System;
 using NUnit.Framework;
+using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
@@ -26,7 +28,7 @@ namespace MapRenderer.Tests
         public void Patch_TiltOnly_ChangesOnlyTilt()
         {
             var initial = new CameraProperties(
-                new LookAtPoint(13.4, 52.5, 0), zoom: 10.0, heading: 45.0, tilt: 0.0);
+                new GeoCoordinate3D { Longitude = 13.4, Latitude = 52.5, Altitude = 0 }, zoom: 10.0, heading: 45.0, tilt: 0.0);
 
             var patch = new CameraPropertiesUpdate { Tilt = 25.0 };
             CameraProperties result = patch.ApplyTo(initial, TestViewportHeight, TestFovDeg);
@@ -34,8 +36,8 @@ namespace MapRenderer.Tests
             Assert.AreEqual(25.0, result.Tilt,         1e-9, "Tilt must be updated to 25.");
             Assert.AreEqual(10.0, result.Zoom,         1e-9, "Zoom must be unchanged.");
             Assert.AreEqual(45.0, result.Heading,      1e-9, "Heading must be unchanged.");
-            Assert.AreEqual(13.4, result.LookAt.Lon,   1e-9, "Lon must be unchanged.");
-            Assert.AreEqual(52.5, result.LookAt.Lat,   1e-9, "Lat must be unchanged.");
+            Assert.AreEqual(13.4, result.LookAt.Longitude,   1e-9, "Lon must be unchanged.");
+            Assert.AreEqual(52.5, result.LookAt.Latitude,   1e-9, "Lat must be unchanged.");
         }
 
         /// <summary>
@@ -45,7 +47,7 @@ namespace MapRenderer.Tests
         public void Patch_ZoomAndDistance_SameCanonicalState()
         {
             var initial = new CameraProperties(
-                new LookAtPoint(0, 0, 0), zoom: 5.0, heading: 0, tilt: 0);
+                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
 
             double targetZoom = 10.0;
             double targetAlt  = CameraPoseMath.AltitudeForZoom(targetZoom, TestViewportHeight, TestFovDeg);
@@ -66,13 +68,13 @@ namespace MapRenderer.Tests
         public void Patch_Empty_IsNoOp()
         {
             var initial = new CameraProperties(
-                new LookAtPoint(1.0, 2.0, 3.0), zoom: 7.5, heading: 30.0, tilt: 15.0);
+                new GeoCoordinate3D { Longitude = 1.0, Latitude = 2.0, Altitude = 3.0 }, zoom: 7.5, heading: 30.0, tilt: 15.0);
 
             var patch = new CameraPropertiesUpdate();
             CameraProperties result = patch.ApplyTo(initial, TestViewportHeight, TestFovDeg);
 
-            Assert.AreEqual(initial.LookAt.Lon, result.LookAt.Lon, 1e-9);
-            Assert.AreEqual(initial.LookAt.Lat, result.LookAt.Lat, 1e-9);
+            Assert.AreEqual(initial.LookAt.Longitude, result.LookAt.Longitude, 1e-9);
+            Assert.AreEqual(initial.LookAt.Latitude, result.LookAt.Latitude, 1e-9);
             Assert.AreEqual(initial.Zoom,        result.Zoom,       1e-9);
             Assert.AreEqual(initial.Heading,     result.Heading,    1e-9);
             Assert.AreEqual(initial.Tilt,        result.Tilt,       1e-9);
@@ -91,7 +93,7 @@ namespace MapRenderer.Tests
             double D          = 2.0; // seconds
 
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), startZoom, 0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Zoom = targetZoom }, new CameraAnimation(D));
@@ -120,7 +122,7 @@ namespace MapRenderer.Tests
             double D          = 1.0;
 
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), startZoom, 0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Zoom = targetZoom }, new CameraAnimation(D));
@@ -142,7 +144,7 @@ namespace MapRenderer.Tests
             double D             = 1.0;
 
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, startHeading, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, startHeading, 0),
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Heading = targetHeading }, new CameraAnimation(D));
@@ -161,7 +163,7 @@ namespace MapRenderer.Tests
         {
             double D = 2.0;
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, 350.0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 350.0, 0),
                 TestViewportHeight, TestFovDeg);
 
             sys.Apply(new CameraPropertiesUpdate { Heading = 10.0 }, new CameraAnimation(D));
@@ -184,7 +186,7 @@ namespace MapRenderer.Tests
         public void InstantApply_SetsCurrentProps_NoAnimation()
         {
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, 0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
                 TestViewportHeight, TestFovDeg);
 
             Assert.IsFalse(sys.IsAnimating, "No animation on fresh CameraSystem.");
@@ -259,15 +261,15 @@ namespace MapRenderer.Tests
         {
             double altitude = 10000.0;
             CameraPoseMath.ComputePose(altitude, 0.0, 0.0,
-                out Double3 pos, out Double3 fwd, out Double3 up);
+                out double3 pos, out double3 fwd, out double3 up);
 
-            Assert.AreEqual(0.0,      pos.X, 1e-6, "At pitch=0, X must be 0 (directly above).");
-            Assert.AreEqual(altitude, pos.Y, 1e-6, "At pitch=0, Y must equal altitude.");
-            Assert.AreEqual(0.0,      pos.Z, 1e-6, "At pitch=0, Z must be 0 (directly above).");
+            Assert.AreEqual(0.0,      pos.x, 1e-6, "At pitch=0, X must be 0 (directly above).");
+            Assert.AreEqual(altitude, pos.y, 1e-6, "At pitch=0, Y must equal altitude.");
+            Assert.AreEqual(0.0,      pos.z, 1e-6, "At pitch=0, Z must be 0 (directly above).");
 
-            Assert.AreEqual( 0.0, fwd.X, 1e-6, "Forward X must be 0 at pitch=0 heading=0.");
-            Assert.AreEqual(-1.0, fwd.Y, 1e-6, "Forward Y must be -1 (looking straight down).");
-            Assert.AreEqual( 0.0, fwd.Z, 1e-6, "Forward Z must be 0 at pitch=0 heading=0.");
+            Assert.AreEqual( 0.0, fwd.x, 1e-6, "Forward X must be 0 at pitch=0 heading=0.");
+            Assert.AreEqual(-1.0, fwd.y, 1e-6, "Forward Y must be -1 (looking straight down).");
+            Assert.AreEqual( 0.0, fwd.z, 1e-6, "Forward Z must be 0 at pitch=0 heading=0.");
         }
 
         /// <summary>
@@ -279,17 +281,17 @@ namespace MapRenderer.Tests
         {
             double altitude = 10000.0;
 
-            CameraPoseMath.ComputePose(altitude, 0.0,  0.0, out _, out _, out Double3 upNorth);
-            CameraPoseMath.ComputePose(altitude, 90.0, 0.0, out _, out _, out Double3 upEast);
+            CameraPoseMath.ComputePose(altitude, 0.0,  0.0, out _, out _, out double3 upNorth);
+            CameraPoseMath.ComputePose(altitude, 90.0, 0.0, out _, out _, out double3 upEast);
 
             // The up-vectors should differ (heading-derived, not fixed world-up).
-            double diffX = Math.Abs(upNorth.X - upEast.X);
-            double diffZ = Math.Abs(upNorth.Z - upEast.Z);
+            double diffX = Math.Abs(upNorth.x - upEast.x);
+            double diffZ = Math.Abs(upNorth.z - upEast.z);
             bool different = diffX + diffZ > 0.1;
             Assert.IsTrue(different,
                 $"Up-vector must rotate with heading at pitch=0. " +
-                $"up(heading=0)=({upNorth.X:F3},{upNorth.Y:F3},{upNorth.Z:F3}) " +
-                $"up(heading=90)=({upEast.X:F3},{upEast.Y:F3},{upEast.Z:F3}).");
+                $"up(heading=0)=({upNorth.x:F3},{upNorth.y:F3},{upNorth.z:F3}) " +
+                $"up(heading=90)=({upEast.x:F3},{upEast.y:F3},{upEast.z:F3}).");
         }
 
         /// <summary>
@@ -300,11 +302,11 @@ namespace MapRenderer.Tests
         {
             double altitude = 10000.0;
             CameraPoseMath.ComputePose(altitude, 0.0, 45.0,
-                out Double3 pos, out Double3 fwd, out _);
+                out double3 pos, out double3 fwd, out _);
 
-            Assert.Greater(pos.Y, 0.0, "Camera must be above origin (pos.Y > 0) at tilt=45.");
-            Assert.Less(fwd.Y,    0.0, "Forward Y must be negative (pointing downward component) at tilt=45.");
-            Assert.Greater(fwd.Y, -1.0, "Forward Y must be > -1 (tilted, not straight down) at tilt=45.");
+            Assert.Greater(pos.y, 0.0, "Camera must be above origin (pos.y > 0) at tilt=45.");
+            Assert.Less(fwd.y,    0.0, "Forward Y must be negative (pointing downward component) at tilt=45.");
+            Assert.Greater(fwd.y, -1.0, "Forward Y must be > -1 (tilted, not straight down) at tilt=45.");
         }
 
         // ── Heading interpolation: shortest-angle (D4) ────────────────────────────────────────────
@@ -336,7 +338,7 @@ namespace MapRenderer.Tests
             double D          = 4.0;
 
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), startZoom, 0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
                 TestViewportHeight, TestFovDeg);
 
             // Start an animation toward zoom 14.
@@ -365,7 +367,7 @@ namespace MapRenderer.Tests
         {
             int callCount = 0;
             var sys = new CameraSystem(
-                new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, 0, 0),
+                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
                 TestViewportHeight, TestFovDeg);
             sys.OnAnimationComplete = () => callCount++;
 
@@ -381,10 +383,10 @@ namespace MapRenderer.Tests
         [Test]
         public void CameraProperties_HeadingNormalized_To0_360()
         {
-            var p = new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, -45.0, 0);
+            var p = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, -45.0, 0);
             Assert.AreEqual(315.0, p.Heading, 1e-9, "Negative heading must wrap to [0,360).");
 
-            var q = new CameraProperties(new LookAtPoint(0, 0, 0), 5.0, 370.0, 0);
+            var q = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 370.0, 0);
             Assert.AreEqual(10.0, q.Heading, 1e-9, "Heading > 360 must wrap to [0,360).");
         }
 
@@ -408,7 +410,7 @@ namespace MapRenderer.Tests
         [Test]
         public void D6a_PanYSign_DragUp_NewIS_MovesCenterSouth()
         {
-            var v = new CameraProperties(new LookAtPoint(0, 0, 0), 4.0, 0, 0);
+            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
 
             // New IS: delta.y = +30 (mouse moved up = drag up).
             // MapController negates: dy_for_ViewInput = -30.
@@ -417,7 +419,7 @@ namespace MapRenderer.Tests
 
             var patch = MapRenderer.Core.View.ViewInput.ApplyPan(v, dxPixels: 0.0, dyPixels: viewInputDy);
 
-            Assert.Less(patch.Lat.Value, v.LookAt.Lat,
+            Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
                 "D6a: a +Y drag in the new Input System (upward mouse movement), after sign flip at the " +
                 "MapController translator, must move the LookAt center SOUTH (lat decreases). " +
                 "Failure means MapController.Update is passing the wrong sign to ViewInput.ApplyPan " +
@@ -431,7 +433,7 @@ namespace MapRenderer.Tests
         [Test]
         public void D6a_PanYSign_DragDown_NewIS_MovesCenterNorth()
         {
-            var v = new CameraProperties(new LookAtPoint(0, 0, 0), 4.0, 0, 0);
+            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
 
             // New IS: delta.y = -30 (mouse moved down = drag down). Negate → +30 for ViewInput.
             double newIsDeltaY = -30.0;
@@ -439,7 +441,7 @@ namespace MapRenderer.Tests
 
             var patch = MapRenderer.Core.View.ViewInput.ApplyPan(v, dxPixels: 0.0, dyPixels: viewInputDy);
 
-            Assert.Greater(patch.Lat.Value, v.LookAt.Lat,
+            Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
                 "D6a: a -Y drag (downward mouse movement in new IS), after sign flip, must move center NORTH.");
         }
 
@@ -465,7 +467,7 @@ namespace MapRenderer.Tests
         public void D6_TiltYSign_DragUp_NewIS_TiltsTowardOverhead()
         {
             // Start tilted (30°) so a decrease is observable (not clamped at 0).
-            var v = new CameraProperties(new LookAtPoint(0, 0, 0), 8.0, heading: 0.0, tilt: 30.0);
+            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
 
             // New IS: delta.y = +20 (drag up). MapController negates → dy_for_ViewInput = -20.
             double newIsDeltaY = 20.0;
@@ -489,7 +491,7 @@ namespace MapRenderer.Tests
         [Test]
         public void D6_TiltYSign_DragDown_NewIS_TiltsTowardHorizon()
         {
-            var v = new CameraProperties(new LookAtPoint(0, 0, 0), 8.0, heading: 0.0, tilt: 30.0);
+            var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
 
             // New IS: delta.y = -20 (drag down). Negate → +20 for ViewInput.
             double newIsDeltaY = -20.0;

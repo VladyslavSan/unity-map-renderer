@@ -1,5 +1,6 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Unity.Mathematics;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
@@ -45,29 +46,26 @@ namespace MapRenderer.Unity
 
         // ── Sensitivity (new Input System calibration) ────────────────────────────────────────────
         [Header("Sensitivity (new Input System — see class doc for calibration notes)")]
-
         [Tooltip("Zoom sensitivity. One normalized scroll unit (= one wheel notch via WheelNotchUnits) " +
                  "is multiplied by this to get zoom delta. Default 0.25 → 0.25 zoom levels per notch.")]
-        public float ZoomSensitivity    = 0.25f;
+        public float ZoomSensitivity = 0.25f;
 
         [Tooltip("Keyboard zoom step in zoom-levels per second. Applied via Time.deltaTime.")]
-        public float KeyboardZoomStep   = 2.0f;
+        public float KeyboardZoomStep = 2.0f;
 
         [Tooltip("Bearing sensitivity (raw px/frame → degrees). 0.3 matches the legacy feel.")]
         public float BearingSensitivity = 0.3f;
 
         [Tooltip("Pitch sensitivity (raw px/frame → degrees). 0.3 matches the legacy feel.")]
-        public float PitchSensitivity   = 0.3f;
+        public float PitchSensitivity = 0.3f;
 
         public float MaxPitch = 60f;
 
-        [Header("Zoom clamp")]
-        public float MinZoom = 0f;
-        public float MaxZoom = 22f;
+        [Header("Zoom clamp")] public float MinZoom = 0f;
+        public                        float MaxZoom = 22f;
 
         // ── Camera framing (bridge — altitude derived from zoom, S42 D2) ──────────────────────────
         [Header("Camera framing — altitude derived from zoom (S42 D2)")]
-
         /// <summary>
         /// Device-independent scroll magnitude per physical wheel notch (new Input System).
         /// Mouse.current.scroll.y delivers ±120 per notch; dividing by this normalizes to ≈±1.0/notch.
@@ -91,8 +89,8 @@ namespace MapRenderer.Unity
         {
             if (Map == null || Map.Camera == null) return;
 
-            CameraPropertiesUpdate patch = default;
-            bool anyChange = false;
+            CameraPropertiesUpdate patch     = default;
+            bool                   anyChange = false;
 
             // ── Zoom (scroll wheel / trackpad) ───────────────────────────────────────────────────
             // Null-guard Mouse.current (absent in headless / test builds — no NRE).
@@ -103,9 +101,9 @@ namespace MapRenderer.Unity
                 if (scroll != 0f)
                 {
                     // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
-                    float normalizedScroll = scroll / WheelNotchUnits;
-                    double newZoom = (Map.Camera.CurrentProperties.Zoom + normalizedScroll * ZoomSensitivity);
-                    newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, newZoom));
+                    float  normalizedScroll = scroll / WheelNotchUnits;
+                    double newZoom          = (Map.Camera.CurrentProperties.Zoom + normalizedScroll * ZoomSensitivity);
+                    newZoom    = math.max(MinZoom, math.min(MaxZoom, newZoom));
                     patch.Zoom = newZoom;
                     anyChange  = true;
                 }
@@ -121,9 +119,19 @@ namespace MapRenderer.Unity
                     Vector2 delta = mouse.delta.ReadValue();
                     if (delta.x != 0f || delta.y != 0f)
                     {
-                        CameraPropertiesUpdate pan = ViewInput.ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y);
-                        if (pan.Lon.HasValue) { patch.Lon = pan.Lon; anyChange = true; }
-                        if (pan.Lat.HasValue) { patch.Lat = pan.Lat; anyChange = true; }
+                        CameraPropertiesUpdate pan =
+                            ViewInput.ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y);
+                        if (pan.Longitude.HasValue)
+                        {
+                            patch.Longitude = pan.Longitude;
+                            anyChange       = true;
+                        }
+
+                        if (pan.Latitude.HasValue)
+                        {
+                            patch.Latitude = pan.Latitude;
+                            anyChange      = true;
+                        }
                     }
                 }
 
@@ -143,7 +151,7 @@ namespace MapRenderer.Unity
                             BearingSensitivity, PitchSensitivity, MaxPitch);
                         patch.Heading = tilt.Heading;
                         patch.Tilt    = tilt.Tilt;
-                        anyChange = true;
+                        anyChange     = true;
                     }
                 }
             }
@@ -153,14 +161,14 @@ namespace MapRenderer.Unity
             var kb = Keyboard.current;
             if (kb != null)
             {
-                float kbStep = KeyboardZoomStep * Time.deltaTime;
-                bool zoomIn  = kb.equalsKey.isPressed || kb.numpadPlusKey.isPressed  || kb.qKey.isPressed;
-                bool zoomOut = kb.minusKey.isPressed  || kb.numpadMinusKey.isPressed || kb.eKey.isPressed;
+                float kbStep  = KeyboardZoomStep * Time.deltaTime;
+                bool  zoomIn  = kb.equalsKey.isPressed || kb.numpadPlusKey.isPressed  || kb.qKey.isPressed;
+                bool  zoomOut = kb.minusKey.isPressed  || kb.numpadMinusKey.isPressed || kb.eKey.isPressed;
                 if (zoomIn || zoomOut)
                 {
-                    double base_ = patch.Zoom ?? Map.Camera.CurrentProperties.Zoom;
-                    double delta = zoomIn ? kbStep : -kbStep;
-                    double newZoom = System.Math.Max(MinZoom, System.Math.Min(MaxZoom, base_ + delta));
+                    double base_   = patch.Zoom ?? Map.Camera.CurrentProperties.Zoom;
+                    double delta   = zoomIn ? kbStep : -kbStep;
+                    double newZoom = math.max(MinZoom, math.min(MaxZoom, base_ + delta));
                     patch.Zoom = newZoom;
                     anyChange  = true;
                 }

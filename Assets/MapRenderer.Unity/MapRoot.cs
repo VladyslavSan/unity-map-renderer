@@ -1,9 +1,11 @@
 using System.IO;
 using UnityEngine;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+
 // S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.
 
 namespace MapRenderer.Unity
@@ -63,15 +65,15 @@ namespace MapRenderer.Unity
             "https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf";
 
         [Tooltip("Path to the style document JSON, relative to Assets/StreamingAssets/ (so it ships in builds; " +
-                 "Editor falls back to Assets/). OpenFreeMap 'liberty' style " +
+                 "Editor falls back to Assets/). OpenFreeMap 'liberty' style "                                   +
                  "(water/landuse/roads-with-casing/boundaries; labels not yet rendered).")]
         public string StyleAssetPath = "Fixtures/liberty.json";
 
         [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
-        public double InitialLatitude = 52.52;   // Berlin
+        public double InitialLatitude = 52.52; // Berlin
 
         [Tooltip("Initial map center longitude (decimal degrees, WGS-84).")]
-        public double InitialLongitude = 13.405;  // Berlin
+        public double InitialLongitude = 13.405; // Berlin
 
         [Tooltip("Initial zoom level (0 = world view). z14 is OpenFreeMap's maxzoom — densest data " +
                  "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
@@ -88,7 +90,10 @@ namespace MapRenderer.Unity
 
             // 3. Build the initial camera state.
             var initialView = new CameraProperties(
-                new LookAtPoint(InitialLongitude, InitialLatitude, 0), InitialZoom, 0, 0);
+                new GeoCoordinate3D
+                {
+                    Latitude = InitialLatitude, Longitude = InitialLongitude, Altitude = 0.0
+                }, InitialZoom, 0, 0);
 
             // 4. Wire: sets MapController.Camera, MapController.Map, calls MapView.Initialise,
             //    and wires the S45 CameraSystem + MapCamera.
@@ -110,7 +115,7 @@ namespace MapRenderer.Unity
 
             var mapView = GetComponent<MapView>();
             Debug.Log($"[MapRoot] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
-                      $"center=({InitialLatitude:F2},{InitialLongitude:F2}), " +
+                      $"center=({InitialLatitude:F2},{InitialLongitude:F2}), "          +
                       $"style layers={mapView.Layers.FillCount} fill layers.");
         }
 
@@ -179,11 +184,11 @@ namespace MapRenderer.Unity
             var cameraSystem = new CameraSystem(
                 initialView,
                 referenceViewportHeightPx: ctrl.ReferenceViewportHeightPx,
-                verticalFovDeg:             ctrl.VerticalFovDeg);
+                verticalFovDeg: ctrl.VerticalFovDeg);
 
             var mapCamera = camera != null
                 ? new MapCamera(camera, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg)
-                : new MapCamera(null,   ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
+                : new MapCamera(null, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
             mapCamera.AltitudeMultiplier = ctrl.AltitudeMultiplier;
 
             mapView.SetCamera(mapCamera, cameraSystem);
@@ -236,8 +241,8 @@ namespace MapRenderer.Unity
 
             try
             {
-                string json = File.ReadAllText(fullPath);
-                StyleDocument doc = StyleParser.Parse(json);
+                string        json = File.ReadAllText(fullPath);
+                StyleDocument doc  = StyleParser.Parse(json);
                 Debug.Log($"[MapRoot] Loaded style: {doc.Name ?? "(unnamed)"}, " +
                           $"{doc.Layers.Count} layers.");
                 return doc;
@@ -261,8 +266,8 @@ namespace MapRenderer.Unity
 
             var lightGo = new GameObject("MapDirectionalLight");
             var light   = lightGo.AddComponent<Light>();
-            light.type      = LightType.Directional;
-            light.intensity = 1.0f;
+            light.type                 = LightType.Directional;
+            light.intensity            = 1.0f;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             Debug.Log("[MapRoot] Created directional light (none found in scene).");
         }

@@ -5,7 +5,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
@@ -78,11 +78,11 @@ namespace MapRenderer.Tests.Visual
 
             var features = FeatureSelector.SelectFeatures(fillStyleLayer, mvtTile, styleZoom);
 
-            var (bMin, _) = new TileId(0, 0, 0).MercatorBounds();
+            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var origin = new double2(bMin.x, bMin.y);
 
             Mesh mesh = StyledFillTileBuilder.BuildMesh(
-                features, paint, styleZoom, mvtLayer.Extent, new TileId(0, 0, 0), origin);
+                features, paint, styleZoom, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, origin);
 
             var mapGo = new GameObject("FillSceneHelper");
             var mf = mapGo.AddComponent<MeshFilter>();

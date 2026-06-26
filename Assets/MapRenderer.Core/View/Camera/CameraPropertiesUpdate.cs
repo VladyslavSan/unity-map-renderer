@@ -1,3 +1,5 @@
+using MapRenderer.Core.Geo;
+
 namespace MapRenderer.Core.View.Camera
 {
     /// <summary>
@@ -26,16 +28,19 @@ namespace MapRenderer.Core.View.Camera
     public struct CameraPropertiesUpdate
     {
         // ── LookAt fields ────────────────────────────────────────────────────────────────────
-        /// <summary>New LookAt longitude (degrees). Null = keep current.</summary>
-        public double? Lon;
         /// <summary>New LookAt latitude (degrees). Null = keep current.</summary>
-        public double? Lat;
+        public double? Latitude;
+
+        /// <summary>New LookAt longitude (degrees). Null = keep current.</summary>
+        public double? Longitude;
+
         /// <summary>New LookAt altitude (metres, reserved). Null = keep current.</summary>
-        public double? Alt;
+        public double? Altitude;
 
         // ── Zoom / distance ───────────────────────────────────────────────────────────────────
         /// <summary>New zoom level (canonical, D1). Null = keep current (use Distance if set).</summary>
         public double? Zoom;
+
         /// <summary>
         /// New camera distance in render-space metres (converted to canonical zoom on apply).
         /// Null = keep current. Ignored when <see cref="Zoom"/> is also set.
@@ -45,28 +50,29 @@ namespace MapRenderer.Core.View.Camera
         // ── Orientation ───────────────────────────────────────────────────────────────────────
         /// <summary>New heading (bearing), degrees CW from north. Null = keep current.</summary>
         public double? Heading;
+
         /// <summary>New tilt (pitch from straight-down), degrees. Null = keep current.</summary>
         public double? Tilt;
 
         /// <summary>True if no field has been set (no-op patch).</summary>
         public bool IsEmpty =>
-            Lon == null && Lat == null && Alt == null &&
-            Zoom == null && Distance == null &&
-            Heading == null && Tilt == null;
+            Longitude == null && Latitude == null && Altitude == null &&
+            Zoom      == null && Distance == null &&
+            Heading   == null && Tilt     == null;
 
         /// <summary>
         /// Merges this patch over <paramref name="current"/>. Fields left null in the patch are
         /// taken from <paramref name="current"/>. Distance is converted to zoom if Zoom is absent.
         /// </summary>
         public CameraProperties ApplyTo(CameraProperties current,
-                                        double referenceViewportHeightPx,
-                                        double verticalFovDeg)
+            double                                       referenceViewportHeightPx,
+            double                                       verticalFovDeg)
         {
-            double lon     = Lon     ?? current.LookAt.Lon;
-            double lat     = Lat     ?? current.LookAt.Lat;
-            double alt     = Alt     ?? current.LookAt.Alt;
-            double heading = Heading ?? current.Heading;
-            double tilt    = Tilt    ?? current.Tilt;
+            double latitude  = Latitude  ?? current.LookAt.Latitude;
+            double longitude = Longitude ?? current.LookAt.Longitude;
+            double altitude  = Altitude  ?? current.LookAt.Altitude;
+            double heading   = Heading   ?? current.Heading;
+            double tilt      = Tilt      ?? current.Tilt;
 
             // Zoom wins over Distance if both are set.
             double zoom;
@@ -77,7 +83,9 @@ namespace MapRenderer.Core.View.Camera
             else
                 zoom = current.Zoom;
 
-            return new CameraProperties(new LookAtPoint(lon, lat, alt), zoom, heading, tilt);
+            return new CameraProperties(
+                new GeoCoordinate3D { Latitude = latitude, Longitude = longitude, Altitude = altitude }, zoom,
+                heading, tilt);
         }
     }
 }

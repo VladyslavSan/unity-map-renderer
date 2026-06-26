@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Core.Data
 {

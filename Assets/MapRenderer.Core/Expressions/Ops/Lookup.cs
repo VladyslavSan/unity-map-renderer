@@ -1,3 +1,5 @@
+using Unity.Mathematics;
+
 namespace MapRenderer.Core.Expressions.Ops
 {
     /// <summary>
@@ -13,7 +15,7 @@ namespace MapRenderer.Core.Expressions.Ops
             {
                 double idxD = vals[0].AsNumber();
                 var array = vals[1].AsArray();
-                if (idxD != System.Math.Floor(idxD) || idxD < 0 || idxD >= array.Count)
+                if (idxD != math.floor(idxD) || idxD < 0 || idxD >= array.Count)
                     throw new ExpressionEvaluationException(
                         $"at: index {Value.FormatNumber(idxD)} out of range [0, {array.Count}).");
                 return array[(int)idxD];

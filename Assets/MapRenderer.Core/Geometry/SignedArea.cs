@@ -44,7 +44,7 @@ namespace MapRenderer.Core.Geometry
         /// </summary>
         public static double AbsArea(List<double2> ring)
         {
-            return System.Math.Abs(Compute(ring)) * 0.5;
+            return math.abs(Compute(ring)) * 0.5;
         }
     }
 }

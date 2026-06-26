@@ -7,7 +7,7 @@ using UnityEngine.Rendering;
 using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Profiling;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
@@ -64,7 +64,8 @@ namespace MapRenderer.Unity
         // S47/S51: this marker now fires on a background ThreadPool thread when called from BuildMeshData
         // inside UniTask.Run. The ProfilerMarkerTests [UnityTest] (tooth 1b) uses
         // ProfilerRecorderOptions.Default (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
-        private static readonly ProfilerMarker PmTessellate = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Tessellate");
+        private static readonly ProfilerMarker PmTessellate =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Tessellate");
 
         // Hoisted fill vertex attribute descriptor array — constructed once (static readonly) so
         // UploadMesh does not allocate per-tile on the main thread (S48 no-per-tile-GC contract).
@@ -75,10 +76,10 @@ namespace MapRenderer.Unity
         // own stream so the reorder does not change any stream's byte offset.
         private static readonly VertexAttributeDescriptor[] FillVertexDescriptors = new[]
         {
-            new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Tangent,   VertexAttributeFormat.Float32, 4, stream: 2),
-            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4, stream: 2),
+            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 3),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
         };
 
@@ -109,12 +110,16 @@ namespace MapRenderer.Unity
         {
             /// <summary>Origin-relative world-space positions (east=+X, height=+Y, north=+Z).</summary>
             public float3[] Verts;
+
             /// <summary>Earcut triangle indices (into Verts).</summary>
             public int[] Indices;
+
             /// <summary>Pre-projection tile-space double2 coordinates (for UV generation).</summary>
             public double2[] TileVerts;
+
             /// <summary>Tile extent in tile units (from MVT layer, typically 4096).</summary>
             public double Extent;
+
             /// <summary>Per-feature sRGB vertex color (linearized in LayerMeshData stream assembly).</summary>
             public Color FeatureColor;
         }
@@ -142,17 +147,22 @@ namespace MapRenderer.Unity
         {
             // ── Stream 0: Position + Normal interleaved ──────────────────────────────────────────
             public NativeArray<FillPositionNormal> Stream0PositionNormal;
+
             // ── Stream 1: TexCoord0 (UV) ─────────────────────────────────────────────────────────
             public NativeArray<Vector2> Stream1Uv;
+
             // ── Stream 2: Tangent ────────────────────────────────────────────────────────────────
             public NativeArray<Vector4> Stream2Tangent;
+
             // ── Stream 3: Color (linearized sRGB, Float32x4) ─────────────────────────────────────
             public NativeArray<Vector4> Stream3Color;
+
             // ── Index buffer ──────────────────────────────────────────────────────────────────────
             public NativeArray<int> Indices;
 
             /// <summary>Vertex count. Zero when no geometry was produced.</summary>
             public int VertexCount;
+
             /// <summary>Index count. Zero when no geometry was produced.</summary>
             public int IndexCount;
 
@@ -193,10 +203,10 @@ namespace MapRenderer.Unity
                 if (!IsCreated) return;
                 IsCreated = false;
                 if (Stream0PositionNormal.IsCreated) Stream0PositionNormal.Dispose();
-                if (Stream1Uv.IsCreated)             Stream1Uv.Dispose();
-                if (Stream2Tangent.IsCreated)        Stream2Tangent.Dispose();
-                if (Stream3Color.IsCreated)          Stream3Color.Dispose();
-                if (Indices.IsCreated)               Indices.Dispose();
+                if (Stream1Uv.IsCreated) Stream1Uv.Dispose();
+                if (Stream2Tangent.IsCreated) Stream2Tangent.Dispose();
+                if (Stream3Color.IsCreated) Stream3Color.Dispose();
+                if (Indices.IsCreated) Indices.Dispose();
                 Interlocked.Decrement(ref LiveAllocCount);
             }
         }
@@ -221,11 +231,11 @@ namespace MapRenderer.Unity
         /// </summary>
         public static LayerMeshData BuildMeshData(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            Fill.PaintProperties paint,
-            double zoom,
-            double extent,
-            TileId id,
-            double2 tileOriginMerc)
+            Fill.PaintProperties      paint,
+            double                    zoom,
+            double                    extent,
+            TileId                    id,
+            double2                   tileOriginMerc)
         {
             // Empty result (IsCreated = false, no NativeArray) for early-out and error cases.
             var empty = new LayerMeshData { Features = new List<FeatureMeshData>() };
@@ -258,9 +268,9 @@ namespace MapRenderer.Unity
                 // Color space (D2): Core Color is sRGB [0,1]; converted to linear below (S48).
                 // _BaseColor=white on material → identity multiply → no double-gamma.
                 Color featureColor = Color.white;
-                var adapter = new MvtFeatureAdapter(feature);
-                
-                
+                var   adapter      = new MvtFeatureAdapter(feature);
+
+
                 if (paint.Color.TryEvaluate(zoom, adapter, out var color))
                     featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
@@ -275,11 +285,11 @@ namespace MapRenderer.Unity
                     Earcut.Result earcutResult = Earcut.Triangulate(polygon.Outer, polygon.Holes);
                     if (earcutResult.Indices == null || earcutResult.Indices.Length == 0) continue;
 
-                    double2[] flatVerts = earcutResult.Vertices;
-                    int[] triIndices    = earcutResult.Indices;
+                    double2[] flatVerts  = earcutResult.Vertices;
+                    int[]     triIndices = earcutResult.Indices;
 
                     // Project via pure managed math (off-main-thread safe; no NativeArray).
-                    // Formula mirrors ProjectTileVerticesJob.Execute (same precision contract).
+                    // Formula mirrors ProjectTileToWebMercatorJob.Execute (same precision contract).
                     float3[] worldPos = ProjectVerticesManaged(flatVerts, id.Z, id.X, id.Y, extent,
                         originX, originY);
 
@@ -309,15 +319,15 @@ namespace MapRenderer.Unity
             // NativeArray(Allocator.Persistent) is thread-safe from any thread (including ThreadPool).
             var result = new LayerMeshData
             {
-                VertexCount = totalVerts,
-                IndexCount  = totalIndices,
-                IsCreated   = true,
-                Features    = tempFeatures, // LEGACY: populated for backward-compat test assertions
+                VertexCount           = totalVerts,
+                IndexCount            = totalIndices,
+                IsCreated             = true,
+                Features              = tempFeatures, // LEGACY: populated for backward-compat test assertions
                 Stream0PositionNormal = new NativeArray<FillPositionNormal>(totalVerts, Allocator.Persistent),
-                Stream1Uv             = new NativeArray<Vector2>(totalVerts,            Allocator.Persistent),
-                Stream2Tangent        = new NativeArray<Vector4>(totalVerts,            Allocator.Persistent),
-                Stream3Color          = new NativeArray<Vector4>(totalVerts,            Allocator.Persistent),
-                Indices               = new NativeArray<int>(totalIndices,              Allocator.Persistent),
+                Stream1Uv             = new NativeArray<Vector2>(totalVerts, Allocator.Persistent),
+                Stream2Tangent        = new NativeArray<Vector4>(totalVerts, Allocator.Persistent),
+                Stream3Color          = new NativeArray<Vector4>(totalVerts, Allocator.Persistent),
+                Indices               = new NativeArray<int>(totalIndices, Allocator.Persistent),
             };
 
             // Increment the leak-guard counter AFTER all streams are allocated.
@@ -335,7 +345,7 @@ namespace MapRenderer.Unity
                 // white.linear == white: S11 uniform-color behavior is preserved.
                 // Thread-safe: Color.linear is pure math (no engine access).
                 Color linearColor = f.FeatureColor.linear;
-                var   colorVec   = new Vector4(linearColor.r, linearColor.g, linearColor.b, linearColor.a);
+                var   colorVec    = new Vector4(linearColor.r, linearColor.g, linearColor.b, linearColor.a);
 
                 for (int i = 0; i < f.Verts.Length; i++)
                 {
@@ -343,12 +353,12 @@ namespace MapRenderer.Unity
                     result.Stream0PositionNormal[vBase + i] = new FillPositionNormal
                     {
                         Position = new Vector3(v.x, v.y, v.z),
-                        Normal   = Vector3.up,  // explicit +Y: flat XZ fill geometry (S34 contract)
+                        Normal   = Vector3.up, // explicit +Y: flat XZ fill geometry (S34 contract)
                     };
 
                     // UV0: tile-local [0,1] from pre-projection tile coordinates.
                     // tileVerts[i].x = tile-space east; tileVerts[i].y = tile-space north.
-                    float u = (float)(f.TileVerts[i].x * extentInv);
+                    float u  = (float)(f.TileVerts[i].x * extentInv);
                     float v2 = (float)(f.TileVerts[i].y * extentInv);
                     result.Stream1Uv[vBase + i] = new Vector2(u, v2);
 
@@ -402,15 +412,16 @@ namespace MapRenderer.Unity
             // SetVertexBufferData<T> copies the data into the Mesh's vertex buffer — the source
             // NativeArray is safe to Dispose after this call returns.
             mesh.SetVertexBufferData(data.Stream0PositionNormal, 0, 0, data.VertexCount, stream: 0);
-            mesh.SetVertexBufferData(data.Stream1Uv,             0, 0, data.VertexCount, stream: 1);
-            mesh.SetVertexBufferData(data.Stream2Tangent,        0, 0, data.VertexCount, stream: 2);
-            mesh.SetVertexBufferData(data.Stream3Color,          0, 0, data.VertexCount, stream: 3);
+            mesh.SetVertexBufferData(data.Stream1Uv, 0, 0, data.VertexCount, stream: 1);
+            mesh.SetVertexBufferData(data.Stream2Tangent, 0, 0, data.VertexCount, stream: 2);
+            mesh.SetVertexBufferData(data.Stream3Color, 0, 0, data.VertexCount, stream: 3);
 
             // Index buffer. Skip Unity's main-thread index validation (O(indices)): the indices come from
             // the Burst earcut/tessellation job and are covered by tests, so re-validating every index per
             // tile upload is wasted work. DontRecalculateBounds just avoids a redundant intermediate compute
             // here — the canonical bounds are set by RecalculateBounds() below.
-            const MeshUpdateFlags NoValidate = MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
+            const MeshUpdateFlags NoValidate =
+                MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
             mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
             mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
 
@@ -435,11 +446,11 @@ namespace MapRenderer.Unity
         /// </summary>
         public static Mesh BuildMesh(
             IReadOnlyList<MvtFeature> selectedFeatures,
-            Fill.PaintProperties paint,
-            double zoom,
-            double extent,
-            TileId id,
-            double2 tileOriginMerc)
+            Fill.PaintProperties      paint,
+            double                    zoom,
+            double                    extent,
+            TileId                    id,
+            double2                   tileOriginMerc)
         {
             LayerMeshData data = BuildMeshData(selectedFeatures, paint, zoom, extent, id, tileOriginMerc);
             try
@@ -452,27 +463,26 @@ namespace MapRenderer.Unity
             }
         }
 
-        // ── Internal: managed projection (mirrors ProjectTileVerticesJob.Execute) ─────────────────
+        // ── Internal: managed projection (delegates to WebMercator.Forward — single source) ────────
 
         /// <summary>
         /// Pure C# projection: tile-space double2 → origin-relative float3 world positions.
-        /// Formula is bit-identical to <see cref="MapRenderer.Jobs.ProjectTileVerticesJob.Execute"/>
-        /// (same double-precision intermediates, same subtract-then-cast pattern).
-        /// Safe to call from any thread (no Unity APIs, no NativeArray).
+        /// Delegates the Mercator-forward step to <see cref="WebMercator.Forward"/> (T2 single
+        /// source of the Mercator literal). The tile→lon/lat conversion stays inline (atan(sinh(…))
+        /// form — not the Mercator literal). Safe to call from any thread (no Unity APIs, no NativeArray).
         /// </summary>
         private static float3[] ProjectVerticesManaged(
             double2[] tileCoords,
-            int tileZ, int tileX, int tileY,
-            double extent,
-            double originMercX, double originMercY)
+            int       tileZ, int tileX, int tileY,
+            double    extent,
+            double    originMercX, double originMercY)
         {
-            const double R = 6378137.0; // Earth radius (Web Mercator / EPSG:3857)
-            const double TwoPi = 2.0 * Math.PI;
+            const double TwoPi = 2.0 * math.PI_DBL;
 
-            int n = tileCoords.Length;
+            int n      = tileCoords.Length;
             var result = new float3[n];
 
-            double pow2z = Math.Pow(2.0, tileZ);
+            double pow2z = math.pow(2.0, tileZ);
 
             for (int i = 0; i < n; i++)
             {
@@ -483,21 +493,22 @@ namespace MapRenderer.Unity
                 double u = (tileX + px / extent) / pow2z;
                 double v = (tileY + py / extent) / pow2z;
 
-                // Normalised → lon/lat (radians)
-                double lonRad = u * TwoPi - Math.PI;
-                double arg     = Math.PI * (1.0 - 2.0 * v);
-                double sinhArg = (Math.Exp(arg) - Math.Exp(-arg)) * 0.5;
-                double latRad  = Math.Atan(sinhArg);
+                // Normalised → lon/lat (radians then degrees for WebMercator.Forward).
+                double longitudeRad = u * TwoPi - math.PI_DBL;
+                double arg          = math.PI_DBL * (1.0 - 2.0 * v);
+                double sinhArg      = (math.exp(arg) - math.exp(-arg)) * 0.5;
+                double latitudeRad  = math.atan(sinhArg);
 
-                // lon/lat → Web Mercator meters (spherical Mercator, R = semi-major axis)
-                double mercX = R * lonRad;
-                double halfLat = latRad * 0.5;
-                double tanArg  = Math.Tan(Math.PI * 0.25 + halfLat);
-                double mercY   = R * Math.Log(tanArg);
+                double latitudeDeg  = latitudeRad * (180.0 / math.PI_DBL);
+                double longitudeDeg = longitudeRad * (180.0 / math.PI_DBL);
+
+                // Delegate to the shared math module (single source of Mercator literal, T2).
+                double3 world = WebMercator.Forward(new GeoCoordinate3D
+                    { Longitude = longitudeDeg, Latitude = latitudeDeg, Altitude = 0.0 });
 
                 // Subtract origin in double, then cast to float — RTC precision
-                double dx = mercX - originMercX;
-                double dz = mercY - originMercY;
+                double dx = world.x - originMercX;
+                double dz = world.z - originMercY;
 
                 result[i] = new float3((float)dx, 0f, (float)dz);
             }

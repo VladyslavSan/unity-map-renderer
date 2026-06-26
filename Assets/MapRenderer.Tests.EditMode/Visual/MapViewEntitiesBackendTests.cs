@@ -12,7 +12,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Unity;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
@@ -32,7 +32,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
-            => new CameraProperties(new LookAtPoint(lon, lat, 0), zoom, 0, 0);
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8, ""name"": ""EntTest"",
@@ -106,7 +106,7 @@ namespace MapRenderer.Tests.Visual
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the Entities backend.");
-                Assert.IsTrue(view.TryGetBuiltTile(new TileId(0, 0, 0)),
+                Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built via the Entities path.");
 
                 var ent = view.EntitiesRenderer();
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Visual
                     "ConsumeTessellationTask must have created at least one tile-layer entity.");
 
                 // Floating origin: the entity translation must equal TileLocalToScene(tileOrigin, sceneOrigin).
-                double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0));
+                double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
                 double2 sceneOrigin0 = cam0.CenterMercator();
                 ent.Rebuild(sceneOrigin0);
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
@@ -191,7 +191,7 @@ namespace MapRenderer.Tests.Visual
             var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new CameraProperties(new LookAtPoint(0, 0, 0), 3.0, 0, 0),
+                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                     ownsSource: false, style: MinimalStyle());
                 for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 { view.Tick(); Thread.Sleep(1); }

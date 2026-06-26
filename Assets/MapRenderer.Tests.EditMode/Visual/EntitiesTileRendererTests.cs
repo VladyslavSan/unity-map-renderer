@@ -14,7 +14,7 @@ using UnityEngine;
 using Unity.Entities;
 using Unity.Mathematics;
 using MapRenderer.Unity;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Imaging;
 
@@ -41,7 +41,7 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 int h0 = r.AddTileLayer(mesh, o, 0, tid);
                 int h1 = r.AddTileLayer(mesh, o, 0, tid);
@@ -81,7 +81,7 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat, mat }, new[] { "water", "road-primary" });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 int hWater = r.AddTileLayer(mesh, o, 0, tid);
                 int hRoad  = r.AddTileLayer(mesh, o, 1, tid);
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat });   // no names supplied
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 int h = r.AddTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
@@ -121,9 +121,9 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
-                double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0));
+                double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
                 int h = r.AddTileLayer(mesh, tileOrigin, 0, tid);
 
                 r.Rebuild(sceneOrigin0);
@@ -144,7 +144,7 @@ namespace MapRenderer.Tests.Visual
                     "ParentSystem must populate the root's Child buffer after a Rebuild tick.");
 
                 // Origin shift (a look-at move): translation must track the new origin.
-                double2 sceneOrigin1 = FloatingOrigin.TileLocalOriginMercator(new TileId(1, 1, 1));
+                double2 sceneOrigin1 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
                 r.Rebuild(sceneOrigin1);
                 float3 expected1 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
                 var (x1, z1) = r.GetInstanceTranslation(h);
@@ -171,9 +171,9 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
-                double2 sceneOrigin  = FloatingOrigin.TileLocalOriginMercator(new TileId(1, 1, 1));
+                double2 sceneOrigin  = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
                 float3  expected     = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
 
                 // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.Tick.
@@ -201,7 +201,7 @@ namespace MapRenderer.Tests.Visual
             var (mesh, mat) = FixtureFill();
             World before = World.DefaultGameObjectInjectionWorld;
             var r = new EntitiesTileRenderer(new[] { mat });
-            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0)), 0, new TileId(0, 0, 0));
+            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }), 0, new TileId { Z = 0, X = 0, Y = 0 });
 
             r.Dispose();
             Assert.IsTrue(r.IsDisposed, "IsDisposed must be true after Dispose.");
@@ -223,7 +223,7 @@ namespace MapRenderer.Tests.Visual
             var r = new EntitiesTileRenderer(new[] { mat });
             try
             {
-                var tid = new TileId(0, 0, 0);
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
                 r.AddTileLayer(mesh, o, 0, tid);
                 // Warm up (JIT + first-tick system allocations).
@@ -277,7 +277,7 @@ namespace MapRenderer.Tests.Visual
             RenderSettings.ambientLight = new Color(0.3f, 0.3f, 0.3f, 1f);
 
             // Place one tile at sceneOrigin == tileOrigin → world position ≈ 0; frame the mesh natively.
-            double2 tileOrigin = FloatingOrigin.TileLocalOriginMercator(new TileId(0, 0, 0));
+            double2 tileOrigin = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
             float3  pos        = FloatingOrigin.TileLocalToScene(tileOrigin, tileOrigin);
             Bounds  mb         = mesh.bounds;
             Vector3 center     = new Vector3(pos.x + mb.center.x, 0f, pos.z + mb.center.z);
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests.Visual
                 controlGo.SetActive(false);
 
                 r = new EntitiesTileRenderer(new[] { mat });
-                r.AddTileLayer(mesh, tileOrigin, 0, new TileId(0, 0, 0));
+                r.AddTileLayer(mesh, tileOrigin, 0, new TileId { Z = 0, X = 0, Y = 0 });
                 r.Rebuild(tileOrigin);
                 snapEg.Render(cam);
 

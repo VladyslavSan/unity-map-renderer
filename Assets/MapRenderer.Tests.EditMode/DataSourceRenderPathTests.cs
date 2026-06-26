@@ -16,7 +16,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Collections;
 using Unity.Jobs;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
@@ -61,7 +61,7 @@ namespace MapRenderer.Tests
                 // synchronously, so calling .GetAwaiter().GetResult() immediately throws
                 // "Not yet completed". Spin-wait until the UniTask completes on the ThreadPool.
                 // Thread.Sleep(1) yields real CPU time so the ThreadPool can run the continuation.
-                var fetchTask = fileSource.FetchAsync(new TileId(0, 0, 0));
+                var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
                 int spins = 0;
                 while (!fetchTask.Status.IsCompleted() && spins++ < 10000)
                     Thread.Sleep(1);
@@ -96,7 +96,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Runs the full managed pipeline on MVT bytes and returns SHA-256 hashes of the flat
         /// vertex position array and flat index array (both in pipeline order across all features).
-        /// Vertex positions are float3 world positions (output of ProjectTileVerticesJob).
+        /// Vertex positions are float3 world positions (output of ProjectTileToWebMercatorJob).
         /// </summary>
         private static (string vertHash, string idxHash) BuildContentHashes(byte[] mvtBytes)
         {
@@ -105,7 +105,7 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(layer, "countries layer must be present");
 
             double extent = layer.Extent;
-            var tileId    = new TileId(0, 0, 0);
+            var tileId    = new TileId { Z = 0, X = 0, Y = 0 };
             var (bMin, _) = tileId.MercatorBounds();
             double originX = bMin.x;
             double originY = bMin.y;
@@ -142,7 +142,7 @@ namespace MapRenderer.Tests
 
                     try
                     {
-                        var job = new ProjectTileVerticesJob
+                        var job = new ProjectTileToWebMercatorJob
                         {
                             TileZ = 0, TileX = 0, TileY = 0,
                             Extent       = extent,

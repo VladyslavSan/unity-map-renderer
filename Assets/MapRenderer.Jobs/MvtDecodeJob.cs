@@ -25,7 +25,7 @@ namespace MapRenderer.Jobs
     /// and pre-sizing the output requires a pass anyway. The parallelism is tile-level
     /// (multiple <see cref="MvtDecodeJob"/>s scheduled in parallel, one per tile).
     /// </summary>
-    [BurstCompile]
+    [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct MvtDecodeJob : IJob
     {
         // Zigzag command IDs (per MVT spec §4.3)

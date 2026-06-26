@@ -5,7 +5,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using Cysharp.Threading.Tasks;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity;
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
 
             // A minimal in-memory data source.
             var source = new FixtureSource();
-            var initialView = new CameraProperties(new LookAtPoint(0.0, 20.0, 0), 2.0, 0, 0);
+            var initialView = new CameraProperties(new GeoCoordinate3D { Longitude = 0.0, Latitude = 20.0, Altitude = 0 }, 2.0, 0, 0);
 
             try
             {
@@ -86,7 +86,7 @@ namespace MapRenderer.Tests
             {
                 // Must not throw.
                 Assert.DoesNotThrow(
-                    () => MapRoot.Wire(rootGo, null, source, new CameraProperties(new LookAtPoint(0, 0, 0), 2, 0, 0), ownsSource: false, style: null),
+                    () => MapRoot.Wire(rootGo, null, source, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2, 0, 0), ownsSource: false, style: null),
                     "Wire(root, null) must not throw even when the camera is missing.");
 
                 var ctrl    = rootGo.GetComponent<MapController>();

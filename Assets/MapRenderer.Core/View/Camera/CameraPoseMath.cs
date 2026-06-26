@@ -1,4 +1,5 @@
-using System;
+using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Core.View.Camera
 {
@@ -9,10 +10,10 @@ namespace MapRenderer.Core.View.Camera
     /// (S42). Now lives in Core so headless tests can exercise the full pose computation.
     ///
     /// <para><b>Altitude formula (D1 — S42 D2):</b>
-    ///   Web-Mercator ground resolution: metersPerPixel = 40075016.686 / (256 × 2^zoom).
+    ///   Web-Mercator ground resolution: metersPerPixel = EarthConstants.EquatorialCircumferenceMetres / (256 × 2^zoom).
     ///   For a perspective camera looking straight down:
     ///   altitude = (viewportHeightPx × metersPerPixel) / (2 × tan(verticalFovDeg/2)).
-    ///   Earth equatorial circumference: 40075016.686 m (IAU/WGS-84, clean-room constant).</para>
+    ///   Earth equatorial circumference: see EarthConstants.EquatorialCircumferenceMetres.</para>
     ///
     /// <para><b>Pose formula (D6):</b>
     ///   Orbit on a sphere of radius=altitude around the look-at position.
@@ -25,9 +26,10 @@ namespace MapRenderer.Core.View.Camera
     /// </summary>
     public static class CameraPoseMath
     {
-        // ── Constants (clean-room: IAU/WGS-84 earth circumference) ─────────────────────────────
-        private const double EarthCircumferenceMetres = 40075016.686;
-        private const double TilePixelSize            = 256.0;
+        // ── Constants — reference EarthConstants and WebMercator (single sources of truth, S62) ─────
+        // Note: EarthCircumferenceMetres is kept as a literal in EarthConstants (NOT derived as 2π·A).
+        private const double EarthCircumferenceMetres = EarthConstants.EquatorialCircumferenceMetres;
+        private const double TilePixelSize            = WebMercator.TilePixelSize;
 
         // ── Altitude ↔ Zoom ──────────────────────────────────────────────────────────────────────
 
@@ -41,7 +43,7 @@ namespace MapRenderer.Core.View.Camera
         /// <param name="zoom">Fractional zoom level.</param>
         /// <returns>Ground resolution in metres per pixel.</returns>
         public static double MetersPerPixel(double zoom)
-            => EarthCircumferenceMetres / (TilePixelSize * Math.Pow(2.0, zoom));
+            => EarthCircumferenceMetres / (TilePixelSize * math.pow(2.0, zoom));
 
         /// <summary>
         /// Computes camera altitude in render-space metres from a fractional zoom level (S42 D2).
@@ -56,8 +58,8 @@ namespace MapRenderer.Core.View.Camera
         public static double AltitudeForZoom(double zoom, double viewportHeightPx, double verticalFovDeg)
         {
             double metersPerPixel = MetersPerPixel(zoom);
-            double halfFovRad     = verticalFovDeg * 0.5 * Math.PI / 180.0;
-            return (viewportHeightPx * metersPerPixel) / (2.0 * Math.Tan(halfFovRad));
+            double halfFovRad     = verticalFovDeg * 0.5 * math.PI_DBL / 180.0;
+            return (viewportHeightPx * metersPerPixel) / (2.0 * math.tan(halfFovRad));
         }
 
         /// <summary>
@@ -66,18 +68,18 @@ namespace MapRenderer.Core.View.Camera
         /// </summary>
         public static double ZoomForDistance(double altitudeMetres, double viewportHeightPx, double verticalFovDeg)
         {
-            double halfFovRad     = verticalFovDeg * 0.5 * Math.PI / 180.0;
-            double metersPerPixel = (2.0 * altitudeMetres * Math.Tan(halfFovRad)) / viewportHeightPx;
+            double halfFovRad     = verticalFovDeg * 0.5 * math.PI_DBL            / 180.0;
+            double metersPerPixel = (2.0 * altitudeMetres * math.tan(halfFovRad)) / viewportHeightPx;
             // altitude = (vpH * mpp) / (2 * tan(fov/2))  →  mpp = altitude*2*tan(fov/2)/vpH
             // mpp = EarthCirc / (TilePx * 2^zoom)  →  zoom = log2(EarthCirc / (TilePx * mpp))
             if (metersPerPixel <= 0) return 0;
-            return Math.Log(EarthCircumferenceMetres / (TilePixelSize * metersPerPixel), 2.0);
+            return math.log2(EarthCircumferenceMetres / (TilePixelSize * metersPerPixel));
         }
 
         // ── Clip planes (derived from altitude — S42 D3) ──────────────────────────────────────────
 
         /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
-        public static double NearClip(double altitude) => Math.Max(0.1, altitude * 0.01);
+        public static double NearClip(double altitude) => math.max(0.1, altitude * 0.01);
 
         /// <summary>Far clip plane from altitude (S42 D3: far = altitude · 4).</summary>
         public static double FarClip(double altitude) => altitude * 4.0;
@@ -101,11 +103,11 @@ namespace MapRenderer.Core.View.Camera
         /// <param name="fwd">Output: unit forward vector (toward look-at).</param>
         /// <param name="up">Output: camera up vector (deterministic, heading-derived).</param>
         public static void ComputePose(double altitude,
-                                       double headingDeg, double tiltDeg,
-                                       out Double3 pos, out Double3 fwd, out Double3 up)
+            double                            headingDeg, double      tiltDeg,
+            out double3                       pos,        out double3 fwd, out double3 up)
         {
-            double headRad = headingDeg * Math.PI / 180.0;
-            double tiltRad = tiltDeg   * Math.PI / 180.0;
+            double headRad = headingDeg * math.PI_DBL / 180.0;
+            double tiltRad = tiltDeg    * math.PI_DBL / 180.0;
 
             // Orbit offset from the look-at: Ry(heading) · Rx(tilt) · (0, altitude, 0).
             //
@@ -117,21 +119,21 @@ namespace MapRenderer.Core.View.Camera
             //   x = alt·sinT·sinH   ← east  (at heading=90, tilt>0: camera moves east)
             //   y = alt·cosT        ← up    (= altitude at tilt=0 → directly overhead; ≥0 for tilt∈[0,90])
             //   z = alt·sinT·cosH   ← north (at heading=0, tilt>0: camera moves toward north)
-            double sinH = Math.Sin(headRad);
-            double cosH = Math.Cos(headRad);
-            double sinT = Math.Sin(tiltRad);
-            double cosT = Math.Cos(tiltRad);
+            double sinH = math.sin(headRad);
+            double cosH = math.cos(headRad);
+            double sinT = math.sin(tiltRad);
+            double cosT = math.cos(tiltRad);
 
             double px = altitude * sinT * sinH;
             double py = altitude * cosT;
             double pz = altitude * sinT * cosH;
 
-            pos = new Double3(px, py, pz);
+            pos = new double3(px, py, pz);
 
             // Forward vector: from camera toward look-at (= origin of orbit) = -pos.normalized
-            double len = Math.Sqrt(px * px + py * py + pz * pz);
+            double len           = math.sqrt(px * px + py * py + pz * pz);
             if (len < 1e-10) len = 1e-10;
-            fwd = new Double3(-px / len, -py / len, -pz / len);
+            fwd = new double3(-px / len, -py / len, -pz / len);
 
             // Up vector (D6b — heading-derived, non-degenerate at tilt=0):
             // The camera's "up" should point roughly north-rotated-by-heading in the horizontal plane.
@@ -144,27 +146,28 @@ namespace MapRenderer.Core.View.Camera
             //
             // Geometric meaning: camera's up = "which way does north project on the camera's image plane".
             // At heading=0: north (+Z) is projected up. At heading=90: east (+X) is up on screen.
-            double upX = sinH;  // = sin(heading)
+            double upX = sinH; // = sin(heading)
             double upY = 0.0;
-            double upZ = cosH;  // = cos(heading)
+            double upZ = cosH; // = cos(heading)
 
             // Gram-Schmidt: orthogonalize upHint against fwd to get the true camera up.
             // up = normalize(upHint - (upHint·fwd)*fwd)
-            double dot = upX * fwd.X + upY * fwd.Y + upZ * fwd.Z;
-            double orthX = upX - dot * fwd.X;
-            double orthY = upY - dot * fwd.Y;
-            double orthZ = upZ - dot * fwd.Z;
-            double orthLen = Math.Sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
+            double dot     = upX * fwd.x + upY * fwd.y + upZ * fwd.z;
+            double orthX   = upX         - dot * fwd.x;
+            double orthY   = upY         - dot * fwd.y;
+            double orthZ   = upZ         - dot * fwd.z;
+            double orthLen = math.sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
             if (orthLen < 1e-10)
             {
                 // Extremely unlikely fallback (upHint parallel to fwd): use world +Y as hint.
-                orthX = -fwd.X * (-fwd.Y);
-                orthY = 1.0 - fwd.Y * fwd.Y;
-                orthZ = -fwd.Z * (-fwd.Y);
-                orthLen = Math.Sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
+                orthX   = -fwd.x * (-fwd.y);
+                orthY   = 1.0 - fwd.y * fwd.y;
+                orthZ   = -fwd.z * (-fwd.y);
+                orthLen = math.sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
                 if (orthLen < 1e-10) orthLen = 1.0;
             }
-            up = new Double3(orthX / orthLen, orthY / orthLen, orthZ / orthLen);
+
+            up = new double3(orthX / orthLen, orthY / orthLen, orthZ / orthLen);
         }
 
         // ── Interpolation helpers (D4) ──────────────────────────────────────────────────────────
@@ -176,7 +179,7 @@ namespace MapRenderer.Core.View.Camera
         public static double LerpHeadingShortest(double from, double to, double t)
         {
             double diff = ((to - from + 180.0) % 360.0 + 360.0) % 360.0 - 180.0;
-            return CameraProperties.NormalizeHeading(from + diff * t);
+            return CameraProperties.NormalizeHeading(from               + diff * t);
         }
 
         /// <summary>Linearly interpolates a scalar value.</summary>
@@ -194,47 +197,15 @@ namespace MapRenderer.Core.View.Camera
         /// </summary>
         public static CameraProperties Interpolate(CameraProperties from, CameraProperties to, double t)
         {
-            double zoom    = Lerp(from.Zoom, to.Zoom, t);
-            double lon     = Lerp(from.LookAt.Lon, to.LookAt.Lon, t);
-            double lat     = Lerp(from.LookAt.Lat, to.LookAt.Lat, t);
-            double alt     = Lerp(from.LookAt.Alt, to.LookAt.Alt, t);
-            double heading = LerpHeadingShortest(from.Heading, to.Heading, t);
-            double tilt    = Lerp(from.Tilt, to.Tilt, t);
-            return new CameraProperties(new LookAtPoint(lon, lat, alt), zoom, heading, tilt);
+            double zoom      = Lerp(from.Zoom, to.Zoom, t);
+            double latitude  = Lerp(from.LookAt.Latitude, to.LookAt.Latitude, t);
+            double longitude = Lerp(from.LookAt.Longitude, to.LookAt.Longitude, t);
+            double altitude  = Lerp(from.LookAt.Altitude, to.LookAt.Altitude, t);
+            double heading   = LerpHeadingShortest(from.Heading, to.Heading, t);
+            double tilt      = Lerp(from.Tilt, to.Tilt, t);
+            return new CameraProperties(
+                new GeoCoordinate3D { Latitude = latitude, Longitude = longitude, Altitude = altitude }, zoom, heading,
+                tilt);
         }
-    }
-
-    /// <summary>
-    /// Minimal engine-free 3-component double vector. Used by <see cref="CameraPoseMath"/> to stay
-    /// engine-free while computing camera positions and orientation vectors.
-    ///
-    /// <para>Only arithmetic the pose math actually needs is implemented (lengths, dot product).
-    /// The Unity layer converts these to <c>Vector3</c> / <c>Quaternion</c>.</para>
-    /// </summary>
-    public readonly struct Double3
-    {
-        public readonly double X, Y, Z;
-
-        public Double3(double x, double y, double z)
-        {
-            X = x; Y = y; Z = z;
-        }
-
-        public static Double3 Zero => new Double3(0, 0, 0);
-
-        public double LengthSquared => X * X + Y * Y + Z * Z;
-        public double Length        => Math.Sqrt(LengthSquared);
-
-        public Double3 Normalized
-        {
-            get
-            {
-                double len = Length;
-                if (len < 1e-10) return Zero;
-                return new Double3(X / len, Y / len, Z / len);
-            }
-        }
-
-        public override string ToString() => $"({X:F4}, {Y:F4}, {Z:F4})";
     }
 }

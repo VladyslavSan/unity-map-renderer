@@ -3,7 +3,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Mvt;
-using MapRenderer.Core.Coordinates;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests
 {
@@ -70,7 +70,7 @@ namespace MapRenderer.Tests
             // a non-z0 fixture would. Y-orientation is validated visually in Batch 2.
             var tile = MvtDecoder.Decode(LoadFixture());
             var layer = tile.GetLayer("countries");
-            var t = new TileId(0, 0, 0);
+            var t = new TileId { Z = 0, X = 0, Y = 0 };
             var (min, max) = t.MercatorBounds();
 
             double marginX = (max.x - min.x) * 0.05;
