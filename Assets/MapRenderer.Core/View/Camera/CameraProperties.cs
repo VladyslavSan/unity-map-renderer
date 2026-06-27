@@ -18,8 +18,11 @@ namespace MapRenderer.Core.View.Camera
     ///     <c>Altitude</c> is reserved for terrain; pass <c>0</c> until S25.</item>
     ///   <item><see cref="Zoom"/> — fractional MapLibre zoom. Higher = more zoomed in (smaller
     ///     ground footprint). Canonical; drives distance/altitude.</item>
-    ///   <item><see cref="Heading"/> — camera bearing, degrees CW from north. [0, 360).</item>
-    ///   <item><see cref="Tilt"/> — camera pitch away from straight-down, degrees [0, ~85].</item>
+    ///   <item><see cref="Heading"/> — camera bearing, degrees CW from north.
+    ///     <see cref="ConstrainedAngle"/> Wrap to <c>[0, 360)</c>.</item>
+    ///   <item><see cref="Tilt"/> — camera tilt relative to the surface normal at LookAt (§7).
+    ///     <c>tilt=0</c> is top-down; <c>tilt=90</c> is parallel to the surface (horizon).
+    ///     <see cref="ConstrainedAngle"/> Clamp to <c>[0, 90]</c>.</item>
     /// </list>
     /// </para>
     ///
@@ -42,11 +45,20 @@ namespace MapRenderer.Core.View.Camera
         public readonly double Zoom;
 
         // ── Orientation ───────────────────────────────────────────────────────────────────────
-        /// <summary>Camera bearing, degrees CW from north. Normalized to [0, 360).</summary>
-        public readonly double Heading;
+        /// <summary>
+        /// Camera bearing, degrees CW from north. <see cref="ConstrainedAngle"/> Wrap to
+        /// <c>[0, 360)</c>. The stored value is always in range; any heading supplied to
+        /// the constructor is normalized on entry.
+        /// </summary>
+        public readonly ConstrainedAngle Heading;
 
-        /// <summary>Camera tilt from straight-down, degrees. [0, maxTilt].</summary>
-        public readonly double Tilt;
+        /// <summary>
+        /// Camera tilt, degrees, relative to the surface normal at <see cref="LookAt"/>
+        /// (§7 locked definition). <c>tilt=0</c> ⇒ camera forward is the inverse of the earth
+        /// normal at LookAt (top-down on Mercator); <c>tilt=90</c> ⇒ forward is parallel to the
+        /// surface (horizon). <see cref="ConstrainedAngle"/> Clamp to <c>[0, 90]</c>.
+        /// </summary>
+        public readonly ConstrainedAngle Tilt;
 
         // ── Constants ─────────────────────────────────────────────────────────────────────────
         /// <summary>
@@ -60,8 +72,8 @@ namespace MapRenderer.Core.View.Camera
         {
             LookAt  = lookAt;
             Zoom    = zoom;
-            Heading = NormalizeHeading(heading);
-            Tilt    = tilt;
+            Heading = ConstrainedAngle.Heading(heading);
+            Tilt    = ConstrainedAngle.Tilt(tilt);
         }
 
         /// <summary>Default (un-initialized) camera at origin, zoom 0, no heading/tilt.</summary>
@@ -83,17 +95,9 @@ namespace MapRenderer.Core.View.Camera
 
         // ── Utilities ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Normalizes a heading value into [0, 360).</summary>
-        public static double NormalizeHeading(double h)
-        {
-            h %= 360.0;
-            if (h < 0) h += 360.0;
-            return h;
-        }
-
         public override string ToString()
         {
-            return $"CameraProperties(LookAt={LookAt}, z={Zoom:F3}, heading={{Heading:F1}}, tilt={{Tilt:F1}})";
+            return $"CameraProperties(LookAt={LookAt}, z={Zoom:F3}, heading={Heading.Degrees:F1}, tilt={Tilt.Degrees:F1})";
         }
     }
 }

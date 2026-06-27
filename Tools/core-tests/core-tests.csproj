@@ -50,6 +50,10 @@
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
 
+    <!-- S63: Managed IProjection + WebMercatorProjection (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/IProjection.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercatorProjection.cs" />
+
     <!-- S62: EarthConstants — pure-geodetic WGS-84 constants, referenced by WebMercator/Ecef/CameraPoseMath -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/EarthConstants.cs" />
 
@@ -64,6 +68,8 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
 
     <!-- S45: Camera system (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/Angle.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/ConstrainedAngle.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraProperties.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPropertiesUpdate.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraAnimation.cs" />
@@ -126,6 +132,8 @@
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/AngleTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ConstrainedAngleTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ProjectionMathTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraPropertiesTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/EarcutTests.cs" />
@@ -135,6 +143,9 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewMathTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewInputTests.cs" />
+
+    <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraInteractionTests.cs" />
 
     <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LayerDrawOrderTests.cs" />

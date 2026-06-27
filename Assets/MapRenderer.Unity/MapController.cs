@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
@@ -19,6 +20,12 @@ namespace MapRenderer.Unity
     ///
     /// <para><b>Scroll normalization (S42 D4 preserved):</b> <see cref="WheelNotchUnits"/> = 120 so
     ///   one physical wheel notch ≈ 1 normalized unit.</para>
+    ///
+    /// <para><b>S63 — Interaction-point-aware gestures.</b> Zoom uses the cursor as the anchor point
+    ///   (zoom-to-cursor); pan tracks the grabbed ground point that was under the cursor at drag-start
+    ///   (anchored pan). Both delegate to <see cref="ViewInput"/> which carries zero Mercator constants.
+    ///   Screen convention: +x right, +y up, origin bottom-left (Unity mouse position) — the former
+    ///   <c>−delta.y</c> negation hack for pan is removed; tilt keeps its <c>−delta.y</c> unchanged.</para>
     ///
     /// <para><b>D5 — Ordering:</b> this Update only queues patches on the camera system. The actual
     ///   camera advance + tile loop runs in <see cref="MapView.Update"/> (via
@@ -83,6 +90,10 @@ namespace MapRenderer.Unity
         [Tooltip("Optional multiplier on the derived altitude (default 1).")]
         public float AltitudeMultiplier = 1f;
 
+        // ── Pan drag state (S63 anchored pan) ─────────────────────────────────────────────────────
+        private GeoCoordinate3D _grabbedGround;
+        private bool            _dragging;
+
         // ── Update: produce CameraPropertiesUpdate patches ────────────────────────────────────────
 
         private void Update()
@@ -92,55 +103,65 @@ namespace MapRenderer.Unity
             CameraPropertiesUpdate patch     = default;
             bool                   anyChange = false;
 
+            // Resolve the active projection and viewport once per frame.
+            IProjection projection = Map.Camera.Projection;
+            double2     vp         = new double2(
+                Camera != null ? Camera.pixelWidth  : Screen.width,
+                Camera != null ? Camera.pixelHeight : Screen.height);
+
             // ── Zoom (scroll wheel / trackpad) ───────────────────────────────────────────────────
             // Null-guard Mouse.current (absent in headless / test builds — no NRE).
             var mouse = Mouse.current;
             if (mouse != null)
             {
+                // Read cursor position once (used by both scroll-zoom and pan).
+                Vector2 mousePos = mouse.position.ReadValue();
+                double2 cursor   = new double2(mousePos.x, mousePos.y);
+
                 float scroll = mouse.scroll.ReadValue().y;
                 if (scroll != 0f)
                 {
                     // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
-                    float  normalizedScroll = scroll / WheelNotchUnits;
-                    double newZoom          = (Map.Camera.CurrentProperties.Zoom + normalizedScroll * ZoomSensitivity);
-                    newZoom    = math.max(MinZoom, math.min(MaxZoom, newZoom));
-                    patch.Zoom = newZoom;
-                    anyChange  = true;
+                    float normalizedScroll = scroll / WheelNotchUnits;
+                    CameraPropertiesUpdate z = ViewInput.ApplyZoom(
+                        projection, Map.Camera.CurrentProperties, cursor, vp,
+                        normalizedScroll, ZoomSensitivity, MinZoom, MaxZoom);
+                    patch.Zoom      = z.Zoom;
+                    patch.Longitude = z.Longitude;
+                    patch.Latitude  = z.Latitude;
+                    anyChange       = true;
                 }
 
-                // ── Pan (left-drag, D6a — Y-sign correct for new Input System) ─────────────────
-                // Mouse.current.delta.y is +up in the new Input System. ViewInput.ApplyPan (shared,
-                // engine-free) treats dy>0 as a downward drag (screen +y → +lat). So we negate delta.y
-                // here at the translator: a +Y drag (drag UP) → ApplyPan(..., -dy) → center moves SOUTH
-                // = content follows the cursor. The negation keeps ViewInput unchanged (it also runs the
-                // core-tests suite, where the D6a tests pin this exact sign flip).
+                // ── Pan (left-drag, S63 anchored pan) ────────────────────────────────────────────
+                // Capture the grabbed ground point on the first frame of the press; hold it for the
+                // duration of the drag. The anchored ApplyPan keeps the grabbed point glued to the
+                // cursor — no delta, no negation hack. Screen convention +y-up is already correct here.
                 if (mouse.leftButton.isPressed)
                 {
-                    Vector2 delta = mouse.delta.ReadValue();
-                    if (delta.x != 0f || delta.y != 0f)
+                    if (!_dragging)
                     {
-                        CameraPropertiesUpdate pan =
-                            ViewInput.ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y);
-                        if (pan.Longitude.HasValue)
-                        {
-                            patch.Longitude = pan.Longitude;
-                            anyChange       = true;
-                        }
-
-                        if (pan.Latitude.HasValue)
-                        {
-                            patch.Latitude = pan.Latitude;
-                            anyChange      = true;
-                        }
+                        // First frame: capture the earth point under the cursor.
+                        _grabbedGround = projection.ScreenToGround(cursor, vp, Map.Camera.CurrentProperties);
+                        _dragging      = true;
                     }
+
+                    CameraPropertiesUpdate pan = ViewInput.ApplyPan(
+                        projection, Map.Camera.CurrentProperties, _grabbedGround, cursor, vp);
+                    patch.Longitude = pan.Longitude;
+                    patch.Latitude  = pan.Latitude;
+                    anyChange       = true;
+                }
+                else
+                {
+                    _dragging = false;
                 }
 
-                // ── Tilt / bearing (right-drag, D6 — Y-sign matches the pan convention) ───────────
-                // Same sign flip as pan: Mouse.current.delta.y is +up in the new Input System, but
-                // ViewInput.ApplyTilt adds dy·sensitivity to the current tilt. Negating delta.y means a
-                // +Y drag (drag UP) → ApplyTilt(..., -dy) → pitch DECREASES → camera tilts toward overhead
-                // (content follows the cursor). Pinned headless by the D6 tilt-Y tests in
-                // CameraPropertiesTests. (Final direction is a maintainer play-test call per S50 D6.)
+                // ── Tilt / bearing (right-drag) ─────────────────────────────────────────────────
+                // Sign convention: Mouse.current.delta.y is +up in the new Input System. Negating
+                // delta.y makes drag-UP decrease pitch (camera tilts toward overhead). This matches
+                // the S50 D6 pinned tilt-Y tests in CameraPropertiesTests. Tilt is NOT reworked in
+                // S63 (no interaction-point anchor needed); only the 'in CameraProperties' overload
+                // is consumed here. Do NOT remove the negation — it is a separate, pinned sign choice.
                 if (mouse.rightButton.isPressed)
                 {
                     Vector2 delta = mouse.delta.ReadValue();
@@ -158,6 +179,9 @@ namespace MapRenderer.Unity
 
             // ── Keyboard zoom (+/= / Q → zoom in; − / E → zoom out) ─────────────────────────────
             // Null-guarded separately from Mouse.current (each device can be absent independently).
+            // Routes through ApplyZoom with the screen centre as the interaction point → exact
+            // centre-zoom (today's keyboard feel). The lon/lat in the returned patch equal the current
+            // look-at, so merging them into patch is safe.
             var kb = Keyboard.current;
             if (kb != null)
             {
@@ -166,11 +190,14 @@ namespace MapRenderer.Unity
                 bool  zoomOut = kb.minusKey.isPressed  || kb.numpadMinusKey.isPressed || kb.eKey.isPressed;
                 if (zoomIn || zoomOut)
                 {
-                    double base_   = patch.Zoom ?? Map.Camera.CurrentProperties.Zoom;
-                    double delta   = zoomIn ? kbStep : -kbStep;
-                    double newZoom = math.max(MinZoom, math.min(MaxZoom, base_ + delta));
-                    patch.Zoom = newZoom;
-                    anyChange  = true;
+                    double kbDelta = zoomIn ? kbStep : -kbStep;
+                    CameraPropertiesUpdate kbz = ViewInput.ApplyZoom(
+                        projection, Map.Camera.CurrentProperties,
+                        vp * 0.5, vp, kbDelta, 1.0, MinZoom, MaxZoom);
+                    patch.Zoom      = kbz.Zoom;
+                    patch.Longitude = kbz.Longitude;
+                    patch.Latitude  = kbz.Latitude;
+                    anyChange       = true;
                 }
             }
 

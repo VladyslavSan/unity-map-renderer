@@ -14,61 +14,82 @@ namespace MapRenderer.Core.View
     /// only the fields it changes (the rest stay null). This aligns the whole input path with the S45
     /// patch model — <c>MapController</c> merges the returned patch directly, no parallel mutation path.</para>
     ///
+    /// <para><b>S63 — interaction-point-aware (D4).</b> All gesture methods take an <see cref="IProjection"/>
+    /// and operate on absolute screen positions (cursor + grabbed ground point), so the ground point under
+    /// the cursor is pinned during the gesture. The projection layer owns all Mercator constants.</para>
+    ///
     /// Conventions:
-    ///   - <b>Zoom</b> from scroll: positive scroll zooms in (z increases), with a sensitivity factor.
+    ///   - <b>Zoom</b> to cursor: the earth point under the cursor stays pinned after zooming.
+    ///     Patch carries Zoom + Longitude + Latitude (the new look-at that satisfies the pin invariant).
     ///     Zoom is clamped to [minZoom, maxZoom].
-    ///   - <b>Pan</b> from a screen-space drag delta: converts a pixel delta to a lon/lat delta using the
-    ///     ground resolution at the current zoom/latitude (so a drag moves the map by the dragged amount,
-    ///     not a fixed lon/lat step). Drag-right moves the map center west (content follows the cursor).
+    ///   - <b>Pan</b> (anchored): the grabbed ground point at drag-start stays glued to the cursor.
+    ///     Returns a Longitude + Latitude patch. The grabbed point is captured once by the caller
+    ///     (<c>projection.ScreenToGround(P_start, vp, cam)</c>) and supplied every frame.
     ///   - <b>Tilt/bearing</b>: a screen-space drag delta maps to pitch (vertical) and bearing (horizontal)
-    ///     in degrees, each clamped to a sane range.
+    ///     in degrees, each clamped to a sane range. Projection-agnostic.
     /// </summary>
     public static class ViewInput
     {
-        // NOTE: TilePixelSize has been removed (S62). Use WebMercator.TilePixelSize directly.
-
         /// <summary>
-        /// Applies a scroll delta to the camera's zoom. <paramref name="scrollDelta"/> is the raw scroll
-        /// (e.g. <c>Input.mouseScrollDelta.y</c>); <paramref name="sensitivity"/> scales it to zoom levels.
-        /// Result is clamped to [<paramref name="minZoom"/>, <paramref name="maxZoom"/>].
+        /// Zoom-to-cursor: applies a scroll delta so the earth point under <paramref name="cursorPx"/>
+        /// remains under <paramref name="cursorPx"/> after the zoom.
+        /// Screen convention: +x right, +y up, origin bottom-left.
         /// </summary>
-        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Zoom"/>.</returns>
-        public static CameraPropertiesUpdate ApplyZoom(CameraProperties current, double scrollDelta,
-                                                       double sensitivity, double minZoom, double maxZoom)
+        /// <returns>A patch that sets <see cref="CameraPropertiesUpdate.Zoom"/>,
+        /// <see cref="CameraPropertiesUpdate.Longitude"/>, and <see cref="CameraPropertiesUpdate.Latitude"/>.</returns>
+        public static CameraPropertiesUpdate ApplyZoom(IProjection projection, in CameraProperties current,
+            double2 cursorPx, double2 viewportPx, double scrollDelta, double sensitivity,
+            double minZoom, double maxZoom)
         {
-            double z = current.Zoom + scrollDelta * sensitivity;
-            if (z < minZoom) z = minZoom;
-            if (z > maxZoom) z = maxZoom;
-            return new CameraPropertiesUpdate { Zoom = z };
+            double zNew = current.Zoom + scrollDelta * sensitivity;
+            if (zNew < minZoom) zNew = minZoom;
+            if (zNew > maxZoom) zNew = maxZoom;
+
+            // Capture the earth point under the cursor at the current zoom.
+            GeoCoordinate3D groundUnderP = projection.ScreenToGround(cursorPx, viewportPx, in current);
+
+            // Build a trial camera at the new zoom (same look-at and orientation).
+            CameraProperties camTrial = new CameraProperties(
+                current.LookAt, zNew, current.Heading.Degrees, current.Tilt.Degrees);
+
+            // Find where the captured ground point appears in the trial camera.
+            double2 Pq = projection.GroundToScreen(in groundUnderP, viewportPx, in camTrial);
+
+            // Solve the new look-at that keeps groundUnderP under cursorPx:
+            // S(centrePx + (Pq − cursor), camTrial) gives the new look-at exactly.
+            GeoCoordinate3D lookAtAfter = projection.ScreenToGround(
+                viewportPx * 0.5 + (Pq - cursorPx), viewportPx, in camTrial);
+
+            return new CameraPropertiesUpdate
+            {
+                Zoom      = zNew,
+                Longitude = WrapLon(lookAtAfter.Longitude),
+                Latitude  = projection.ClampValidLatitude(lookAtAfter.Latitude)
+            };
         }
 
         /// <summary>
-        /// Converts a screen-space drag (in pixels) to a new center lon/lat. A drag moves the map content
-        /// with the cursor: dragging right (positive <paramref name="dxPixels"/>) shifts the center west.
-        /// The pixel→degree conversion uses the ground resolution at the current zoom and latitude.
+        /// Anchored pan: keeps <paramref name="grabbedGround"/> (captured once at drag-start by the caller)
+        /// pinned under <paramref name="cursorPx"/>. The camera bearing is accounted for by the projection.
+        /// Screen convention: +x right, +y up, origin bottom-left.
         /// </summary>
-        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Longitude"/> and
+        /// <returns>A patch that sets <see cref="CameraPropertiesUpdate.Longitude"/> and
         ///   <see cref="CameraPropertiesUpdate.Latitude"/>.</returns>
-        public static CameraPropertiesUpdate ApplyPan(CameraProperties current, double dxPixels, double dyPixels)
+        public static CameraPropertiesUpdate ApplyPan(IProjection projection, in CameraProperties current,
+            GeoCoordinate3D grabbedGround, double2 cursorPx, double2 viewportPx)
         {
-            double n = math.pow(2.0, current.Zoom);
-            double worldPixels = WebMercator.TilePixelSize * n;   // pixels spanning 360° of longitude
-            double degPerPixelLon = 360.0 / worldPixels;
+            // Find where the grabbed ground currently projects on screen.
+            double2 Pq = projection.GroundToScreen(in grabbedGround, viewportPx, in current);
 
-            // Latitude degrees-per-pixel shrinks toward the poles (Mercator). Use the local cos(lat)
-            // factor so vertical drags track the cursor at the current latitude.
-            double curLat = current.LookAt.Latitude;
-            double latRad = Clamp(curLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat)
-                            * math.PI_DBL / 180.0;
-            double degPerPixelLat = degPerPixelLon * math.cos(latRad);
+            // Solve the new look-at that places the grabbed ground under cursorPx.
+            GeoCoordinate3D lookAtAfter = projection.ScreenToGround(
+                viewportPx * 0.5 + (Pq - cursorPx), viewportPx, in current);
 
-            // Drag-right (dx>0) → center moves west (−lon). Drag-down (screen dy>0) → center moves north.
-            double newLon = current.LookAt.Longitude - dxPixels * degPerPixelLon;
-            double newLat = curLat + dyPixels * degPerPixelLat;
-
-            newLon = WrapLon(newLon);
-            newLat = Clamp(newLat, -CameraProperties.MaxMercatorLat, CameraProperties.MaxMercatorLat);
-            return new CameraPropertiesUpdate { Longitude = newLon, Latitude = newLat };
+            return new CameraPropertiesUpdate
+            {
+                Longitude = WrapLon(lookAtAfter.Longitude),
+                Latitude  = projection.ClampValidLatitude(lookAtAfter.Latitude)
+            };
         }
 
         /// <summary>
@@ -77,21 +98,20 @@ namespace MapRenderer.Core.View
         /// </summary>
         /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Heading"/> and
         ///   <see cref="CameraPropertiesUpdate.Tilt"/>.</returns>
-        public static CameraPropertiesUpdate ApplyTilt(CameraProperties current, double dxPixels, double dyPixels,
+        public static CameraPropertiesUpdate ApplyTilt(in CameraProperties current, double dxPixels, double dyPixels,
                                                        double bearingSensitivity, double pitchSensitivity,
                                                        double maxPitch)
         {
-            double bearing = current.Heading + dxPixels * bearingSensitivity;
-            double pitch   = current.Tilt    + dyPixels * pitchSensitivity;
+            // Bearing: the ConstrainedAngle + Angle operator re-applies the [0,360) Wrap constraint.
+            double bearing = (current.Heading + Angle.FromDegrees(dxPixels * bearingSensitivity)).Degrees;
 
-            bearing %= 360.0;
-            if (bearing < 0) bearing += 360.0;
-            pitch = Clamp(pitch, 0.0, maxPitch);
+            // Pitch: use a runtime Clamped(lo=0, hi=maxPitch) — distinct from the [0,90] Tilt type
+            // preset; maxPitch may be narrower (e.g. 60°) and must not be silently widened to 90°.
+            double pitch = ConstrainedAngle.Clamped(
+                current.Tilt.Degrees + dyPixels * pitchSensitivity, 0.0, maxPitch).Degrees;
+
             return new CameraPropertiesUpdate { Heading = bearing, Tilt = pitch };
         }
-
-        private static double Clamp(double x, double lo, double hi)
-            => x < lo ? lo : (x > hi ? hi : x);
 
         private static double WrapLon(double lon)
         {

@@ -33,9 +33,9 @@ namespace MapRenderer.Tests
             var patch = new CameraPropertiesUpdate { Tilt = 25.0 };
             CameraProperties result = patch.ApplyTo(initial, TestViewportHeight, TestFovDeg);
 
-            Assert.AreEqual(25.0, result.Tilt,         1e-9, "Tilt must be updated to 25.");
-            Assert.AreEqual(10.0, result.Zoom,         1e-9, "Zoom must be unchanged.");
-            Assert.AreEqual(45.0, result.Heading,      1e-9, "Heading must be unchanged.");
+            Assert.AreEqual(25.0, result.Tilt.Degrees,    1e-9, "Tilt must be updated to 25.");
+            Assert.AreEqual(10.0, result.Zoom,           1e-9, "Zoom must be unchanged.");
+            Assert.AreEqual(45.0, result.Heading.Degrees, 1e-9, "Heading must be unchanged.");
             Assert.AreEqual(13.4, result.LookAt.Longitude,   1e-9, "Lon must be unchanged.");
             Assert.AreEqual(52.5, result.LookAt.Latitude,   1e-9, "Lat must be unchanged.");
         }
@@ -76,8 +76,8 @@ namespace MapRenderer.Tests
             Assert.AreEqual(initial.LookAt.Longitude, result.LookAt.Longitude, 1e-9);
             Assert.AreEqual(initial.LookAt.Latitude, result.LookAt.Latitude, 1e-9);
             Assert.AreEqual(initial.Zoom,        result.Zoom,       1e-9);
-            Assert.AreEqual(initial.Heading,     result.Heading,    1e-9);
-            Assert.AreEqual(initial.Tilt,        result.Tilt,       1e-9);
+            Assert.AreEqual(initial.Heading.Degrees, result.Heading.Degrees, 1e-9);
+            Assert.AreEqual(initial.Tilt.Degrees,   result.Tilt.Degrees,   1e-9);
         }
 
         // ── Animation interpolation (S45 acceptance tooth 2) ─────────────────────────────────────
@@ -151,7 +151,7 @@ namespace MapRenderer.Tests
             sys.Update(D); // full duration
 
             // Must reach 10° by the +20° path.
-            Assert.AreEqual(10.0, sys.CurrentProperties.Heading, 1.0,
+            Assert.AreEqual(10.0, sys.CurrentProperties.Heading.Degrees, 1.0,
                 "Heading must ease 350→10 via the short +20° path, landing at 10°.");
         }
 
@@ -170,7 +170,7 @@ namespace MapRenderer.Tests
             sys.Update(D / 2.0);
 
             // At t=0.5, eased t=0.5, heading = 350 + 20*0.5 = 360 ≡ 0.
-            double heading = sys.CurrentProperties.Heading;
+            double heading = sys.CurrentProperties.Heading.Degrees;
             bool nearZeroOrFull = heading < 5.0 || heading > 355.0;
             Assert.IsTrue(nearZeroOrFull,
                 $"At 50% progress, 350→10 heading must be near 0°/360° (short path). Got {heading:F2}°.");
@@ -260,7 +260,7 @@ namespace MapRenderer.Tests
         public void Pose_PitchZero_CameraOverhead_LooksDown()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, 0.0, 0.0,
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
                 out double3 pos, out double3 fwd, out double3 up);
 
             Assert.AreEqual(0.0,      pos.x, 1e-6, "At pitch=0, X must be 0 (directly above).");
@@ -281,8 +281,8 @@ namespace MapRenderer.Tests
         {
             double altitude = 10000.0;
 
-            CameraPoseMath.ComputePose(altitude, 0.0,  0.0, out _, out _, out double3 upNorth);
-            CameraPoseMath.ComputePose(altitude, 90.0, 0.0, out _, out _, out double3 upEast);
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0),  Angle.FromDegrees(0.0), out _, out _, out double3 upNorth);
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(90.0), Angle.FromDegrees(0.0), out _, out _, out double3 upEast);
 
             // The up-vectors should differ (heading-derived, not fixed world-up).
             double diffX = Math.Abs(upNorth.x - upEast.x);
@@ -301,7 +301,7 @@ namespace MapRenderer.Tests
         public void Pose_Pitch45_TiltsTowardHorizon_StaysAbove()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, 0.0, 45.0,
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
                 out double3 pos, out double3 fwd, out _);
 
             Assert.Greater(pos.y, 0.0, "Camera must be above origin (pos.y > 0) at tilt=45.");
@@ -384,65 +384,61 @@ namespace MapRenderer.Tests
         public void CameraProperties_HeadingNormalized_To0_360()
         {
             var p = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, -45.0, 0);
-            Assert.AreEqual(315.0, p.Heading, 1e-9, "Negative heading must wrap to [0,360).");
+            Assert.AreEqual(315.0, p.Heading.Degrees, 1e-9, "Negative heading must wrap to [0,360).");
 
             var q = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 370.0, 0);
-            Assert.AreEqual(10.0, q.Heading, 1e-9, "Heading > 360 must wrap to [0,360).");
+            Assert.AreEqual(10.0, q.Heading.Degrees, 1e-9, "Heading > 360 must wrap to [0,360).");
         }
 
-        // ── D6a pan Y-sign regression (S45 tooth 5) ──────────────────────────────────────────────
+        // ── D6a pan Y-sign regression (S45 tooth 5, updated for S63 anchored pan) ────────────────
 
         /// <summary>
-        /// D6a regression: documents the CORRECT behavior at the ViewInput level.
-        /// ViewInput.ApplyPan(dy=+N) uses the OLD Input System convention (dy>0 = drag DOWN = north).
-        /// The new Input System gives delta.y>0 for UPWARD mouse movement.
+        /// D6a: pins the "content follows cursor" pan direction using the S63 anchored-pan API.
+        /// Screen convention: +x right, +y up, origin bottom-left (Unity mouse position).
+        /// MapController (S63) no longer negates delta.y — the anchored pan handles direction correctly.
         ///
-        /// At the MapController input translator layer (MapController.Update), the sign is negated:
-        ///   ApplyPan(Map.Camera.CurrentProperties, delta.x, -delta.y)
-        ///
-        /// This test pins the EXPECTED behavior after sign flip:
-        ///   +Y drag (new IS = drag UP) → negate dy → ViewInput.ApplyPan(v, 0, -positive) → lat DECREASES
-        ///   = "content follows cursor" (drag up = see more southern content = center moves south).
-        ///
-        /// Tests at the pure ViewInput level because MapController.Update requires live mouse input
-        /// (not testable headlessly); the fix is validated here at the math boundary.
+        /// This test pins: cursor moves UP (+y in +y-up convention) → grabbed ground appears ABOVE centre
+        /// → camera centre moves SOUTH (lat decreases) so the grabbed point follows the cursor.
         /// </summary>
         [Test]
         public void D6a_PanYSign_DragUp_NewIS_MovesCenterSouth()
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
+            IProjection proj   = new WebMercatorProjection();
+            var         vp     = new double2(1920.0, 1080.0);
+            var         centre = new double2(960.0, 540.0);
 
-            // New IS: delta.y = +30 (mouse moved up = drag up).
-            // MapController negates: dy_for_ViewInput = -30.
-            double newIsDeltaY = 30.0;
-            double viewInputDy = -newIsDeltaY; // sign flip at the translator
+            // Grab the earth point at the screen centre.
+            GeoCoordinate3D grabbed = proj.ScreenToGround(centre, vp, v);
+            // Cursor moves UP (+y): grabbed point needs to appear above centre → centre moves SOUTH.
+            var cursorNow = centre + new double2(0.0, 30.0);
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(v, dxPixels: 0.0, dyPixels: viewInputDy);
+            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a: a +Y drag in the new Input System (upward mouse movement), after sign flip at the " +
-                "MapController translator, must move the LookAt center SOUTH (lat decreases). " +
-                "Failure means MapController.Update is passing the wrong sign to ViewInput.ApplyPan " +
-                "(content does NOT follow cursor when dragging up).");
+                "D6a (S63): cursor UP in +y-up convention must move the LookAt centre SOUTH " +
+                "(grabbed point glues to cursor above centre; content follows cursor correctly).");
         }
 
         /// <summary>
-        /// D6a complementary: drag DOWN (new IS: delta.y = -30) → center moves NORTH.
-        /// Symmetric check for the same sign-flip convention.
+        /// D6a complementary: cursor moves DOWN (−y in +y-up convention) → centre moves NORTH.
         /// </summary>
         [Test]
         public void D6a_PanYSign_DragDown_NewIS_MovesCenterNorth()
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
+            IProjection proj   = new WebMercatorProjection();
+            var         vp     = new double2(1920.0, 1080.0);
+            var         centre = new double2(960.0, 540.0);
 
-            // New IS: delta.y = -30 (mouse moved down = drag down). Negate → +30 for ViewInput.
-            double newIsDeltaY = -30.0;
-            double viewInputDy = -newIsDeltaY; // = +30
+            GeoCoordinate3D grabbed = proj.ScreenToGround(centre, vp, v);
+            // Cursor moves DOWN (−y): grabbed point appears below centre → centre moves NORTH.
+            var cursorNow = centre - new double2(0.0, 30.0);
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(v, dxPixels: 0.0, dyPixels: viewInputDy);
+            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a: a -Y drag (downward mouse movement in new IS), after sign flip, must move center NORTH.");
+                "D6a (S63): cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
         }
 
         // ── D6 tilt-Y sign convention (S50 tooth 6) ──────────────────────────────────────────────
@@ -477,7 +473,7 @@ namespace MapRenderer.Tests
                 v, dxPixels: 0.0, dyPixels: viewInputDy,
                 bearingSensitivity: 0.3, pitchSensitivity: 0.3, maxPitch: 60.0);
 
-            Assert.Less(patch.Tilt.Value, v.Tilt,
+            Assert.Less(patch.Tilt.Value, v.Tilt.Degrees,
                 "D6: a +Y drag (upward mouse move in the new Input System), after sign flip at the " +
                 "MapController translator, must tilt the camera TOWARD overhead (pitch decreases). " +
                 "Failure means MapController.Update passes the wrong sign to ViewInput.ApplyTilt " +
@@ -501,7 +497,7 @@ namespace MapRenderer.Tests
                 v, dxPixels: 0.0, dyPixels: viewInputDy,
                 bearingSensitivity: 0.3, pitchSensitivity: 0.3, maxPitch: 60.0);
 
-            Assert.Greater(patch.Tilt.Value, v.Tilt,
+            Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,
                 "D6: a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
                 "the camera TOWARD the horizon (pitch increases).");
         }

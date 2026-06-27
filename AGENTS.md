@@ -86,15 +86,13 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
   in the Editor (a step the user runs).
 - Vendored third-party code goes under `Assets/ThirdParty/<name>/` with its license, and an entry in
   `THIRD-PARTY-NOTICES.txt`. Avoid copyleft (see `ARCHITECTURE.md` §4).
-- **Type-explicit builder naming.** A type that builds or owns a single geometry kind must name it
-  explicitly (`StyledFillTileBuilder`, `StyledLineTileBuilder`); generic names (`MeshBuilder`,
-  `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers. (S54 — the retired
-  Gen-1 `MeshBuilder`/`TileMeshFactory` were the naming offenders this rule targets.)
-- **Math types: `Unity.Mathematics` only** — `float2/3/4`, `double2/3`, `quaternion`, `math.*`; *not*
-  `UnityEngine.Vector2/3/4` or `Quaternion`. `Core` is engine-free, so `UnityEngine.Vector*` is forbidden
-  there outright. Sole exception: a Unity boundary API that demands a `VectorN` — convert at that call site.
-  Full rationale + examples in **`docs/conventions.md`**. (S60.)
-- **`System.Math` is banned in all production code** — use `Unity.Mathematics.math.*` instead (e.g.
-  `math.sin`, `math.sqrt`, `math.abs`, `math.pow`). **Use `math.PI_DBL` for double-precision π** (not
-  `math.PI` which is a float); likewise `math.E_DBL`. Full replacement table in
-  **`docs/conventions.md` §"System.Math is banned"**. (S62.)
+
+The code-style rules (math types, `System.Math` ban, `in` params, data carriers, builder naming,
+test-code-bloat) live in **Coding conventions** below — don't restate them here.
+
+## Coding conventions
+
+The short summary index is imported below; each entry links to its full section in `docs/conventions.md`
+(the canonical human-facing reference — read it when a rule is ambiguous or you need the *why*).
+
+@docs/conventions-short.md

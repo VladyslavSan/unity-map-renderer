@@ -71,8 +71,8 @@ namespace MapRenderer.Core.View.Camera
             double latitude  = Latitude  ?? current.LookAt.Latitude;
             double longitude = Longitude ?? current.LookAt.Longitude;
             double altitude  = Altitude  ?? current.LookAt.Altitude;
-            double heading   = Heading   ?? current.Heading;
-            double tilt      = Tilt      ?? current.Tilt;
+            double heading   = Heading   ?? current.Heading.Degrees;
+            double tilt      = Tilt      ?? current.Tilt.Degrees;
 
             // Zoom wins over Distance if both are set.
             double zoom;

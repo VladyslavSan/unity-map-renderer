@@ -93,6 +93,16 @@ namespace MapRenderer.Core.Geo
             );
         }
 
+        // ── Ground resolution ────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Mercator-plane metres per screen pixel at the given fractional zoom level.
+        /// Single source of the <c>circumference / (TilePixelSize · 2^zoom)</c> formula —
+        /// used by the camera interaction layer to convert pixel offsets to ground distances.
+        /// </summary>
+        public static double GroundResolution(double zoom)
+            => EarthConstants.EquatorialCircumferenceMetres / (TilePixelSize * math.pow(2.0, zoom));
+
         // ── Legacy 2D helpers (retained for existing planar callers) ─────────────────────────────
 
         /// <summary>

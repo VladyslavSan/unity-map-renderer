@@ -1,4 +1,5 @@
 using System;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Core.View.Camera
 {
@@ -29,6 +30,10 @@ namespace MapRenderer.Core.View.Camera
         public readonly double ReferenceViewportHeightPx;
         public readonly double VerticalFovDeg;
 
+        // ── Active projection (S63: default WebMercator; injectable for tests / future globe) ─────
+        /// <summary>The active projection used by the camera interaction layer.</summary>
+        public IProjection Projection { get; }
+
         // ── Current state ─────────────────────────────────────────────────────────────────────────
         private CameraProperties _current;
 
@@ -47,11 +52,13 @@ namespace MapRenderer.Core.View.Camera
 
         public CameraSystem(CameraProperties initial,
                             double referenceViewportHeightPx = 1080.0,
-                            double verticalFovDeg             = 60.0)
+                            double verticalFovDeg             = 60.0,
+                            IProjection projection            = null)
         {
             _current                  = initial;
             ReferenceViewportHeightPx = referenceViewportHeightPx;
             VerticalFovDeg            = verticalFovDeg;
+            Projection                = projection ?? new WebMercatorProjection();
         }
 
         // ── Public state ──────────────────────────────────────────────────────────────────────────

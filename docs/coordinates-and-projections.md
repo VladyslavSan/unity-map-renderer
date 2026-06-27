@@ -70,21 +70,57 @@ Then `lon/lat → Mercator` (§2) or `→ ECEF` (§3) depending on mode.
   carries `O`. (Classic Cesium **Relative-To-Center**.)
 - Why mandatory: planar coords reach ±20 M m, globe ±6.37 M m — float32 alone jitters badly at world scale.
 
-## 6. Projection interface
+## 6. Projection interface — ONE abstraction, which emits a Burst struct (LOCKED principle)
+
+**There is a single projection abstraction: a managed OOP `IProjection` (`WebMercatorProjection` : planar,
+`EcefProjection` : globe). There is NOT a second, separately hand-authored static surface for the Burst
+jobs.** The render/job path does not duplicate the projection math — instead `IProjection` hands out a
+**blittable struct** that carries the projection *rules* into the Burst job. One source of truth ⇒ the
+managed path and the job path **cannot drift**.
+
 ```csharp
+// The managed abstraction — chosen ONCE per session; lives on the main thread.
 interface IProjection {
+    // Core RULES — must be blittable / Burst-emittable (see below). Pure geodetic → render-space math.
     double3 Project(double lon, double lat, double height); // → render space (pre-RTC)
-    double3 UpAt(double lon, double lat);                    // local up (extrusion / normals)
-    double   MetersPerUnit { get; }                          // scale bookkeeping
-    bool     IsOccluded(double3 renderPos, Camera cam);      // globe horizon cull; planar = false
+    double3 UpAt(double lon, double lat);                   // local up (extrusion / normals)
+    double  MetersPerUnit { get; }                          // scale bookkeeping
+
+    // The bridge: hand the rules to a job as a blittable value (no managed refs inside).
+    ProjectionRules ToBurstRules();                         // struct the Burst job projects with
 }
 // WebMercatorProjection : planar ;  EcefProjection : globe
 ```
+
+**Keep the rules blittable — no main-thread-only junk in the core.** Whatever ends up in the
+Burst-bound struct (`ProjectionRules`) must be pure values: **no managed references, no `UnityEngine.Camera`,
+no main-thread state.** View-/interaction-dependent operations are a **separate layer that *consumes* a
+projection — not part of the rules**:
+- **camera interaction** (screen↔ground unproject, zoom-to-cursor, anchored pan) needs the viewport + camera
+  pose — it lives on the managed interaction side and calls `IProjection`, but those methods are NOT in the
+  blittable rules;
+- **globe horizon occlusion** (`IsOccluded(renderPos, camera)` in the old sketch) needs the `Camera` — same
+  story: a view-layer concern, deliberately **removed from the rules interface above** (it was the smell that
+  motivated locking this principle).
+
+**This reconciles S61's "an interface cannot run inside Burst" (`Coordinates/ProjectionMode.cs`).** Correct —
+and the interface never does. It runs on the **managed** side and *emits* the struct that runs in Burst.
+The `ProjectionMode` enum is the **interim** seam the S61 job path switches on; the durable design is
+`IProjection` → `ProjectionRules`. Camera-interaction code (S63) is the first real consumer and uses
+`IProjection` **directly** on the managed side (no enum, no Burst constraint there). The interface earns its
+second method only when a second real consumer (globe interaction) exists — don't pre-add globe/`Ecef` slop
+ahead of a working implementation.
 
 ## 7. Axis conventions (Unity is left-handed, Y-up) — LOCKED defaults
 - **ECEF → Unity:** `unity = (X, Z, Y)` (swap Y/Z; flips right-handed Z-up → left-handed Y-up).
 - **Mercator plane → Unity:** east → `+X`, north → `+Z`, elevation/height → `+Y`.
 - Front-face winding: **CCW**. Globe surface normal for lighting = geodetic `up` (§3).
+- **Camera tilt is defined relative to the surface normal at `LookAt`.** `tilt = 0°` ⇒ the camera view
+  (forward) vector is the **inverse of the earth normal at `LookAt`** (top-down); `tilt = 90°` ⇒ the view is
+  **parallel to the surface at `LookAt`** (horizon), and is the limit ⇒ range `[0°, 90°]`. The normal is
+  **projection-dependent**: constant `+Y` on Mercator, the geodetic normal `IProjection.UpAt(lon, lat)` (§6)
+  on the globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputePose`).
+  (`Tilt`/`Heading` become `ConstrainedAngle` camera params — S68.)
 
 ## 8. Low-level rules (invariants)
 1. **Geodetic is the source of truth.** Projection is a pure, late-applied function — never store

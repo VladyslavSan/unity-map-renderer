@@ -1,5 +1,6 @@
 using Unity.Mathematics;
 using UnityEngine;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity
@@ -29,6 +30,10 @@ namespace MapRenderer.Unity
     {
         // ── Unity camera to drive ─────────────────────────────────────────────────────────────────
         private readonly UnityEngine.Camera _camera;
+
+        // ── Active projection (S63: default WebMercator; D7 symmetry with CameraSystem) ──────────
+        /// <summary>The active projection for this camera (default: WebMercatorProjection).</summary>
+        public IProjection Projection = new WebMercatorProjection();
 
         // ── Framing parameters (match CameraSystem) ───────────────────────────────────────────────
         /// <summary>
@@ -73,8 +78,8 @@ namespace MapRenderer.Unity
             if (altitude < 0.1) altitude = 0.1;
 
             CameraPoseMath.ComputePose(altitude,
-                                       props.Heading,
-                                       props.Tilt,
+                                       props.Heading.Value,
+                                       props.Tilt.Value,
                                        out double3 pos,
                                        out double3 fwd,
                                        out double3 up);
