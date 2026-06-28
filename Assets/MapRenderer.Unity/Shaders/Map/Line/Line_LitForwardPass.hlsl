@@ -1,20 +1,37 @@
-// MapLitForwardPass.hlsl — map-renderer derivative of URP LitForwardPass.hlsl
+// Line_LitForwardPass.hlsl — line layer forward-lit pass; derived from URP LitForwardPass.hlsl
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitForwardPass.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
+//           Verbatim reference copy: Assets/MapRenderer.Unity/Shaders/UnityLit/LitForwardPass.hlsl
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
-// Modified from upstream:
-//   • Includes MapLitInput.hlsl (our mirror) instead of LitInput.hlsl.
-//   • Calls MapVertexModify(input.positionOS.xyz) before GetVertexPositionInputs in vertex.
-//   • Modulates albedo/alpha by map paint properties after InitializeStandardLitSurfaceData.
-//   Keep verbatim-plus-delta so git diff against upstream stays meaningful.
+//
+// MINIMAL DELTA vs upstream LitForwardPass.hlsl. Everything outside the marked "LINE DELTA" points is
+// byte-identical to upstream, so the FULL URP feature set stays available — unused features (normal
+// map, detail, parallax, clear-coat, lightmaps, APV, …) compile out via their shader_feature keywords.
+//
+//   • Attributes  → LineAttributes (extrudeN / side+dist / widthScale / color), defined in
+//                   Line_VertexExtrude.hlsl. The line mesh has no tangent/texcoord/lightmap streams.
+//   • Varyings    → stock Varyings, with `uv` promoted to float3 carrying the line's native
+//                   parameterization, plus ONE extra interpolator (vColor) in the otherwise-free
+//                   TEXCOORD4 slot:
+//                       uv.x = distance along the line in line-width units (dashU)
+//                       uv.y = signed cross position ∈ [-1,+1] (side; 0 = center, ±1 = edge)
+//                       uv.z = gap inner-fraction (S14; 0 = solid line)
+//                       vColor = per-feature data-driven color (white = identity)
+//   • Vertex      → position from Line_VertexExtrude (shared world-space ribbon extrusion); constant
+//                   +Y lighting normal + placeholder tangent; uv = (dashU, side, innerFrac).
+//   • Fragment    → albedo *= vColor; alpha replaced by the fwidth ribbon coverage:
+//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a (S05/S14 — makes _Opacity
+//                   functional, carries gap/dash AA). SurfaceData still comes from the stock
+//                   InitializeStandardLitSurfaceData(uv.xy, …) — never hand-assembled.
+//
+// Include order (set by Line.shader): Line_LitInput.hlsl → Line_VertexExtrude.hlsl → this file.
+// See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
 
-#ifndef MAP_FORWARD_LIT_PASS_INCLUDED
-#define MAP_FORWARD_LIT_PASS_INCLUDED
+#ifndef MAP_LINE_FORWARD_PASS_INCLUDED
+#define MAP_LINE_FORWARD_PASS_INCLUDED
 
-#include "MapLitInput.hlsl"
-#include "MapLitCore.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 
@@ -30,24 +47,13 @@
 #define REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR
 #endif
 
-// keep this file in sync with MapLitGBufferPass.hlsl
+// ── LineAttributes is defined in Line_VertexExtrude.hlsl (included by Line.shader before this) ──
 
-struct Attributes
+// keep this file in sync with Line_LitGBufferPass.hlsl
+struct LineVaryings
 {
-    float4 positionOS   : POSITION;
-    float3 normalOS     : NORMAL;
-    float4 tangentOS    : TANGENT;
-    float2 texcoord     : TEXCOORD0;
-    float2 staticLightmapUV   : TEXCOORD1;
-    float2 dynamicLightmapUV  : TEXCOORD2;
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
-    float4 color        : COLOR;
-    UNITY_VERTEX_INPUT_INSTANCE_ID
-};
-
-struct Varyings
-{
-    float2 uv                       : TEXCOORD0;
+    // LINE DELTA: float3 uv = (dashU [along, width-units], side [signed cross ∈ -1..1], innerFrac [gap]).
+    float3 uv                       : TEXCOORD0;
 
 #if defined(REQUIRES_WORLD_SPACE_POS_INTERPOLATOR)
     float3 positionWS               : TEXCOORD1;
@@ -57,6 +63,9 @@ struct Varyings
 #if defined(REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR)
     half4 tangentWS                : TEXCOORD3;    // xyz: tangent, w: sign
 #endif
+
+    // LINE DELTA: per-feature data-driven color (white = identity). TEXCOORD4 is free in stock Lit.
+    float4 vColor                   : TEXCOORD4;
 
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
     half4 fogFactorAndVertexLight   : TEXCOORD5; // x: fogFactor, yzw: vertex light
@@ -81,16 +90,12 @@ struct Varyings
     float4 probeOcclusion : TEXCOORD10;
 #endif
 
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
-    // TEXCOORD11 is free in this pass; avoids collisions with TEXCOORD0-10 above.
-    half4 vColor                    : TEXCOORD11;
-
     float4 positionCS               : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
 };
 
-void InitializeInputData(Varyings input, half3 normalTS, out InputData inputData)
+void InitializeInputData(LineVaryings input, half3 normalTS, out InputData inputData)
 {
     inputData = (InputData)0;
 
@@ -162,7 +167,7 @@ void InitializeInputData(Varyings input, half3 normalTS, out InputData inputData
     #endif
 }
 
-void InitializeBakedGIData(Varyings input, inout InputData inputData)
+void InitializeBakedGIData(LineVaryings input, inout InputData inputData)
 {
     #if defined(_SCREEN_SPACE_IRRADIANCE)
     inputData.bakedGI = SAMPLE_GI(_ScreenSpaceIrradiance, input.positionCS.xy);
@@ -187,23 +192,25 @@ void InitializeBakedGIData(Varyings input, inout InputData inputData)
 //                  Vertex and Fragment functions                            //
 ///////////////////////////////////////////////////////////////////////////////
 
-// Used in Standard (Physically Based) shader
-Varyings LitPassVertex(Attributes input)
+// Entry points named LinePass* (referenced by Line.shader's #pragma vertex/fragment).
+LineVaryings LinePassVertex(LineAttributes input)
 {
-    Varyings output = (Varyings)0;
+    LineVaryings output = (LineVaryings)0;
 
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_TRANSFER_INSTANCE_ID(input, output);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-    // [MAP DELTA] Apply per-layer vertex modification before position transform.
-    // Fill: no-op. Line: lateral extrusion. See Fill_Input.hlsl / Line_Input.hlsl.
-    MapVertexModify(input.positionOS.xyz);
+    // LINE DELTA: world-space ribbon extrusion (the one helper every line pass shares → identical silhouettes).
+    float side, innerFrac, dashU;
+    float4 tangentOS;
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS);
 
-    VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
+    VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
 
-    // normalWS and tangentWS already normalize.
-    VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS, input.tangentOS);
+    // LINE DELTA: per-vertex normal + the derived line tangent (from Line_VertexExtrude) → a real tangent
+    // frame, so _NORMALMAP/_DETAIL/_PARALLAXMAP work without a tangent vertex stream.
+    VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS, tangentOS);
 
     half3 vertexLight = VertexLighting(vertexInput.positionWS, normalInput.normalWS);
 
@@ -212,11 +219,14 @@ Varyings LitPassVertex(Attributes input)
         fogFactor = ComputeFogFactor(vertexInput.positionCS.z);
     #endif
 
-    output.uv = TRANSFORM_TEX(input.texcoord, _BaseMap);
+    // LINE DELTA: uv carries the line parameterization, NOT TRANSFORM_TEX'd (coverage needs raw dashU).
+    output.uv     = float3(dashU, side, innerFrac);
+    output.vColor = input.color;
 
+    // already normalized from normal transform to WS.
     output.normalWS = normalInput.normalWS;
 #if defined(REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR) || defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
-    real sign = input.tangentOS.w * GetOddNegativeScale();
+    real sign = real(1.0) * GetOddNegativeScale();   // LINE DELTA: no tangentOS stream → placeholder w = +1
     half4 tangentWS = half4(normalInput.tangentWS.xyz, sign);
 #endif
 #if defined(REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR)
@@ -229,9 +239,10 @@ Varyings LitPassVertex(Attributes input)
     output.viewDirTS = viewDirTS;
 #endif
 
-    OUTPUT_LIGHTMAP_UV(input.staticLightmapUV, unity_LightmapST, output.staticLightmapUV);
+    // LINE DELTA: line has no lightmap UV stream — emit zero (lines are not lightmapped).
+    OUTPUT_LIGHTMAP_UV(float2(0, 0), unity_LightmapST, output.staticLightmapUV);
 #ifdef DYNAMICLIGHTMAP_ON
-    output.dynamicLightmapUV = input.dynamicLightmapUV.xy * unity_DynamicLightmapST.xy + unity_DynamicLightmapST.zw;
+    output.dynamicLightmapUV = float2(0, 0);
 #endif
     OUTPUT_SH4(vertexInput.positionWS, output.normalWS.xyz, GetWorldSpaceNormalizeViewDir(vertexInput.positionWS), output.vertexSH, output.probeOcclusion);
 #ifdef _ADDITIONAL_LIGHTS_VERTEX
@@ -250,15 +261,11 @@ Varyings LitPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
-    output.vColor = input.color;
-
     return output;
 }
 
-// Used in Standard (Physically Based) shader
-void LitPassFragment(
-    Varyings input
+void LinePassFragment(
+    LineVaryings input
     , out half4 outColor : SV_Target0
 #ifdef _WRITE_RENDERING_LAYERS
     , out uint outRenderingLayers : SV_Target1
@@ -268,6 +275,8 @@ void LitPassFragment(
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
+    float2 baseUV = input.uv.xy;   // LINE DELTA: uv is float3 (z = gap) → sample maps at xy
+
 #if defined(_PARALLAXMAP)
 #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
     half3 viewDirTS = input.viewDirTS;
@@ -275,21 +284,13 @@ void LitPassFragment(
     half3 viewDirWS = GetWorldSpaceNormalizeViewDir(input.positionWS);
     half3 viewDirTS = GetViewDirectionTangentSpace(input.tangentWS, input.normalWS, viewDirWS);
 #endif
-    ApplyPerPixelDisplacement(viewDirTS, input.uv);
+    ApplyPerPixelDisplacement(viewDirTS, baseUV);
 #endif
 
     SurfaceData surfaceData;
-    InitializeStandardLitSurfaceData(input.uv, surfaceData);
+    InitializeStandardLitSurfaceData(baseUV, surfaceData);
 
-    // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
-    // The constant/zoom layer color rides _BaseColor (applied in InitializeStandardLitSurfaceData);
-    // _Opacity modulates alpha (effective in transparent queue).
-    // [MAP DELTA S12] Composite data-driven × constant:
-    //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
-    //   _BaseColor.rgb   = zoom-level or constant color (S11 uniform dimension, applied above)
-    //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
-    surfaceData.albedo *= input.vColor.rgb;
-    surfaceData.alpha  *= input.vColor.a   * _Opacity;
+    surfaceData.albedo *= input.vColor.rgb;   // LINE DELTA: per-feature data-driven tint (white = identity)
 
 #ifdef LOD_FADE_CROSSFADE
     LODFadeCrossFade(input.positionCS);
@@ -297,7 +298,7 @@ void LitPassFragment(
 
     InputData inputData;
     InitializeInputData(input, surfaceData.normalTS, inputData);
-    SETUP_DEBUG_TEXTURE_DATA(inputData, UNDO_TRANSFORM_TEX(input.uv, _BaseMap));
+    SETUP_DEBUG_TEXTURE_DATA(inputData, UNDO_TRANSFORM_TEX(baseUV, _BaseMap));
 
 #if defined(_DBUFFER)
     ApplyDecalToSurfaceData(input.positionCS, surfaceData, inputData);
@@ -307,7 +308,10 @@ void LitPassFragment(
 
     half4 color = UniversalFragmentPBR(inputData, surfaceData);
     color.rgb = MixFog(color.rgb, inputData.fogCoord);
-    color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
+
+    // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × per-feature alpha (S05).
+    float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
+    color.a = coverage * _Opacity * input.vColor.a;
 
     outColor = color;
 
@@ -316,4 +320,4 @@ void LitPassFragment(
 #endif
 }
 
-#endif // MAP_FORWARD_LIT_PASS_INCLUDED
+#endif // MAP_LINE_FORWARD_PASS_INCLUDED

@@ -16,7 +16,7 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   + `LitFill_NormalMap` both failed on run 1, both passed on run 2.)
 
 - **SRP Batcher requires the `UnityPerMaterial` CBUFFER to be byte-identical across every pass of a
-  shader.** Define it once in a shared include (`MapLitInput.hlsl` / `MapLineInput.hlsl`); never add/remove
+  shader.** Define it once in a shared include (`Fill_LitInput.hlsl` / `Line_LitInput.hlsl`); never add/remove
   members in per-pass code. Removing or adding a CBUFFER member shifts every later member's offset, and the
   change must be mirrored in **three** places that travel together: the CBUFFER, the
   `UNITY_DOTS_INSTANCING` block (+ sampled statics + `#define`s), and any BRG SoA packing

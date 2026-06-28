@@ -8,9 +8,9 @@ This is the reference design every map-geometry shader follows. Researched again
 URP rendering system — not MapLibre — so URP source/docs are fair reference.
 
 **S34 implementation mandates (enforced by `ShaderStructureTests` + headless `LitFillSnapshotTests`):**
-- `MapLitInput.hlsl` in `Shaders/` holds the **complete** `UnityPerMaterial` CBUFFER (full URP Lit shape
-  + `_Color`/`_Opacity` map additions) and `InitializeStandardLitSurfaceData`. NEVER define a stripped
-  CBUFFER or hand-assemble `SurfaceData` field-by-field.
+- `Fill_LitInput.hlsl` in `Shaders/Map/Fill/` holds the fill layer's **complete** `UnityPerMaterial` CBUFFER
+  (full URP Lit shape + fill paint additions) and `InitializeStandardLitSurfaceData`. NEVER define a stripped
+  CBUFFER or hand-assemble `SurfaceData` field-by-field. See `Shaders/README.md` for the current layout (S66).
 - After calling `InitializeStandardLitSurfaceData`, the fragment **init-then-modulates**:
   `surfaceData.albedo *= _Color.rgb; surfaceData.alpha *= _Opacity;` — this is the only allowed pattern.
 - `Shaders/Fill.shader` is the authoritative shader (thin scaffold, passes mirror URP `Lit.shader`).
@@ -30,7 +30,7 @@ That was a self-inflicted loss: the "collision" only existed because of the cust
 
 The **adopted approach (S34)** is to **mirror-copy URP's structure into `Shaders/` and extend it**:
 - A thin `.shader` scaffold mirroring URP `Lit.shader`'s pass list; each pass `#include`s mirror-copied
-  building blocks (`MapLitInput.hlsl` ← `LitInput.hlsl`; `MapLit*Pass.hlsl` ← URP's pass files), kept
+  building blocks (`Fill_LitInput.hlsl` ← `LitInput.hlsl`; `Fill_<Pass>.hlsl` ← URP's pass files), kept
   verbatim-plus-our-delta so **upstream URP updates apply via `git diff`**.
 - The **full** `UnityPerMaterial` (URP Lit's complete shape) **+ our map additions**; `SurfaceData` comes
   from `InitializeStandardLitSurfaceData`, **NEVER hand-assembled field-by-field** (the rule that keeps a
@@ -54,8 +54,8 @@ property changes — **no mesh rebuild** (e.g. `material.SetFloat("_Width", …)
 
 ShaderGraph is ruled out: it cannot share one HLSL vertex function across N per-layer graphs, gates the
 pass list behind toggles, and is impractical for the complex per-layer logic (extrusion, fwidth AA, SDF
-symbols). We use hand-HLSL with a shared **`MapLitCore.hlsl`** skeleton `#include`d into every pass of
-every layer shader — the single source of truth for the vertex transform and the material CBUFFER.
+symbols). We use hand-HLSL with each layer self-contained under `Shaders/Map/<Layer>/` — its `<Layer>_LitInput.hlsl`
+is the CBUFFER source of truth for that layer, included by the `.shader` before any pass body.
 
 ## The multi-pass requirement (the part a shallow "use Lit" misses)
 
@@ -69,11 +69,11 @@ vertex code via an include/macro for vertex-moving shaders.
 - `ShadowCaster` — casts shadows. **Mandatory** if the feature casts shadows.
 - `DepthOnly` — camera depth prepass / `_CameraDepthTexture`. Needed when depth texture is on.
 - `DepthNormals` — depth+normals prepass. Needed for SSAO.
-- `UniversalGBuffer` — **only for deferred-opaque layers** (fills). Omit for forward-only layers (lines).
+- `UniversalGBuffer` — carried by **both Fill and Line as capability** (S67). The line's GBuffer pass is **present-but-inert by default policy** (transparent queue → URP excludes it from the GBuffer prepass) until S69 introduces opacity-driven activation.
 - Meta / Universal2D / MotionVectors / XR — opt-in only (lightmapping / 2D / TAA / XR).
 
-Every pass `#include`s `MapLitCore.hlsl` and routes `positionOS` (and the extrusion vector) through the
-shared `MapVertexModify(...)` before `TransformObjectToHClip`. Reuse Unity's stock pass bodies
+Each pass applies the layer's shared vertex transform identically — **Fill via the `MapVertexModify` hook, Line via `Line_VertexExtrude.hlsl`** — before `TransformObjectToHClip`; the layer's
+`<Layer>_LitInput.hlsl` is included by the `.shader` before the pass body. Reuse Unity's stock pass bodies
 (`LitForwardPass.hlsl`, `LitGBufferPass.hlsl`, `ShadowCasterPass.hlsl`, `DepthOnlyPass.hlsl`,
 `LitDepthNormalsPass.hlsl`) and substitute only the vertex math — version drift is then mostly keyword
 lists + Attributes/Varyings fields.
@@ -119,12 +119,18 @@ lists + Attributes/Varyings fields.
 
 ## Shared-skeleton structure
 
-- `MapLitCore.hlsl` — the `UnityPerMaterial` CBUFFER (+ DOTS-instancing bridge), `MapVertexModify(inout
-  float3 positionWS/OS, float3 extrudeDir, …)`, and `MapEdgeAA(…)` (fwidth coverage). One file, everywhere.
-- per-layer `*_Input.hlsl` — that layer's `MapVertexModify` body (line lateral extrude; fill = no-op;
-  fill-extrusion = height; circle billboard; SDF symbol quad) and any layer-specific fragment.
-- per-layer `.shader` — the pass scaffolding; each `HLSLPROGRAM` includes `MapLitCore.hlsl` + the layer
-  input + Unity's stock pass body; adds ONLY its vertex/fragment difference.
+Each layer is self-contained under `Shaders/Map/<Layer>/`. The `.shader` drives includes in this order for
+every pass: `<Layer>_LitInput.hlsl` (CBUFFER + DOTS bridge + `InitializeStandardLitSurfaceData`) → (Fill only)
+`Fill_VertexModify.hlsl` (`MapVertexModify` body) → `<Layer>_<Pass>.hlsl` (vertex/fragment entry points).
+See `Shaders/README.md` for the full layout and naming rules (S66).
+
+- `<Layer>_LitInput.hlsl` — that layer's `UnityPerMaterial` CBUFFER (+ DOTS-instancing bridge) and
+  `InitializeStandardLitSurfaceData`. Fill's is `Fill_LitInput.hlsl`; Line's is `Line_LitInput.hlsl`.
+- `Fill_VertexModify.hlsl` — Fill's `MapVertexModify` body (fill-translate offset). Line does its extrusion
+  via `Line_VertexExtrude.hlsl` (S67 shared helper, included before every line pass; replaces the inline
+  extrusion that was previously in `Line_LitForwardPass.hlsl`).
+- per-layer `.shader` — the pass scaffolding; each `HLSLPROGRAM` includes the layer input + vertex-modify (Fill)
+  + Unity's stock pass body; adds ONLY its vertex/fragment difference.
 
 ## Gotchas to design around
 - `MaterialPropertyBlock` silently kills the SRP Batcher + GPU instancing — per-layer materials / DOTS-
@@ -138,17 +144,19 @@ lists + Attributes/Varyings fields.
 ## Line specifics (S33)
 
 ### Forward-transparent rationale
-Lines use `Queue=Transparent` (≥2501) and a single `UniversalForward` pass. URP renders all
-transparents in forward regardless of the deferred setting, so lines get the same lighting and
-SSAO as deferred-opaque fills. The GBuffer/ShadowCaster/DepthOnly/DepthNormals passes are
-intentionally absent — they are dead code for a transparent material (URP excludes Queue≥2501
-from the opaque depth/GBuffer prepasses) and would only add compile time.
+Lines use `Queue=Transparent` (≥2501) and a `UniversalForward` pass as their primary rendering path.
+URP renders all transparents in forward regardless of the deferred setting, so lines get the same
+lighting and SSAO as deferred-opaque fills. The line now **carries the full pass set as capability**
+(ForwardLit / ShadowCaster / DepthOnly / DepthNormals / GBuffer — structural parity with Fill, S67).
+The four prepasses remain **present-but-inert** by default policy: the line stays `Queue=Transparent`,
+so URP excludes it from the opaque depth/GBuffer prepasses until S69 introduces opacity-driven
+activation that can move the line to an opaque queue.
 
-### CBUFFER fork (MapLineInput.hlsl)
+### CBUFFER fork (Line_LitInput.hlsl)
 The line needs `_Width`, `_WidthIsPixels`, `_MetersPerPixel`, `_Blur` in `UnityPerMaterial` in
-addition to the fill's properties. We cannot `#include MapLitInput.hlsl` and append — the HLSL
+addition to the fill's properties. We cannot `#include Fill_LitInput.hlsl` and append — the HLSL
 compiler rejects a duplicate `CBUFFER_START(UnityPerMaterial)`. The solution is a deliberate
-verbatim fork: `MapLineInput.hlsl` ← `LitInput.hlsl`, with the full URP Lit CBUFFER body
+verbatim fork: `Line_LitInput.hlsl` ← `LitInput.hlsl`, with the full URP Lit CBUFFER body
 copied byte-for-byte, then our line additions appended. `InitializeStandardLitSurfaceData` is
 also duplicated verbatim (the upstream pattern, not a helper call). The duplication is
 intentional and correct; `git diff` against URP upstream remains meaningful for both files.
@@ -156,7 +164,7 @@ intentional and correct; `git diff` against URP upstream remains meaningful for 
 ### World-space extrusion (decisive S05 fix)
 S05's `Materials/Line.shader` extruded in object space before `TransformObjectToHClip`. This is
 only correct under an identity object→world transform; it fails under tile-scale or translated
-parents. The fix in `MapLineForwardPass.hlsl` (vertex function):
+parents. The fix in `Line_LitForwardPass.hlsl` (vertex function):
 1. Extract the unit extrusion direction from `extrudeN` (strip the miter factor).
 2. Transform to world space via `(float3x3)GetObjectToWorldMatrix()`.
 3. **Normalize** the world-space direction — this strips any object→world scale, so `_Width`
@@ -180,7 +188,7 @@ Attribute layout:
 
 ### Z-fighting mitigation (#7)
 Fills and lines are coplanar on the flat XZ plane. The fix is a tiny constant +Y lift of
-`0.001` world-meters applied in `MapLineForwardPass.hlsl`'s vertex function (added to the
+`0.001` world-meters applied in `Line_LitForwardPass.hlsl`'s vertex function (added to the
 world-space offset before rounding back to object space). This is in addition to the
 `Queue=Transparent` / `ZWrite Off` ordering that the painter's-algorithm layer ordering relies
 on. The lift is invisible at any map scale and prevents depth-buffer fights.

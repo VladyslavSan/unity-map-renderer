@@ -15,9 +15,11 @@ namespace MapRenderer.Tests.Visual
     /// <summary>
     /// S33 acceptance tests — Lit forward-transparent line shader.
     ///
-    /// Test #1 (structural): Map/Line shader exists, compiles without errors, has
-    ///   exactly one pass (UniversalForward), no GBuffer/ShadowCaster/DepthOnly/DepthNormals,
-    ///   and includes MapLineInput.hlsl. NORMAL stream = +Y, extrudeN on separate TEXCOORD.
+    /// Test #1 (structural): Map/Line shader exists, compiles without errors, has the full
+    ///   five-pass set (S67: ForwardLit/ShadowCaster/DepthOnly/DepthNormals/GBuffer), each
+    ///   prepass carrying only its LightMode tag, and includes Line_LitInput.hlsl +
+    ///   Line_VertexExtrude.hlsl. NORMAL stream = +Y, extrudeN on separate TEXCOORD.
+    ///   Passes 2-5 are capability-only (present-but-inert for transparent lines).
     ///
     /// Test #2 (luminance delta): Line is lit — luminance changes when directional light
     ///   intensity changes. Proves URP PBR lighting is live.
@@ -181,37 +183,41 @@ namespace MapRenderer.Tests.Visual
                     System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
                     shaderPath));
 
-            // 1. Only UniversalForward pass present.
+            // 1. Full five-pass set present (S67 capability parity with Fill).
+            // ForwardLit is the primary rendering pass; the four prepasses are capability-only
+            // (present-but-inert for transparent lines; URP excludes Queue>=2501 from prepasses).
             Assert.That(src, Does.Contain("\"UniversalForward\""),
-                "Shaders/Map/Line/Line.shader must have a UniversalForward pass.");
+                "Shaders/Map/Line/Line.shader must have a UniversalForward (ForwardLit) pass.");
+            Assert.That(src, Does.Contain("\"ShadowCaster\""),
+                "Line.shader must have a ShadowCaster pass (S67 capability — inert for transparent).");
+            Assert.That(src, Does.Contain("\"UniversalGBuffer\""),
+                "Line.shader must have a GBuffer pass (S67 capability — inert for transparent).");
+            Assert.That(src, Does.Contain("\"DepthOnly\""),
+                "Line.shader must have a DepthOnly pass (S67 capability — inert for transparent).");
+            Assert.That(src, Does.Contain("\"DepthNormals\""),
+                "Line.shader must have a DepthNormals pass (S67 capability — inert for transparent).");
 
-            // 2. No dead passes for transparent material.
-            Assert.That(src, Does.Not.Contain("\"ShadowCaster\""),
-                "Line.shader must NOT have a ShadowCaster pass (transparent — dead pass).");
-            Assert.That(src, Does.Not.Contain("\"UniversalGBuffer\""),
-                "Line.shader must NOT have a GBuffer pass (transparent — dead pass).");
-            Assert.That(src, Does.Not.Contain("\"DepthOnly\""),
-                "Line.shader must NOT have a DepthOnly pass (transparent — dead pass).");
-            Assert.That(src, Does.Not.Contain("\"DepthNormals\""),
-                "Line.shader must NOT have a DepthNormals pass (transparent — dead pass).");
+            // 2. S67 shared helpers included.
+            Assert.That(src, Does.Contain("Line_VertexExtrude.hlsl"),
+                "Line.shader must #include Line_VertexExtrude.hlsl (S67 shared extrusion + coverage helper).");
 
-            // 3. Includes the line input (not fill input).
-            Assert.That(src, Does.Contain("MapLineForwardPass.hlsl"),
-                "Line.shader must #include MapLineForwardPass.hlsl.");
+            // 3. Includes the line forward pass (S66: explicit include; input provided separately by .shader).
+            Assert.That(src, Does.Contain("Line_LitForwardPass.hlsl"),
+                "Line.shader must #include Line_LitForwardPass.hlsl (S66 rename from MapLineForwardPass.hlsl).");
 
             // 4. Does NOT include the fill forward pass.
-            Assert.That(src, Does.Not.Contain("MapLitForwardPass.hlsl"),
-                "Line.shader must NOT #include MapLitForwardPass.hlsl (wrong pass for line).");
+            Assert.That(src, Does.Not.Contain("Fill_LitForwardPass.hlsl"),
+                "Line.shader must NOT #include Fill_LitForwardPass.hlsl (wrong pass for line).");
 
-            // 5. MapLineForwardPass uses MapLineInput (CBUFFER fork) and InitializeStandardLitSurfaceData.
+            // 5. Line_LitInput is included by Line.shader; Line_LitForwardPass calls InitializeStandardLitSurfaceData.
             string passPath = System.IO.Path.Combine(
                 System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
-                "Assets/MapRenderer.Unity/Shaders/Map/Line/MapLineForwardPass.hlsl");
+                "Assets/MapRenderer.Unity/Shaders/Map/Line/Line_LitForwardPass.hlsl");
             string passSrc = System.IO.File.ReadAllText(passPath);
-            Assert.That(passSrc, Does.Contain("MapLineInput.hlsl"),
-                "MapLineForwardPass.hlsl must #include MapLineInput.hlsl (CBUFFER fork).");
+            Assert.That(passSrc, Does.Not.Contain("#include \"Line_LitInput.hlsl\""),
+                "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl (S66: Line.shader provides it).");
             Assert.That(passSrc, Does.Contain("InitializeStandardLitSurfaceData"),
-                "MapLineForwardPass.hlsl must call InitializeStandardLitSurfaceData (not hand-assembled).");
+                "Line_LitForwardPass.hlsl must call InitializeStandardLitSurfaceData (not hand-assembled).");
 
             // 6. Transparent state.
             Assert.That(src, Does.Contain("ZWrite Off"),

@@ -1,29 +1,15 @@
-// MapShadowCasterPass.hlsl — map-renderer derivative of URP ShadowCasterPass.hlsl
-//
-// Origin:   Packages/com.unity.render-pipelines.universal/Shaders/ShadowCasterPass.hlsl
-//           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
-// Copyright © 2020 Unity Technologies ApS
-// Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
-// Modified from upstream:
-//   • Includes MapLitInput.hlsl (our mirror) instead of being included alongside LitInput.hlsl.
-//   • Calls MapVertexModify(input.positionOS.xyz) before position transforms in GetShadowPositionHClip.
-//   The vertex modification MUST also apply in this pass so shadows match the lit silhouette.
+#ifndef UNIVERSAL_SHADOW_CASTER_PASS_INCLUDED
+#define UNIVERSAL_SHADOW_CASTER_PASS_INCLUDED
 
-#ifndef MAP_SHADOW_CASTER_PASS_INCLUDED
-#define MAP_SHADOW_CASTER_PASS_INCLUDED
-
-#include "MapLitInput.hlsl"
-#include "MapLitCore.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
 #if defined(LOD_FADE_CROSSFADE)
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/LODCrossFade.hlsl"
 #endif
 
-// Shadow Casting Light geometric parameters. These variables are used when applying the shadow
-// Normal Bias and are set by UnityEngine.Rendering.Universal.ShadowUtils.SetupShadowCasterConstantBuffer.
+// Shadow Casting Light geometric parameters. These variables are used when applying the shadow Normal Bias and are set by UnityEngine.Rendering.Universal.ShadowUtils.SetupShadowCasterConstantBuffer in com.unity.render-pipelines.universal/Runtime/ShadowUtils.cs
 // For Directional lights, _LightDirection is used when applying shadow Normal Bias.
-// For Spot lights and Point lights, _LightPosition is used to compute the actual light direction.
+// For Spot lights and Point lights, _LightPosition is used to compute the actual light direction because it is different at each shadow caster geometry vertex.
 float3 _LightDirection;
 float3 _LightPosition;
 
@@ -46,9 +32,6 @@ struct Varyings
 
 float4 GetShadowPositionHClip(Attributes input)
 {
-    // [MAP DELTA] Apply per-layer vertex modification before world-space transform.
-    MapVertexModify(input.positionOS.xyz);
-
     float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
     float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
 
@@ -92,4 +75,4 @@ half4 ShadowPassFragment(Varyings input) : SV_TARGET
     return 0;
 }
 
-#endif // MAP_SHADOW_CASTER_PASS_INCLUDED
+#endif

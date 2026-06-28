@@ -355,15 +355,17 @@ namespace MapRenderer.Tests
             // into outerM (the magnitude), both sides widen symmetrically and ALL of teeth 1/2/4
             // would pass on the CPU but fail on the GPU. The greppable HLSL assertion catches it.
             //
-            // We assert that MapLineForwardPass.hlsl contains "sideAndDist.x" in its offset block,
-            // proving the shader multiplies by side (∈{+1,-1}) rather than adding to outerM.
+            // S67: The offset term moved from Line_LitForwardPass.hlsl (inline) into
+            // Line_VertexExtrude.hlsl (shared helper). We assert it is there — still one site,
+            // consumed by all five line passes. Same assertion strength, correct file.
 
-            string repoRoot   = GetRepoRoot();
+            string repoRoot     = GetRepoRoot();
+            // S67: extrusion logic (including the S44 offset term) lives in Line_VertexExtrude.hlsl.
             string hlslPath   = Path.Combine(repoRoot, "Assets", "MapRenderer.Unity", "Shaders",
-                                             "Map", "Line", "MapLineForwardPass.hlsl");
+                                             "Map", "Line", "Line_VertexExtrude.hlsl");
 
             Assert.That(File.Exists(hlslPath), Is.True,
-                $"MapLineForwardPass.hlsl not found at: {hlslPath}");
+                $"Line_VertexExtrude.hlsl not found at: {hlslPath}");
 
             string hlsl = File.ReadAllText(hlslPath);
 
@@ -371,27 +373,27 @@ namespace MapRenderer.Tests
             // This is the structural guarantee that the offset shifts the band CENTER,
             // not the half-width (which would be a symmetric widening, failing teeth 1/2/4).
             Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * offsetM)"),
-                "MapLineForwardPass.hlsl S44 offset term must multiply by sideAndDist.x " +
+                "Line_VertexExtrude.hlsl S44 offset term must multiply by sideAndDist.x " +
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +
                 "Grep: 'sideAndDist.x * (miter * offsetM)'");
 
-            // Also confirm _LineOffset is declared in MapLineInput.hlsl.
+            // Also confirm _LineOffset is declared in Line_LitInput.hlsl.
             string inputPath = Path.Combine(repoRoot, "Assets", "MapRenderer.Unity", "Shaders",
-                                            "Map", "Line", "MapLineInput.hlsl");
+                                            "Map", "Line", "Line_LitInput.hlsl");
             Assert.That(File.Exists(inputPath), Is.True,
-                $"MapLineInput.hlsl not found at: {inputPath}");
+                $"Line_LitInput.hlsl not found at: {inputPath}");
 
             string inputHlsl = File.ReadAllText(inputPath);
             Assert.That(inputHlsl, Does.Contain("float  _LineOffset;"),
-                "MapLineInput.hlsl CBUFFER must declare 'float  _LineOffset;' (SRP Batcher requirement).");
+                "Line_LitInput.hlsl CBUFFER must declare 'float  _LineOffset;' (SRP Batcher requirement).");
 
             // Confirm the DOTS bridge includes _LineOffset (all four pieces).
             Assert.That(inputHlsl, Does.Contain("UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)"),
-                "MapLineInput.hlsl DOTS bridge must include _LineOffset instanced prop.");
+                "Line_LitInput.hlsl DOTS bridge must include _LineOffset instanced prop.");
             Assert.That(inputHlsl, Does.Contain("unity_DOTS_Sampled_LineOffset"),
-                "MapLineInput.hlsl DOTS bridge must include unity_DOTS_Sampled_LineOffset static.");
+                "Line_LitInput.hlsl DOTS bridge must include unity_DOTS_Sampled_LineOffset static.");
             Assert.That(inputHlsl, Does.Contain("#define _LineOffset"),
-                "MapLineInput.hlsl DOTS bridge must include #define _LineOffset redirect.");
+                "Line_LitInput.hlsl DOTS bridge must include #define _LineOffset redirect.");
         }
 
         // ── Helper: resolve repo root ────────────────────────────────────────────────────────

@@ -7,28 +7,57 @@ materials included with or referenced by this project, with their respective lic
 CODE
 ----
 
-Unity Universal Render Pipeline (URP) shader files — derivative works
-  The following files in Assets/MapRenderer.Unity/Shaders/ are mirror-copies (verbatim-plus-delta)
-  of Unity URP shader source files from com.unity.render-pipelines.universal version 17.5.0:
-
-    MapLitInput.hlsl          ← derived from LitInput.hlsl
-    MapLitForwardPass.hlsl    ← derived from LitForwardPass.hlsl
-    MapLitGBufferPass.hlsl    ← derived from LitGBufferPass.hlsl
-    MapShadowCasterPass.hlsl  ← derived from ShadowCasterPass.hlsl
-    MapDepthOnlyPass.hlsl     ← derived from DepthOnlyPass.hlsl
-    MapDepthNormalsPass.hlsl  ← derived from LitDepthNormalsPass.hlsl
-    MapLineInput.hlsl         ← derived from LitInput.hlsl (line-layer CBUFFER fork; S33)
-    MapLineForwardPass.hlsl   ← derived from LitForwardPass.hlsl (line-layer forward pass; S33)
-
-  com.unity.render-pipelines.universal copyright © 2020 Unity Technologies ApS
+Unity Universal Render Pipeline (URP) shader source — verbatim reference template + derivatives
+  Source: com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89), as
+  shipped with Unity 6000.5.0f1. Copyright © 2020 Unity Technologies ApS.
   Licensed under the Unity Companion License for Unity-dependent projects.
   License text: Assets/ThirdParty/UnityCompanionLicense.txt
-  Online: http://www.unity3d.com/legal/licenses/Unity_Companion_License
+  Online:       http://www.unity3d.com/legal/licenses/Unity_Companion_License
+  The Unity Companion License is NOT copyleft — it does not affect our proprietary code; only the
+  copied/derived files listed below are subject to the UCL terms.
 
-  These files are our editable derivatives: each carries a UCL attribution header and
-  documents the delta from upstream (MapVertexModify hook, map paint property modulation).
-  The Unity Companion License is NOT copyleft — it does not affect our proprietary code.
-  Only the copied/derived files themselves are subject to the UCL terms.
+  (a) Verbatim reference template — Assets/MapRenderer.Unity/Shaders/UnityLit/
+      Unmodified copies of the URP Lit shader set, vendored as a diff baseline so our map shaders
+      can be audited as a minimal delta against stock Lit. The ONLY changes from upstream are the
+      shader name (Universal Render Pipeline/Lit → Template/UnityLit) and include paths (rewritten
+      to local-relative). Reference-only; bound to no material at runtime.
+      See Assets/MapRenderer.Unity/Shaders/UnityLit/README.md for provenance + refresh procedure.
+
+        UnityLit.shader              ← Lit.shader
+        LitInput.hlsl                ← LitInput.hlsl
+        LitForwardPass.hlsl          ← LitForwardPass.hlsl
+        LitGBufferPass.hlsl          ← LitGBufferPass.hlsl
+        ShadowCasterPass.hlsl        ← ShadowCasterPass.hlsl
+        DepthOnlyPass.hlsl           ← DepthOnlyPass.hlsl
+        DepthNormalsPass.hlsl        ← DepthNormalsPass.hlsl
+        LitDepthNormalsPass.hlsl     ← LitDepthNormalsPass.hlsl
+        LitMetaPass.hlsl             ← LitMetaPass.hlsl
+
+  (b) Editable derivatives (verbatim-plus-delta) — Assets/MapRenderer.Unity/Shaders/Map/
+      Each is a mirror-copy of a URP source file plus map-specific deltas (paint + tweakable
+      render-state properties, the MapVertexModify / line-extrusion hook, coverage/alpha). Each
+      carries a UCL attribution header documenting its delta from upstream.
+
+        Map/Fill/Fill.shader                 ← Lit.shader
+        Map/Fill/Fill_LitInput.hlsl          ← LitInput.hlsl
+        Map/Fill/Fill_LitForwardPass.hlsl    ← LitForwardPass.hlsl
+        Map/Fill/Fill_LitGBufferPass.hlsl    ← LitGBufferPass.hlsl
+        Map/Fill/Fill_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
+        Map/Fill/Fill_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
+        Map/Fill/Fill_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Map/Line/Line.shader                 ← Lit.shader
+        Map/Line/Line_LitInput.hlsl          ← LitInput.hlsl
+        Map/Line/Line_LitForwardPass.hlsl    ← LitForwardPass.hlsl
+        Map/Line/Line_LitGBufferPass.hlsl    ← LitGBufferPass.hlsl
+        Map/Line/Line_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
+        Map/Line/Line_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
+        Map/Line/Line_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Common/LitInput.Template.hlsl        ← LitInput.hlsl (Map-flavoured skeleton template; S66)
+
+  (c) Bespoke map helpers — original clean-room work, NOT Unity-derived; listed here only so the
+      shader tree's provenance is unambiguous:
+        Map/Line/Line_VertexExtrude.hlsl   — world-space ribbon extrusion + line coverage
+        Map/Fill/Fill_VertexModify.hlsl    — fill vertex hook
 
 Fill triangulation is a clean-room implementation of the ear-clipping algorithm. The Mapbox
 "earcut" project (ISC) was consulted only as an algorithm reference; no source was copied.

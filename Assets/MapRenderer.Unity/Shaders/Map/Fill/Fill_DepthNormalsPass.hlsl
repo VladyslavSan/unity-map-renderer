@@ -1,11 +1,11 @@
-// MapDepthNormalsPass.hlsl — map-renderer derivative of URP LitDepthNormalsPass.hlsl
+// Fill_DepthNormalsPass.hlsl — fill layer depth+normals pass; derived from URP LitDepthNormalsPass.hlsl
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitDepthNormalsPass.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream:
-//   • Includes MapLitInput.hlsl (our mirror) instead of being included alongside LitInput.hlsl.
+//   • Fill_LitInput.hlsl (our mirror) is included by Fill.shader before this file.
 //   • Calls MapVertexModify(input.positionOS.xyz) before TransformObjectToHClip.
 //   The vertex modification MUST also apply here so the normals prepass (_CameraNormalsTexture)
 //   matches the lit silhouette (needed for SSAO correctness).
@@ -13,8 +13,6 @@
 #ifndef MAP_DEPTH_NORMALS_PASS_INCLUDED
 #define MAP_DEPTH_NORMALS_PASS_INCLUDED
 
-#include "MapLitInput.hlsl"
-#include "MapLitCore.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #if defined(LOD_FADE_CROSSFADE)
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/LODCrossFade.hlsl"
@@ -80,7 +78,7 @@ Varyings DepthNormalsVertex(Attributes input)
     #endif
 
     // [MAP DELTA] Apply per-layer vertex modification before clip-space transform.
-    MapVertexModify(input.positionOS.xyz);
+    MapVertexModify(input.positionOS.xyz, input.normal, input.tangentOS);
 
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
 

@@ -33,7 +33,7 @@ namespace MapRenderer.Unity
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, +Y) interleaved via <see cref="LinePositionNormal"/>.
-    ///   Stream 1 — TexCoord0: extrusion normal (Float32x2).
+    ///   Stream 1 — TexCoord0: extrusion across-direction (Float32x3, 3D tangent-plane; Y=0 for Mercator).
     ///   Stream 2 — TexCoord1: side + distanceAlong (Float32x2).
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
@@ -87,7 +87,7 @@ namespace MapRenderer.Unity
             new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
             new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0),
             new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 3),
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 3, stream: 1),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 2, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 1, stream: 3),
         };
@@ -114,8 +114,8 @@ namespace MapRenderer.Unity
             // Stream 0: Position + Normal interleaved.
             public NativeArray<LinePositionNormal> Stream0PositionNormal;
 
-            // Stream 1: extrusion normal.
-            public NativeArray<Vector2> Stream1ExtrudeN;
+            // Stream 1: extrusion across-direction (3D tangent-plane vector; Y=0 for Mercator).
+            public NativeArray<Vector3> Stream1ExtrudeN;
 
             // Stream 2: side + distanceAlong.
             public NativeArray<Vector2> Stream2SideAndDist;
@@ -187,7 +187,7 @@ namespace MapRenderer.Unity
 
             // Phase 1: tessellate all features into temporary managed lists.
             var tempVerts0  = new List<LinePositionNormal>(512);
-            var tempVerts1  = new List<Vector2>(512);
+            var tempVerts1  = new List<Vector3>(512);
             var tempVerts2  = new List<Vector2>(512);
             var tempVerts3  = new List<LineWidthColor>(512);
             var tempIndices = new List<int>(1024);
@@ -274,7 +274,9 @@ namespace MapRenderer.Unity
                             Position = new Vector3((float)v.Position.x, 0f, (float)v.Position.y),
                             Normal   = UpNormal,
                         });
-                        tempVerts1.Add(new Vector2((float)v.Normal.x, (float)v.Normal.y));
+                        // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat
+                        // Mercator frame; a globe projection bakes non-zero Y and the shader consumes it as-is.
+                        tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
                         tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
                         tempVerts3.Add(new LineWidthColor
                         {
@@ -301,7 +303,7 @@ namespace MapRenderer.Unity
             var payload = new LayerMeshData
             {
                 Stream0PositionNormal = new NativeArray<LinePositionNormal>(vCount, Allocator.Persistent),
-                Stream1ExtrudeN       = new NativeArray<Vector2>(vCount, Allocator.Persistent),
+                Stream1ExtrudeN       = new NativeArray<Vector3>(vCount, Allocator.Persistent),
                 Stream2SideAndDist    = new NativeArray<Vector2>(vCount, Allocator.Persistent),
                 Stream3WidthColor     = new NativeArray<LineWidthColor>(vCount, Allocator.Persistent),
                 Indices               = new NativeArray<int>(iCount, Allocator.Persistent),

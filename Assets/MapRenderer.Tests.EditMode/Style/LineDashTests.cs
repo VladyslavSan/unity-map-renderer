@@ -322,7 +322,7 @@ namespace MapRenderer.Tests
         // ── Tooth 4 (GREPPABLE): Shader consumes per-vertex sideAndDist.y as dashU ────────────
 
         [Test]
-        public void ShaderStructure_MapLineForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
+        public void ShaderStructure_LineLitForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
         {
             string[] starts = new[]
             {
@@ -337,7 +337,7 @@ namespace MapRenderer.Tests
                 for (int i = 0; i < 16 && dir != null; i++)
                 {
                     string candidate = Path.Combine(dir,
-                        "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line", "MapLineForwardPass.hlsl");
+                        "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_LitForwardPass.hlsl");
                     if (File.Exists(candidate)) { hlslPath = candidate; break; }
                     dir = Directory.GetParent(dir)?.FullName;
                 }
@@ -345,18 +345,45 @@ namespace MapRenderer.Tests
             }
 
             Assert.That(hlslPath, Is.Not.Null,
-                $"MapLineForwardPass.hlsl not found. Tried walking up 16 levels from " +
+                $"Line_LitForwardPass.hlsl not found. Tried walking up 16 levels from " +
                 $"cwd={Directory.GetCurrentDirectory()} and AppContext.BaseDirectory={AppContext.BaseDirectory}");
             string text = File.ReadAllText(hlslPath);
 
-            Assert.That(text, Does.Contain("sideAndDist.y"),
-                "Vertex shader must read input.sideAndDist.y (per-vertex distanceAlong) for dashU.");
-            Assert.That(text, Does.Contain("output.dashU"),
-                "Vertex shader must write output.dashU.");
-            Assert.That(text, Does.Contain("input.dashU"),
-                "Fragment shader must read input.dashU.");
-            Assert.That(text, Does.Contain("_DashCount"),
-                "Shader must have _DashCount guard for solid identity.");
+            // S67 + UV-channel cleanup: dashU is computed in the shared Line_VertexExtrude helper; the
+            // forward pass calls it and carries the result in the line uv channel (uv.x — the native
+            // along-coordinate), and the fragment reads uv.x for dash coverage. There is no dedicated
+            // dashU varying any more (per-vertex distanceAlong sourcing is asserted on the helper below).
+            Assert.That(text, Does.Contain("Line_VertexExtrude("),
+                "Line_LitForwardPass.hlsl must call the shared Line_VertexExtrude helper (which sources dashU).");
+            Assert.That(text, Does.Contain("output.uv"),
+                "Vertex shader must carry the line coordinates (dashU/side/innerFrac) in output.uv.");
+            Assert.That(text, Does.Contain("input.uv.x"),
+                "Fragment shader must read the dash coordinate from input.uv.x.");
+
+            // _DashCount: S67 factored the dash logic into Line_VertexExtrude.hlsl (shared by all passes).
+            // Assert the guard is present there — still a single-site check, just in the helper.
+            string extrudePath = null;
+            foreach (string start in starts)
+            {
+                string dir2 = start;
+                for (int i = 0; i < 16 && dir2 != null; i++)
+                {
+                    string candidate2 = Path.Combine(dir2,
+                        "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_VertexExtrude.hlsl");
+                    if (File.Exists(candidate2)) { extrudePath = candidate2; break; }
+                    dir2 = Directory.GetParent(dir2)?.FullName;
+                }
+                if (extrudePath != null) break;
+            }
+            Assert.That(extrudePath, Is.Not.Null,
+                "Line_VertexExtrude.hlsl not found (S67 shared extrusion helper).");
+            string extrudeText = File.ReadAllText(extrudePath);
+            Assert.That(extrudeText, Does.Contain("sideAndDist.y"),
+                "Line_VertexExtrude.hlsl must consume per-vertex distanceAlong (input.sideAndDist.y) to form dashU.");
+            Assert.That(extrudeText, Does.Contain("dashU"),
+                "Line_VertexExtrude.hlsl must emit the dashU dash coordinate.");
+            Assert.That(extrudeText, Does.Contain("_DashCount"),
+                "Line_VertexExtrude.hlsl must have _DashCount guard for solid identity (S67: dash logic lives in shared helper).");
         }
 
         // ── LinePaint.HasDashArray parse integration ──────────────────────────────────────────

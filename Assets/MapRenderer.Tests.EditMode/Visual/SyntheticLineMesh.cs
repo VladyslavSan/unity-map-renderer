@@ -49,7 +49,7 @@ namespace MapRenderer.Tests.Visual
             var data = new StyledLineTileBuilder.LayerMeshData
             {
                 Stream0PositionNormal = new NativeArray<StyledLineTileBuilder.LinePositionNormal>(vCount, Allocator.Persistent),
-                Stream1ExtrudeN       = new NativeArray<Vector2>(vCount, Allocator.Persistent),
+                Stream1ExtrudeN       = new NativeArray<Vector3>(vCount, Allocator.Persistent),
                 Stream2SideAndDist    = new NativeArray<Vector2>(vCount, Allocator.Persistent),
                 Stream3WidthColor     = new NativeArray<StyledLineTileBuilder.LineWidthColor>(vCount, Allocator.Persistent),
                 Indices               = new NativeArray<int>(iCount, Allocator.Persistent),
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Visual
                     Position = new Vector3((float)v.Position.x, 0f, (float)v.Position.y),
                     Normal   = Vector3.up,
                 };
-                data.Stream1ExtrudeN[i]    = new Vector2((float)v.Normal.x, (float)v.Normal.y);
+                data.Stream1ExtrudeN[i]    = new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y);
                 data.Stream2SideAndDist[i] = new Vector2(v.Side, (float)v.DistanceAlong);
                 data.Stream3WidthColor[i]  = new StyledLineTileBuilder.LineWidthColor
                 {
@@ -150,7 +150,7 @@ namespace MapRenderer.Tests.Visual
             var data = new StyledLineTileBuilder.LayerMeshData
             {
                 Stream0PositionNormal = new NativeArray<StyledLineTileBuilder.LinePositionNormal>(totalV, Allocator.Persistent),
-                Stream1ExtrudeN       = new NativeArray<Vector2>(totalV, Allocator.Persistent),
+                Stream1ExtrudeN       = new NativeArray<Vector3>(totalV, Allocator.Persistent),
                 Stream2SideAndDist    = new NativeArray<Vector2>(totalV, Allocator.Persistent),
                 Stream3WidthColor     = new NativeArray<StyledLineTileBuilder.LineWidthColor>(totalV, Allocator.Persistent),
                 Indices               = new NativeArray<int>(totalI, Allocator.Persistent),
@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.Visual
                         Position = new Vector3((float)v.Position.x, 0f, (float)v.Position.y),
                         Normal   = Vector3.up,
                     };
-                    data.Stream1ExtrudeN[vOff + i]    = new Vector2((float)v.Normal.x, (float)v.Normal.y);
+                    data.Stream1ExtrudeN[vOff + i]    = new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y);
                     data.Stream2SideAndDist[vOff + i] = new Vector2(v.Side, (float)v.DistanceAlong);
                     data.Stream3WidthColor[vOff + i]  = new StyledLineTileBuilder.LineWidthColor
                     {

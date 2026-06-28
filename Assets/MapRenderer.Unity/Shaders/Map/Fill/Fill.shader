@@ -223,10 +223,11 @@ Shader "Map/Fill"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            // Include order: pass body first (brings MapLitInput.hlsl + MapLitCore.hlsl
-            // which declare MapVertexModify); then Fill_Input.hlsl which defines the body.
-            #include "../../Common/MapLitForwardPass.hlsl"
-            #include "Fill_Input.hlsl"
+            // Include order (define-before-use): input first (CBUFFER + DOTS bridge),
+            // then vertex-modify body (MapVertexModify definition), then pass body.
+            #include "Fill_LitInput.hlsl"
+            #include "Fill_VertexModify.hlsl"
+            #include "Fill_LitForwardPass.hlsl"
             ENDHLSL
         }
 
@@ -258,8 +259,9 @@ Shader "Map/Fill"
             #pragma multi_compile _ LOD_FADE_CROSSFADE
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
-            #include "../../Common/MapShadowCasterPass.hlsl"
-            #include "Fill_Input.hlsl"
+            #include "Fill_LitInput.hlsl"
+            #include "Fill_VertexModify.hlsl"
+            #include "Fill_ShadowCasterPass.hlsl"
             ENDHLSL
         }
 
@@ -330,8 +332,9 @@ Shader "Map/Fill"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "../../Common/MapLitGBufferPass.hlsl"
-            #include "Fill_Input.hlsl"
+            #include "Fill_LitInput.hlsl"
+            #include "Fill_VertexModify.hlsl"
+            #include "Fill_LitGBufferPass.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutputFormat.hlsl"
             ENDHLSL
         }
@@ -362,8 +365,9 @@ Shader "Map/Fill"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "../../Common/MapDepthOnlyPass.hlsl"
-            #include "Fill_Input.hlsl"
+            #include "Fill_LitInput.hlsl"
+            #include "Fill_VertexModify.hlsl"
+            #include "Fill_DepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -397,8 +401,9 @@ Shader "Map/Fill"
             #pragma multi_compile_instancing
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            #include "../../Common/MapDepthNormalsPass.hlsl"
-            #include "Fill_Input.hlsl"
+            #include "Fill_LitInput.hlsl"
+            #include "Fill_VertexModify.hlsl"
+            #include "Fill_DepthNormalsPass.hlsl"
             ENDHLSL
         }
     }

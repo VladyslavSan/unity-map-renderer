@@ -1,19 +1,17 @@
-// MapLitGBufferPass.hlsl — map-renderer derivative of URP LitGBufferPass.hlsl
+// Fill_LitGBufferPass.hlsl — fill layer GBuffer pass; derived from URP LitGBufferPass.hlsl
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitGBufferPass.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream:
-//   • Includes MapLitInput.hlsl (our mirror) instead of LitInput.hlsl.
+//   • Fill_LitInput.hlsl (our mirror) is included by Fill.shader before this file.
 //   • Calls MapVertexModify(input.positionOS.xyz) before GetVertexPositionInputs in vertex.
 //   • Modulates albedo/alpha by map paint properties after InitializeStandardLitSurfaceData.
 
 #ifndef MAP_LIT_GBUFFER_PASS_INCLUDED
 #define MAP_LIT_GBUFFER_PASS_INCLUDED
 
-#include "MapLitInput.hlsl"
-#include "MapLitCore.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutput.hlsl"
 #if defined(LOD_FADE_CROSSFADE)
@@ -28,7 +26,7 @@
 #define REQUIRES_WORLD_SPACE_TANGENT_INTERPOLATOR
 #endif
 
-// keep this file in sync with MapLitForwardPass.hlsl
+// keep this file in sync with Fill_LitForwardPass.hlsl
 
 struct Attributes
 {
@@ -160,7 +158,7 @@ Varyings LitGBufferPassVertex(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // [MAP DELTA] Apply per-layer vertex modification before position transform.
-    MapVertexModify(input.positionOS.xyz);
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 

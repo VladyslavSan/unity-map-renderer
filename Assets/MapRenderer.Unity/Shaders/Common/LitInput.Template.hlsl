@@ -1,19 +1,26 @@
-// MapLitInput.hlsl — map-renderer derivative of URP LitInput.hlsl
+// LitInput.Template.hlsl — Map-flavoured reference template for per-layer LitInput files.
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
-// Modified from upstream: full UnityPerMaterial + map paint properties (_Opacity, fill/line extras);
-//   DOTS bridge extended for map props; InitializeStandardLitSurfaceData preserved verbatim.
+// Modified from upstream: standard URP-lit CBUFFER props preserved verbatim; DOTS bridge + helpers
+//   carried with Map conventions (paint-color = _BaseColor, modulation after InitializeStandardLitSurfaceData).
 //
-// S34: this file replaces the stripped 5-prop MapLitCore.hlsl CBUFFER.
-//      All passes of every map-lit shader must #include this file FIRST.
-//      SRP Batcher requires the UnityPerMaterial shape to be IDENTICAL across all passes —
-//      never add/remove CBUFFER members in per-pass code; only modify this file.
+// S66: Map-flavoured skeleton — copy into Map/<Layer>/<Layer>_LitInput.hlsl and add the layer's
+//   paint props at the markers below. Included by NO .shader (the .Template.hlsl infix signals
+//   "reference only; never compiled"). URP already ships a pristine LitInput.hlsl; this adds
+//   our Map conventions on top (SRP-Batcher warning, _BaseColor-as-paint-color note, DOTS bridge).
+//
+// How to create a new layer input from this template:
+//   1. Copy to Map/<Layer>/<Layer>_LitInput.hlsl.
+//   2. Rename the include guard (MAP_LIT_INPUT_TEMPLATE_INCLUDED → MAP_<LAYER>_LIT_INPUT_INCLUDED).
+//   3. Rename SetupDOTSMapLitMaterialPropertyCaches → SetupDOTS<Layer>MaterialPropertyCaches.
+//   4. At each '// ── <Layer> paint props go here ──' marker, add your layer's props.
+//   5. Never add/remove CBUFFER members in per-pass code — SRP Batcher requires byte-identical shape.
 
-#ifndef MAP_LIT_INPUT_INCLUDED
-#define MAP_LIT_INPUT_INCLUDED
+#ifndef MAP_LIT_INPUT_TEMPLATE_INCLUDED
+#define MAP_LIT_INPUT_TEMPLATE_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
@@ -30,7 +37,12 @@
 // ── UnityPerMaterial CBUFFER ─────────────────────────────────────────────────
 // NOTE: Do not ifdef the properties here as SRP Batcher cannot handle different layouts.
 // Layout mirrors URP LitInput.hlsl exactly (same type/order), plus map-specific additions.
-// Map additions are appended at the end to keep upstream delta minimal.
+// Map paint props are appended at the end to keep upstream delta minimal.
+//
+// _BaseColor is the layer paint color (rgb→albedo tint, a→base alpha), exactly like stock Lit.
+// After InitializeStandardLitSurfaceData, the fragment applies additional map modulation:
+//   surfaceData.albedo *= input.vColor.rgb;   // per-feature data-driven tint
+//   surfaceData.alpha  *= input.vColor.a * _Opacity;
 CBUFFER_START(UnityPerMaterial)
 float4 _BaseMap_ST;
 float4 _BaseMap_TexelSize;
@@ -49,25 +61,8 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map paint properties (S34/S13 additions) ──────────────────────────────────
-// The per-layer paint color is the standard URP _BaseColor (declared above): it multiplies onto
-// albedo (and its alpha into the surface alpha) exactly like Lit. (S58 retired the redundant
-// _MapColor, which duplicated _BaseColor's rgb tint while ignoring its alpha.)
-// _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment.
-//                   In opaque queue it has no visual effect; wired for forward-compatible styling.
-// _FillOutlineColor — fill-outline-color (S13): used by a future outline pass; declared here so
-//                   the SRP Batcher CBUFFER shape is stable across all passes from day one.
-// _FillTranslate  — fill-translate (S13): xy = pixel offset (world-space or viewport-space per
-//                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
-// _FillAntialias  — fill-antialias (S13): 1=AA on (default), 0=off. Used by future MSAA/AA variant.
-// _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
-// _FillPattern    — fill-pattern (S13): sprite atlas index/flag for pattern fills. 0=no pattern.
-float  _Opacity;
-float4 _FillOutlineColor;
-float4 _FillTranslate;
-float  _FillAntialias;
-float  _FillTranslateAnchor;
-float  _FillPattern;
+// ── <Layer> paint props go here ──────────────────────────────────────────────
+// (Add layer-specific CBUFFER properties at this marker when copying this template.)
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
@@ -90,13 +85,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Map paint additions (S34/S13):
-    UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
-    UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
-    UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
-    UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
-    UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
-    UNITY_DOTS_INSTANCED_PROP(float , _FillPattern)
+    // ── <Layer> paint props go here ──
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 // Cache values in statics to avoid redundant load code per property use (same pattern as
@@ -114,13 +103,7 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Map paint statics (S34/S13):
-static float  unity_DOTS_Sampled_Opacity;
-static float4 unity_DOTS_Sampled_FillOutlineColor;
-static float4 unity_DOTS_Sampled_FillTranslate;
-static float  unity_DOTS_Sampled_FillAntialias;
-static float  unity_DOTS_Sampled_FillTranslateAnchor;
-static float  unity_DOTS_Sampled_FillPattern;
+// ── <Layer> paint prop statics go here ──
 
 void SetupDOTSMapLitMaterialPropertyCaches()
 {
@@ -137,12 +120,7 @@ void SetupDOTSMapLitMaterialPropertyCaches()
     unity_DOTS_Sampled_ClearCoatSmoothness  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _ClearCoatSmoothness);
     unity_DOTS_Sampled_DetailAlbedoMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoMapScale);
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
-    unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
-    unity_DOTS_Sampled_FillOutlineColor     = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillOutlineColor);
-    unity_DOTS_Sampled_FillTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillTranslate);
-    unity_DOTS_Sampled_FillAntialias        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
-    unity_DOTS_Sampled_FillTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
-    unity_DOTS_Sampled_FillPattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillPattern);
+    // ── <Layer> paint prop cache loads go here ──
 }
 
 // Redirect UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() → our extended function.
@@ -165,13 +143,7 @@ void SetupDOTSMapLitMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Map paint redirects (S34/S13):
-#define _Opacity                unity_DOTS_Sampled_Opacity
-#define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
-#define _FillTranslate          unity_DOTS_Sampled_FillTranslate
-#define _FillAntialias          unity_DOTS_Sampled_FillAntialias
-#define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor
-#define _FillPattern            unity_DOTS_Sampled_FillPattern
+// ── <Layer> paint prop #define redirects go here ──
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 
@@ -294,7 +266,7 @@ half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask)
 }
 
 // ── InitializeStandardLitSurfaceData ─────────────────────────────────────────
-// Verbatim from LitInput.hlsl; used by MapLitForwardPass + MapLitGBufferPass.
+// Verbatim from LitInput.hlsl; used by forward + GBuffer passes.
 // _BaseColor (rgb→albedo, a→alpha) is applied INSIDE this function, like stock Lit. After calling,
 // the fragment applies the remaining map modulation:
 //   surfaceData.albedo *= input.vColor.rgb;   // per-feature data-driven tint
@@ -339,4 +311,4 @@ inline void InitializeStandardLitSurfaceData(float2 uv, out SurfaceData outSurfa
 #endif
 }
 
-#endif // MAP_LIT_INPUT_INCLUDED
+#endif // MAP_LIT_INPUT_TEMPLATE_INCLUDED

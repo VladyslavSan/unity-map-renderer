@@ -1,18 +1,22 @@
 // Line.shader — Map/Line (S33: lit, forward-transparent, world-space extrusion)
 //
-// Lit line shader for unity-map-renderer.
-// ONE pass only: UniversalForward (forward-transparent, Queue=Transparent>=2501).
-// DO NOT add GBuffer/ShadowCaster/DepthOnly/DepthNormals — lines are transparent,
-// excluded from the opaque depth/GBuffer prepasses, and those passes are dead weight.
+// S67: FIVE passes — ForwardLit + ShadowCaster + DepthOnly + DepthNormals + GBuffer.
+// Passes 2-5 are CAPABILITY-ONLY (present-but-inert). URP excludes Queue=Transparent (>=2501)
+// materials from the opaque depth/GBuffer prepasses, so they never execute at runtime.
+// S69 will activate them when line rendering mode is changed (opaque-queue or forced shadows).
 //
-// Key design points (S33):
-//   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData.
-//   • CBUFFER (UnityPerMaterial) in MapLineInput.hlsl; IDENTICAL in the single pass (SRP Batcher).
-//   • Extrusion done in world space with normalize() in MapLineForwardPass.hlsl (decisive S05 fix).
-//   • NORMAL stream = constant +Y (lighting); extrudeN on separate TEXCOORD0 (not overloaded).
-//   • Alpha = fwidth-smoothstep coverage × _Opacity (S05 formula; makes _Opacity functional).
-//   • Tiny +Y lift (0.001m) in vertex shader for coplanar fill/line z-fighting (#7).
-//   • Blend SrcAlpha OneMinusSrcAlpha, ZWrite Off, Cull Off.
+// Key design points (S33/S66/S67):
+//   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData (S34).
+//   • CBUFFER (UnityPerMaterial) in Line_LitInput.hlsl; byte-IDENTICAL across all passes (SRP Batcher).
+//   • Line_VertexExtrude.hlsl: shared helper included before every pass body.
+//     Defines: LineAttributes struct, Line_VertexExtrude() (world-space extrusion, S05 fix),
+//     LineCoverage() (fwidth-smoothstep outer+inner+dash coverage). Single extrusion site.
+//   • NORMAL stream = constant +Y (lighting); extrudeN on TEXCOORD0 (not overloaded).
+//   • Alpha = LineCoverage() × _Opacity (S05 formula; makes _Opacity functional).
+//   • Tiny +Y lift (0.001m) in Line_VertexExtrude, applied to every pass equally.
+//   • ForwardLit: S58-parameterized Blend/ZWrite/ZTest/Cull.
+//   • Passes 2-5: hardcode ZWrite On / Cull Off / ZTest LEqual (NOT SubShader-level params —
+//     SubShader level defaults to ZWrite 0 / ZTest LEqual; passes must override independently).
 //
 // Shader name: Map/Line (replaces Hidden/Map/Line_S05_Deprecated in Materials/).
 //
@@ -159,7 +163,7 @@ Shader "Map/Line"
 
             // S58: fully parameterized forward render state. Defaults reproduce the prior hardcode
             // (Blend SrcAlpha OneMinusSrcAlpha / ZWrite Off / ZTest LEqual / Cull Off / BlendOp Add).
-            Blend [_SrcBlend] [_DstBlend]
+            Blend[_SrcBlend][_DstBlend], [_SrcBlendAlpha][_DstBlendAlpha]
             BlendOp [_BlendOp]
             ZWrite [_ZWrite]
             ZTest [_ZTest]
@@ -171,8 +175,199 @@ Shader "Map/Line"
             #pragma vertex   LinePassVertex
             #pragma fragment LinePassFragment
 
+            // -------------------------------------
+            // Material Keywords
+            #pragma shader_feature_local _NORMALMAP
+            #pragma shader_feature_local _PARALLAXMAP
+            #pragma shader_feature_local _RECEIVE_SHADOWS_OFF
+            #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
+            #pragma shader_feature_local_fragment _SURFACE_TYPE_TRANSPARENT
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local_fragment _ _ALPHAPREMULTIPLY_ON _ALPHAMODULATE_ON
+            #pragma shader_feature_local_fragment _EMISSION
+            #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+            #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+            #pragma shader_feature_local_fragment _OCCLUSIONMAP
+            #pragma shader_feature_local_fragment _SPECULARHIGHLIGHTS_OFF
+            #pragma shader_feature_local_fragment _ENVIRONMENTREFLECTIONS_OFF
+            #pragma shader_feature_local_fragment _SPECULAR_SETUP
+
+            // -------------------------------------
+            // Universal Pipeline keywords
+#if defined(UNITY_PLATFORM_META_QUEST)
+            #pragma multi_compile _ META_QUEST_LIGHTUNROLL
+#endif
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile _ _ADDITIONAL_LIGHTS_VERTEX _ADDITIONAL_LIGHTS
+            #pragma multi_compile _ EVALUATE_SH_MIXED EVALUATE_SH_VERTEX
+            #pragma multi_compile_fragment _ _ADDITIONAL_LIGHT_SHADOWS
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
+            #pragma multi_compile_fragment _ _REFLECTION_PROBE_ATLAS
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
+            #pragma multi_compile_fragment _ _SCREEN_SPACE_IRRADIANCE
+            #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
+            #pragma multi_compile_fragment _ _LIGHT_COOKIES
+            #pragma multi_compile _ _LIGHT_LAYERS
+            #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
+#if defined(UNITY_PLATFORM_META_QUEST)
+            #pragma multi_compile _ META_QUEST_ORTHO_PROJ
+            #pragma multi_compile _ META_QUEST_NO_SPOTLIGHTS_LIGHT_LOOP
+#endif
+            #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
+
+
+            // -------------------------------------
+            // Unity defined keywords
+            #pragma multi_compile _ LIGHTMAP_SHADOW_MIXING
+            #pragma multi_compile _ SHADOWS_SHADOWMASK
+            #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+            #pragma multi_compile _ LIGHTMAP_ON
+            #pragma multi_compile_fragment _ LIGHTMAP_BICUBIC_SAMPLING
+            #pragma multi_compile_fragment _ REFLECTION_PROBE_ROTATION
+            #pragma multi_compile _ DYNAMICLIGHTMAP_ON
+            #pragma multi_compile _ USE_LEGACY_LIGHTMAPS
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #pragma multi_compile_fragment _ DEBUG_DISPLAY
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Fog.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
+
+            //--------------------------------------
+            // GPU Instancing
+            #pragma multi_compile_instancing
+            #pragma instancing_options renderinglayer
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            // Include order (define-before-use): input (CBUFFER + DOTS bridge), helper
+            // (LineAttributes + Line_VertexExtrude + LineCoverage), then pass body.
+            #include "Line_LitInput.hlsl"
+            #include "Line_VertexExtrude.hlsl"
+            #include "Line_LitForwardPass.hlsl"
+            ENDHLSL
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Pass: ShadowCaster — CAPABILITY-ONLY (present-but-inert for transparent lines).
+        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // Hardcodes ZWrite On / Cull Off / ZTest LEqual — cannot inherit SubShader params
+        // (SubShader default ZWrite=0 would break shadow depth writes).
+        // ─────────────────────────────────────────────────────────────────────
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma target 2.0
+
+            #pragma vertex   LineShadowPassVertex
+            #pragma fragment LineShadowPassFragment
+
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+
+            #pragma multi_compile_instancing
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            #include "Line_LitInput.hlsl"
+            #include "Line_VertexExtrude.hlsl"
+            #include "Line_ShadowCasterPass.hlsl"
+            ENDHLSL
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Pass: DepthOnly — CAPABILITY-ONLY (present-but-inert for transparent lines).
+        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // ─────────────────────────────────────────────────────────────────────
+        Pass
+        {
+            Name "DepthOnly"
+            Tags { "LightMode" = "DepthOnly" }
+
+            ZWrite On
+            ColorMask R
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma target 2.0
+
+            #pragma vertex   LineDepthOnlyVertex
+            #pragma fragment LineDepthOnlyFragment
+
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+
+            #pragma multi_compile_instancing
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            #include "Line_LitInput.hlsl"
+            #include "Line_VertexExtrude.hlsl"
+            #include "Line_DepthOnlyPass.hlsl"
+            ENDHLSL
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Pass: DepthNormals — CAPABILITY-ONLY (present-but-inert for transparent lines).
+        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // ─────────────────────────────────────────────────────────────────────
+        Pass
+        {
+            Name "DepthNormals"
+            Tags { "LightMode" = "DepthNormals" }
+
+            ZWrite On
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma target 2.0
+
+            #pragma vertex   LineDepthNormalsVertex
+            #pragma fragment LineDepthNormalsFragment
+
+            #pragma shader_feature_local_fragment _ALPHATEST_ON
+
+            #pragma multi_compile_instancing
+            #pragma multi_compile _ LOD_FADE_CROSSFADE
+            #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
+            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
+
+            #include "Line_LitInput.hlsl"
+            #include "Line_VertexExtrude.hlsl"
+            #include "Line_DepthNormalsPass.hlsl"
+            ENDHLSL
+        }
+
+        // ─────────────────────────────────────────────────────────────────────
+        // Pass: GBuffer — CAPABILITY-ONLY (present-but-inert for transparent lines).
+        // URP only invokes this for opaque-queue materials in deferred mode. S69 activates it.
+        // Requires shader target 4.5 and excludes renderers without MRT support.
+        // ─────────────────────────────────────────────────────────────────────
+        Pass
+        {
+            Name "GBuffer"
+            Tags { "LightMode" = "UniversalGBuffer" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull Off
+
+            HLSLPROGRAM
+            #pragma target 4.5
+            #pragma exclude_renderers gles3 glcore
+
+            #pragma vertex   LineGBufferPassVertex
+            #pragma fragment LineGBufferPassFragment
+
             // ── Material keywords ────────────────────────────────────────────
-            // No _NORMALMAP / _DETAIL / _PARALLAXMAP for the line (flat +Y normal; UV=0).
             #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
             #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
             #pragma shader_feature_local_fragment _OCCLUSIONMAP
@@ -190,13 +385,10 @@ Shader "Map/Line"
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BLENDING
             #pragma multi_compile_fragment _ _REFLECTION_PROBE_BOX_PROJECTION
             #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
-            #pragma multi_compile_fragment _ _SCREEN_SPACE_OCCLUSION
-            #pragma multi_compile_fragment _ _SCREEN_SPACE_IRRADIANCE
             #pragma multi_compile_fragment _ _DBUFFER_MRT1 _DBUFFER_MRT2 _DBUFFER_MRT3
-            #pragma multi_compile_fragment _ _LIGHT_COOKIES
             #pragma multi_compile _ _LIGHT_LAYERS
             #pragma multi_compile _ _CLUSTER_LIGHT_LOOP
-            #include_with_pragmas "Packages/com.unity.render-pipelines.core/ShaderLibrary/FoveatedRenderingKeywords.hlsl"
+            #pragma multi_compile_fragment _ _GBUFFER_NORMALS_OCT
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/RenderingLayers.hlsl"
 
             // ── Unity defined keywords ───────────────────────────────────────
@@ -204,13 +396,9 @@ Shader "Map/Line"
             #pragma multi_compile _ SHADOWS_SHADOWMASK
             #pragma multi_compile _ DIRLIGHTMAP_COMBINED
             #pragma multi_compile _ LIGHTMAP_ON
-            #pragma multi_compile_fragment _ LIGHTMAP_BICUBIC_SAMPLING
-            #pragma multi_compile_fragment _ REFLECTION_PROBE_ROTATION
             #pragma multi_compile _ DYNAMICLIGHTMAP_ON
             #pragma multi_compile _ USE_LEGACY_LIGHTMAPS
             #pragma multi_compile _ LOD_FADE_CROSSFADE
-            #pragma multi_compile_fragment _ DEBUG_DISPLAY
-            #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Fog.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/ProbeVolumeVariants.hlsl"
 
             // ── GPU Instancing ───────────────────────────────────────────────
@@ -218,9 +406,9 @@ Shader "Map/Line"
             #pragma instancing_options renderinglayer
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
-            // Include: MapLineForwardPass.hlsl includes MapLineInput.hlsl (line CBUFFER fork)
-            // and defines LinePassVertex + LinePassFragment.
-            #include "MapLineForwardPass.hlsl"
+            #include "Line_LitInput.hlsl"
+            #include "Line_VertexExtrude.hlsl"
+            #include "Line_LitGBufferPass.hlsl"
             ENDHLSL
         }
     }

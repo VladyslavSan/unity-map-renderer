@@ -1,24 +1,21 @@
-// MapLineInput.hlsl — map-renderer line-layer CBUFFER fork, derived from URP LitInput.hlsl
+// Fill_LitInput.hlsl — fill layer CBUFFER + DOTS bridge + surface helpers; derived from URP LitInput.hlsl
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitInput.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
-// Modified from upstream: full UnityPerMaterial + line-specific paint properties
-//   (_Opacity, _Width, _WidthIsPixels, _MetersPerPixel, _Blur; color rides standard _BaseColor);
-//   DOTS bridge extended for line props; InitializeStandardLitSurfaceData preserved verbatim.
+// Modified from upstream: full UnityPerMaterial + fill paint properties (_Opacity, _FillOutlineColor, etc.);
+//   DOTS bridge extended for fill props; InitializeStandardLitSurfaceData preserved verbatim.
 //
-// S33: This is a DELIBERATE FORK of MapLitInput.hlsl for the line layer.
-//      The line needs additional CBUFFER props (_Width, _WidthIsPixels, _MetersPerPixel, _Blur).
-//      We CANNOT #include MapLitInput.hlsl and add to it — that would produce a duplicate
-//      UnityPerMaterial CBUFFER, which the HLSL compiler rejects.
-//      SRP Batcher requires the CBUFFER to be IDENTICAL in every pass of the line shader,
-//      so all line passes must #include THIS file, not MapLitInput.hlsl.
-//
-// See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
+// S34/S66: Fill-layer input — the UnityPerMaterial CBUFFER, DOTS-instancing bridge, and
+//   InitializeStandardLitSurfaceData for all Fill passes. Included by Fill.shader BEFORE any
+//   pass body (Fill_VertexModify.hlsl, then Fill_<Pass>.hlsl). Define-before-use order — no
+//   forward-declaration hack needed.
+//   SRP Batcher requires the UnityPerMaterial shape to be IDENTICAL across all passes —
+//   never add/remove CBUFFER members in per-pass code; only modify this file.
 
-#ifndef MAP_LINE_INPUT_INCLUDED
-#define MAP_LINE_INPUT_INCLUDED
+#ifndef MAP_LIT_INPUT_INCLUDED
+#define MAP_LIT_INPUT_INCLUDED
 
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonMaterial.hlsl"
@@ -33,9 +30,9 @@
 #endif
 
 // ── UnityPerMaterial CBUFFER ─────────────────────────────────────────────────
-// Layout mirrors URP LitInput.hlsl exactly (same type/order), then appends map-
-// specific additions. Line-specific props (_Width etc.) come last.
-// NOTE: Must be IDENTICAL across ALL passes of Line.shader (SRP Batcher requires this).
+// NOTE: Do not ifdef the properties here as SRP Batcher cannot handle different layouts.
+// Layout mirrors URP LitInput.hlsl exactly (same type/order), plus map-specific additions.
+// Map additions are appended at the end to keep upstream delta minimal.
 CBUFFER_START(UnityPerMaterial)
 float4 _BaseMap_ST;
 float4 _BaseMap_TexelSize;
@@ -54,40 +51,31 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map paint properties (S33 line additions) ─────────────────────────────────
-// The per-layer line color is the standard URP _BaseColor (declared above): rgb→albedo, a→alpha,
-// like stock Lit. (S58 retired the redundant _MapColor, which duplicated _BaseColor's rgb tint
-// while ignoring its alpha.)
-// _Opacity — overall opacity [0,1], multiplied onto fwidth AA coverage.
-// _Width   — line width in pixels (WidthIsPixels=1) or meters (WidthIsPixels=0).
-// _WidthIsPixels   — 0 = meters, 1 = pixels.
-// _MetersPerPixel  — px→m conversion for pixel-mode width.
-// _Blur    — AA feather multiplier (~1 = 1px feather, matches S05 smoothstep).
-// _GapWidth        — S14: line-gap-width in same units as _Width (pixels). Produces cased/hollow line.
-//                    0 = solid line (default); >0 = outer extrude to gap/2+width, discard inner band.
-// _LineTranslate   — S14: line-translate as float4(x, y, 0, 0) in pixels. Applied in vertex shader.
-// _LineTranslateAnchor — S14: 0 = "map" (world-space), 1 = "viewport" (clip-space approximation).
-// _LinePattern     — S14: hook flag. 0 = solid color; 1 = pattern (falls back to solid until S17).
-// _DashArray       — S43: on/off lengths (up to 4) in line-width units. Unused slots = 0.
-// _DashCount       — S43: number of valid entries in _DashArray (0 = solid identity, no dashing).
-// _LineOffset      — S44: perpendicular band-center shift in pixels (same units as _Width).
-//                    0 = no shift (default). Positive = left of travel direction.
-//                    Converted to meters via same px→m path as _Width.
+// ── Map paint properties (S34/S13 additions) ──────────────────────────────────
+// The per-layer paint color is the standard URP _BaseColor (declared above): it multiplies onto
+// albedo (and its alpha into the surface alpha) exactly like Lit. (S58 retired the redundant
+// _MapColor, which duplicated _BaseColor's rgb tint while ignoring its alpha.)
+// _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment.
+//                   In opaque queue it has no visual effect; wired for forward-compatible styling.
+// _FillOutlineColor — fill-outline-color (S13): used by a future outline pass; declared here so
+//                   the SRP Batcher CBUFFER shape is stable across all passes from day one.
+// _FillTranslate  — fill-translate (S13): xy = pixel offset (world-space or viewport-space per
+//                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
+// _FillAntialias  — fill-antialias (S13): 1=AA on (default), 0=off. Used by future MSAA/AA variant.
+// _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
+// _FillPattern    — fill-pattern (S13): sprite atlas index/flag for pattern fills. 0=no pattern.
 float  _Opacity;
-float  _Width;
-float  _WidthIsPixels;
-float  _MetersPerPixel;
-float  _Blur;
-float  _GapWidth;
-float4 _LineTranslate;
-float  _LineTranslateAnchor;
-float  _LinePattern;
-float4 _DashArray;
-float  _DashCount;
-float  _LineOffset;
+float4 _FillOutlineColor;
+float4 _FillTranslate;
+float  _FillAntialias;
+float  _FillTranslateAnchor;
+float  _FillPattern;
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
+// NOTE: Do not ifdef the properties for dots instancing, but ifdef the actual usage.
+// Otherwise you might break CPU-side as property constant-buffer offsets change per variant.
+// NOTE: Dots instancing is orthogonal to the constant buffer above.
 #ifdef UNITY_DOTS_INSTANCING_ENABLED
 
 UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
@@ -104,21 +92,17 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Line paint additions:
+    // Map paint additions (S34/S13):
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
-    UNITY_DOTS_INSTANCED_PROP(float , _Width)
-    UNITY_DOTS_INSTANCED_PROP(float , _WidthIsPixels)
-    UNITY_DOTS_INSTANCED_PROP(float , _MetersPerPixel)
-    UNITY_DOTS_INSTANCED_PROP(float , _Blur)
-    UNITY_DOTS_INSTANCED_PROP(float , _GapWidth)
-    UNITY_DOTS_INSTANCED_PROP(float4, _LineTranslate)
-    UNITY_DOTS_INSTANCED_PROP(float , _LineTranslateAnchor)
-    UNITY_DOTS_INSTANCED_PROP(float , _LinePattern)
-    UNITY_DOTS_INSTANCED_PROP(float4, _DashArray)
-    UNITY_DOTS_INSTANCED_PROP(float , _DashCount)
-    UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)
+    UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
+    UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
+    UNITY_DOTS_INSTANCED_PROP(float , _FillPattern)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
+// Cache values in statics to avoid redundant load code per property use (same pattern as
+// URP LitInput.hlsl — ~10% GPU perf improvement on Meta Quest 2).
 static float4 unity_DOTS_Sampled_BaseColor;
 static float4 unity_DOTS_Sampled_SpecColor;
 static float4 unity_DOTS_Sampled_EmissionColor;
@@ -132,21 +116,15 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Line paint statics:
+// Map paint statics (S34/S13):
 static float  unity_DOTS_Sampled_Opacity;
-static float  unity_DOTS_Sampled_Width;
-static float  unity_DOTS_Sampled_WidthIsPixels;
-static float  unity_DOTS_Sampled_MetersPerPixel;
-static float  unity_DOTS_Sampled_Blur;
-static float  unity_DOTS_Sampled_GapWidth;
-static float4 unity_DOTS_Sampled_LineTranslate;
-static float  unity_DOTS_Sampled_LineTranslateAnchor;
-static float  unity_DOTS_Sampled_LinePattern;
-static float4 unity_DOTS_Sampled_DashArray;
-static float  unity_DOTS_Sampled_DashCount;
-static float  unity_DOTS_Sampled_LineOffset;
+static float4 unity_DOTS_Sampled_FillOutlineColor;
+static float4 unity_DOTS_Sampled_FillTranslate;
+static float  unity_DOTS_Sampled_FillAntialias;
+static float  unity_DOTS_Sampled_FillTranslateAnchor;
+static float  unity_DOTS_Sampled_FillPattern;
 
-void SetupDOTSMapLineMaterialPropertyCaches()
+void SetupDOTSMapLitMaterialPropertyCaches()
 {
     unity_DOTS_Sampled_BaseColor            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _BaseColor);
     unity_DOTS_Sampled_SpecColor            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _SpecColor);
@@ -162,22 +140,20 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_DetailAlbedoMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoMapScale);
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
-    unity_DOTS_Sampled_Width                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Width);
-    unity_DOTS_Sampled_WidthIsPixels        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
-    unity_DOTS_Sampled_MetersPerPixel       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetersPerPixel);
-    unity_DOTS_Sampled_Blur                 = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Blur);
-    unity_DOTS_Sampled_GapWidth             = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _GapWidth);
-    unity_DOTS_Sampled_LineTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _LineTranslate);
-    unity_DOTS_Sampled_LineTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineTranslateAnchor);
-    unity_DOTS_Sampled_LinePattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LinePattern);
-    unity_DOTS_Sampled_DashArray            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray);
-    unity_DOTS_Sampled_DashCount            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DashCount);
-    unity_DOTS_Sampled_LineOffset           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineOffset);
+    unity_DOTS_Sampled_FillOutlineColor     = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillOutlineColor);
+    unity_DOTS_Sampled_FillTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillTranslate);
+    unity_DOTS_Sampled_FillAntialias        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
+    unity_DOTS_Sampled_FillTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
+    unity_DOTS_Sampled_FillPattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillPattern);
 }
 
+// Redirect UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() → our extended function.
+// UNITY_SETUP_INSTANCE_ID calls this macro under DOTS instancing, so all pass bodies
+// that call UNITY_SETUP_INSTANCE_ID will automatically load our map properties.
 #undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
-#define UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() SetupDOTSMapLineMaterialPropertyCaches()
+#define UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() SetupDOTSMapLitMaterialPropertyCaches()
 
+// Redirect property reads to statics (same pattern as URP LitInput.hlsl lines 99-114).
 #define _BaseColor              unity_DOTS_Sampled_BaseColor
 #define _SpecColor              unity_DOTS_Sampled_SpecColor
 #define _EmissionColor          unity_DOTS_Sampled_EmissionColor
@@ -191,19 +167,13 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Line paint redirects:
+// Map paint redirects (S34/S13):
 #define _Opacity                unity_DOTS_Sampled_Opacity
-#define _Width                  unity_DOTS_Sampled_Width
-#define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels
-#define _MetersPerPixel         unity_DOTS_Sampled_MetersPerPixel
-#define _Blur                   unity_DOTS_Sampled_Blur
-#define _GapWidth               unity_DOTS_Sampled_GapWidth
-#define _LineTranslate          unity_DOTS_Sampled_LineTranslate
-#define _LineTranslateAnchor    unity_DOTS_Sampled_LineTranslateAnchor
-#define _LinePattern            unity_DOTS_Sampled_LinePattern
-#define _DashArray              unity_DOTS_Sampled_DashArray
-#define _DashCount              unity_DOTS_Sampled_DashCount
-#define _LineOffset             unity_DOTS_Sampled_LineOffset
+#define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
+#define _FillTranslate          unity_DOTS_Sampled_FillTranslate
+#define _FillAntialias          unity_DOTS_Sampled_FillAntialias
+#define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor
+#define _FillPattern            unity_DOTS_Sampled_FillPattern
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 
@@ -262,17 +232,22 @@ half SampleOcclusion(float2 uv)
     #endif
 }
 
+// Returns clear coat parameters
+// .x/.r == mask
+// .y/.g == smoothness
 half2 SampleClearCoat(float2 uv)
 {
 #if defined(_CLEARCOAT) || defined(_CLEARCOATMAP)
     half2 clearCoatMaskSmoothness = half2(_ClearCoatMask, _ClearCoatSmoothness);
+
 #if defined(_CLEARCOATMAP)
     clearCoatMaskSmoothness *= SAMPLE_TEXTURE2D(_ClearCoatMap, sampler_ClearCoatMap, uv).rg;
 #endif
+
     return clearCoatMaskSmoothness;
 #else
     return half2(0.0, 1.0);
-#endif
+#endif  // _CLEARCOAT
 }
 
 void ApplyPerPixelDisplacement(half3 viewDirTS, inout float2 uv)
@@ -291,11 +266,13 @@ half3 ApplyDetailAlbedo(float2 detailUv, half3 albedo, half detailMask)
 {
 #if defined(_DETAIL)
     half3 detailAlbedo = SAMPLE_TEXTURE2D(_DetailAlbedoMap, sampler_DetailAlbedoMap, detailUv).rgb;
+
 #if defined(_DETAIL_SCALED)
     detailAlbedo = ScaleDetailAlbedo(detailAlbedo, _DetailAlbedoMapScale);
 #else
     detailAlbedo = half(2.0) * detailAlbedo;
 #endif
+
     return albedo * LerpWhiteTo(detailAlbedo, detailMask);
 #else
     return albedo;
@@ -310,6 +287,7 @@ half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask)
 #else
     half3 detailNormalTS = UnpackNormalScale(SAMPLE_TEXTURE2D(_DetailNormalMap, sampler_DetailNormalMap, detailUv), _DetailNormalMapScale);
 #endif
+
     detailNormalTS = normalize(detailNormalTS);
     return lerp(normalTS, BlendNormalRNM(normalTS, detailNormalTS), detailMask);
 #else
@@ -318,10 +296,12 @@ half3 ApplyDetailNormal(float2 detailUv, half3 normalTS, half detailMask)
 }
 
 // ── InitializeStandardLitSurfaceData ─────────────────────────────────────────
-// Verbatim from LitInput.hlsl; used by MapLineForwardPass.
-// _BaseColor (rgb→albedo, a→alpha) is applied INSIDE this function; after calling, the fragment
-// applies the per-feature tint: surfaceData.albedo *= input.vColor.rgb.
-// NEVER hand-assemble SurfaceData field-by-field.
+// Verbatim from LitInput.hlsl; used by Fill_LitForwardPass + Fill_LitGBufferPass.
+// _BaseColor (rgb→albedo, a→alpha) is applied INSIDE this function, like stock Lit. After calling,
+// the fragment applies the remaining map modulation:
+//   surfaceData.albedo *= input.vColor.rgb;   // per-feature data-driven tint
+//   surfaceData.alpha  *= input.vColor.a * _Opacity;
+// NEVER hand-assemble SurfaceData field-by-field — this function is the gate.
 inline void InitializeStandardLitSurfaceData(float2 uv, out SurfaceData outSurfaceData)
 {
     half4 albedoAlpha = SampleAlbedoAlpha(uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap));
@@ -361,4 +341,4 @@ inline void InitializeStandardLitSurfaceData(float2 uv, out SurfaceData outSurfa
 #endif
 }
 
-#endif // MAP_LINE_INPUT_INCLUDED
+#endif // MAP_LIT_INPUT_INCLUDED
