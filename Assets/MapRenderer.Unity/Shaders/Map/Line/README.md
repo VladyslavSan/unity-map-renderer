@@ -47,6 +47,33 @@ The four new passes call `LineCoverage(side, innerFrac, dashU)` and `clip(covera
 **interpolated varyings** in every pass (not computed per-vertex constants). This is why the line
 depth passes carry those three interpolators even though depth passes normally carry only `positionCS`.
 
+## Antialiasing model — opaque core + edge buffer
+
+The line is **opaque-core + feathered-edge**: `Line_VertexExtrude()` pads the lateral extrude OUTWARD by
+`(_AaEdgeWidth + _Blur)` device pixels (perspective-correct, measured per-vertex from the projected
+centre/edge), and `LineCoverage`'s `fwidth` smoothstep falls off over that same width — so the styled width
+stays `coverage = 1` (fully opaque) and only the buffer is partial. The interior is never made translucent,
+so overlapping roads/casings/joins composite with **no alpha accumulation**.
+
+**Two distinct properties — do NOT merge them** (see `docs/lessons-learned.md` § Shaders & HLSL):
+
+| Property | Meaning | Default | Style-bound? |
+|---|---|---|---|
+| `_AaEdgeWidth` | internal AA buffer/edge width, px per side | 1 | **no** (engine plumbing) |
+| `_Blur` | MapLibre **`line-blur`** paint | 0 | yes (`MaterialFactory` binds `line-blur`) |
+
+`_AaEdgeWidth` was once named `_Blur`; that collided with the `line-blur` style term (`line-X → _X`), so the
+styler bound its spec-default `0` over it and **silently zeroed antialiasing on every backend**. Internal
+render params (`_AaEdgeWidth`, `_WidthIsPixels`, `_MetersPerPixel`) are kept in a separate labeled group
+from the style-bound `line-*` props in `Line_LitInput.hlsl` / `Line.shader` — keep that boundary.
+
+**Known residual artifact (DEFERRED): sub-pixel lines over-thicken.** The pad is *geometric*, so a line
+narrower than the buffer (e.g. ~0.3px) is fattened to ~`0.3 + 2·_AaEdgeWidth` ≈ 2.3px and blurred; two such
+thin lines close together have their buffers overlap into a smeared mess. Fixing it needs coverage-conserving
+sub-pixel handling (clamp geometry to ~1px, scale alpha by the true width ratio) — which re-opens the
+translucent-overlap problem and likely needs the whole-layer composite. Tracked in
+`agents-devloop/stages/S70-line-antialiasing-subpixel-crawl.md` § "Known residual artifact".
+
 ## Render-state design
 
 - `ForwardLit`: S58-parameterized (`Blend [_SrcBlend] [_DstBlend]`, `ZWrite [_ZWrite]`, etc.).

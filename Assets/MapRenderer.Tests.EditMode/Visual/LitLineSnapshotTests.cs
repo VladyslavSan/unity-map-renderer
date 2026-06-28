@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_Blur",           1f);
+            mat.SetFloat("_AaEdgeWidth",    1f);   // antialiasing buffer (was _Blur pre-decouple)
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return (go, mat);
         }
@@ -573,8 +573,8 @@ namespace MapRenderer.Tests.Visual
                     snap.RawPixels, SnapW, SnapH, col, topEdge);
 
                 Assert.That(transitionPx, Is.LessThanOrEqualTo(3),
-                    $"AA transition ≤ 3px expected (fwidth ~1px + blur=1). Got {transitionPx}px. " +
-                    "Check smoothstep(0, max(fwidth(side)*_Blur,1e-4), 1-abs(side)) in MapLineForwardPass.hlsl.");
+                    $"AA transition ≤ 3px expected (fwidth ~1px × _AaEdgeWidth=1). Got {transitionPx}px. " +
+                    "Check smoothstep(0, max(fwidth(side)*(_AaEdgeWidth+_Blur),1e-4), 1-abs(side)) in LineCoverage.");
 
                 Debug.Log($"[LitLineSnapshotTests] AA edge: topEdge row={topEdge}, transitionPx={transitionPx}");
             }

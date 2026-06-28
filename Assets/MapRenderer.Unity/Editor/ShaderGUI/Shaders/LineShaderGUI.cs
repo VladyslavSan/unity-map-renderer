@@ -21,18 +21,22 @@ namespace MapRenderer.Unity.Editor
 
         private void DrawLineInputs(Material material)
         {
-            Prop(ShaderProperties.Opacity,            "Opacity");
-            Prop(ShaderProperties.Width,              "Width");
-            Prop(ShaderProperties.WidthIsPixels,      "Width In Pixels");
-            Prop(ShaderProperties.MetersPerPixel,     "Meters Per Pixel");
-            Prop(ShaderProperties.Blur,               "Blur (AA feather)");
-            Prop(ShaderProperties.GapWidth,           "Gap Width");
-            Prop(ShaderProperties.LineOffset,         "Line Offset");
-            Prop(ShaderProperties.DashArray,          "Dash Array");
+            // (A) Style-bound — MapLibre line-* paint/layout (written by the styler).
+            Prop(ShaderProperties.Opacity,            "Opacity (line-opacity)");
+            Prop(ShaderProperties.Width,              "Width (line-width)");
+            Prop(ShaderProperties.Blur,               "Line Blur (line-blur)");
+            Prop(ShaderProperties.GapWidth,           "Gap Width (line-gap-width)");
+            Prop(ShaderProperties.LineOffset,         "Line Offset (line-offset)");
+            Prop(ShaderProperties.DashArray,          "Dash Array (line-dasharray)");
             Prop(ShaderProperties.DashCount,          "Dash Count");
             Prop(ShaderProperties.LinePattern,        "Line Pattern (hook)");
-            Prop(ShaderProperties.LineTranslate,      "Line Translate");
+            Prop(ShaderProperties.LineTranslate,      "Line Translate (line-translate)");
             Prop(ShaderProperties.LineTranslateAnchor, "Translate Anchor");
+
+            // (B) Internal render params — NOT style properties.
+            Prop(ShaderProperties.WidthIsPixels,      "Width In Pixels");
+            Prop(ShaderProperties.MetersPerPixel,     "Meters Per Pixel");
+            Prop(ShaderProperties.AaEdgeWidth,        "AA Edge Width (px / side)");
         }
     }
 }

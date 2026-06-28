@@ -34,11 +34,9 @@ namespace MapRenderer.Unity.Rendering
         public const string BaseColor = "_BaseColor";
         public const string BaseMap   = "_BaseMap";
 
-        // ── Line-specific ──
+        // ── Line: style-bound (MapLibre line-* paint/layout; written by the styler) ──
         public const string Width                = "_Width";
-        public const string WidthIsPixels        = "_WidthIsPixels";
-        public const string MetersPerPixel       = "_MetersPerPixel";
-        public const string Blur                 = "_Blur";
+        public const string Blur                 = "_Blur";  // MapLibre line-blur (NOT antialiasing — see AaEdgeWidth)
         public const string GapWidth             = "_GapWidth";
         public const string LineTranslate        = "_LineTranslate";
         public const string LineTranslateAnchor  = "_LineTranslateAnchor";
@@ -46,6 +44,11 @@ namespace MapRenderer.Unity.Rendering
         public const string DashArray            = "_DashArray";
         public const string DashCount            = "_DashCount";
         public const string LineOffset           = "_LineOffset";
+
+        // ── Line: internal render params (NOT style properties; the styler never writes these) ──
+        public const string WidthIsPixels        = "_WidthIsPixels";
+        public const string MetersPerPixel       = "_MetersPerPixel";
+        public const string AaEdgeWidth          = "_AaEdgeWidth"; // antialiasing edge/buffer width, px/side
 
         // ── Fill-specific ──
         public const string FillOutlineColor    = "_FillOutlineColor";

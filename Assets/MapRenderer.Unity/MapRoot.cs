@@ -5,6 +5,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using Unity.Mathematics;
 
 // S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.
 
@@ -79,8 +80,20 @@ namespace MapRenderer.Unity
                  "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
         public double InitialZoom = 14.0;
 
+        [Tooltip("Cap the frame rate to the display refresh rate (VSync) on Start. Off = render " +
+                 "uncapped (1000+ FPS), which needlessly drives the GPU and heats the machine.")]
+        public bool CapFrameRateToRefreshRate = true;
+
         private void Start()
         {
+            // 0. Cap the frame rate to the display refresh (VSync) — uncapped rendering serves no
+            //    purpose for a map demo and just spins up the GPU/fans. vSyncCount=1 = every v-blank.
+            if (CapFrameRateToRefreshRate)
+            {
+                QualitySettings.vSyncCount  = 1;
+                Application.targetFrameRate = (int)math.round(Screen.currentResolution.refreshRateRatio.value);
+            }
+
             // 1. Load and parse the style document.
             StyleDocument style = LoadStyle();
 
@@ -188,7 +201,7 @@ namespace MapRenderer.Unity
 
             var mapCamera = camera != null
                 ? new MapCamera(camera, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg)
-                : new MapCamera(null, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
+                : new MapCamera(null,   ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
             mapCamera.AltitudeMultiplier = ctrl.AltitudeMultiplier;
 
             mapView.SetCamera(mapCamera, cameraSystem);

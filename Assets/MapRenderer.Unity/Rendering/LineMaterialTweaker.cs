@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering
         public static void ApplyPainterContract(Material m)
         {
             BaseMaterialTweaker.ApplyBaseContract(m);
-            m.SetBlend(BlendMode.SrcAlpha, BlendMode.OneMinusSrcAlpha);
+            m.SetBlend(BlendMode.SrcAlpha, BlendMode.OneMinusSrcAlpha, BlendMode.One, BlendMode.OneMinusSrcAlpha);
         }
     }
 }

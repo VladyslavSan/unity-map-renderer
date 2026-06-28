@@ -6,6 +6,7 @@
 //      MATERIAL's property values (never a MaterialProperty) and runs the editor-only FixupEmissiveFlag.
 //   3. On the committed .mat baseline (no maps, black emission, opaque) the derived keyword set is EMPTY —
 //      proving the keyword sync is behaviour-neutral (parity).
+
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
@@ -36,20 +37,27 @@ namespace MapRenderer.Tests
             var m = NewFill();
             try
             {
-                m.SetFloat(ShaderProperties.ZWrite, 1f);          // simulate an opaque-authored base
+                m.SetFloat(ShaderProperties.ZWrite, 1f);           // simulate an opaque-authored base
                 m.SetColor(ShaderProperties.BaseColor, Color.red); // simulate a tinted base
                 FillMaterialTweaker.ApplyPainterContract(m);
 
                 Assert.AreEqual(0f, m.GetFloat(ShaderProperties.ZWrite), "painter contract → ZWrite off");
                 Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.ZTest),
                     "painter contract → ZTest LEqual");
-                Assert.AreEqual((int)BlendMode.One, (int)m.GetFloat(ShaderProperties.SrcBlend),
-                    "fill contract → opaque One/Zero blend");
-                Assert.AreEqual((int)BlendMode.Zero, (int)m.GetFloat(ShaderProperties.DstBlend),
-                    "fill contract → opaque One/Zero blend");
+                Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcRGBBlend,
+                    (int)m.GetFloat(ShaderProperties.SrcBlend));
+                Assert.AreEqual((int)FillMaterialTweaker.DefaultDstRGBBlend,
+                    (int)m.GetFloat(ShaderProperties.DstBlend));
+                Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcAlphaBlend,
+                    (int)m.GetFloat(ShaderProperties.SrcBlendAlpha));
+                Assert.AreEqual((int)FillMaterialTweaker.DefaultDstRGBBlend,
+                    (int)m.GetFloat(ShaderProperties.DstBlendAlpha));
                 AssertWhite(m.GetColor(ShaderProperties.BaseColor), "_BaseColor");
             }
-            finally { Object.DestroyImmediate(m); }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
         }
 
         [Test]
@@ -67,7 +75,10 @@ namespace MapRenderer.Tests
                     "line contract → straight-alpha OneMinusSrcAlpha blend");
                 AssertWhite(m.GetColor(ShaderProperties.BaseColor), "_BaseColor");
             }
-            finally { Object.DestroyImmediate(m); }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
         }
 
         // ── 2. Editor keyword sync (the shader GUIs' ValidateMaterial) reads the material ──
@@ -92,7 +103,10 @@ namespace MapRenderer.Tests
                 new FillShaderGUI().ValidateMaterial(m);
                 Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "BakedEmissive/white → _EMISSION on");
             }
-            finally { Object.DestroyImmediate(m); }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
         }
 
         [Test]
@@ -106,7 +120,10 @@ namespace MapRenderer.Tests
                 new LineShaderGUI().ValidateMaterial(m);
                 Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "RealtimeEmissive/white → _EMISSION on");
             }
-            finally { Object.DestroyImmediate(m); }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
         }
 
         // ── 3. Default material → empty keyword set (behaviour-neutral / parity) ──
@@ -133,11 +150,15 @@ namespace MapRenderer.Tests
                 };
                 var on = new List<string>();
                 foreach (var kw in feature)
-                    if (m.IsKeywordEnabled(kw)) on.Add(kw);
+                    if (m.IsKeywordEnabled(kw))
+                        on.Add(kw);
                 Assert.IsEmpty(on, "no-maps/black-emission/opaque baseline must derive an EMPTY feature-keyword " +
-                    "set, but these were enabled: " + string.Join(", ", on));
+                                   "set, but these were enabled: " + string.Join(", ", on));
             }
-            finally { Object.DestroyImmediate(m); }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
         }
     }
 }

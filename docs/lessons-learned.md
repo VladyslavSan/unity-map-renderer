@@ -22,6 +22,20 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `UNITY_DOTS_INSTANCING` block (+ sampled statics + `#define`s), and any BRG SoA packing
   (`BrgTileRenderer` `Pfx_*` offsets + `FloatsPerInstance` + `MetaCount`). Miss one → wrong-offset reads.
 
+- **NEVER name an internal shader property after a MapLibre style term — the styler binds `line-X → _X`
+  and silently overwrites it.** `MaterialFactory`/`ZoomStyleApplier.BindFloat` maps each style paint/layout
+  property onto a shader property by stripping the prefix (`line-width → _Width`, `line-opacity → _Opacity`,
+  `line-blur → _Blur`). An internal render param that reuses such a name gets clobbered with the style value
+  at material-build time — no error, just wrong visuals. **The bug (2026-06-28):** the line antialiasing
+  edge-width knob was named `_Blur`, collided with `line-blur` (spec default **0**), so `MaterialFactory`
+  set `_Blur = 0` on every rendered material → **AA was off the whole time** on all backends. Took a
+  frame-debugger capture (`_Blur = 0` despite the inspector showing 4) to find. Fix: the AA knob became
+  `_AaEdgeWidth` (internal, default 1, never style-bound), `_Blur` now honestly means `line-blur`, and the
+  shader uses `(_AaEdgeWidth + _Blur)`. **Rule:** before naming a `_X` property, grep `PropertyNames.cs` /
+  `PaintProperties.cs`; reserve style-derived names for real bindings, and give internal params clearly
+  non-style names (cf. `_WidthIsPixels`, `_MetersPerPixel`). Keep the two kinds in **separate, labeled
+  groups** in the CBUFFER / Properties block so the boundary is visible.
+
 ## DOTS / Entities Graphics
 
 - **An Entities-Graphics entity renders NOTHING in a headless EditMode test until you tick its system

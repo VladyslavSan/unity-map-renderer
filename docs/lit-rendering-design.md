@@ -89,6 +89,37 @@ lists + Attributes/Varyings fields.
   offset / a tiny Y lift — NOT by changing the AA model.
 - (MSAA-in-deferred and auto alpha-to-coverage are URP-version-sensitive; pin to the project's URP version.)
 
+## Layer opacity & antialiasing — opaque cores, feathered edges
+
+Every MapLibre paint layer has an `*-opacity`, and per-feature opacity is baked into the vertex alpha
+(`StyledFill/LineTileBuilder` → `vColor.a`). For that alpha to actually composite, the painter contract
+uses straight **alpha blending** (`Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha` — the 4-arg form
+carries destination alpha correctly). Opaque layers (α=1) render byte-identically to the old `One/Zero`
+path; α<1 now blends. (Was a silent no-op until that fix.)
+
+**The AA model is opaque-core + feathered-edge — NOT whole-shape translucency.** Line geometry is extruded
+**`(_AaEdgeWidth + _Blur)` device-pixels past the styled width** (measured per-vertex from the projected
+centre/edge, so it's perspective-correct), and `LineCoverage`'s `fwidth` falloff (the same width) lands
+entirely in that added buffer. So the styled width stays `coverage = 1` (fully opaque) and only the edge is
+partial. `_AaEdgeWidth` is the *internal* AA buffer width (default 1px, never style-bound); `_Blur` is the
+MapLibre `line-blur` paint (default 0) that adds softening on top. **Do NOT conflate these — naming the AA
+knob `_Blur` once let the styler zero antialiasing entirely (see docs/lessons-learned.md).** Two reasons the
+opaque core matters, both learned the hard way:
+  - **Sub-pixel lines still rasterize** (the buffer guarantees ≥ ~1px of geometry), so thin roads/casings
+    render as a stable hairline instead of dropping pixels / crawling.
+  - **Overlaps composite cleanly.** Map data overlaps everywhere (casings under fills, joins, a road
+    crossing itself, multipart features). If the *interior* were translucent, each overlap would blend
+    twice and read darker. Forcing the interior opaque — and never dimming the whole line for AA — keeps
+    overlaps correct. (This is why an "energy-conserving" widen-and-dim AA was rejected: it makes the whole
+    ribbon translucent, which is exactly the failure mode.)
+
+**Known limitation — translucent self-overlap accumulates.** Per-primitive blending means a layer drawn at
+α<1 whose *own* geometry overlaps will composite those pixels twice and read darker than its intended layer
+opacity. Opaque layers and the thin AA edge never hit this (negligible). The fully-correct fix is to
+composite **the whole layer as a unit at its opacity** — render the layer to an offscreen target, then blend
+that once. That's a separable piece of architecture, deferred until semi-transparent overlapping layers are
+actually in use.
+
 ## Styling as material properties
 
 - All style props (`_Width`, `_Color`, `_Opacity`, metallic/smoothness/emission, …) live in **one
@@ -153,8 +184,9 @@ so URP excludes it from the opaque depth/GBuffer prepasses until S69 introduces 
 activation that can move the line to an opaque queue.
 
 ### CBUFFER fork (Line_LitInput.hlsl)
-The line needs `_Width`, `_WidthIsPixels`, `_MetersPerPixel`, `_Blur` in `UnityPerMaterial` in
-addition to the fill's properties. We cannot `#include Fill_LitInput.hlsl` and append — the HLSL
+The line needs its style-bound paint props (`_Width`, `_Blur` = line-blur, …) plus internal render params
+(`_WidthIsPixels`, `_MetersPerPixel`, `_AaEdgeWidth`) in `UnityPerMaterial` in addition to the fill's
+properties — kept in two separate labeled groups so style names never collide with internal ones. We cannot `#include Fill_LitInput.hlsl` and append — the HLSL
 compiler rejects a duplicate `CBUFFER_START(UnityPerMaterial)`. The solution is a deliberate
 verbatim fork: `Line_LitInput.hlsl` ← `LitInput.hlsl`, with the full URP Lit CBUFFER body
 copied byte-for-byte, then our line additions appended. `InitializeStandardLitSurfaceData` is
@@ -233,8 +265,8 @@ copied" branch of the ticket, not the pure-derive branch.*
   Surface Inputs incl. base/normal/metallic-or-specular/occlusion/emission map slots with tiling/offset,
   Advanced) are full-fidelity.
 - A single **"Map Paint"** foldout (registered via `FillAdditionalFoldouts`, occupying the slot where
-  Details normally sits) draws `_Color` and `_Opacity`, plus the line knobs (`_Width`, `_WidthIsPixels`,
-  `_MetersPerPixel`, `_Blur`) gated on `material.HasProperty("_Width")`. `_Width` exists only on
+  Details normally sits) draws `_Color` and `_Opacity`, plus the line knobs (`_Width`, `_Blur` = line-blur,
+  `_WidthIsPixels`, `_MetersPerPixel`, `_AaEdgeWidth`) gated on `material.HasProperty("_Width")`. `_Width` exists only on
   `MapRenderer/Line`, so one shared `CustomEditor` (`MapRenderer.Unity.Editor.MapLitShaderGUI`) serves both
   `MapRenderer/Fill` and `MapRenderer/Line` and shows the line knobs only on the line material.
 - `MapExpandable.MapPaint = 1 << 4` is the foldout's persisted expand-state bit — outside URP's

@@ -1,6 +1,6 @@
 using System;
 using UnityEditor;
-using UnityEditor.Rendering;   // MaterialHeaderScopeList (com.unity.render-pipelines.core editor — a UI utility)
+using UnityEditor.Rendering; // MaterialHeaderScopeList (com.unity.render-pipelines.core editor — a UI utility)
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Unity.Rendering;
@@ -41,11 +41,12 @@ namespace MapRenderer.Unity.Editor
         // Smoothness source channel labels (not a domain enum — a texture-channel selector).
         static readonly string[] s_SmoothnessSrc = { "Metallic Alpha", "Albedo Alpha" };
 
-        protected MaterialEditor _editor;
+        protected MaterialEditor     _editor;
         protected MaterialProperty[] _props;
 
         readonly MaterialHeaderScopeList _scopes =
             new MaterialHeaderScopeList(uint.MaxValue & ~(uint)Expandable.Advanced);
+
         bool _registered;
 
         // ── foldout registration (ordered: Surface Options, Surface Inputs, [middle], Advanced) ──
@@ -56,8 +57,8 @@ namespace MapRenderer.Unity.Editor
         {
             AddScope("Surface Options", Expandable.SurfaceOptions, DrawSurfaceOptions);
             AddScope("Surface Inputs",  Expandable.SurfaceInputs,  DrawSurfaceInputs);
-            RegisterMiddleScopes();   // successors insert Detail + feature foldouts here
-            AddScope("Advanced",        Expandable.Advanced,       DrawAdvanced);
+            RegisterMiddleScopes(); // successors insert Detail + feature foldouts here
+            AddScope("Advanced", Expandable.Advanced, DrawAdvanced);
         }
 
         /// <summary>Hook for successors to register foldouts BETWEEN Surface Inputs and Advanced
@@ -70,7 +71,12 @@ namespace MapRenderer.Unity.Editor
             _props  = properties;
             var material = (Material)materialEditor.target;
 
-            if (!_registered) { RegisterScopes(); _registered = true; }
+            if (!_registered)
+            {
+                RegisterScopes();
+                _registered = true;
+            }
+
             _scopes.DrawHeaders(materialEditor, material);
 
             // Keep keywords in sync as the user edits — routes through the virtual ValidateMaterial so the
@@ -103,7 +109,8 @@ namespace MapRenderer.Unity.Editor
 
             // Normal map (URP BaseShaderGUI L957 — note: height/parallax is the Lit level, not here).
             if (material.HasProperty(ShaderProperties.BumpMap))
-                CoreUtils.SetKeyword(material, ShaderKeywords.NormalMap, material.GetTexture(ShaderProperties.BumpMap) != null);
+                CoreUtils.SetKeyword(material, ShaderKeywords.NormalMap,
+                    material.GetTexture(ShaderProperties.BumpMap) != null);
 
             // Receive-shadows OFF toggle (URP BaseShaderGUI L806; default 1 → keyword off).
             if (material.HasProperty(ShaderProperties.ReceiveShadows))
@@ -113,13 +120,14 @@ namespace MapRenderer.Unity.Editor
             // Surface type / alpha clip (URP BaseShaderGUI.SetupMaterialBlendModeInternal L1013/L1022).
             CoreUtils.SetKeyword(material, ShaderKeywords.SurfaceTypeTransparent, !IsOpaque(material));
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaTestOn,
-                material.HasProperty(ShaderProperties.AlphaClip) && material.GetFloat(ShaderProperties.AlphaClip) >= 0.5f);
+                material.HasProperty(ShaderProperties.AlphaClip) &&
+                material.GetFloat(ShaderProperties.AlphaClip) >= 0.5f);
 
             // S58 exposes raw blend factors directly rather than a blend preset, so the premultiply/modulate
             // blend-preset keywords are not auto-derived — keep them off (URP sets these in its transparent
             // branch, L1114/L1115).
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaPremultiplyOn, false);
-            CoreUtils.SetKeyword(material, ShaderKeywords.AlphaModulateOn, false);
+            CoreUtils.SetKeyword(material, ShaderKeywords.AlphaModulateOn,    false);
         }
 
         /// <summary>True when the material's surface is opaque (no <c>_Surface</c> prop, or <c>_Surface == 0</c>).</summary>
@@ -132,17 +140,19 @@ namespace MapRenderer.Unity.Editor
         protected virtual void DrawSurfaceOptions(Material material)
         {
             // Domain enums (runtime) → labels generated from the enum value names by EnumPopup.
-            EnumPopup<SurfaceType>(ShaderProperties.Surface,       "Surface Type");
+            EnumPopup<SurfaceType>(ShaderProperties.Surface, "Surface Type");
             EnumPopup<WorkflowMode>(ShaderProperties.WorkflowMode, "Workflow Mode");
 
             EditorGUILayout.Space();
             // Raw low-level render state (the S58 knobs — what URP's Surface Type/Blend presets hide).
-            EnumPopup<DepthWrite>(ShaderProperties.ZWrite,     "Depth Write");
+            EnumPopup<DepthWrite>(ShaderProperties.ZWrite, "Depth Write");
             EnumPopup<CompareFunction>(ShaderProperties.ZTest, "Depth Test");
-            EnumPopup<CullMode>(ShaderProperties.CullMode,         "Render Face (Cull)");
-            EnumPopup<BlendMode>(ShaderProperties.SrcBlend,    "Src Blend");
-            EnumPopup<BlendMode>(ShaderProperties.DstBlend,    "Dst Blend");
-            EnumPopup<BlendOp>(ShaderProperties.BlendOp,       "Blend Op");
+            EnumPopup<CullMode>(ShaderProperties.CullMode, "Render Face (Cull)");
+            EnumPopup<BlendMode>(ShaderProperties.SrcBlend,      "Src Blend");
+            EnumPopup<BlendMode>(ShaderProperties.DstBlend,      "Dst Blend");
+            EnumPopup<BlendMode>(ShaderProperties.SrcBlendAlpha, "Src Blend Alpha");
+            EnumPopup<BlendMode>(ShaderProperties.DstBlendAlpha, "Dst Blend Alpha");
+            EnumPopup<BlendOp>(ShaderProperties.BlendOp, "Blend Op");
 
             EditorGUILayout.Space();
             Prop(ShaderProperties.AlphaClip, "Alpha Clip");
@@ -153,6 +163,7 @@ namespace MapRenderer.Unity.Editor
                 Prop(ShaderProperties.Cutoff, "Threshold");
                 EditorGUI.indentLevel--;
             }
+
             Prop(ShaderProperties.ReceiveShadows, "Receive Shadows");
         }
 
@@ -166,12 +177,13 @@ namespace MapRenderer.Unity.Editor
             // ── Base Map + colour (URP BaseShaderGUI.DrawBaseProperties) ──
             var baseMap = Find(ShaderProperties.BaseMap);
             var color   = Find(ShaderProperties.BaseColor);
-            if (baseMap != null && color != null) _editor.TexturePropertySingleLine(new GUIContent("Base Map"), baseMap, color);
-            else if (color != null)               _editor.ShaderProperty(color, "Color");
+            if (baseMap != null && color != null)
+                _editor.TexturePropertySingleLine(new GUIContent("Base Map"), baseMap, color);
+            else if (color != null) _editor.ShaderProperty(color, "Color");
 
             // ── Metallic / Specular area (URP LitGUI.DoMetallicSpecularArea) ──
             // The metallic slider / spec colour is shown only when NO gloss map is assigned (the map drives it).
-            var workflow = Find(ShaderProperties.WorkflowMode);
+            var  workflow = Find(ShaderProperties.WorkflowMode);
             bool specular = workflow != null && (WorkflowMode)(int)workflow.floatValue == WorkflowMode.Specular;
             if (specular)
             {
@@ -187,6 +199,7 @@ namespace MapRenderer.Unity.Editor
                     _editor.TexturePropertySingleLine(new GUIContent("Metallic Map"), metMap,
                         metMap.textureValue != null ? null : Find(ShaderProperties.Metallic));
             }
+
             DrawSmoothness(material);
 
             // ── Normal / height / occlusion (URP LitGUI.Inputs) — scale/strength shown only when assigned ──
@@ -231,9 +244,11 @@ namespace MapRenderer.Unity.Editor
                     EditorGUILayout.Popup("Smoothness Source", 0, s_SmoothnessSrc);
                     EditorGUI.EndDisabledGroup();
                 }
+
                 EditorGUI.showMixedValue = false;
                 EditorGUI.indentLevel--;
             }
+
             EditorGUI.indentLevel -= 2;
         }
 
@@ -256,7 +271,7 @@ namespace MapRenderer.Unity.Editor
             }
 
             // If a texture is assigned but the colour is black, bump it to white so it actually shows (URP).
-            if (emMap != null && emCol != null && emMap.textureValue != null
+            if (emMap                                 != null && emCol != null && emMap.textureValue != null
                 && emCol.colorValue.maxColorComponent <= 0f)
                 emCol.colorValue = Color.white;
 
@@ -272,7 +287,7 @@ namespace MapRenderer.Unity.Editor
             Prop(ShaderProperties.SpecularHighlights,     "Specular Highlights");
             Prop(ShaderProperties.EnvironmentReflections, "Environment Reflections");
             EditorGUILayout.Space();
-            _editor.RenderQueueField();        // render queue edited directly on the material (S58)
+            _editor.RenderQueueField(); // render queue edited directly on the material (S58)
             _editor.EnableInstancingField();
         }
 
@@ -305,8 +320,8 @@ namespace MapRenderer.Unity.Editor
             MaterialEditor.BeginProperty(p);
             EditorGUI.showMixedValue = p.hasMixedValue;
             EditorGUI.BeginChangeCheck();
-            var current = (TEnum)Enum.ToObject(typeof(TEnum), (int)p.floatValue);
-            var next = EditorGUILayout.EnumPopup(label, current);
+            var current                                  = (TEnum)Enum.ToObject(typeof(TEnum), (int)p.floatValue);
+            var next                                     = EditorGUILayout.EnumPopup(label, current);
             if (EditorGUI.EndChangeCheck()) p.floatValue = Convert.ToInt32(next);
             EditorGUI.showMixedValue = false;
             MaterialEditor.EndProperty();

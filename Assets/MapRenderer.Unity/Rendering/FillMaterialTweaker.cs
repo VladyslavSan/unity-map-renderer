@@ -10,6 +10,12 @@ namespace MapRenderer.Unity.Rendering
     /// </summary>
     public static class FillMaterialTweaker
     {
+        public const BlendMode DefaultSrcRGBBlend   = BlendMode.SrcAlpha;
+        public const BlendMode DefaultDstRGBBlend   = BlendMode.OneMinusSrcAlpha;
+        public const BlendMode DefaultSrcAlphaBlend = BlendMode.One;
+        public const BlendMode DefaultDstAlphaBlend = BlendMode.OneMinusSrcAlpha;
+
+
         /// <summary>
         /// Re-asserts the fill compositing contract after cloning a base <c>.mat</c> (replaces S57's
         /// magic-string <c>SetFloat</c> calls): shared base contract (no depth write, LEqual test, white
@@ -20,7 +26,7 @@ namespace MapRenderer.Unity.Rendering
         public static void ApplyPainterContract(Material m)
         {
             BaseMaterialTweaker.ApplyBaseContract(m);
-            m.SetBlend(BlendMode.One, BlendMode.Zero);
+            m.SetBlend(DefaultSrcRGBBlend, DefaultDstRGBBlend, DefaultSrcAlphaBlend, DefaultDstAlphaBlend);
         }
     }
 }

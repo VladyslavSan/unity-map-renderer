@@ -1,6 +1,7 @@
 // S58 acceptance — the typed render-state layer maps Unity rendering enums → the underlying ShaderLab
 // int properties (_ZWrite/_ZTest/_Cull/_SrcBlend/_DstBlend/_BlendOp). Pure property round-trip on a
 // Map/Fill material; no GUI, no scene.
+
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -69,20 +70,24 @@ namespace MapRenderer.Tests
         {
             var state = new MapRenderState
             {
-                DepthWrite = DepthWrite.Off,
-                DepthTest  = CompareFunction.LessEqual,
-                Cull       = CullMode.Off,
-                SrcBlend   = BlendMode.SrcAlpha,
-                DstBlend   = BlendMode.OneMinusSrcAlpha,
-                BlendOp    = BlendOp.Add,
+                DepthWrite    = DepthWrite.Off,
+                DepthTest     = CompareFunction.NotEqual,
+                Cull          = CullMode.Off,
+                SrcBlend      = BlendMode.SrcAlphaSaturate,
+                DstBlend      = BlendMode.DstColor,
+                SrcBlendAlpha = BlendMode.OneMinusDstAlpha,
+                DstBlendAlpha = BlendMode.OneMinusSrcColor,
+                BlendOp       = BlendOp.Add,
             };
             state.ApplyTo(_mat);
 
             Assert.AreEqual(0f, _mat.GetFloat(ShaderProperties.ZWrite));
-            Assert.AreEqual((int)CompareFunction.LessEqual, (int)_mat.GetFloat(ShaderProperties.ZTest));
+            Assert.AreEqual((int)CompareFunction.NotEqual, (int)_mat.GetFloat(ShaderProperties.ZTest));
             Assert.AreEqual((int)CullMode.Off, (int)_mat.GetFloat(ShaderProperties.CullMode));
-            Assert.AreEqual((int)BlendMode.SrcAlpha, (int)_mat.GetFloat(ShaderProperties.SrcBlend));
-            Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)_mat.GetFloat(ShaderProperties.DstBlend));
+            Assert.AreEqual((int)BlendMode.SrcAlphaSaturate, (int)_mat.GetFloat(ShaderProperties.SrcBlend));
+            Assert.AreEqual((int)BlendMode.DstColor, (int)_mat.GetFloat(ShaderProperties.DstBlend));
+            Assert.AreEqual((int)BlendMode.OneMinusDstAlpha, (int)_mat.GetFloat(ShaderProperties.SrcBlendAlpha));
+            Assert.AreEqual((int)BlendMode.OneMinusSrcColor, (int)_mat.GetFloat(ShaderProperties.DstBlendAlpha));
             Assert.AreEqual((int)BlendOp.Add, (int)_mat.GetFloat(ShaderProperties.BlendOp));
         }
     }

@@ -110,7 +110,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_GapWidth",       gapPx);
             mat.SetColor("_BaseColor",       color ?? new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_Blur",           1f);
+            mat.SetFloat("_AaEdgeWidth",    1f);   // antialiasing buffer (was _Blur pre-decouple)
             mat.SetVector("_LineTranslate", Vector4.zero);
             mat.SetFloat("_LinePattern",    linePattern);
 

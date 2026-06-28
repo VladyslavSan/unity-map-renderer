@@ -106,18 +106,20 @@ Shader "Map/Line"
         [HideInInspector][NoScaleOffset]unity_LightmapsInd("unity_LightmapsInd", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset]unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
 
-        // ── Map paint / line-specific properties ─────────────────────────────
+        // ── Map line properties ──────────────────────────────────────────────
+        // TWO separate groups — see Line_LitInput.hlsl for the rule:
+        //   (A) STYLE-BOUND : MapLibre line-* paint/layout, written by the styler (line-X → _X).
+        //   (B) INTERNAL    : engine render params the styler never touches — names MUST avoid the
+        //                     line-*/fill-* namespace (the AA width was once `_Blur` = line-blur → bug).
+
+        // (A) Style-bound — MapLibre line-* paint/layout:
         // The line color is the standard _BaseColor above; _Opacity modulates alpha.
-        _Opacity        ("Opacity", Range(0, 1)) = 1.0
-
-        _Width          ("Width (m or px)", Float)    = 2.0
-        [Toggle]
-        _WidthIsPixels  ("Width In Pixels", Float)    = 0.0
-        _MetersPerPixel ("Meters Per Pixel", Float)   = 1.0
-        _Blur           ("Blur (AA feather)", Range(0, 4)) = 1.0
-
+        _Opacity        ("Opacity (line-opacity)", Range(0, 1)) = 1.0
+        _Width          ("Width (line-width, m or px)", Float) = 2.0
+        // line-blur (px, spec default 0): edge softening ADDED on top of _AaEdgeWidth. 0 = crisp.
+        _Blur           ("Line Blur (line-blur, px)", Range(0, 8)) = 0.0
         // S14: line-gap-width — hollow/cased line. 0 = solid (default). Units = pixels (same as _Width).
-        _GapWidth       ("Gap Width (px)", Float)     = 0.0
+        _GapWidth       ("Gap Width (line-gap-width, px)", Float) = 0.0
         // S14: line-translate — pixel offset for the rendered ribbon.
         _LineTranslate  ("Line Translate (px xy)", Vector) = (0, 0, 0, 0)
         // S14: line-translate-anchor — 0 = map (world-space), 1 = viewport (screen-space).
@@ -131,6 +133,16 @@ Shader "Map/Line"
         // S44: line-offset — perpendicular band-center shift in pixels (same units as _Width).
         // 0 = no shift (default). Positive = left of travel direction.
         _LineOffset     ("Line Offset (px)", Float) = 0.0
+
+        // (B) Internal render params — NOT style properties (the styler never writes these):
+        [Toggle]
+        _WidthIsPixels  ("Width In Pixels", Float)    = 0.0
+        _MetersPerPixel ("Meters Per Pixel", Float)   = 1.0
+        // AA edge/buffer width in device px PER SIDE (default 1). The lateral extrude is padded this many
+        // px past the styled width so the styled core stays fully opaque and the fwidth falloff lands in
+        // the buffer; it also guarantees sub-pixel lines rasterize (≥ this width). 0 = sharp edge but
+        // sub-pixel lines can drop pixels again. Effective feather = (_AaEdgeWidth + _Blur).
+        _AaEdgeWidth    ("AA Edge Width (px / side)", Range(0, 4)) = 1.0
     }
 
     SubShader

@@ -11,6 +11,7 @@ namespace MapRenderer.Unity.Rendering
     {
         /// <summary>ZWrite Off — do not write to the depth buffer (painter's-algorithm layers).</summary>
         Off = 0,
+
         /// <summary>ZWrite On — write depth (opaque geometry).</summary>
         On = 1,
     }
@@ -25,14 +26,25 @@ namespace MapRenderer.Unity.Rendering
     {
         /// <summary>ZWrite.</summary>
         public DepthWrite DepthWrite;
+
         /// <summary>ZTest comparison.</summary>
         public CompareFunction DepthTest;
+
         /// <summary>Cull mode.</summary>
         public CullMode Cull;
+
         /// <summary>Source blend factor (RGB and alpha).</summary>
         public BlendMode SrcBlend;
+
         /// <summary>Destination blend factor (RGB and alpha).</summary>
         public BlendMode DstBlend;
+
+        /// <summary>Source blend factor (RGB and alpha).</summary>
+        public BlendMode SrcBlendAlpha;
+
+        /// <summary>Destination blend factor (RGB and alpha).</summary>
+        public BlendMode DstBlendAlpha;
+
         /// <summary>Blend operation.</summary>
         public BlendOp BlendOp;
 
@@ -42,7 +54,7 @@ namespace MapRenderer.Unity.Rendering
             material.SetDepthWrite(DepthWrite);
             material.SetDepthTest(DepthTest);
             material.SetCull(Cull);
-            material.SetBlend(SrcBlend, DstBlend);
+            material.SetBlend(SrcBlend, DstBlend, SrcBlendAlpha, DstBlendAlpha);
             material.SetBlendOp(BlendOp);
         }
     }

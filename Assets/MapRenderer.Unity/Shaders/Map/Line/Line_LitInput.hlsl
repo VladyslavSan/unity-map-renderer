@@ -5,11 +5,12 @@
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream: full UnityPerMaterial + line-specific paint properties
-//   (_Opacity, _Width, _WidthIsPixels, _MetersPerPixel, _Blur; color rides standard _BaseColor);
+//   style-bound (_Opacity, _Width, _Blur=line-blur, …) + internal render params (_WidthIsPixels,
+//   _MetersPerPixel, _AaEdgeWidth); color rides standard _BaseColor.
 //   DOTS bridge extended for line props; InitializeStandardLitSurfaceData preserved verbatim.
 //
 // S33/S66: This is a DELIBERATE FORK of Fill_LitInput.hlsl for the line layer.
-//      The line needs additional CBUFFER props (_Width, _WidthIsPixels, _MetersPerPixel, _Blur).
+//      The line needs additional CBUFFER props (_Width, _Blur, _WidthIsPixels, _MetersPerPixel, _AaEdgeWidth).
 //      We CANNOT #include Fill_LitInput.hlsl and add to it — that would produce a duplicate
 //      UnityPerMaterial CBUFFER, which the HLSL compiler rejects.
 //      SRP Batcher requires the CBUFFER to be IDENTICAL in every pass of the line shader,
@@ -54,29 +55,31 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map paint properties (S33 line additions) ─────────────────────────────────
-// The per-layer line color is the standard URP _BaseColor (declared above): rgb→albedo, a→alpha,
-// like stock Lit. (S58 retired the redundant _MapColor, which duplicated _BaseColor's rgb tint
-// while ignoring its alpha.)
-// _Opacity — overall opacity [0,1], multiplied onto fwidth AA coverage.
-// _Width   — line width in pixels (WidthIsPixels=1) or meters (WidthIsPixels=0).
-// _WidthIsPixels   — 0 = meters, 1 = pixels.
-// _MetersPerPixel  — px→m conversion for pixel-mode width.
-// _Blur    — AA feather multiplier (~1 = 1px feather, matches S05 smoothstep).
-// _GapWidth        — S14: line-gap-width in same units as _Width (pixels). Produces cased/hollow line.
-//                    0 = solid line (default); >0 = outer extrude to gap/2+width, discard inner band.
-// _LineTranslate   — S14: line-translate as float4(x, y, 0, 0) in pixels. Applied in vertex shader.
-// _LineTranslateAnchor — S14: 0 = "map" (world-space), 1 = "viewport" (clip-space approximation).
-// _LinePattern     — S14: hook flag. 0 = solid color; 1 = pattern (falls back to solid until S17).
-// _DashArray       — S43: on/off lengths (up to 4) in line-width units. Unused slots = 0.
-// _DashCount       — S43: number of valid entries in _DashArray (0 = solid identity, no dashing).
-// _LineOffset      — S44: perpendicular band-center shift in pixels (same units as _Width).
-//                    0 = no shift (default). Positive = left of travel direction.
-//                    Converted to meters via same px→m path as _Width.
+// ── Map line properties (S33+) ────────────────────────────────────────────────
+// Kept in TWO deliberately-separate groups (do not merge them):
+//   (A) STYLE-BOUND paint/layout — written from the style by MaterialFactory/ZoomStyleApplier via the
+//       MapLibre `line-X → _X` naming convention. These names ARE the style namespace: a new shader
+//       property named after a real `line-*`/`fill-*` term is silently overwritten by the styler. Reserve
+//       names here for genuine spec properties only.
+//   (B) INTERNAL render params — engine plumbing the styler never writes. MUST NOT be named after any
+//       `line-*`/`fill-*` term (the AA width was once `_Blur` = `line-blur`, which zeroed AA on every
+//       backend — see docs/lessons-learned.md).
+// The per-layer line color is the standard URP _BaseColor (declared above): rgb→albedo, a→alpha
+// (S58 retired the redundant _MapColor).
+
+// (A) Style-bound — MapLibre line-* paint/layout:
+// _Opacity             — line-opacity: overall opacity [0,1], multiplied onto AA coverage.
+// _Width               — line-width: width in pixels (_WidthIsPixels=1) or meters.
+// _Blur                — line-blur (px, spec default 0): edge softening ADDED on top of _AaEdgeWidth.
+// _GapWidth            — line-gap-width (px): cased/hollow line. 0 = solid; >0 = outer extrude, discard inner.
+// _LineTranslate       — line-translate: float4(x, y, 0, 0) in pixels.
+// _LineTranslateAnchor — line-translate-anchor: 0 = "map" (world), 1 = "viewport" (clip approx).
+// _LinePattern         — line-pattern hook flag: 0 = solid color; 1 = pattern (solid until S17).
+// _DashArray           — line-dasharray: on/off lengths (up to 4) in line-width units. Unused slots = 0.
+// _DashCount           — # valid _DashArray entries (0 = solid identity, no dashing).
+// _LineOffset          — line-offset: perpendicular band-center shift in px. 0 = none; + = left of travel.
 float  _Opacity;
 float  _Width;
-float  _WidthIsPixels;
-float  _MetersPerPixel;
 float  _Blur;
 float  _GapWidth;
 float4 _LineTranslate;
@@ -85,6 +88,17 @@ float  _LinePattern;
 float4 _DashArray;
 float  _DashCount;
 float  _LineOffset;
+
+// (B) Internal render params — NOT style properties; the styler never writes these:
+// _WidthIsPixels       — 0 = _Width is meters, 1 = pixels.
+// _MetersPerPixel      — px→m conversion for pixel-mode width / offset / translate.
+// _AaEdgeWidth         — antialiasing edge/buffer width in device px PER SIDE (default 1). The lateral
+//                        extrude is padded this many px past the styled width so the styled core stays
+//                        opaque and the fwidth coverage falloff lands in the buffer. Effective feather
+//                        width = (_AaEdgeWidth + _Blur).
+float  _WidthIsPixels;
+float  _MetersPerPixel;
+float  _AaEdgeWidth;
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
@@ -104,11 +118,9 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Line paint additions:
+    // Line — (A) style-bound (MapLibre line-*):
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float , _Width)
-    UNITY_DOTS_INSTANCED_PROP(float , _WidthIsPixels)
-    UNITY_DOTS_INSTANCED_PROP(float , _MetersPerPixel)
     UNITY_DOTS_INSTANCED_PROP(float , _Blur)
     UNITY_DOTS_INSTANCED_PROP(float , _GapWidth)
     UNITY_DOTS_INSTANCED_PROP(float4, _LineTranslate)
@@ -117,6 +129,10 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float4, _DashArray)
     UNITY_DOTS_INSTANCED_PROP(float , _DashCount)
     UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)
+    // Line — (B) internal render params (not style):
+    UNITY_DOTS_INSTANCED_PROP(float , _WidthIsPixels)
+    UNITY_DOTS_INSTANCED_PROP(float , _MetersPerPixel)
+    UNITY_DOTS_INSTANCED_PROP(float , _AaEdgeWidth)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 static float4 unity_DOTS_Sampled_BaseColor;
@@ -132,11 +148,9 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Line paint statics:
+// Line — (A) style-bound statics:
 static float  unity_DOTS_Sampled_Opacity;
 static float  unity_DOTS_Sampled_Width;
-static float  unity_DOTS_Sampled_WidthIsPixels;
-static float  unity_DOTS_Sampled_MetersPerPixel;
 static float  unity_DOTS_Sampled_Blur;
 static float  unity_DOTS_Sampled_GapWidth;
 static float4 unity_DOTS_Sampled_LineTranslate;
@@ -145,6 +159,10 @@ static float  unity_DOTS_Sampled_LinePattern;
 static float4 unity_DOTS_Sampled_DashArray;
 static float  unity_DOTS_Sampled_DashCount;
 static float  unity_DOTS_Sampled_LineOffset;
+// Line — (B) internal render param statics:
+static float  unity_DOTS_Sampled_WidthIsPixels;
+static float  unity_DOTS_Sampled_MetersPerPixel;
+static float  unity_DOTS_Sampled_AaEdgeWidth;
 
 void SetupDOTSMapLineMaterialPropertyCaches()
 {
@@ -161,10 +179,9 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_ClearCoatSmoothness  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _ClearCoatSmoothness);
     unity_DOTS_Sampled_DetailAlbedoMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailAlbedoMapScale);
     unity_DOTS_Sampled_DetailNormalMapScale = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DetailNormalMapScale);
+    // (A) style-bound:
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
     unity_DOTS_Sampled_Width                = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Width);
-    unity_DOTS_Sampled_WidthIsPixels        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
-    unity_DOTS_Sampled_MetersPerPixel       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetersPerPixel);
     unity_DOTS_Sampled_Blur                 = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Blur);
     unity_DOTS_Sampled_GapWidth             = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _GapWidth);
     unity_DOTS_Sampled_LineTranslate        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _LineTranslate);
@@ -173,6 +190,10 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_DashArray            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _DashArray);
     unity_DOTS_Sampled_DashCount            = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _DashCount);
     unity_DOTS_Sampled_LineOffset           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineOffset);
+    // (B) internal render params:
+    unity_DOTS_Sampled_WidthIsPixels        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
+    unity_DOTS_Sampled_MetersPerPixel       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetersPerPixel);
+    unity_DOTS_Sampled_AaEdgeWidth          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AaEdgeWidth);
 }
 
 #undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
@@ -191,11 +212,9 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Line paint redirects:
+// Line — (A) style-bound redirects:
 #define _Opacity                unity_DOTS_Sampled_Opacity
 #define _Width                  unity_DOTS_Sampled_Width
-#define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels
-#define _MetersPerPixel         unity_DOTS_Sampled_MetersPerPixel
 #define _Blur                   unity_DOTS_Sampled_Blur
 #define _GapWidth               unity_DOTS_Sampled_GapWidth
 #define _LineTranslate          unity_DOTS_Sampled_LineTranslate
@@ -204,6 +223,10 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _DashArray              unity_DOTS_Sampled_DashArray
 #define _DashCount              unity_DOTS_Sampled_DashCount
 #define _LineOffset             unity_DOTS_Sampled_LineOffset
+// Line — (B) internal render param redirects:
+#define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels
+#define _MetersPerPixel         unity_DOTS_Sampled_MetersPerPixel
+#define _AaEdgeWidth            unity_DOTS_Sampled_AaEdgeWidth
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 

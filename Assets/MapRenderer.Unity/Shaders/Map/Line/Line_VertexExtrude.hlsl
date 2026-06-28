@@ -87,8 +87,40 @@ float3 Line_VertexExtrude(
     // for a globe). The lateral/lift frame is built from this, so the shader makes no flat-ground assumption.
     float3 upWS = normalize(TransformObjectToWorldNormal(input.normalOS));
 
-    // Lateral world offset = unit world across-direction × miter factor × outerM.
-    float3 offsetWS = unitDir_WS * (miter * outerM);
+    // Lateral world half-width vector = unit world across-direction × miter factor × outerM.
+    float3 lateralWS = unitDir_WS * (miter * outerM);
+
+    // ── Antialiasing buffer (outer edge) ──────────────────────────────────────
+    // Extend the lateral extrude OUTWARD by (_AaEdgeWidth + _Blur) device pixels so the styled width stays
+    // a fully OPAQUE core and the fwidth coverage falloff (LineCoverage, the same width) lands entirely in
+    // this added buffer — never inside the line body. This is the standard line-AA model (opaque core +
+    // feathered edge): the interior is never made translucent, so overlapping roads/casings/joins
+    // composite cleanly with NO alpha accumulation. It also gives sub-pixel-width lines enough geometry
+    // to rasterize (≥ the buffer), so they render as a stable hairline instead of dropping pixels.
+    //   _AaEdgeWidth — internal AA buffer width (default 1px); _Blur — MapLibre line-blur (default 0px),
+    //   adds softening on top. Their sum is the buffer/feather width.
+    // pxHalf is measured in screen pixels from the projected centre/edge — perspective-correct, with no
+    // dependency on _MetersPerPixel. padScale also rescales innerFrac below so the gap inner edge tracks
+    // the widened |side| range.
+    float aaPx = _AaEdgeWidth + _Blur;   // AA buffer (+ line-blur softening) in device px per side
+    float padScale = 1.0;
+    {
+        float3 centerWS = TransformObjectToWorld(input.positionOS.xyz);
+        float4 clipC = TransformWorldToHClip(centerWS);
+        float4 clipE = TransformWorldToHClip(centerWS + lateralWS);
+        // Guard behind-camera vertices (w ≤ 0): leave padScale = 1 (no pad).
+        if (clipC.w > 1e-5 && clipE.w > 1e-5)
+        {
+            // NDC delta → device-pixel delta (the +0.5 NDC→pixel offset cancels in the difference).
+            float2 ndcDelta = (clipE.xy / clipE.w) - (clipC.xy / clipC.w);
+            float  pxHalf   = length(ndcDelta * 0.5 * _ScreenParams.xy);
+            if (pxHalf > 1e-5)
+                padScale = (pxHalf + aaPx) / pxHalf;   // add the AA buffer to each side
+        }
+    }
+    lateralWS *= padScale;
+
+    float3 offsetWS = lateralWS;
 
     // ── S44: line-offset ──────────────────────────────────────────────────────
     // Shift the band center perpendicular to the centerline by offsetM.
@@ -124,7 +156,8 @@ float3 Line_VertexExtrude(
     // innerFrac = fraction of [0,outerM] that is the inner (gap) hole, in [side]-space.
     // When gap=0, innerFrac=0 → no clipping in fragment (solid line path, unchanged).
     // Inner hole: |side| < innerFrac (in normalized side-space).
-    innerFrac = (gapM > 1e-6) ? (0.5 * gapM / outerM) : 0.0;
+    // /padScale: |side| now spans the AA-padded range, so the gap inner-edge fraction shrinks to match.
+    innerFrac = (gapM > 1e-6) ? (0.5 * gapM / outerM) / padScale : 0.0;
 
     // ── Out parameters ────────────────────────────────────────────────────────
     side  = input.sideAndDist.x;  // ∈ {+1,−1}, interpolated for AA
@@ -160,15 +193,19 @@ float LineCoverage(float side, float innerFrac, float dashU)
     // ── Outer and inner AA edges ──────────────────────────────────────────────
     float absSide  = abs(side);
     float feather  = fwidth(side);
+    // Feather ramp width = (_AaEdgeWidth + _Blur), matching the vertex-stage geometry buffer (aaPx) so
+    // the ramp ends exactly at the styled edge. _AaEdgeWidth (default 1) keeps AA always on; _Blur
+    // (line-blur, default 0) widens it. feather scales it from px into |side| units.
+    float aaRamp   = max(feather * (_AaEdgeWidth + _Blur), 1e-4);
 
     // Outer edge: smoothstep from (|side|=1) inward. Identical to S05 solid formula.
     float outerEdgeDist = 1.0 - absSide;
-    float outerAA       = smoothstep(0.0, max(feather * _Blur, 1e-4), outerEdgeDist);
+    float outerAA       = smoothstep(0.0, aaRamp, outerEdgeDist);
 
     // S14: inner edge (gap hole): smoothstep from (|side|=innerFrac) outward.
     // When innerFrac=0 (no gap), innerAA=1.0 → coverage = outerAA (unchanged, gap=0 path).
     float innerAA = (innerFrac > 1e-6)
-        ? smoothstep(0.0, max(feather * _Blur, 1e-4), absSide - innerFrac)
+        ? smoothstep(0.0, aaRamp, absSide - innerFrac)
         : 1.0;
 
     float coverage = outerAA * innerAA;
