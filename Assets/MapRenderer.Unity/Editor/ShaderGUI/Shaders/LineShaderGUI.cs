@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor
 {
@@ -22,21 +23,21 @@ namespace MapRenderer.Unity.Editor
         private void DrawLineInputs(Material material)
         {
             // (A) Style-bound — MapLibre line-* paint/layout (written by the styler).
-            Prop(ShaderProperties.Opacity,            "Opacity (line-opacity)");
-            Prop(ShaderProperties.Width,              "Width (line-width)");
-            Prop(ShaderProperties.Blur,               "Line Blur (line-blur)");
-            Prop(ShaderProperties.GapWidth,           "Gap Width (line-gap-width)");
-            Prop(ShaderProperties.LineOffset,         "Line Offset (line-offset)");
-            Prop(ShaderProperties.DashArray,          "Dash Array (line-dasharray)");
-            Prop(ShaderProperties.DashCount,          "Dash Count");
-            Prop(ShaderProperties.LinePattern,        "Line Pattern (hook)");
-            Prop(ShaderProperties.LineTranslate,      "Line Translate (line-translate)");
-            Prop(ShaderProperties.LineTranslateAnchor, "Translate Anchor");
+            Prop(ShaderProperties.PropertyNames.Opacity,                   "Opacity (line-opacity)");
+            Prop(ShaderProperties.Line.PropertyNames.Width,                 "Width (line-width)");
+            Prop(ShaderProperties.Line.PropertyNames.Blur,                  "Line Blur (line-blur)");
+            Prop(ShaderProperties.Line.PropertyNames.GapWidth,              "Gap Width (line-gap-width)");
+            Prop(ShaderProperties.Line.PropertyNames.LineOffset,            "Line Offset (line-offset)");
+            Prop(ShaderProperties.Line.PropertyNames.DashArray,             "Dash Array (line-dasharray)");
+            Prop(ShaderProperties.Line.PropertyNames.DashCount,             "Dash Count");
+            Prop(ShaderProperties.Line.PropertyNames.LinePattern,           "Line Pattern (hook)");
+            Prop(ShaderProperties.Line.PropertyNames.LineTranslate,         "Line Translate (line-translate)");
+            Prop(ShaderProperties.Line.PropertyNames.LineTranslateAnchor,   "Translate Anchor");
 
             // (B) Internal render params — NOT style properties.
-            Prop(ShaderProperties.WidthIsPixels,      "Width In Pixels");
-            Prop(ShaderProperties.MetersPerPixel,     "Meters Per Pixel");
-            Prop(ShaderProperties.AaEdgeWidth,        "AA Edge Width (px / side)");
+            Prop(ShaderProperties.Line.PropertyNames.WidthIsPixels,  "Width In Pixels");
+            Prop(ShaderProperties.Line.PropertyNames.MetersPerPixel, "Meters Per Pixel");
+            Prop(ShaderProperties.Line.PropertyNames.AaEdgeWidth,    "AA Edge Width (px / side)");
         }
     }
 }

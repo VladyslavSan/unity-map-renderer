@@ -4,6 +4,7 @@ using UnityEditor.Rendering; // MaterialHeaderScopeList (com.unity.render-pipeli
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor
 {
@@ -96,32 +97,32 @@ namespace MapRenderer.Unity.Editor
         public override void ValidateMaterial(Material material)
         {
             // Double-sided GI from cull state (URP BaseShaderGUI L929).
-            if (material.HasProperty(ShaderProperties.CullMode))
-                material.doubleSidedGI = (CullMode)material.GetFloat(ShaderProperties.CullMode) != CullMode.Front;
+            if (material.HasProperty(ShaderProperties.PropertyId.CullMode))
+                material.doubleSidedGI = (CullMode)material.GetFloat(ShaderProperties.PropertyId.CullMode) != CullMode.Front;
 
             // Emission (URP BaseShaderGUI L943-953): the editor-only FixupEmissiveFlag reconciles the GI flag
             // with the emission colour first, then the keyword follows the flag (a black colour ⇒ EmissiveIsBlack
             // ⇒ excluded from AnyEmissive ⇒ keyword off). This is exactly why keyword sync lives editor-side now.
-            if (material.HasProperty(ShaderProperties.EmissionColor))
+            if (material.HasProperty(ShaderProperties.PropertyId.EmissionColor))
                 MaterialEditor.FixupEmissiveFlag(material);
             bool emission = (material.globalIlluminationFlags & MaterialGlobalIlluminationFlags.AnyEmissive) != 0;
             CoreUtils.SetKeyword(material, ShaderKeywords.Emission, emission);
 
             // Normal map (URP BaseShaderGUI L957 — note: height/parallax is the Lit level, not here).
-            if (material.HasProperty(ShaderProperties.BumpMap))
+            if (material.HasProperty(ShaderProperties.PropertyId.BumpMap))
                 CoreUtils.SetKeyword(material, ShaderKeywords.NormalMap,
-                    material.GetTexture(ShaderProperties.BumpMap) != null);
+                    material.GetTexture(ShaderProperties.PropertyId.BumpMap) != null);
 
             // Receive-shadows OFF toggle (URP BaseShaderGUI L806; default 1 → keyword off).
-            if (material.HasProperty(ShaderProperties.ReceiveShadows))
+            if (material.HasProperty(ShaderProperties.PropertyId.ReceiveShadows))
                 CoreUtils.SetKeyword(material, ShaderKeywords.ReceiveShadowsOff,
-                    material.GetFloat(ShaderProperties.ReceiveShadows) == 0f);
+                    material.GetFloat(ShaderProperties.PropertyId.ReceiveShadows) == 0f);
 
             // Surface type / alpha clip (URP BaseShaderGUI.SetupMaterialBlendModeInternal L1013/L1022).
             CoreUtils.SetKeyword(material, ShaderKeywords.SurfaceTypeTransparent, !IsOpaque(material));
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaTestOn,
-                material.HasProperty(ShaderProperties.AlphaClip) &&
-                material.GetFloat(ShaderProperties.AlphaClip) >= 0.5f);
+                material.HasProperty(ShaderProperties.PropertyId.AlphaClip) &&
+                material.GetFloat(ShaderProperties.PropertyId.AlphaClip) >= 0.5f);
 
             // S58 exposes raw blend factors directly rather than a blend preset, so the premultiply/modulate
             // blend-preset keywords are not auto-derived — keep them off (URP sets these in its transparent
@@ -132,7 +133,7 @@ namespace MapRenderer.Unity.Editor
 
         /// <summary>True when the material's surface is opaque (no <c>_Surface</c> prop, or <c>_Surface == 0</c>).</summary>
         protected static bool IsOpaque(Material m)
-            => !m.HasProperty(ShaderProperties.Surface) || m.GetFloat(ShaderProperties.Surface) == 0f;
+            => !m.HasProperty(ShaderProperties.PropertyId.Surface) || m.GetFloat(ShaderProperties.PropertyId.Surface) == 0f;
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
         // Section 1 — Surface Options
@@ -140,31 +141,31 @@ namespace MapRenderer.Unity.Editor
         protected virtual void DrawSurfaceOptions(Material material)
         {
             // Domain enums (runtime) → labels generated from the enum value names by EnumPopup.
-            EnumPopup<SurfaceType>(ShaderProperties.Surface, "Surface Type");
-            EnumPopup<WorkflowMode>(ShaderProperties.WorkflowMode, "Workflow Mode");
+            EnumPopup<SurfaceType>(ShaderProperties.PropertyNames.Surface, "Surface Type");
+            EnumPopup<WorkflowMode>(ShaderProperties.PropertyNames.WorkflowMode, "Workflow Mode");
 
             EditorGUILayout.Space();
             // Raw low-level render state (the S58 knobs — what URP's Surface Type/Blend presets hide).
-            EnumPopup<DepthWrite>(ShaderProperties.ZWrite, "Depth Write");
-            EnumPopup<CompareFunction>(ShaderProperties.ZTest, "Depth Test");
-            EnumPopup<CullMode>(ShaderProperties.CullMode, "Render Face (Cull)");
-            EnumPopup<BlendMode>(ShaderProperties.SrcBlend,      "Src Blend");
-            EnumPopup<BlendMode>(ShaderProperties.DstBlend,      "Dst Blend");
-            EnumPopup<BlendMode>(ShaderProperties.SrcBlendAlpha, "Src Blend Alpha");
-            EnumPopup<BlendMode>(ShaderProperties.DstBlendAlpha, "Dst Blend Alpha");
-            EnumPopup<BlendOp>(ShaderProperties.BlendOp, "Blend Op");
+            EnumPopup<DepthWrite>(ShaderProperties.PropertyNames.ZWrite, "Depth Write");
+            EnumPopup<CompareFunction>(ShaderProperties.PropertyNames.ZTest, "Depth Test");
+            EnumPopup<CullMode>(ShaderProperties.PropertyNames.CullMode, "Render Face (Cull)");
+            EnumPopup<BlendMode>(ShaderProperties.PropertyNames.SrcBlend,      "Src Blend");
+            EnumPopup<BlendMode>(ShaderProperties.PropertyNames.DstBlend,      "Dst Blend");
+            EnumPopup<BlendMode>(ShaderProperties.PropertyNames.SrcBlendAlpha, "Src Blend Alpha");
+            EnumPopup<BlendMode>(ShaderProperties.PropertyNames.DstBlendAlpha, "Dst Blend Alpha");
+            EnumPopup<BlendOp>(ShaderProperties.PropertyNames.BlendOp, "Blend Op");
 
             EditorGUILayout.Space();
-            Prop(ShaderProperties.AlphaClip, "Alpha Clip");
-            var ac = Find(ShaderProperties.AlphaClip);
+            Prop(ShaderProperties.PropertyNames.AlphaClip, "Alpha Clip");
+            var ac = Find(ShaderProperties.PropertyNames.AlphaClip);
             if (ac != null && ac.floatValue >= 0.5f)
             {
                 EditorGUI.indentLevel++;
-                Prop(ShaderProperties.Cutoff, "Threshold");
+                Prop(ShaderProperties.PropertyNames.Cutoff, "Threshold");
                 EditorGUI.indentLevel--;
             }
 
-            Prop(ShaderProperties.ReceiveShadows, "Receive Shadows");
+            Prop(ShaderProperties.PropertyNames.ReceiveShadows, "Receive Shadows");
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -175,37 +176,37 @@ namespace MapRenderer.Unity.Editor
         protected virtual void DrawSurfaceInputs(Material material)
         {
             // ── Base Map + colour (URP BaseShaderGUI.DrawBaseProperties) ──
-            var baseMap = Find(ShaderProperties.BaseMap);
-            var color   = Find(ShaderProperties.BaseColor);
+            var baseMap = Find(ShaderProperties.PropertyNames.BaseMap);
+            var color   = Find(ShaderProperties.PropertyNames.BaseColor);
             if (baseMap != null && color != null)
                 _editor.TexturePropertySingleLine(new GUIContent("Base Map"), baseMap, color);
             else if (color != null) _editor.ShaderProperty(color, "Color");
 
             // ── Metallic / Specular area (URP LitGUI.DoMetallicSpecularArea) ──
             // The metallic slider / spec colour is shown only when NO gloss map is assigned (the map drives it).
-            var  workflow = Find(ShaderProperties.WorkflowMode);
+            var  workflow = Find(ShaderProperties.PropertyNames.WorkflowMode);
             bool specular = workflow != null && (WorkflowMode)(int)workflow.floatValue == WorkflowMode.Specular;
             if (specular)
             {
-                var specMap = Find(ShaderProperties.SpecGlossMap);
+                var specMap = Find(ShaderProperties.PropertyNames.SpecGlossMap);
                 if (specMap != null)
                     _editor.TexturePropertySingleLine(new GUIContent("Specular Map"), specMap,
-                        specMap.textureValue != null ? null : Find(ShaderProperties.SpecColor));
+                        specMap.textureValue != null ? null : Find(ShaderProperties.PropertyNames.SpecColor));
             }
             else
             {
-                var metMap = Find(ShaderProperties.MetallicGlossMap);
+                var metMap = Find(ShaderProperties.PropertyNames.MetallicGlossMap);
                 if (metMap != null)
                     _editor.TexturePropertySingleLine(new GUIContent("Metallic Map"), metMap,
-                        metMap.textureValue != null ? null : Find(ShaderProperties.Metallic));
+                        metMap.textureValue != null ? null : Find(ShaderProperties.PropertyNames.Metallic));
             }
 
             DrawSmoothness(material);
 
             // ── Normal / height / occlusion (URP LitGUI.Inputs) — scale/strength shown only when assigned ──
-            Tex(ShaderProperties.BumpMap,      "Normal Map",    ShaderProperties.BumpScale);
-            Tex(ShaderProperties.ParallaxMap,  "Height Map",    ShaderProperties.Parallax);
-            Tex(ShaderProperties.OcclusionMap, "Occlusion Map", ShaderProperties.OcclusionStrength);
+            Tex(ShaderProperties.PropertyNames.BumpMap,      "Normal Map",    ShaderProperties.PropertyNames.BumpScale);
+            Tex(ShaderProperties.PropertyNames.ParallaxMap,  "Height Map",    ShaderProperties.PropertyNames.Parallax);
+            Tex(ShaderProperties.PropertyNames.OcclusionMap, "Occlusion Map", ShaderProperties.PropertyNames.OcclusionStrength);
 
             // ── Emission (URP BaseShaderGUI.DrawEmissionProperties(material, keyword: true)) ──
             DrawEmissionProperties(material);
@@ -218,13 +219,13 @@ namespace MapRenderer.Unity.Editor
         /// under the slider and disabled when the surface is transparent (albedo-alpha can't be the source).</summary>
         protected void DrawSmoothness(Material material)
         {
-            var smoothness = Find(ShaderProperties.Smoothness);
+            var smoothness = Find(ShaderProperties.PropertyNames.Smoothness);
             if (smoothness == null) return;
 
             EditorGUI.indentLevel += 2;
             _editor.ShaderProperty(smoothness, "Smoothness");
 
-            var channel = Find(ShaderProperties.SmoothnessTextureChannel);
+            var channel = Find(ShaderProperties.PropertyNames.SmoothnessTextureChannel);
             if (channel != null)
             {
                 bool opaque = IsOpaque(material);
@@ -259,8 +260,8 @@ namespace MapRenderer.Unity.Editor
         /// via <see cref="MaterialEditor.LightmapEmissionFlagsProperty"/>.</summary>
         protected void DrawEmissionProperties(Material material)
         {
-            var emMap = Find(ShaderProperties.EmissionMap);
-            var emCol = Find(ShaderProperties.EmissionColor);
+            var emMap = Find(ShaderProperties.PropertyNames.EmissionMap);
+            var emCol = Find(ShaderProperties.PropertyNames.EmissionColor);
 
             bool emissive = _editor.EmissionEnabledProperty();
             using (new EditorGUI.DisabledScope(!emissive))
@@ -284,8 +285,8 @@ namespace MapRenderer.Unity.Editor
         // ─────────────────────────────────────────────────────────────────────────────────────────
         protected virtual void DrawAdvanced(Material material)
         {
-            Prop(ShaderProperties.SpecularHighlights,     "Specular Highlights");
-            Prop(ShaderProperties.EnvironmentReflections, "Environment Reflections");
+            Prop(ShaderProperties.PropertyNames.SpecularHighlights,     "Specular Highlights");
+            Prop(ShaderProperties.PropertyNames.EnvironmentReflections, "Environment Reflections");
             EditorGUILayout.Space();
             _editor.RenderQueueField(); // render queue edited directly on the material (S58)
             _editor.EnableInstancingField();

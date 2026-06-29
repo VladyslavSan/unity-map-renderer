@@ -6,6 +6,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests
 {
@@ -32,9 +33,9 @@ namespace MapRenderer.Tests
         public void SetDepthWrite_WritesZWriteInt_AndRoundTrips()
         {
             _mat.SetDepthWrite(DepthWrite.Off);
-            Assert.AreEqual(0f, _mat.GetFloat(ShaderProperties.ZWrite));
+            Assert.AreEqual(0f, _mat.GetFloat(ShaderProperties.PropertyNames.ZWrite));
             _mat.SetDepthWrite(DepthWrite.On);
-            Assert.AreEqual(1f, _mat.GetFloat(ShaderProperties.ZWrite));
+            Assert.AreEqual(1f, _mat.GetFloat(ShaderProperties.PropertyNames.ZWrite));
             Assert.AreEqual(DepthWrite.On, _mat.GetDepthWrite());
         }
 
@@ -42,7 +43,7 @@ namespace MapRenderer.Tests
         public void SetDepthTest_WritesZTestInt_AndRoundTrips()
         {
             _mat.SetDepthTest(CompareFunction.LessEqual);
-            Assert.AreEqual((int)CompareFunction.LessEqual, (int)_mat.GetFloat(ShaderProperties.ZTest));
+            Assert.AreEqual((int)CompareFunction.LessEqual, (int)_mat.GetFloat(ShaderProperties.PropertyNames.ZTest));
             Assert.AreEqual(CompareFunction.LessEqual, _mat.GetDepthTest());
             _mat.SetDepthTest(CompareFunction.Always);
             Assert.AreEqual(CompareFunction.Always, _mat.GetDepthTest());
@@ -52,7 +53,7 @@ namespace MapRenderer.Tests
         public void SetCull_WritesCullInt_AndRoundTrips()
         {
             _mat.SetCull(CullMode.Off);
-            Assert.AreEqual((int)CullMode.Off, (int)_mat.GetFloat(ShaderProperties.CullMode));
+            Assert.AreEqual((int)CullMode.Off, (int)_mat.GetFloat(ShaderProperties.PropertyNames.CullMode));
             _mat.SetCull(CullMode.Back);
             Assert.AreEqual(CullMode.Back, _mat.GetCull());
         }
@@ -61,8 +62,8 @@ namespace MapRenderer.Tests
         public void SetBlend_WritesSrcDstInts()
         {
             _mat.SetBlend(BlendMode.SrcAlpha, BlendMode.OneMinusSrcAlpha);
-            Assert.AreEqual((int)BlendMode.SrcAlpha, (int)_mat.GetFloat(ShaderProperties.SrcBlend));
-            Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)_mat.GetFloat(ShaderProperties.DstBlend));
+            Assert.AreEqual((int)BlendMode.SrcAlpha, (int)_mat.GetFloat(ShaderProperties.PropertyNames.SrcBlend));
+            Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)_mat.GetFloat(ShaderProperties.PropertyNames.DstBlend));
         }
 
         [Test]
@@ -81,14 +82,14 @@ namespace MapRenderer.Tests
             };
             state.ApplyTo(_mat);
 
-            Assert.AreEqual(0f, _mat.GetFloat(ShaderProperties.ZWrite));
-            Assert.AreEqual((int)CompareFunction.NotEqual, (int)_mat.GetFloat(ShaderProperties.ZTest));
-            Assert.AreEqual((int)CullMode.Off, (int)_mat.GetFloat(ShaderProperties.CullMode));
-            Assert.AreEqual((int)BlendMode.SrcAlphaSaturate, (int)_mat.GetFloat(ShaderProperties.SrcBlend));
-            Assert.AreEqual((int)BlendMode.DstColor, (int)_mat.GetFloat(ShaderProperties.DstBlend));
-            Assert.AreEqual((int)BlendMode.OneMinusDstAlpha, (int)_mat.GetFloat(ShaderProperties.SrcBlendAlpha));
-            Assert.AreEqual((int)BlendMode.OneMinusSrcColor, (int)_mat.GetFloat(ShaderProperties.DstBlendAlpha));
-            Assert.AreEqual((int)BlendOp.Add, (int)_mat.GetFloat(ShaderProperties.BlendOp));
+            Assert.AreEqual(0f, _mat.GetFloat(ShaderProperties.PropertyNames.ZWrite));
+            Assert.AreEqual((int)CompareFunction.NotEqual, (int)_mat.GetFloat(ShaderProperties.PropertyNames.ZTest));
+            Assert.AreEqual((int)CullMode.Off, (int)_mat.GetFloat(ShaderProperties.PropertyNames.CullMode));
+            Assert.AreEqual((int)BlendMode.SrcAlphaSaturate, (int)_mat.GetFloat(ShaderProperties.PropertyNames.SrcBlend));
+            Assert.AreEqual((int)BlendMode.DstColor, (int)_mat.GetFloat(ShaderProperties.PropertyNames.DstBlend));
+            Assert.AreEqual((int)BlendMode.OneMinusDstAlpha, (int)_mat.GetFloat(ShaderProperties.PropertyNames.SrcBlendAlpha));
+            Assert.AreEqual((int)BlendMode.OneMinusSrcColor, (int)_mat.GetFloat(ShaderProperties.PropertyNames.DstBlendAlpha));
+            Assert.AreEqual((int)BlendOp.Add, (int)_mat.GetFloat(ShaderProperties.PropertyNames.BlendOp));
         }
     }
 }

@@ -17,6 +17,8 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Unity;
+using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Tests.Visual;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 
@@ -87,7 +89,7 @@ namespace MapRenderer.Tests
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]"),
                     0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
-                applier.BindFloat(widthSp, "_Width");
+                applier.BindFloat(widthSp, ShaderProperties.Line.PropertyId.Width);
 
                 applier.ApplyZoom(5.0);
                 float widthAtZ5 = lineMat.GetFloat("_Width");
@@ -124,7 +126,7 @@ namespace MapRenderer.Tests
                     "0,[\"rgba\",0,0,0,0],1,[\"rgba\",255,255,255,1]]"),
                     default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorSp, "_BaseColor");
+                applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
 
                 // Apply at zoom=0.5 (t=0.5 between stops 0 and 1).
                 applier.ApplyZoom(0.5);
@@ -200,7 +202,7 @@ namespace MapRenderer.Tests
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,20.0]"),
                     0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
-                applier.BindFloat(widthSp, "_Width");
+                applier.BindFloat(widthSp, ShaderProperties.Line.PropertyId.Width);
 
                 // Warm up: ensure JIT compilation and shader reflection are done before measuring.
                 for (int w = 0; w < 20; w++)
@@ -235,7 +237,7 @@ namespace MapRenderer.Tests
                     "5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]"),
                     default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
-                applier.BindColor(colorSp, "_BaseColor");
+                applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
 
                 for (int w = 0; w < 20; w++)
                     applier.ApplyZoom(5.0 + (w % 10) * 1.0);

@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor
 {
@@ -21,9 +22,9 @@ namespace MapRenderer.Unity.Editor
 
         private void DrawFillInputs(Material material)
         {
-            Prop(ShaderProperties.Opacity,          "Opacity");
-            Prop(ShaderProperties.FillOutlineColor, "Outline Color");
-            Prop(ShaderProperties.FillAntialias,    "Antialias");
+            Prop(ShaderProperties.PropertyNames.Opacity,              "Opacity");
+            Prop(ShaderProperties.Fill.PropertyNames.FillOutlineColor, "Outline Color");
+            Prop(ShaderProperties.Fill.PropertyNames.FillAntialias,    "Antialias");
         }
     }
 }

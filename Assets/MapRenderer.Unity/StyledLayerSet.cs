@@ -8,6 +8,8 @@ using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity
 {
@@ -144,7 +146,7 @@ namespace MapRenderer.Unity
                 for (int i = 0; i < _lines.Count; i++)
                 {
                     _lines[i].Applier.ApplyZoom(zoom);
-                    _lines[i].Material.SetFloat("_MetersPerPixel", metersPerPixel);
+                    _lines[i].Material.SetFloat(ShaderProperties.Line.PropertyId.MetersPerPixel, metersPerPixel);
 
                     // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom
                     // (the engine's classification). A constant dash (the common case) is set once at

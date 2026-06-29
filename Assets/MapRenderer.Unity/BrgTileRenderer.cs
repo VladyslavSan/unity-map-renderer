@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Rendering;
 
 namespace MapRenderer.Unity
 {
@@ -21,103 +22,19 @@ namespace MapRenderer.Unity
     /// <see cref="StyledLayerSet"/>; draw commands are emitted in ascending renderQueue order so the
     /// painter's-algorithm layer order is honoured (NOT GameObject child order).
     ///
-    /// Per-instance buffer layout — STRUCT-OF-ARRAYS (SoA):
-    ///   Unity BRG's MetadataValue.Value is the byte offset of the ARRAY start for a property, not the
-    ///   start of a per-instance record. Instance i's property P lives at:
-    ///     byteOffset_of_P_array + i * sizeof(P)
-    ///   So all N instances' O2W matrices come first, then all N W2O matrices, then all N _BaseColor
-    ///   values, etc. (NOT interleaved per-instance records).
-    ///
-    /// SoA array byte offsets (N = instance count, all ×4 for float→byte):
-    ///   O2W          : 0         (N×12 floats = N×48 bytes)
-    ///   W2O          : N×48      (N×12 floats = N×48 bytes)
-    ///   _BaseColor   : N×96      (N×4 floats  = N×16 bytes)
-    ///   _SpecColor   : N×112     (N×4 floats)
-    ///   _EmissionColor: N×128    (N×4 floats)
-    ///   _Cutoff      : N×144     (N×1 float)
-    ///   _Smoothness  : N×148     (N×1 float)
-    ///   _Metallic    : N×152     (N×1 float)
-    ///   _BumpScale   : N×156     (N×1 float)
-    ///   _Parallax    : N×160     (N×1 float)
-    ///   _OcclusionStrength: N×164 (N×1 float)
-    ///   _ClearCoatMask: N×168    (N×1 float)
-    ///   _ClearCoatSmoothness: N×172 (N×1 float)
-    ///   _DetailAlbedoMapScale: N×176 (N×1 float)
-    ///   _DetailNormalMapScale: N×180 (N×1 float)
-    ///   _Opacity     : N×184     (N×1 float)
-    ///   _FillOutlineColor: N×188 (N×4 floats)
-    ///   _FillTranslate: N×204    (N×4 floats)
-    ///   _FillAntialias: N×220    (N×1 float)
-    ///   _FillTranslateAnchor: N×224 (N×1 float)
-    ///   _FillPattern : N×228     (N×1 float)
-    ///   TOTAL        : N×232 bytes (N×58 floats). (S58 dropped _MapColor; the layer color rides _BaseColor.)
-    ///
-    /// IMPORTANT: byte offsets depend on N → batch must be re-registered whenever instance count changes.
-    ///
-    /// Values are read back from the live Material object (after ZoomStyleApplier writes them) each
-    /// <see cref="Rebuild"/> call — no per-frame managed alloc.
-    ///
-    /// Graphics buffer is Raw (not ConstantBuffer). Metal-specific constant-buffer windowing is deferred
-    /// to S52 (acceptable for the toggle-off default path in S49).
+    /// Per-instance buffer layout: see <see cref="MapInstanceData"/> (the single source of truth for
+    /// the SoA layout). <see cref="InstancePropPlan.BuildFromStruct{T}"/> reflects it ONCE at
+    /// construction to build the cached packing plan; per-frame pack is reflection-free.
     ///
     /// Clean-room: design follows the MapLibre Style Spec and Unity BRG documentation.
     /// </summary>
     internal sealed class BrgTileRenderer : ITileRenderBackend
     {
-        // ── Per-instance property counts (number of floats per property per instance) ─────────
-        // These are stride multipliers used when packing the SoA CPU buffer.
-        //
-        // SoA array layout (floats per property, per instance):
-        //   O2W:           12 (Unity BRG packed float3x4: p1=[m00,m10,m20,m01], p2=[m11,m21,m02,m12], p3=[m22,m03,m13,m23])
-        //   W2O:           12
-        //   _BaseColor:     4
-        //   _SpecColor:     4
-        //   _EmissionColor: 4
-        //   _Cutoff:        1
-        //   _Smoothness:    1
-        //   _Metallic:      1
-        //   _BumpScale:     1
-        //   _Parallax:      1
-        //   _OccStr:        1
-        //   _CCMask:        1
-        //   _CCSmoothness:  1
-        //   _DetailAlb:     1
-        //   _DetailNorm:    1
-        //   _Opacity:       1
-        //   _FillOutlineColor: 4
-        //   _FillTranslate: 4
-        //   _FillAA:        1
-        //   _FillTrAnch:    1
-        //   _FillPattern:   1
-        //   TOTAL: 58 floats per instance (the layer color rides _BaseColor; S58 dropped _MapColor's 4 floats)
+        // ── Reflected-once packing plan ───────────────────────────────────────────────────────
+        // Built once at construction from MapInstanceData. Per-frame pack indexes MaterialEntries[]
+        // by index only — no reflection, no boxing, no LINQ, no managed allocation.
 
-        private const int FloatsPerInstance = 58;
-
-        // Float-count prefix sums for each SoA array (= starting float index for property P's array,
-        // in units of "per-instance floats", i.e. the actual start = prefix[P] * N).
-        // Named Pfx_ (prefix) to distinguish from the old AoS offsets.
-        private const int Pfx_O2W          =  0; // cumulative start: 0 floats from the start of the instance group
-        private const int Pfx_W2O          = 12; // 0 + 12
-        private const int Pfx_BaseColor    = 24; // 12 + 12
-        private const int Pfx_SpecColor    = 28; // 24 + 4
-        private const int Pfx_Emission     = 32; // 28 + 4
-        private const int Pfx_Cutoff       = 36; // 32 + 4
-        private const int Pfx_Smoothness   = 37; // 36 + 1
-        private const int Pfx_Metallic     = 38; // 37 + 1
-        private const int Pfx_BumpScale    = 39; // 38 + 1
-        private const int Pfx_Parallax     = 40; // 39 + 1
-        private const int Pfx_OccStr       = 41; // 40 + 1
-        private const int Pfx_CCMask       = 42; // 41 + 1
-        private const int Pfx_CCSmoothness = 43; // 42 + 1
-        private const int Pfx_DetailAlb    = 44; // 43 + 1
-        private const int Pfx_DetailNorm   = 45; // 44 + 1
-        private const int Pfx_Opacity      = 46; // 45 + 1
-        private const int Pfx_FillOutline  = 47; // 46 + 1
-        private const int Pfx_FillTrans    = 51; // 47 + 4
-        private const int Pfx_FillAA       = 55; // 51 + 4
-        private const int Pfx_FillTrAnch   = 56; // 55 + 1
-        private const int Pfx_FillPattern  = 57; // 56 + 1
-        // 61 + 1 = 62 = FloatsPerInstance ✓
+        private readonly InstancePropPlan _plan = InstancePropPlan.BuildFromStruct<MapInstanceData>();
 
         // ── Per-draw-item record ─────────────────────────────────────────────────────────────
 
@@ -175,6 +92,20 @@ namespace MapRenderer.Unity
         private static readonly Bounds GenBounds = new Bounds(
             Vector3.zero, new Vector3(100_000_000f, 100_000_000f, 100_000_000f));
 
+        // ── Test observability ────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Total floats per instance in the SoA buffer, as derived from <see cref="MapInstanceData"/>.
+        /// Asserted == 76 by the S76 readback tooth.
+        /// </summary>
+        internal int FloatsPerInstance => _plan.FloatsPerInstance;
+
+        /// <summary>
+        /// Total BRG metadata entry count (2 transforms + 31 material props), as derived from
+        /// <see cref="MapInstanceData"/>. Asserted == 33 by the S76 readback tooth.
+        /// </summary>
+        internal int MetadataEntryCount => _plan.MetaCount;
+
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -218,7 +149,7 @@ namespace MapRenderer.Unity
         public (float x, float z) GetInstanceTranslation(int handle)
         {
             int count = _sortedItems.Count;
-            if (_cpuBuffer == null || _cpuBuffer.Length < count * FloatsPerInstance || count == 0)
+            if (_cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance || count == 0)
                 return (float.NaN, float.NaN);
 
             for (int si = 0; si < count; si++)
@@ -239,6 +170,51 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
+        /// Returns the packed value of the material property <paramref name="propId"/> for the instance
+        /// <paramref name="handle"/> from the last <see cref="Rebuild"/> call.
+        /// GPU-independent — reads the CPU SoA buffer directly.
+        ///
+        /// <para><paramref name="component"/> selects the float within a multi-float property
+        /// (0=x/r, 1=y/g, 2=z/b, 3=w/a). For scalar properties component must be 0.</para>
+        ///
+        /// Returns <c>float.NaN</c> if the handle is not registered, the property is not in the plan,
+        /// or no <see cref="Rebuild"/> has run. NaN (not 0) makes the buggy-build case (no plan entry)
+        /// fail explicitly rather than silently reading 0.
+        /// </summary>
+        internal float GetInstancePropValue(int handle, int propId, int component = 0)
+        {
+            int count = _sortedItems.Count;
+            if (_cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance || count == 0)
+                return float.NaN;
+
+            int slot = -1;
+            for (int si = 0; si < count; si++)
+            {
+                if (_sortedItems[si].handle == handle) { slot = si; break; }
+            }
+            if (slot < 0) return float.NaN;
+
+            for (int e = 0; e < _plan.MaterialEntries.Length; e++)
+            {
+                InstancePropEntry entry = _plan.MaterialEntries[e];
+                if (entry.PropId == propId)
+                {
+                    int idx = entry.SoaFloatOffset * count + slot * entry.FloatCount + component;
+                    if ((uint)idx >= (uint)_cpuBuffer.Length) return float.NaN;
+                    return _cpuBuffer[idx];
+                }
+            }
+            return float.NaN;
+        }
+
+        /// <summary>
+        /// Returns the SoA float offset (the Pfx_ equivalent) for the material property
+        /// <paramref name="propId"/>, or -1 if not found in the plan.
+        /// Used by tests for the byte-identical-wire spot check (e.g. <c>_Opacity</c> must be 46).
+        /// </summary>
+        internal int GetPropSoaOffset(int propId) => _plan.GetSoaFloatOffset(propId);
+
+        /// <summary>
         /// Returns the XZ scene-space bounding box that covers all registered tile instances.
         /// Each tile origin is the translation from the packed O2W buffer; <paramref name="tileSizeWorld"/>
         /// is added to the max to account for the tile's mesh extent beyond its origin.
@@ -250,7 +226,7 @@ namespace MapRenderer.Unity
         public Bounds ComputeSceneBounds(float tileSizeWorld)
         {
             int count = _sortedItems.Count;
-            if (count == 0 || _cpuBuffer == null || _cpuBuffer.Length < count * FloatsPerInstance)
+            if (count == 0 || _cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance)
                 return new Bounds(Vector3.zero, Vector3.zero);
 
             float minX = float.MaxValue, maxX = float.MinValue;
@@ -365,7 +341,7 @@ namespace MapRenderer.Unity
             _sortedItems.Sort((a, b) => a.renderQueue.CompareTo(b.renderQueue));
 
             // Grow CPU buffer if needed (no shrink → steady-state no-alloc).
-            int floatsNeeded = count * FloatsPerInstance;
+            int floatsNeeded = count * _plan.FloatsPerInstance;
             if (_cpuBuffer.Length < floatsNeeded)
                 _cpuBuffer = new float[floatsNeeded];
 
@@ -374,9 +350,9 @@ namespace MapRenderer.Unity
             // Instance si's value for property P is at: Pfx_P*count + si*stride_P.
 
             // ── O2W block (12 floats per instance) ──────────────────────────────────────────
-            int o2wBase = Pfx_O2W * count; // = 0
+            int o2wBase = _plan.O2WFloatOffset * count; // = 0 * count = 0
             // ── W2O block (12 floats per instance) ──────────────────────────────────────────
-            int w2oBase = Pfx_W2O * count; // = 12*count
+            int w2oBase = _plan.W2OFloatOffset * count; // = 12 * count
 
             for (int si = 0; si < count; si++)
             {
@@ -421,92 +397,63 @@ namespace MapRenderer.Unity
         }
 
         /// <summary>
-        /// Reads all DOTS-instanced material properties from <paramref name="mat"/> and packs them
-        /// into <see cref="_cpuBuffer"/> in SoA layout for instance <paramref name="index"/> out of
-        /// <paramref name="count"/> total instances.
+        /// Packs all DOTS-instanced material properties from <paramref name="mat"/> into the CPU SoA
+        /// buffer for instance <paramref name="index"/> out of <paramref name="count"/> total instances.
         ///
-        /// SoA: property P for instance si is at float index Pfx_P*count + si*stride_P.
-        /// GetColor/GetFloat are allocation-free; HasProperty is allocation-free.
+        /// Driven by the reflected <see cref="InstancePropPlan"/> — no hand-maintained property list.
+        /// Allocation-free: array indexed by <c>for</c>, int-id Material accessors (no string lookups),
+        /// value-type defaults. Safe to call 100× per frame without triggering GC gen-0.
         /// </summary>
         private void PackMaterialProps(int index, int count, Material mat)
         {
-            Color   baseColor  = mat.HasProperty("_BaseColor")           ? mat.GetColor("_BaseColor")           : Color.white;
-            Color   specColor  = mat.HasProperty("_SpecColor")           ? mat.GetColor("_SpecColor")           : Color.white;
-            Color   emission   = mat.HasProperty("_EmissionColor")       ? mat.GetColor("_EmissionColor")       : Color.black;
-            Color   outline    = mat.HasProperty("_FillOutlineColor")    ? mat.GetColor("_FillOutlineColor")    : Color.clear;
-            Vector4 fillTrans  = mat.HasProperty("_FillTranslate")       ? mat.GetVector("_FillTranslate")      : Vector4.zero;
+            for (int e = 0; e < _plan.MaterialEntries.Length; e++)
+            {
+                InstancePropEntry entry   = _plan.MaterialEntries[e];
+                int               soaBase = entry.SoaFloatOffset * count;
 
-            float cutoff     = mat.HasProperty("_Cutoff")              ? mat.GetFloat("_Cutoff")              : 0.5f;
-            float smoothness = mat.HasProperty("_Smoothness")          ? mat.GetFloat("_Smoothness")          : 0f;
-            float metallic   = mat.HasProperty("_Metallic")            ? mat.GetFloat("_Metallic")            : 0f;
-            float bumpScale  = mat.HasProperty("_BumpScale")           ? mat.GetFloat("_BumpScale")           : 1f;
-            float parallax   = mat.HasProperty("_Parallax")            ? mat.GetFloat("_Parallax")            : 0f;
-            float occStr     = mat.HasProperty("_OcclusionStrength")   ? mat.GetFloat("_OcclusionStrength")   : 1f;
-            float ccMask     = mat.HasProperty("_ClearCoatMask")       ? mat.GetFloat("_ClearCoatMask")       : 0f;
-            float ccSmooth   = mat.HasProperty("_ClearCoatSmoothness") ? mat.GetFloat("_ClearCoatSmoothness") : 1f;
-            float detailAlb  = mat.HasProperty("_DetailAlbedoMapScale")? mat.GetFloat("_DetailAlbedoMapScale"): 1f;
-            float detailNorm = mat.HasProperty("_DetailNormalMapScale") ? mat.GetFloat("_DetailNormalMapScale"): 1f;
-            float opacity    = mat.HasProperty("_Opacity")             ? mat.GetFloat("_Opacity")             : 1f;
-            float fillAA     = mat.HasProperty("_FillAntialias")       ? mat.GetFloat("_FillAntialias")       : 1f;
-            float fillTrAnch = mat.HasProperty("_FillTranslateAnchor") ? mat.GetFloat("_FillTranslateAnchor") : 0f;
-            float fillPat    = mat.HasProperty("_FillPattern")         ? mat.GetFloat("_FillPattern")         : 0f;
-
-            // SoA packing: property P for instance 'index' lives at Pfx_P*count + index*stride_P.
-            // stride_P = 4 for Color, 1 for float.
-
-            int bc4 = Pfx_BaseColor * count + index * 4;
-            _cpuBuffer[bc4 + 0] = baseColor.r;
-            _cpuBuffer[bc4 + 1] = baseColor.g;
-            _cpuBuffer[bc4 + 2] = baseColor.b;
-            _cpuBuffer[bc4 + 3] = baseColor.a;
-
-            int sc4 = Pfx_SpecColor * count + index * 4;
-            _cpuBuffer[sc4 + 0] = specColor.r;
-            _cpuBuffer[sc4 + 1] = specColor.g;
-            _cpuBuffer[sc4 + 2] = specColor.b;
-            _cpuBuffer[sc4 + 3] = specColor.a;
-
-            int em4 = Pfx_Emission * count + index * 4;
-            _cpuBuffer[em4 + 0] = emission.r;
-            _cpuBuffer[em4 + 1] = emission.g;
-            _cpuBuffer[em4 + 2] = emission.b;
-            _cpuBuffer[em4 + 3] = emission.a;
-
-            _cpuBuffer[Pfx_Cutoff       * count + index] = cutoff;
-            _cpuBuffer[Pfx_Smoothness   * count + index] = smoothness;
-            _cpuBuffer[Pfx_Metallic     * count + index] = metallic;
-            _cpuBuffer[Pfx_BumpScale    * count + index] = bumpScale;
-            _cpuBuffer[Pfx_Parallax     * count + index] = parallax;
-            _cpuBuffer[Pfx_OccStr       * count + index] = occStr;
-            _cpuBuffer[Pfx_CCMask       * count + index] = ccMask;
-            _cpuBuffer[Pfx_CCSmoothness * count + index] = ccSmooth;
-            _cpuBuffer[Pfx_DetailAlb    * count + index] = detailAlb;
-            _cpuBuffer[Pfx_DetailNorm   * count + index] = detailNorm;
-
-            _cpuBuffer[Pfx_Opacity * count + index] = opacity;
-
-            int fo4 = Pfx_FillOutline * count + index * 4;
-            _cpuBuffer[fo4 + 0] = outline.r;
-            _cpuBuffer[fo4 + 1] = outline.g;
-            _cpuBuffer[fo4 + 2] = outline.b;
-            _cpuBuffer[fo4 + 3] = outline.a;
-
-            int ft4 = Pfx_FillTrans * count + index * 4;
-            _cpuBuffer[ft4 + 0] = fillTrans.x;
-            _cpuBuffer[ft4 + 1] = fillTrans.y;
-            _cpuBuffer[ft4 + 2] = fillTrans.z;
-            _cpuBuffer[ft4 + 3] = fillTrans.w;
-
-            _cpuBuffer[Pfx_FillAA      * count + index] = fillAA;
-            _cpuBuffer[Pfx_FillTrAnch  * count + index] = fillTrAnch;
-            _cpuBuffer[Pfx_FillPattern * count + index] = fillPat;
+                switch (entry.Kind)
+                {
+                    case PropKind.Color:
+                    {
+                        Color c = mat.HasProperty(entry.PropId)
+                            ? mat.GetColor(entry.PropId)
+                            : new Color(entry.Default.x, entry.Default.y, entry.Default.z, entry.Default.w);
+                        int b4 = soaBase + index * 4;
+                        _cpuBuffer[b4 + 0] = c.r;
+                        _cpuBuffer[b4 + 1] = c.g;
+                        _cpuBuffer[b4 + 2] = c.b;
+                        _cpuBuffer[b4 + 3] = c.a;
+                        break;
+                    }
+                    case PropKind.Vector:
+                    {
+                        Vector4 v = mat.HasProperty(entry.PropId)
+                            ? mat.GetVector(entry.PropId)
+                            : new Vector4(entry.Default.x, entry.Default.y, entry.Default.z, entry.Default.w);
+                        int b4 = soaBase + index * 4;
+                        _cpuBuffer[b4 + 0] = v.x;
+                        _cpuBuffer[b4 + 1] = v.y;
+                        _cpuBuffer[b4 + 2] = v.z;
+                        _cpuBuffer[b4 + 3] = v.w;
+                        break;
+                    }
+                    default: // PropKind.Float
+                    {
+                        float f = mat.HasProperty(entry.PropId)
+                            ? mat.GetFloat(entry.PropId)
+                            : entry.Default.x;
+                        _cpuBuffer[soaBase + index] = f;
+                        break;
+                    }
+                }
+            }
         }
 
         // ── GraphicsBuffer / batch management ─────────────────────────────────────────────────
 
         private void EnsureBuffer(int instanceCount)
         {
-            int floatsNeeded = instanceCount * FloatsPerInstance;
+            int floatsNeeded = instanceCount * _plan.FloatsPerInstance;
             bool bufferGrew = false;
 
             if (_instanceBuffer == null || _instanceBuffer.count < floatsNeeded)
@@ -516,7 +463,7 @@ namespace MapRenderer.Unity
                 _instanceBuffer?.Release();
                 _instanceBuffer = null;
                 int newCount = math.max(floatsNeeded, prevCount * 2);
-                newCount = math.max(newCount, FloatsPerInstance); // at least one instance
+                newCount = math.max(newCount, _plan.FloatsPerInstance); // at least one instance
                 _instanceBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Raw, newCount, sizeof(float));
                 bufferGrew = true;
             }
@@ -535,9 +482,12 @@ namespace MapRenderer.Unity
         /// <paramref name="instanceCount"/> instances.
         ///
         /// MetadataValue.Value = (uint)(array_byte_offset | 0x80000000u):
-        ///   array_byte_offset = property_prefix_float_count × instanceCount × 4
+        ///   array_byte_offset = property_SoaFloatOffset × instanceCount × 4
         /// This is the offset of the FIRST element of the property's SoA array in the buffer.
         /// Unity computes instance i's value at: array_byte_offset + i × sizeof(property).
+        ///
+        /// Driven by the reflected plan — no hand-maintained M(...) wall. Each material entry is
+        /// emitted in one loop; the 2 transform entries are emitted first.
         /// </summary>
         private void ReRegisterBatch(int instanceCount)
         {
@@ -551,12 +501,9 @@ namespace MapRenderer.Unity
 
             if (_instanceBuffer == null) return;
 
-            // Compute SoA byte offsets for the given instance count.
-            // byte_offset(P) = Pfx_P * instanceCount * 4
             int N = instanceCount;
 
-            const int MetaCount = 21; // O2W, W2O + 19 material props (S58 dropped _MapColor)
-            var meta = new NativeArray<MetadataValue>(MetaCount, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            var meta = new NativeArray<MetadataValue>(_plan.MetaCount, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
             try
             {
                 static MetadataValue M(int nameId, int byteOffset) => new MetadataValue
@@ -566,29 +513,15 @@ namespace MapRenderer.Unity
                 };
 
                 int idx = 0;
-                // Transforms (12 floats per instance each):
-                meta[idx++] = M(Shader.PropertyToID("unity_ObjectToWorld"),    Pfx_O2W          * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("unity_WorldToObject"),    Pfx_W2O          * N * 4);
-                // Material properties:
-                meta[idx++] = M(Shader.PropertyToID("_BaseColor"),             Pfx_BaseColor    * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_SpecColor"),             Pfx_SpecColor    * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_EmissionColor"),         Pfx_Emission     * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_Cutoff"),                Pfx_Cutoff       * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_Smoothness"),            Pfx_Smoothness   * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_Metallic"),              Pfx_Metallic     * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_BumpScale"),             Pfx_BumpScale    * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_Parallax"),              Pfx_Parallax     * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_OcclusionStrength"),     Pfx_OccStr       * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_ClearCoatMask"),         Pfx_CCMask       * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_ClearCoatSmoothness"),   Pfx_CCSmoothness * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_DetailAlbedoMapScale"),  Pfx_DetailAlb    * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_DetailNormalMapScale"),  Pfx_DetailNorm   * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_Opacity"),               Pfx_Opacity      * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_FillOutlineColor"),      Pfx_FillOutline  * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_FillTranslate"),         Pfx_FillTrans    * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_FillAntialias"),         Pfx_FillAA       * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_FillTranslateAnchor"),   Pfx_FillTrAnch   * N * 4);
-                meta[idx++] = M(Shader.PropertyToID("_FillPattern"),           Pfx_FillPattern  * N * 4);
+                // Transform entries first (O2W, W2O):
+                meta[idx++] = M(_plan.O2WPropId, _plan.O2WFloatOffset * N * 4);
+                meta[idx++] = M(_plan.W2OPropId, _plan.W2OFloatOffset * N * 4);
+                // Material property entries (31 entries, driven by the reflected plan):
+                for (int e = 0; e < _plan.MaterialEntries.Length; e++)
+                {
+                    InstancePropEntry entry = _plan.MaterialEntries[e];
+                    meta[idx++] = M(entry.PropId, entry.SoaFloatOffset * N * 4);
+                }
 
                 _batchId         = _brg.AddBatch(meta, _instanceBuffer.bufferHandle);
                 _batchRegistered = true;

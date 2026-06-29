@@ -2,6 +2,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;   // CoreUtils.SetKeyword (same helper URP's LitGUI/LitDetailGUI use)
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor
 {
@@ -25,48 +26,48 @@ namespace MapRenderer.Unity.Editor
 
             // ── Shading-model keywords (URP LitGUI.SetMaterialKeywords) ──
             // Workflow (0 = Specular, 1 = Metallic) — L449.
-            bool specular = material.HasProperty(ShaderProperties.WorkflowMode)
-                            && (WorkflowMode)(int)material.GetFloat(ShaderProperties.WorkflowMode) == WorkflowMode.Specular;
+            bool specular = material.HasProperty(ShaderProperties.PropertyId.WorkflowMode)
+                            && (WorkflowMode)(int)material.GetFloat(ShaderProperties.PropertyId.WorkflowMode) == WorkflowMode.Specular;
             CoreUtils.SetKeyword(material, ShaderKeywords.SpecularSetup, specular);
 
             // Metallic / specular gloss map — L465 (the active map depends on the workflow).
-            string glossMap = specular ? ShaderProperties.SpecGlossMap : ShaderProperties.MetallicGlossMap;
+            int glossMap = specular ? ShaderProperties.PropertyId.SpecGlossMap : ShaderProperties.PropertyId.MetallicGlossMap;
             CoreUtils.SetKeyword(material, ShaderKeywords.MetallicSpecGlossMap,
                 material.HasProperty(glossMap) && material.GetTexture(glossMap) != null);
 
             // Specular-highlights / environment-reflections OFF toggles — L468/L471 (default 1 → keyword off).
-            if (material.HasProperty(ShaderProperties.SpecularHighlights))
+            if (material.HasProperty(ShaderProperties.PropertyId.SpecularHighlights))
                 CoreUtils.SetKeyword(material, ShaderKeywords.SpecularHighlightsOff,
-                    material.GetFloat(ShaderProperties.SpecularHighlights) == 0f);
-            if (material.HasProperty(ShaderProperties.EnvironmentReflections))
+                    material.GetFloat(ShaderProperties.PropertyId.SpecularHighlights) == 0f);
+            if (material.HasProperty(ShaderProperties.PropertyId.EnvironmentReflections))
                 CoreUtils.SetKeyword(material, ShaderKeywords.EnvironmentReflectionsOff,
-                    material.GetFloat(ShaderProperties.EnvironmentReflections) == 0f);
+                    material.GetFloat(ShaderProperties.PropertyId.EnvironmentReflections) == 0f);
 
             // Occlusion map — L474.
-            if (material.HasProperty(ShaderProperties.OcclusionMap))
+            if (material.HasProperty(ShaderProperties.PropertyId.OcclusionMap))
                 CoreUtils.SetKeyword(material, ShaderKeywords.OcclusionMap,
-                    material.GetTexture(ShaderProperties.OcclusionMap) != null);
+                    material.GetTexture(ShaderProperties.PropertyId.OcclusionMap) != null);
 
             // Height / parallax map — L477 (URP puts this in LitGUI, NOT BaseShaderGUI — mirrored).
-            if (material.HasProperty(ShaderProperties.ParallaxMap))
+            if (material.HasProperty(ShaderProperties.PropertyId.ParallaxMap))
                 CoreUtils.SetKeyword(material, ShaderKeywords.ParallaxMap,
-                    material.GetTexture(ShaderProperties.ParallaxMap) != null);
+                    material.GetTexture(ShaderProperties.PropertyId.ParallaxMap) != null);
 
             // Smoothness source channel — L482: albedo-alpha only when selected AND opaque.
-            if (material.HasProperty(ShaderProperties.SmoothnessTextureChannel))
+            if (material.HasProperty(ShaderProperties.PropertyId.SmoothnessTextureChannel))
                 CoreUtils.SetKeyword(material, ShaderKeywords.SmoothnessTextureAlbedoChannelA,
-                    material.GetFloat(ShaderProperties.SmoothnessTextureChannel) == 1f && IsOpaque(material));
+                    material.GetFloat(ShaderProperties.PropertyId.SmoothnessTextureChannel) == 1f && IsOpaque(material));
 
             // ── Detail keywords (URP LitDetailGUI.SetMaterialKeywords L64-73) ──
             // The scaled variant (mul-x2 with a per-detail scale ≠ 1) is a distinct, less-performant keyword;
             // exactly one of the two is on when a detail map is assigned.
-            if (material.HasProperty(ShaderProperties.DetailAlbedoMap)
-                && material.HasProperty(ShaderProperties.DetailNormalMap)
-                && material.HasProperty(ShaderProperties.DetailAlbedoMapScale))
+            if (material.HasProperty(ShaderProperties.PropertyId.DetailAlbedoMap)
+                && material.HasProperty(ShaderProperties.PropertyId.DetailNormalMap)
+                && material.HasProperty(ShaderProperties.PropertyId.DetailAlbedoMapScale))
             {
-                bool isScaled  = material.GetFloat(ShaderProperties.DetailAlbedoMapScale) != 1f;
-                bool hasDetail = material.GetTexture(ShaderProperties.DetailAlbedoMap) != null
-                              || material.GetTexture(ShaderProperties.DetailNormalMap) != null;
+                bool isScaled  = material.GetFloat(ShaderProperties.PropertyId.DetailAlbedoMapScale) != 1f;
+                bool hasDetail = material.GetTexture(ShaderProperties.PropertyId.DetailAlbedoMap) != null
+                              || material.GetTexture(ShaderProperties.PropertyId.DetailNormalMap) != null;
                 CoreUtils.SetKeyword(material, ShaderKeywords.DetailMulx2,  !isScaled && hasDetail);
                 CoreUtils.SetKeyword(material, ShaderKeywords.DetailScaled,  isScaled && hasDetail);
             }
@@ -80,11 +81,11 @@ namespace MapRenderer.Unity.Editor
 
         protected virtual void DrawDetailInputs(Material material)
         {
-            Tex(ShaderProperties.DetailMask,       "Detail Mask",   null);
-            Tex(ShaderProperties.DetailAlbedoMap,  "Detail Albedo", ShaderProperties.DetailAlbedoMapScale);
-            Tex(ShaderProperties.DetailNormalMap,  "Detail Normal", ShaderProperties.DetailNormalMapScale);
+            Tex(ShaderProperties.PropertyNames.DetailMask,       "Detail Mask",   null);
+            Tex(ShaderProperties.PropertyNames.DetailAlbedoMap,  "Detail Albedo", ShaderProperties.PropertyNames.DetailAlbedoMapScale);
+            Tex(ShaderProperties.PropertyNames.DetailNormalMap,  "Detail Normal", ShaderProperties.PropertyNames.DetailNormalMapScale);
 
-            var detailAlbedo = Find(ShaderProperties.DetailAlbedoMap);
+            var detailAlbedo = Find(ShaderProperties.PropertyNames.DetailAlbedoMap);
             if (detailAlbedo != null) _editor.TextureScaleOffsetProperty(detailAlbedo);
         }
     }

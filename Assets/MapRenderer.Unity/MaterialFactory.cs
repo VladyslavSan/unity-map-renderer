@@ -4,6 +4,7 @@ using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity
 {
@@ -57,23 +58,23 @@ namespace MapRenderer.Unity
         {
             // fill-opacity: bind for Constant/Zoom (data-driven → vertex bake, not supported for fill yet).
             if (!paint.Opacity.DependsOnFeature)
-                applier.BindFloat(paint.Opacity, "_Opacity");
+                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
             // fill-outline-color: bind only when explicitly set (not a fallback) and non-data-driven.
             if (!paint.OutlineColorIsFallback && !paint.OutlineColor.DependsOnFeature)
-                applier.BindColor(paint.OutlineColor, "_FillOutlineColor");
+                applier.BindColor(paint.OutlineColor, ShaderProperties.Fill.PropertyId.FillOutlineColor);
 
             // fill-antialias.
             if (!paint.Antialias.DependsOnFeature)
-                applier.BindFloat(paint.Antialias, "_FillAntialias");
+                applier.BindFloat(paint.Antialias, ShaderProperties.Fill.PropertyId.FillAntialias);
 
             // fill-translate: collapsed to double2 — extract x/y and set as Vector4.
             var t = paint.Translate.Evaluate(0.0);
-            mat.SetVector("_FillTranslate", new Vector4((float)t.x, (float)t.y, 0f, 0f));
+            mat.SetVector(ShaderProperties.Fill.PropertyId.FillTranslate, new Vector4((float)t.x, (float)t.y, 0f, 0f));
 
             // fill-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
-                applier.BindFloat(paint.TranslateAnchor, "_FillTranslateAnchor");
+                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
         }
 
         /// <summary>
@@ -115,11 +116,11 @@ namespace MapRenderer.Unity
             // line-color: bind only for non-data-driven (Constant/Zoom). Data-driven → vertex bake.
             // The color rides the standard _BaseColor (S58 collapsed the redundant _MapColor into it).
             if (!paint.Color.DependsOnFeature)
-                applier.BindColor(paint.Color, ShaderProperties.BaseColor);
+                applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
 
             // line-opacity.
             if (!paint.Opacity.DependsOnFeature)
-                applier.BindFloat(paint.Opacity, "_Opacity");
+                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
             // line-width (in pixels per MapLibre spec).
             // Convention (data-driven width): when Width depends on feature, the evaluated width
@@ -127,39 +128,39 @@ namespace MapRenderer.Unity
             // the shader formula (_Width × WidthScale) yields the full baked width directly.
             // For Constant/Zoom kind, bind normally as a uniform.
             if (paint.Width.DependsOnFeature)
-                mat.SetFloat("_Width", 1f); // base = 1; evaluated width baked into WidthScale per feature
+                mat.SetFloat(ShaderProperties.Line.PropertyId.Width, 1f); // base = 1; evaluated width baked into WidthScale per feature
             else
-                applier.BindFloat(paint.Width, "_Width");
+                applier.BindFloat(paint.Width, ShaderProperties.Line.PropertyId.Width);
             // Ensure WidthIsPixels=1 so the shader interprets width as pixels.
-            mat.SetFloat("_WidthIsPixels", 1f);
+            mat.SetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels, 1f);
 
             // line-blur (MapLibre paint, spec default 0) → _Blur. This is ONLY the optional style blur;
             // the shader ADDS it to the internal antialiasing buffer (_AaEdgeWidth). _AaEdgeWidth is
             // deliberately NOT bound here — it is an internal render param that keeps its material default
             // (1px), so AA stays on even when the style omits line-blur. (Historically _Blur doubled as the
-            // AA knob, so this very binding silently zeroed antialiasing — see ShaderProperties.AaEdgeWidth.)
+            // AA knob, so this very binding silently zeroed antialiasing — see ShaderProperties.Line.PropertyNames.AaEdgeWidth.)
             if (!paint.Blur.DependsOnFeature)
-                applier.BindFloat(paint.Blur, "_Blur");
+                applier.BindFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
 
             // line-gap-width.
             if (!paint.GapWidth.DependsOnFeature)
-                applier.BindFloat(paint.GapWidth, "_GapWidth");
+                applier.BindFloat(paint.GapWidth, ShaderProperties.Line.PropertyId.GapWidth);
 
             // line-offset (S44).
             if (!paint.Offset.DependsOnFeature)
-                applier.BindFloat(paint.Offset, "_LineOffset");
+                applier.BindFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
 
             // line-translate: collapsed to double2 — extract x/y and set as Vector4.
             // Unity boundary cast: double2 → (float)x/(float)y then pack into Vector4.
             var t = paint.Translate.Evaluate(0.0);
-            mat.SetVector("_LineTranslate", new Vector4((float)t.x, (float)t.y, 0f, 0f));
+            mat.SetVector(ShaderProperties.Line.PropertyId.LineTranslate, new Vector4((float)t.x, (float)t.y, 0f, 0f));
 
             // line-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
-                applier.BindFloat(paint.TranslateAnchor, "_LineTranslateAnchor");
+                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Line.PropertyId.LineTranslateAnchor);
 
             // line-pattern hook: set flag; solid fallback until S17.
-            mat.SetFloat("_LinePattern", paint.PatternName != null ? 1f : 0f);
+            mat.SetFloat(ShaderProperties.Line.PropertyId.LinePattern, paint.PatternName != null ? 1f : 0f);
 
             // S43: line-dasharray initial bind (constant or first zoom-step evaluation at zoom=0).
             ApplyLineDashArray(paint, mat, 0.0);
@@ -179,14 +180,14 @@ namespace MapRenderer.Unity
             if (Line.LineDash.TryEvaluatePattern(paint.DashArray, zoom, out var packed, out int count))
             {
                 // Unity boundary cast: float4 → Vector4 (at the SetVector call site, not upstream).
-                mat.SetVector("_DashArray", new Vector4(packed.x, packed.y, packed.z, packed.w));
-                mat.SetFloat("_DashCount",  count);
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray, new Vector4(packed.x, packed.y, packed.z, packed.w));
+                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,  count);
             }
             else
             {
                 // No / unsupported / degenerate dasharray: solid identity.
-                mat.SetVector("_DashArray", Vector4.zero);
-                mat.SetFloat("_DashCount",  0f);
+                mat.SetVector(ShaderProperties.Line.PropertyId.DashArray, Vector4.zero);
+                mat.SetFloat(ShaderProperties.Line.PropertyId.DashCount,  0f);
             }
         }
     }

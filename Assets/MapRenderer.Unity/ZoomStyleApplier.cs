@@ -54,11 +54,11 @@ namespace MapRenderer.Unity
         /// <summary>
         /// Bind a <see cref="StyleProperty{float}"/> to a float shader property.
         /// Constant-kind bindings are applied immediately (no allocation); Zoom-kind bindings are
-        /// queued for <see cref="ApplyZoom"/>.
+        /// queued for <see cref="ApplyZoom"/>. Pass a cached id from <c>ShaderProperties.PropertyId</c>,
+        /// <c>ShaderProperties.Line.PropertyId</c>, or <c>ShaderProperties.Fill.PropertyId</c>.
         /// </summary>
-        public void BindFloat(StyleProperty<float> prop, string shaderPropertyName)
+        public void BindFloat(StyleProperty<float> prop, int id)
         {
-            int id = Shader.PropertyToID(shaderPropertyName);
             if (prop.IsZoomDependent)
                 _floatBindings.Add((prop, id));
             else
@@ -68,10 +68,10 @@ namespace MapRenderer.Unity
         /// <summary>
         /// Bind a <see cref="StyleProperty{CoreColor}"/> to a color shader property.
         /// Constant-kind bindings are applied immediately; Zoom-kind bindings are queued.
+        /// Pass a cached id from <c>ShaderProperties.PropertyId</c>, <c>ShaderProperties.Line.PropertyId</c>, or <c>ShaderProperties.Fill.PropertyId</c>.
         /// </summary>
-        public void BindColor(StyleProperty<CoreColor> prop, string shaderPropertyName)
+        public void BindColor(StyleProperty<CoreColor> prop, int id)
         {
-            int id = Shader.PropertyToID(shaderPropertyName);
             if (prop.IsZoomDependent)
                 _colorBindings.Add((prop, id));
             else

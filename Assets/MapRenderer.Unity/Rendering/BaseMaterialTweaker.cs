@@ -22,7 +22,7 @@ namespace MapRenderer.Unity.Rendering
         {
             m.SetDepthWrite(DepthWrite.Off);
             m.SetDepthTest(CompareFunction.LessEqual);
-            m.SetColor(ShaderProperties.BaseColor, Color.white);
+            m.SetColor(ShaderProperties.PropertyId.BaseColor, Color.white);
         }
     }
 }

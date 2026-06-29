@@ -487,7 +487,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 var applier = new ZoomStyleApplier(mat);
-                applier.BindFloat(paint.Opacity, "_MyZoomOpacity");
+                applier.BindFloat(paint.Opacity, Shader.PropertyToID("_MyZoomOpacity"));
 
                 // Apply at zoom=0.
                 applier.ApplyZoom(0.0);

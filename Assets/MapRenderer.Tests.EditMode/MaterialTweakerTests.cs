@@ -12,6 +12,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Unity.Rendering;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Unity.Editor;
 
 namespace MapRenderer.Tests
@@ -37,22 +38,22 @@ namespace MapRenderer.Tests
             var m = NewFill();
             try
             {
-                m.SetFloat(ShaderProperties.ZWrite, 1f);           // simulate an opaque-authored base
-                m.SetColor(ShaderProperties.BaseColor, Color.red); // simulate a tinted base
+                m.SetFloat(ShaderProperties.PropertyNames.ZWrite, 1f);           // simulate an opaque-authored base
+                m.SetColor(ShaderProperties.PropertyNames.BaseColor, Color.red); // simulate a tinted base
                 FillMaterialTweaker.ApplyPainterContract(m);
 
-                Assert.AreEqual(0f, m.GetFloat(ShaderProperties.ZWrite), "painter contract → ZWrite off");
-                Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.ZTest),
+                Assert.AreEqual(0f, m.GetFloat(ShaderProperties.PropertyNames.ZWrite), "painter contract → ZWrite off");
+                Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.PropertyNames.ZTest),
                     "painter contract → ZTest LEqual");
                 Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcRGBBlend,
-                    (int)m.GetFloat(ShaderProperties.SrcBlend));
+                    (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend));
                 Assert.AreEqual((int)FillMaterialTweaker.DefaultDstRGBBlend,
-                    (int)m.GetFloat(ShaderProperties.DstBlend));
+                    (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend));
                 Assert.AreEqual((int)FillMaterialTweaker.DefaultSrcAlphaBlend,
-                    (int)m.GetFloat(ShaderProperties.SrcBlendAlpha));
+                    (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlendAlpha));
                 Assert.AreEqual((int)FillMaterialTweaker.DefaultDstRGBBlend,
-                    (int)m.GetFloat(ShaderProperties.DstBlendAlpha));
-                AssertWhite(m.GetColor(ShaderProperties.BaseColor), "_BaseColor");
+                    (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlendAlpha));
+                AssertWhite(m.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
             }
             finally
             {
@@ -66,14 +67,14 @@ namespace MapRenderer.Tests
             var m = NewLine();
             try
             {
-                m.SetFloat(ShaderProperties.ZWrite, 1f);
+                m.SetFloat(ShaderProperties.PropertyNames.ZWrite, 1f);
                 LineMaterialTweaker.ApplyPainterContract(m);
-                Assert.AreEqual(0f, m.GetFloat(ShaderProperties.ZWrite), "painter contract → ZWrite off");
-                Assert.AreEqual((int)BlendMode.SrcAlpha, (int)m.GetFloat(ShaderProperties.SrcBlend),
+                Assert.AreEqual(0f, m.GetFloat(ShaderProperties.PropertyNames.ZWrite), "painter contract → ZWrite off");
+                Assert.AreEqual((int)BlendMode.SrcAlpha, (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend),
                     "line contract → straight-alpha SrcAlpha blend (NOT the premultiplied One the .mat may carry)");
-                Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)m.GetFloat(ShaderProperties.DstBlend),
+                Assert.AreEqual((int)BlendMode.OneMinusSrcAlpha, (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend),
                     "line contract → straight-alpha OneMinusSrcAlpha blend");
-                AssertWhite(m.GetColor(ShaderProperties.BaseColor), "_BaseColor");
+                AssertWhite(m.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
             }
             finally
             {
@@ -93,12 +94,12 @@ namespace MapRenderer.Tests
             var m = NewFill();
             try
             {
-                m.SetColor(ShaderProperties.EmissionColor, Color.black);
+                m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.black);
                 m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
                 new FillShaderGUI().ValidateMaterial(m);
                 Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.Emission), "EmissiveIsBlack/black → _EMISSION off");
 
-                m.SetColor(ShaderProperties.EmissionColor, Color.white);
+                m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.white);
                 m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
                 new FillShaderGUI().ValidateMaterial(m);
                 Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "BakedEmissive/white → _EMISSION on");
@@ -115,7 +116,7 @@ namespace MapRenderer.Tests
             var m = NewLine();
             try
             {
-                m.SetColor(ShaderProperties.EmissionColor, Color.white);
+                m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.white);
                 m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
                 new LineShaderGUI().ValidateMaterial(m);
                 Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "RealtimeEmissive/white → _EMISSION on");
