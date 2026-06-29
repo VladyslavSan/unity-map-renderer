@@ -171,7 +171,7 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             _mapCamera     = mapCamera;
             _cameraSystem  = cameraSystem;
-            TileManager?.InvalidateCover(); // null before Initialise (MapRoot.Wire order); reset re-armed there
+            TileManager?.InvalidateCover(); // null before Initialise (Bootstrapper.Wire order); reset re-armed there
         }
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────

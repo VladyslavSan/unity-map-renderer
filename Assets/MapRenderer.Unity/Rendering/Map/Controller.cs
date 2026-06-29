@@ -45,10 +45,10 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     public sealed class Controller : MonoBehaviour
     {
-        [Tooltip("The MapView this controller drives (set by MapRoot.Wire at runtime).")]
+        [Tooltip("The MapView this controller drives (set by Bootstrapper.Wire at runtime).")]
         public MapView Map;
 
-        [Tooltip("The camera this controller positions (set by MapRoot.Wire at runtime).")]
+        [Tooltip("The camera this controller positions (set by Bootstrapper.Wire at runtime).")]
         public Camera Camera;
 
         // ── Sensitivity (new Input System calibration) ────────────────────────────────────────────

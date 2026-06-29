@@ -89,82 +89,58 @@ namespace MapRenderer.Core.View.Camera
         /// <summary>
         /// Computes camera position and forward/up vectors from a <see cref="CameraProperties"/>.
         ///
-        /// <para><b>Coordinate convention:</b> +Y is up, camera orbits the look-at origin.</para>
+        /// <para><b>Coordinate convention:</b> right-handed, Y=up, X=east, Z=north; heading is CW from
+        /// north. The camera orbits the look-at (origin under camera-relative rendering).</para>
         ///
-        /// <para><b>D6a — Overhead degeneracy fix:</b> at tilt=0, the camera is directly above;
-        /// LookRotation(-offset.normalized, upHint) would be fed (0,-1,0) as forward. We derive
-        /// <c>upHint</c> from the heading direction in the horizontal plane so it is NEVER
-        /// anti-parallel to the world-up direction, giving deterministic north-up at any bearing.</para>
+        /// <para><b>Orbit geometry (closed form).</b> The pose is <c>Ry(heading)</c> applied to the
+        /// heading-0 pose. At heading 0 the camera sits <b>south of</b> and above the look-at and looks
+        /// <b>north</b> and down, so increasing tilt swings the view from straight-down toward the
+        /// horizon in the bearing direction (at bearing 0, north recedes to the top of the screen — the
+        /// MapLibre convention). With <c>sinT=tilt.Sin</c>, <c>cosT=tilt.Cos</c>, <c>sinH/cosH</c>:
+        /// <code>
+        ///   pos = (−alt·sinT·sinH,  alt·cosT,  −alt·sinT·cosH)   // camera, opposite the bearing dir
+        ///   fwd = −pos/alt = (sinT·sinH, −cosT, sinT·cosH)       // toward look-at; |pos| ≡ alt
+        ///   up  = (sinH·cosT,  sinT,  cosH·cosT)                 // world-up preserved (up.y = sinT ≥ 0)
+        /// </code>
+        /// </para>
+        ///
+        /// <para>This <c>up</c> is provably unit-length and orthogonal to <c>fwd</c> for <b>all</b>
+        /// tilt∈[0,90] (the heading cross-terms cancel via sin²H+cos²H=1), so no Gram-Schmidt /
+        /// degeneracy fallback is needed: at tilt=0 it is the non-degenerate heading-derived
+        /// north-up <c>(sinH,0,cosH)</c>; at tilt=90 it is world-up <c>(0,1,0)</c>. Keeping
+        /// <c>up.y=sinT≥0</c> is what prevents the image from flipping vertically as tilt→90.</para>
         /// </summary>
         /// <param name="altitude">Camera orbit radius in metres (from <see cref="AltitudeForZoom"/>).</param>
         /// <param name="heading">Camera bearing (constraint already enforced upstream).</param>
         /// <param name="tilt">Camera tilt angle (constraint already enforced upstream).</param>
         /// <param name="pos">Output: camera position offset from look-at (render-space).</param>
         /// <param name="fwd">Output: unit forward vector (toward look-at).</param>
-        /// <param name="up">Output: camera up vector (deterministic, heading-derived).</param>
+        /// <param name="up">Output: camera up vector (world-up preserved; non-degenerate at tilt=0).</param>
         public static void ComputePose(double altitude,
             Angle                             heading, Angle       tilt,
             out double3                       pos,     out double3 fwd, out double3 up)
         {
-            // Orbit offset from the look-at: Ry(heading) · Rx(tilt) · (0, altitude, 0).
-            //
-            // Standard Unity/right-handed frame: Y=up, X=east, Z=north; heading is CW from north so
-            // east is the +heading direction.
-            //
-            // Rx(tilt)·(0, alt, 0) = (0, alt·cosT, alt·sinT)        — tilts toward +Z (north at heading=0).
-            // Ry(heading)·(0, alt·cosT, alt·sinT), with Ry = [cosH 0 sinH; 0 1 0; -sinH 0 cosH]:
-            //   x = alt·sinT·sinH   ← east  (at heading=90, tilt>0: camera moves east)
-            //   y = alt·cosT        ← up    (= altitude at tilt=0 → directly overhead; ≥0 for tilt∈[0,90])
-            //   z = alt·sinT·cosH   ← north (at heading=0, tilt>0: camera moves toward north)
             double sinH = heading.Sin;
             double cosH = heading.Cos;
             double sinT = tilt.Sin;
             double cosT = tilt.Cos;
 
-            double px = altitude * sinT * sinH;
-            double py = altitude * cosT;
-            double pz = altitude * sinT * cosH;
-
+            // Camera position: orbit offset on the side OPPOSITE the bearing direction (so the camera
+            // looks toward the bearing). At tilt=0 this is (0, altitude, 0) — directly overhead.
+            double px = -altitude * sinT * sinH;
+            double py =  altitude * cosT;
+            double pz = -altitude * sinT * cosH;
             pos = new double3(px, py, pz);
 
-            // Forward vector: from camera toward look-at (= origin of orbit) = -pos.normalized
+            // Forward = toward the look-at = -pos normalized. |pos| ≡ altitude analytically, but divide
+            // by the computed length to stay robust to rounding.
             double len           = math.sqrt(px * px + py * py + pz * pz);
             if (len < 1e-10) len = 1e-10;
             fwd = new double3(-px / len, -py / len, -pz / len);
 
-            // Up vector (D6b — heading-derived, non-degenerate at tilt=0):
-            // The camera's "up" should point roughly north-rotated-by-heading in the horizontal plane.
-            // At heading=0: north is +Z, so up ≈ (0, 0, 1) transformed by heading.
-            // upHint = Ry(heading) * (0, 0, 1) = (sinH, 0, cosH)  — a horizontal vector pointing
-            //   in the heading direction rotated 90° back (i.e., the north direction in the heading frame).
-            // This is never anti-parallel to fwd because fwd has a -Y component (camera looking down)
-            // while upHint is purely horizontal. At tilt=0, fwd=(0,-1,0) and upHint=(sinH,0,cosH) are
-            // orthogonal — LookRotation gets well-behaved vectors.
-            //
-            // Geometric meaning: camera's up = "which way does north project on the camera's image plane".
-            // At heading=0: north (+Z) is projected up. At heading=90: east (+X) is up on screen.
-            double upX = sinH; // = sin(heading)
-            double upY = 0.0;
-            double upZ = cosH; // = cos(heading)
-
-            // Gram-Schmidt: orthogonalize upHint against fwd to get the true camera up.
-            // up = normalize(upHint - (upHint·fwd)*fwd)
-            double dot     = upX * fwd.x + upY * fwd.y + upZ * fwd.z;
-            double orthX   = upX         - dot * fwd.x;
-            double orthY   = upY         - dot * fwd.y;
-            double orthZ   = upZ         - dot * fwd.z;
-            double orthLen = math.sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
-            if (orthLen < 1e-10)
-            {
-                // Extremely unlikely fallback (upHint parallel to fwd): use world +Y as hint.
-                orthX   = -fwd.x * (-fwd.y);
-                orthY   = 1.0 - fwd.y * fwd.y;
-                orthZ   = -fwd.z * (-fwd.y);
-                orthLen = math.sqrt(orthX * orthX + orthY * orthY + orthZ * orthZ);
-                if (orthLen < 1e-10) orthLen = 1.0;
-            }
-
-            up = new double3(orthX / orthLen, orthY / orthLen, orthZ / orthLen);
+            // Camera up: world-up preserved through the tilt, rotated by heading. Closed form (always
+            // unit-length and ⟂ fwd) — see method doc. up.y = sinT ≥ 0 keeps the sky up at every tilt.
+            up = new double3(sinH * cosT, sinT, cosH * cosT);
         }
 
         // ── Interpolation helpers (D4) ──────────────────────────────────────────────────────────

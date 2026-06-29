@@ -79,6 +79,8 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraAnimation.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPoseMath.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSystem.cs" />
+    <!-- S72: pure two-way slider↔camera reconcile (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSliderBinding.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/FileDataSource.cs" />
     <!-- HttpDataSource removed from Core (S51): HttpClient is inherently Task-based.
@@ -150,6 +152,9 @@
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraInteractionTests.cs" />
+
+    <!-- S72: two-way slider↔camera reconcile tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraSliderBindingTests.cs" />
 
     <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LayerDrawOrderTests.cs" />

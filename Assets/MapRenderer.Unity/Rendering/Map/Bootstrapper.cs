@@ -3,7 +3,6 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using Unity.Mathematics;
 
@@ -12,8 +11,9 @@ using Unity.Mathematics;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// S41 map-root bootstrap and wire-up hub. Lives on the <b>MapRoot</b> GameObject, which is the
-    /// scene owner of the map subsystem (<see cref="View"/> + <see cref="Controller"/>).
+    /// S41 map bootstrap and wire-up hub (<c>Map.Bootstrapper</c>). Lives on the <b>MapRoot</b>
+    /// GameObject, which is the scene owner of the map subsystem (<see cref="View"/> +
+    /// <see cref="Controller"/>); this component assembles and starts that subsystem.
     ///
     /// <para>The Main Camera is a separate plain camera GameObject (tagged <c>MainCamera</c>); this
     /// component finds it at startup via <c>Camera.main</c> and wires it into <see cref="Controller"/>.</para>
@@ -44,7 +44,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     [RequireComponent(typeof(MapView))]
     [RequireComponent(typeof(Controller))]
-    public sealed class Root : MonoBehaviour
+    public sealed class Bootstrapper : MonoBehaviour
     {
         // Demo data source: the free, no-key OpenFreeMap OSM tiles (OpenMapTiles schema) rendered with
         // the OpenFreeMap "liberty" style (Assets/StreamingAssets/Fixtures/liberty.json — under
@@ -108,7 +108,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     Latitude = InitialLatitude, Longitude = InitialLongitude, Altitude = 0.0
                 }, InitialZoom, 0, 0);
 
-            // 4. Wire: sets MapController.Camera, MapController.Map, calls MapView.Initialise,
+            // 4. Wire: sets Controller.Camera, Controller.Map, calls MapView.Initialise,
             //    and wires the S45 CameraSystem + MapCamera.
             Wire(gameObject, Camera.main, source, initialView, ownsSource: true, style: style);
 
@@ -127,7 +127,7 @@ namespace MapRenderer.Unity.Rendering.Map
             }
 
             var mapView = GetComponent<MapView>();
-            Debug.Log($"[MapRoot] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
+            Debug.Log($"[Bootstrapper] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
                       $"center=({InitialLatitude:F2},{InitialLongitude:F2}), "          +
                       $"style layers={mapView.Layers.FillCount} fill layers.");
         }
@@ -136,8 +136,8 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Wires the map subsystem on <paramref name="root"/>: finds <see cref="Controller"/> and
-        /// <see cref="View"/> on <paramref name="root"/>, sets <c>MapController.Camera</c> and
-        /// <c>MapController.Map</c>, and calls <see cref="View.Initialise"/> with <paramref name="source"/>
+        /// <see cref="View"/> on <paramref name="root"/>, sets <c>Controller.Camera</c> and
+        /// <c>Controller.Map</c>, and calls <see cref="View.Initialise"/> with <paramref name="source"/>
         /// and <paramref name="initialView"/>.
         ///
         /// <para>If <paramref name="camera"/> is null the method logs a warning and returns without
@@ -146,7 +146,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <para>This is the single wiring graph entry point. Both the runtime <see cref="Start"/>
         /// and EditMode wiring tests call this method.</para>
         /// </summary>
-        /// <param name="root">The MapRoot GameObject (must carry MapView + MapController).</param>
+        /// <param name="root">The MapRoot GameObject (must carry MapView + Controller).</param>
         /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
         /// <param name="source">The tile data source (HTTP, file, in-memory…). May be null in tests.</param>
         /// <param name="initialView">Initial camera state.</param>
@@ -162,28 +162,28 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             if (root == null)
             {
-                Debug.LogWarning("[MapRoot.Wire] root is null — wire-up skipped.");
+                Debug.LogWarning("[Bootstrapper.Wire] root is null — wire-up skipped.");
                 return;
             }
 
             if (camera == null)
             {
-                Debug.LogWarning("[MapRoot.Wire] No camera provided (Camera.main is null). " +
-                                 "MapController will not drive any camera. Wire-up skipped for camera.");
+                Debug.LogWarning("[Bootstrapper.Wire] No camera provided (Camera.main is null). " +
+                                 "Controller will not drive any camera. Wire-up skipped for camera.");
                 // We still continue to initialise MapView and set Map on the controller.
             }
 
             var mapView = root.GetComponent<MapView>();
             if (mapView == null)
             {
-                Debug.LogWarning("[MapRoot.Wire] No MapView found on root — wire-up skipped.");
+                Debug.LogWarning("[Bootstrapper.Wire] No MapView found on root — wire-up skipped.");
                 return;
             }
 
             var ctrl = root.GetComponent<Controller>();
             if (ctrl == null)
             {
-                Debug.LogWarning("[MapRoot.Wire] No Controller found on root — wire-up skipped.");
+                Debug.LogWarning("[Bootstrapper.Wire] No Controller found on root — wire-up skipped.");
                 return;
             }
 
@@ -245,7 +245,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
             if (!File.Exists(fullPath))
             {
-                Debug.LogWarning($"[MapRoot] Style not found at {fullPath} " +
+                Debug.LogWarning($"[Bootstrapper] Style not found at {fullPath} " +
                                  $"(StreamingAssets: {Path.Combine(Application.streamingAssetsPath, StyleAssetPath)}). " +
                                  "MapView will render no fills until a style is loaded. " +
                                  "In a build, the style must live under Assets/StreamingAssets/.");
@@ -256,13 +256,13 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 string        json = File.ReadAllText(fullPath);
                 StyleDocument doc  = StyleParser.Parse(json);
-                Debug.Log($"[MapRoot] Loaded style: {doc.Name ?? "(unnamed)"}, " +
+                Debug.Log($"[Bootstrapper] Loaded style: {doc.Name ?? "(unnamed)"}, " +
                           $"{doc.Layers.Count} layers.");
                 return doc;
             }
             catch (System.Exception ex)
             {
-                Debug.LogError($"[MapRoot] Failed to parse style at {fullPath}: {ex.Message}");
+                Debug.LogError($"[Bootstrapper] Failed to parse style at {fullPath}: {ex.Message}");
                 return new StyleDocument();
             }
         }
@@ -282,7 +282,7 @@ namespace MapRenderer.Unity.Rendering.Map
             light.type                 = LightType.Directional;
             light.intensity            = 1.0f;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
-            Debug.Log("[MapRoot] Created directional light (none found in scene).");
+            Debug.Log("[Bootstrapper] Created directional light (none found in scene).");
         }
     }
 }

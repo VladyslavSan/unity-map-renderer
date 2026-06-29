@@ -309,6 +309,71 @@ namespace MapRenderer.Tests
             Assert.Greater(fwd.y, -1.0, "Forward Y must be > -1 (tilted, not straight down) at tilt=45.");
         }
 
+        /// <summary>
+        /// REGRESSION (tilt vertical-flip): the camera up-vector must keep the sky up at every tilt —
+        /// <c>up.y &gt; 0</c> across a tilt sweep. The pre-fix pose set <c>up.y = -sinT &lt; 0</c>, so as
+        /// tilt → 90 the up-vector pointed straight down and the rendered world appeared on top. This was
+        /// invisible until S72 added a way to tilt in the demo (no pose test pinned up.y at tilt&gt;0).
+        /// </summary>
+        [Test]
+        public void Pose_UpVector_KeepsSkyUp_AcrossTiltSweep()
+        {
+            double altitude = 10000.0;
+            foreach (double t in new[] { 0.0, 30.0, 45.0, 60.0, 89.0 })
+            foreach (double h in new[] { 0.0, 90.0, 200.0, 359.0 })
+            {
+                CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(h), Angle.FromDegrees(t),
+                    out _, out _, out double3 up);
+                Assert.Greater(up.y, -1e-9,
+                    $"up.y must be ≥ 0 (sky up) at tilt={t}, heading={h}; got {up.y:F4} " +
+                    "(negative ⇒ the vertical-flip bug is back).");
+                // up must stay unit-length (the closed form has no normalization step).
+                double upLen = math.sqrt(up.x * up.x + up.y * up.y + up.z * up.z);
+                Assert.AreEqual(1.0, upLen, 1e-9, $"up must be unit at tilt={t}, heading={h}.");
+            }
+        }
+
+        /// <summary>
+        /// REGRESSION: at tilt=90 the camera looks along the horizon with world-up exactly preserved.
+        /// At heading=0 it looks toward +Z (north) from the south side, up = (0,1,0).
+        /// </summary>
+        [Test]
+        public void Pose_Tilt90_LooksAtHorizon_SkyUp()
+        {
+            double altitude = 10000.0;
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(90.0),
+                out double3 pos, out double3 fwd, out double3 up);
+
+            Assert.AreEqual(0.0, pos.x, 1e-3, "At heading=0 the camera has no east/west offset (pos.x ≈ 0).");
+            Assert.Less(pos.z, 0.0, "At tilt=90 heading=0 the camera must sit SOUTH of the look-at (pos.z < 0).");
+            Assert.AreEqual(0.0, pos.y, 1e-3, "At tilt=90 the camera is at ground level (pos.y ≈ 0).");
+
+            Assert.AreEqual( 0.0, fwd.x, 1e-9);
+            Assert.AreEqual( 0.0, fwd.y, 1e-9, "Forward must be horizontal at tilt=90.");
+            Assert.AreEqual( 1.0, fwd.z, 1e-9, "Forward must point north (+Z) at tilt=90 heading=0.");
+
+            Assert.AreEqual(0.0, up.x, 1e-9);
+            Assert.AreEqual(1.0, up.y, 1e-9, "Up must be world-up (0,1,0) at tilt=90.");
+            Assert.AreEqual(0.0, up.z, 1e-9);
+        }
+
+        /// <summary>
+        /// REGRESSION: with tilt&gt;0 at heading=0 the camera looks NORTH (forward +Z) from the south
+        /// side (pos.z &lt; 0), so the bearing-0 view recedes toward north at the top of the screen
+        /// (MapLibre convention). The pre-fix pose had the opposite Z sign (camera north, looking south).
+        /// </summary>
+        [Test]
+        public void Pose_TiltPositive_Heading0_OrbitsToSouth_LooksNorth()
+        {
+            double altitude = 10000.0;
+            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
+                out double3 pos, out double3 fwd, out _);
+
+            Assert.Less(pos.z,    0.0, "Camera must orbit to the SOUTH (pos.z < 0) at heading=0 tilt=45.");
+            Assert.Greater(fwd.z, 0.0, "Forward must have a NORTH component (fwd.z > 0) at heading=0 tilt=45.");
+            Assert.Greater(pos.y, 0.0, "Camera stays above the ground at tilt=45.");
+        }
+
         // ── Heading interpolation: shortest-angle (D4) ────────────────────────────────────────────
 
         [Test]

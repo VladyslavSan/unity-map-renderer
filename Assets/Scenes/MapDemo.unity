@@ -349,9 +349,10 @@ GameObject:
   - component: {fileID: 300000002}
   - component: {fileID: 300000005}
   - component: {fileID: 300000003}
+  - component: {fileID: 300000006}
   - component: {fileID: 300000004}
   m_Layer: 0
-  m_Name: MapRoot
+  m_Name: MapBootstrapper
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -426,12 +427,31 @@ MonoBehaviour:
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: ad261931632ac433d81df864138e16ab, type: 3}
   m_Name: 
-  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapRoot
+  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.Bootstrapper
   TileUrlTemplate: https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf
   StyleAssetPath: Fixtures/liberty.json
   InitialLatitude: 52.52
   InitialLongitude: 13.405
   InitialZoom: 14
+  CapFrameRateToRefreshRate: 1
+--- !u!114 &300000006
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300000001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f764aa4dcc26249138aaf4adf26ba8df, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.CameraControlPanel
+  Map: {fileID: 300000003}
+  minDistance: 0
+  maxDistance: 10000
+  Distance: 1000000
+  Tilt: 0
+  Heading: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
