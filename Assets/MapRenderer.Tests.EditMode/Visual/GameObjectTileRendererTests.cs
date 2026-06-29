@@ -18,12 +18,15 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Unity;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Tile;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 
 namespace MapRenderer.Tests.Visual
 {

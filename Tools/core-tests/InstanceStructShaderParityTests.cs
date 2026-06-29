@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
         /// </summary>
         private static Dictionary<string, int> ParseStructMaterialFields(out int totalFieldCount)
         {
-            string path = Path.Combine(RenderingDir, "MapInstanceData.cs");
+            string path = Path.Combine(RenderingDir, "Backend", "BRG", "MapInstanceData.cs");
             Assert.That(File.Exists(path), Is.True, $"MapInstanceData.cs not found at: {path}");
             string text = File.ReadAllText(path);
 

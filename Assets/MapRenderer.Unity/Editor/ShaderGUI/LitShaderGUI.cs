@@ -1,7 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;   // CoreUtils.SetKeyword (same helper URP's LitGUI/LitDetailGUI use)
-using MapRenderer.Unity.Rendering;
+using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor

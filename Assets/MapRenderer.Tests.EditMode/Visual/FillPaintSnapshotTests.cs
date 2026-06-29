@@ -4,9 +4,9 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
-using MapRenderer.Unity;
 #if UNITY_EDITOR
 using UnityEditor;
+using MapRenderer.Unity.Rendering.Meshing;
 #endif
 // S54: MapFillBootstrap retired; build helpers migrated to FillSceneHelper.
 

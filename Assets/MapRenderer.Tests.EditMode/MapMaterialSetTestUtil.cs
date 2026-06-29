@@ -4,8 +4,7 @@
 // they exercise the real baseline rather than synthesizing one.
 using NUnit.Framework;
 using UnityEditor;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Materials;
 namespace MapRenderer.Tests
 {
     internal static class MapMaterialSetTestUtil

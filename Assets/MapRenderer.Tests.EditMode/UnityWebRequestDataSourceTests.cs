@@ -22,8 +22,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Source;
 namespace MapRenderer.Tests
 {
     /// <summary>

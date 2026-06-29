@@ -18,9 +18,10 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Unity;
-using MapRenderer.Unity.Rendering;
+using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
+using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Visual
 {

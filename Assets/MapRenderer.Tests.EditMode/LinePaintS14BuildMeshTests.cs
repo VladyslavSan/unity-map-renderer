@@ -11,8 +11,8 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
-using MapRenderer.Unity;
 using Unity.Mathematics;
+using MapRenderer.Unity.Rendering.Meshing;
 
 namespace MapRenderer.Tests
 {

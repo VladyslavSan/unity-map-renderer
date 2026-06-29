@@ -21,6 +21,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
+using MapRenderer.Unity.Rendering.Source;
 
 namespace MapRenderer.Tests
 {

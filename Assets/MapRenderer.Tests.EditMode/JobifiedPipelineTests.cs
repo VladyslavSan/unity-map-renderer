@@ -14,8 +14,6 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
-using MapRenderer.Unity;
-
 namespace MapRenderer.Tests
 {
     /// <summary>

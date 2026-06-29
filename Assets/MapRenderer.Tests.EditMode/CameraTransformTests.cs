@@ -11,8 +11,8 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity;
-
+using MapController = MapRenderer.Unity.Rendering.Map.Controller;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests
 {
     [TestFixture]

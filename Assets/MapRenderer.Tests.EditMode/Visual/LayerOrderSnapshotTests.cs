@@ -6,8 +6,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Materials;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>

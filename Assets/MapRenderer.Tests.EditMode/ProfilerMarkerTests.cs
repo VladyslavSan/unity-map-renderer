@@ -26,8 +26,8 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Meshing;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests
 {
     [TestFixture]

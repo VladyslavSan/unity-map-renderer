@@ -14,8 +14,8 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Unity;
-
+using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Tests
 {
     /// <summary>

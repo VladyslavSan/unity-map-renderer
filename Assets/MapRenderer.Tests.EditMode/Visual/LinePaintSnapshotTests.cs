@@ -7,7 +7,6 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity;
 using Unity.Mathematics;
 using System.Collections.Generic;
 

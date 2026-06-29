@@ -7,6 +7,7 @@ using MapRenderer.Core.Imaging;
 // S54: MapFillBootstrap retired; FillSceneHelper replaces it.
 #if UNITY_EDITOR
 using UnityEditor;
+using MapRenderer.Unity.Rendering.Meshing;
 #endif
 
 namespace MapRenderer.Tests.Visual

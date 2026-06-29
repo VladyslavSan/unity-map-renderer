@@ -14,8 +14,8 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Map;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests
 {
     [TestFixture]
@@ -94,8 +94,8 @@ namespace MapRenderer.Tests
 
                 // The camera state exposed by MapView.View must also reflect the new zoom (it reads
                 // CameraSystem.Current directly — the single camera-state type, no bridge).
-                Assert.AreEqual(targetZoom, view.View.Zoom, 1e-6,
-                    "MapView.View.Zoom must equal the post-update camera zoom after UpdateFrame. " +
+                Assert.AreEqual(targetZoom, view.CurrentProperties.Zoom, 1e-6,
+                    "MapView.CurrentProperties.Zoom must equal the post-update camera zoom after UpdateFrame. " +
                     "Failure means tile-selection saw the OLD zoom in this frame (determinism bug).");
             }
             finally { TearDown(rootGo, camGo); }
@@ -129,8 +129,8 @@ namespace MapRenderer.Tests
 
                 Assert.AreEqual(expectedZoom, camSys.CurrentProperties.Zoom, 0.05,
                     "CameraSystem.Current.Zoom must be near midpoint after dt=D/2.");
-                Assert.AreEqual(expectedZoom, view.View.Zoom, 0.05,
-                    "MapView.View.Zoom must reflect the mid-animation zoom within the same UpdateFrame call " +
+                Assert.AreEqual(expectedZoom, view.CurrentProperties.Zoom, 0.05,
+                    "MapView.CurrentProperties.Zoom must reflect the mid-animation zoom within the same UpdateFrame call " +
                     "(tile-selection reads the post-advance camera, not the pre-advance one).");
             }
             finally { TearDown(rootGo, camGo); }

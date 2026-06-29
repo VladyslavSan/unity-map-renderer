@@ -8,8 +8,9 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity;
-
+using MapController = MapRenderer.Unity.Rendering.Map.Controller;
+using MapRoot = MapRenderer.Unity.Rendering.Map.Root;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests
 {
     /// <summary>

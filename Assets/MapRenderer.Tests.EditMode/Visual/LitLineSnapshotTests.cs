@@ -4,10 +4,10 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity;
 using Unity.Mathematics;
 #if UNITY_EDITOR
 using UnityEditor;
+using MapRenderer.Unity.Rendering.Meshing;
 #endif
 
 namespace MapRenderer.Tests.Visual

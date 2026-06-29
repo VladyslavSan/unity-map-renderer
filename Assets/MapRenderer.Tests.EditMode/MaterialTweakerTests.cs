@@ -11,9 +11,11 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
-using MapRenderer.Unity.Rendering;
+using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Unity.Editor;
+using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
+using LineMaterialTweaker = MapRenderer.Unity.Rendering.Materials.LineTweaker;
 
 namespace MapRenderer.Tests
 {

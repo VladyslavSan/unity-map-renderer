@@ -34,8 +34,12 @@ using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity;
-
+using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Tile;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>

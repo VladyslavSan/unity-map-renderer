@@ -16,11 +16,11 @@ using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity;
-using MapRenderer.Unity.Rendering;
+using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Tests.Visual;
 using CoreColor = MapRenderer.Core.Expressions.Color;
+using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests
 {

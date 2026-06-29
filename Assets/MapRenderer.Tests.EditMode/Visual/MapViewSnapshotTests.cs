@@ -10,8 +10,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Imaging;
-using MapRenderer.Unity;
-
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>

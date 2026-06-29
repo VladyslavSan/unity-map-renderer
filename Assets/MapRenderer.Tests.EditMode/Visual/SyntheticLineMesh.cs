@@ -6,8 +6,7 @@ using UnityEngine;
 using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Meshing;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>

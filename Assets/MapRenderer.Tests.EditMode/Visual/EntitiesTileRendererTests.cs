@@ -13,10 +13,11 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Entities;
 using Unity.Mathematics;
-using MapRenderer.Unity;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Imaging;
+using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
+using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Visual
 {

@@ -1,0 +1,32 @@
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace MapRenderer.Unity.Rendering.Materials
+{
+    /// <summary>
+    /// Fill material tweaker — the runtime render-state contract for a fill material (keyword sync is editor-
+    /// side, in <c>FillShaderGUI</c>). STATIC. The painter contract adds the fill's OPAQUE blend on top of the
+    /// shared base contract. (S58)
+    /// </summary>
+    public static class FillTweaker
+    {
+        public const BlendMode DefaultSrcRGBBlend   = BlendMode.SrcAlpha;
+        public const BlendMode DefaultDstRGBBlend   = BlendMode.OneMinusSrcAlpha;
+        public const BlendMode DefaultSrcAlphaBlend = BlendMode.One;
+        public const BlendMode DefaultDstAlphaBlend = BlendMode.OneMinusSrcAlpha;
+
+
+        /// <summary>
+        /// Re-asserts the fill compositing contract after cloning a base <c>.mat</c> (replaces S57's
+        /// magic-string <c>SetFloat</c> calls): shared base contract (no depth write, LEqual test, white
+        /// identity) + OPAQUE <c>One/Zero</c> blend (each fill layer overwrites in painter's order — code-
+        /// owned, overrides any stale premultiply blend a base .mat may carry). Render state + identity ONLY,
+        /// not keyword sync (a clone inherits the base's import-baked keywords).
+        /// </summary>
+        public static void ApplyPainterContract(Material m)
+        {
+            BaseTweaker.ApplyBaseContract(m);
+            m.SetBlend(DefaultSrcRGBBlend, DefaultDstRGBBlend, DefaultSrcAlphaBlend, DefaultDstAlphaBlend);
+        }
+    }
+}

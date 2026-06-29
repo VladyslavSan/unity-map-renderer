@@ -3,7 +3,7 @@ using UnityEditor;
 using UnityEditor.Rendering; // MaterialHeaderScopeList (com.unity.render-pipelines.core editor — a UI utility)
 using UnityEngine;
 using UnityEngine.Rendering;
-using MapRenderer.Unity.Rendering;
+using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Editor

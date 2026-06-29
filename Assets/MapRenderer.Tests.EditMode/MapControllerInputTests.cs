@@ -8,6 +8,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using MapController = MapRenderer.Unity.Rendering.Map.Controller;
 
 namespace MapRenderer.Tests
 {
@@ -20,7 +21,7 @@ namespace MapRenderer.Tests
             {
                 // Resolve path relative to the Unity project root (Application.dataPath ends at "Assets").
                 string root   = Path.GetDirectoryName(Application.dataPath);
-                string path   = Path.Combine(root, "Assets", "MapRenderer.Unity", "MapController.cs");
+                string path   = Path.Combine(root, "Assets", "MapRenderer.Unity", "Rendering", "Map", "Controller.cs");
                 return File.ReadAllText(path);
             }
         }

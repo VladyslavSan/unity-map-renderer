@@ -1,7 +1,6 @@
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Unity;
-
+using MapRenderer.Unity.Rendering.Materials;
 namespace MapRenderer.Tests.EditMode
 {
     /// <summary>

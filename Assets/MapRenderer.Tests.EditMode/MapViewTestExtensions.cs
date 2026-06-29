@@ -1,7 +1,13 @@
 using UnityEngine;
 using Unity.Mathematics;
-using MapRenderer.Unity;
 using MapRenderer.Core.Geo;
+using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
+using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
+using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Tile;
+using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 
 namespace MapRenderer.Tests
 {

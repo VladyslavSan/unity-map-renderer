@@ -2,6 +2,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Imaging;
+using MapRenderer.Unity.Rendering.Meshing;
 // S54: MapFillBootstrap retired; FillSceneHelper replaces it.
 
 namespace MapRenderer.Tests.Visual
