@@ -39,6 +39,9 @@ namespace MapRenderer.Tests
         /// <summary>Number of tiles released while their tessellation was still in-flight.</summary>
         public static int ReleasedMidFlightCount(this MapView view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
 
+        /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
+        public static int ReleasedMidFetchCount(this MapView view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
+
         /// <summary>True when the tile is loaded AND produced geometry. Backend-agnostic.</summary>
         public static bool TryGetBuiltTile(this MapView view, TileId id) => view.TileManager != null && view.TileManager.TryGetBuiltTile(id);
 

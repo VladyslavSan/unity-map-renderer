@@ -264,15 +264,6 @@ namespace MapRenderer.Tests.Visual
             } ]
         }");
 
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] b) { _bytes = b; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -287,10 +278,10 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void GameObjectBackend_BuildsContainers_AtTileLocalToScene_AndIsExclusive()
         {
-            var src  = new FixtureSource(FixtureBytes());
+            var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Go");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
             view.Backend = RenderBackend.GameObject;
             try

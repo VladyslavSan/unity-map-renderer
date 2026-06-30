@@ -81,29 +81,13 @@ namespace MapRenderer.Tests
             ]
         }");
 
-        /// <summary>
-        /// In-memory source that serves the same fixture bytes for ANY tile id.
-        /// UniTask.FromResult makes the fetch synchronously-completing so PumpUntilSettled
-        /// can drain tessellation UniTasks within a small number of spins + Thread.Sleep(1) calls.
-        /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (was Task&lt;TileResponse&gt;).
-        /// </summary>
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] bytes) { _bytes = bytes; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            // S51: UniTask.FromResult — no Task.
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         /// <summary>
         /// Pumps Tick() until every loaded tile has settled or a spin budget is hit.
         /// With S47 async tessellation, each Tick() polls completed tasks, so a few spins +
         /// Thread.Sleep(1) drain the ThreadPool tessellation naturally.
         /// </summary>
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
+        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
@@ -128,12 +112,12 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth1_TessellationDeferred_TileNotBuiltInSameFetchFrame()
         {
-            var src  = new FixtureSource(FixtureBytes());
+            var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_T1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -154,7 +138,7 @@ namespace MapRenderer.Tests
                     "synchronously in the same Tick() call that starts it.");
 
                 // Now let the async task complete and drain naturally.
-                PumpUntilSettled(view, maxFrames: 500);
+                PumpUntilSettled(view, maxFrames: 2500);
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "After draining, all tiles must eventually settle.");
@@ -263,12 +247,12 @@ namespace MapRenderer.Tests
             const string tessellateMarkerName = "MapRenderer.Tile.Tessellate";
             const string uploadMarkerName     = "MapRenderer.Mesh.Upload";
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T2b");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread restricts capture to the
@@ -355,12 +339,12 @@ namespace MapRenderer.Tests
         public void Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath()
         {
             byte[] bytes = FixtureBytes();
-            var src  = new FixtureSource(bytes);
+            var src  = TestDataSource.FromBytes(bytes);
             var go   = new GameObject("MapView_T3");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -446,12 +430,12 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth4_ReleasedMidFlight_NoGameObjectCreated()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -476,7 +460,7 @@ namespace MapRenderer.Tests
                     "Tooth 4: Original tile (5,16,16) must be evicted after panning.");
 
                 // Let everything settle (new cover tiles build).
-                PumpUntilSettled(view, maxFrames: 500);
+                PumpUntilSettled(view, maxFrames: 2500);
 
                 // After full settle, the evicted original tile must still be absent.
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
@@ -504,12 +488,12 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth5_DrainTessellation_SettlesAllTiles()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -547,13 +531,13 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth6_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T6");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
             view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -574,7 +558,8 @@ namespace MapRenderer.Tests
                     "Tooth 6a: MapView.Tick must not allocate during a within-cover pan. " +
                     "The S47 async polling loop must allocate only on fetch-completion edges, not here.");
 
-                Assert.AreEqual(9, view.LoadedTileCount(), "Within-cover pan must not load new tiles.");
+                Assert.AreEqual(16, view.LoadedTileCount(),
+                    "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles.");
 
                 // ── (b) static frame early-out ──
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),

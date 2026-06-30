@@ -78,19 +78,6 @@ namespace MapRenderer.Tests
             ]
         }");
 
-        /// <summary>
-        /// In-memory source returning the fixture bytes synchronously.
-        /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (no Task).
-        /// </summary>
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] bytes) { _bytes = bytes; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         /// <summary>
         /// Pumps Tick until all tiles settle or maxFrames is reached.
@@ -129,12 +116,12 @@ namespace MapRenderer.Tests
         [Test]
         public void BuildAndRelease_NoOrphanedMesh()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_A");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             // Baseline: count Meshes before the map load.
@@ -200,12 +187,12 @@ namespace MapRenderer.Tests
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_B");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             // MaxBuildsPerTick = 0 BEFORE initialise: prevents Phase-2 (consume) from running.
             // Tessellation tasks are KICKED (Phase-1) but never consumed, guaranteeing the tiles
             // are in HasTessellationTask=true, Built=false state when we evict them.
@@ -352,12 +339,12 @@ namespace MapRenderer.Tests
         {
             long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
             // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
             view.MaxBuildsPerTick = 0;
@@ -457,12 +444,12 @@ namespace MapRenderer.Tests
         {
             long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -515,12 +502,12 @@ namespace MapRenderer.Tests
         [Test]
         public void DrainThenDestroy_NoOrphanedMesh()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_LeakGuard_C");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             int meshBefore = CountMeshObjects();

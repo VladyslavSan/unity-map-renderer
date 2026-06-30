@@ -64,15 +64,6 @@ namespace MapRenderer.Tests
             ]
         }");
 
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] bytes) { _bytes = bytes; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -162,7 +153,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_ProfilerTest");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             // Start both recorders BEFORE the tile load — must be open when samples fire.
@@ -178,7 +169,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.Initialise(new FixtureSource(FixtureBytes()), Cam(0, 0, 0.0),
+                view.Initialise(TestDataSource.FromBytes(FixtureBytes()), Cam(0, 0, 0.0),
                     ownsSource: false, style: MinimalStyle());
 
                 // Drive the tile load synchronously (FixtureSource returns immediately).

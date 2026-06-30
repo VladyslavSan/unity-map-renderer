@@ -28,8 +28,9 @@ namespace MapRenderer.Core.View
     /// <c>≈ merc_vertex − sceneOrigin</c>. Precision is therefore governed entirely by how far the
     /// farthest visible vertex's true Mercator position lies from <c>sceneOrigin</c>:
     /// <c>≤ |camera − sceneOrigin| + coverRadius</c>. With <c>sceneOrigin ≡ look-at</c> each frame,
-    /// <c>|camera − sceneOrigin|</c> is ~0 (the camera orbits the render origin); <see cref="TileCover"/>
-    /// bounds <c>coverRadius</c>; and the per-tile in-tile span is bounded by the zoom. The worst-case
+    /// <c>|camera − sceneOrigin|</c> is ~0 (the camera orbits the render origin); the visible-tile selector
+    /// (<see cref="IVisibleTileSelector"/>) bounds <c>coverRadius</c>; and the per-tile in-tile span is
+    /// bounded by the zoom. The worst-case
     /// rendered magnitude stays within the float32 ULP budget (≈ 8.4 km ⇒ sub-mm) by a wide margin.</para>
     ///
     /// <para>All inputs/outputs are Web-Mercator meters except <see cref="TileLocalToScene"/>, which

@@ -79,7 +79,7 @@ namespace MapRenderer.Tests
 
         // ── B5: Clamped — runtime range ≠ the [0,90] Tilt preset ─────────────────────────────────
         //
-        // ViewInput.ApplyTilt's maxPitch limit is a runtime value, distinct from the [0,90] Tilt
+        // ViewInput.ApplyTiltDelta's maxPitch limit is a runtime value, distinct from the [0,90] Tilt
         // type invariant. If both were collapsed into the Tilt preset, Clamped(75,0,60) would return
         // 75° (accepted by the [0,90] preset) — but with the correct separate Clamped path it returns 60°.
 

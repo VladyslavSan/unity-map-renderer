@@ -4,6 +4,7 @@ using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -73,9 +74,13 @@ namespace MapRenderer.Unity.Rendering.Map
         private static readonly ProfilerMarker PmManagerTick      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.ManagerTick");
 
         // ── Configuration (serialized — inspector-editable; read every Tick, never snapshotted) ──
-        [Tooltip("Cover over-select: viewport aspect (w/h) and pad factor (absorbs viewport size + pitch).")]
-        public float ViewportAspect = 1.5f;
-        public float PadFactor      = 1.5f;
+        [Tooltip("S71: fixed safety ring (in tiles) added around the viewport-derived cover. Coverage itself " +
+                 "comes from unprojecting the viewport corners — this is slop margin, NOT the coverage knob.")]
+        public int PadTiles = 1;
+
+        [Tooltip("Headless fallback viewport aspect (w/h). Used only when there is no live Unity camera to " +
+                 "read pixelWidth/pixelHeight from (deterministic ticks); at runtime the live aspect is used.")]
+        public float FallbackAspect = 1.5f;
 
         [Tooltip("Zoom clamp for tile selection.")]
         public int MinZoom = 0;
@@ -223,18 +228,49 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmInstancedRebuild.Auto())
                 TileManager.InstancedRebuild(_sceneOrigin);
 
+            EnsureSelector();
             using (PmManagerTick.Auto())
                 TileManager.Tick(cam, BuildTileSelectionConfig());
         }
 
-        private Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig() => new Tile.TileManager.TileSelectionConfig
+        // ── S71: visible-tile selector (default ViewportCornerTileSelector), rebuilt only when its algorithm
+        //     config changes — so inspector tweaks take effect while steady-state stays allocation-free. ──
+        private int _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom;
+
+        private void EnsureSelector()
         {
-            ViewportAspect   = ViewportAspect,
-            PadFactor        = PadFactor,
-            MinZoom          = MinZoom,
-            MaxZoom          = MaxZoom,
-            MaxBuildsPerTick = MaxBuildsPerTick,
-        };
+            if (TileManager == null) return;
+            if (TileManager.Selector == null ||
+                _selPadTiles != PadTiles || _selMinZoom != MinZoom || _selMaxZoom != MaxZoom)
+            {
+                TileManager.Selector = new ViewportCornerTileSelector(PadTiles, MinZoom, MaxZoom);
+                _selPadTiles = PadTiles; _selMinZoom = MinZoom; _selMaxZoom = MaxZoom;
+            }
+        }
+
+        /// <summary>
+        /// S71: the per-frame view inputs the selector consumes. Feeds the <b>framing</b> viewport
+        /// <c>(refH · liveAspect, refH)</c> — NOT raw live px (D6/D7): <c>refH</c> is the same reference height
+        /// the camera framing uses (<see cref="CameraSystem.ReferenceViewportHeightPx"/>); <c>liveAspect</c>
+        /// comes from the live Unity camera at runtime and the serialized <see cref="FallbackAspect"/> headless.
+        /// Projection is the active pixel↔ground service the camera owns (Web-Mercator today).
+        /// </summary>
+        private Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
+        {
+            double refH     = _cameraSystem != null ? _cameraSystem.ReferenceViewportHeightPx : 1080.0;
+            double aspect   = _mapCamera    != null ? _mapCamera.LiveAspect(FallbackAspect)    : FallbackAspect;
+            IProjection proj = _cameraSystem != null ? _cameraSystem.Projection : _fallbackProjection;
+
+            return new Tile.TileManager.TileSelectionConfig
+            {
+                FramingViewportPx = new double2(refH * aspect, refH),
+                Projection        = proj,
+                MaxBuildsPerTick  = MaxBuildsPerTick,
+            };
+        }
+
+        // Used only on the (test) path where no CameraSystem is present yet; production always has one.
+        private readonly IProjection _fallbackProjection = new WebMercatorProjection();
 
         private void Update()
         {

@@ -25,11 +25,63 @@ namespace MapRenderer.Core.View
     ///   - <b>Pan</b> (anchored): the grabbed ground point at drag-start stays glued to the cursor.
     ///     Returns a Longitude + Latitude patch. The grabbed point is captured once by the caller
     ///     (<c>projection.ScreenToGround(P_start, vp, cam)</c>) and supplied every frame.
-    ///   - <b>Tilt/bearing</b>: a screen-space drag delta maps to pitch (vertical) and bearing (horizontal)
-    ///     in degrees, each clamped to a sane range. Projection-agnostic.
+    ///   - <b>Heading/tilt</b>: degree deltas (already scaled by source sensitivity) map to separate
+    ///     heading-only or tilt-only patches. <see cref="ApplyHeadingDelta"/> and
+    ///     <see cref="ApplyTiltDelta"/> are independent; each leaves the other angle null.
+    ///     The unified <see cref="Apply(in GestureIntent, in ViewContext)"/> dispatch routes any
+    ///     <see cref="GestureIntent"/> to the appropriate helper.
     /// </summary>
     public static class ViewInput
     {
+        /// <summary>
+        /// Single device-agnostic dispatch: maps a <see cref="GestureIntent"/> to a
+        /// <see cref="CameraPropertiesUpdate"/> patch, reading the per-frame camera, viewport,
+        /// and projection from <paramref name="view"/>.
+        ///
+        /// <para>Sources (mouse, keyboard, touch, test driver) build a <see cref="GestureIntent"/>
+        /// and call this method; the mapping lives here, not in the source. Only the fields relevant
+        /// to the gesture are set on the returned patch (the rest stay <c>null</c>).</para>
+        /// </summary>
+        public static CameraPropertiesUpdate Apply(in GestureIntent intent, in ViewContext view)
+            => intent.Kind switch
+            {
+                GestureKind.ZoomAtAnchor => ApplyZoom(view.Projection, view.Camera,
+                                                      intent.AnchorPx, view.ViewportPx,
+                                                      intent.ZoomDelta, 1.0,
+                                                      intent.MinZoom, intent.MaxZoom),
+                GestureKind.PanToAnchor  => ApplyPan(view.Projection, view.Camera,
+                                                     intent.GrabbedGround, intent.CursorPx,
+                                                     view.ViewportPx),
+                GestureKind.HeadingBy    => ApplyHeadingDelta(view.Camera, intent.HeadingDeltaDeg),
+                GestureKind.TiltBy       => ApplyTiltDelta(view.Camera, intent.TiltDeltaDeg, intent.MaxPitch),
+                _                        => default,
+            };
+
+        /// <summary>
+        /// Heading-only patch: rotates bearing by <paramref name="headingDeltaDeg"/> degrees, re-applying
+        /// the [0, 360) <see cref="MapRenderer.Core.View.Camera.AngleConstraint.Wrap"/> constraint from
+        /// the S68 <c>ConstrainedAngle</c> model. <b>Tilt is not set</b> (stays <c>null</c> on the patch).
+        /// </summary>
+        /// <returns>A patch with only <see cref="CameraPropertiesUpdate.Heading"/> set.</returns>
+        public static CameraPropertiesUpdate ApplyHeadingDelta(in CameraProperties current, double headingDeltaDeg)
+            => new CameraPropertiesUpdate
+            {
+                Heading = (current.Heading + Angle.FromDegrees(headingDeltaDeg)).Degrees,
+            };
+
+        /// <summary>
+        /// Tilt-only patch: pitches the camera by <paramref name="tiltDeltaDeg"/> degrees, clamped to
+        /// [0, <paramref name="maxPitch"/>] via <see cref="ConstrainedAngle.Clamped"/>. <b>Heading is
+        /// not set</b> (stays <c>null</c> on the patch). The runtime <paramref name="maxPitch"/> is a
+        /// distinct, potentially narrower limit than the [0, 90] type invariant of the Tilt preset.
+        /// </summary>
+        /// <returns>A patch with only <see cref="CameraPropertiesUpdate.Tilt"/> set.</returns>
+        public static CameraPropertiesUpdate ApplyTiltDelta(in CameraProperties current, double tiltDeltaDeg, double maxPitch)
+            => new CameraPropertiesUpdate
+            {
+                Tilt = ConstrainedAngle.Clamped(current.Tilt.Degrees + tiltDeltaDeg, 0.0, maxPitch).Degrees,
+            };
+
         /// <summary>
         /// Zoom-to-cursor: applies a scroll delta so the earth point under <paramref name="cursorPx"/>
         /// remains under <paramref name="cursorPx"/> after the zoom.
@@ -90,27 +142,6 @@ namespace MapRenderer.Core.View
                 Longitude = WrapLon(lookAtAfter.Longitude),
                 Latitude  = projection.ClampValidLatitude(lookAtAfter.Latitude)
             };
-        }
-
-        /// <summary>
-        /// Applies a screen-space drag to bearing (horizontal) and pitch (vertical). Pitch is clamped to
-        /// [0, <paramref name="maxPitch"/>]; bearing wraps to [0,360).
-        /// </summary>
-        /// <returns>A patch that sets only <see cref="CameraPropertiesUpdate.Heading"/> and
-        ///   <see cref="CameraPropertiesUpdate.Tilt"/>.</returns>
-        public static CameraPropertiesUpdate ApplyTilt(in CameraProperties current, double dxPixels, double dyPixels,
-                                                       double bearingSensitivity, double pitchSensitivity,
-                                                       double maxPitch)
-        {
-            // Bearing: the ConstrainedAngle + Angle operator re-applies the [0,360) Wrap constraint.
-            double bearing = (current.Heading + Angle.FromDegrees(dxPixels * bearingSensitivity)).Degrees;
-
-            // Pitch: use a runtime Clamped(lo=0, hi=maxPitch) — distinct from the [0,90] Tilt type
-            // preset; maxPitch may be narrower (e.g. 60°) and must not be silently widened to 90°.
-            double pitch = ConstrainedAngle.Clamped(
-                current.Tilt.Degrees + dyPixels * pitchSensitivity, 0.0, maxPitch).Degrees;
-
-            return new CameraPropertiesUpdate { Heading = bearing, Tilt = pitch };
         }
 
         private static double WrapLon(double lon)

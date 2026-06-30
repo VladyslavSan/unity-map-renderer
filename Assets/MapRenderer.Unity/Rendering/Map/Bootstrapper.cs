@@ -212,6 +212,14 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // Wire the controller to the view.
             ctrl.Map = mapView;
+
+            // S74: wire the touch source alongside the desktop controller (same write seam).
+            // GetComponent-or-AddComponent so no committed scene edit is required; the scene
+            // validator only flags missing scripts, not runtime-added ones. A maintainer follow-up
+            // adds it to the MapRoot prefab so thresholds/sensitivities are tunable in the Inspector.
+            var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
+            touch.camera = camera;
+            touch.Map    = mapView;
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────

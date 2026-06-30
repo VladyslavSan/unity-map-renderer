@@ -207,7 +207,7 @@ namespace MapRenderer.Tests
         {
             var tcs  = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return tcs.Task;
@@ -242,7 +242,7 @@ namespace MapRenderer.Tests
         public async Task Scheduler_AfterFetch_CacheHit_NoSecondFetch()
         {
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return UniTask.FromResult(MakeResponse(7));
@@ -276,7 +276,7 @@ namespace MapRenderer.Tests
         {
             var tcs        = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return tcs.Task;  // Returns pending UniTask; will be cancelled below.
@@ -311,7 +311,7 @@ namespace MapRenderer.Tests
             // Release() drops the cache entry and the in-flight reference. After release,
             // a new Request() must trigger a fresh fetch (not serve a stale cached result).
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return UniTask.FromResult(MakeResponse((byte)(fetchCount * 10)));
@@ -346,7 +346,7 @@ namespace MapRenderer.Tests
             // Source blocks until manually signalled, to model a real in-flight HTTP fetch.
             var tcs   = new UniTaskCompletionSource<TileResponse>();
             int fetchCount = 0;
-            var fakeSource = new FakeDataSourceCt((id, ct) =>
+            var fakeSource = new TestDataSource((id, ct) =>
             {
                 Interlocked.Increment(ref fetchCount);
                 // Register a callback: when ct is cancelled, cancel the TCS so the blocked
@@ -388,7 +388,7 @@ namespace MapRenderer.Tests
             // Source does NOT honour the cancellation token — it blocks and eventually returns
             // a successful result regardless of cancellation.
             var tcs        = new UniTaskCompletionSource<TileResponse>();
-            var fakeSource = new FakeDataSource(id => tcs.Task);
+            var fakeSource = TestDataSource.FromFetch(id => tcs.Task);
 
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(fakeSource, cache);
@@ -423,7 +423,7 @@ namespace MapRenderer.Tests
         public async Task SyncCompletingSource_NoStaleInFlightEntry()
         {
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 // Sync completion: returns an already-resolved UniTask.
@@ -457,7 +457,7 @@ namespace MapRenderer.Tests
         public async Task NegativeCache_AbsentTile_NotRefetchedWithinTtl()
         {
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
@@ -496,7 +496,7 @@ namespace MapRenderer.Tests
         public async Task NegativeCache_RefetchesAfterTtlExpiry()
         {
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
@@ -527,7 +527,7 @@ namespace MapRenderer.Tests
         public async Task NegativeCache_ZeroTtl_AlwaysRefetches()
         {
             int fetchCount = 0;
-            var fakeSource = new FakeDataSource(id =>
+            var fakeSource = TestDataSource.FromFetch(id =>
             {
                 Interlocked.Increment(ref fetchCount);
                 return UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
@@ -555,7 +555,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Dispose_DoesNotDisposeInjectedSource()
         {
-            var spySource = new DisposeSpySource();
+            var spySource = TestDataSource.Absent();
             var cache     = new TileCache(capacity: 10);
             var scheduler = new TileScheduler(spySource, cache);
 
@@ -575,7 +575,7 @@ namespace MapRenderer.Tests
         {
             var tcs        = new UniTaskCompletionSource<TileResponse>();
             bool cancellationObserved = false;
-            var fakeSource = new FakeDataSourceCt((id, ct) =>
+            var fakeSource = new TestDataSource((id, ct) =>
             {
                 ct.Register(() => { cancellationObserved = true; tcs.TrySetCanceled(); });
                 return tcs.Task;
@@ -607,16 +607,6 @@ namespace MapRenderer.Tests
             public void Advance(TimeSpan by) { _now += by; }
         }
 
-        /// <summary>Data source that records whether Dispose was called on it.</summary>
-        private sealed class DisposeSpySource : IDataSource
-        {
-            public bool WasDisposed { get; private set; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-            public void Dispose() { WasDisposed = true; }
-        }
 
         // -----------------------------------------------------------------------------------------
         // Helpers
@@ -629,44 +619,6 @@ namespace MapRenderer.Tests
         // Fake data sources for scheduler tests
         // -----------------------------------------------------------------------------------------
 
-        private sealed class FakeDataSource : IDataSource
-        {
-            private readonly Func<TileId, UniTask<TileResponse>> _fetch;
 
-            public TileEncoding Encoding => TileEncoding.Mvt;
-
-            public FakeDataSource(Func<TileId, UniTask<TileResponse>> fetch)
-            {
-                _fetch = fetch;
-            }
-
-            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => _fetch(id);
-
-            public void Dispose() { }
-        }
-
-        /// <summary>
-        /// Fake data source variant that exposes the CancellationToken to the fetch delegate,
-        /// so tests can register cancellation callbacks.
-        /// </summary>
-        private sealed class FakeDataSourceCt : IDataSource
-        {
-            private readonly Func<TileId, CancellationToken, UniTask<TileResponse>> _fetch;
-
-            public TileEncoding Encoding => TileEncoding.Mvt;
-
-            public FakeDataSourceCt(Func<TileId, CancellationToken, UniTask<TileResponse>> fetch)
-            {
-                _fetch = fetch;
-            }
-
-            // S51: returns UniTask<TileResponse> (was Task<TileResponse>).
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => _fetch(id, ct);
-
-            public void Dispose() { }
-        }
     }
 }

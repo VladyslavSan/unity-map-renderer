@@ -8,7 +8,8 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.View.Camera;
-using MapController = MapRenderer.Unity.Rendering.Map.Controller;
+using MapController   = MapRenderer.Unity.Rendering.Map.Controller;
+using TouchController = MapRenderer.Unity.Rendering.Map.TouchController;
 using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
 using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 namespace MapRenderer.Tests
@@ -43,7 +44,7 @@ namespace MapRenderer.Tests
             var cam = cameraGo.AddComponent<Camera>();
 
             // A minimal in-memory data source.
-            var source = new FixtureSource();
+            var source = TestDataSource.Absent();
             var initialView = new CameraProperties(new GeoCoordinate3D { Longitude = 0.0, Latitude = 20.0, Altitude = 0 }, 2.0, 0, 0);
 
             try
@@ -81,7 +82,7 @@ namespace MapRenderer.Tests
             var rootGo = new GameObject("MapRoot");
             rootGo.AddComponent<MapView>();
             rootGo.AddComponent<MapController>();
-            var source = new FixtureSource();
+            var source = TestDataSource.Absent();
 
             try
             {
@@ -124,19 +125,46 @@ namespace MapRenderer.Tests
             }
         }
 
+        // ── (4) S74 — TouchController wired by Wire() ────────────────────────────────────────────
+
+        /// <summary>
+        /// S74: Wire() must add (or find) a <see cref="TouchController"/> on root and set its
+        /// Map and Camera fields — locks the wiring so touch can't silently un-wire.
+        /// </summary>
+        [Test]
+        public void Wire_HappyPath_WiresTouchController()
+        {
+            var rootGo = new GameObject("MapRoot");
+            rootGo.AddComponent<MapView>();
+            rootGo.AddComponent<MapController>();
+
+            var cameraGo = new GameObject("MainCamera");
+            cameraGo.tag = "MainCamera";
+            var cam = cameraGo.AddComponent<Camera>();
+
+            var source      = TestDataSource.Absent();
+            var initialView = new CameraProperties(
+                new GeoCoordinate3D { Longitude = 0.0, Latitude = 0.0, Altitude = 0 }, 2.0, 0, 0);
+
+            try
+            {
+                Bootstrapper.Wire(rootGo, cam, source, initialView, ownsSource: false, style: null);
+
+                var touch = rootGo.GetComponent<TouchController>();
+                Assert.IsNotNull(touch,    "S74: Wire() must add TouchController to root");
+                Assert.IsNotNull(touch.Map, "S74: TouchController.Map must be set after Wire()");
+                Assert.AreEqual(cam, touch.camera,
+                    "S74: TouchController.camera must equal the camera passed to Wire()");
+            }
+            finally
+            {
+                Object.DestroyImmediate(rootGo);
+                Object.DestroyImmediate(cameraGo);
+                source.Dispose();
+            }
+        }
+
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Minimal in-memory IDataSource that immediately returns empty (no-data) responses.</summary>
-        private sealed class FixtureSource : IDataSource
-        {
-            public TileEncoding Encoding => TileEncoding.Mvt;
-
-            public UniTask<TileResponse> FetchAsync(
-                TileId id,
-                System.Threading.CancellationToken ct = default)
-                => UniTask.FromResult(TileResponse.Absent(TileEncoding.Mvt));
-
-            public void Dispose() { }
-        }
     }
 }

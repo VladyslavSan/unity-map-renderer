@@ -67,9 +67,18 @@
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/ProjectionMode.cs" />
 
     <!-- S06: tile cover / floating-origin / input math (Core, engine-free) -->
-    <Compile Include="../../Assets/MapRenderer.Core/View/TileCover.cs" />
+    <!-- S71: visible-tile-selection seam + default viewport-corner impl (replaces TileCover) -->
+    <!-- S73: device-agnostic gesture intent vocabulary -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/ViewContext.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/IVisibleTileSelector.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/ViewportCornerTileSelector.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/GestureIntent.cs" />
+
+    <!-- S74: touch gesture recognizer + finger-sample type (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/TouchSample.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/TouchGestureRecognizer.cs" />
 
     <!-- S45: Camera system (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/Angle.cs" />
@@ -137,6 +146,9 @@
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Strings.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
+    <!-- S81: shared engine-free test double for IDataSource (used by DataSourceTests in both runners) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/TestSupport/TestDataSource.cs" />
+
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/AngleTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ConstrainedAngleTests.cs" />
@@ -152,6 +164,9 @@
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraInteractionTests.cs" />
+
+    <!-- S74: touch gesture recognizer tests (engine-free; B-CLASSIFY/B-CLAMP/B-PANPIN/T-FAKESOURCE) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/TouchGestureRecognizerTests.cs" />
 
     <!-- S72: two-way slider↔camera reconcile tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraSliderBindingTests.cs" />

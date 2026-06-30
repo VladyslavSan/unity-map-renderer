@@ -72,15 +72,6 @@ namespace MapRenderer.Tests.Visual
             return File.ReadAllBytes(path);
         }
 
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] b) { _bytes = b; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -133,12 +124,12 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_TwoFillLayers_ProducesTwoDistinctChildRenderersWithOrderedQueues()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = TwoFillLayerStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -201,11 +192,11 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_InterleavedFillLineFill_QueuesFollowStyleOrderNotType()
         {
-            var src  = new FixtureSource(FixtureBytes());
+            var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -284,12 +275,12 @@ namespace MapRenderer.Tests.Visual
         public void MapView_ContinentMatchStyle_BakesAtLeastTwoDistinctVertexColors()
         {
             var bytes = FixtureBytes();
-            var src   = new FixtureSource(bytes);
+            var src   = TestDataSource.FromBytes(bytes);
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = ContinentFillStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -390,12 +381,12 @@ namespace MapRenderer.Tests.Visual
                 ]
             }";
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -539,12 +530,12 @@ namespace MapRenderer.Tests.Visual
                 }]
             }";
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try

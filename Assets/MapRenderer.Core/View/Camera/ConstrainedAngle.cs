@@ -24,7 +24,7 @@ namespace MapRenderer.Core.View.Camera
     ///   <item><see cref="Heading"/> — <c>[0, 360)</c> Wrap.</item>
     ///   <item><see cref="Tilt"/> — <c>[0, 90]</c> Clamp.</item>
     ///   <item><see cref="Clamped"/> — arbitrary <c>[lo, hi]</c> Clamp (e.g. a runtime
-    ///     <c>maxPitch</c> limit in <c>ViewInput.ApplyTilt</c>).</item>
+    ///     <c>maxPitch</c> limit in <c>ViewInput.ApplyTiltDelta</c>).</item>
     /// </list>
     /// </para>
     ///
@@ -87,7 +87,7 @@ namespace MapRenderer.Core.View.Camera
 
         /// <summary>
         /// General clamped angle with a runtime <c>[loDeg, hiDeg]</c> range. Used where the limit
-        /// is a runtime value (e.g. <c>maxPitch</c> in <c>ViewInput.ApplyTilt</c>) — a distinct,
+        /// is a runtime value (e.g. <c>maxPitch</c> in <c>ViewInput.ApplyTiltDelta</c>) — a distinct,
         /// potentially narrower limit than the <c>[0, 90]</c> type invariant of <see cref="Tilt"/>.
         /// </summary>
         public static ConstrainedAngle Clamped(double degrees, double loDeg, double hiDeg)

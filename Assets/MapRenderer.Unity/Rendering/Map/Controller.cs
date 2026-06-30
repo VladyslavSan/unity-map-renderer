@@ -8,15 +8,15 @@ using MapRenderer.Core.View.Camera;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// S45: Thin input → <see cref="CameraPropertiesUpdate"/> patch translator. Supersedes the
+    /// S45/S73: Thin input → <see cref="CameraPropertiesUpdate"/> patch translator. Supersedes the
     /// S42 god-MonoBehaviour: all pose math has moved to <see cref="CameraPoseMath"/> (Core) and
     /// <see cref="MapCamera"/> (Unity sync). This class reads <c>Mouse.current</c> /
     /// <c>Keyboard.current</c> and calls <see cref="View.Camera"/>.Apply with instant patches.
     ///
     /// <para><b>Input backend: new Input System (<c>UnityEngine.InputSystem</c>).</b>
     ///   Reads <c>Mouse.current</c> and <c>Keyboard.current</c> directly (no legacy
-    ///   <c>UnityEngine.Input</c>). Controls: left-drag = pan, scroll = zoom, right-drag = tilt/bearing,
-    ///   +/=/Q = zoom in, −/E = zoom out.</para>
+    ///   <c>UnityEngine.Input</c>). Controls: left-drag = pan, shift+drag = tilt, ctrl+drag = heading,
+    ///   scroll = zoom-to-cursor, +/=/Q = zoom in, −/E = zoom out.</para>
     ///
     /// <para><b>Scroll normalization (S42 D4 preserved):</b> <see cref="WheelNotchUnits"/> = 120 so
     ///   one physical wheel notch ≈ 1 normalized unit.</para>
@@ -24,8 +24,16 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <para><b>S63 — Interaction-point-aware gestures.</b> Zoom uses the cursor as the anchor point
     ///   (zoom-to-cursor); pan tracks the grabbed ground point that was under the cursor at drag-start
     ///   (anchored pan). Both delegate to <see cref="ViewInput"/> which carries zero Mercator constants.
-    ///   Screen convention: +x right, +y up, origin bottom-left (Unity mouse position) — the former
-    ///   <c>−delta.y</c> negation hack for pan is removed; tilt keeps its <c>−delta.y</c> unchanged.</para>
+    ///   Screen convention: +x right, +y up, origin bottom-left (Unity mouse position).</para>
+    ///
+    /// <para><b>S73 — Device-agnostic seam.</b> All gestures are translated into
+    ///   <see cref="GestureIntent"/> values and dispatched through
+    ///   <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/>. Sensitivity is applied here
+    ///   (before building the intent) so the seam sees device-independent magnitudes. Modifier precedence
+    ///   per frame: shift → <see cref="GestureKind.TiltBy"/> (drag-Y only), else ctrl →
+    ///   <see cref="GestureKind.HeadingBy"/> (drag-X only), else <see cref="GestureKind.PanToAnchor"/>.
+    ///   Sign convention: <c>-delta.y</c> for tilt (drag-up → pitch decreases, toward overhead),
+    ///   <c>+delta.x</c> for heading (drag-right → bearing increases).</para>
     ///
     /// <para><b>D5 — Ordering:</b> this Update only queues patches on the camera system. The actual
     ///   camera advance + tile loop runs in <see cref="View.Update"/> (via
@@ -109,12 +117,26 @@ namespace MapRenderer.Unity.Rendering.Map
                 Camera != null ? Camera.pixelWidth  : Screen.width,
                 Camera != null ? Camera.pixelHeight : Screen.height);
 
+            // Build the per-frame view context (camera + live interaction viewport + projection).
+            // The live viewport is used here so cursor positions and viewport are in the same pixel
+            // scale — required by the B-ZOOMPIN / B-PAN pin invariants.
+            var view = new ViewContext
+            {
+                Camera     = Map.Camera.CurrentProperties,
+                ViewportPx = vp,
+                Projection = projection,
+            };
+
+            // ── Keyboard modifier state (read early; reused in the drag block below) ────────────
+            // Null-guarded separately from Mouse.current (each device can be absent independently).
+            var kb = Keyboard.current;
+
             // ── Zoom (scroll wheel / trackpad) ───────────────────────────────────────────────────
             // Null-guard Mouse.current (absent in headless / test builds — no NRE).
             var mouse = Mouse.current;
             if (mouse != null)
             {
-                // Read cursor position once (used by both scroll-zoom and pan).
+                // Read cursor position once (used by both scroll-zoom and drag).
                 Vector2 mousePos = mouse.position.ReadValue();
                 double2 cursor   = new double2(mousePos.x, mousePos.y);
 
@@ -123,66 +145,76 @@ namespace MapRenderer.Unity.Rendering.Map
                 {
                     // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
                     float normalizedScroll = scroll / WheelNotchUnits;
-                    CameraPropertiesUpdate z = ViewInput.ApplyZoom(
-                        projection, Map.Camera.CurrentProperties, cursor, vp,
-                        normalizedScroll, ZoomSensitivity, MinZoom, MaxZoom);
+                    // ZoomAtAnchor: pinned-cursor zoom via the device-agnostic seam.
+                    var zi = GestureIntent.ZoomAt(cursor, normalizedScroll * ZoomSensitivity, MinZoom, MaxZoom);
+                    CameraPropertiesUpdate z = ViewInput.Apply(zi, view);
                     patch.Zoom      = z.Zoom;
                     patch.Longitude = z.Longitude;
                     patch.Latitude  = z.Latitude;
                     anyChange       = true;
                 }
 
-                // ── Pan (left-drag, S63 anchored pan) ────────────────────────────────────────────
-                // Capture the grabbed ground point on the first frame of the press; hold it for the
-                // duration of the drag. The anchored ApplyPan keeps the grabbed point glued to the
-                // cursor — no delta, no negation hack. Screen convention +y-up is already correct here.
+                // ── Left-drag: modifier decides the gesture (S73 D4) ─────────────────────────────
+                // Modifier precedence (evaluated each frame):
+                //   shift → TiltBy (drag-Y only; drag-X ignored; _dragging cleared for clean re-capture)
+                //   ctrl  → HeadingBy (drag-X only; drag-Y ignored; _dragging cleared)
+                //   else  → PanToAnchor (anchored pan, grabbed ground captured on first frame)
+                //
+                // Sign convention (pinned by CameraPropertiesTests.D6_TiltYSign_*):
+                //   Tilt:    -delta.y  (drag-UP → pitch decreases, toward overhead)
+                //   Heading: +delta.x  (drag-right → bearing increases)
                 if (mouse.leftButton.isPressed)
                 {
-                    if (!_dragging)
-                    {
-                        // First frame: capture the earth point under the cursor.
-                        _grabbedGround = projection.ScreenToGround(cursor, vp, Map.Camera.CurrentProperties);
-                        _dragging      = true;
-                    }
+                    bool shift = kb != null && (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed);
+                    bool ctrl  = kb != null && (kb.leftCtrlKey.isPressed  || kb.rightCtrlKey.isPressed);
 
-                    CameraPropertiesUpdate pan = ViewInput.ApplyPan(
-                        projection, Map.Camera.CurrentProperties, _grabbedGround, cursor, vp);
-                    patch.Longitude = pan.Longitude;
-                    patch.Latitude  = pan.Latitude;
-                    anyChange       = true;
+                    Vector2 delta = mouse.delta.ReadValue();
+
+                    if (shift)
+                    {
+                        // shift+drag → TiltBy (pitch only; heading unchanged).
+                        // Clear _dragging so a subsequent plain pan re-captures _grabbedGround cleanly.
+                        _dragging = false;
+                        var ti = GestureIntent.TiltBy(-delta.y * PitchSensitivity, MaxPitch);
+                        CameraPropertiesUpdate tp = ViewInput.Apply(ti, view);
+                        patch.Tilt = tp.Tilt;
+                        anyChange  = true;
+                    }
+                    else if (ctrl)
+                    {
+                        // ctrl+drag → HeadingBy (bearing only; tilt unchanged).
+                        _dragging = false;
+                        var hi = GestureIntent.HeadingBy(delta.x * BearingSensitivity);
+                        CameraPropertiesUpdate hp = ViewInput.Apply(hi, view);
+                        patch.Heading = hp.Heading;
+                        anyChange     = true;
+                    }
+                    else
+                    {
+                        // No modifier → PanToAnchor (anchored pan, S63).
+                        // Capture the grabbed ground point on the first frame of the press.
+                        if (!_dragging)
+                        {
+                            _grabbedGround = projection.ScreenToGround(cursor, vp, Map.Camera.CurrentProperties);
+                            _dragging      = true;
+                        }
+
+                        var pi = GestureIntent.Pan(_grabbedGround, cursor);
+                        CameraPropertiesUpdate pan = ViewInput.Apply(pi, view);
+                        patch.Longitude = pan.Longitude;
+                        patch.Latitude  = pan.Latitude;
+                        anyChange       = true;
+                    }
                 }
                 else
                 {
                     _dragging = false;
                 }
-
-                // ── Tilt / bearing (right-drag) ─────────────────────────────────────────────────
-                // Sign convention: Mouse.current.delta.y is +up in the new Input System. Negating
-                // delta.y makes drag-UP decrease pitch (camera tilts toward overhead). This matches
-                // the S50 D6 pinned tilt-Y tests in CameraPropertiesTests. Tilt is NOT reworked in
-                // S63 (no interaction-point anchor needed); only the 'in CameraProperties' overload
-                // is consumed here. Do NOT remove the negation — it is a separate, pinned sign choice.
-                if (mouse.rightButton.isPressed)
-                {
-                    Vector2 delta = mouse.delta.ReadValue();
-                    if (delta.x != 0f || delta.y != 0f)
-                    {
-                        CameraPropertiesUpdate tilt = ViewInput.ApplyTilt(
-                            Map.Camera.CurrentProperties, delta.x, -delta.y,
-                            BearingSensitivity, PitchSensitivity, MaxPitch);
-                        patch.Heading = tilt.Heading;
-                        patch.Tilt    = tilt.Tilt;
-                        anyChange     = true;
-                    }
-                }
             }
 
             // ── Keyboard zoom (+/= / Q → zoom in; − / E → zoom out) ─────────────────────────────
             // Null-guarded separately from Mouse.current (each device can be absent independently).
-            // Routes through ApplyZoom with the screen centre as the interaction point → exact
-            // centre-zoom (today's keyboard feel). The lon/lat in the returned patch equal the current
-            // look-at, so merging them into patch is safe.
-            var kb = Keyboard.current;
+            // ZoomAtAnchor at the viewport centre → exact centre-zoom feel (unchanged from S42).
             if (kb != null)
             {
                 float kbStep  = KeyboardZoomStep * Time.deltaTime;
@@ -191,9 +223,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 if (zoomIn || zoomOut)
                 {
                     double kbDelta = zoomIn ? kbStep : -kbStep;
-                    CameraPropertiesUpdate kbz = ViewInput.ApplyZoom(
-                        projection, Map.Camera.CurrentProperties,
-                        vp * 0.5, vp, kbDelta, 1.0, MinZoom, MaxZoom);
+                    var kbi = GestureIntent.ZoomAt(vp * 0.5, kbDelta, MinZoom, MaxZoom);
+                    CameraPropertiesUpdate kbz = ViewInput.Apply(kbi, view);
                     patch.Zoom      = kbz.Zoom;
                     patch.Longitude = kbz.Longitude;
                     patch.Latitude  = kbz.Latitude;

@@ -58,6 +58,20 @@ namespace MapRenderer.Unity.Rendering.Map
             VerticalFovDeg            = verticalFovDeg;
         }
 
+        /// <summary>
+        /// S71: the live viewport aspect (width / height) of the wrapped Unity camera, for the framing
+        /// viewport the tile selector consumes. Returns <paramref name="fallback"/> when there is no camera
+        /// or its pixel height is not yet valid (headless / first frame) — <c>Camera.pixelHeight</c> is
+        /// non-reproducible headless, so the deterministic fallback keeps tests stable.
+        /// </summary>
+        public double LiveAspect(double fallback)
+        {
+            if (_camera == null) return fallback;
+            int h = _camera.pixelHeight;
+            if (h <= 0) return fallback;
+            return (double)_camera.pixelWidth / h;
+        }
+
         // ── Apply ────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>

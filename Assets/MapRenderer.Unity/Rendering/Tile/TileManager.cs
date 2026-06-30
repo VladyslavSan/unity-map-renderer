@@ -62,11 +62,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         public struct TileSelectionConfig
         {
-            public float ViewportAspect;
-            public float PadFactor;
-            public int   MinZoom;
-            public int   MaxZoom;
-            public int   MaxBuildsPerTick;
+            /// <summary>S71: the FRAMING viewport in pixels — <c>(refH · liveAspect, refH)</c>, NOT raw live
+            /// px (see <see cref="IVisibleTileSelector"/> D6/D7). Flows into the per-tick
+            /// <see cref="ViewContext"/>.</summary>
+            public double2      FramingViewportPx;
+            /// <summary>S71: the active pixel↔ground projection (Web-Mercator today). Per-frame view context.</summary>
+            public IProjection  Projection;
+            public int          MaxBuildsPerTick;
         }
 
         // ── S47 tessellation payload (S51: Task → UniTask) ────────────────────────────────────
@@ -133,6 +135,16 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in Initialise ────
         private Backend.ITileRenderBackend _instanced; // null only before Initialise / after Dispose
 
+        // ── S71: the visible-tile-selection seam (default = ViewportCornerTileSelector; injected by MapView) ─
+        // Held as the interface type so a future mixed-zoom (distance-LOD) impl drops in with no change here.
+        private IVisibleTileSelector _selector;
+
+        /// <summary>The visible-tile selection algorithm. Set by MapView (default
+        /// <see cref="ViewportCornerTileSelector"/>); a different <see cref="IVisibleTileSelector"/> is a
+        /// drop-in replacement. The consumer (this class) builds a <see cref="ViewContext"/> per tick and
+        /// owns the request/release transition — the seam returns just the set.</summary>
+        internal IVisibleTileSelector Selector { get => _selector; set => _selector = value; }
+
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId>                   _cover     = new List<TileId>(64);
         private readonly HashSet<TileId>                _coverSet  = new HashSet<TileId>();
@@ -141,16 +153,26 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         private bool _coverDirty = true;
 
-        // ── S50: tile-selection key (scalar fields, no boxing) ─────────────────────────────────
+        // ── S50/S71: tile-selection key (scalar fields, no boxing) ─────────────────────────────
+        // S71: keyed on the FULL camera+viewport inputs the selector reads — fractional zoom, heading, and
+        // framing viewport size all change the covered set now (the old key tracked only integer zoom).
         private double _coverKeyLon;
         private double _coverKeyLat;
-        private int    _coverKeyIntegerZoom;
+        private double _coverKeyZoom;
+        private double _coverKeyHeading;
+        private double _coverKeyViewportX;
+        private double _coverKeyViewportY;
         private bool   _coverKeyInitialised;
 
         // ── S51 test observability: mid-flight release counter ─────────────────────────────────
         // Counts tiles released while their tessellation was still in-flight (HasTessellationTask
         // && !Built). Exposed for tests to prove the race actually occurred. See S51 tooth 5b.
         private int _releasedMidFlightCount;
+
+        // ── S84 test observability: mid-FETCH release counter ──────────────────────────────────────
+        // Counts tiles released while their FETCH was still in-flight (!FetchCompleted). Exposed for the
+        // S84 test to prove the cancel-mid-fetch race actually occurred (non-vacuous).
+        private int _releasedMidFetchCount;
 
         // ── S48 mid-flight discard holding pen ────────────────────────────────────────────────
         // When a tile is released mid-flight (ReleaseTile while TessellationTask is still running),
@@ -162,6 +184,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Dispose
         // are all main-thread). No locking is required.
         private readonly List<UniTask<TessellationResult>> _pendingDisposal = new List<UniTask<TessellationResult>>(8);
+
+        // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
+        // When a tile is released before its fetch completes (rapid zoom/cover churn), the preserved
+        // fetch UniTask would otherwise be dropped UNOBSERVED — and a fetch cancelled mid-flight faults
+        // (the aborted UnityWebRequest), so UniTask's GC finalizer floods the console with
+        // "UnityWebRequestException: Unknown Error". Stash the in-flight fetch here on release; each Tick
+        // observes completed ones (and Dispose spins the rest), so every fetch task's outcome is consumed
+        // exactly once. Main-thread only, like _pendingDisposal.
+        private readonly List<UniTask<TileResponse>> _pendingFetchDisposal = new List<UniTask<TileResponse>>(8);
+
+        // S84: running count of genuine (non-cancellation) fetch errors, for bounded logging.
+        private int _fetchErrorCount;
 
         public TileManager(Style.StyledLayerSet layers)
         {
@@ -240,6 +274,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         internal int ReleasedMidFlightCount => _releasedMidFlightCount;
 
+        /// <summary>S84: number of tiles released while their fetch was still in-flight.</summary>
+        internal int ReleasedMidFetchCount => _releasedMidFetchCount;
+
         /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="Initialise"/>.</summary>
         internal BRGBackend.TileRenderer BrgRenderer => _instanced as BRGBackend.TileRenderer;
 
@@ -312,19 +349,23 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
         {
-            if (_scheduler == null) return;
+            if (_scheduler == null || _selector == null) return;
 
-            int integerZoom = cam.IntegerZoom;
             if (!_coverKeyInitialised ||
-                cam.LookAt.Longitude != _coverKeyLon ||
-                cam.LookAt.Latitude != _coverKeyLat ||
-                integerZoom    != _coverKeyIntegerZoom)
+                cam.LookAt.Longitude    != _coverKeyLon ||
+                cam.LookAt.Latitude     != _coverKeyLat ||
+                cam.Zoom                != _coverKeyZoom ||
+                cam.Heading.Degrees     != _coverKeyHeading ||
+                cfg.FramingViewportPx.x != _coverKeyViewportX ||
+                cfg.FramingViewportPx.y != _coverKeyViewportY)
             {
                 _coverDirty = true;
             }
 
             // S48: drain any completed mid-flight-discard tasks so their NativeArrays are freed.
             DrainPendingDisposal();
+            // S84: observe any completed mid-flight-released fetch tasks (no unobserved-exception flood).
+            DrainPendingFetchDisposal();
 
             int pending = PumpPendingBuilds(cam, cfg.MaxBuildsPerTick);
 
@@ -333,7 +374,15 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             using var sCoverSel = PmCoverSelect.Auto();
 
-            TileCover.Cover(cam, cfg.ViewportAspect, cfg.PadFactor, cfg.MinZoom, cfg.MaxZoom, _cover);
+            // S71: select through the seam. Build the per-frame view context (camera + framing viewport +
+            // active projection); the request/release transition below is unchanged (instant swap).
+            ViewContext view = new ViewContext
+            {
+                Camera     = cam,
+                ViewportPx = cfg.FramingViewportPx,
+                Projection = cfg.Projection,
+            };
+            _selector.SelectVisibleTiles(in view, _cover);
 
             _coverSet.Clear();
             for (int i = 0; i < _cover.Count; i++)
@@ -370,7 +419,10 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _coverKeyLon         = cam.LookAt.Longitude;
             _coverKeyLat         = cam.LookAt.Latitude;
-            _coverKeyIntegerZoom = integerZoom;
+            _coverKeyZoom        = cam.Zoom;
+            _coverKeyHeading     = cam.Heading.Degrees;
+            _coverKeyViewportX   = cfg.FramingViewportPx.x;
+            _coverKeyViewportY   = cfg.FramingViewportPx.y;
             _coverKeyInitialised = true;
 
             _coverDirty = false;
@@ -422,18 +474,19 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     lt.FetchCompleted = true;
 
-                    if (req.Status == UniTaskStatus.Succeeded &&
-                        req.GetAwaiter().GetResult().HasData &&
-                        req.GetAwaiter().GetResult().Bytes != null)
+                    // S84: observe the fetch outcome exactly once (Succeeded / Faulted / Canceled) so a
+                    // faulted fetch is never dropped unobserved.
+                    TileResponse resp = ObserveFetchOutcome(req, logErrors: true);
+                    if (resp.HasData && resp.Bytes != null)
                     {
                         // Kick tessellation synchronously (wait inline).
-                        var tessTask = KickTessellationTask(lt, id, req.GetAwaiter().GetResult().Bytes, cam);
+                        var tessTask = KickTessellationTask(lt, id, resp.Bytes, cam);
                         lt.HasTessellationTask = true;
                         lt.TessellationTask    = tessTask;
                     }
                     else
                     {
-                        // Absent/failed fetch — nothing to tessellate.
+                        // Absent/failed/cancelled fetch — nothing to tessellate.
                         lt.Built = true;
                         _loaded[id] = lt;
                         continue;
@@ -526,25 +579,19 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // Mark fetch done; kick tessellation regardless of HasData so the tile settles.
                 lt.FetchCompleted = true;
 
-                if (lt.Request.Status == UniTaskStatus.Succeeded)
+                // S84: observe the fetch outcome exactly once (handles Succeeded / Faulted / Canceled) so
+                // a faulted fetch is never left for UniTask's unobserved-exception finalizer. Still-wanted,
+                // so real errors are logged (bounded); cancellation is swallowed.
+                TileResponse resp = ObserveFetchOutcome(lt.Request, logErrors: true);
+                if (resp.HasData && resp.Bytes != null)
                 {
-                    // GetResult() is safe because IsCompleted is true (checked above via Status).
-                    TileResponse resp = lt.Request.GetAwaiter().GetResult();
-                    if (resp.HasData && resp.Bytes != null)
-                    {
-                        lt.TessellationTask    = KickTessellationTask(lt, id, resp.Bytes, cam);
-                        lt.HasTessellationTask = true;
-                        pending++; // tessellation now in-flight
-                    }
-                    else
-                    {
-                        // Absent tile — mark built (nothing to render).
-                        lt.Built = true;
-                    }
+                    lt.TessellationTask    = KickTessellationTask(lt, id, resp.Bytes, cam);
+                    lt.HasTessellationTask = true;
+                    pending++; // tessellation now in-flight
                 }
                 else
                 {
-                    // Fetch faulted or cancelled — mark built (nothing to render).
+                    // Absent / failed / cancelled — mark built (nothing to render).
                     lt.Built = true;
                 }
 
@@ -773,6 +820,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (_loaded.TryGetValue(id, out var lt))
             {
+                // S84: if the FETCH is still in-flight, stash its preserved UniTask so it is observed when
+                // it completes (cancelled by _scheduler.Release below). Otherwise the dropped task faults
+                // unobserved → UnityWebRequestException console flood under rapid cover churn.
+                if (!lt.FetchCompleted)
+                {
+                    _releasedMidFetchCount++;
+                    _pendingFetchDisposal.Add(lt.Request);
+                }
+
                 // Track tiles released mid-flight (tessellation in-flight but not yet consumed).
                 // This counter is read by S51 tooth 5b to prove the race genuinely occurred.
                 if (lt.HasTessellationTask && !lt.Built)
@@ -841,6 +897,64 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // Faulted/cancelled: no LayerData produced, nothing to dispose.
 
                 _pendingDisposal.RemoveAt(i);
+            }
+        }
+
+        /// <summary>
+        /// S84: Observes a COMPLETED fetch task's terminal outcome exactly once and returns its response
+        /// (default / no-data on cancel or fault). This is the single place a fetch <see cref="UniTask{T}"/>
+        /// result is consumed, so a faulted/cancelled fetch is never left for UniTask's unobserved-exception
+        /// finalizer (the console-flood bug). A tile released mid-fetch cancels its token, surfacing as
+        /// <see cref="System.OperationCanceledException"/> (mapped from the aborted request by
+        /// <c>UnityWebRequestDataSource</c>) — benign, swallowed silently. A genuine error (5xx / connection)
+        /// is surfaced only when <paramref name="logErrors"/> is set (the still-wanted path) and is bounded.
+        /// Precondition: <c>req.Status.IsCompleted()</c>; safe because <c>lt.Request</c> is <c>.Preserve()</c>d.
+        /// </summary>
+        private TileResponse ObserveFetchOutcome(UniTask<TileResponse> req, bool logErrors)
+        {
+            try
+            {
+                return req.GetAwaiter().GetResult();
+            }
+            catch (System.OperationCanceledException)
+            {
+                return default; // tile released mid-fetch — benign cancellation
+            }
+            catch (System.Exception ex)
+            {
+                if (logErrors) LogFetchErrorThrottled(ex);
+                return default;
+            }
+        }
+
+        /// <summary>
+        /// S84: bounded fetch-error logging. Chaotic input can fail many still-wanted tiles at once, so a
+        /// per-tile-per-frame warning would just relocate the flood. Surface the first error and then a
+        /// periodic count, so a genuinely broken endpoint stays visible without spamming the console.
+        /// </summary>
+        private void LogFetchErrorThrottled(System.Exception ex)
+        {
+            _fetchErrorCount++;
+            if (_fetchErrorCount == 1 || (_fetchErrorCount & 63) == 0)
+                Debug.LogWarning($"[TileManager] tile fetch failed ({_fetchErrorCount} total): {ex.Message}");
+        }
+
+        /// <summary>
+        /// S84: Drains completed tasks from the mid-flight FETCH holding pen, observing (and discarding)
+        /// each outcome silently — these are released tiles we no longer want. Non-blocking poll; called
+        /// once per Tick (mirrors <see cref="DrainPendingDisposal"/>).
+        /// </summary>
+        private void DrainPendingFetchDisposal()
+        {
+            if (_pendingFetchDisposal.Count == 0) return;
+
+            for (int i = _pendingFetchDisposal.Count - 1; i >= 0; i--)
+            {
+                if (!_pendingFetchDisposal[i].Status.IsCompleted())
+                    continue; // still in-flight; check again next Tick
+
+                ObserveFetchOutcome(_pendingFetchDisposal[i], logErrors: false); // released → swallow silently
+                _pendingFetchDisposal.RemoveAt(i);
             }
         }
 
@@ -941,6 +1055,32 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
             }
             _pendingDisposal.Clear();
+
+            // S84: cancel + observe any FETCH still in-flight at teardown — loaded tiles whose fetch
+            // hasn't completed, plus the mid-flight-released holding pen — so no fetch task is dropped
+            // unobserved (UnityWebRequestException flood on the abort). CANCEL FIRST via _scheduler.Release
+            // so the in-flight request faults/cancels promptly; otherwise the spin below would wait on a
+            // request that only the (later) _scheduler.Dispose would cancel. (Release does not touch
+            // _loaded, so iterating it here is safe.)
+            foreach (var kv in _loaded)
+            {
+                if (kv.Value.FetchCompleted) continue;
+                _scheduler.Release(kv.Key);
+                var fetchTask = kv.Value.Request;
+                int spins = 0;
+                while (!fetchTask.Status.IsCompleted() && spins++ < 10000)
+                    Thread.Sleep(1);
+                ObserveFetchOutcome(fetchTask, logErrors: false);
+            }
+            for (int i = 0; i < _pendingFetchDisposal.Count; i++)
+            {
+                var task = _pendingFetchDisposal[i];
+                int spins = 0;
+                while (!task.Status.IsCompleted() && spins++ < 10000)
+                    Thread.Sleep(1);
+                ObserveFetchOutcome(task, logErrors: false);
+            }
+            _pendingFetchDisposal.Clear();
 
             // Destroy each tile's tracked Mesh assets.
             //

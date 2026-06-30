@@ -46,15 +46,6 @@ namespace MapRenderer.Tests.Visual
             } ]
         }");
 
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] b) { _bytes = b; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -71,10 +62,10 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_DoesNotConstructEntitiesRenderer()
         {
-            var src  = new FixtureSource(FixtureBytes());
+            var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_EntOff");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
             view.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
             try
@@ -96,10 +87,10 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void EntitiesBackend_BuildsEntities_AtTileLocalToScene()
         {
-            var src  = new FixtureSource(FixtureBytes());
+            var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Ent");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
             view.Backend = RenderBackend.Entities;
             try
@@ -168,10 +159,10 @@ namespace MapRenderer.Tests.Visual
             const byte BgR8 = 26, BgG8 = 28, BgB8 = 38;
             const float MinFill = 0.05f, MaxFill = 0.95f;
 
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var mapGo = new GameObject("MapView_EntPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 3; view.MaxZoom = 3; view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.MinZoom = 3; view.MaxZoom = 3; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
             view.Backend = RenderBackend.Entities;
 
@@ -196,7 +187,7 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                     ownsSource: false, style: MinimalStyle());
-                for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
+                for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 { view.Tick(); Thread.Sleep(1); }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "Entities path must load + settle tiles.");

@@ -108,5 +108,76 @@ namespace MapRenderer.Tests
                 "Keyboard.current result must be null-checked (tooth 4 null-guard requirement). " +
                 "Pattern: var kb = Keyboard.current; if (kb != null) { ... }");
         }
+
+        // ── T-ADAPTER teeth (S73) — desktop backend is a thin adapter over the seam ──────────────
+
+        /// <summary>
+        /// S73 T-ADAPTER: Controller.cs must route gestures through <c>ViewInput.Apply(</c> —
+        /// the device-agnostic seam dispatch — rather than calling camera math directly.
+        /// </summary>
+        [Test]
+        public void MapController_RoutesThrough_ViewInputApply()
+        {
+            Assert.IsTrue(MapControllerSource.Contains("ViewInput.Apply("),
+                "Controller.cs must contain 'ViewInput.Apply(' — all gestures route through the " +
+                "device-agnostic seam dispatch (S73 T-ADAPTER).");
+        }
+
+        /// <summary>
+        /// S73 T-ADAPTER: the fused <c>ApplyTilt</c> call (that set both Heading and Tilt) must be
+        /// gone from Controller.cs. The split HeadingBy / TiltBy intents replace it.
+        /// </summary>
+        [Test]
+        public void MapController_NoFusedApplyTilt()
+        {
+            Assert.IsFalse(MapControllerSource.Contains("ApplyTilt"),
+                "Controller.cs must NOT contain 'ApplyTilt' — the fused helper is retired (S73 D2). " +
+                "Use GestureIntent.TiltBy + GestureIntent.HeadingBy via ViewInput.Apply instead.");
+        }
+
+        /// <summary>
+        /// S73 T-ADAPTER: shift key binding must be present and greppable — proves shift→tilt
+        /// (MapLibre parity) cannot silently regress to fused right-drag.
+        /// </summary>
+        [Test]
+        public void MapController_ShiftDrivesTilt()
+        {
+            string src = MapControllerSource;
+            Assert.IsTrue(src.Contains("leftShiftKey"),
+                "Controller.cs must reference 'leftShiftKey' (shift → TiltBy, S73 D4 / T-ADAPTER).");
+            Assert.IsTrue(src.Contains("TiltBy"),
+                "Controller.cs must contain 'TiltBy' (the tilt intent, S73 D4 / T-ADAPTER).");
+        }
+
+        /// <summary>
+        /// S73 T-ADAPTER: ctrl key binding must be present and greppable — proves ctrl→heading
+        /// (MapLibre parity) cannot silently regress.
+        /// </summary>
+        [Test]
+        public void MapController_CtrlDrivesHeading()
+        {
+            string src = MapControllerSource;
+            Assert.IsTrue(src.Contains("leftCtrlKey"),
+                "Controller.cs must reference 'leftCtrlKey' (ctrl → HeadingBy, S73 D4 / T-ADAPTER).");
+            Assert.IsTrue(src.Contains("HeadingBy"),
+                "Controller.cs must contain 'HeadingBy' (the heading intent, S73 D4 / T-ADAPTER).");
+        }
+
+        /// <summary>
+        /// S73 T-ADAPTER: Controller.cs must not re-implement camera math — no Mercator arithmetic,
+        /// no manual degree wrapping, no Mathf.Clamp on angles. These live in Core / ConstrainedAngle,
+        /// invoked via ViewInput.Apply, not duplicated in the binding.
+        /// </summary>
+        [Test]
+        public void MapController_NoCameraMathInBinding()
+        {
+            string src = MapControllerSource;
+            Assert.IsFalse(src.Contains("% 360"),
+                "Controller.cs must not contain '% 360' — angle wrap lives in ConstrainedAngle (S73 T-ADAPTER).");
+            Assert.IsFalse(src.Contains("Mathf.Clamp"),
+                "Controller.cs must not contain 'Mathf.Clamp' on tilt/heading — clamping lives in ConstrainedAngle (S73 T-ADAPTER).");
+            Assert.IsFalse(src.Contains("WebMercator."),
+                "Controller.cs must not call WebMercator.* directly — projection math lives in Core (S73 T-ADAPTER).");
+        }
     }
 }

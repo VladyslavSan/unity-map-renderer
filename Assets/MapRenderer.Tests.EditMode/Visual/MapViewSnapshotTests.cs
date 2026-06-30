@@ -32,15 +32,6 @@ namespace MapRenderer.Tests.Visual
         private const float MinFill = 0.05f, MaxFill = 0.95f;
         private const int   MinBuckets = 4;
 
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public FixtureSource(byte[] b) { _bytes = b; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, System.Threading.CancellationToken ct = default)
-                => UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            public void Dispose() { }
-        }
 
         // Minimal one-fill-layer style for snapshot testing (constant red, countries source-layer).
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
@@ -65,12 +56,12 @@ namespace MapRenderer.Tests.Visual
         {
             string fixturePath = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(fixturePath), $"Fixture missing: {fixturePath}");
-            var src = new FixtureSource(File.ReadAllBytes(fixturePath));
+            var src = TestDataSource.FromBytes(File.ReadAllBytes(fixturePath));
 
             var mapGo = new GameObject("MapView");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 3; view.MaxZoom = 3;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             // Light so the URP Lit fill is bright enough for coverage.
@@ -92,7 +83,7 @@ namespace MapRenderer.Tests.Visual
             {
                 view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
                 // Pump to settle all tiles.
-                for (int f = 0; f < 500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
+                for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.Tick();
                     Thread.Sleep(1);

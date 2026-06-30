@@ -67,6 +67,14 @@ namespace MapRenderer.Unity.Rendering.Source
             {
                 return TileResponse.Absent(TileEncoding.Mvt);
             }
+            catch (UnityWebRequestException) when (ct.IsCancellationRequested)
+            {
+                // S84: a fetch cancelled mid-flight (tile released by cover churn) aborts the
+                // UnityWebRequest, which can surface as a generic "Unknown Error" UnityWebRequestException
+                // rather than OperationCanceledException. Re-map it to a cancellation so the scheduler /
+                // TileManager treat it as benign (swallowed) instead of a logged error / unobserved fault.
+                throw new OperationCanceledException(ct);
+            }
 
             // 204 No Content on a 2xx path (unusual but possible) — treat as absent.
             if (req.responseCode == (long)HttpStatusCode.NoContent)

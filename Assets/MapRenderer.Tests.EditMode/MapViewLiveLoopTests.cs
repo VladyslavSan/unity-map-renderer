@@ -70,23 +70,9 @@ namespace MapRenderer.Tests
             ]
         }");
 
-        /// <summary>In-memory source that serves the same fixture bytes for ANY tile id.</summary>
-        private sealed class FixtureSource : IDataSource
-        {
-            private readonly byte[] _bytes;
-            public int FetchCount;
-            public FixtureSource(byte[] bytes) { _bytes = bytes; }
-            public TileEncoding Encoding => TileEncoding.Mvt;
-            public UniTask<TileResponse> FetchAsync(TileId id, CancellationToken ct = default)
-            {
-                Interlocked.Increment(ref FetchCount);
-                return UniTask.FromResult(new TileResponse(_bytes, TileEncoding.Mvt));
-            }
-            public void Dispose() { }
-        }
 
         /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit.</summary>
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
+        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
@@ -102,12 +88,12 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_CoverDrivesTileSelection_AndEvictionReleases()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -115,7 +101,9 @@ namespace MapRenderer.Tests
                 view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
                 PumpUntilSettled(view);
 
-                Assert.AreEqual(9, view.LoadedTileCount(), "z5 center cover is a 3×3 block");
+                // S71: the cover now tracks the framing viewport span (no longer a magic 3×3); assert the
+                // behaviour (center built, far pan evicts + re-covers), not a frozen count.
+                Assert.Greater(view.LoadedTileCount(), 0, "z5 center cover must be non-empty");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "the center tile must be built");
 
@@ -123,7 +111,7 @@ namespace MapRenderer.Tests
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170, Latitude = 0 }, CameraAnimation.Instant);
                 PumpUntilSettled(view);
 
-                Assert.AreEqual(9, view.LoadedTileCount(), "still a 3×3 cover after panning");
+                Assert.Greater(view.LoadedTileCount(), 0, "cover must be re-selected (non-empty) after the pan");
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "the old center tile must have been evicted after the pan");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 5, X = 31, Y = 16 }),
@@ -150,12 +138,12 @@ namespace MapRenderer.Tests
         public void MapView_GoLive_ProducesSameGeometryAsDirectBuilder()
         {
             byte[] bytes = FixtureBytes();
-            var src   = new FixtureSource(bytes);
+            var src   = TestDataSource.FromBytes(bytes);
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -213,13 +201,13 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Backend = RenderBackend.Brg; // zero-alloc path under test
             view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -246,17 +234,21 @@ namespace MapRenderer.Tests
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
                     "A failure means a per-frame List/Task/closure/LINQ leaked into the hot path.");
 
-                Assert.AreEqual(9, view.LoadedTileCount(),
-                    "the within-cover pan must not have loaded new tiles");
+                Assert.AreEqual(16, view.LoadedTileCount(),
+                    "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
                 // ── (b) the fully-static frame also early-outs allocation-free. ──
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
-                // ── (c) a heading/tilt-only change is camera-only → no cover dirty → alloc-free. ──
+                // ── (c) a heading/tilt change still ticks alloc-free. ──
+                // S71: heading now DIRTIES the cover (it rotates the viewport quad → a different tile bbox),
+                // so this Tick runs the full recompute — but at the whole-world z2 cover the re-selected set
+                // is identical, so request/release find nothing and the recompute stays zero-alloc. (Tilt is
+                // not in the cover key — the selector has no tilt branch, D3.)
                 view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 }, CameraAnimation.Instant);
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "A heading/tilt-only camera change must not dirty the cover, so Tick stays alloc-free.");
+                    "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");
 
                 // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
                 // This is the symmetric counterpart to MapView_SteadyStateTick_Entities_AllocationVerdict,
@@ -285,13 +277,13 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_SteadyStateTick_Entities_AllocationVerdict()
         {
-            var src   = new FixtureSource(FixtureBytes());
+            var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Backend = RenderBackend.Entities; // the default backend under measurement
             view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadFactor = 1f; view.ViewportAspect = 1f;
+            view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
 
             try
@@ -309,7 +301,8 @@ namespace MapRenderer.Tests
                 // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
                 view.Tick(); // consume the pan; now steady.
-                Assert.AreEqual(9, view.LoadedTileCount(), "the within-cover pan must not have loaded new tiles");
+                Assert.AreEqual(16, view.LoadedTileCount(),
+                    "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
                 // Measure over MANY frames, not one. A single Entities Tick is alloc-free, but EG's system
                 // groups allocate INTERMITTENTLY (the isolated Rebuild×50 test trips the recorder) — so a

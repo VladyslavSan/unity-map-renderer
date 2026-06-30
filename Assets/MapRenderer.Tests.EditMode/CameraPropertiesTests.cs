@@ -506,18 +506,20 @@ namespace MapRenderer.Tests
                 "D6a (S63): cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
         }
 
-        // ── D6 tilt-Y sign convention (S50 tooth 6) ──────────────────────────────────────────────
+        // ── D6 tilt-Y sign convention (S50 tooth 6, migrated S73) ───────────────────────────────────
+        //
+        // Migrated from ApplyTilt (retired S73) to ApplyTiltDelta.
+        // The sensitivity multiply (pitchSensitivity = 0.3) is now applied by the caller before the
+        // delta reaches the seam — exactly as MapController does when building a TiltBy intent.
+        // All assertion values and sign direction are preserved verbatim.
 
         /// <summary>
-        /// D6 (S50): pins the right-drag tilt-Y sign convention — the same sign-flip class as the D6a pan.
+        /// D6 (S50/S73): pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead
+        /// (pitch DECREASES). The new Input System reports <c>delta.y &gt; 0</c> for an upward mouse
+        /// move; <c>MapController</c> negates it before building the <see cref="MapRenderer.Core.View.GestureIntent.TiltBy"/>
+        /// intent, and <c>ApplyTiltDelta</c> adds <c>dy·sensitivity</c> to the current tilt.
         ///
-        /// <para><b>Chosen convention (maintainer default, per the S50 ticket):</b> drag-UP tilts the
-        /// camera toward overhead (pitch DECREASES), matching "content follows cursor." The new Input
-        /// System reports <c>delta.y &gt; 0</c> for an upward mouse move; <c>MapController</c> negates it
-        /// before calling <see cref="MapRenderer.Core.View.ViewInput.ApplyTilt"/> (exactly like pan), and
-        /// <c>ApplyTilt</c> adds <c>dy·sensitivity</c> to the current tilt.</para>
-        ///
-        /// <para>So: +Y drag (drag up) → negate → ApplyTilt(dy = -positive) → tilt DECREASES.
+        /// <para>So: +Y drag (drag up) → negate → TiltBy(dy = -positive * sensitivity) → tilt DECREASES.
         /// This is the headless pin for that direction; <c>MapController</c>'s comment and call site must
         /// agree (the final direction is a maintainer play-test call, noted in the stage).</para>
         ///
@@ -530,18 +532,18 @@ namespace MapRenderer.Tests
             // Start tilted (30°) so a decrease is observable (not clamped at 0).
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
 
-            // New IS: delta.y = +20 (drag up). MapController negates → dy_for_ViewInput = -20.
+            // New IS: delta.y = +20 (drag up). MapController negates → dy_for_seam = -20.
+            // Sensitivity 0.3 is applied by the caller before the intent is built (as in MapController).
             double newIsDeltaY = 20.0;
             double viewInputDy = -newIsDeltaY;
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyTilt(
-                v, dxPixels: 0.0, dyPixels: viewInputDy,
-                bearingSensitivity: 0.3, pitchSensitivity: 0.3, maxPitch: 60.0);
+            var patch = MapRenderer.Core.View.ViewInput.ApplyTiltDelta(
+                v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Less(patch.Tilt.Value, v.Tilt.Degrees,
                 "D6: a +Y drag (upward mouse move in the new Input System), after sign flip at the " +
                 "MapController translator, must tilt the camera TOWARD overhead (pitch decreases). " +
-                "Failure means MapController.Update passes the wrong sign to ViewInput.ApplyTilt " +
+                "Failure means MapController.Update passes the wrong sign to ViewInput.ApplyTiltDelta " +
                 "(drag direction does not match the documented overhead-on-drag-up convention).");
         }
 
@@ -554,13 +556,12 @@ namespace MapRenderer.Tests
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
 
-            // New IS: delta.y = -20 (drag down). Negate → +20 for ViewInput.
+            // New IS: delta.y = -20 (drag down). Negate → +20 for the seam.
             double newIsDeltaY = -20.0;
             double viewInputDy = -newIsDeltaY;
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyTilt(
-                v, dxPixels: 0.0, dyPixels: viewInputDy,
-                bearingSensitivity: 0.3, pitchSensitivity: 0.3, maxPitch: 60.0);
+            var patch = MapRenderer.Core.View.ViewInput.ApplyTiltDelta(
+                v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,
                 "D6: a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
