@@ -123,6 +123,7 @@ namespace MapRenderer.Tests
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             // Baseline: count Meshes before the map load.
             int meshBefore = CountMeshObjects();
@@ -197,6 +198,7 @@ namespace MapRenderer.Tests
             // Tessellation tasks are KICKED (Phase-1) but never consumed, guaranteeing the tiles
             // are in HasTessellationTask=true, Built=false state when we evict them.
             view.MaxBuildsPerTick = 0;
+            view.MaxTessellationsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
@@ -230,6 +232,8 @@ namespace MapRenderer.Tests
 
                 // Restore MaxBuildsPerTick so the new cover settles normally.
                 view.MaxBuildsPerTick = 64;
+                view.MaxTessellationsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
                 // Let the tessellation UniTasks for the evicted tiles complete on the ThreadPool.
                 // Then pump the new cover until it settles.
@@ -348,6 +352,7 @@ namespace MapRenderer.Tests
             // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
             // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
             view.MaxBuildsPerTick = 0;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -402,6 +407,8 @@ namespace MapRenderer.Tests
 
                 // Restore MaxBuildsPerTick so the new cover can settle.
                 view.MaxBuildsPerTick = 64;
+                view.MaxTessellationsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
                 // Let the ThreadPool tessellation tasks complete, then pump until the new cover settles.
                 // DrainPendingDisposal() is called inside each Tick — released tiles' NativeArrays are
@@ -451,6 +458,7 @@ namespace MapRenderer.Tests
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -509,6 +517,7 @@ namespace MapRenderer.Tests
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 

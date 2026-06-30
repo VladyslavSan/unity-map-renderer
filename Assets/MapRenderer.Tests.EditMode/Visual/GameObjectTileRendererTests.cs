@@ -283,6 +283,7 @@ namespace MapRenderer.Tests.Visual
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.GameObject;
             try
             {

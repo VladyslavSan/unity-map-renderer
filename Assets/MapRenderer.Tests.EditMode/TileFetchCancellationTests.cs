@@ -73,6 +73,7 @@ namespace MapRenderer.Tests
                 view.MinZoom = 5; view.MaxZoom = 5;
                 view.PadTiles = 0; view.FallbackAspect = 1f;
                 view.MaxBuildsPerTick = 64;
+                view.MaxTessellationsPerTick = 64;
 
                 view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: MinimalStyle());
 

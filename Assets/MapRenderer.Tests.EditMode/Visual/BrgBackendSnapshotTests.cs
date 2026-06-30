@@ -190,6 +190,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             // Backend defaults to Entities (S53c) — do NOT set it to Brg.
 
             try
@@ -236,6 +237,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg; // S49 BRG path
 
             try
@@ -355,6 +357,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 3; view.MaxZoom = 3;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     view.Backend = RenderBackend.Brg;
                     try
                     {
@@ -404,6 +407,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 3; view.MaxZoom = 3;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     view.Backend = RenderBackend.Brg;
                     try
                     {
@@ -586,6 +590,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg;
 
             try
@@ -690,6 +695,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg;
 
             try
@@ -751,6 +757,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg;
 
             try
@@ -828,6 +835,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 3; view.MaxZoom = 3;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg;
 
             var lightGo = new GameObject("BrgTestLight");
@@ -1066,6 +1074,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 0; view.MaxZoom = 2;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     view.Backend = RenderBackend.Brg;
                     try
                     {
@@ -1117,6 +1126,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 4; view.MaxZoom = 6;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     view.Backend = RenderBackend.Brg;
                     try
                     {
@@ -1308,6 +1318,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 4; view.MaxZoom = 6;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     // Default backend = Entities.
                     try
                     {
@@ -1350,6 +1361,7 @@ namespace MapRenderer.Tests.Visual
                     view.MinZoom = 4; view.MaxZoom = 6;
                     view.PadTiles = 0; view.FallbackAspect = 1f;
                     view.MaxBuildsPerTick = 64;
+                    view.MaxTessellationsPerTick = 64;
                     view.Backend = RenderBackend.Brg;
                     try
                     {

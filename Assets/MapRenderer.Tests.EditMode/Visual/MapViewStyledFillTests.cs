@@ -131,6 +131,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -198,6 +199,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -282,6 +284,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -388,6 +391,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {
@@ -537,6 +541,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             try
             {

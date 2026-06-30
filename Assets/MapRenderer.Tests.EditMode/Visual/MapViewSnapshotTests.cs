@@ -63,6 +63,7 @@ namespace MapRenderer.Tests.Visual
             view.MinZoom = 3; view.MaxZoom = 3;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             // Light so the URP Lit fill is bright enough for coverage.
             var lightGo = new GameObject("SceneLight");

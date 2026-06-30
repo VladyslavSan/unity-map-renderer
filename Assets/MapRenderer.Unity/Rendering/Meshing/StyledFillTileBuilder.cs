@@ -172,6 +172,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
             /// </summary>
             public bool IsCreated;
 
+            /// <summary>S55: tight AABB of all fill vertex positions, accumulated during
+            /// <see cref="StyledFillTileBuilder.BuildMeshData"/> (worker thread). Valid only when
+            /// <see cref="IsCreated"/> is true. Used by <see cref="StyledFillTileBuilder.UploadMesh"/> to
+            /// assign <see cref="Mesh.bounds"/> directly, replacing the main-thread RecalculateBounds() scan.</summary>
+            public float3 BoundsMin;
+            /// <inheritdoc cref="BoundsMin"/>
+            public float3 BoundsMax;
+
             /// <summary>
             /// LEGACY compatibility: per-feature managed intermediate data. Still populated by
             /// <see cref="BuildMeshData"/> so existing tests can inspect it. Empty when <see cref="IsCreated"/>
@@ -334,8 +342,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
             Interlocked.Increment(ref LayerMeshData.LiveAllocCount);
 
             // Phase 3: Copy managed temp data into NativeArray streams.
+            // S55: accumulate tight AABB while copying positions (worker-thread; no main-thread scan needed).
             int vBase = 0;
             int iBase = 0;
+            float3 bMin = new float3(float.MaxValue);
+            float3 bMax = new float3(float.MinValue);
             foreach (var f in tempFeatures)
             {
                 double extentInv = f.Extent > 0.0 ? 1.0 / f.Extent : 0.0;
@@ -350,6 +361,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 for (int i = 0; i < f.Verts.Length; i++)
                 {
                     float3 v = f.Verts[i];
+                    bMin = math.min(bMin, v); // S55: AABB accumulation
+                    bMax = math.max(bMax, v); // S55: AABB accumulation
                     result.Stream0PositionNormal[vBase + i] = new FillPositionNormal
                     {
                         Position = new Vector3(v.x, v.y, v.z),
@@ -377,6 +390,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 iBase += f.Indices.Length;
             }
 
+            result.BoundsMin = bMin;
+            result.BoundsMax = bMax;
             return result;
         }
 
@@ -429,12 +444,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
             mesh.subMeshCount = 1;
             mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
 
-            // Accurate bounds matter: the snapshot/render tests frustum-cull on the renderer's mesh.bounds,
-            // so a loose placeholder breaks fill coverage. RecalculateBounds() is correct and its cost is
-            // irrelevant to the real hot path (tile-load is dominated by Tile.AddLayer, not Mesh.Upload).
-            // TODO(perf): compute the tight geometry AABB at generation time (accumulate vertex min/max in
-            // ProjectVerticesManaged) to skip this scan AND enable tight frustum culling — filed follow-up.
-            mesh.RecalculateBounds();
+            // S55: tight AABB baked on the worker thread in BuildMeshData — assign directly.
+            // Replaces the main-thread O(vertex) RecalculateBounds() scan. The frustum-cull contract
+            // (snapshot/render tests) is satisfied because the AABB is tight (matches RecalculateBounds).
+            float3 c3   = (data.BoundsMin + data.BoundsMax) * 0.5f;
+            float3 s3   = data.BoundsMax - data.BoundsMin;
+            mesh.bounds = new Bounds(
+                new Vector3(c3.x, c3.y, c3.z),
+                new Vector3(s3.x, s3.y, s3.z));
             return mesh;
         }
 

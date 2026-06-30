@@ -135,6 +135,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
             /// <summary>True when the NativeArray streams are allocated and valid.</summary>
             public bool IsCreated;
 
+            /// <summary>S55: tight AABB of centerline vertex positions, accumulated during
+            /// <see cref="StyledLineTileBuilder.BuildMeshData"/> (worker thread). Valid only when
+            /// <see cref="IsCreated"/> is true. Centerline positions only (no shader width extrusion);
+            /// parity with the pre-S55 RecalculateBounds() which also did not account for extrusion.</summary>
+            public float3 BoundsMin;
+            /// <inheritdoc cref="BoundsMin"/>
+            public float3 BoundsMax;
+
             /// <summary>
             /// S14 leak-guard counter: net live NativeArray allocations.
             /// Mirrors <see cref="StyledFillTileBuilder.LayerMeshData.LiveAllocCount"/>.
@@ -191,6 +199,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             var tempVerts2  = new List<Vector2>(512);
             var tempVerts3  = new List<LineWidthColor>(512);
             var tempIndices = new List<int>(1024);
+            // S55: tight AABB accumulator — centerline positions only (parity with old RecalculateBounds).
+            float3 bMin = new float3(float.MaxValue);
+            float3 bMax = new float3(float.MinValue);
 
             foreach (var feature in selectedFeatures)
             {
@@ -269,9 +280,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     foreach (var v in result.Vertices)
                     {
                         // Position: (east=+X, height=+Y=0, north=+Z).
+                        float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
+                        bMin = math.min(bMin, pos); // S55: centerline AABB accumulation
+                        bMax = math.max(bMax, pos); // S55: centerline AABB accumulation
                         tempVerts0.Add(new LinePositionNormal
                         {
-                            Position = new Vector3((float)v.Position.x, 0f, (float)v.Position.y),
+                            Position = new Vector3(pos.x, pos.y, pos.z),
                             Normal   = UpNormal,
                         });
                         // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat
@@ -310,6 +324,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 VertexCount           = vCount,
                 IndexCount            = iCount,
                 IsCreated             = true,
+                BoundsMin             = bMin, // S55: baked AABB
+                BoundsMax             = bMax, // S55: baked AABB
             };
 
             Interlocked.Increment(ref LayerMeshData.LiveAllocCount);
@@ -361,10 +377,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             mesh.subMeshCount = 1;
             mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
-            // Accurate bounds: render tests frustum-cull on mesh.bounds (see StyledFillTileBuilder). Cost is
-            // irrelevant vs the real hot path (Tile.AddLayer). TODO(perf): tight geometry AABB at generation
-            // time — filed follow-up.
-            mesh.RecalculateBounds();
+            // S55: tight AABB baked on the worker thread in BuildMeshData (centerline positions only;
+            // parity with old RecalculateBounds which also did not account for shader width extrusion).
+            float3 c3   = (data.BoundsMin + data.BoundsMax) * 0.5f;
+            float3 s3   = data.BoundsMax - data.BoundsMin;
+            mesh.bounds = new Bounds(
+                new Vector3(c3.x, c3.y, c3.z),
+                new Vector3(s3.x, s3.y, s3.z));
 
             return mesh;
         }

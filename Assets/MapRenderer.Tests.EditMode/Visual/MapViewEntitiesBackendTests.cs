@@ -67,6 +67,7 @@ namespace MapRenderer.Tests.Visual
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
             try
             {
@@ -92,6 +93,7 @@ namespace MapRenderer.Tests.Visual
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Entities;
             try
             {
@@ -164,6 +166,7 @@ namespace MapRenderer.Tests.Visual
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.MinZoom = 3; view.MaxZoom = 3; view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
             view.Backend = RenderBackend.Entities;
 
             var lightGo = new GameObject("EntPixelLight");

@@ -155,6 +155,7 @@ namespace MapRenderer.Tests
             view.MinZoom = 0; view.MaxZoom = 0;
             view.PadTiles = 0; view.FallbackAspect = 1f;
             view.MaxBuildsPerTick = 64;
+            view.MaxTessellationsPerTick = 64;
 
             // Start both recorders BEFORE the tile load — must be open when samples fire.
             // ProfilerCategory.Scripts matches the explicit category in each ProfilerMarker constructor.

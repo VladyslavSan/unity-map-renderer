@@ -42,6 +42,15 @@ namespace MapRenderer.Tests
         /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
         public static int ReleasedMidFetchCount(this MapView view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
 
+        /// <summary>S55: tessellation kicks issued in the most recent Tick.</summary>
+        public static int TessellationsKickedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.TessellationsKickedLastTick : 0;
+        /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
+        public static int VerticesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
+        /// <summary>S55/S87: number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
+        public static int TilesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
+        /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
+        public static int MeshesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
+
         /// <summary>True when the tile is loaded AND produced geometry. Backend-agnostic.</summary>
         public static bool TryGetBuiltTile(this MapView view, TileId id) => view.TileManager != null && view.TileManager.TryGetBuiltTile(id);
 
