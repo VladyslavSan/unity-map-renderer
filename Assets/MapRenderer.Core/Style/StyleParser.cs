@@ -126,7 +126,8 @@ namespace MapRenderer.Core.Style
             return layer;
         }
 
-        private static string[] ParseStringArray(JsonValue arr)
+        // internal (not private): TileJsonParser reuses these so the tiles[]/bounds parse is single-source.
+        internal static string[] ParseStringArray(JsonValue arr)
         {
             if (arr == null || !arr.IsArray) return null;
             var items = arr.Items;
@@ -136,7 +137,7 @@ namespace MapRenderer.Core.Style
             return result;
         }
 
-        private static double[] ParseDoubleArray(JsonValue arr)
+        internal static double[] ParseDoubleArray(JsonValue arr)
         {
             if (arr == null || !arr.IsArray) return null;
             var items = arr.Items;

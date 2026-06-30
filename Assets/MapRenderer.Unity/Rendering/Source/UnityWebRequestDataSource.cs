@@ -36,9 +36,16 @@ namespace MapRenderer.Unity.Rendering.Source
 
         public TileEncoding Encoding => TileEncoding.Mvt;
 
+        // S83b test observability: how many of these (the network source) have been constructed process-wide.
+        // The offline tooth asserts this stays unchanged across a file:// SetStyle + settle — a "zero network"
+        // proof (mirrors the DebugLiveAllocCount counter pattern). Interlocked: ctor may run off-main.
+        private static int _debugConstructedCount;
+        internal static int DebugConstructedCount => System.Threading.Volatile.Read(ref _debugConstructedCount);
+
         public UnityWebRequestDataSource(string urlTemplate)
         {
             _urlTemplate = urlTemplate ?? throw new ArgumentNullException(nameof(urlTemplate));
+            System.Threading.Interlocked.Increment(ref _debugConstructedCount);
         }
 
         public async UniTask<TileResponse> FetchAsync(TileId coord, CancellationToken ct = default)

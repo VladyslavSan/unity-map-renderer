@@ -113,6 +113,9 @@
     <Compile Include="../../Assets/MapRenderer.Core/Style/StyleDocument.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Style/StyleParser.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Style/SourceLayerResolver.cs" />
+    <!-- S83a: TileJSON model+parser + SourceDefinition resolution (engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/TileJson.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/SourceResolver.cs" />
 
     <!-- S11: type assertions (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Expressions/Ops/Assertions.cs" />
@@ -177,6 +180,9 @@
 
     <!-- S08: style-spec model tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/StyleParserTests.cs" />
+
+    <!-- S83a: TileJSON parse + SourceDefinition resolution tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/TileJsonTests.cs" />
 
     <!-- S09: expression engine tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Expressions/ExprTestUtil.cs" />

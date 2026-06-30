@@ -1,3 +1,6 @@
+using System.Collections.Generic;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
@@ -6,6 +9,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Source;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -155,7 +159,129 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.Initialise(source, ownsSource, Backend);
         }
 
-        /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
+        // ── S83b: SetStyle — the style is the single source of truth ───────────────────────────
+
+        private string _styleId;
+
+        /// <summary>S83b: the id of the active style (forward contract for S82's prepared-tile cache —
+        /// decision 6). For <see cref="SetStyle(string,CancellationToken)"/> it is the style URI; for the
+        /// <see cref="StyleDocument"/> overload it is the caller-supplied id. <c>internal</c>: test/S82
+        /// surface, not a public getter.</summary>
+        internal string StyleId => _styleId;
+
+        // S83b loader seams (decision 2) — production defaults; tests inject counting/offline fakes via
+        // InternalsVisibleTo. The production consumer is SetStyle below. Document loader: style/TileJSON
+        // text fetch (file:// + http). Tile-source factory: a templated per-tile IDataSource.
+        internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
+        internal System.Func<string, IDataSource>                        TileSourceFactoryOverride;
+
+        /// <summary>
+        /// S83b: load a style from <paramref name="styleUri"/> (file:// or http(s)://), resolve each of its
+        /// sources (inline <c>tiles[]</c>, else S83a TileJSON), wire one data pipeline per source-id, and
+        /// build the render layers — each fetching from ITS OWN source. <c>styleId == styleUri</c>.
+        ///
+        /// Async (fetches the style doc + any TileJSON). The returned <see cref="UniTask"/> completes on the
+        /// ThreadPool for a file:// chain (no PlayerLoop), so a headless test can spin on its status.
+        /// </summary>
+        public async UniTask SetStyle(string styleUri, CancellationToken ct = default)
+        {
+            var loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
+            string json = await loader(styleUri, ct);
+            StyleDocument style = StyleParser.Parse(json);
+            await SetStyle(style, styleUri, ct);
+        }
+
+        /// <summary>
+        /// S83b: apply an already-parsed <paramref name="style"/> with a caller-supplied
+        /// <paramref name="styleId"/> (a content hash is an acceptable choice — decision 6). A second call
+        /// RESTYLES: <see cref="StyledLayerSet"/> rebuilds and the source registry diffs (unchanged sources
+        /// keep their warm pipeline; removed are torn down) — see <see cref="Tile.TileManager.SetSources"/>.
+        /// </summary>
+        public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
+        {
+            _style   = style;
+            _styleId = styleId;
+
+            if (_cameraSystem == null)
+                _cameraSystem = new CameraSystem(CameraProperties.Default);
+
+            _layers.Build(_style, _cameraSystem.CurrentProperties.Zoom, MaterialSet);
+
+            var specs = await BuildSourceSpecs(style, ct);
+
+            if (TileManager == null)
+                TileManager = new Tile.TileManager(_layers);
+            TileManager.SetSources(specs, Backend);
+        }
+
+        /// <summary>
+        /// S83b: resolves each rendered source-id of <paramref name="style"/> into a
+        /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
+        /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via S83a. Failure
+        /// isolation (decision 4): an offline/404/malformed TileJSON logs a warning and skips THAT source —
+        /// it does not throw, so other sources still wire and render.
+        /// </summary>
+        private async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
+            StyleDocument style, CancellationToken ct)
+        {
+            var loader  = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
+            var factory = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
+
+            // Distinct rendered (fill/line) source-ids in declared order.
+            var seen    = new HashSet<string>();
+            var ordered = new List<string>();
+            foreach (var sl in style.Layers)
+            {
+                bool rendered = sl is MapRenderer.Core.Style.Fill.StyleLayer
+                             || sl is MapRenderer.Core.Style.Line.StyleLayer;
+                if (!rendered) continue;
+                string sid = sl.Source ?? string.Empty;
+                if (seen.Add(sid)) ordered.Add(sid);
+            }
+
+            var specs = new List<Tile.TileManager.SourceSpec>(ordered.Count);
+            foreach (string sid in ordered)
+            {
+                SourceDefinition def = style.GetSource(sid);
+                if (def == null)
+                {
+                    Debug.LogWarning($"[MapView.SetStyle] layer references undefined source '{sid}' — skipped.");
+                    continue;
+                }
+
+                // Fetch + resolve the TileJSON ONCE when the source is url-only (inline tiles[] short-circuits).
+                if (SourceResolver.NeedsTileJson(def))
+                {
+                    try
+                    {
+                        string tjText = await loader(def.Url, ct);
+                        SourceResolver.Resolve(def, TileJsonParser.Parse(tjText));
+                    }
+                    catch (System.OperationCanceledException) { throw; }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning($"[MapView.SetStyle] TileJSON load failed for source '{sid}' " +
+                                         $"({def.Url}): {ex.Message}. Source skipped (no tiles).");
+                        continue; // failure isolation — other sources still wire
+                    }
+                }
+
+                if (def.Tiles == null || def.Tiles.Length == 0)
+                {
+                    Debug.LogWarning($"[MapView.SetStyle] source '{sid}' resolved to no tiles — skipped.");
+                    continue;
+                }
+
+                string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
+                var key = Tile.TileManager.SourceKey.From(def);
+                specs.Add(new Tile.TileManager.SourceSpec(
+                    sid, key, def.MinZoom, def.MaxZoom, () => factory(template)));
+            }
+            return specs;
+        }
+
+        /// <summary>True once <see cref="Initialise"/> or <see cref="SetStyle(string,CancellationToken)"/>
+        /// has run successfully.</summary>
         public bool IsInitialised => TileManager != null && TileManager.IsInitialised;
 
         /// <summary>

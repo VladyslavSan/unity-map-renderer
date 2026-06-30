@@ -1,4 +1,5 @@
 using System.IO;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
@@ -30,9 +31,8 @@ namespace MapRenderer.Unity.Rendering.Map
     /// (the map won't pan/zoom but also won't crash).</para>
     ///
     /// Inspector fields:
-    ///   <see cref="TileUrlTemplate"/>   — HTTP URL template with {z}/{x}/{y} tokens.
-    ///   <see cref="StyleAssetPath"/>    — path to the style JSON, relative to Assets/StreamingAssets/
-    ///                                     (ships in builds; Editor falls back to Assets/).
+    ///   <see cref="StyleUri"/>          — the style document URI (the single source of truth — S83b);
+    ///                                     its sources[] declare the tiles (inline or via TileJSON).
     ///   <see cref="InitialLatitude"/>   — initial map center latitude.
     ///   <see cref="InitialLongitude"/>  — initial map center longitude.
     ///   <see cref="InitialZoom"/>       — initial zoom level.
@@ -46,29 +46,20 @@ namespace MapRenderer.Unity.Rendering.Map
     [RequireComponent(typeof(Controller))]
     public sealed class Bootstrapper : MonoBehaviour
     {
-        // Demo data source: the free, no-key OpenFreeMap OSM tiles (OpenMapTiles schema) rendered with
-        // the OpenFreeMap "liberty" style (Assets/StreamingAssets/Fixtures/liberty.json — under
-        // StreamingAssets so it ships in standalone builds). The maplibre demotiles only
-        // carry a single country-fill layer up to ~z5; OpenFreeMap goes to z14 with water/roads/landuse/
-        // buildings. We render liberty's fill + line layers (water, landuse, the full road hierarchy with
-        // casings, boundaries); symbol (labels), raster (hillshade) and fill-extrusion layers are skipped
-        // until those features land. A simpler hand-authored alternative lives at Fixtures/openfreemap-
-        // style.json.
+        // S83b: the STYLE is the single source of truth. One URI points at the style document; its
+        // sources[] declare every data source (a vector source carries either inline tiles[] or a TileJSON
+        // url, resolved at SetStyle time — S83a). The dated/hardcoded tile-URL template is gone: the
+        // openmaptiles source's TileJSON (https://tiles.openfreemap.org/planet) supplies the current tile
+        // path, so it no longer rots when OpenFreeMap rotates the version segment.
         //
-        // NOTE: the "20260614_080001_pt" segment is a DATED tile-set version that OpenFreeMap rotates
-        // periodically. If tiles start 404ing, fetch the current path from the TileJSON:
-        //   curl -s https://tiles.openfreemap.org/planet | jq -r '.tiles[0]'
-        // (The robust fix — recommended before relying on this in CI/demos — is to read that TileJSON at
-        // startup rather than hardcode the version segment.)
-        [Tooltip("MVT tile URL template. Tokens: {z} {x} {y}. " +
-                 "OpenFreeMap free OSM tiles (OpenMapTiles schema). Versioned path — see code note.")]
-        public string TileUrlTemplate =
-            "https://tiles.openfreemap.org/planet/20260614_080001_pt/{z}/{x}/{y}.pbf";
-
-        [Tooltip("Path to the style document JSON, relative to Assets/StreamingAssets/ (so it ships in builds; " +
-                 "Editor falls back to Assets/). OpenFreeMap 'liberty' style "                                   +
-                 "(water/landuse/roads-with-casing/boundaries; labels not yet rendered).")]
-        public string StyleAssetPath = "Fixtures/liberty.json";
+        // Default: the shipped OpenFreeMap "liberty" style under StreamingAssets (ships in standalone
+        // builds), loaded via file:// for a fully-offline default. A leading scheme (file://, http://,
+        // https://) is used verbatim; a bare relative path is resolved under StreamingAssets as file://.
+        // To use the live OpenFreeMap style instead, set this to
+        // "https://tiles.openfreemap.org/styles/liberty".
+        [Tooltip("Style document URI — the single source of truth. file://, http(s):// or a bare path " +
+                 "resolved under StreamingAssets. Its sources[] declare the tiles (inline or via TileJSON).")]
+        public string StyleUri = "Fixtures/liberty.json";
 
         [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
         public double InitialLatitude = 52.52; // Berlin
@@ -94,28 +85,30 @@ namespace MapRenderer.Unity.Rendering.Map
                 Application.targetFrameRate = (int)math.round(Screen.currentResolution.refreshRateRatio.value);
             }
 
-            // 1. Load and parse the style document.
-            StyleDocument style = LoadStyle();
-
-            // 2. Create the tile data source (owned — MapView will dispose on OnDestroy).
-            // S51: HttpDataSource removed from Core; UnityWebRequestDataSource is the production HTTP source.
-            var source = new Source.UnityWebRequestDataSource(TileUrlTemplate);
-
-            // 3. Build the initial camera state.
+            // 1. Build the initial camera state.
             var initialView = new CameraProperties(
                 new GeoCoordinate3D
                 {
                     Latitude = InitialLatitude, Longitude = InitialLongitude, Altitude = 0.0
                 }, InitialZoom, 0, 0);
 
-            // 4. Wire: sets Controller.Camera, Controller.Map, calls MapView.Initialise,
-            //    and wires the S45 CameraSystem + MapCamera.
-            Wire(gameObject, Camera.main, source, initialView, ownsSource: true, style: style);
+            // 2. Wire camera + components only (S83b: NO data source / Initialise here — the style drives
+            //    the sources). Passing source:null makes Wire do the CameraSystem/MapCamera/Controller
+            //    wiring and skip Initialise; SetStyle (step 4) builds the multi-source pipeline.
+            Wire(gameObject, Camera.main, source: null, initialView, ownsSource: false, style: null);
 
-            // 5. Ensure a directional light exists in the scene (for URP Lit fill shader).
+            // 3. Ensure a directional light exists in the scene (for URP Lit fill shader).
             EnsureDirectionalLight();
 
-            // 6. Apply initial camera framing (perspective, altitude-from-zoom, overhead at pitch=0).
+            // 4. Resolve the style URI and load it. SetStyle is async (fetches the style doc + any
+            //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
+            //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
+            var mapView = GetComponent<MapView>();
+            string styleUri = ResolveStyleUri(StyleUri);
+            if (mapView != null)
+                mapView.SetStyle(styleUri).Forget();
+
+            // 5. Apply initial camera framing (perspective, altitude-from-zoom, overhead at pitch=0).
             //    Delegates to ApplyCameraTransform so frame-0 framing matches the runtime path and
             //    InitialZoom is respected (zoom 2 → continent scale, zoom 16 → street scale).
             var ctrl = GetComponent<Controller>();
@@ -126,10 +119,23 @@ namespace MapRenderer.Unity.Rendering.Map
                     ctrl.Camera.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
             }
 
-            var mapView = GetComponent<MapView>();
-            Debug.Log($"[Bootstrapper] Started. URL={TileUrlTemplate}, zoom={InitialZoom}, " +
-                      $"center=({InitialLatitude:F2},{InitialLongitude:F2}), "          +
-                      $"style layers={mapView.Layers.FillCount} fill layers.");
+            Debug.Log($"[Bootstrapper] Started. styleUri={styleUri}, zoom={InitialZoom}, " +
+                      $"center=({InitialLatitude:F2},{InitialLongitude:F2}).");
+        }
+
+        /// <summary>
+        /// S83b: resolves <paramref name="styleUri"/> to a loadable URI. A leading scheme
+        /// (<c>file://</c>, <c>http://</c>, <c>https://</c>) is used verbatim; a bare relative path is
+        /// resolved under <c>Application.streamingAssetsPath</c> as a <c>file://</c> URI (so the shipped
+        /// liberty.json loads fully offline in a standalone build).
+        /// </summary>
+        private static string ResolveStyleUri(string styleUri)
+        {
+            if (string.IsNullOrEmpty(styleUri)) styleUri = "Fixtures/liberty.json";
+            if (styleUri.StartsWith("file://") || styleUri.StartsWith("http://") || styleUri.StartsWith("https://"))
+                return styleUri;
+            // Bare path → under StreamingAssets, as a file:// URI.
+            return "file://" + Path.Combine(Application.streamingAssetsPath, styleUri);
         }
 
         // ── Static wire-up entry (testable without Play mode) ─────────────────────────────────────
@@ -223,57 +229,6 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Loads and parses the style document from <see cref="StyleAssetPath"/>.
-        ///
-        /// <para>Resolved against <c>Application.streamingAssetsPath</c> first: files under
-        /// <c>Assets/StreamingAssets/</c> are the only loose files Unity copies verbatim into a built
-        /// player, so this is what makes the style available at runtime in a standalone build. A raw file
-        /// under <c>Assets/</c> read via <c>Application.dataPath</c> exists ONLY in the Editor (where
-        /// dataPath = the project's <c>Assets</c> folder); in a build dataPath points inside the app bundle
-        /// and the file is absent — which is why an earlier dataPath-based load rendered an empty map.</para>
-        ///
-        /// <para>An Editor/back-compat fallback to <c>Application.dataPath</c> is kept so any legacy path
-        /// still resolves. Note: <c>File.ReadAllText</c> on streamingAssetsPath works on standalone
-        /// (macOS/Windows/Linux) and in the Editor; Android/WebGL would need a UnityWebRequest read.</para>
-        ///
-        /// <para>Falls back to an empty StyleDocument if the file is not found (so the demo still launches).</para>
-        /// </summary>
-        private StyleDocument LoadStyle()
-        {
-            // StreamingAssets ships into the built player; the Editor-only dataPath/Assets copy does not.
-            string fullPath = Path.Combine(Application.streamingAssetsPath, StyleAssetPath);
-            if (!File.Exists(fullPath))
-            {
-                string editorPath = Path.Combine(Application.dataPath, StyleAssetPath);
-                if (File.Exists(editorPath))
-                    fullPath = editorPath;
-            }
-
-            if (!File.Exists(fullPath))
-            {
-                Debug.LogWarning($"[Bootstrapper] Style not found at {fullPath} " +
-                                 $"(StreamingAssets: {Path.Combine(Application.streamingAssetsPath, StyleAssetPath)}). " +
-                                 "MapView will render no fills until a style is loaded. " +
-                                 "In a build, the style must live under Assets/StreamingAssets/.");
-                return new StyleDocument();
-            }
-
-            try
-            {
-                string        json = File.ReadAllText(fullPath);
-                StyleDocument doc  = StyleParser.Parse(json);
-                Debug.Log($"[Bootstrapper] Loaded style: {doc.Name ?? "(unnamed)"}, " +
-                          $"{doc.Layers.Count} layers.");
-                return doc;
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError($"[Bootstrapper] Failed to parse style at {fullPath}: {ex.Message}");
-                return new StyleDocument();
-            }
-        }
 
         /// <summary>
         /// Ensures at least one directional light is present in the scene so the URP Lit fill shader
