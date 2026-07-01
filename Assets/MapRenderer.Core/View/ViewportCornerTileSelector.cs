@@ -40,17 +40,29 @@ namespace MapRenderer.Core.View
         private readonly int _padTiles;
         private readonly int _minZoom;
         private readonly int _maxZoom;
+        private readonly int _selectionZoomOffset;
 
         /// <param name="padTiles">Fixed safety margin, in tiles, added on every side of the viewport-derived
         ///   bounding box (covers fractional-edge / rounding slop and mild tilt). NOT a coverage multiplier —
         ///   coverage comes from the unprojected span. Default 1; clamped to ≥ 0.</param>
         /// <param name="minZoom">Lower clamp for the (internal) selection zoom.</param>
         /// <param name="maxZoom">Upper clamp for the (internal) selection zoom.</param>
-        public ViewportCornerTileSelector(int padTiles = 1, int minZoom = 0, int maxZoom = 22)
+        /// <param name="onScreenTilePx">The logical-pixel size a selected tile should occupy on screen
+        ///   (the "512 convention" MapLibre vector tiles are authored for). It enters ONLY as a selection-zoom
+        ///   offset — <c>log2(WebMercator.TilePixelSize / onScreenTilePx)</c> — applied to the integer tile
+        ///   grid; the framing SPAN still reads the true camera zoom (see <see cref="CornerTile"/>), and the
+        ///   canonical <c>GroundResolution</c>/<c>TilePixelSize = 256</c> paint math is untouched. Default 512
+        ///   ⇒ offset −1 ⇒ one level coarser ⇒ ~4× fewer, larger tiles over the same ground span.</param>
+        public ViewportCornerTileSelector(int padTiles = 1, int minZoom = 0, int maxZoom = 22,
+                                          int onScreenTilePx = 512)
         {
             _padTiles = padTiles < 0 ? 0 : padTiles;
             _minZoom  = minZoom;
             _maxZoom  = maxZoom;
+            // Power-of-two convention (256→0, 512→−1, 1024→−2); round covers non-power-of-two sizes.
+            double tilePx    = WebMercator.TilePixelSize;                 // frozen canonical 256 (paint anchor)
+            double onScreenPx = onScreenTilePx > 0 ? onScreenTilePx : tilePx;
+            _selectionZoomOffset = (int)math.round(math.log2(tilePx / onScreenPx));
         }
 
         /// <inheritdoc/>
@@ -65,7 +77,9 @@ namespace MapRenderer.Core.View
 
             // Selection zoom: single integer level (impl detail — never surfaced on the seam). Fractional
             // zoom changes the COUNT of covered tiles (via the unprojected span), not which z they live at.
-            int z = camera.IntegerZoom;
+            // The on-screen-tile-size offset (512 convention) coarsens the grid here ONLY; the span below
+            // still reads the true camera zoom via ScreenToGround, so the count drops without under-covering.
+            int z = camera.IntegerZoom + _selectionZoomOffset;
             if (z < _minZoom) z = _minZoom;
             if (z > _maxZoom) z = _maxZoom;
 

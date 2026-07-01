@@ -72,6 +72,7 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewContext.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/IVisibleTileSelector.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewportCornerTileSelector.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/DeviceScaling.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/GestureIntent.cs" />

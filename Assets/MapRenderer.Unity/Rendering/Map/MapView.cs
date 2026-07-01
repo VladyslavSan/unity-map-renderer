@@ -249,27 +249,32 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         // ── S71: visible-tile selector, rebuilt only when its algorithm config changes ──────────
-        private int _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom;
+        private int _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom, _selOnScreenTilePx;
 
         private void EnsureSelector()
         {
             if (TileManager.Selector == null ||
-                _selPadTiles != _config.PadTiles || _selMinZoom != _config.MinZoom || _selMaxZoom != _config.MaxZoom)
+                _selPadTiles != _config.PadTiles || _selMinZoom != _config.MinZoom || _selMaxZoom != _config.MaxZoom ||
+                _selOnScreenTilePx != _config.OnScreenTilePx)
             {
-                TileManager.Selector = new ViewportCornerTileSelector(_config.PadTiles, _config.MinZoom, _config.MaxZoom);
+                TileManager.Selector = new ViewportCornerTileSelector(
+                    _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
                 _selPadTiles = _config.PadTiles; _selMinZoom = _config.MinZoom; _selMaxZoom = _config.MaxZoom;
+                _selOnScreenTilePx = _config.OnScreenTilePx;
             }
         }
 
         /// <summary>
         /// The per-frame view inputs the selector consumes. The camera IS the viewport: the framing viewport
-        /// is the wrapped Unity camera's live pixel size (<see cref="MapCamera.ViewportPx"/>), and the
-        /// projection is the pixel↔ground service the camera owns (Web-Mercator today).
+        /// is the wrapped Unity camera's live pixel size (<see cref="MapCamera.ViewportPx"/>), normalised to
+        /// LOGICAL pixels by <see cref="MapViewConfig.DevicePixelRatio"/> (S86 DPI slice) so an on-screen tile
+        /// is the same physical size across panel densities; the projection is the pixel↔ground service the
+        /// camera owns (Web-Mercator today).
         /// </summary>
         private Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
             => new Tile.TileManager.TileSelectionConfig
             {
-                FramingViewportPx       = Camera.ViewportPx,
+                FramingViewportPx       = Camera.ViewportPx / _config.DevicePixelRatio,
                 Projection              = Camera.Projection,
                 MaxBuildsPerTick        = _config.MaxBuildsPerTick,
                 MaxTessellationsPerTick = _config.MaxTessellationsPerTick,

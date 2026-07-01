@@ -4,6 +4,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using Unity.Mathematics;
 
@@ -107,6 +108,14 @@ namespace MapRenderer.Unity.Rendering.Map
             //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
             //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
             var mapView = GetComponent<MapViewComponent>();
+            if (mapView != null)
+            {
+                // Device-independent on-screen tile size: derive the device-pixel ratio from the real panel
+                // (dpr = Screen.dpi / 160, the mdpi golden standard) so a selection tile is a constant physical
+                // size across densities. Start runs only at runtime over a real display, so Screen.dpi is a
+                // measured density; tests drive Wire (not Start) and keep the serialized DevicePixelRatio.
+                mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
+            }
             string styleUri = ResolveStyleUri(StyleUri);
             if (mapView != null)
                 mapView.SetStyle(styleUri).Forget();

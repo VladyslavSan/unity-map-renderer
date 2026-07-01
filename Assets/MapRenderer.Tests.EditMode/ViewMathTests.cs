@@ -149,13 +149,15 @@ namespace MapRenderer.Tests
             foreach (var fc in FrameCases())
             {
                 var cam = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
-                int z   = cam.IntegerZoom;
-                double mpp   = WebMercator.GroundResolution(cam.Zoom);
+                double mpp   = WebMercator.GroundResolution(cam.Zoom); // span reads the TRUE camera zoom
                 double halfV = RefH * mpp / 2.0;
                 double halfH = halfV * fc.Aspect;
 
                 sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
                 var S = new HashSet<TileId>(buf);
+                // Coverage is asserted at the z the selector ACTUALLY emits (OnScreenTilePx may offset it
+                // coarser than IntegerZoom) — the no-white-spot guarantee must hold at that resolution.
+                int z = buf.Count > 0 ? buf[0].Z : cam.IntegerZoom;
 
                 // The four framing corners AND a dense interior grid must all be covered. One miss ⇒ a
                 // visible pixel with no tile ⇒ white border.
@@ -188,11 +190,11 @@ namespace MapRenderer.Tests
             foreach (var fc in FrameCases())
             {
                 var cam = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
-                int z   = cam.IntegerZoom;
                 double2 vp = new double2(RefH * fc.Aspect, RefH);
 
                 sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
                 var S = new HashSet<TileId>(buf);
+                int z = buf.Count > 0 ? buf[0].Z : cam.IntegerZoom; // selection zoom actually emitted (offset-aware)
 
                 const int G = 16;
                 for (int i = 0; i <= G; i++)
@@ -309,16 +311,143 @@ namespace MapRenderer.Tests
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(0, 0, 2.0), 1.0), buf);
 
-            var cameraTile = MercToTile(Cam(0, 0, 2.0).CenterMercator(), 2);
+            // Selection zoom actually emitted (OnScreenTilePx may coarsen z2 → z1 under the 512 default).
+            int z = buf.Count > 0 ? buf[0].Z : 2;
+            var cameraTile = MercToTile(Cam(0, 0, 2.0).CenterMercator(), z);
             Assert.IsTrue(buf.Contains(cameraTile),
-                $"Cover must contain the camera's own tile {cameraTile.X},{cameraTile.Y}.");
+                $"Cover must contain the camera's own tile {cameraTile.X},{cameraTile.Y} at z{z}.");
 
             var xs = buf.Select(t => t.X).Distinct().OrderBy(v => v).ToList();
             var ys = buf.Select(t => t.Y).Distinct().OrderBy(v => v).ToList();
             Assert.AreEqual(xs.Count, xs.Last() - xs.First() + 1, "x columns must be contiguous (no holes).");
             Assert.AreEqual(ys.Count, ys.Last() - ys.First() + 1, "y rows must be contiguous (no holes).");
             Assert.AreEqual(xs.Count * ys.Count, buf.Count, "the block must be a full rectangle (no holes).");
-            foreach (var t in buf) Assert.AreEqual(2, t.Z, "single selection zoom z2 for this case.");
+            foreach (var t in buf) Assert.AreEqual(z, t.Z, "single selection zoom for this case.");
+        }
+
+        // ── DPI — device-pixel ratio derives from real dpi vs the 160 golden standard ───────────
+
+        [Test]
+        public void DeviceScaling_DerivesDprFromDpi()
+        {
+            Assert.AreEqual(160.0, DeviceScaling.ReferenceDpi, 0.0, "mdpi golden standard.");
+            // dpr = dpi / 160 (screenDpi is a precondition-positive measured density).
+            Assert.AreEqual(1.0, DeviceScaling.DevicePixelRatioFromDpi(160.0), 1e-12,
+                "160 dpi ⇒ dpr 1 (the reference density).");
+            Assert.AreEqual(2.0, DeviceScaling.DevicePixelRatioFromDpi(320.0), 1e-12,
+                "320 dpi ⇒ dpr 2 (a 2× panel).");
+            Assert.AreEqual(2.75, DeviceScaling.DevicePixelRatioFromDpi(440.0), 1e-12,
+                "arbitrary dpi divides by 160.");
+        }
+
+        // ── S88 T-DENSITY — 512 selects exactly one level coarser than 256, over the SAME span ───
+
+        [Test]
+        public void Selector_TDensity_512IsOneLevelCoarserThan256()
+        {
+            var sel512 = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22, onScreenTilePx: 512);
+            var sel256 = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22, onScreenTilePx: 256);
+            var b512 = new List<TileId>();
+            var b256 = new List<TileId>();
+
+            foreach (var fc in FrameCases())
+            {
+                var cam = Cam(fc.Lon, fc.Lat, fc.Zoom, fc.HeadingDeg);
+                sel256.SelectVisibleTiles(View(cam, fc.Aspect), b256);
+                sel512.SelectVisibleTiles(View(cam, fc.Aspect), b512);
+                if (b256.Count == 0 || b512.Count == 0) continue;
+
+                int z256 = b256[0].Z;
+                int z512 = b512[0].Z;
+                if (z256 == 0) continue; // offset would clamp at minZoom — not an interior case
+
+                Assert.AreEqual(z256 - 1, z512,
+                    $"[{fc.Name}] 512 convention must select exactly one integer level coarser than 256 " +
+                    $"(got 256→z{z256}, 512→z{z512}).");
+                Assert.LessOrEqual(b512.Count, b256.Count,
+                    $"[{fc.Name}] the coarser 512 selection must not select MORE tiles than 256 " +
+                    $"(got {b512.Count} vs {b256.Count}).");
+            }
+        }
+
+        // ── S88 T-DEFAULT — a fresh selector is the 512 convention (no inspector change needed) ───
+
+        [Test]
+        public void Selector_TDefault_IsThe512Convention()
+        {
+            var selDefault = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);      // default 512
+            var sel256     = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22, 256);
+            var cam = Cam(0, 0, 10.0);
+            var bDef = new List<TileId>();
+            var b256 = new List<TileId>();
+            selDefault.SelectVisibleTiles(View(cam, 16.0 / 9.0), bDef);
+            sel256.SelectVisibleTiles(View(cam, 16.0 / 9.0), b256);
+
+            Assert.AreEqual(b256[0].Z - 1, bDef[0].Z,
+                "The DEFAULT selector must be the 512 convention — one level coarser than an explicit 256.");
+            Assert.Less(bDef.Count, b256.Count,
+                $"The 512 default must select fewer tiles than 256 (got {bDef.Count} vs {b256.Count}).");
+        }
+
+        // ── T-ROBUST — nasty camera points never crash and never boom the tile count ────────────
+
+        [Test]
+        public void Selector_TRobust_BadCameraPoints_NoCrash_NoCountBoom()
+        {
+            const int pad = 1;
+            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(pad, 0, 22); // default 512
+            var buf = new List<TileId>();
+
+            // Antimeridian, out-of-range longitudes, poles, beyond-Mercator latitudes, and extreme /
+            // clamped / fractional zooms — every combination the camera can wander into.
+            double[] lons     = { -360.0, -180.0, -179.999, -90.0, 0.0, 90.0, 179.999, 180.0, 359.9 };
+            double[] lats     = { -90.0, -89.99, -85.06, -60.0, 0.0, 60.0, 85.06, 89.99, 90.0 };
+            double[] zooms    = { 0.0, 0.4, 1.0, 7.3, 14.0, 19.0, 22.0, 30.0 };
+            double[] aspects  = { 1.0, 16.0 / 9.0, 21.0 / 9.0 };
+            double[] headings = { 0.0, 45.0, 200.0, -30.0 };
+
+            // Position-INDEPENDENT ceiling: the framing span (viewportPx · metresPerPixel at the TRUE zoom)
+            // in tiles at the emitted zoom, made rotation-safe (w·|cos|+h·|sin| ≤ w+h), plus the pad ring and a
+            // phase-slop term. Poles only CLAMP the count below this; a wrap/NaN/pole bug that emits far more
+            // (the "100-tile glitch") blows past it. Capped at the whole world (n·n).
+            long Ceiling(in CameraProperties cam, double aspect, int emittedZ)
+            {
+                long   n       = 1L << emittedZ;
+                double vTiles  = RefH * WebMercator.GroundResolution(cam.Zoom) * n / (2.0 * WebMercator.WorldExtent);
+                double hTiles  = vTiles * aspect;
+                double axis    = math.ceil(hTiles + vTiles) + 2 * pad + 2;
+                long   bound   = (long)(axis * axis);
+                long   world   = n * n;
+                return bound < world ? bound : world;
+            }
+
+            foreach (var lon in lons)
+            foreach (var lat in lats)
+            foreach (var zoom in zooms)
+            foreach (var aspect in aspects)
+            foreach (var heading in headings)
+            {
+                var cam = Cam(lon, lat, zoom, heading);
+                string where = $"lon={lon} lat={lat} zoom={zoom} aspect={aspect:F2} heading={heading}";
+
+                Assert.DoesNotThrow(() => sel.SelectVisibleTiles(View(cam, aspect), buf),
+                    $"selection threw at {where}");
+                Assert.Greater(buf.Count, 0, $"empty cover (white screen) at {where}");
+
+                int  z = buf[0].Z;
+                long n = 1L << z;
+                foreach (var t in buf)
+                {
+                    Assert.AreEqual(z, t.Z, $"mixed selection zoom at {where}");
+                    Assert.IsTrue(t.X >= 0 && t.X < n, $"x={t.X} out of [0,{n}) at {where}");
+                    Assert.IsTrue(t.Y >= 0 && t.Y < n, $"y={t.Y} out of [0,{n}) at {where}");
+                }
+                Assert.AreEqual(buf.Count, buf.Distinct().Count(), $"duplicate tiles at {where}");
+
+                long ceiling = Ceiling(in cam, aspect, z);
+                Assert.LessOrEqual(buf.Count, ceiling,
+                    $"tile-count BOOM at {where}: selected {buf.Count} > ceiling {ceiling} (z{z}) — a wrap/pole/NaN glitch.");
+            }
         }
 
         // ── T-SEAM — the interface stays algorithm-agnostic + the impl is swappable (structural) ─
@@ -377,15 +506,19 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TWrap_LongitudeAtAntimeridian()
         {
-            // Center near +180° at z2 (n=4), wide viewport: the x-span straddles the seam → wrap includes 0.
+            // Center near +180°, wide viewport: the x-span straddles the seam → wrap includes column 0 and
+            // its western neighbour (n-1). n derives from the emitted selection zoom (OnScreenTilePx-aware),
+            // so the antimeridian guarantee holds at whatever resolution the selector chose.
             var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(179.5, 0, 2.0), 16.0 / 9.0), buf);
 
+            int  z = buf.Count > 0 ? buf[0].Z : 2;
+            long n = 1L << z; // tiles per axis at the emitted zoom
             var xs = new HashSet<int>(buf.Select(t => t.X));
             Assert.IsTrue(xs.Contains(0), "Antimeridian wrap must include column x=0.");
-            Assert.IsTrue(xs.Contains(3), "…and the western neighbour x=3.");
-            foreach (var t in buf) Assert.IsTrue(t.X >= 0 && t.X < 4, $"Wrapped x must stay in [0,4): {t.X}");
+            Assert.IsTrue(xs.Contains((int)(n - 1)), $"…and the western neighbour x={n - 1} (n={n}).");
+            foreach (var t in buf) Assert.IsTrue(t.X >= 0 && t.X < n, $"Wrapped x must stay in [0,{n}): {t.X}");
             Assert.AreEqual(buf.Count, buf.Distinct().Count(), "No duplicate (z,x,y) even at full world width.");
         }
 

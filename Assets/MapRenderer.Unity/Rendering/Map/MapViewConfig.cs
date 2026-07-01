@@ -22,6 +22,21 @@ namespace MapRenderer.Unity.Rendering.Map
         public int MinZoom = 0;
         public int MaxZoom = 14;
 
+        [Tooltip("S88: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
+                 "512 convention MapLibre vector tiles are authored for. Enters ONLY as a selection-zoom " +
+                 "offset (log2(256/OnScreenTilePx)); 512 ⇒ one level coarser ⇒ ~4× fewer, larger tiles over " +
+                 "the SAME ground span (paint/GroundResolution math is frozen). 256 = the dense legacy S71 " +
+                 "behaviour.")]
+        public int OnScreenTilePx = 512;
+
+        [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
+                 "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
+                 "same PHYSICAL size across panel densities. At runtime the Bootstrapper OVERWRITES this from " +
+                 "the real panel — dpr = Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi). This " +
+                 "serialized value is the deterministic one used in tests/headless (which drive Wire, not " +
+                 "Start). Must be positive. Default 1.")]
+        public double DevicePixelRatio = 1.0;
+
         [Tooltip("S87: Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
                  "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). S87 made " +
                  "consume MESH-by-mesh, so a single rich tile no longer lands in one frame. Pair with " +
