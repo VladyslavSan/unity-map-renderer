@@ -122,7 +122,6 @@ namespace MapRenderer.Tests
 
             Assert.IsTrue(r.Patch.Zoom.HasValue, "an edited Zoom must be emitted");
             Assert.That(r.Patch.Zoom.Value, Is.EqualTo(11.5).Within(1e-9), "Zoom is passed through as canonical zoom");
-            Assert.IsFalse(r.Patch.Distance.HasValue, "Distance must not be set (Zoom is canonical)");
             Assert.That(r.Display.Zoom, Is.EqualTo(11.5).Within(1e-9));
         }
     }

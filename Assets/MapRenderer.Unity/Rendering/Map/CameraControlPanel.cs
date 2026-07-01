@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Map
     public sealed class CameraControlPanel : MonoBehaviour
     {
         [Tooltip("The MapView whose live camera these sliders drive (set in the Inspector).")]
-        public MapView Map;
+        public MapViewComponent Map;
 
         [Header("Camera (two-way bound to the live camera)")]
         [Range(0f, 24f)]
@@ -61,7 +61,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         internal void Tick()
         {
-            // Play-mode only: null-guard until the bootstrapper wires the camera (edit mode has no CameraSystem).
+            // Play-mode only: null-guard until the bootstrapper wires the camera (edit mode has no MapCamera).
             if (Map == null || Map.Camera == null) return;
 
             CameraProperties camera = Map.Camera.CurrentProperties;
@@ -86,7 +86,7 @@ namespace MapRenderer.Unity.Rendering.Map
             ReconcileResult result = CameraSliderBinding.Reconcile(in fields, in _baseline, in camera);
 
             if (result.HasPatch)
-                Map.Camera.Apply(result.Patch, CameraAnimation.Instant);
+                Map.Camera.Apply(result.Patch);
 
             // Write the reconciled display values back into the serialized sliders, and store the baseline.
             Zoom      = (float)result.Display.Zoom;
@@ -97,7 +97,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // Debug readouts — display-only, always follow the camera (never written back). Distance is the
             // metres view of the reconciled zoom; lat/lon are the look-at this panel never moves (pan owns it).
             Distance  = (float)CameraPoseMath.AltitudeForZoom(
-                result.Display.Zoom, Map.Camera.ReferenceViewportHeightPx, Map.Camera.VerticalFovDeg);
+                result.Display.Zoom, Map.Camera.ViewportPx.y, Map.Camera.CurrentProperties.VerticalFovDeg);
             Latitude  = camera.LookAt.Latitude;
             Longitude = camera.LookAt.Longitude;
         }

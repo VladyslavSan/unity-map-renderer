@@ -33,7 +33,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -116,14 +116,14 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_T1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
                 // First Tick: cover is dirty, tile is requested.
                 // FixtureSource returns synchronously, so fetch IsCompleted immediately.
@@ -252,10 +252,10 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T2b");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread restricts capture to the
             // main (test) thread — so Task.Run background samples for PmTessellate are NOT counted.
@@ -269,7 +269,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
                 // Drive the async tile load. PumpUntilSettled calls Tick() repeatedly on the main thread.
                 // Tessellation runs on a background Task.Run thread; UploadMesh runs on this (main) thread.
@@ -345,14 +345,14 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_T3");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -437,15 +437,15 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
                 // Load initial cover at lon=0, z=5: center tile is (5,16,16).
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
                 // First Tick: tiles are added to _loaded, fetch tasks kicked (FixtureSource is sync,
                 // but TileScheduler's FetchAndCacheAsync has a Task.Run hop so they're not yet complete).
@@ -456,7 +456,7 @@ namespace MapRenderer.Tests
 
                 // Pan far east immediately — before tessellation tasks complete.
                 // lon=170, z=5 → center tile (5,31,16), completely non-overlapping cover.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts all original (5,16,*) tiles
 
                 // Original center tile must be gone from _loaded.
@@ -496,14 +496,14 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
                 // First Tick: kicks fetch (sync) and tessellation Task.
                 view.Tick();
@@ -539,27 +539,27 @@ namespace MapRenderer.Tests
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T6");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
+            view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
-            view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "All tiles must settle before measuring steady state.");
 
                 // Prime reused buffers to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.Tick();
 
                 // ── (a) within-cover pan: full recompute, zero allocation ──
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "Tooth 6a: MapView.Tick must not allocate during a within-cover pan. " +
                     "The S47 async polling loop must allocate only on fetch-completion edges, not here.");

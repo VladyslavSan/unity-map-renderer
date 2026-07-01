@@ -1,6 +1,10 @@
+using System.Collections.Generic;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Data;
+using MapRenderer.Core.Style;
+using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
@@ -8,6 +12,8 @@ using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 
 namespace MapRenderer.Tests
 {
@@ -22,52 +28,108 @@ namespace MapRenderer.Tests
     /// </summary>
     internal static class MapViewTestExtensions
     {
+        // ── Test camera rig ─────────────────────────────────────────────────────────────────────
+        // MapCamera wraps a NON-NULL UnityEngine.Camera and the camera IS the viewport, so a headless
+        // MapView test needs a real camera with a deterministic pixel size. This wires an offscreen,
+        // never-rendered camera whose square RenderTexture gives ViewportPx = (px, px) — reproducing the
+        // old `FallbackAspect = 1f` square viewport so tile selection is unchanged. The camera is parented
+        // to the view (destroyed with it); the RenderTexture is shared (the camera never renders to it).
+        private static RenderTexture _testViewportRt;
+
+        /// <summary>Wire a deterministic square (px×px) offscreen camera into <paramref name="view"/> so its
+        /// tile loop has a non-null camera / viewport. Chains after <c>AddComponent&lt;MapView&gt;()</c>.</summary>
+        public static MapViewComponent WithTestCamera(this MapViewComponent view, int px = 1080)
+        {
+            if (_testViewportRt == null || _testViewportRt.width != px)
+                _testViewportRt = new RenderTexture(px, px, 0);
+
+            var camGo = new GameObject("TestViewportCamera");
+            camGo.transform.SetParent(view.transform, false);
+            var cam = camGo.AddComponent<Camera>();
+            cam.enabled       = false;             // never renders — only supplies a deterministic ViewportPx
+            cam.targetTexture = _testViewportRt;
+
+            view.SetCamera(new MapCamera(cam, CameraProperties.Default));
+            return view;
+        }
+
+        /// <summary>
+        /// Test-only: wire an explicit data source + style synchronously, without <see cref="MapView.SetStyle"/>'s
+        /// async style/TileJSON fetch. Builds the layers, then drives the SAME production
+        /// <see cref="TileManager.SetSources"/> entry MapView.SetStyle uses — pointing every rendered source-id
+        /// at the one injected <paramref name="source"/>. No test-only seam on production TileManager. Requires
+        /// the camera to be wired first (<see cref="WithTestCamera"/>).
+        /// </summary>
+        internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
+            CameraProperties initialView, StyleDocument style = null)
+        {
+            MapView mv = view.View;
+            mv.Camera.SetProperties(initialView);
+            mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
+
+            // One SourceSpec per distinct rendered (fill/line) source-id, each creating the injected source.
+            // Zoom range left wide-open (cover is already zoom-clamped by the selector). Key is irrelevant —
+            // tests wire once, never restyle-diff.
+            var specs = new List<TileManager.SourceSpec>();
+            var seen  = new HashSet<string>();
+            foreach (var f in mv.Layers.Fills) AddSpec(f.StyleLayer?.Source);
+            foreach (var l in mv.Layers.Lines) AddSpec(l.StyleLayer?.Source);
+            mv.TileManager.SetSources(specs, view.Config.Backend);
+
+            void AddSpec(string sid)
+            {
+                sid ??= string.Empty;
+                if (seen.Add(sid))
+                    specs.Add(new TileManager.SourceSpec(sid, default, 0, int.MaxValue, () => source));
+            }
+        }
+
         /// <summary>Number of fill render bundles MapView built from the style.</summary>
-        public static int FillLayerCount(this MapView view) => view.Layers.FillCount;
+        public static int FillLayerCount(this MapViewComponent view) => view.Layers.FillCount;
 
         /// <summary>Number of line render bundles MapView built from the style.</summary>
-        public static int LineLayerCount(this MapView view) => view.Layers.LineCount;
+        public static int LineLayerCount(this MapViewComponent view) => view.Layers.LineCount;
 
         // ── Tile lifecycle observability (forwarded to the TileManager) ──────────────────────────
 
         /// <summary>Number of currently loaded (or loading) tiles.</summary>
-        public static int LoadedTileCount(this MapView view) => view.TileManager != null ? view.TileManager.LoadedTileCount : 0;
+        public static int LoadedTileCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.LoadedTileCount : 0;
 
         /// <summary>The scheduler's in-flight fetch count.</summary>
-        public static int InFlightCount(this MapView view) => view.TileManager != null ? view.TileManager.InFlightCount : 0;
+        public static int InFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.InFlightCount : 0;
 
         /// <summary>Number of tiles released while their tessellation was still in-flight.</summary>
-        public static int ReleasedMidFlightCount(this MapView view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
+        public static int ReleasedMidFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
 
         /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
-        public static int ReleasedMidFetchCount(this MapView view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
+        public static int ReleasedMidFetchCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
 
         /// <summary>S55: tessellation kicks issued in the most recent Tick.</summary>
-        public static int TessellationsKickedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.TessellationsKickedLastTick : 0;
+        public static int TessellationsKickedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TessellationsKickedLastTick : 0;
         /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
-        public static int VerticesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
+        public static int VerticesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
         /// <summary>S55/S87: number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
-        public static int TilesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
+        public static int TilesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
-        public static int MeshesConsumedLastTick(this MapView view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
+        public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
         /// <summary>True when the tile is loaded AND produced geometry. Backend-agnostic.</summary>
-        public static bool TryGetBuiltTile(this MapView view, TileId id) => view.TileManager != null && view.TileManager.TryGetBuiltTile(id);
+        public static bool TryGetBuiltTile(this MapViewComponent view, TileId id) => view.TileManager != null && view.TileManager.TryGetBuiltTile(id);
 
         /// <summary>The Mesh assets built for a loaded tile (one per rendered layer), or null if not built.</summary>
-        public static Mesh[] GetTileMeshes(this MapView view, TileId id) => view.TileManager?.GetTileMeshes(id);
+        public static Mesh[] GetTileMeshes(this MapViewComponent view, TileId id) => view.TileManager?.GetTileMeshes(id);
 
         /// <summary>Scene-space bounds of the live tiles (for framing a snapshot camera). <paramref name="tileSizeWorld"/>
         /// is the tile's world extent at the current zoom.</summary>
-        public static Bounds ComputeSceneBounds(this MapView view, float tileSizeWorld)
+        public static Bounds ComputeSceneBounds(this MapViewComponent view, float tileSizeWorld)
             => view.TileManager != null ? view.TileManager.ComputeSceneBounds(tileSizeWorld) : default;
 
         /// <summary>True once every loaded tile has finished building (or is definitively absent).</summary>
-        public static bool AllTilesSettled(this MapView view) => view.TileManager == null || view.TileManager.AllTilesSettled();
+        public static bool AllTilesSettled(this MapViewComponent view) => view.TileManager == null || view.TileManager.AllTilesSettled();
 
         /// <summary>Deterministic drain — blocks until all in-flight fetch and tessellation complete, then
         /// consumes their results synchronously. After this returns, <see cref="AllTilesSettled"/> is true.</summary>
-        public static void DrainTessellation(this MapView view)
+        public static void DrainTessellation(this MapViewComponent view)
         {
             if (view.Camera == null || view.TileManager == null) return;
             view.TileManager.DrainTessellation(view.Camera.CurrentProperties);
@@ -76,13 +138,13 @@ namespace MapRenderer.Tests
         // ── Backend handles (null unless the matching backend is selected and Initialise has run) ─
 
         /// <summary>The live BRG renderer; lets tests read instance buffer state without GPU readback.</summary>
-        public static BrgTileRenderer BrgRenderer(this MapView view) => view.TileManager?.BrgRenderer;
+        public static BrgTileRenderer BrgRenderer(this MapViewComponent view) => view.TileManager?.BrgRenderer;
 
         /// <summary>The live Entities-Graphics renderer.</summary>
-        public static EntitiesTileRenderer EntitiesRenderer(this MapView view) => view.TileManager?.EntitiesRenderer;
+        public static EntitiesTileRenderer EntitiesRenderer(this MapViewComponent view) => view.TileManager?.EntitiesRenderer;
 
         /// <summary>The live GameObject renderer; lets tests read the per-tile GameObject Hierarchy.</summary>
-        public static GameObjectTileRenderer GameObjectRenderer(this MapView view) => view.TileManager?.GameObjectRenderer;
+        public static GameObjectTileRenderer GameObjectRenderer(this MapViewComponent view) => view.TileManager?.GameObjectRenderer;
 
         /// <summary>
         /// Assigns the committed production <see cref="MapMaterialSet"/> so the view can build per-layer
@@ -90,9 +152,9 @@ namespace MapRenderer.Tests
         /// factory returns null and <see cref="StyledLayerSet"/> builds zero layers. Returns the view for
         /// chaining: <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
         /// </summary>
-        public static MapView WithTestMaterials(this MapView view)
+        public static MapViewComponent WithTestMaterials(this MapViewComponent view)
         {
-            view.MaterialSet = MapMaterialSetTestUtil.Load();
+            view.Config.MaterialSet = MapMaterialSetTestUtil.Load();
             return view;
         }
     }

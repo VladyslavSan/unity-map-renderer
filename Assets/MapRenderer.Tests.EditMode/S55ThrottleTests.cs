@@ -53,7 +53,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Tests.Visual;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
 {
@@ -149,12 +149,12 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S87");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
-            view.MaxTessellationsPerTick = 64;           // kick all tiles
-            view.MaxVerticesPerTick      = int.MaxValue;
-            view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
+            view.Config.MaxTessellationsPerTick = 64;           // kick all tiles
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
             view.Tick(); Thread.Sleep(10);   // request
             view.Tick(); Thread.Sleep(10);   // observe → ReadyBytes
             view.Tick(); Thread.Sleep(2000); // kick all; wait for every tessellation to complete
@@ -176,15 +176,15 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_A");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick          = 64;
-            view.MaxTessellationsPerTick   = 1;  // one kick per Tick
-            view.MaxVerticesPerTick        = int.MaxValue;
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick          = 64;
+            view.Config.MaxTessellationsPerTick   = 1;  // one kick per Tick
+            view.Config.MaxVerticesPerTick        = int.MaxValue;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: FillStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
                 // Tick 1: request tiles. PumpPendingBuilds sees no tiles, then cover adds them.
                 view.Tick();
@@ -238,8 +238,8 @@ namespace MapRenderer.Tests
                     "Need a multi-tile z=5 backlog so the per-mesh split is non-vacuous.");
 
                 // Consume ONE mesh per frame.
-                view.MaxBuildsPerTick   = 1;
-                view.MaxVerticesPerTick = int.MaxValue;
+                view.Config.MaxBuildsPerTick   = 1;
+                view.Config.MaxVerticesPerTick = int.MaxValue;
 
                 bool sawPartialTileFrame = false; // a frame that uploaded a mesh but completed NO tile
                 int  maxMeshesInAnyFrame = 0;
@@ -287,14 +287,14 @@ namespace MapRenderer.Tests
                 var src  = TestDataSource.FromBytes(FixtureBytes());
                 var go   = new GameObject("MapView_S55_D_Throttled");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
-                view.MinZoom = 5; view.MaxZoom = 5;
-                view.PadTiles = 0; view.FallbackAspect = 1f;
-                view.MaxBuildsPerTick        = 64;
-                view.MaxTessellationsPerTick = 1;
-                view.MaxVerticesPerTick      = 1;
+                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.Config.MaxBuildsPerTick        = 64;
+                view.Config.MaxTessellationsPerTick = 1;
+                view.Config.MaxVerticesPerTick      = 1;
                 try
                 {
-                    view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: FillStyle());
+                    view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
                     PumpUntilSettled(view);
                     Assert.IsTrue(view.AllTilesSettled(), "Throttled run must settle.");
                     countThrottled = view.LoadedTileCount();
@@ -308,14 +308,14 @@ namespace MapRenderer.Tests
                 var src  = TestDataSource.FromBytes(FixtureBytes());
                 var go   = new GameObject("MapView_S55_D_Uncapped");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
-                view.MinZoom = 5; view.MaxZoom = 5;
-                view.PadTiles = 0; view.FallbackAspect = 1f;
-                view.MaxBuildsPerTick        = 64;
-                view.MaxTessellationsPerTick = 64;
-                view.MaxVerticesPerTick      = int.MaxValue;
+                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.Config.MaxBuildsPerTick        = 64;
+                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxVerticesPerTick      = int.MaxValue;
                 try
                 {
-                    view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: FillStyle());
+                    view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
                     PumpUntilSettled(view);
                     Assert.IsTrue(view.AllTilesSettled(), "Uncapped run must settle.");
                     countUncapped = view.LoadedTileCount();
@@ -344,15 +344,15 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_F");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick        = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick        = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: FillAndLineStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndLineStyle());
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tile must settle for bounds test.");
@@ -466,8 +466,8 @@ namespace MapRenderer.Tests
 
                 // ONE pump with a partial per-frame MESH budget (< the full backlog).
                 const int meshBudget = 3;
-                view.MaxBuildsPerTick   = meshBudget;
-                view.MaxVerticesPerTick = int.MaxValue;
+                view.Config.MaxBuildsPerTick   = meshBudget;
+                view.Config.MaxVerticesPerTick = int.MaxValue;
                 view.Tick();
 
                 int meshesConsumed = view.MeshesConsumedLastTick();
@@ -543,18 +543,18 @@ namespace MapRenderer.Tests
             var mapGo = new GameObject("S55_E_MapView");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             // S55 DEFAULT throttle values — the whole point is not to override them here.
-            view.MinZoom = Zoom; view.MaxZoom = Zoom;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick        = 64;
-            view.MaxTessellationsPerTick = 2;      // S55 default
-            view.MaxVerticesPerTick      = 50000;  // S55 default
+            view.Config.MinZoom = Zoom; view.Config.MaxZoom = Zoom;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick        = 64;
+            view.Config.MaxTessellationsPerTick = 2;      // S55 default
+            view.Config.MaxVerticesPerTick      = 50000;  // S55 default
 
             try
             {
                 var cam3 = new CameraProperties(
                     new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, Zoom, 0, 0);
-                view.Initialise(TestDataSource.FromBytes(FixtureBytes()),
-                    cam3, ownsSource: false, style: FillStyle());
+                view.LoadTestStyle(TestDataSource.FromBytes(FixtureBytes()),
+                    cam3, style: FillStyle());
 
                 // Pump to settle — throttle spreads kicks/consumes across many ticks.
                 for (int f = 0; f < 5000 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
@@ -617,28 +617,28 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_G");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
-            view.MinZoom = 2; view.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick        = 64;
-            view.MaxTessellationsPerTick = 64; // uncapped for fast settle
-            view.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
+            view.Config.MinZoom = 2; view.Config.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick        = 64;
+            view.Config.MaxTessellationsPerTick = 64; // uncapped for fast settle
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: FillStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: FillStyle());
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "Must settle before measuring steady-state alloc.");
 
                 // Prime reused internal buffers to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.Tick();
 
                 // ── (a) within-cover pan: PumpPendingBuilds resets 3 int counters, then early-exits ──
                 // The counters and budget locals are all scalar ints — must not box.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "Tooth (g-a): MapView.Tick must not allocate during a within-cover pan. " +
                     "The 3 new S55 int counter resets must be scalar, never boxing.");
@@ -676,8 +676,8 @@ namespace MapRenderer.Tests
             try
             {
                 // Consume a few meshes at 1/frame so some tiles are left PARTIALLY consumed (cursor > 0).
-                view.MaxBuildsPerTick   = 1;
-                view.MaxVerticesPerTick = int.MaxValue;
+                view.Config.MaxBuildsPerTick   = 1;
+                view.Config.MaxVerticesPerTick = int.MaxValue;
                 for (int i = 0; i < 3; i++) view.Tick();
                 Assert.IsFalse(view.AllTilesSettled(),
                     "Must be mid-consume (partial tiles present) before the eviction.");
@@ -685,7 +685,7 @@ namespace MapRenderer.Tests
                 // Evict the whole z=5 cover via a far camera jump → ReleaseTile runs on partial tiles.
                 // Block further kicks-into-consume timing is irrelevant; we measure after teardown.
                 view.Camera.Apply(
-                    new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 }, CameraAnimation.Instant);
+                    new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
                 for (int i = 0; i < 6; i++) { view.Tick(); Thread.Sleep(5); } // release old + drain holding pen
             }
             finally

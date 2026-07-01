@@ -33,7 +33,7 @@ using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -120,15 +120,15 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_A");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             // Baseline: count Meshes before the map load.
             int meshBefore = CountMeshObjects();
 
-            view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+            view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
             // Drive load: fetch → tessellate → consume (creates Mesh + GameObject).
             PumpUntilSettled(view);
@@ -192,20 +192,20 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_B");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
             // MaxBuildsPerTick = 0 BEFORE initialise: prevents Phase-2 (consume) from running.
             // Tessellation tasks are KICKED (Phase-1) but never consumed, guaranteeing the tiles
             // are in HasTessellationTask=true, Built=false state when we evict them.
-            view.MaxBuildsPerTick = 0;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MaxBuildsPerTick = 0;
+            view.Config.MaxTessellationsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
             try
             {
                 // Load initial cover at lon=0, z=5.
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → completes immediately).
                 view.Tick();
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests
 
                 // Pan far east — before tessellation results are consumed.
                 // MaxBuildsPerTick=0 guarantees tiles are still in-flight (HasTessellationTask && !Built).
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts original tiles while they are in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
@@ -231,9 +231,9 @@ namespace MapRenderer.Tests
                     "would be vacuously true (nothing was built → nothing to orphan).");
 
                 // Restore MaxBuildsPerTick so the new cover settles normally.
-                view.MaxBuildsPerTick = 64;
-                view.MaxTessellationsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+                view.Config.MaxBuildsPerTick = 64;
+                view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
                 // Let the tessellation UniTasks for the evicted tiles complete on the ThreadPool.
                 // Then pump the new cover until it settles.
@@ -347,16 +347,16 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
             // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
             // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
-            view.MaxBuildsPerTick = 0;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MaxBuildsPerTick = 0;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
                 view.Tick();
@@ -365,7 +365,7 @@ namespace MapRenderer.Tests
                 view.Tick();
 
                 // Pan far east — evicting the original tiles while tessellation is in-flight.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
 
                 // Positive control: at least one tile must have been released mid-flight.
@@ -406,9 +406,9 @@ namespace MapRenderer.Tests
                     "(confirm NativeArray_PositiveControl_LeakedAlloc_CounterNonZero still passes).");
 
                 // Restore MaxBuildsPerTick so the new cover can settle.
-                view.MaxBuildsPerTick = 64;
-                view.MaxTessellationsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+                view.Config.MaxBuildsPerTick = 64;
+                view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
                 // Let the ThreadPool tessellation tasks complete, then pump until the new cover settles.
                 // DrainPendingDisposal() is called inside each Tick — released tiles' NativeArrays are
@@ -455,14 +455,14 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing NativeArray balance.");
@@ -514,16 +514,16 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_C");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
                 view.Tick(); // kick fetch + tessellation
 
                 // DrainTessellation: synchronous settle — waits for tessellation UniTasks to complete.

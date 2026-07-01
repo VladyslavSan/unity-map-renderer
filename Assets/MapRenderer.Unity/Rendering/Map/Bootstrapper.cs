@@ -42,7 +42,7 @@ namespace MapRenderer.Unity.Rendering.Map
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
-    [RequireComponent(typeof(MapView))]
+    [RequireComponent(typeof(MapViewComponent))]
     [RequireComponent(typeof(Controller))]
     public sealed class Bootstrapper : MonoBehaviour
     {
@@ -71,6 +71,10 @@ namespace MapRenderer.Unity.Rendering.Map
                  "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
         public double InitialZoom = 14.0;
 
+        [Tooltip("Vertical field-of-view (degrees) for the perspective camera — the initial camera lens " +
+                 "(carried in CameraProperties, pushed to the Unity camera).")]
+        public double VerticalFovDeg = 60.0;
+
         [Tooltip("Cap the frame rate to the display refresh rate (VSync) on Start. Off = render " +
                  "uncapped (1000+ FPS), which needlessly drives the GPU and heats the machine.")]
         public bool CapFrameRateToRefreshRate = true;
@@ -90,12 +94,11 @@ namespace MapRenderer.Unity.Rendering.Map
                 new GeoCoordinate3D
                 {
                     Latitude = InitialLatitude, Longitude = InitialLongitude, Altitude = 0.0
-                }, InitialZoom, 0, 0);
+                }, InitialZoom, 0, 0, VerticalFovDeg);
 
-            // 2. Wire camera + components only (S83b: NO data source / Initialise here — the style drives
-            //    the sources). Passing source:null makes Wire do the CameraSystem/MapCamera/Controller
-            //    wiring and skip Initialise; SetStyle (step 4) builds the multi-source pipeline.
-            Wire(gameObject, Camera.main, source: null, initialView, ownsSource: false, style: null);
+            // 2. Wire camera + components only — the style drives the sources. Wire builds the MapView over
+            //    the main camera; SetStyle (step 4) loads the multi-source pipeline.
+            Wire(gameObject, Camera.main, initialView);
 
             // 3. Ensure a directional light exists in the scene (for URP Lit fill shader).
             EnsureDirectionalLight();
@@ -103,7 +106,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // 4. Resolve the style URI and load it. SetStyle is async (fetches the style doc + any
             //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
             //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
-            var mapView = GetComponent<MapView>();
+            var mapView = GetComponent<MapViewComponent>();
             string styleUri = ResolveStyleUri(StyleUri);
             if (mapView != null)
                 mapView.SetStyle(styleUri).Forget();
@@ -141,10 +144,10 @@ namespace MapRenderer.Unity.Rendering.Map
         // ── Static wire-up entry (testable without Play mode) ─────────────────────────────────────
 
         /// <summary>
-        /// Wires the map subsystem on <paramref name="root"/>: finds <see cref="Controller"/> and
-        /// <see cref="View"/> on <paramref name="root"/>, sets <c>Controller.Camera</c> and
-        /// <c>Controller.Map</c>, and calls <see cref="View.Initialise"/> with <paramref name="source"/>
-        /// and <paramref name="initialView"/>.
+        /// Wires the map subsystem on <paramref name="root"/>: finds the <see cref="Controller"/> and
+        /// <see cref="MapViewComponent"/>, sets <c>Controller.Camera</c>/<c>Controller.Map</c>, and builds
+        /// the MapView over the camera (from <paramref name="initialView"/>). Data is loaded separately via
+        /// <see cref="MapViewComponent.SetStyle(string,System.Threading.CancellationToken)"/>.
         ///
         /// <para>If <paramref name="camera"/> is null the method logs a warning and returns without
         /// NRE (missing camera is handled gracefully).</para>
@@ -154,17 +157,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         /// <param name="root">The MapRoot GameObject (must carry MapView + Controller).</param>
         /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
-        /// <param name="source">The tile data source (HTTP, file, in-memory…). May be null in tests.</param>
-        /// <param name="initialView">Initial camera state.</param>
-        /// <param name="ownsSource">If true, MapView will dispose the source on OnDestroy.</param>
-        /// <param name="style">Optional StyleDocument; null renders nothing.</param>
+        /// <param name="initialView">Initial camera state (the MapCamera is built from it).</param>
         public static void Wire(
             GameObject       root,
             Camera           camera,
-            IDataSource      source      = null,
-            CameraProperties initialView = default,
-            bool             ownsSource  = false,
-            StyleDocument    style       = null)
+            CameraProperties initialView = default)
         {
             if (root == null)
             {
@@ -179,10 +176,10 @@ namespace MapRenderer.Unity.Rendering.Map
                 // We still continue to initialise MapView and set Map on the controller.
             }
 
-            var mapView = root.GetComponent<MapView>();
+            var mapView = root.GetComponent<MapViewComponent>();
             if (mapView == null)
             {
-                Debug.LogWarning("[Bootstrapper.Wire] No MapView found on root — wire-up skipped.");
+                Debug.LogWarning("[Bootstrapper.Wire] No MapViewComponent found on root — wire-up skipped.");
                 return;
             }
 
@@ -196,27 +193,18 @@ namespace MapRenderer.Unity.Rendering.Map
             // Set the camera reference on the controller (may be null — guarded in Update).
             ctrl.Camera = camera;
 
-            // ── S45/S50: Wire CameraSystem + MapCamera onto MapView (D4) ────────────────────────
-            // MapView owns the (single) CameraSystem. Wire it BEFORE Initialise so the layer-record
-            // build reads this fully-framed system (not a default one). When camera is null, MapCamera
-            // sync is a no-op (guarded inside MapCamera.Sync).
-            var cameraSystem = new CameraSystem(
-                initialView,
-                referenceViewportHeightPx: ctrl.ReferenceViewportHeightPx,
-                verticalFovDeg: ctrl.VerticalFovDeg);
+            // ── Wire the MapCamera onto MapView ────────────────────────────────────────────────
+            // MapView owns the (single) MapCamera; SetCamera builds the MapView (it is valid from that point
+            // — an empty map until SetStyle loads data). MapCamera wraps a real Unity camera, so with no
+            // camera we skip: no MapView is built (the scene always has a main camera in practice).
+            if (camera != null)
+            {
+                // FOV + viewport come from initialView / the camera; only the altitude multiplier is side config.
+                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier);
+                mapView.SetCamera(mapCamera);
+            }
 
-            var mapCamera = camera != null
-                ? new MapCamera(camera, ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg)
-                : new MapCamera(null,   ctrl.ReferenceViewportHeightPx, ctrl.VerticalFovDeg);
-            mapCamera.AltitudeMultiplier = ctrl.AltitudeMultiplier;
-
-            mapView.SetCamera(mapCamera, cameraSystem);
-
-            // Initialise MapView so the scheduler and layer records are built (keeps the wired camera).
-            if (source != null)
-                mapView.Initialise(source, initialView, ownsSource: ownsSource, style: style);
-
-            // Wire the controller to the view.
+            // Wire the controller to the view (data is loaded separately via SetStyle — see Start).
             ctrl.Map = mapView;
 
             // S74: wire the touch source alongside the desktop controller (same write seam).

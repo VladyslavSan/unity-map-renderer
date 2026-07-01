@@ -12,7 +12,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapController = MapRenderer.Unity.Rendering.Map.Controller;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     [TestFixture]
@@ -41,10 +41,11 @@ namespace MapRenderer.Tests
 
             var camGo = new GameObject("Camera_Test");
             var cam   = camGo.AddComponent<Camera>();
+            // Deterministic viewport: the camera IS the viewport now (ViewportPx.y drives the altitude
+            // formula), so a fixed-height RenderTexture reproduces the old ReferenceViewportHeightPx=1080.
+            cam.targetTexture = new RenderTexture((int)TestViewportHeight, (int)TestViewportHeight, 0);
 
             ctrl.Camera                 = cam;
-            ctrl.ReferenceViewportHeightPx = TestViewportHeight;
-            ctrl.VerticalFovDeg         = TestFovDeg;
             ctrl.AltitudeMultiplier     = 1f;
 
             return (ctrl, cam, rootGo, camGo);

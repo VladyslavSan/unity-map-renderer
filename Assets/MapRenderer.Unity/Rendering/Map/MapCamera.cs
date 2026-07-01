@@ -1,3 +1,4 @@
+using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
@@ -6,112 +7,107 @@ using MapRenderer.Core.View.Camera;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// S45/S52: Thin Unity binding. Applies a Core <see cref="CameraProperties"/> to a
-    /// <see cref="UnityEngine.Camera"/> transform. The geo-aware camera <em>model</em> lives in Core
-    /// (<see cref="CameraSystem"/> + <see cref="CameraPoseMath"/>); this is the only piece allowed to
-    /// touch <c>UnityEngine.Camera</c>.
+    /// The map camera — a neat wrapper around a <b>non-null</b> <see cref="UnityEngine.Camera"/> that holds
+    /// the current <see cref="CameraProperties"/> and drives the camera transform from them. Correct by
+    /// construction: the wrapped camera is never null, so there is no fallback path for aspect / viewport /
+    /// pose. (S89: absorbed the former Core <c>CameraSystem</c>; there is no separate model↔binding split.)
     ///
-    /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at every frame, so
-    /// the look-at always sits at the render origin. The camera therefore <b>orbits the origin</b> — its
-    /// render position is purely the orbit pose (altitude/heading/tilt) from <see cref="CameraPoseMath"/>,
-    /// with no floating-origin term. That is why <see cref="ApplyCameraProperties"/> is a pure function of
-    /// <see cref="CameraProperties"/> and needs nothing from the scene: positioning the tiles relative to
-    /// the look-at is the tile layer's job (<see cref="FloatingOrigin"/>), not the camera's.</para>
+    /// <para><b>Control is instant.</b> <see cref="Apply"/> merges a <see cref="CameraPropertiesUpdate"/>
+    /// patch over the current state and re-drives the transform. Smooth, animated, per-property control is
+    /// the job of a separate <c>CameraController</c> (future), layered on top of this.</para>
     ///
-    /// <para><b>Placement:</b> at tilt=0 the camera is directly above the look-at (origin) at altitude,
-    /// looking straight down; at tilt&gt;0 it orbits toward the horizon; bearing rotates in the horizontal
-    /// plane. The Core pose computes a deterministic heading-derived up-vector so LookRotation is never
-    /// fed degenerate inputs. Clip planes: near = altitude·0.01 (min 0.1); far = altitude·4.</para>
+    /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at, so the camera
+    /// orbits the origin and its transform is a pure function of <see cref="CameraProperties"/> — recomputed
+    /// on <see cref="Apply"/>, not per frame. At tilt=0 the camera sits directly above the look-at looking
+    /// straight down; tilt&gt;0 orbits toward the horizon; heading rotates in the horizontal plane. Clip
+    /// planes scale with altitude (near = altitude·0.01 min 0.1; far = altitude·4).</para>
     ///
-    /// <para>Not a MonoBehaviour. <see cref="ApplyCameraProperties"/> is called by
-    /// <see cref="MapView.UpdateFrame"/> after the camera model is advanced (D5).</para>
+    /// <para><b>Framing:</b> the zoom→altitude formula uses the camera's <b>live</b> pixel height
+    /// (<see cref="ViewportPx"/>.y) so a given zoom renders tiles at their native resolution on any window
+    /// size (slippy-map convention). The FOV lens is camera <b>state</b>
+    /// (<see cref="CameraProperties.VerticalFovDeg"/>) — a genuine parameter, not a measurement — pushed to
+    /// the Unity camera on each sync; the viewport height comes from the camera, not from side config.</para>
+    ///
+    /// <para>Not a MonoBehaviour.</para>
     /// </summary>
     public sealed class MapCamera
     {
-        // ── Unity camera to drive ─────────────────────────────────────────────────────────────────
+        // ── Wrapped Unity camera (never null — ctor-enforced) ───────────────────────────────────────
         private readonly UnityEngine.Camera _camera;
 
-        // ── Active projection (S63: default WebMercator; D7 symmetry with CameraSystem) ──────────
-        /// <summary>The active projection for this camera (default: WebMercatorProjection).</summary>
-        public IProjection Projection = new WebMercatorProjection();
+        // ── Active projection (S63: default WebMercator; injectable for tests / future globe) ─────────
+        public IProjection Projection { get; }
 
-        // ── Framing parameters (match CameraSystem) ───────────────────────────────────────────────
-        /// <summary>
-        /// Deterministic reference viewport height fed to the altitude formula. Use a fixed constant
-        /// (e.g. 1080), NOT <c>Camera.pixelHeight</c> — pixel height is non-reproducible in headless.
-        /// </summary>
-        public float ReferenceViewportHeightPx;
+        /// <summary>Altitude multiplier for art-direction (default 1).</summary>
+        public readonly float AltitudeMultiplier;
 
-        /// <summary>Vertical FOV for the perspective camera (degrees). Pushed to <c>Camera.fieldOfView</c>.</summary>
-        public float VerticalFovDeg;
+        // ── Current state (includes the FOV lens — CameraProperties.VerticalFovDeg) ──────────────────
+        private CameraProperties _current;
 
-        /// <summary>Optional altitude multiplier for art-direction (default 1). Same as S42 AltitudeMultiplier.</summary>
-        public float AltitudeMultiplier = 1f;
-
-        // ── Construction ──────────────────────────────────────────────────────────────────────────
         public MapCamera(UnityEngine.Camera camera,
-                         float referenceViewportHeightPx = 1080f,
-                         float verticalFovDeg             = 60f)
+                         CameraProperties initial,
+                         float       altitudeMultiplier = 1f,
+                         IProjection projection         = null)
         {
-            _camera                   = camera;
-            ReferenceViewportHeightPx = referenceViewportHeightPx;
-            VerticalFovDeg            = verticalFovDeg;
+            _camera = camera != null ? camera
+                : throw new ArgumentNullException(nameof(camera), "MapCamera requires a real UnityEngine.Camera.");
+            _current           = initial;
+            AltitudeMultiplier = altitudeMultiplier;
+            Projection         = projection ?? new WebMercatorProjection();
+            SyncTransform();
         }
 
+        /// <summary>The current camera properties.</summary>
+        public CameraProperties CurrentProperties => _current;
+
+        /// <summary>Live viewport size in pixels, straight from the wrapped camera (the camera IS the
+        /// viewport — no fallback).</summary>
+        public double2 ViewportPx => new double2(_camera.pixelWidth, _camera.pixelHeight);
+
         /// <summary>
-        /// S71: the live viewport aspect (width / height) of the wrapped Unity camera, for the framing
-        /// viewport the tile selector consumes. Returns <paramref name="fallback"/> when there is no camera
-        /// or its pixel height is not yet valid (headless / first frame) — <c>Camera.pixelHeight</c> is
-        /// non-reproducible headless, so the deterministic fallback keeps tests stable.
+        /// Merge <paramref name="update"/> over the current properties and re-drive the transform (instant).
+        /// An empty patch still re-syncs the transform (cheap, pure function of the props).
         /// </summary>
-        public double LiveAspect(double fallback)
+        public void Apply(CameraPropertiesUpdate update)
         {
-            if (_camera == null) return fallback;
-            int h = _camera.pixelHeight;
-            if (h <= 0) return fallback;
-            return (double)_camera.pixelWidth / h;
+            _current = update.ApplyTo(_current);
+            SyncTransform();
         }
 
-        // ── Apply ────────────────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Positions and orients the Unity camera from <paramref name="props"/>. The camera orbits the
-        /// render origin (the look-at, by the camera-relative-rendering invariant), so this is a pure
-        /// function of the camera properties — no scene/floating-origin input.
-        ///
-        /// <para>Derives altitude from zoom, computes the orbit pose (position/forward/up) via
-        /// <see cref="CameraPoseMath"/>, then sets transform, FOV, and altitude-scaled clip planes.
-        /// No-op if the wrapped camera is null (headless/no-camera path).</para>
-        /// </summary>
-        public void ApplyCameraProperties(CameraProperties props)
+        /// <summary>Jump the camera to an absolute <paramref name="props"/> state and re-drive the transform.
+        /// The absolute counterpart to <see cref="Apply"/> (used to seed the initial view).</summary>
+        public void SetProperties(CameraProperties props)
         {
-            if (_camera == null) return;
+            _current = props;
+            SyncTransform();
+        }
 
-            double altitude = CameraPoseMath.AltitudeForZoom(props.Zoom, ReferenceViewportHeightPx, VerticalFovDeg)
+        // ── Drive the Unity camera transform from the current props ─────────────────────────────────
+        private void SyncTransform()
+        {
+            double altitude = CameraPoseMath.AltitudeForZoom(_current.Zoom, ViewportPx.y, _current.VerticalFovDeg)
                               * AltitudeMultiplier;
             if (altitude < 0.1) altitude = 0.1;
 
             CameraPoseMath.ComputePose(altitude,
-                                       props.Heading.Value,
-                                       props.Tilt.Value,
+                                       _current.Heading.Value,
+                                       _current.Tilt.Value,
                                        out double3 pos,
                                        out double3 fwd,
                                        out double3 up);
 
             _camera.orthographic = false;
-            _camera.fieldOfView  = VerticalFovDeg;
+            _camera.fieldOfView  = (float)_current.VerticalFovDeg;
 
             // Orbit pose around the render origin (the look-at sits at origin under camera-relative
             // rendering, so there is no scene-origin term here).
             _camera.transform.position = new Vector3((float)pos.x, (float)pos.y, (float)pos.z);
 
-            // LookRotation(forward, up): forward = direction the camera looks (toward the look-at/origin).
-            // Core already orthogonalized up vs. fwd (Gram-Schmidt) so this is always valid.
+            // LookRotation(forward, up): Core already orthogonalized up vs. fwd (closed-form, unit-length).
             _camera.transform.rotation = Quaternion.LookRotation(
                 new Vector3((float)fwd.x, (float)fwd.y, (float)fwd.z),
                 new Vector3((float)up.x,  (float)up.y,  (float)up.z));
 
-            // Clip planes: scale with altitude so the world is not clipped at z2, precision OK at z16.
             _camera.nearClipPlane = Mathf.Max(0.1f, (float)CameraPoseMath.NearClip(altitude));
             _camera.farClipPlane  =                  (float)CameraPoseMath.FarClip(altitude);
         }

@@ -143,39 +143,14 @@ namespace MapRenderer.Core.View.Camera
             up = new double3(sinH * cosT, sinT, cosH * cosT);
         }
 
-        // ── Interpolation helpers (D4) ──────────────────────────────────────────────────────────
+        // ── Heading interpolation (D4) ──────────────────────────────────────────────────────────
 
         /// <summary>
         /// Interpolates heading using the shortest angular path (D4).
         /// 350 → 10 goes +20° (not −340°). Thin shim over <see cref="Angle.LerpShortest"/>.
+        /// A pure helper for smooth heading control (the future CameraController).
         /// </summary>
         public static double LerpHeadingShortest(double from, double to, double t)
             => Angle.LerpShortest(Angle.FromDegrees(from), Angle.FromDegrees(to), t).Degrees;
-
-        /// <summary>Linearly interpolates a scalar value.</summary>
-        public static double Lerp(double a, double b, double t) => a + (b - a) * t;
-
-        /// <summary>
-        /// Interpolates two <see cref="CameraProperties"/> values at parameter <paramref name="t"/>
-        /// according to D4 interpolation spaces:
-        /// <list type="bullet">
-        ///   <item>Zoom — zoom-space (not altitude).</item>
-        ///   <item>LookAt lat/lon — linear (Web-Mercator; close-enough for the non-flyTo path).</item>
-        ///   <item>Heading — shortest-angle wrap.</item>
-        ///   <item>Tilt — linear.</item>
-        /// </list>
-        /// </summary>
-        public static CameraProperties Interpolate(CameraProperties from, CameraProperties to, double t)
-        {
-            double zoom      = Lerp(from.Zoom, to.Zoom, t);
-            double latitude  = Lerp(from.LookAt.Latitude, to.LookAt.Latitude, t);
-            double longitude = Lerp(from.LookAt.Longitude, to.LookAt.Longitude, t);
-            double altitude  = Lerp(from.LookAt.Altitude, to.LookAt.Altitude, t);
-            double heading   = LerpHeadingShortest(from.Heading.Degrees, to.Heading.Degrees, t);
-            double tilt      = Lerp(from.Tilt.Degrees, to.Tilt.Degrees, t);
-            return new CameraProperties(
-                new GeoCoordinate3D { Latitude = latitude, Longitude = longitude, Altitude = altitude }, zoom, heading,
-                tilt);
-        }
     }
 }

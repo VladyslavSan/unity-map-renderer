@@ -8,7 +8,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
 {
@@ -27,11 +27,7 @@ namespace MapRenderer.Tests
             var camGo  = new GameObject("Camera_Test");
             var cam    = camGo.AddComponent<Camera>();
 
-            var mapCam = new MapCamera(cam, TestViewportHeight, TestFovDeg);
-            var camSys = new CameraSystem(initial,
-                                          referenceViewportHeightPx: TestViewportHeight,
-                                          verticalFovDeg: TestFovDeg);
-            view.SetCamera(mapCam, camSys);
+            view.SetCamera(new MapCamera(cam, initial));
             return (view, rootGo, camGo);
         }
 
@@ -48,14 +44,14 @@ namespace MapRenderer.Tests
 
                 // Frame 1: seeds the baseline from the camera and pulls the sliders to it (no edit yet).
                 panel.Tick();
-                Assert.That(view.CurrentProperties.Heading.Degrees, Is.EqualTo(0.0).Within(1e-6),
+                Assert.That(view.Camera.CurrentProperties.Heading.Degrees, Is.EqualTo(0.0).Within(1e-6),
                     "seeding frame must not move the camera");
 
                 // The user drags Heading to 90; next Tick must push it through to the live camera.
                 panel.Heading = 90f;
                 panel.Tick();
-                Assert.That(view.CurrentProperties.Heading.Degrees, Is.EqualTo(90.0).Within(1e-3),
-                    "a Heading slider edit must reach MapView.CurrentProperties via the write seam");
+                Assert.That(view.Camera.CurrentProperties.Heading.Degrees, Is.EqualTo(90.0).Within(1e-3),
+                    "a Heading slider edit must reach the live camera via the write seam");
             }
             finally
             {
@@ -77,7 +73,7 @@ namespace MapRenderer.Tests
                 panel.Tick();
 
                 double expectedMetres = MapRenderer.Core.View.Camera.CameraPoseMath.AltitudeForZoom(
-                    10.0, view.Camera.ReferenceViewportHeightPx, view.Camera.VerticalFovDeg);
+                    10.0, view.Camera.ViewportPx.y, view.Camera.CurrentProperties.VerticalFovDeg);
 
                 Assert.That(panel.Distance,  Is.EqualTo(expectedMetres).Within(1.0),
                     "Distance readout must be the metres view of the camera's zoom.");

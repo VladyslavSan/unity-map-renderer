@@ -28,7 +28,7 @@ namespace MapRenderer.Tests
 
         // Build a CameraProperties from a patch applied to a base camera (using CameraPropertiesUpdate.ApplyTo).
         private static CameraProperties ApplyPatch(CameraProperties cam, CameraPropertiesUpdate u)
-            => u.ApplyTo(cam, 1080.0, 60.0);
+            => u.ApplyTo(cam);
 
         // ── ApplyZoom ────────────────────────────────────────────────────────────────────────────
 

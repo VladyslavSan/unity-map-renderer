@@ -18,9 +18,9 @@ using GOBackend = MapRenderer.Unity.Rendering.Backend.GameObjects;
 namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
-    /// Owns the tile lifecycle for <see cref="Map.View"/> — the cover→fetch→tessellate→consume→evict
+    /// Owns the tile lifecycle for <see cref="Map.MapView"/> — the cover→fetch→tessellate→consume→evict
     /// pipeline plus the S48/S51 disposal &amp; mesh-leak guards. Extracted from MapView as the biggest,
-    /// most cohesive cut of the decomposition: MapView keeps the camera, the <see cref="StyledLayerSet"/>,
+    /// most cohesive cut of the decomposition: MapView keeps the camera, the <see cref="Style.StyledLayerSet"/>,
     /// and the scene origin; this object keeps the scheduler, the loaded-tile table, and all the in-flight
     /// async machinery, and is just ticked once per frame.
     ///
@@ -31,7 +31,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     ///   <item>the scene origin (Mercator) for tile placement,</item>
     ///   <item>tile-selection config (<see cref="TileSelectionConfig"/>) read from MapView's serialized fields.</item>
     /// </list>
-    /// The <see cref="StyledLayerSet"/> (render bundles) is stable for the object's life, so it's injected
+    /// The <see cref="Style.StyledLayerSet"/> (render bundles) is stable for the object's life, so it's injected
     /// at construction.</para>
     ///
     /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as a
@@ -187,7 +187,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             public string        SourceId;   // the StyleLayer.Source this pipeline serves (normalized, never null)
             public int           Slot;        // index into _pipelines (0..N-1)
             public IDataSource   Source;
-            public bool          OwnsSource;  // dispose Source on teardown (false when shared, e.g. legacy Initialise)
+            public bool          OwnsSource;  // dispose Source on teardown (this pipeline built it)
             public TileScheduler Scheduler;
             public TileCache     Cache;
             public int           MinZoom;     // resolved source minzoom — admission clamp (decision 10)
@@ -267,14 +267,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S83b: per-source pipeline registry (replaces the single _scheduler/_source/_ownsSource). The
         // per-tile lifecycle is per-(tile, source) — see LoadedKey.
         private readonly List<SourcePipeline> _pipelines = new List<SourcePipeline>(4);
-        private bool _initialised;
 
         /// <summary>S83b: the normalized source-id a rendered style layer draws from (null → "" so it is a
         /// valid Dictionary key and matches a pipeline built for an absent <c>source</c>).</summary>
         private static string SourceIdOf(StyleLayer layer) => layer?.Source ?? string.Empty;
 
-        // ── Tile render backend (Entities, BRG, or GameObject) — constructed in Initialise ────
-        private Backend.ITileRenderBackend _instanced; // null only before Initialise / after Dispose
+        // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
+        private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
 
         // ── S71: the visible-tile-selection seam (default = ViewportCornerTileSelector; injected by MapView) ─
         // Held as the interface type so a future mixed-zoom (distance-LOD) impl drops in with no change here.
@@ -305,23 +304,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         private double _coverKeyViewportX;
         private double _coverKeyViewportY;
         private bool   _coverKeyInitialised;
-
-        // ── S51 test observability: mid-flight release counter ─────────────────────────────────
-        // Counts tiles released while their tessellation was still in-flight (HasTessellationTask
-        // && !Built). Exposed for tests to prove the race actually occurred. See S51 tooth 5b.
-        private int _releasedMidFlightCount;
-
-        // ── S84 test observability: mid-FETCH release counter ──────────────────────────────────────
-        // Counts tiles released while their FETCH was still in-flight (!FetchCompleted). Exposed for the
-        // S84 test to prove the cancel-mid-fetch race actually occurred (non-vacuous).
-        private int _releasedMidFetchCount;
-
-        // ── S55/S87 test-observability: throttle counters (reset at each PumpPendingBuilds entry) ─────────
-        private int _tessellationsKickedLastTick;
-        private int _verticesConsumedLastTick;
-        private int _tilesConsumedLastTick;
-        // S87: meshes (tile-layers) uploaded+registered this tick — the per-frame mesh-count budget observable.
-        private int _meshesConsumedLastTick;
 
         // S87: reusable scratch for one ConsumeTessellationTask call's newly-built meshes/handles (main-thread
         // only, not re-entrant). Cleared at the start of each call; merged into the tile's arrays at the end.
@@ -360,43 +342,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Creates the scheduler over <paramref name="source"/> and resets selection state. If
-        /// <paramref name="ownsSource"/> is true, <see cref="Dispose"/> disposes the source.
-        ///
-        /// Constructs the tile render backend for <paramref name="backend"/>: a <see cref="BRGBackend.TileRenderer"/>
-        /// (Brg), a <see cref="Backend.GameObjects.TileRenderer"/> (GameObject), or an <see cref="Backend.Entities.TileRenderer"/>
-        /// (Entities, the default), all built from the styled layer set passed at construction.
-        /// </summary>
-        public void Initialise(IDataSource source, bool ownsSource,
-            Map.RenderBackend backend = Map.RenderBackend.Entities)
-        {
-            // S83b legacy single-source entry: wire EVERY rendered source-id to the one injected source, so
-            // a style whose layers all name one source (the common case) builds exactly one pipeline ⇒ N=1 ⇒
-            // behaviour identical to the pre-S83b single-source path. The first pipeline owns the shared
-            // source (if ownsSource); the rest share the same instance without owning it (no double-dispose).
-            // Zoom range is left wide-open (cover is already zoom-clamped by MapView); SetStyle (the S83b
-            // entry) supplies per-source resolved minzoom/maxzoom instead.
-            DisposePipelines();
-
-            bool first = true;
-            foreach (string sid in CollectRenderedSourceIds())
-            {
-                AddPipeline(sid, source, ownsSource && first, minZoom: 0, maxZoom: int.MaxValue);
-                first = false;
-            }
-            // A style with no rendered fill/line layers builds no pipeline (nothing fetches) — but the
-            // manager is still "initialised" and owns the (otherwise unused) source for disposal.
-            if (_pipelines.Count == 0 && ownsSource)
-                _orphanSource = source;
-
-            _coverDirty          = true;
-            _coverKeyInitialised = false;
-            _initialised         = true;
-
-            BuildBackend(backend);
-        }
-
-        /// <summary>
         /// S83b multi-source entry (the <see cref="Map.View.SetStyle"/> path). Applies <paramref name="specs"/>
         /// — one per rendered source-id, already resolved (inline <c>tiles[]</c> or via S83a TileJSON) — as
         /// the pipeline registry, and (re)builds the backend from the current <see cref="StyledLayerSet"/>.
@@ -415,11 +360,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///     the next Tick re-requests the cover, hitting kept caches (no re-fetch).</item>
         /// </list>
         /// </summary>
-        internal void SetSources(System.Collections.Generic.IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
+        internal void SetSources(IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
         {
             // 1. Render-teardown every existing record (NO scheduler release — keep warm caches). The
-            //    in-flight tasks land in the S48/S84 pens → disposed, never consumed against the new backend
-            //    (7d). _orphanSource (a zero-pipeline owned source) is freed by the diff below if dropped.
+            //    in-flight tasks land in the S48/S84 pens → disposed, never consumed against the new backend (7d).
             foreach (var kv in _loaded)
             {
                 var lt = kv.Value; // foreach value is read-only; teardown needs a ref to null its Meshes
@@ -462,8 +406,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 p.Scheduler?.Dispose();
                 if (p.OwnsSource) p.Source?.Dispose();
             }
-            _orphanSource?.Dispose();
-            _orphanSource = null;
 
             // Commit the new registry with stable slots 0..N-1.
             _pipelines.Clear();
@@ -472,7 +414,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             // 3. Rebuild the backend from the (caller-rebuilt) styled layer set; re-arm cover selection.
             _coverDirty          = true;
             _coverKeyInitialised = false;
-            _initialised         = true;
             BuildBackend(backend);
         }
 
@@ -498,47 +439,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             };
         }
 
-        // S83b: an owned source for a style with zero rendered pipelines — held only so Dispose frees it.
-        private IDataSource _orphanSource;
-
-        /// <summary>S83b: the distinct rendered (fill/line) source-ids, in first-seen declared order — the
-        /// set of pipelines a style needs. Background/raster/symbol layers never reach
-        /// <see cref="StyledLayerSet"/>, so this enumerates only vector-rendered sources.</summary>
-        private List<string> CollectRenderedSourceIds()
-        {
-            var ids = new List<string>(4);
-            for (int i = 0; i < _layers.FillCount; i++) AddDistinct(ids, SourceIdOf(_layers.Fills[i].StyleLayer));
-            for (int i = 0; i < _layers.LineCount; i++) AddDistinct(ids, SourceIdOf(_layers.Lines[i].StyleLayer));
-            return ids;
-
-            static void AddDistinct(List<string> list, string id)
-            {
-                if (!list.Contains(id)) list.Add(id);
-            }
-        }
-
-        /// <summary>S83b: appends a pipeline (its own scheduler + cache) for <paramref name="sourceId"/>.</summary>
-        private void AddPipeline(string sourceId, IDataSource source, bool ownsSource, int minZoom, int maxZoom)
-        {
-            var cache = new TileCache(capacity: 256);
-            _pipelines.Add(new SourcePipeline
-            {
-                SourceId   = sourceId,
-                Slot       = _pipelines.Count,
-                Source     = source,
-                OwnsSource = ownsSource,
-                Scheduler  = new TileScheduler(source, cache),
-                Cache      = cache,
-                MinZoom    = minZoom,
-                MaxZoom    = maxZoom,
-            });
-        }
-
         /// <summary>Flattens the styled layer set's materials (fills in declared order, then lines) — the
         /// material list every backend indexes by <c>materialIndex</c>.</summary>
-        private static System.Collections.Generic.List<Material> FlattenLayerMaterials(Style.StyledLayerSet layers)
+        private static List<Material> FlattenLayerMaterials(Style.StyledLayerSet layers)
         {
-            var mats = new System.Collections.Generic.List<Material>(layers.FillCount + layers.LineCount);
+            var mats = new List<Material>(layers.FillCount + layers.LineCount);
             for (int i = 0; i < layers.FillCount; i++) mats.Add(layers.Fills[i].Material);
             for (int i = 0; i < layers.LineCount; i++) mats.Add(layers.Lines[i].Material);
             return mats;
@@ -547,16 +452,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Flattens the per-layer style ids in the same (fills then lines) order as
         /// <see cref="FlattenLayerMaterials"/>, so the Entities backend can name each layer entity after its
         /// style layer (e.g. "water") in the Entities Hierarchy instead of the shared material name.</summary>
-        private static System.Collections.Generic.List<string> FlattenLayerNames(Style.StyledLayerSet layers)
+        private static List<string> FlattenLayerNames(Style.StyledLayerSet layers)
         {
-            var names = new System.Collections.Generic.List<string>(layers.FillCount + layers.LineCount);
+            var names = new List<string>(layers.FillCount + layers.LineCount);
             for (int i = 0; i < layers.FillCount; i++) names.Add(layers.Fills[i].StyleLayer?.Id);
             for (int i = 0; i < layers.LineCount; i++) names.Add(layers.Lines[i].StyleLayer?.Id);
             return names;
         }
-
-        /// <summary>True once <see cref="Initialise"/> has been called successfully.</summary>
-        public bool IsInitialised => _initialised;
 
         // ── Test observability (internal; surfaced to tests through MapViewTestExtensions, not the
         //    production API). TileManager is already an internal type, so these stay close to the state
@@ -578,30 +480,33 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// and not yet Built at the moment of release). Incremented by ReleaseTile. Read by tests
         /// to prove the mid-flight race actually occurred in <c>S51DisposalLeakGuardTests</c>.
         /// </summary>
-        internal int ReleasedMidFlightCount => _releasedMidFlightCount;
+        internal int ReleasedMidFlightCount { get; private set; }
 
         /// <summary>S84: number of tiles released while their fetch was still in-flight.</summary>
-        internal int ReleasedMidFetchCount => _releasedMidFetchCount;
+        internal int ReleasedMidFetchCount { get; private set; }
 
         /// <summary>S55: tessellation kicks issued in the most recent PumpPendingBuilds call.
         /// Exposed for tests; never call from production code.</summary>
-        internal int TessellationsKickedLastTick => _tessellationsKickedLastTick;
+        internal int TessellationsKickedLastTick { get; private set; }
+
         /// <summary>S55/S87: sum of layer-mesh vertex counts consumed in the most recent PumpPendingBuilds call.</summary>
-        internal int VerticesConsumedLastTick => _verticesConsumedLastTick;
+        internal int VerticesConsumedLastTick { get; private set; }
+
         /// <summary>S55/S87: number of tiles that reached <c>Built</c> (fully consumed) in the most recent
         /// PumpPendingBuilds call. With S87's per-mesh consume a tile may take several ticks to complete.</summary>
-        internal int TilesConsumedLastTick => _tilesConsumedLastTick;
+        internal int TilesConsumedLastTick { get; private set; }
+
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent PumpPendingBuilds call —
         /// the per-frame mesh-count budget observable (bounds AddLayer / entity-add and GPU upload per frame).</summary>
-        internal int MeshesConsumedLastTick => _meshesConsumedLastTick;
+        internal int MeshesConsumedLastTick { get; private set; }
 
-        /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="Initialise"/>.</summary>
+        /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="SetSources"/>.</summary>
         internal BRGBackend.TileRenderer BrgRenderer => _instanced as BRGBackend.TileRenderer;
 
-        /// <summary>The live Entities-Graphics renderer, or null when not on the Entities backend / before <see cref="Initialise"/>.</summary>
+        /// <summary>The live Entities-Graphics renderer, or null when not on the Entities backend / before <see cref="SetSources"/>.</summary>
         internal EntBackend.TileRenderer EntitiesRenderer => _instanced as EntBackend.TileRenderer;
 
-        /// <summary>The live GameObject renderer, or null when not on the GameObject backend / before <see cref="Initialise"/>.</summary>
+        /// <summary>The live GameObject renderer, or null when not on the GameObject backend / before <see cref="SetSources"/>.</summary>
         internal GOBackend.TileRenderer GameObjectRenderer => _instanced as GOBackend.TileRenderer;
 
         /// <summary>
@@ -691,7 +596,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
         {
-            if (!_initialised || _selector == null) return;
+            if (_selector == null) return;
 
             if (!_coverKeyInitialised ||
                 cam.LookAt.Longitude    != _coverKeyLon ||
@@ -902,10 +807,10 @@ namespace MapRenderer.Unity.Rendering.Tile
             using var sFetchPoll = PmFetchPoll.Auto();
 
             // Reset per-tick observability counters.
-            _tessellationsKickedLastTick = 0;
-            _verticesConsumedLastTick    = 0;
-            _tilesConsumedLastTick       = 0;
-            _meshesConsumedLastTick      = 0;
+            TessellationsKickedLastTick = 0;
+            VerticesConsumedLastTick    = 0;
+            TilesConsumedLastTick       = 0;
+            MeshesConsumedLastTick      = 0;
 
             // S55: treat 0 as uncapped for the kick + vertex caps (unset config field → harmless default).
             int tessCap  = maxTessellationsPerTick > 0 ? maxTessellationsPerTick : int.MaxValue;
@@ -951,9 +856,9 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     meshesConsumed            += meshesThisCall;
                     verticesConsumed          += vertsThisCall;
-                    _meshesConsumedLastTick    = meshesConsumed;
-                    _verticesConsumedLastTick  = verticesConsumed;
-                    if (complete) _tilesConsumedLastTick++;
+                    MeshesConsumedLastTick    = meshesConsumed;
+                    VerticesConsumedLastTick  = verticesConsumed;
+                    if (complete) TilesConsumedLastTick++;
                     else          pending++;   // tile partially consumed — resume next Tick
                     _loaded[key] = lt;
                     continue;
@@ -979,7 +884,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     lt.HasTessellationTask = true;
                     lt.ReadyBytes          = null;
                     tessKicked++;
-                    _tessellationsKickedLastTick = tessKicked;
+                    TessellationsKickedLastTick = tessKicked;
                     pending++; // tessellation now in-flight
                     _loaded[key] = lt;
                     continue;
@@ -1055,13 +960,13 @@ namespace MapRenderer.Unity.Rendering.Tile
                     var rec = layerRecordsSnapshot[li];
 
                     var features = (SourceIdOf(rec.StyleLayer) != sourceId)
-                        ? (System.Collections.Generic.IReadOnlyList<MvtFeature>)System.Array.Empty<MvtFeature>()
+                        ? (IReadOnlyList<MvtFeature>)System.Array.Empty<MvtFeature>()
                         : MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(rec.StyleLayer, mvtTile, zoom);
                     if (features.Count == 0)
                     {
                         layerData[li] = new Meshing.StyledFillTileBuilder.LayerMeshData
                         {
-                            Features = new System.Collections.Generic.List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
+                            Features = new List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
                         };
                         continue;
                     }
@@ -1072,7 +977,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     {
                         layerData[li] = new Meshing.StyledFillTileBuilder.LayerMeshData
                         {
-                            Features = new System.Collections.Generic.List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
+                            Features = new List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
                         };
                         continue;
                     }
@@ -1294,7 +1199,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // completes. Otherwise the dropped task faults unobserved → UnityWebRequestException console flood.
             if (!lt.FetchCompleted)
             {
-                _releasedMidFetchCount++;
+                ReleasedMidFetchCount++;
                 _pendingFetchDisposal.Add(lt.Request);
             }
 
@@ -1305,7 +1210,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (lt.HasTessellationTask && !lt.Built)
             {
                 if (!lt.TessellationTask.Status.IsCompleted())
-                    _releasedMidFlightCount++;
+                    ReleasedMidFlightCount++;
                 _pendingDisposal.Add(lt.TessellationTask);
             }
 
@@ -1448,13 +1353,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// scheduler and (if owned) the data source. Does NOT dispose the StyledLayerSet — MapView owns
         /// that and disposes it AFTER this (tile renderers reference layer materials, so the order matters).
         ///
-        /// <para>Idempotent: safe to call more than once (subsequent calls are no-ops via the
-        /// <c>_scheduler == null</c> guard).</para>
+        /// <para>Idempotent and construction-safe: every collection it drains is empty before the first
+        /// <see cref="SetSources"/> and cleared after the first Dispose, and the backend is disposed via
+        /// <c>_instanced?.Dispose()</c> — so a second call (or a call on a never-styled manager) is a no-op
+        /// with no guard flag.</para>
         /// </summary>
         public void Dispose()
         {
-            if (!_initialised) return; // already torn down (idempotent guard)
-
             // S51/S48: drain outstanding tessellation UniTasks before tearing down.
             // Safe spin: tessellation UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
             // so IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning
@@ -1568,12 +1473,10 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // S83b: dispose every source pipeline (each scheduler + its owned source).
             DisposePipelines();
-
-            _initialised = false; // idempotent guard
         }
 
         /// <summary>S83b: disposes and clears every source pipeline (scheduler always; the data source only
-        /// when that pipeline owns it). Also frees an owned source for a zero-pipeline style. Idempotent.</summary>
+        /// when that pipeline owns it). Idempotent.</summary>
         private void DisposePipelines()
         {
             for (int i = 0; i < _pipelines.Count; i++)
@@ -1583,9 +1486,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (p.OwnsSource) p.Source?.Dispose();
             }
             _pipelines.Clear();
-
-            _orphanSource?.Dispose();
-            _orphanSource = null;
         }
     }
 }

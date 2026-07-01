@@ -27,7 +27,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     [TestFixture]
@@ -152,10 +152,10 @@ namespace MapRenderer.Tests
 
             var go   = new GameObject("MapView_ProfilerTest");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             // Start both recorders BEFORE the tile load — must be open when samples fire.
             // ProfilerCategory.Scripts matches the explicit category in each ProfilerMarker constructor.
@@ -170,8 +170,8 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.Initialise(TestDataSource.FromBytes(FixtureBytes()), Cam(0, 0, 0.0),
-                    ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(TestDataSource.FromBytes(FixtureBytes()), Cam(0, 0, 0.0),
+                    style: MinimalStyle());
 
                 // Drive the tile load synchronously (FixtureSource returns immediately).
                 PumpUntilSettled(view);

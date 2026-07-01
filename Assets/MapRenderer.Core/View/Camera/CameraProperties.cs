@@ -8,9 +8,8 @@ namespace MapRenderer.Core.View.Camera
     /// S45/S50: Canonical, immutable camera state — the single camera-state type across Core, Unity,
     /// and tests.
     ///
-    /// <para><b>D1 — Zoom is canonical.</b> Distance and altitude are derived via the altitude-from-zoom
-    /// formula (Web-Mercator perspective framing). Callers may supply <see cref="Distance"/>; it is
-    /// immediately converted back to zoom so the round-trip is exact.</para>
+    /// <para><b>D1 — Zoom is canonical.</b> Distance/altitude are derived from zoom via the
+    /// altitude-from-zoom formula (Web-Mercator perspective framing); see <see cref="CameraPoseMath"/>.</para>
     ///
     /// <para><b>Field semantics:</b>
     /// <list type="bullet">
@@ -60,6 +59,13 @@ namespace MapRenderer.Core.View.Camera
         /// </summary>
         public readonly ConstrainedAngle Tilt;
 
+        /// <summary>
+        /// Vertical field of view in degrees — the perspective lens. Part of the camera state: it drives
+        /// the zoom→altitude framing and is pushed to the Unity camera's <c>fieldOfView</c>. Unlike the
+        /// viewport pixel size (a live measurement read from the camera), FOV is a genuine parameter.
+        /// </summary>
+        public readonly double VerticalFovDeg;
+
         // ── Constants ─────────────────────────────────────────────────────────────────────────
         /// <summary>
         /// Web-Mercator latitude limit. Thin alias for <see cref="WebMercator.MaxLatitude"/>;
@@ -68,15 +74,17 @@ namespace MapRenderer.Core.View.Camera
         public const double MaxMercatorLat = WebMercator.MaxLatitude;
 
         // ── Construction ─────────────────────────────────────────────────────────────────────
-        public CameraProperties(GeoCoordinate3D lookAt, double zoom, double heading, double tilt)
+        public CameraProperties(GeoCoordinate3D lookAt, double zoom, double heading, double tilt,
+                                double verticalFovDeg = 60.0)
         {
-            LookAt  = lookAt;
-            Zoom    = zoom;
-            Heading = ConstrainedAngle.Heading(heading);
-            Tilt    = ConstrainedAngle.Tilt(tilt);
+            LookAt         = lookAt;
+            Zoom           = zoom;
+            Heading        = ConstrainedAngle.Heading(heading);
+            Tilt           = ConstrainedAngle.Tilt(tilt);
+            VerticalFovDeg = verticalFovDeg;
         }
 
-        /// <summary>Default (un-initialized) camera at origin, zoom 0, no heading/tilt.</summary>
+        /// <summary>Default (un-initialized) camera at origin, zoom 0, no heading/tilt, default 60° FOV.</summary>
         public static CameraProperties Default => new CameraProperties(new GeoCoordinate3D(), 0, 0, 0);
 
         // ── Derived helpers ───────────────────────────────────────────────────────────────────
@@ -97,7 +105,7 @@ namespace MapRenderer.Core.View.Camera
 
         public override string ToString()
         {
-            return $"CameraProperties(LookAt={LookAt}, z={Zoom:F3}, heading={Heading.Degrees:F1}, tilt={Tilt.Degrees:F1})";
+            return $"CameraProperties(LookAt={LookAt}, z={Zoom:F3}, heading={Heading.Degrees:F1}, tilt={Tilt.Degrees:F1}, fov={VerticalFovDeg:F1})";
         }
     }
 }

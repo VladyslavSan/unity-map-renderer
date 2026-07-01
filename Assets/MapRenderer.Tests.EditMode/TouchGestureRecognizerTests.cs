@@ -505,7 +505,7 @@ namespace MapRenderer.Tests
 
             // Apply and check grabbed ground appears under cursor within 0.5px.
             var patch   = ViewInput.Apply(panIntent, view);
-            var newCam  = patch.ApplyTo(cam, 1080.0, 60.0);
+            var newCam  = patch.ApplyTo(cam);
             double2 reprojected = Proj.GroundToScreen(panIntent.GrabbedGround, Vp, newCam);
             double2 diff        = reprojected - cursor;
             double  dist        = math.sqrt(diff.x * diff.x + diff.y * diff.y);

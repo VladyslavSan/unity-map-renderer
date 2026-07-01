@@ -1,6 +1,6 @@
 // Unity EditMode only — tests the Bootstrapper.Wire() static entry point (S41 acceptance tooth 1).
 // Verifies the wiring graph: MapController.Map != null, MapController.Camera == Camera.main,
-// and MapView.IsInitialised after Wire(root, camera, source, ...).
+// and the MapView is built over the camera after Wire(root, camera, ...).
 
 using NUnit.Framework;
 using UnityEngine;
@@ -11,7 +11,7 @@ using MapRenderer.Core.View.Camera;
 using MapController   = MapRenderer.Unity.Rendering.Map.Controller;
 using TouchController = MapRenderer.Unity.Rendering.Map.TouchController;
 using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -28,7 +28,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Wire(root, camera, source, view) sets MapController.Camera == the supplied camera,
-        /// MapController.Map != null, and MapView.IsInitialised.
+        /// MapController.Map != null, and builds the MapView over the camera.
         /// </summary>
         [Test]
         public void Wire_HappyPath_SetsControllerFieldsAndInitialisesMapView()
@@ -50,7 +50,7 @@ namespace MapRenderer.Tests
             try
             {
                 // Act.
-                Bootstrapper.Wire(rootGo, cam, source, initialView, ownsSource: false, style: null);
+                Bootstrapper.Wire(rootGo, cam, initialView);
 
                 // Assert — tooth 1 of S41 acceptance:
                 var ctrl    = rootGo.GetComponent<MapController>();
@@ -59,8 +59,8 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(ctrl.Map,    "MapController.Map must be set after Wire()");
                 Assert.AreEqual(cam, ctrl.Camera,
                     "MapController.Camera must equal the camera passed to Wire()");
-                Assert.IsTrue(mapView.IsInitialised,
-                    "MapView must be initialised (Initialise() called) after Wire()");
+                Assert.IsNotNull(mapView.Camera,
+                    "Wire must build the MapView over the camera (data loads separately via SetStyle)");
             }
             finally
             {
@@ -70,14 +70,15 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── (2) Missing camera — logs, no NRE, still wires MapView ──────────────────────────────
+        // ── (2) Missing camera — logs, no NRE ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Wire(root, null) must not throw. MapView is still initialised; MapController.Camera
-        /// remains null (no camera to drive, but no crash either — D3 graceful handling).
+        /// Wire(root, null) must not throw. A MapCamera requires a real camera, so with none the MapView
+        /// is not built — but MapController.Map is still set and nothing crashes.
+        /// (In practice the scene always has a main camera; this only pins the graceful no-camera path.)
         /// </summary>
         [Test]
-        public void Wire_NullCamera_DoesNotThrow_MapViewStillInitialised()
+        public void Wire_NullCamera_DoesNotThrow_NoMapBuilt()
         {
             var rootGo = new GameObject("MapRoot");
             rootGo.AddComponent<MapView>();
@@ -88,7 +89,7 @@ namespace MapRenderer.Tests
             {
                 // Must not throw.
                 Assert.DoesNotThrow(
-                    () => Bootstrapper.Wire(rootGo, null, source, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2, 0, 0), ownsSource: false, style: null),
+                    () => Bootstrapper.Wire(rootGo, null, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2, 0, 0)),
                     "Wire(root, null) must not throw even when the camera is missing.");
 
                 var ctrl    = rootGo.GetComponent<MapController>();
@@ -96,7 +97,8 @@ namespace MapRenderer.Tests
 
                 Assert.IsNull(ctrl.Camera, "MapController.Camera must stay null when no camera is provided");
                 Assert.IsNotNull(ctrl.Map,  "MapController.Map must still be set");
-                Assert.IsTrue(mapView.IsInitialised, "MapView must still be initialised with a null camera");
+                Assert.IsNull(mapView.View,
+                    "with no camera the MapView is not built (a MapCamera requires a real camera) — but no crash");
             }
             finally
             {
@@ -148,7 +150,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                Bootstrapper.Wire(rootGo, cam, source, initialView, ownsSource: false, style: null);
+                Bootstrapper.Wire(rootGo, cam, initialView);
 
                 var touch = rootGo.GetComponent<TouchController>();
                 Assert.IsNotNull(touch,    "S74: Wire() must add TouchController to root");

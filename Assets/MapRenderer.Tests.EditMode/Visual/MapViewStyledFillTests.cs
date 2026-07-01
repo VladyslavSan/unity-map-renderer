@@ -28,7 +28,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
@@ -128,14 +128,14 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = TwoFillLayerStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -196,15 +196,15 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0),
-                                ownsSource: false, style: FillLineFillStyle());
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0),
+                                style: FillLineFillStyle());
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -281,14 +281,14 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = ContinentFillStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -388,14 +388,14 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -538,14 +538,14 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 0.0, 0, 0), style: style);
 
                 // ── DECISIVE: fill layer count = 1 after Initialise ───────────────────────────
                 // (FillLayerCount() is a test-only extension over MapView internals — see MapViewTestExtensions.)

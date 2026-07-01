@@ -16,7 +16,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
 {
@@ -70,12 +70,12 @@ namespace MapRenderer.Tests
             MapView    view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.MinZoom = 5; view.MaxZoom = 5;
-                view.PadTiles = 0; view.FallbackAspect = 1f;
-                view.MaxBuildsPerTick = 64;
-                view.MaxTessellationsPerTick = 64;
+                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.Config.MaxBuildsPerTick = 64;
+                view.Config.MaxTessellationsPerTick = 64;
 
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 
                 // Tiles enter cover; fetches kick and stay in-flight (CancelFaultingSource never returns).
                 view.Tick();
@@ -83,7 +83,7 @@ namespace MapRenderer.Tests
                 view.Tick();
 
                 // Churn: pan far so the original tiles are released while their fetch is still in-flight.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick();
 
                 // Positive control (non-vacuous): the cancel-mid-fetch race must actually have happened.

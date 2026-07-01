@@ -12,7 +12,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Source;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
 {
@@ -56,9 +56,9 @@ namespace MapRenderer.Tests
         {
             go = new GameObject("MapView");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64; view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64; view.Config.MaxTessellationsPerTick = 64;
             return view;
         }
 
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests
             string tilesTemplate = WriteFileTileFixture("s83b-inline-tiles");
             int docFetches = 0;
             var view = NewView(out var go);
-            view.DocumentLoaderOverride = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
+            view.View.DocumentLoaderOverride = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             try
             {
                 var style = StyleParser.Parse(OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
@@ -140,7 +140,7 @@ namespace MapRenderer.Tests
             int docFetches = 0;
             var view = NewView(out var go);
             // Document loader returns a TileJSON whose tiles[] is the local file:// fixture template.
-            view.DocumentLoaderOverride = (uri, ct) =>
+            view.View.DocumentLoaderOverride = (uri, ct) =>
             {
                 Interlocked.Increment(ref docFetches);
                 return UniTask.FromResult($@"{{ ""tilejson"":""3.0.0"", ""tiles"":[""{tilesTemplate}""], ""minzoom"":0, ""maxzoom"":0 }}");
@@ -172,7 +172,7 @@ namespace MapRenderer.Tests
             byte[] bytes = FixtureBytes();
             var perTemplate = new Dictionary<string, TestDataSource>();
             var view = NewView(out var go);
-            view.TileSourceFactoryOverride = template =>
+            view.View.TileSourceFactoryOverride = template =>
             {
                 var src = TestDataSource.FromBytes(bytes);
                 perTemplate[template] = src;
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests
             int constructsForA = 0;
             TestDataSource srcA = null;
             var view = NewView(out var go);
-            view.TileSourceFactoryOverride = template =>
+            view.View.TileSourceFactoryOverride = template =>
             {
                 if (template == "https://a/{z}/{x}/{y}.pbf") { constructsForA++; srcA = TestDataSource.FromBytes(bytes); return srcA; }
                 return TestDataSource.FromBytes(bytes);

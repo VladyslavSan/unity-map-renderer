@@ -20,7 +20,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -92,14 +92,14 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 5; view.MaxZoom = 5;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 5.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
                 PumpUntilSettled(view);
 
                 // S71: the cover now tracks the framing viewport span (no longer a magic 3×3); assert the
@@ -109,7 +109,7 @@ namespace MapRenderer.Tests
                     "the center tile must be built");
 
                 // Pan far east (lon=170) → new cover does NOT overlap the old one.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170, Latitude = 0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170, Latitude = 0 });
                 PumpUntilSettled(view);
 
                 Assert.Greater(view.LoadedTileCount(), 0, "cover must be re-selected (non-empty) after the pan");
@@ -143,14 +143,14 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -207,23 +207,23 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Backend = RenderBackend.Brg; // zero-alloc path under test
-            view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg; // zero-alloc path under test
+            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
                 // Warm up: load the whole cover and let every tile settle.
-                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.Tick();
 
                 // ── (a) THE PAN CASE ──
@@ -231,7 +231,7 @@ namespace MapRenderer.Tests
                 // at the equator, so a 111 km pan loads no new tiles), but it DOES dirty the cover so
                 // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
                 // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "MapView.Tick must not allocate during a within-cover pan (cover recompute path: " +
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
@@ -249,7 +249,7 @@ namespace MapRenderer.Tests
                 // so this Tick runs the full recompute — but at the whole-world z2 cover the re-selected set
                 // is identical, so request/release find nothing and the recompute stays zero-alloc. (Tilt is
                 // not in the cover key — the selector has no tilt branch, D3.)
-                view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 });
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
                     "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");
 
@@ -284,26 +284,26 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Backend = RenderBackend.Entities; // the default backend under measurement
-            view.MinZoom = 2; view.MaxZoom = 2;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Entities; // the default backend under measurement
+            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             try
             {
-                view.Initialise(src, Cam(0, 0, 2.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "all tiles must be built before measuring steady state");
 
                 // Prime reused buffers, identical to the BRG test.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
                 view.Tick();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.Tick();
 
                 // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 }, CameraAnimation.Instant);
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 view.Tick(); // consume the pan; now steady.
                 Assert.AreEqual(16, view.LoadedTileCount(),
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");

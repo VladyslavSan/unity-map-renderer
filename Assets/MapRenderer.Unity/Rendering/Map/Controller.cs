@@ -54,7 +54,7 @@ namespace MapRenderer.Unity.Rendering.Map
     public sealed class Controller : MonoBehaviour
     {
         [Tooltip("The MapView this controller drives (set by Bootstrapper.Wire at runtime).")]
-        public MapView Map;
+        public MapViewComponent Map;
 
         [Tooltip("The camera this controller positions (set by Bootstrapper.Wire at runtime).")]
         public Camera Camera;
@@ -87,13 +87,6 @@ namespace MapRenderer.Unity.Rendering.Map
         /// Trackpad delivers continuous fractional values that scale proportionally after normalization.
         /// </summary>
         public const float WheelNotchUnits = 120f;
-
-        [Tooltip("Deterministic viewport height fed to the altitude formula (not Camera.pixelHeight, " +
-                 "which is non-reproducible in headless/test mode).")]
-        public float ReferenceViewportHeightPx = 1080f;
-
-        [Tooltip("Vertical field-of-view for the perspective camera (degrees).")]
-        public float VerticalFovDeg = 60f;
 
         [Tooltip("Optional multiplier on the derived altitude (default 1).")]
         public float AltitudeMultiplier = 1f;
@@ -233,7 +226,7 @@ namespace MapRenderer.Unity.Rendering.Map
             }
 
             if (anyChange)
-                Map.Camera.Apply(patch, CameraAnimation.Instant);
+                Map.Camera.Apply(patch);
         }
 
         // ── Camera-transform bridge (CameraTransformTests + MapRoot frame-0 framing) ─────────────
@@ -249,11 +242,10 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             if (Camera == null) return;
 
-            // Delegate to MapCamera (Core pose math) via a temporary MapCamera wrapper.
-            var mc = new MapCamera(Camera, ReferenceViewportHeightPx, VerticalFovDeg);
-            mc.AltitudeMultiplier = AltitudeMultiplier;
-
-            mc.ApplyCameraProperties(props);
+            // A MapCamera drives the transform from its props on construction (Core pose math); this
+            // one-shot wrapper frames the Unity camera for the given props (initial framing / tests). FOV
+            // and viewport height come from the props / the camera, not from side config.
+            _ = new MapCamera(Camera, props, AltitudeMultiplier);
         }
 
         /// <summary>

@@ -26,7 +26,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// and folds each emitted <see cref="GestureIntent"/> through
     /// <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/> into one
     /// <see cref="CameraPropertiesUpdate"/>, then calls
-    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate, CameraAnimation)"/>.
+    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate)"/>.
     ///
     /// <para><b>Input backend: new Input System / EnhancedTouch</b>. Uses
     /// <see cref="Touch.activeTouches"/> exclusively — zero legacy UnityEngine.Input API.
@@ -44,7 +44,7 @@ namespace MapRenderer.Unity.Rendering.Map
     {
         // ── References (set by Bootstrapper.Wire) ────────────────────────────────────────────────
         [Tooltip("The MapView this touch controller drives (set by Bootstrapper.Wire at runtime).")]
-        public MapView Map;
+        public MapViewComponent Map;
 
         [Tooltip("The camera providing the live viewport (set by Bootstrapper.Wire at runtime).")]
         public new Camera camera;
@@ -177,7 +177,7 @@ namespace MapRenderer.Unity.Rendering.Map
             }
 
             if (!patch.IsEmpty)
-                Map.Camera.Apply(patch, CameraAnimation.Instant);
+                Map.Camera.Apply(patch);
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────────

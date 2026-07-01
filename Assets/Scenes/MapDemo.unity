@@ -382,16 +382,18 @@ MonoBehaviour:
   m_GameObject: {fileID: 300000001}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: d0d7aa608343b477c87be4a6636911a3, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapView
-  ViewportAspect: 1.5
-  PadFactor: 1.5
-  MinZoom: 0
-  MaxZoom: 14
-  MaxBuildsPerTick: 4
-  Backend: 0
-  MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
+  m_Script: {fileID: 11500000, guid: da734f65b47934279ab8cceefc6654f2, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  Config:
+    PadTiles: 1
+    MinZoom: 0
+    MaxZoom: 14
+    MaxBuildsPerTick: 4
+    MaxTessellationsPerTick: 2
+    MaxVerticesPerTick: 50000
+    Backend: 0
+    MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
 --- !u!114 &300000004
 MonoBehaviour:
   m_ObjectHideFlags: 0

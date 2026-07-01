@@ -26,7 +26,7 @@ using MapRenderer.Core.View.Camera;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -281,14 +281,14 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Go");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.GameObject;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.GameObject;
             try
             {
                 var cam0 = MakeCam(0, 0, 0.0);
-                view.Initialise(src, cam0, ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, cam0, style: MinimalStyle());
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the GameObject backend.");

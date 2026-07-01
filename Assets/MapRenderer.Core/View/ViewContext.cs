@@ -35,9 +35,9 @@ namespace MapRenderer.Core.View
         ///   <item><b>Camera-interaction seam (S73)</b> — the <b>live</b> interaction viewport
         ///     (<c>Camera.pixelWidth, Camera.pixelHeight</c>); must be in the same pixel scale as
         ///     the cursor positions fed to the gesture mapping so the pin invariants hold.</item>
-        ///   <item><b>Tile-selection seam (S71)</b> — the <b>framing</b> viewport
-        ///     <c>(ReferenceViewportHeightPx · liveAspect, ReferenceViewportHeightPx)</c>, NOT the
-        ///     raw live window size (see <see cref="IVisibleTileSelector"/> D6/D7).</item>
+        ///   <item><b>Tile-selection seam (S71)</b> — the framing viewport, which is now the camera's
+        ///     live pixel size (<c>MapCamera.ViewportPx</c>); the camera IS the viewport
+        ///     (see <see cref="IVisibleTileSelector"/>).</item>
         /// </list>
         /// The type is usage-neutral; each consumer fills this field with the appropriate scale.
         /// </summary>

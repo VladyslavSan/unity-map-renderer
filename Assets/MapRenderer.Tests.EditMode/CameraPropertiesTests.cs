@@ -1,8 +1,9 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine reference.
 //
-// Tests S45 CameraProperties, CameraPropertiesUpdate (patch semantics), CameraSystem (animation +
-// interpolation + instant path), CameraPoseMath (altitude formula + inverse + pose + D6 fixes).
+// Tests CameraProperties, CameraPropertiesUpdate (patch semantics), CameraPoseMath (altitude formula +
+// inverse + pose + D6 fixes), and the shortest-angle heading lerp. (Camera animation was removed — smooth
+// control will be a separate CameraController; the instant patch path is CameraPropertiesUpdate.ApplyTo.)
 
 using System;
 using NUnit.Framework;
@@ -31,36 +32,13 @@ namespace MapRenderer.Tests
                 new GeoCoordinate3D { Longitude = 13.4, Latitude = 52.5, Altitude = 0 }, zoom: 10.0, heading: 45.0, tilt: 0.0);
 
             var patch = new CameraPropertiesUpdate { Tilt = 25.0 };
-            CameraProperties result = patch.ApplyTo(initial, TestViewportHeight, TestFovDeg);
+            CameraProperties result = patch.ApplyTo(initial);
 
             Assert.AreEqual(25.0, result.Tilt.Degrees,    1e-9, "Tilt must be updated to 25.");
             Assert.AreEqual(10.0, result.Zoom,           1e-9, "Zoom must be unchanged.");
             Assert.AreEqual(45.0, result.Heading.Degrees, 1e-9, "Heading must be unchanged.");
             Assert.AreEqual(13.4, result.LookAt.Longitude,   1e-9, "Lon must be unchanged.");
             Assert.AreEqual(52.5, result.LookAt.Latitude,   1e-9, "Lat must be unchanged.");
-        }
-
-        /// <summary>
-        /// Zoom and Distance must set the same canonical state (round-trip equal via D1).
-        /// </summary>
-        [Test]
-        public void Patch_ZoomAndDistance_SameCanonicalState()
-        {
-            var initial = new CameraProperties(
-                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
-
-            double targetZoom = 10.0;
-            double targetAlt  = CameraPoseMath.AltitudeForZoom(targetZoom, TestViewportHeight, TestFovDeg);
-
-            var patchZoom = new CameraPropertiesUpdate { Zoom = targetZoom };
-            var patchDist = new CameraPropertiesUpdate { Distance = targetAlt };
-
-            CameraProperties fromZoom = patchZoom.ApplyTo(initial, TestViewportHeight, TestFovDeg);
-            CameraProperties fromDist = patchDist.ApplyTo(initial, TestViewportHeight, TestFovDeg);
-
-            // Round-trip tolerance: inverse is not exact to double precision but must be well within 0.1%.
-            Assert.AreEqual(fromZoom.Zoom, fromDist.Zoom, targetZoom * 0.001,
-                "Setting Zoom and setting the equivalent Distance must produce the same canonical zoom.");
         }
 
         /// <summary>Empty patch is a no-op.</summary>
@@ -71,7 +49,7 @@ namespace MapRenderer.Tests
                 new GeoCoordinate3D { Longitude = 1.0, Latitude = 2.0, Altitude = 3.0 }, zoom: 7.5, heading: 30.0, tilt: 15.0);
 
             var patch = new CameraPropertiesUpdate();
-            CameraProperties result = patch.ApplyTo(initial, TestViewportHeight, TestFovDeg);
+            CameraProperties result = patch.ApplyTo(initial);
 
             Assert.AreEqual(initial.LookAt.Longitude, result.LookAt.Longitude, 1e-9);
             Assert.AreEqual(initial.LookAt.Latitude, result.LookAt.Latitude, 1e-9);
@@ -80,121 +58,19 @@ namespace MapRenderer.Tests
             Assert.AreEqual(initial.Tilt.Degrees,   result.Tilt.Degrees,   1e-9);
         }
 
-        // ── Animation interpolation (S45 acceptance tooth 2) ─────────────────────────────────────
-
         /// <summary>
-        /// Apply({Zoom=target}, Duration=D) then Advance(D/2) lands halfway in ZOOM-SPACE.
+        /// Instant patch sets the target field immediately (the only apply path now that animation is gone).
         /// </summary>
         [Test]
-        public void Animation_HalfwayAdvance_LandsHalfwayInZoomSpace()
+        public void Patch_Zoom_SetsImmediately()
         {
-            double startZoom  = 4.0;
-            double targetZoom = 12.0;
-            double D          = 2.0; // seconds
+            var initial = new CameraProperties(
+                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
 
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
-                TestViewportHeight, TestFovDeg);
+            CameraProperties result = new CameraPropertiesUpdate { Zoom = 8.0 }
+                .ApplyTo(initial);
 
-            sys.Apply(new CameraPropertiesUpdate { Zoom = targetZoom }, new CameraAnimation(D));
-            Assert.IsTrue(sys.IsAnimating, "Animation must be in flight.");
-
-            // Advance by half the duration.
-            sys.Update(D / 2.0);
-
-            // At t=0.5, smoothStep(0.5) = 0.5^2 * (3 - 2*0.5) = 0.25 * 2 = 0.5
-            // So the eased t is also 0.5 at t_linear=0.5 for smooth-step.
-            double expectedZoom = startZoom + (targetZoom - startZoom) * 0.5;
-
-            Assert.AreEqual(expectedZoom, sys.CurrentProperties.Zoom, 0.01,
-                $"At D/2, zoom must be halfway between {startZoom} and {targetZoom} in zoom-space.");
-            Assert.IsTrue(sys.IsAnimating, "Animation must still be in flight at halfway.");
-        }
-
-        /// <summary>
-        /// Advance(D) reaches target and IsAnimating clears.
-        /// </summary>
-        [Test]
-        public void Animation_FullAdvance_ReachesTargetAndClears()
-        {
-            double startZoom  = 2.0;
-            double targetZoom = 14.0;
-            double D          = 1.0;
-
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
-                TestViewportHeight, TestFovDeg);
-
-            sys.Apply(new CameraPropertiesUpdate { Zoom = targetZoom }, new CameraAnimation(D));
-            sys.Update(D); // full duration
-
-            Assert.IsFalse(sys.IsAnimating, "IsAnimating must clear after full duration.");
-            Assert.AreEqual(targetZoom, sys.CurrentProperties.Zoom, 1e-9,
-                "Zoom must exactly equal target after full duration.");
-        }
-
-        /// <summary>
-        /// Heading eases the short way across the 360° wrap: 350° → 10° takes +20°, not −340°.
-        /// </summary>
-        [Test]
-        public void Animation_HeadingShortestPath_AcrossWrap()
-        {
-            double startHeading  = 350.0;
-            double targetHeading = 10.0;
-            double D             = 1.0;
-
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, startHeading, 0),
-                TestViewportHeight, TestFovDeg);
-
-            sys.Apply(new CameraPropertiesUpdate { Heading = targetHeading }, new CameraAnimation(D));
-            sys.Update(D); // full duration
-
-            // Must reach 10° by the +20° path.
-            Assert.AreEqual(10.0, sys.CurrentProperties.Heading.Degrees, 1.0,
-                "Heading must ease 350→10 via the short +20° path, landing at 10°.");
-        }
-
-        /// <summary>
-        /// Heading eases the short way at the midpoint: 350° → 10° at t=0.5 should be near 0° (≡360°).
-        /// </summary>
-        [Test]
-        public void Animation_HeadingShortestPath_MidpointNearZero()
-        {
-            double D = 2.0;
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 350.0, 0),
-                TestViewportHeight, TestFovDeg);
-
-            sys.Apply(new CameraPropertiesUpdate { Heading = 10.0 }, new CameraAnimation(D));
-            sys.Update(D / 2.0);
-
-            // At t=0.5, eased t=0.5, heading = 350 + 20*0.5 = 360 ≡ 0.
-            double heading = sys.CurrentProperties.Heading.Degrees;
-            bool nearZeroOrFull = heading < 5.0 || heading > 355.0;
-            Assert.IsTrue(nearZeroOrFull,
-                $"At 50% progress, 350→10 heading must be near 0°/360° (short path). Got {heading:F2}°.");
-        }
-
-        // ── Instant path / no per-frame GC (S45 acceptance tooth 4) ──────────────────────────────
-
-        /// <summary>
-        /// Duration==0 path: Apply with Instant animation sets current props, IsAnimating stays false.
-        /// (Structural review that the instant path takes no animation object.)
-        /// </summary>
-        [Test]
-        public void InstantApply_SetsCurrentProps_NoAnimation()
-        {
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
-                TestViewportHeight, TestFovDeg);
-
-            Assert.IsFalse(sys.IsAnimating, "No animation on fresh CameraSystem.");
-
-            sys.Apply(new CameraPropertiesUpdate { Zoom = 8.0 }, CameraAnimation.Instant);
-
-            Assert.IsFalse(sys.IsAnimating, "No animation after instant Apply.");
-            Assert.AreEqual(8.0, sys.CurrentProperties.Zoom, 1e-9, "Zoom must be set immediately.");
+            Assert.AreEqual(8.0, result.Zoom, 1e-9, "Zoom must be set immediately.");
         }
 
         // ── Altitude formula (S45 non-regression, absorbed from CameraTransformTests) ─────────────
@@ -391,56 +267,6 @@ namespace MapRenderer.Tests
         {
             double full = CameraPoseMath.LerpHeadingShortest(350.0, 10.0, 1.0);
             Assert.AreEqual(10.0, full, 1e-6, "350→10 at t=1.0 must land at 10°.");
-        }
-
-        // ── D7 Interruption: new Apply replaces in-flight animation from current value ─────────────
-
-        [Test]
-        public void Interruption_ReplacesAnimation_StartsFromCurrentValue()
-        {
-            double startZoom  = 2.0;
-            double midTarget  = 14.0;
-            double D          = 4.0;
-
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, startZoom, 0, 0),
-                TestViewportHeight, TestFovDeg);
-
-            // Start an animation toward zoom 14.
-            sys.Apply(new CameraPropertiesUpdate { Zoom = midTarget }, new CameraAnimation(D));
-            sys.Update(D / 4.0); // advance 25% → zoom ≈ 5.0 (smoothStep(0.25) = 0.15625 → 2+12*0.15625≈3.875)
-
-            double zoomAtInterrupt = sys.CurrentProperties.Zoom;
-            Assert.Greater(zoomAtInterrupt, startZoom, "Zoom must have increased from start.");
-            Assert.Less(zoomAtInterrupt,    midTarget,  "Zoom must not have reached target yet.");
-
-            // Interrupt: apply new animation from current position to zoom 1.
-            sys.Apply(new CameraPropertiesUpdate { Zoom = 1.0 }, new CameraAnimation(1.0));
-            Assert.IsTrue(sys.IsAnimating, "New animation must be in flight after interruption.");
-
-            // The starting point of the new animation must be the current (interpolated) zoom.
-            // Advancing a tiny bit: zoom must be very close to zoomAtInterrupt (not jump to startZoom).
-            sys.Update(0.01);
-            Assert.AreEqual(zoomAtInterrupt, sys.CurrentProperties.Zoom, 0.1,
-                "After interruption, zoom must start from current interpolated value (not the original start).");
-        }
-
-        // ── Completion callback ───────────────────────────────────────────────────────────────────
-
-        [Test]
-        public void OnAnimationComplete_CalledOnce_WhenAnimationFinishes()
-        {
-            int callCount = 0;
-            var sys = new CameraSystem(
-                new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
-                TestViewportHeight, TestFovDeg);
-            sys.OnAnimationComplete = () => callCount++;
-
-            sys.Apply(new CameraPropertiesUpdate { Zoom = 10.0 }, new CameraAnimation(1.0));
-            sys.Update(1.0); // completes the animation
-
-            Assert.AreEqual(1, callCount, "OnAnimationComplete must be called exactly once.");
-            Assert.IsFalse(sys.IsAnimating, "IsAnimating must clear after completion.");
         }
 
         // ── Heading normalization ─────────────────────────────────────────────────────────────────

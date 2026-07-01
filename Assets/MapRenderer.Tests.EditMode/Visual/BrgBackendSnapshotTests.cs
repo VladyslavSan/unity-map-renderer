@@ -39,7 +39,7 @@ using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRe
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
@@ -187,15 +187,15 @@ namespace MapRenderer.Tests.Visual
             var go   = new GameObject("MapView_Tooth1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
             // Backend defaults to Entities (S53c) — do NOT set it to Brg.
 
             try
             {
-                view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: style);
 
                 Assert.IsNull(view.BrgRenderer(),
                     "The default (Entities) backend must NOT construct a BrgTileRenderer; " +
@@ -234,15 +234,15 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_Tooth2");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg; // S49 BRG path
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg; // S49 BRG path
 
             try
             {
-                view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: style);
+                view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: style);
 
                 Assert.IsNotNull(view.BrgRenderer(),
                     "Backend=Brg must construct a BrgTileRenderer.");
@@ -354,15 +354,15 @@ namespace MapRenderer.Tests.Visual
                     var src  = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderA");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 3; view.MaxZoom = 3;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
-                    view.Backend = RenderBackend.Brg;
+                    view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
+                    view.Config.Backend = RenderBackend.Brg;
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
-                            ownsSource: false, style: StyleLineThenFill());
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
+                            style: StyleLineThenFill());
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
@@ -404,15 +404,15 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderB");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 3; view.MaxZoom = 3;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
-                    view.Backend = RenderBackend.Brg;
+                    view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
+                    view.Config.Backend = RenderBackend.Brg;
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
-                            ownsSource: false, style: StyleFillThenLine());
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
+                            style: StyleFillThenLine());
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
@@ -587,16 +587,16 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_Tooth4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg;
 
             try
             {
                 var cam0 = MakeCam(0, 0, 0.0);
-                view.Initialise(src, cam0, ownsSource: false, style: style);
+                view.LoadTestStyle(src, cam0, style: style);
 
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle.");
@@ -692,15 +692,15 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_Tooth5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg;
 
             try
             {
-                view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());
                 PumpUntilSettled(view);
 
                 var brg = view.BrgRenderer();
@@ -754,15 +754,15 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NoAlloc");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg;
 
             try
             {
-                view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());
                 PumpUntilSettled(view);
 
                 var brg = view.BrgRenderer();
@@ -832,11 +832,11 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var mapGo = new GameObject("MapView_BrgPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 3; view.MaxZoom = 3;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg;
+            view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg;
 
             var lightGo = new GameObject("BrgTestLight");
             var light   = lightGo.AddComponent<Light>();
@@ -861,8 +861,8 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
-                    ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
+                    style: MinimalStyle());
 
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
@@ -1071,15 +1071,15 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomLow");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 0; view.MaxZoom = 2;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
-                    view.Backend = RenderBackend.Brg;
+                    view.Config.MinZoom = 0; view.Config.MaxZoom = 2;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
+                    view.Config.Backend = RenderBackend.Brg;
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 1.0, 0, 0),
-                            ownsSource: false, style: StyleZoomDependentLine());
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 1.0, 0, 0),
+                            style: StyleZoomDependentLine());
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
@@ -1123,15 +1123,15 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomHigh");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 4; view.MaxZoom = 6;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
-                    view.Backend = RenderBackend.Brg;
+                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
+                    view.Config.Backend = RenderBackend.Brg;
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
-                            ownsSource: false, style: StyleZoomDependentLine());
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
+                            style: StyleZoomDependentLine());
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
@@ -1315,15 +1315,15 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgParityEntities");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 4; view.MaxZoom = 6;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
+                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
                     // Default backend = Entities.
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
-                            ownsSource: false, style: style);
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
+                            style: style);
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
@@ -1358,15 +1358,15 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgParityBrg");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.MinZoom = 4; view.MaxZoom = 6;
-                    view.PadTiles = 0; view.FallbackAspect = 1f;
-                    view.MaxBuildsPerTick = 64;
-                    view.MaxTessellationsPerTick = 64;
-                    view.Backend = RenderBackend.Brg;
+                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.Config.MaxBuildsPerTick = 64;
+                    view.Config.MaxTessellationsPerTick = 64;
+                    view.Config.Backend = RenderBackend.Brg;
                     try
                     {
-                        view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
-                            ownsSource: false, style: style);
+                        view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
+                            style: style);
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {

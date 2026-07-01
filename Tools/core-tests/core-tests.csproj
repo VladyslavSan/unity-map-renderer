@@ -85,9 +85,7 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/ConstrainedAngle.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraProperties.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPropertiesUpdate.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraAnimation.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraPoseMath.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSystem.cs" />
     <!-- S72: pure two-way slider↔camera reconcile (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/View/Camera/CameraSliderBinding.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Data/IDataSource.cs" />

@@ -10,7 +10,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Imaging;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
@@ -60,10 +60,10 @@ namespace MapRenderer.Tests.Visual
 
             var mapGo = new GameObject("MapView");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 3; view.MaxZoom = 3;
-            view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
+            view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
 
             // Light so the URP Lit fill is bright enough for coverage.
             var lightGo = new GameObject("SceneLight");
@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), style: MinimalStyle());
                 // Pump to settle all tiles.
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {

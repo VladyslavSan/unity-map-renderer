@@ -20,7 +20,7 @@ using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
-using MapView = MapRenderer.Unity.Rendering.Map.MapView;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -65,13 +65,13 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_EntOff");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
             try
             {
-                view.Initialise(src, MakeCam(0, 0, 0.0), ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());
                 PumpUntilSettled(view);
                 Assert.IsNull(view.EntitiesRenderer(),
                     "The BRG backend must NOT construct the Entities renderer (backend selection is exclusive).");
@@ -91,14 +91,14 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Ent");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 0; view.MaxZoom = 0; view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Entities;
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Entities;
             try
             {
                 var cam0 = MakeCam(0, 0, 0.0);
-                view.Initialise(src, cam0, ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, cam0, style: MinimalStyle());
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle on the Entities backend.");
@@ -164,10 +164,10 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var mapGo = new GameObject("MapView_EntPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.MinZoom = 3; view.MaxZoom = 3; view.PadTiles = 0; view.FallbackAspect = 1f;
-            view.MaxBuildsPerTick = 64;
-            view.MaxTessellationsPerTick = 64;
-            view.Backend = RenderBackend.Entities;
+            view.Config.MinZoom = 3; view.Config.MaxZoom = 3; view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MaxBuildsPerTick = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.Backend = RenderBackend.Entities;
 
             var lightGo = new GameObject("EntPixelLight");
             var light   = lightGo.AddComponent<Light>();
@@ -188,8 +188,8 @@ namespace MapRenderer.Tests.Visual
             var snap = new SnapshotRenderer(SnapW, SnapH);
             try
             {
-                view.Initialise(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
-                    ownsSource: false, style: MinimalStyle());
+                view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
+                    style: MinimalStyle());
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 { view.Tick(); Thread.Sleep(1); }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
