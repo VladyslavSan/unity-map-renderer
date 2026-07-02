@@ -109,6 +109,7 @@ namespace MapRenderer.Tests
             try
             {
                 mapCam.SetProperties(initial);
+                mapCam.SyncToCamera();
 
                 Assert.Greater(cam.transform.position.y, 0f,
                     "Camera must be above the origin (position.y > 0) at tilt=0.");
@@ -132,10 +133,12 @@ namespace MapRenderer.Tests
             try
             {
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 0.0));
+                mapCam.SyncToCamera();
                 Vector3 upNorth = cam.transform.up;
                 Vector3 fwdN    = cam.transform.forward;
 
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 90.0, 0.0));
+                mapCam.SyncToCamera();
                 Vector3 upEast = cam.transform.up;
                 Vector3 fwdE   = cam.transform.forward;
 
@@ -162,6 +165,7 @@ namespace MapRenderer.Tests
             {
                 mapCam.SetProperties(
                     new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
+                mapCam.SyncToCamera();
 
                 Assert.Greater(cam.transform.position.y, 0f,
                     "Camera must still be above origin at tilt=45.");
@@ -199,9 +203,11 @@ namespace MapRenderer.Tests
             try
             {
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
+                mapCam.SyncToCamera();
                 Vector3 posN = cam.transform.position;
 
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 90.0, 45.0));
+                mapCam.SyncToCamera();
                 Vector3 posE = cam.transform.position;
 
                 Assert.Greater(posN.y, 0f, "Camera above origin at bearing=0 pitch=45.");
@@ -225,6 +231,7 @@ namespace MapRenderer.Tests
             {
                 cam.orthographic = true;
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0, 0));
+                mapCam.SyncToCamera();
 
                 Assert.IsFalse(cam.orthographic, "Camera must be set to perspective (orthographic=false).");
                 Assert.AreEqual(TestFovDeg, cam.fieldOfView, 0.001f,

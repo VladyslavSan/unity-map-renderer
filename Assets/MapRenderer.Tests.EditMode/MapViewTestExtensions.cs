@@ -65,6 +65,7 @@ namespace MapRenderer.Tests
         {
             MapView mv = view.View;
             mv.Camera.SetProperties(initialView);
+            mv.Camera.SyncToCamera(); // production commits in LateUpdate; tests drive it explicitly at the seed
             mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
 
             // One SourceSpec per distinct rendered (fill/line) source-id, each creating the injected source.

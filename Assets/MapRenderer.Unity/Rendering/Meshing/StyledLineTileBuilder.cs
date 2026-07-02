@@ -135,6 +135,18 @@ namespace MapRenderer.Unity.Rendering.Meshing
             float3 bMin = new float3(float.MaxValue);
             float3 bMax = new float3(float.MinValue);
 
+            // Grow-only reusable Burst scratch: allocate once per tile, grow only when a longer path appears,
+            // dispose once (finally). Sequential .Run() means each buffer is free for reuse before the next
+            // ring — no per-ring malloc/free churn. The count arrays (size 1) are overwritten each ring.
+            NativeArray<double2>    inPts = default;
+            NativeArray<LineVertex> outV  = default;
+            NativeArray<int>        outI  = default;
+            var vcArr = new NativeArray<int>(1, Allocator.Persistent);
+            var icArr = new NativeArray<int>(1, Allocator.Persistent);
+            int inCap = 0, outVCap = 0, outICap = 0;
+
+            try
+            {
             foreach (var feature in selectedFeatures)
             {
                 if (feature.GeometryType != MvtGeometryType.LineString)
@@ -179,71 +191,72 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     var worldPts = ProjectLineRing(ring, id.Z, id.X, id.Y, extent, tileOriginMerc.x, tileOriginMerc.y);
                     if (worldPts == null || worldPts.Count < 2) continue;
 
-                    // Burst line tessellation (Run() on this worker — see StyledFillTileBuilder for the choreography;
-                    // decode+projection stay managed and feed the double-precision job → strict parity with the
-                    // managed LineTessellator on the miter/butt path). Worst-case output sizing; actual counts in
-                    // vcArr/icArr. Per-ring native scratch is malloc/free churn (no GC).
+                    // Burst line tessellation (Run() on this worker — see StyledFillTileBuilder for the
+                    // choreography; decode+projection stay managed and feed the double-precision job → strict
+                    // parity with the managed LineTessellator on the miter/butt path). Worst-case output sizing.
                     int n    = worldPts.Count;
                     int capV = LineTessellationJob.MaxVertexCount(n, DefaultRoundSegments);
                     int capI = LineTessellationJob.MaxIndexCount(n, DefaultRoundSegments);
 
-                    var inPts = new NativeArray<double2>(n, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    if (n > inCap)      { if (inPts.IsCreated) inPts.Dispose(); inPts = new NativeArray<double2>(n,       Allocator.Persistent, NativeArrayOptions.UninitializedMemory); inCap   = n; }
+                    if (capV > outVCap) { if (outV.IsCreated)  outV.Dispose();  outV  = new NativeArray<LineVertex>(capV, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outVCap = capV; }
+                    if (capI > outICap) { if (outI.IsCreated)  outI.Dispose();  outI  = new NativeArray<int>(capI,        Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outICap = capI; }
+
                     for (int k = 0; k < n; k++) inPts[k] = worldPts[k];
-                    var outV  = new NativeArray<LineVertex>(capV, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                    var outI  = new NativeArray<int>(capI, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                    var vcArr = new NativeArray<int>(1, Allocator.Persistent);
-                    var icArr = new NativeArray<int>(1, Allocator.Persistent);
-                    try
+
+                    new LineTessellationJob
                     {
-                        new LineTessellationJob
-                        {
-                            InputPoints    = inPts,
-                            PointCount     = n,
-                            Join           = joinType,
-                            Cap            = capType,
-                            MiterLimit     = DefaultMiterLimit,
-                            RoundSegments  = DefaultRoundSegments,
-                            OutVertices    = outV,
-                            OutIndices     = outI,
-                            OutVertexCount = vcArr,
-                            OutIndexCount  = icArr,
-                        }.Run();
+                        InputPoints    = inPts,
+                        PointCount     = n,
+                        Join           = joinType,
+                        Cap            = capType,
+                        MiterLimit     = DefaultMiterLimit,
+                        RoundSegments  = DefaultRoundSegments,
+                        OutVertices    = outV,
+                        OutIndices     = outI,
+                        OutVertexCount = vcArr,
+                        OutIndexCount  = icArr,
+                    }.Run();
 
-                        int nv = vcArr[0];
-                        int ni = icArr[0];
-                        if (nv == 0 || ni == 0) continue; // finally still disposes the scratch
+                    int nv = vcArr[0];
+                    int ni = icArr[0];
+                    if (nv == 0 || ni == 0) continue;
 
-                        int offset = tempVerts0.Count;
-                        for (int k = 0; k < nv; k++)
-                        {
-                            LineVertex v = outV[k];
-                            float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
-                            bMin = math.min(bMin, pos);
-                            bMax = math.max(bMax, pos);
-                            tempVerts0.Add(new LinePositionNormal
-                            {
-                                Position = new Vector3(pos.x, pos.y, pos.z),
-                                Normal   = UpNormal,
-                            });
-                            // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat Mercator;
-                            // a globe projection bakes non-zero Y and the shader consumes it as-is.
-                            tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
-                            tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
-                            tempVerts3.Add(new LineWidthColor
-                            {
-                                WidthScale = v.WidthScale * featureWidthScale,
-                                Color      = featureColor,
-                            });
-                        }
-
-                        for (int k = 0; k < ni; k++)
-                            tempIndices.Add(offset + outI[k]);
-                    }
-                    finally
+                    int offset = tempVerts0.Count;
+                    for (int k = 0; k < nv; k++)
                     {
-                        inPts.Dispose(); outV.Dispose(); outI.Dispose(); vcArr.Dispose(); icArr.Dispose();
+                        LineVertex v = outV[k];
+                        float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
+                        bMin = math.min(bMin, pos);
+                        bMax = math.max(bMax, pos);
+                        tempVerts0.Add(new LinePositionNormal
+                        {
+                            Position = new Vector3(pos.x, pos.y, pos.z),
+                            Normal   = UpNormal,
+                        });
+                        // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat Mercator;
+                        // a globe projection bakes non-zero Y and the shader consumes it as-is.
+                        tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
+                        tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
+                        tempVerts3.Add(new LineWidthColor
+                        {
+                            WidthScale = v.WidthScale * featureWidthScale,
+                            Color      = featureColor,
+                        });
                     }
+
+                    for (int k = 0; k < ni; k++)
+                        tempIndices.Add(offset + outI[k]);
                 }
+            }
+            }
+            finally
+            {
+                if (inPts.IsCreated) inPts.Dispose();
+                if (outV.IsCreated)  outV.Dispose();
+                if (outI.IsCreated)  outI.Dispose();
+                vcArr.Dispose();
+                icArr.Dispose();
             }
 
             if (tempVerts0.Count == 0 || tempIndices.Count == 0)

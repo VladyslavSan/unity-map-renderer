@@ -12,13 +12,18 @@ namespace MapRenderer.Unity.Rendering.Map
     /// construction: the wrapped camera is never null, so there is no fallback path for aspect / viewport /
     /// pose. (S89: absorbed the former Core <c>CameraSystem</c>; there is no separate model↔binding split.)
     ///
-    /// <para><b>Control is instant.</b> <see cref="Apply"/> merges a <see cref="CameraPropertiesUpdate"/>
-    /// patch over the current state and re-drives the transform. Smooth, animated, per-property control is
-    /// the job of a separate <c>CameraController</c> (future), layered on top of this.</para>
+    /// <para><b>State vs. propagation are separated.</b> <see cref="Apply"/> / <see cref="SetProperties"/>
+    /// only mutate <see cref="CurrentProperties"/> — the live "most recent state" — and do NOT touch the Unity
+    /// camera. The transform is propagated ONCE per frame by <see cref="SyncToCamera"/> (driven from
+    /// <c>MapViewComponent.LateUpdate</c>), so many setters in a frame collapse to a single commit from the
+    /// final merged state. <see cref="SyncToCamera"/> is the "camera matrix is frozen for this frame" point:
+    /// anything reading the Unity camera matrix (e.g. future symbol/label screen-space placement) MUST run
+    /// AFTER it, sequenced in the same LateUpdate — never in <c>Update</c> (before the commit). Smooth,
+    /// animated control is a separate <c>CameraController</c> (future), layered on top.</para>
     ///
     /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at, so the camera
     /// orbits the origin and its transform is a pure function of <see cref="CameraProperties"/> — recomputed
-    /// on <see cref="Apply"/>, not per frame. At tilt=0 the camera sits directly above the look-at looking
+    /// once per frame at the commit. At tilt=0 the camera sits directly above the look-at looking
     /// straight down; tilt&gt;0 orbits toward the horizon; heading rotates in the horizontal plane. Clip
     /// planes scale with altitude (near = altitude·0.01 min 0.1; far = altitude·4).</para>
     ///
@@ -54,7 +59,7 @@ namespace MapRenderer.Unity.Rendering.Map
             _current           = initial;
             AltitudeMultiplier = altitudeMultiplier;
             Projection         = projection ?? new WebMercatorProjection();
-            SyncTransform();
+            SyncToCamera(); // seed the transform at construction so frame-0 is valid before the first commit
         }
 
         /// <summary>The current camera properties.</summary>
@@ -65,25 +70,31 @@ namespace MapRenderer.Unity.Rendering.Map
         public double2 ViewportPx => new double2(_camera.pixelWidth, _camera.pixelHeight);
 
         /// <summary>
-        /// Merge <paramref name="update"/> over the current properties and re-drive the transform (instant).
-        /// An empty patch still re-syncs the transform (cheap, pure function of the props).
+        /// Merge <paramref name="update"/> over the current properties. Updates <see cref="CurrentProperties"/>
+        /// immediately; does NOT touch the Unity camera — the transform is propagated once per frame by
+        /// <see cref="SyncToCamera"/>.
         /// </summary>
         public void Apply(CameraPropertiesUpdate update)
         {
             _current = update.ApplyTo(_current);
-            SyncTransform();
         }
 
-        /// <summary>Jump the camera to an absolute <paramref name="props"/> state and re-drive the transform.
-        /// The absolute counterpart to <see cref="Apply"/> (used to seed the initial view).</summary>
+        /// <summary>Jump the current properties to an absolute <paramref name="props"/> state (the absolute
+        /// counterpart to <see cref="Apply"/>). Updates <see cref="CurrentProperties"/> immediately; the Unity
+        /// camera is propagated once per frame by <see cref="SyncToCamera"/>.</summary>
         public void SetProperties(CameraProperties props)
         {
             _current = props;
-            SyncTransform();
         }
 
-        // ── Drive the Unity camera transform from the current props ─────────────────────────────────
-        private void SyncTransform()
+        /// <summary>
+        /// Propagate <see cref="CurrentProperties"/> to the wrapped Unity camera (transform + FOV + clip) —
+        /// the single per-frame commit, driven from <c>MapViewComponent.LateUpdate</c>. Idempotent: pushing
+        /// the same state twice is harmless (no dirty tracking). This is the "camera matrix frozen for this
+        /// frame" point — any Unity-camera-matrix consumer (future symbol screen-space placement) must run
+        /// AFTER it.
+        /// </summary>
+        public void SyncToCamera()
         {
             double altitude = CameraPoseMath.AltitudeForZoom(_current.Zoom, ViewportPx.y, _current.VerticalFovDeg)
                               * AltitudeMultiplier;

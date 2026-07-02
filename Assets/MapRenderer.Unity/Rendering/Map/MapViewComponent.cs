@@ -51,6 +51,15 @@ namespace MapRenderer.Unity.Rendering.Map
         public void Teardown()           => View?.Teardown();
 
         private void Update()    => View?.UpdateFrame(Time.deltaTime);
+
+        // Single per-frame camera commit. Input controllers mutate MapCamera.CurrentProperties during their
+        // Update; LateUpdate runs after ALL of them, so this propagates the final merged state to the Unity
+        // camera exactly once — and before rendering (LateUpdate precedes culling/render). This is the
+        // "camera matrix frozen for this frame" point: any future Unity-camera-matrix consumer (symbol
+        // screen-space placement) must be sequenced AFTER this call, here — not in Update, not in another
+        // component's LateUpdate (Unity does not order those).
+        private void LateUpdate() => View?.Camera?.SyncToCamera();
+
         private void OnDestroy() => View?.Teardown();
 
         // ── Internal test reads (forwarded so MapViewTestExtensions stays unchanged) ─────────────
