@@ -42,10 +42,10 @@ namespace MapRenderer.Tests
         public void ComputeEmitOrder_RemoveItemWithoutRebuild_DropsEvictedItem()
         {
             var style = StyleParser.Parse(OneFillStyleJson);
-            var set   = new StyledLayerSet();
+            var set   = new RenderLayerSet();
             set.Build(style, 0.0, MapMaterialSetTestUtil.Load());
 
-            var brg    = new BrgTileRenderer(set);
+            var brg    = new BrgTileRenderer(new[] { set[0].Material });
             var meshes = new List<Mesh>();
             var scratch = new List<int>();
 

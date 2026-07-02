@@ -52,6 +52,10 @@ namespace MapRenderer.Jobs
         /// <summary>Projected float3 world positions (one per tile vertex). Length = total tile verts.</summary>
         public NativeArray<float3> WorldPositions;
 
+        /// <summary>S89 D2: feature index of each merged vertex (into the input FeatureGeometries list).
+        /// Lets the fill stream-write assign per-feature color without re-deriving vertex→feature.</summary>
+        public NativeArray<int> VertexFeatureIdx;
+
         // ── Counts written by jobs ─────────────────────────────────────────────────────────────
         public NativeArray<int> RingCount;          // [0]
         public NativeArray<int> VertexCount;        // [0]
@@ -84,6 +88,7 @@ namespace MapRenderer.Jobs
             if (HoleRingIdxs.IsCreated)     HoleRingIdxs.Dispose();
             if (TriangleIndices.IsCreated)  TriangleIndices.Dispose();
             if (WorldPositions.IsCreated)   WorldPositions.Dispose();
+            if (VertexFeatureIdx.IsCreated) VertexFeatureIdx.Dispose();
             if (RingCount.IsCreated)        RingCount.Dispose();
             if (VertexCount.IsCreated)      VertexCount.Dispose();
             if (PolygonCount.IsCreated)     PolygonCount.Dispose();

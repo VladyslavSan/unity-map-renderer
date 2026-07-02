@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.Visual
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var origin = new double2(bMin.x, bMin.y);
 
-            Mesh mesh = StyledFillTileBuilder.BuildMesh(
+            Mesh mesh = TestTileMeshBuilder.BuildFill(
                 features, paint, styleZoom, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, origin);
 
             var mapGo = new GameObject("FillSceneHelper");

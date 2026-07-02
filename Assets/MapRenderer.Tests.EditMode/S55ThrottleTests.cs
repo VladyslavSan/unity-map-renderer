@@ -667,8 +667,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth_h_PartialTileEviction_NoLeak()
         {
-            long Live() => StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount
-                         + StyledLineTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            long Live() => MapRenderer.Unity.Rendering.Style.MeshDataTessellation.DebugLiveAllocCount;
 
             long baseline = Live();
 

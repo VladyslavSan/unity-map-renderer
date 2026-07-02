@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // ── Internal test reads (forwarded so MapViewTestExtensions stays unchanged) ─────────────
         internal Tile.TileManager     TileManager => View?.TileManager;
-        internal Style.StyledLayerSet Layers      => View?.Layers;
+        internal Style.RenderLayerSet Layers      => View?.Layers;
         internal double2              SceneOrigin => View != null ? View.SceneOrigin : default;
         internal string               StyleId     => View?.StyleId;
     }

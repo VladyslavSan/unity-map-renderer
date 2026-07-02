@@ -40,13 +40,13 @@ namespace MapRenderer.Unity.Rendering.Map
     /// The live multi-tile render loop — per-layer styled fill/line rendering. A <b>plain C# class</b>
     /// (the MonoBehaviour host is <see cref="MapViewComponent"/>): correct by construction — it is built with
     /// its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/>, and owns its
-    /// <see cref="StyledLayerSet"/> and <see cref="TileManager"/> from construction, so there are no
+    /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so there are no
     /// "is it wired yet" null guards and no lifecycle flag: before <see cref="SetStyle(string,CancellationToken)"/>
     /// runs it is simply an empty map whose <see cref="Tick"/> selects a cover but has no sources to fetch from,
     /// so it renders nothing — a safe no-op, not an invalid state.
     ///
     /// <para>Architecture: one render bundle per fill/line style layer (declared/painter's order), each with a
-    /// per-layer Material + ZoomStyleApplier, held by the <see cref="StyledLayerSet"/>. The tile lifecycle
+    /// per-layer Material + ZoomStyleApplier, held by the <see cref="RenderLayerSet"/>. The tile lifecycle
     /// (cover→fetch→tessellate→consume→evict, disposal/leak guards) lives in <see cref="TileManager"/>, ticked
     /// once per frame. Per-frame: push zoom uniforms, snap the render origin to the look-at, rebuild, tick.</para>
     ///
@@ -75,7 +75,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private StyleDocument _style;
 
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
-        private readonly Style.StyledLayerSet _layers = new Style.StyledLayerSet();
+        private readonly Style.RenderLayerSet _layers = new Style.RenderLayerSet();
 
         // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only _layers).
         internal readonly Tile.TileManager TileManager;
@@ -128,7 +128,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// S83b: apply an already-parsed <paramref name="style"/> with a caller-supplied
-        /// <paramref name="styleId"/>. A second call RESTYLES: <see cref="StyledLayerSet"/> rebuilds and the
+        /// <paramref name="styleId"/>. A second call RESTYLES: <see cref="RenderLayerSet"/> rebuilds and the
         /// source registry diffs (unchanged sources keep their warm pipeline; removed are torn down).
         /// </summary>
         public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
@@ -212,7 +212,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts
         /// via <c>MapViewTestExtensions</c> (InternalsVisibleTo).</summary>
-        internal Style.StyledLayerSet Layers => _layers;
+        internal Style.RenderLayerSet Layers => _layers;
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
@@ -283,7 +283,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
-        /// StyledLayerSet's materials. Order matters: tiles first — their renderers reference layer
+        /// RenderLayerSet's materials. Order matters: tiles first — their renderers reference layer
         /// materials. Idempotent (both disposes are). The MonoBehaviour host calls this from OnDestroy.
         /// </summary>
         public void Teardown()

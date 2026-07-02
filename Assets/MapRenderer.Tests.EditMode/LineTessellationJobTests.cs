@@ -1,190 +1,232 @@
+using System.Collections.Generic;
+using System.IO;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Geometry;
+using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// EditMode tests for <see cref="LineTessellationJob"/>.
+    /// Differential oracle for <see cref="LineTessellationJob"/> (Burst) vs the managed reference
+    /// <see cref="LineTessellator.Triangulate"/>. The two implementations must produce identical
+    /// output for the same input — this is what makes the Burst port falsifiable (S89 D1).
     ///
-    /// Validates Burst compilation and basic output for a 2-point straight segment.
-    /// Full multi-line parallel jobification is deferred to S06; this is the smoke test
-    /// that confirms the job compiles under Burst and emits the correct vertex/index layout.
-    ///
-    /// Core vs Job parity: the 2-point case is simple enough to verify analytically.
+    /// Parity is STRICT (bit-exact) for the arithmetic-only paths (miter/bevel joins, butt/square
+    /// caps: only +,−,*,/,sqrt — all IEEE-correctly-rounded, so Burst and Mono agree exactly), and
+    /// TIGHT-TOLERANCE for the transcendental paths (round join/cap use atan2/cos/sin, whose libm
+    /// implementations may differ by a ULP between Burst and Mono — but the triangle topology, which
+    /// is integer, must still match exactly).
     /// </summary>
     [TestFixture]
     public class LineTessellationJobTests
     {
-        [Test]
-        public void TwoPoints_HorizontalLine_ProducesFourVertsAndSixIndices()
-        {
-            const int capacity = 16;
-            var points   = new NativeArray<double2>(2, Allocator.TempJob);
-            var outPos   = new NativeArray<float3>(capacity, Allocator.TempJob);
-            var outNorm  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outSide  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outWS    = new NativeArray<float>(capacity, Allocator.TempJob);
-            var outIdx   = new NativeArray<int>(capacity, Allocator.TempJob);
-            var vcArr    = new NativeArray<int>(1, Allocator.TempJob);
-            var icArr    = new NativeArray<int>(1, Allocator.TempJob);
+        private static string FixturePath =>
+            Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
 
+        // ── Oracle harness ──────────────────────────────────────────────────────────────────────
+
+        private static (LineVertex[] verts, int[] indices) RunJob(
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments)
+        {
+            int capV = LineTessellationJob.MaxVertexCount(pts.Length, roundSegments);
+            int capI = LineTessellationJob.MaxIndexCount(pts.Length, roundSegments);
+
+            var points = new NativeArray<double2>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
+            var outV   = new NativeArray<LineVertex>(capV == 0 ? 1 : capV, Allocator.TempJob);
+            var outI   = new NativeArray<int>(capI == 0 ? 1 : capI, Allocator.TempJob);
+            var vc     = new NativeArray<int>(1, Allocator.TempJob);
+            var ic     = new NativeArray<int>(1, Allocator.TempJob);
             try
             {
-                points[0] = new double2(0, 0);
-                points[1] = new double2(10, 0);
+                for (int i = 0; i < pts.Length; i++) points[i] = pts[i];
 
-                var job = new LineTessellationJob
+                new LineTessellationJob
                 {
                     InputPoints    = points,
-                    PointCount     = 2,
-                    OutPositions   = outPos,
-                    OutNormals     = outNorm,
-                    OutSideAndDist = outSide,
-                    OutWidthScales = outWS,
-                    OutIndices     = outIdx,
-                    OutVertexCount = vcArr,
-                    OutIndexCount  = icArr,
-                };
+                    PointCount     = pts.Length,
+                    Join           = join,
+                    Cap            = cap,
+                    MiterLimit     = miterLimit,
+                    RoundSegments  = roundSegments,
+                    OutVertices    = outV,
+                    OutIndices     = outI,
+                    OutVertexCount = vc,
+                    OutIndexCount  = ic,
+                }.Schedule().Complete();
 
-                job.Schedule().Complete();
-
-                Assert.AreEqual(4, vcArr[0],
-                    $"2-pt horizontal line → 4 verts. Got {vcArr[0]}.");
-                Assert.AreEqual(6, icArr[0],
-                    $"2-pt horizontal line → 6 indices. Got {icArr[0]}.");
-
-                // Verify normal perpendicularity to horizontal segment (tangent = (1,0)).
-                for (int i = 0; i < 4; i++)
-                {
-                    float2 n   = outNorm[i];
-                    float  dot = n.x * 1f + n.y * 0f; // dot with tangent (1,0)
-                    Assert.That((double)dot, Is.InRange(-1e-6, 1e-6),
-                        $"Vertex[{i}] normal must be perpendicular to horizontal tangent. " +
-                        $"dot={dot:G6} for normal=({n.x:G},{n.y:G}).");
-                }
-
-                // Verify unit normals (butt cap, straight segment → all unit).
-                for (int i = 0; i < 4; i++)
-                {
-                    float2 n   = outNorm[i];
-                    float  len = System.Math.Abs(n.x * n.x + n.y * n.y - 1f);
-                    Assert.That((double)len, Is.LessThan(1e-5),
-                        $"Vertex[{i}] normal must be unit. ||n||^2 - 1 = {len:G6}.");
-                }
-
-                // Verify index range.
-                for (int i = 0; i < 6; i++)
-                    Assert.That(outIdx[i], Is.InRange(0, 3),
-                        $"Index[{i}]={outIdx[i]} must be in [0,3].");
+                int nv = vc[0], ni = ic[0];
+                var verts   = new LineVertex[nv];
+                var indices = new int[ni];
+                for (int i = 0; i < nv; i++) verts[i]   = outV[i];
+                for (int i = 0; i < ni; i++) indices[i] = outI[i];
+                return (verts, indices);
             }
             finally
             {
-                points.Dispose(); outPos.Dispose(); outNorm.Dispose();
-                outSide.Dispose(); outWS.Dispose(); outIdx.Dispose();
-                vcArr.Dispose(); icArr.Dispose();
+                points.Dispose(); outV.Dispose(); outI.Dispose(); vc.Dispose(); ic.Dispose();
             }
         }
+
+        /// <summary>
+        /// Assert the Burst job matches the managed reference for <paramref name="pts"/> under the
+        /// given style. Counts + indices are always exact; vertex fields are exact when
+        /// <paramref name="strict"/> (arithmetic-only), else within <c>1e-9</c> (transcendental).
+        /// </summary>
+        private static void AssertParity(
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments,
+            bool strict, string label)
+        {
+            var managed  = LineTessellator.Triangulate(pts, join, cap, miterLimit, roundSegments);
+            var (jv, ji) = RunJob(pts, join, cap, miterLimit, roundSegments);
+
+            Assert.AreEqual(managed.Vertices.Length, jv.Length, $"{label}: vertex count");
+            Assert.AreEqual(managed.Indices.Length,  ji.Length, $"{label}: index count");
+
+            for (int i = 0; i < ji.Length; i++)
+                Assert.AreEqual(managed.Indices[i], ji[i], $"{label}: index[{i}]");
+
+            for (int i = 0; i < jv.Length; i++)
+            {
+                LineVertex m = managed.Vertices[i], j = jv[i];
+                // Side / WidthScale are set by pure assignment — always exact.
+                Assert.AreEqual(m.Side,       j.Side,       $"{label}: v[{i}].Side");
+                Assert.AreEqual(m.WidthScale, j.WidthScale, $"{label}: v[{i}].WidthScale");
+
+                if (strict)
+                {
+                    Assert.AreEqual(m.Position.x,   j.Position.x,   $"{label}: v[{i}].Position.x");
+                    Assert.AreEqual(m.Position.y,   j.Position.y,   $"{label}: v[{i}].Position.y");
+                    Assert.AreEqual(m.Normal.x,     j.Normal.x,     $"{label}: v[{i}].Normal.x");
+                    Assert.AreEqual(m.Normal.y,     j.Normal.y,     $"{label}: v[{i}].Normal.y");
+                    Assert.AreEqual(m.DistanceAlong, j.DistanceAlong, $"{label}: v[{i}].DistanceAlong");
+                }
+                else
+                {
+                    Assert.AreEqual(m.Position.x,   j.Position.x,   1e-9, $"{label}: v[{i}].Position.x");
+                    Assert.AreEqual(m.Position.y,   j.Position.y,   1e-9, $"{label}: v[{i}].Position.y");
+                    Assert.AreEqual(m.Normal.x,     j.Normal.x,     1e-9, $"{label}: v[{i}].Normal.x");
+                    Assert.AreEqual(m.Normal.y,     j.Normal.y,     1e-9, $"{label}: v[{i}].Normal.y");
+                    Assert.AreEqual(m.DistanceAlong, j.DistanceAlong, 1e-9, $"{label}: v[{i}].DistanceAlong");
+                }
+            }
+        }
+
+        // ── Degenerate / smoke ───────────────────────────────────────────────────────────────────
 
         [Test]
         public void LessThanTwoPoints_ProducesZeroOutput()
         {
-            const int capacity = 8;
-            var points   = new NativeArray<double2>(1, Allocator.TempJob);
-            var outPos   = new NativeArray<float3>(capacity, Allocator.TempJob);
-            var outNorm  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outSide  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outWS    = new NativeArray<float>(capacity, Allocator.TempJob);
-            var outIdx   = new NativeArray<int>(capacity, Allocator.TempJob);
-            var vcArr    = new NativeArray<int>(1, Allocator.TempJob);
-            var icArr    = new NativeArray<int>(1, Allocator.TempJob);
-
-            try
-            {
-                points[0] = new double2(5, 5);
-
-                var job = new LineTessellationJob
-                {
-                    InputPoints    = points,
-                    PointCount     = 1,
-                    OutPositions   = outPos,
-                    OutNormals     = outNorm,
-                    OutSideAndDist = outSide,
-                    OutWidthScales = outWS,
-                    OutIndices     = outIdx,
-                    OutVertexCount = vcArr,
-                    OutIndexCount  = icArr,
-                };
-
-                job.Schedule().Complete();
-
-                Assert.AreEqual(0, vcArr[0], "< 2 points → 0 verts.");
-                Assert.AreEqual(0, icArr[0], "< 2 points → 0 indices.");
-            }
-            finally
-            {
-                points.Dispose(); outPos.Dispose(); outNorm.Dispose();
-                outSide.Dispose(); outWS.Dispose(); outIdx.Dispose();
-                vcArr.Dispose(); icArr.Dispose();
-            }
+            var (jv, ji) = RunJob(new[] { new double2(5, 5) }, JoinType.Miter, CapType.Butt, 2.0, 4);
+            Assert.AreEqual(0, jv.Length, "< 2 points → 0 verts.");
+            Assert.AreEqual(0, ji.Length, "< 2 points → 0 indices.");
         }
 
         [Test]
-        public void TwoPoints_CoreParityCheck_NormalsMatchLineTessellator()
+        public void DuplicateConsecutivePoints_CollapsedIdentically()
         {
-            // Verify that the Job's output for a simple horizontal 2-pt line matches
-            // what LineTessellator.Triangulate produces for the same input.
-            // This is the Core-vs-Job parity check for the smoke scenario.
-            const int capacity = 16;
-            var points   = new NativeArray<double2>(2, Allocator.TempJob);
-            var outPos   = new NativeArray<float3>(capacity, Allocator.TempJob);
-            var outNorm  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outSide  = new NativeArray<float2>(capacity, Allocator.TempJob);
-            var outWS    = new NativeArray<float>(capacity, Allocator.TempJob);
-            var outIdx   = new NativeArray<int>(capacity, Allocator.TempJob);
-            var vcArr    = new NativeArray<int>(1, Allocator.TempJob);
-            var icArr    = new NativeArray<int>(1, Allocator.TempJob);
-
-            try
+            // Managed collapses consecutive duplicates before tessellating; the job must too.
+            var pts = new[]
             {
-                points[0] = new double2(0, 0);
-                points[1] = new double2(10, 0);
+                new double2(0, 0), new double2(0, 0),
+                new double2(10, 0), new double2(10, 0), new double2(20, 5),
+            };
+            AssertParity(pts, JoinType.Miter, CapType.Butt, 2.0, 4, strict: true, "dup-collapse");
+        }
 
-                var job = new LineTessellationJob
+        // ── Arithmetic-only paths → STRICT bit-exact parity ────────────────────────────────────────
+
+        [Test]
+        public void TwoPoints_Butt_ExactParity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0) },
+                            JoinType.Miter, CapType.Butt, 2.0, 4, strict: true, "2pt-butt");
+
+        [Test]
+        public void MiterJoin_ShallowCorner_ExactParity()
+        {
+            // Gentle bend → miter stays under the limit (no bevel fallback).
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(20, 3) };
+            AssertParity(pts, JoinType.Miter, CapType.Butt, 4.0, 4, strict: true, "miter-shallow");
+        }
+
+        [Test]
+        public void MiterJoin_SharpCorner_FallsBackToBevel_ExactParity()
+        {
+            // Near-hairpin → miter ratio exceeds the limit → the Miter path falls back to bevel.
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(1, 1) };
+            AssertParity(pts, JoinType.Miter, CapType.Butt, 2.0, 4, strict: true, "miter->bevel");
+        }
+
+        [Test]
+        public void BevelJoin_LeftTurn_ExactParity()
+        {
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) }; // CCW / left
+            AssertParity(pts, JoinType.Bevel, CapType.Butt, 2.0, 4, strict: true, "bevel-left");
+        }
+
+        [Test]
+        public void BevelJoin_RightTurn_ExactParity()
+        {
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) }; // CW / right
+            AssertParity(pts, JoinType.Bevel, CapType.Butt, 2.0, 4, strict: true, "bevel-right");
+        }
+
+        [Test]
+        public void SquareCap_ExactParity()
+        {
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) };
+            AssertParity(pts, JoinType.Miter, CapType.Square, 4.0, 4, strict: true, "square-cap");
+        }
+
+        // ── Transcendental paths → topology exact, geometry tight-tolerance ─────────────────────────
+
+        [Test]
+        public void RoundJoin_BothTurns_ApproxParity()
+        {
+            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) },
+                         JoinType.Round, CapType.Butt, 2.0, 4, strict: false, "round-join-left");
+            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) },
+                         JoinType.Round, CapType.Butt, 2.0, 4, strict: false, "round-join-right");
+        }
+
+        [Test]
+        public void RoundCap_ApproxParity()
+        {
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) };
+            AssertParity(pts, JoinType.Miter, CapType.Round, 4.0, 3, strict: false, "round-cap");
+        }
+
+        // ── Fixture-wide oracle over real line geometry (geolines layer) ────────────────────────────
+
+        [Test]
+        public void Fixture_Geolines_ExactParity_MiterButt()
+        {
+            Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
+            var tile  = MvtDecoder.Decode(File.ReadAllBytes(FixturePath));
+            var layer = tile.GetLayer("geolines");
+            Assert.IsNotNull(layer, "geolines layer present in fixture");
+
+            int pathsChecked = 0;
+            foreach (var feature in layer.Features)
+            {
+                if (feature.GeometryType != MvtGeometryType.LineString || feature.Geometry == null)
+                    continue;
+
+                List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
+                foreach (var path in paths)
                 {
-                    InputPoints    = points,
-                    PointCount     = 2,
-                    OutPositions   = outPos,
-                    OutNormals     = outNorm,
-                    OutSideAndDist = outSide,
-                    OutWidthScales = outWS,
-                    OutIndices     = outIdx,
-                    OutVertexCount = vcArr,
-                    OutIndexCount  = icArr,
-                };
-                job.Schedule().Complete();
-
-                // Expected from LineTessellator (horizontal, butt): normals are ±(0,1).
-                // Vertices [0]=(0,0) left: normal=(0,1), side=+1.
-                //          [1]=(0,0) right: normal=(0,-1), side=-1.
-                //          [2]=(10,0) left: normal=(0,1), side=+1.
-                //          [3]=(10,0) right: normal=(0,-1), side=-1.
-
-                Assert.That((double)outNorm[0].x, Is.InRange(-1e-6, 1e-6), "Vertex[0] normal.x ≈ 0.");
-                Assert.That((double)outNorm[0].y, Is.InRange(1.0 - 1e-6, 1.0 + 1e-6), "Vertex[0] normal.y ≈ +1.");
-                Assert.That((double)outNorm[1].x, Is.InRange(-1e-6, 1e-6), "Vertex[1] normal.x ≈ 0.");
-                Assert.That((double)outNorm[1].y, Is.InRange(-1.0 - 1e-6, -1.0 + 1e-6), "Vertex[1] normal.y ≈ -1.");
-                Assert.That(outSide[0].x, Is.EqualTo(+1f), "Vertex[0] side=+1.");
-                Assert.That(outSide[1].x, Is.EqualTo(-1f), "Vertex[1] side=-1.");
+                    if (path.Count < 2) continue;
+                    AssertParity(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4,
+                                 strict: true, $"geolines#{feature.Id}");
+                    pathsChecked++;
+                }
             }
-            finally
-            {
-                points.Dispose(); outPos.Dispose(); outNorm.Dispose();
-                outSide.Dispose(); outWS.Dispose(); outIdx.Dispose();
-                vcArr.Dispose(); icArr.Dispose();
-            }
+
+            Assert.Greater(pathsChecked, 0, "expected at least one geoline path to tessellate");
         }
     }
 }

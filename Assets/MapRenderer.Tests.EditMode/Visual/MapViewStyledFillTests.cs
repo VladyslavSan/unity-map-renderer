@@ -148,10 +148,10 @@ namespace MapRenderer.Tests.Visual
                     "The tile must have exactly 2 layer meshes (one per fill style layer). " +
                     "If this is 0 or 1, the per-layer iteration is broken.");
 
-                // ── DECISIVE: distinct Material per layer (backend-agnostic, from the StyledLayerSet) ──
-                Assert.AreEqual(2, view.Layers.FillCount, "Two fill style layers must produce two records.");
-                Material mat0 = view.Layers.Fills[0].Material;
-                Material mat1 = view.Layers.Fills[1].Material;
+                // ── DECISIVE: distinct Material per layer (backend-agnostic, from the RenderLayerSet) ──
+                Assert.AreEqual(2, view.FillLayerCount(), "Two fill style layers must produce two records.");
+                Material mat0 = view.Layers[0].Material;
+                Material mat1 = view.Layers[1].Material;
                 Assert.IsNotNull(mat0, "Fill layer 0 must have a Material");
                 Assert.IsNotNull(mat1, "Fill layer 1 must have a Material");
 
@@ -210,11 +210,12 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built");
 
-                // Map each layer id -> its material renderQueue from the StyledLayerSet (backend-agnostic;
-                // the renderQueue is assigned by the layer's style index, which encodes paint order).
+                // Map each layer id -> its material renderQueue from the RenderLayerSet (backend-agnostic;
+                // the renderQueue is assigned by the layer's declared index, which encodes paint order).
                 var queueById = new Dictionary<string, int>();
-                foreach (var rec in view.Layers.Fills) queueById[rec.StyleLayer.Id] = rec.Material.renderQueue;
-                foreach (var rec in view.Layers.Lines) queueById[rec.StyleLayer.Id] = rec.Material.renderQueue;
+                var orderedLayers = view.Layers.Layers;
+                for (int i = 0; i < orderedLayers.Count; i++)
+                    queueById[orderedLayers[i].StyleLayer.Id] = orderedLayers[i].Material.renderQueue;
 
                 Assert.IsTrue(
                     queueById.ContainsKey("fill-bottom") && queueById.ContainsKey("line-mid") && queueById.ContainsKey("fill-top"),
@@ -551,7 +552,7 @@ namespace MapRenderer.Tests.Visual
                 // (FillLayerCount() is a test-only extension over MapView internals — see MapViewTestExtensions.)
                 Assert.AreEqual(1, view.FillLayerCount(),
                     "MapView must build 1 fill render bundle for the zoom-opacity style. " +
-                    "If 0, StyledLayerSet.Build is not creating bundles for zoom-dependent layers.");
+                    "If 0, RenderLayerSet.Build is not creating bundles for zoom-dependent layers.");
 
                 // Tick once to pump tiles and fire ApplyZoom.
                 view.Tick();

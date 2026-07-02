@@ -1,35 +1,33 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Threading;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
-using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs;
 using Line = MapRenderer.Core.Style.Line;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// S14 managed per-layer line mesh builder. Mirrors <see cref="StyledFillTileBuilder"/>
-    /// but for line-type style layers.
+    /// S14 managed per-layer line mesh builder. Mirrors <see cref="StyledFillTileBuilder"/> but for
+    /// line-type style layers.
     ///
-    /// Pipeline per feature:
-    ///   MvtGeometry.Decode → project to tile-local meters → LineTessellator.Triangulate
-    ///   → stream assembly → NativeArray upload.
+    /// Pipeline per feature (S89 D2): MvtGeometry.Decode + project to tile-local meters (managed, double2) →
+    ///   Burst <c>LineTessellationJob</c> per ring (run on this worker via <c>.Run()</c> into NativeArrays) →
+    ///   stream write into a <c>Mesh.MeshData</c>. The managed <c>LineTessellator</c> is retired from this
+    ///   path (differential oracle only). Decode + projection stay managed for now.
     ///
-    /// S14 split (matching S47 fill async split):
-    ///   <see cref="BuildMeshData"/> runs the full decode/tessellate/project loop off the main
-    ///   thread, returning a <see cref="LayerMeshData"/> payload (IDisposable, holds NativeArrays).
-    ///   <see cref="UploadMesh"/> uploads a <see cref="LayerMeshData"/> to a <see cref="Mesh"/> on the
-    ///   main thread using the advanced NativeArray API.
+    /// S89 Stage B — <see cref="WriteMeshData"/> tessellates AND writes directly into a caller-allocated
+    /// <see cref="Mesh.MeshData"/>, off the main thread (see <see cref="StyledFillTileBuilder"/> for the
+    /// choreography). The bespoke NativeArray-stream payload + main-thread copy is gone.
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, +Y) interleaved via <see cref="LinePositionNormal"/>.
@@ -38,22 +36,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
     ///
-    /// Color (D1): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted
-    /// to linear via <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material
-    /// (identity multiply). Never set <c>_BaseColor</c> to the style color for data-driven layers.
-    ///
-    /// Thread-safety: <see cref="BuildMeshData"/> touches only pure-managed, stateless Core code.
-    /// All paths are allocation-local with no shared mutable static state.
+    /// Color (D1): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted to linear via
+    /// <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material (identity multiply).
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
     public static class StyledLineTileBuilder
     {
-        // ── Structs for interleaved NativeArray streams ─────────────────────────
-
         /// <summary>
-        /// Tightly-packed Position + Normal struct for stream 0.
-        /// Stride = 6 × 4 = 24 bytes.
+        /// Tightly-packed Position + Normal struct for stream 0. Stride = 6 × 4 = 24 bytes.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         public struct LinePositionNormal
@@ -63,10 +54,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// S14: Color + WidthScale interleaved on stream 3.
-        /// Canonical field order matches the canonical descriptor order (Color enum=3 before
-        /// TexCoord2 enum=6), so stream-3 byte offsets are Color@0, WidthScale@16.
-        /// Stride = 16 (float4) + 4 (float) = 20 bytes.
+        /// S14: Color + WidthScale interleaved on stream 3. Canonical field order matches the canonical
+        /// descriptor order (Color enum=3 before TexCoord2 enum=6), so stream-3 byte offsets are Color@0,
+        /// WidthScale@16. Stride = 16 (float4) + 4 (float) = 20 bytes.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         public struct LineWidthColor
@@ -75,14 +65,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
             public float   WidthScale;
         }
 
-        // ── Hoisted vertex attribute descriptor ─────────────────────────────────
-
-        // Constructed once (static readonly) so UploadMesh does not allocate per-tile.
-        // Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Color=3,
-        // TexCoord0=4, TexCoord1=5, TexCoord2=6) eliminates the Unity "non-standard order" warning.
-        // Stream-3 interleave: Color (Float32x4, 16 bytes) then TexCoord2/WidthScale (Float32x1, 4 bytes),
-        // matching LineWidthColor struct field order { Vector4 Color; float WidthScale }.
-        private static readonly VertexAttributeDescriptor[] LineVertexDescriptors = new[]
+        // Line vertex attribute descriptors (static readonly — no per-tile alloc). Canonical ascending
+        // VertexAttribute enum order (Position=0, Normal=1, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6)
+        // avoids the "non-standard order" warning. Stream-3 interleave: Color (Float32x4, 16B) then
+        // TexCoord2/WidthScale (Float32x1, 4B), matching LineWidthColor { Vector4 Color; float WidthScale }.
+        // internal (not private): the SyntheticLineMesh test helper reuses the exact production layout.
+        internal static readonly VertexAttributeDescriptor[] LineVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
             new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0),
@@ -92,102 +80,46 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 1, stream: 3),
         };
 
+        // Skip main-thread index validation + redundant intermediate bounds compute (see StyledFillTileBuilder).
+        internal const MeshUpdateFlags NoValidate =
+            MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
+
+        // LineTessellator.Triangulate defaults — the Burst LineTessellationJob must match them for parity.
+        private const double DefaultMiterLimit    = 2.0;
+        private const int    DefaultRoundSegments = 4;
+
         // Constant +Y normal for all line vertices.
         private static readonly Vector3 UpNormal = Vector3.up;
 
         // White vertex color = identity multiply.
         private static readonly Vector4 WhiteColor = new Vector4(1f, 1f, 1f, 1f);
 
-        // ── Payload ─────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// CPU-computed mesh data for one line style layer, held as NativeArray streams.
-        /// Produced by <see cref="BuildMeshData"/> off the main thread; uploaded by
-        /// <see cref="UploadMesh"/> on the main thread.
-        ///
-        /// OWNERSHIP: caller of <see cref="BuildMeshData"/> MUST call <see cref="Dispose"/> on
-        /// EVERY exit path. <see cref="UploadMesh"/> does NOT dispose — dispose after upload.
-        /// When no geometry was produced, <see cref="IsCreated"/> is false and Dispose() is a no-op.
-        /// </summary>
-        public struct LayerMeshData : IDisposable
-        {
-            // Stream 0: Position + Normal interleaved.
-            public NativeArray<LinePositionNormal> Stream0PositionNormal;
-
-            // Stream 1: extrusion across-direction (3D tangent-plane vector; Y=0 for Mercator).
-            public NativeArray<Vector3> Stream1ExtrudeN;
-
-            // Stream 2: side + distanceAlong.
-            public NativeArray<Vector2> Stream2SideAndDist;
-
-            // Stream 3: widthScale + color interleaved.
-            public NativeArray<LineWidthColor> Stream3WidthColor;
-
-            // Index buffer.
-            public NativeArray<int> Indices;
-
-            /// <summary>Vertex count. Zero when no geometry was produced.</summary>
-            public int VertexCount;
-
-            /// <summary>Index count. Zero when no geometry was produced.</summary>
-            public int IndexCount;
-
-            /// <summary>True when the NativeArray streams are allocated and valid.</summary>
-            public bool IsCreated;
-
-            /// <summary>S55: tight AABB of centerline vertex positions, accumulated during
-            /// <see cref="StyledLineTileBuilder.BuildMeshData"/> (worker thread). Valid only when
-            /// <see cref="IsCreated"/> is true. Centerline positions only (no shader width extrusion);
-            /// parity with the pre-S55 RecalculateBounds() which also did not account for extrusion.</summary>
-            public float3 BoundsMin;
-            /// <inheritdoc cref="BoundsMin"/>
-            public float3 BoundsMax;
-
-            /// <summary>
-            /// S14 leak-guard counter: net live NativeArray allocations.
-            /// Mirrors <see cref="StyledFillTileBuilder.LayerMeshData.LiveAllocCount"/>.
-            /// </summary>
-            internal static long LiveAllocCount;
-
-            /// <summary>Test accessor for <see cref="LiveAllocCount"/>.</summary>
-            public static long DebugLiveAllocCount => Interlocked.Read(ref LiveAllocCount);
-
-            public void Dispose()
-            {
-                if (!IsCreated) return;
-                IsCreated = false;
-                if (Stream0PositionNormal.IsCreated) Stream0PositionNormal.Dispose();
-                if (Stream1ExtrudeN.IsCreated) Stream1ExtrudeN.Dispose();
-                if (Stream2SideAndDist.IsCreated) Stream2SideAndDist.Dispose();
-                if (Stream3WidthColor.IsCreated) Stream3WidthColor.Dispose();
-                if (Indices.IsCreated) Indices.Dispose();
-                Interlocked.Decrement(ref LiveAllocCount);
-            }
-        }
-
         // ── Public API ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// CPU-only half: tessellate all line features for one style layer, producing a
-        /// <see cref="LayerMeshData"/> payload backed by <see cref="NativeArray{T}"/> streams.
-        /// Safe to call from a ThreadPool thread.
-        ///
-        /// When no line geometry is produced, returns a default <see cref="LayerMeshData"/>
-        /// with <see cref="LayerMeshData.IsCreated"/> == false (no Dispose needed).
+        /// Tessellate all line features for one style layer and write the geometry directly into
+        /// <paramref name="md"/> (a caller-allocated <c>Mesh.MeshData</c>, count-1 slot), off the main thread.
+        /// Returns <paramref name="vertexCount"/> = 0 (leaving <paramref name="md"/> untouched) when no line
+        /// geometry is produced. <paramref name="bounds"/> carries the worker-computed centerline AABB
+        /// (parity with the pre-S55 RecalculateBounds, which also ignored shader width extrusion).
         /// </summary>
-        public static LayerMeshData BuildMeshData(
+        public static void WriteMeshData(
+            Mesh.MeshData             md,
             IReadOnlyList<MvtFeature> selectedFeatures,
             Line.PaintProperties      paint,
             Line.LayoutProperties     layout,
             double                    zoom,
             double                    extent,
             TileId                    id,
-            double2                   tileOriginMerc)
+            double2                   tileOriginMerc,
+            out int                   vertexCount,
+            out Bounds                bounds)
         {
-            var empty = new LayerMeshData();
+            vertexCount = 0;
+            bounds      = default;
 
             if (selectedFeatures == null || selectedFeatures.Count == 0)
-                return empty;
+                return;
 
             // S60: Join/Cap are already parsed enums on LayoutProperties (no per-build string switch).
             JoinType joinType = layout.Join;
@@ -208,55 +140,35 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (feature.GeometryType != MvtGeometryType.LineString)
                     continue;
 
-                // Bake per-feature vertex color from the data-driven paint expression.
-                // Color space: Core Color is sRGB [0,1]; convert to linear here (off-main-thread).
-                // _BaseColor=white on the material → identity multiply (D1 / fills convention).
+                // Bake per-feature vertex color from the data-driven paint expression (sRGB→linear here,
+                // off-main-thread). _BaseColor=white on the material → identity multiply.
                 Vector4 featureColor = WhiteColor;
                 var     adapter      = new MvtFeatureAdapter(feature);
-                // S60: Color is now StyleProperty<CoreColor>; use TryEvaluate bake path.
                 if (paint.Color.TryEvaluate(zoom, adapter, out CoreColor c))
                 {
-                    // sRGB→linear: use UnityEngine.Color.linear via cast.
                     var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
                     var linear     = unityColor.linear;
                     featureColor = new Vector4(linear.r, linear.g, linear.b, linear.a);
                 }
 
-                // S14 data-driven opacity: bake evaluated opacity into vertex alpha.
-                // Gate: only when OpacityKind depends on feature (Feature or Composite).
-                // For Constant/Zoom opacity, _Opacity uniform is already bound by BindLinePaintToApplier;
-                // baking here would double-apply it (shader multiplies vColor.a × _Opacity).
-                // S60: OpacityKind → paint.Opacity.DependsOnFeature; DataDrivenOpacity → Opacity.TryEvaluate.
+                // S14 data-driven opacity: bake evaluated opacity into vertex alpha, ONLY when opacity depends
+                // on the feature (else BindLinePaintToApplier already bound _Opacity and baking double-applies).
                 if (paint.Opacity.DependsOnFeature)
                 {
                     if (paint.Opacity.TryEvaluate(zoom, adapter, out float opacityVal))
-                    {
-                        // featureColor.w starts at 1.0 (from WhiteColor or color bake above).
-                        // Multiply by the evaluated opacity so the shader's (vColor.a × _Opacity=1)
-                        // produces the correct per-feature alpha.
                         featureColor.w *= opacityVal;
-                    }
                 }
 
-                // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width).
-                // Convention: when WidthKind depends on feature, _Width is set to 1.0 by
-                // BindLinePaintToApplier (base width = 1 px), so WidthScale = the full evaluated
-                // width in pixels. For Constant/Zoom width, WidthScale stays at v.WidthScale (tessellator
-                // default 1) and _Width uniform carries the width.
-                // WidthScale is per-vertex at loop time; store the per-feature scale and apply below.
+                // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
+                // width depends on the feature, _Width is set to 1.0 by BindLinePaintToApplier, so WidthScale
+                // carries the full evaluated pixel width; otherwise WidthScale stays the tessellator's factor.
                 float featureWidthScale = 1f;
-                // S60: WidthKind → paint.Width.DependsOnFeature; DataDrivenWidth → Width.TryEvaluate.
                 if (paint.Width.DependsOnFeature)
                 {
                     if (paint.Width.TryEvaluate(zoom, adapter, out float widthVal))
-                    {
-                        // widthVal is the evaluated width in pixels. Since _Width=1.0, WidthScale
-                        // = v.WidthScale (tessellator miter factor) × widthVal gives final width.
                         featureWidthScale = math.max(0f, widthVal);
-                    }
                 }
 
-                // Decode line rings from the MVT geometry.
                 List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
                 if (rings == null || rings.Count == 0) continue;
 
@@ -264,135 +176,116 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 {
                     if (ring == null || ring.Count < 2) continue;
 
-                    // Project tile-space coordinates to world-space meters.
-                    var worldPts = ProjectLineRing(ring, id.Z, id.X, id.Y, extent,
-                        tileOriginMerc.x, tileOriginMerc.y);
+                    var worldPts = ProjectLineRing(ring, id.Z, id.X, id.Y, extent, tileOriginMerc.x, tileOriginMerc.y);
                     if (worldPts == null || worldPts.Count < 2) continue;
 
-                    // Tessellate.
-                    LineTessellator.Result result = LineTessellator.Triangulate(
-                        worldPts, joinType, capType);
-                    if (result.Vertices == null || result.Vertices.Length == 0) continue;
-                    if (result.Indices  == null || result.Indices.Length  == 0) continue;
+                    // Burst line tessellation (Run() on this worker — see StyledFillTileBuilder for the choreography;
+                    // decode+projection stay managed and feed the double-precision job → strict parity with the
+                    // managed LineTessellator on the miter/butt path). Worst-case output sizing; actual counts in
+                    // vcArr/icArr. Per-ring native scratch is malloc/free churn (no GC).
+                    int n    = worldPts.Count;
+                    int capV = LineTessellationJob.MaxVertexCount(n, DefaultRoundSegments);
+                    int capI = LineTessellationJob.MaxIndexCount(n, DefaultRoundSegments);
 
-                    int offset = tempVerts0.Count;
-
-                    foreach (var v in result.Vertices)
+                    var inPts = new NativeArray<double2>(n, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    for (int k = 0; k < n; k++) inPts[k] = worldPts[k];
+                    var outV  = new NativeArray<LineVertex>(capV, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    var outI  = new NativeArray<int>(capI, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                    var vcArr = new NativeArray<int>(1, Allocator.Persistent);
+                    var icArr = new NativeArray<int>(1, Allocator.Persistent);
+                    try
                     {
-                        // Position: (east=+X, height=+Y=0, north=+Z).
-                        float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
-                        bMin = math.min(bMin, pos); // S55: centerline AABB accumulation
-                        bMax = math.max(bMax, pos); // S55: centerline AABB accumulation
-                        tempVerts0.Add(new LinePositionNormal
+                        new LineTessellationJob
                         {
-                            Position = new Vector3(pos.x, pos.y, pos.z),
-                            Normal   = UpNormal,
-                        });
-                        // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat
-                        // Mercator frame; a globe projection bakes non-zero Y and the shader consumes it as-is.
-                        tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
-                        tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
-                        tempVerts3.Add(new LineWidthColor
-                        {
-                            // S14 data-driven width: multiply tessellator's miter factor by the
-                            // feature-evaluated width. For non-data-driven width, featureWidthScale=1
-                            // so v.WidthScale passes through unchanged (miter/cap factors preserved).
-                            WidthScale = v.WidthScale * featureWidthScale,
-                            Color      = featureColor,
-                        });
-                    }
+                            InputPoints    = inPts,
+                            PointCount     = n,
+                            Join           = joinType,
+                            Cap            = capType,
+                            MiterLimit     = DefaultMiterLimit,
+                            RoundSegments  = DefaultRoundSegments,
+                            OutVertices    = outV,
+                            OutIndices     = outI,
+                            OutVertexCount = vcArr,
+                            OutIndexCount  = icArr,
+                        }.Run();
 
-                    foreach (int idx in result.Indices)
-                        tempIndices.Add(offset + idx);
+                        int nv = vcArr[0];
+                        int ni = icArr[0];
+                        if (nv == 0 || ni == 0) continue; // finally still disposes the scratch
+
+                        int offset = tempVerts0.Count;
+                        for (int k = 0; k < nv; k++)
+                        {
+                            LineVertex v = outV[k];
+                            float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
+                            bMin = math.min(bMin, pos);
+                            bMax = math.max(bMax, pos);
+                            tempVerts0.Add(new LinePositionNormal
+                            {
+                                Position = new Vector3(pos.x, pos.y, pos.z),
+                                Normal   = UpNormal,
+                            });
+                            // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat Mercator;
+                            // a globe projection bakes non-zero Y and the shader consumes it as-is.
+                            tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
+                            tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
+                            tempVerts3.Add(new LineWidthColor
+                            {
+                                WidthScale = v.WidthScale * featureWidthScale,
+                                Color      = featureColor,
+                            });
+                        }
+
+                        for (int k = 0; k < ni; k++)
+                            tempIndices.Add(offset + outI[k]);
+                    }
+                    finally
+                    {
+                        inPts.Dispose(); outV.Dispose(); outI.Dispose(); vcArr.Dispose(); icArr.Dispose();
+                    }
                 }
             }
 
             if (tempVerts0.Count == 0 || tempIndices.Count == 0)
-                return empty;
+                return; // no geometry — md left untouched; caller disposes the unused MeshData
 
-            // Phase 2: allocate NativeArray streams and copy managed data.
+            // Phase 2: declare the mesh buffers on the MeshData and grab stream views.
             int vCount = tempVerts0.Count;
             int iCount = tempIndices.Count;
 
-            var payload = new LayerMeshData
-            {
-                Stream0PositionNormal = new NativeArray<LinePositionNormal>(vCount, Allocator.Persistent),
-                Stream1ExtrudeN       = new NativeArray<Vector3>(vCount, Allocator.Persistent),
-                Stream2SideAndDist    = new NativeArray<Vector2>(vCount, Allocator.Persistent),
-                Stream3WidthColor     = new NativeArray<LineWidthColor>(vCount, Allocator.Persistent),
-                Indices               = new NativeArray<int>(iCount, Allocator.Persistent),
-                VertexCount           = vCount,
-                IndexCount            = iCount,
-                IsCreated             = true,
-                BoundsMin             = bMin, // S55: baked AABB
-                BoundsMax             = bMax, // S55: baked AABB
-            };
+            md.SetVertexBufferParams(vCount, LineVertexDescriptors);
+            NativeArray<LinePositionNormal> s0 = md.GetVertexData<LinePositionNormal>(0);
+            NativeArray<Vector3>            s1 = md.GetVertexData<Vector3>(1);
+            NativeArray<Vector2>            s2 = md.GetVertexData<Vector2>(2);
+            NativeArray<LineWidthColor>     s3 = md.GetVertexData<LineWidthColor>(3);
+            md.SetIndexBufferParams(iCount, IndexFormat.UInt32);
+            NativeArray<int> indices = md.GetIndexData<int>();
 
-            Interlocked.Increment(ref LayerMeshData.LiveAllocCount);
-
+            // Phase 3: copy temp streams into the MeshData views (worker thread).
             for (int i = 0; i < vCount; i++)
             {
-                payload.Stream0PositionNormal[i] = tempVerts0[i];
-                payload.Stream1ExtrudeN[i]       = tempVerts1[i];
-                payload.Stream2SideAndDist[i]    = tempVerts2[i];
-                payload.Stream3WidthColor[i]     = tempVerts3[i];
+                s0[i] = tempVerts0[i];
+                s1[i] = tempVerts1[i];
+                s2[i] = tempVerts2[i];
+                s3[i] = tempVerts3[i];
             }
-
             for (int i = 0; i < iCount; i++)
-                payload.Indices[i] = tempIndices[i];
+                indices[i] = tempIndices[i];
 
-            return payload;
-        }
+            md.subMeshCount = 1;
+            md.SetSubMesh(0, new SubMeshDescriptor(0, iCount, MeshTopology.Triangles), NoValidate);
 
-        /// <summary>
-        /// Main-thread half: upload a <see cref="LayerMeshData"/> payload to a new <see cref="Mesh"/>
-        /// using the advanced NativeArray API. Returns null when <see cref="LayerMeshData.IsCreated"/>
-        /// is false (no geometry).
-        ///
-        /// Does NOT dispose the payload — caller must dispose after this call.
-        /// </summary>
-        public static Mesh UploadMesh(LayerMeshData data)
-        {
-            if (!data.IsCreated || data.VertexCount == 0) return null;
-
-            var mesh = new Mesh
-            {
-                name        = "LineMesh_S14",
-                indexFormat = IndexFormat.UInt32,
-            };
-
-            mesh.SetVertexBufferParams(data.VertexCount, LineVertexDescriptors);
-            mesh.SetVertexBufferData(data.Stream0PositionNormal, 0, 0, data.VertexCount, stream: 0);
-            mesh.SetVertexBufferData(data.Stream1ExtrudeN, 0, 0, data.VertexCount, stream: 1);
-            mesh.SetVertexBufferData(data.Stream2SideAndDist, 0, 0, data.VertexCount, stream: 2);
-            mesh.SetVertexBufferData(data.Stream3WidthColor, 0, 0, data.VertexCount, stream: 3);
-
-            // Skip main-thread index validation (trusted Burst tessellation indices); see
-            // StyledFillTileBuilder.UploadMesh. DontRecalculateBounds just avoids a redundant intermediate
-            // compute — canonical bounds come from RecalculateBounds() below.
-            const MeshUpdateFlags NoValidate =
-                MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
-            mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
-            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
-
-            mesh.subMeshCount = 1;
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
-            // S55: tight AABB baked on the worker thread in BuildMeshData (centerline positions only;
-            // parity with old RecalculateBounds which also did not account for shader width extrusion).
-            float3 c3   = (data.BoundsMin + data.BoundsMax) * 0.5f;
-            float3 s3   = data.BoundsMax - data.BoundsMin;
-            mesh.bounds = new Bounds(
-                new Vector3(c3.x, c3.y, c3.z),
-                new Vector3(s3.x, s3.y, s3.z));
-
-            return mesh;
+            vertexCount = vCount;
+            float3 c3 = (bMin + bMax) * 0.5f;
+            float3 sz = bMax - bMin;
+            bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
         }
 
         // ── Private helpers ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// Project a line ring from tile-space double2 coordinates to world-space double2 (meters,
-        /// relative to the scene origin). Uses the same full Web Mercator projection as
+        /// Project a line ring from tile-space double2 coordinates to world-space double2 (meters, relative
+        /// to the scene origin). Uses the same full Web Mercator projection as
         /// StyledFillTileBuilder.ProjectVerticesManaged — identical precision contract.
         /// </summary>
         private static List<double2> ProjectLineRing(
@@ -411,11 +304,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 double px = pt.x;
                 double py = pt.y;
 
-                // Tile-space → normalised [0,1] map coordinates.
                 double u = (tileX + px / extent) / pow2z;
                 double v = (tileY + py / extent) / pow2z;
 
-                // Normalised → lon/lat (radians then degrees for WebMercator.Forward).
                 double longitudeRad = u * TwoPi - math.PI_DBL;
                 double arg          = math.PI_DBL * (1.0 - 2.0 * v);
                 double sinhArg      = (math.exp(arg)     - math.exp(-arg)) * 0.5;
@@ -424,17 +315,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 double latitudeDeg  = latitudeRad  * (180.0 / math.PI_DBL);
                 double longitudeDeg = longitudeRad * (180.0 / math.PI_DBL);
 
-                // Delegate to the shared math module (single source of Mercator literal, T2).
                 double3 world = WebMercator.Forward(new GeoCoordinate3D
                     { Longitude = longitudeDeg, Latitude = latitudeDeg, Altitude = 0.0 });
 
-                // Subtract scene origin in double (RTC precision), output double2 for LineTessellator.
                 result.Add(new double2(world.x - originX, world.z - originY));
             }
 
             return result;
         }
-
-        // S60: ParseJoinType/ParseCapType deleted — Join/Cap are now typed enums on LayoutProperties.
     }
 }

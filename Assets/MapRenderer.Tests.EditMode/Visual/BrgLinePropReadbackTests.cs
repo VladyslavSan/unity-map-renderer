@@ -1,6 +1,6 @@
 // S76 BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
 //
-// Directly constructs a BrgTileRenderer from a line-only StyledLayerSet (no MapView) and asserts that:
+// Directly constructs a BrgTileRenderer from a line-only RenderLayerSet (no MapView) and asserts that:
 //   1. FloatsPerInstance == 76 and MetadataEntryCount == 33 (exact plan-count tooth).
 //   2. _Width packed value == mat.GetFloat(_Width id) == 40 (non-NaN, the direct pack proof).
 //   3. _AaEdgeWidth packed == mat.GetFloat(_AaEdgeWidth id) AND > 0 (AA tooth: must never be 0).
@@ -33,7 +33,7 @@ namespace MapRenderer.Tests.Visual
     public class BrgLinePropReadbackTests
     {
         // Line-only style: one line layer with line-width=40 (literal, so the styler evaluates it as 40
-        // at any zoom). This sets _Width=40 on the material after StyledLayerSet.Build.
+        // at any zoom). This sets _Width=40 on the material after RenderLayerSet.Build.
         private const string LineStyleJson = @"{
     ""version"": 8,
     ""name"": ""LinePropReadbackTest"",
@@ -54,16 +54,16 @@ namespace MapRenderer.Tests.Visual
         public void BrgLinePropReadback_PackedValuesMatchMaterial()
         {
             var style  = StyleParser.Parse(LineStyleJson);
-            var set    = new StyledLayerSet();
+            var set    = new RenderLayerSet();
             set.Build(style, 0.0, MapMaterialSetTestUtil.Load());
 
-            // For a line-only style: FillCount=0, LineCount=1
-            // BrgTileRenderer registers: fills first (none), then lines → _layerMaterials[0] = lines[0]
-            Assert.That(set.FillCount, Is.EqualTo(0), "Line-only style must have 0 fills.");
-            Assert.That(set.LineCount, Is.EqualTo(1), "Line-only style must have exactly 1 line layer.");
+            // Line-only style: one render layer (a line) → _layerMaterials[0] = layer[0].
+            Assert.That(set.Count, Is.EqualTo(1), "Line-only style must have exactly 1 render layer.");
+            Assert.IsInstanceOf<MapRenderer.Core.Style.Line.StyleLayer>(set[0].StyleLayer,
+                "The single render layer must be a line.");
 
-            Material mat = set.Lines[0].Material;
-            Assert.IsNotNull(mat, "Line material must be non-null after StyledLayerSet.Build.");
+            Material mat = set[0].Material;
+            Assert.IsNotNull(mat, "Line material must be non-null after RenderLayerSet.Build.");
 
             // Pre-check: styler must have applied line-width=40 to the material.
             int widthId       = ShaderProperties.Line.PropertyId.Width;
@@ -75,13 +75,13 @@ namespace MapRenderer.Tests.Visual
             float matOpacity    = mat.HasProperty(opacityId)    ? mat.GetFloat(opacityId)    : float.NaN;
 
             Assert.That(matWidth, Is.EqualTo(40f).Within(1e-3f),
-                "Pre-check: mat._Width must be 40 after StyledLayerSet.Build with line-width:40. " +
+                "Pre-check: mat._Width must be 40 after RenderLayerSet.Build with line-width:40. " +
                 "If NaN, the Line shader does not declare _Width in Properties{}.");
             Assert.That(matAaEdgeWidth, Is.GreaterThan(0f),
                 "Pre-check: mat._AaEdgeWidth must be > 0 (shader default 1.0). " +
                 "If NaN/0, the Line shader does not declare _AaEdgeWidth in Properties{}.");
 
-            var brg  = new BrgTileRenderer(set);
+            var brg  = new BrgTileRenderer(new[] { set[0].Material });
             var mesh = new Mesh();
 
             try

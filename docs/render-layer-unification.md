@@ -1,6 +1,79 @@
 # Render-layer unification + Burst tessellation — design
 
-Status: **DRAFT for review** (no code moved yet). Author: cleanup epic, 2026-07-01.
+Status: **IN PROGRESS** (hand-driven). Author: cleanup epic, 2026-07-01.
+
+## Progress log
+- **Stage A — DONE (`92e2e0b`, 2026-07-01).** `IRenderLayer`/`RenderLayerSet` + `RenderLayerFactory`;
+  fill/line unified into one ordered `List<IRenderLayer>` (index == draw order == material index);
+  `TessellationResult` two lanes → one `IRenderLayerTessellation[]` (reference-type handle so `Dispose`
+  mutates the NativeArray struct in place); all 3 backends index the one declared-order material list;
+  `FillCount+li` flatten + "fills first" comments gone. Pure indirection over the UNCHANGED managed
+  builders — behaviour-preserving (906 EditMode green). Decision-5c sparse fill KEPT (dies in C). New
+  `RenderLayerSetTests` locks: one ordered list, fill/line interleaved not type-bucketed, monotonic queue,
+  non-renderable background takes no slot, factory is sole dispatch.
+- **Stage B — DONE (2026-07-01, 907 EditMode green).** `Mesh.MeshData` replaced the bespoke `LayerMeshData`
+  + `UploadMesh`/`BuildMesh` + the `SetVertexBufferData` copy. `WriteMeshData` tessellates straight into a
+  caller-allocated writable `MeshData` off the worker; one shared `MeshDataTessellation` handle (a
+  count-1 `MeshDataArray`) replaced Stage A's per-type handles. TileManager allocates per this-source layer
+  at kick, worker writes, consume `ApplyAndDisposeWritableMeshData` per-layer (S87 budget); fault-safe
+  wrapping disposes every array. Leak guard → `MeshDataTessellation.DebugLiveAllocCount`. Perf-parity flags
+  (`DontValidateIndices|DontRecalculateBounds` + worker AABB) preserved. Coupled tests reworked onto the new
+  API (SyntheticLineMesh, MapViewAsyncTessellation, S51/S55 leak guards, LinePaintS14 bake, FillSceneHelper,
+  MapViewLiveLoop) + shared `TestTileMeshBuilder`.
+- **Stage D1 (line kernel) — DONE (2026-07-02, 915 EditMode green).** `LineTessellationJob` rewritten from
+  a 2-point `float3` smoke stub into a faithful `[BurstCompile]` transliteration of the managed
+  `LineTessellator.Triangulate` (all join types — miter/bevel/round; all caps — butt/square/round; dedup,
+  miter→bevel fallback, worst-case `MaxVertexCount`/`MaxIndexCount` sizing). Emits `NativeArray<LineVertex>`
+  (double-precision) so it is **bit-comparable** to the oracle. `LineTessellationJobTests` reworked into the
+  differential oracle: **strict bit-exact** parity on the arithmetic-only paths (miter/bevel + butt/square +
+  the fixture `geolines` layer — only +,−,*,/,sqrt, IEEE-exact between Burst and Mono) and **tight-tolerance
+  (1e-9)** parity on the transcendental round join/cap (atan2/cos/sin may differ a ULP; triangle topology
+  still exact). Isolated/test-only — touches NO live code. **Fill kernels** (`MvtDecodeJob`/`RingAssemblyJob`/
+  `EarcutJob`/`ProjectTileToWebMercatorJob` via `TileTessellationPipeline`) were already oracle-validated
+  strict by `JobifiedPipelineTests` — so the geometry-Burst port (D1) is now complete. Remaining: **C** (per-
+  `(tile,layer)` produce) + **D2** (wire the D1 jobs into the live lifecycle; `UniTask→JobHandle` + drain pen).
+- **Stage C (dense per-source produce) — DONE (2026-07-02, 915 EditMode green).** Killed the S83b
+  decision-5c full-width sparse union. `TessellationResult.Payloads` is now **dense per-`(tile, source)`**
+  (one slot per this-source layer in draw order, no null other-source slots); each payload
+  (`MeshDataTessellation`) **carries its own `MaterialIndex`**. Consume uses `payload.MaterialIndex`
+  (not `cursor == materialIndex`) with a restyle-shrink guard (`(uint)materialIndex >= _layers.Count` →
+  free, no backend throw); `ConsumeCursor` is now a dense resume index. Kick allocates/produces only dense
+  slots. Behaviour-preserving (Visual snapshots unchanged). Acceptance tooth #2 (“no decision-5c sparse
+  union anywhere”) met.
+- **Stage D2 (fills → live Burst geometry) — DONE (2026-07-02, 917 EditMode green).** The live fill path now
+  tessellates via **Burst geometry in the running pipeline** (the jobs were test-only before). Key
+  reconception (vs the doc's async-JobHandle D2): the GC win is entirely in **Phase-1 geometry**
+  (decode/assemble/earcut/project → `List`/array garbage); the managed stream-write is already alloc-free.
+  So run the existing Burst kernels **synchronously on the current `UniTask` worker via `.Run()`** — no
+  lifecycle rewire (kick/consume/S48/S84/S87 unchanged). Spike-proven off-main
+  (`BurstJobRunOffMainSpikeTests`: `ProjectJob.Run()` + `EarcutJob.Run()` correct on a `RunOnThreadPool`
+  worker; kernels use caller-provided Persistent scratch, no internal `Allocator.Temp`). `TileTessellationPipeline`
+  switched `.Schedule()→.Run()` (output bit-identical, `JobifiedPipelineTests` still holds) + emits a
+  per-vertex `VertexFeatureIdx` so the stream-write assigns per-feature color. `StyledFillTileBuilder`
+  Phase-1 (managed `MvtGeometry.Decode`/`PolygonAssembler`/`Earcut`/`ProjectVerticesManaged` + `FeatureMeshData`)
+  deleted → drives the pipeline; managed tessellation garbage gone. Lines still managed (next slice).
+- **Stage D2 (lines → live Burst tessellation) — DONE (2026-07-02, 918 EditMode green).** Same
+  `.Run()`-on-worker pattern: `StyledLineTileBuilder` swaps the per-ring managed `LineTessellator.Triangulate`
+  for the D1 `LineTessellationJob.Run()` (now USED in the live path). Decode + `ProjectLineRing` stay managed
+  (double2 feeds the double-precision job → strict parity on the miter/butt path; round join/cap within
+  snapshot tolerance). Guarded by an added `BurstJobRunOffMainSpikeTests` case — `LineTessellationJob` uses
+  `Allocator.Temp` INTERNALLY (unlike the fill kernels' caller scratch), proven safe off a `RunOnThreadPool`
+  worker. **S89 complete: managed Core geometry (`Earcut`/`PolygonAssembler`/`LineTessellator`) is retired
+  from the live production path — differential oracle only.** (Line decode+projection remain managed — a
+  later throughput follow-up, not a correctness gap.)
+- **Stage B (historical note) —** `Mesh.MeshData` replaces the bespoke `LayerMeshData` + hand-rolled 4-stream
+  consume. **Spike-verified threading rules (`MeshDataThreadWriteSpikeTests`):**
+  `SetVertexBufferParams`/`GetVertexData`/`SetIndexBufferParams`/`GetIndexData`/`SetSubMesh` **DO** run on a
+  raw `UniTask.RunOnThreadPool` worker (a known vertex round-trips through `ApplyAndDisposeWritableMeshData`);
+  `AllocateWritableMeshData` and `ApplyAndDisposeWritableMeshData` are **main-thread only**
+  ("CreateNewMeshDatas can only be called from the main thread"). **Choreography (locked):** allocate one
+  `MeshDataArray(1)` per this-source layer at KICK (main); write on the WORKER; `ApplyAndDispose` per-layer
+  at CONSUME (main), budget-gated (S87 — per-`(tile,layer)` array so a rich tile still spreads across
+  frames). Per-layer allocation → the two Stage-A payload handles collapse into ONE `MeshDataTessellation`
+  (post-write the handle is layer-type-agnostic). Leak guard retargeted to a MeshDataArray alloc/dispose
+  counter (unapplied arrays are native leaks Unity tracks); holding-pen + teardown dispose every unapplied
+  array. Perf-parity flags preserved (`DontValidateIndices|DontRecalculateBounds` + worker-computed bounds).
+- Stages C, D1, D2 — pending (see §4).
 
 This is the "make it right" plan for the styled-layer / tessellation pipeline. It replaces the
 fills-vs-lines split (which drifted away from `ARCHITECTURE.md`'s "ordered list of layers") with a

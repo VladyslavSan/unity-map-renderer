@@ -216,7 +216,7 @@ namespace MapRenderer.Jobs
                     OutRingFeatureIndex = ringFeatIdx,
                     OutRingCount        = ringCountArr,
                     OutVertexCount      = vertCountArr,
-                }.Schedule().Complete();
+                }.Run(); // Run (not Schedule) so the pipeline is callable off the main thread (S89 D2 worker path)
             }
 
             commands.Dispose();
@@ -256,7 +256,7 @@ namespace MapRenderer.Jobs
                     OutHoleRingIdxs      = holeRingIdxs,
                     OutPolygonCount      = polyCountArr,
                     OutHoleCount         = holeCountArr,
-                }.Schedule().Complete();
+                }.Run();
             }
 
             int polyCount    = polyCountArr[0];
@@ -292,10 +292,12 @@ namespace MapRenderer.Jobs
             var scratchIsEar         = new NativeArray<bool>[polyCount];
             var perPolyIdxArrays     = new NativeArray<int>[polyCount];
             int[] perPolyMergedVC    = new int[polyCount];
+            int[] perPolyFeatureIdx  = new int[polyCount]; // S89 D2: feature index of each polygon (for per-vertex color)
 
             for (int pi = 0; pi < polyCount; pi++)
             {
                 int outerRi    = polyOuterIdx[pi];
+                perPolyFeatureIdx[pi] = ringFeatIdx[outerRi]; // captured before ringFeatIdx is disposed post-earcut
                 int outerStart = ringOffsets[outerRi];
                 int outerLen   = ringOffsets[outerRi + 1] - outerStart;
                 int holeCount  = polyHoleCount[pi];
@@ -362,15 +364,15 @@ namespace MapRenderer.Jobs
                 scratchIsEar[pi]     = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
 
-            // Schedule all earcut jobs (parallel across polygons).
+            // Run all earcut jobs sequentially (each polygon is independent — Run, not Schedule, so the
+            // pipeline is callable off the main thread; per-polygon parallelism is a later throughput knob).
             {
                 using var sPipelineEarcut = PmPipelineEarcut.Auto();
-                var earcutHandles = new NativeArray<JobHandle>(polyCount, Allocator.Temp);
                 for (int pi = 0; pi < polyCount; pi++)
                 {
                     int outerLen  = ringOffsets[polyOuterIdx[pi] + 1] - ringOffsets[polyOuterIdx[pi]];
                     int holeCount = polyHoleCount[pi];
-                    earcutHandles[pi] = new EarcutJob
+                    new EarcutJob
                     {
                         PolyVertices      = perPolyVerts[pi],
                         OuterCount        = outerLen,
@@ -387,10 +389,8 @@ namespace MapRenderer.Jobs
                         IsBridgeCopy      = scratchIsBridge[pi],
                         Removed           = scratchRemoved[pi],
                         IsEar             = scratchIsEar[pi],
-                    }.Schedule();
+                    }.Run();
                 }
-                JobHandle.CompleteAll(earcutHandles);
-                earcutHandles.Dispose();
             }
 
             // No longer need ring/assembly data.
@@ -414,6 +414,8 @@ namespace MapRenderer.Jobs
 
             var outMergedVerts = new NativeArray<double2>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var outWorldPos    = new NativeArray<float3>(totalMergedVerts,  Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var outVertexFeat  = new NativeArray<int>(totalMergedVerts > 0 ? totalMergedVerts : 1,
+                                                      Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var outIndices     = new NativeArray<int>(totalIdxCount > 0 ? totalIdxCount : 1,
                                                       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
@@ -423,9 +425,13 @@ namespace MapRenderer.Jobs
             {
                 int mergedVC = perPolyMergedVC[pi];
                 int idxCount = perPolyIdxCount[pi][0];
+                int featIdx  = perPolyFeatureIdx[pi];
 
                 for (int i = 0; i < mergedVC; i++)
+                {
                     outMergedVerts[globalVertBase + i] = new double2(scratchVx[pi][i], scratchVy[pi][i]);
+                    outVertexFeat[globalVertBase + i]  = featIdx; // S89 D2: per-vertex feature index for color
+                }
 
                 for (int i = 0; i < idxCount; i++)
                     outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
@@ -460,7 +466,7 @@ namespace MapRenderer.Jobs
                     OriginMercY    = input.OriginMercY,
                     TileCoords     = outMergedVerts,
                     WorldPositions = outWorldPos,
-                }.Schedule(totalMergedVerts, 64).Complete();
+                }.Run(totalMergedVerts);
             }
 
             // ── Build output TileMeshBuffers. ─────────────────────────────────────────────────────
@@ -477,6 +483,7 @@ namespace MapRenderer.Jobs
             {
                 TileVertices        = outMergedVerts,
                 WorldPositions      = outWorldPos,
+                VertexFeatureIdx    = outVertexFeat,
                 TriangleIndices     = outIndices,
                 VertexCount         = vertCountFinal,
                 PolygonCount        = polyCountFinal,

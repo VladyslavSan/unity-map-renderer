@@ -168,7 +168,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// <summary>
         /// Evaluates the line-dasharray expression at <paramref name="zoom"/> and sets
         /// <c>_DashArray</c>/<c>_DashCount</c> on the material. Called at bind time and — only for a
-        /// zoom-dependent dasharray (see <see cref="StyledLayerSet"/>) — per frame. When absent or
+        /// zoom-dependent dasharray (see <see cref="RenderLayerSet"/>) — per frame. When absent or
         /// degenerate, sets _DashCount=0 (solid identity — no change to rendering path).
         ///
         /// S60: uses the new alloc-free <see cref="Line.LineDash.TryEvaluatePattern"/> that returns

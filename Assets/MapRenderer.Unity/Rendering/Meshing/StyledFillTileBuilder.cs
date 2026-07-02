@@ -1,7 +1,5 @@
-using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
-using System.Threading;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
@@ -12,32 +10,25 @@ using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
-using CoreColor = MapRenderer.Core.Expressions.Color;
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// S40 managed per-layer fill mesh builder. Extracted from the S02-era MapFillBootstrap.BuildMesh
-    /// (retired in S54) and generalized to receive real <see cref="TileId"/> + origin, a set of
+    /// S40 managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
     /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
-    /// Pipeline per feature:
-    ///   MvtGeometry.Decode → PolygonAssembler.Assemble → Earcut.Triangulate
-    ///   → ProjectVerticesManaged (pure C#, off-main-thread safe) → stream assembly → NativeArray upload.
+    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>TileTessellationPipeline</c>
+    ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
+    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core geometry
+    ///   (<c>Earcut</c>/<c>PolygonAssembler</c>) is retired from this path (differential oracle only).
     ///
-    /// S47 async split:
-    ///   <see cref="BuildMeshData"/> runs the full decode/assemble/earcut/project loop off the main
-    ///   thread, returning a <see cref="LayerMeshData"/> payload (IDisposable, holds NativeArrays).
-    ///   <see cref="UploadMesh"/> uploads a <see cref="LayerMeshData"/> to a <see cref="Mesh"/> on the
-    ///   main thread using the advanced NativeArray API. <see cref="BuildMesh"/> is the sync convenience:
-    ///   BuildMeshData → UploadMesh → Dispose.
-    ///
-    /// S48 advanced Mesh API:
-    ///   <see cref="LayerMeshData"/> now holds <see cref="NativeArray{T}"/> streams (Allocator.Persistent).
-    ///   The sRGB→linear color conversion runs off the main thread inside <see cref="BuildMeshData"/>,
-    ///   preserving the S13 D2 gamma fix. <see cref="UploadMesh"/> is upload-only, read-only, and does
-    ///   NOT call SetVertices/SetColors/SetTriangles. The caller is responsible for disposing after upload.
+    /// S89 Stage B — <see cref="WriteMeshData"/> tessellates AND writes directly into a caller-allocated
+    /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread. The bespoke
+    /// NativeArray-stream payload + main-thread <c>SetVertexBufferData</c> copy is gone: the worker populates
+    /// the mesh buffers in place, and the main thread only allocates (at kick) and applies (at consume). The
+    /// off-thread-write threading contract is guarded by <c>MeshDataThreadWriteSpikeTests</c>.
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3) interleaved via <see cref="FillPositionNormal"/>.
@@ -46,34 +37,34 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
     ///
-    /// Color (D2): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted
-    /// to linear via <c>Color.linear</c> off the main thread (S48). <c>_BaseColor=white</c> on the Material
-    /// (identity multiply). Never set <c>_BaseColor</c> to the style color — that would double-apply gamma.
+    /// Color (D2): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted to linear via
+    /// <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material (identity multiply).
+    /// Never set <c>_BaseColor</c> to the style color — that would double-apply gamma.
     ///
-    /// Thread-safety: <see cref="BuildMeshData"/> touches only pure-managed, stateless Core code
-    /// (MvtGeometry.Decode, PolygonAssembler.Assemble, Earcut.Triangulate, StyleProperty,
-    /// MvtFeatureAdapter). All are allocation-local with no shared mutable static state. Safe to run
-    /// concurrently on multiple ThreadPool threads (one per tile).
+    /// Thread-safety: <see cref="WriteMeshData"/> touches only pure-managed, stateless Core code plus a
+    /// caller-allocated <c>Mesh.MeshData</c> (whose <c>SetVertexBufferParams</c>/<c>GetVertexData</c>/… are
+    /// off-main-thread safe). No shared mutable static state — safe to run concurrently per tile.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
     public static class StyledFillTileBuilder
     {
-        // MapRenderer.Tile.Tessellate — wraps the decode/assemble/earcut/project loop per BuildMesh call.
-        // S46 acceptance: proved-wired target for the profiler recorder test (tooth 1b).
-        // S47/S51: this marker now fires on a background ThreadPool thread when called from BuildMeshData
-        // inside UniTask.Run. The ProfilerMarkerTests [UnityTest] (tooth 1b) uses
-        // ProfilerRecorderOptions.Default (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
+        // MapRenderer.Tile.Tessellate — wraps the decode/assemble/earcut/project/write loop. Fires on a
+        // background ThreadPool thread (S47/S51); ProfilerMarkerTests tooth-1b uses ProfilerRecorderOptions.Default
+        // (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
         private static readonly ProfilerMarker PmTessellate =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Tessellate");
 
-        // Hoisted fill vertex attribute descriptor array — constructed once (static readonly) so
-        // UploadMesh does not allocate per-tile on the main thread (S48 no-per-tile-GC contract).
-        // Layout: 4 streams (Unity max). Stream 0 = Position+Normal interleaved. Stream 1 = UV.
-        // Stream 2 = Tangent. Stream 3 = Color. See class XML doc.
-        // Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Tangent=2, Color=3,
-        // TexCoord0=4) eliminates the Unity "non-standard order" warning. Each attribute is on its
-        // own stream so the reorder does not change any stream's byte offset.
+        // Skip Unity's main-thread index validation (O(indices)) + the redundant intermediate bounds compute:
+        // indices come from earcut and are covered by tests, and the canonical bounds are the worker-computed
+        // AABB assigned to Mesh.bounds after apply. Preserves the S48/S55 no-main-thread-scan contract.
+        private const MeshUpdateFlags NoValidate =
+            MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
+
+        // Hoisted fill vertex attribute descriptor array (static readonly — no per-tile alloc). 4 streams
+        // (Unity max). Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Tangent=2,
+        // Color=3, TexCoord0=4) eliminates the "non-standard order" warning; each attribute on its own stream
+        // so the reorder does not change any stream's byte offset.
         private static readonly VertexAttributeDescriptor[] FillVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
@@ -86,8 +77,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // Constant tangent: +X direction, +1 bitangent sign (right-handed), valid for flat +Y-normal fill.
         private static readonly Vector4 FlatTangent = new Vector4(1f, 0f, 0f, 1f);
 
-        // ── Intermediate data payload (holds NativeArrays — must be Disposed) ───────────────────
-
         /// <summary>
         /// Tightly-packed Position + Normal struct for stream 0.
         /// Stride = 6 × 4 = 24 bytes, matching the descriptor (Position float3 + Normal float3).
@@ -99,438 +88,125 @@ namespace MapRenderer.Unity.Rendering.Meshing
             public Vector3 Normal;
         }
 
-        /// <summary>
-        /// Per-feature vertex payload produced by <see cref="BuildMeshData"/> (LEGACY — kept for
-        /// compatibility with existing tests that inspect the managed intermediate. Tests that call
-        /// BuildMeshData directly should use <see cref="LayerMeshData.IsCreated"/> and
-        /// <see cref="LayerMeshData.VertexCount"/> instead of <c>data.Features</c>).
-        /// No UnityEngine types — safe to allocate and pass across threads.
-        /// </summary>
-        public struct FeatureMeshData
-        {
-            /// <summary>Origin-relative world-space positions (east=+X, height=+Y, north=+Z).</summary>
-            public float3[] Verts;
-
-            /// <summary>Earcut triangle indices (into Verts).</summary>
-            public int[] Indices;
-
-            /// <summary>Pre-projection tile-space double2 coordinates (for UV generation).</summary>
-            public double2[] TileVerts;
-
-            /// <summary>Tile extent in tile units (from MVT layer, typically 4096).</summary>
-            public double Extent;
-
-            /// <summary>Per-feature sRGB vertex color (linearized in LayerMeshData stream assembly).</summary>
-            public Color FeatureColor;
-        }
-
-        /// <summary>
-        /// S48: CPU-computed mesh data for one style layer, held as NativeArray streams.
-        /// Produced by <see cref="BuildMeshData"/> off the main thread; uploaded by
-        /// <see cref="UploadMesh"/> on the main thread via the advanced NativeArray Mesh API.
-        ///
-        /// OWNERSHIP: the caller of <see cref="BuildMeshData"/> owns this payload and MUST call
-        /// <see cref="Dispose"/> on EVERY exit path (consume OR discard). <see cref="UploadMesh"/>
-        /// copies data into the Mesh (via SetVertexBufferData) and does NOT dispose — dispose after
-        /// upload. <see cref="BuildMesh"/> is the sync convenience and disposes automatically.
-        ///
-        /// When no geometry was produced, <see cref="IsCreated"/> is false and Dispose() is a no-op.
-        ///
-        /// Alloc counting (S48 leak guard): <see cref="DebugLiveAllocCount"/> is a static counter
-        /// incremented on allocation and decremented on Dispose. Tests assert the net is zero after
-        /// a full load+release cycle. Interlocked for thread-safety (BuildMeshData runs concurrently).
-        ///
-        /// Also carries <see cref="Features"/> (managed list) for backwards-compatible test assertions
-        /// that inspect the intermediate data; do NOT use Features in the live upload path.
-        /// </summary>
-        public struct LayerMeshData : IDisposable
-        {
-            // ── Stream 0: Position + Normal interleaved ──────────────────────────────────────────
-            public NativeArray<FillPositionNormal> Stream0PositionNormal;
-
-            // ── Stream 1: TexCoord0 (UV) ─────────────────────────────────────────────────────────
-            public NativeArray<Vector2> Stream1Uv;
-
-            // ── Stream 2: Tangent ────────────────────────────────────────────────────────────────
-            public NativeArray<Vector4> Stream2Tangent;
-
-            // ── Stream 3: Color (linearized sRGB, Float32x4) ─────────────────────────────────────
-            public NativeArray<Vector4> Stream3Color;
-
-            // ── Index buffer ──────────────────────────────────────────────────────────────────────
-            public NativeArray<int> Indices;
-
-            /// <summary>Vertex count. Zero when no geometry was produced.</summary>
-            public int VertexCount;
-
-            /// <summary>Index count. Zero when no geometry was produced.</summary>
-            public int IndexCount;
-
-            /// <summary>
-            /// True when the NativeArray streams are allocated and valid.
-            /// False for default/empty payloads (no geometry produced).
-            /// </summary>
-            public bool IsCreated;
-
-            /// <summary>S55: tight AABB of all fill vertex positions, accumulated during
-            /// <see cref="StyledFillTileBuilder.BuildMeshData"/> (worker thread). Valid only when
-            /// <see cref="IsCreated"/> is true. Used by <see cref="StyledFillTileBuilder.UploadMesh"/> to
-            /// assign <see cref="Mesh.bounds"/> directly, replacing the main-thread RecalculateBounds() scan.</summary>
-            public float3 BoundsMin;
-            /// <inheritdoc cref="BoundsMin"/>
-            public float3 BoundsMax;
-
-            /// <summary>
-            /// LEGACY compatibility: per-feature managed intermediate data. Still populated by
-            /// <see cref="BuildMeshData"/> so existing tests can inspect it. Empty when <see cref="IsCreated"/>
-            /// is false. Do NOT use in the live NativeArray upload path.
-            /// </summary>
-            public List<FeatureMeshData> Features;
-
-            /// <summary>
-            /// S48 leak-guard counter: net live NativeArray allocations.
-            /// Incremented (Interlocked) when streams are allocated in <see cref="BuildMeshData"/>;
-            /// decremented in <see cref="Dispose"/>. Tests assert this is zero after a full cycle.
-            /// Positive value means produced-but-not-Disposed payloads exist (leak detected).
-            /// </summary>
-            internal static long LiveAllocCount;
-
-            /// <summary>
-            /// Test accessor for <see cref="LiveAllocCount"/>.
-            /// Non-zero means there are live (unDisposed) NativeArray-backed LayerMeshData payloads.
-            /// </summary>
-            public static long DebugLiveAllocCount => Interlocked.Read(ref LiveAllocCount);
-
-            /// <summary>
-            /// Disposes all NativeArray streams. Idempotent (guarded by <see cref="IsCreated"/>).
-            /// Call on EVERY exit path after upload or on discard. Must be called on any thread;
-            /// NativeArray.Dispose() is thread-safe for Persistent allocator arrays.
-            /// </summary>
-            public void Dispose()
-            {
-                if (!IsCreated) return;
-                IsCreated = false;
-                if (Stream0PositionNormal.IsCreated) Stream0PositionNormal.Dispose();
-                if (Stream1Uv.IsCreated) Stream1Uv.Dispose();
-                if (Stream2Tangent.IsCreated) Stream2Tangent.Dispose();
-                if (Stream3Color.IsCreated) Stream3Color.Dispose();
-                if (Indices.IsCreated) Indices.Dispose();
-                Interlocked.Decrement(ref LiveAllocCount);
-            }
-        }
-
         // ── Public API ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// CPU-only half: decode/assemble/earcut/project all features for one style layer, producing
-        /// a <see cref="LayerMeshData"/> payload backed by <see cref="NativeArray{T}"/> streams
-        /// (Allocator.Persistent). The sRGB→linear color conversion runs here (off the main thread).
+        /// Tessellate all fill features for one style layer and write the geometry directly into
+        /// <paramref name="md"/> (a caller-allocated <c>Mesh.MeshData</c>, count-1 slot). Runs the full
+        /// decode/assemble/earcut/project loop plus the sRGB→linear color conversion off the main thread.
         ///
-        /// Safe to call from a ThreadPool thread (e.g. inside UniTask.Run):
-        /// all code paths use only pure-managed, stateless Core logic until the final NativeArray
-        /// allocation step. <c>NativeArray(Allocator.Persistent)</c> is thread-safe off-main.
-        ///
-        /// When no polygon geometry is produced, returns a default <see cref="LayerMeshData"/> with
-        /// <see cref="LayerMeshData.IsCreated"/> == false and no NativeArray allocation (no Dispose needed).
-        ///
-        /// The <see cref="PmTessellate"/> profiler marker wraps this call. In the async path (S47),
-        /// this fires on a background thread — the ProfilerMarkerTests tooth-1b recorder must use
-        /// <see cref="ProfilerRecorderOptions.Default"/> (not CollectOnlyOnCurrentThread).
+        /// <para>Returns <paramref name="vertexCount"/> = 0 (and leaves <paramref name="md"/> untouched) when
+        /// no polygon geometry is produced — the caller then disposes the unused writable-mesh-data without
+        /// creating a Mesh. On success, <paramref name="bounds"/> carries the worker-computed tight AABB
+        /// (assigned to <c>Mesh.bounds</c> after apply, avoiding a main-thread RecalculateBounds scan).</para>
         /// </summary>
-        public static LayerMeshData BuildMeshData(
+        public static void WriteMeshData(
+            Mesh.MeshData             md,
             IReadOnlyList<MvtFeature> selectedFeatures,
             Fill.PaintProperties      paint,
             double                    zoom,
             double                    extent,
             TileId                    id,
-            double2                   tileOriginMerc)
+            double2                   tileOriginMerc,
+            out int                   vertexCount,
+            out Bounds                bounds)
         {
-            // Empty result (IsCreated = false, no NativeArray) for early-out and error cases.
-            var empty = new LayerMeshData { Features = new List<FeatureMeshData>() };
+            vertexCount = 0;
+            bounds      = default;
 
             if (selectedFeatures == null || selectedFeatures.Count == 0)
-                return empty;
+                return;
 
-            double originX = tileOriginMerc.x;
-            double originY = tileOriginMerc.y;
-
-            // MapRenderer.Tile.Tessellate — wraps the full decode/assemble/earcut/project loop.
-            // S46 acceptance: proves-wired marker for profiler recorder test (tooth 1b).
-            // S47/S51: fires on a background thread when called inside UniTask.Run from MapView.
             using var sTessellate = PmTessellate.Auto();
 
-            // Phase 1: Run the full decode/assemble/earcut/project loop into temporary managed lists.
-            // NativeArray allocation happens AFTER this loop (once counts are known), so a mid-loop
-            // exception never leaves half-allocated NativeArrays behind.
-            var tempFeatures = new List<FeatureMeshData>(selectedFeatures.Count);
-
-            int totalVerts   = 0;
-            int totalIndices = 0;
-
+            // Phase 1 (Burst): collect this layer's polygon features + their per-feature linear color, then
+            // run the Burst decode→assemble→earcut→project chain via TileTessellationPipeline (Run(), so it
+            // works on this worker thread). The managed List<>/array tessellation garbage is gone — geometry
+            // lives in NativeArrays. Color stays managed (paint.Color is an expression over string keys).
+            var geoms         = new List<uint[]>(selectedFeatures.Count);
+            var featureColors = new List<Vector4>(selectedFeatures.Count); // linearized sRGB, parallel to geoms
             foreach (var feature in selectedFeatures)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon)
+                if (feature.GeometryType != MvtGeometryType.Polygon || feature.Geometry == null)
                     continue;
 
-                // Bake per-feature vertex color from the data-driven paint expression.
-                // Color space (D2): Core Color is sRGB [0,1]; converted to linear below (S48).
-                // _BaseColor=white on material → identity multiply → no double-gamma.
                 Color featureColor = Color.white;
                 var   adapter      = new MvtFeatureAdapter(feature);
-
-
                 if (paint.Color.TryEvaluate(zoom, adapter, out var color))
                     featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
-                // Decode rings, assemble polygons, earcut, project.
-                List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
-                if (rings == null || rings.Count == 0) continue;
-
-                List<Polygon> polygons = PolygonAssembler.Assemble(rings);
-
-                foreach (var polygon in polygons)
-                {
-                    Earcut.Result earcutResult = Earcut.Triangulate(polygon.Outer, polygon.Holes);
-                    if (earcutResult.Indices == null || earcutResult.Indices.Length == 0) continue;
-
-                    double2[] flatVerts  = earcutResult.Vertices;
-                    int[]     triIndices = earcutResult.Indices;
-
-                    // Project via pure managed math (off-main-thread safe; no NativeArray).
-                    // Formula mirrors ProjectTileToWebMercatorJob.Execute (same precision contract).
-                    float3[] worldPos = ProjectVerticesManaged(flatVerts, id.Z, id.X, id.Y, extent,
-                        originX, originY);
-
-                    tempFeatures.Add(new FeatureMeshData
-                    {
-                        Verts        = worldPos,
-                        Indices      = triIndices,
-                        TileVerts    = flatVerts,
-                        Extent       = extent,
-                        FeatureColor = featureColor,
-                    });
-
-                    totalVerts   += worldPos.Length;
-                    totalIndices += triIndices.Length;
-                }
+                // S13 D2 gamma fix (off main thread): sRGB→linear here. white.linear == white.
+                Color lin = featureColor.linear;
+                geoms.Add(feature.Geometry);
+                featureColors.Add(new Vector4(lin.r, lin.g, lin.b, lin.a));
             }
 
-            // No polygon geometry produced — return empty (no NativeArray allocation).
-            if (tempFeatures.Count == 0 || totalVerts == 0 || totalIndices == 0)
+            if (geoms.Count == 0)
+                return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
+
+            TileMeshBuffers buffers = TileTessellationPipeline.Schedule(new TileTessellationPipeline.LayerInput
             {
-                empty.Features = tempFeatures; // may be empty list but populated for compat
-                return empty;
-            }
+                FeatureGeometries = geoms,
+                Extent            = extent,
+                TileZ             = id.Z, TileX = id.X, TileY = id.Y,
+                OriginMercX       = tileOriginMerc.x, OriginMercY = tileOriginMerc.y,
+            });
 
-            // Phase 2: Allocate NativeArray streams (now that counts are known) and copy in.
-            // Persistent allocator: tiles live for multiple frames; TempJob has a ~4-frame guard.
-            // NativeArray(Allocator.Persistent) is thread-safe from any thread (including ThreadPool).
-            var result = new LayerMeshData
+            try
             {
-                VertexCount           = totalVerts,
-                IndexCount            = totalIndices,
-                IsCreated             = true,
-                Features              = tempFeatures, // LEGACY: populated for backward-compat test assertions
-                Stream0PositionNormal = new NativeArray<FillPositionNormal>(totalVerts, Allocator.Persistent),
-                Stream1Uv             = new NativeArray<Vector2>(totalVerts, Allocator.Persistent),
-                Stream2Tangent        = new NativeArray<Vector4>(totalVerts, Allocator.Persistent),
-                Stream3Color          = new NativeArray<Vector4>(totalVerts, Allocator.Persistent),
-                Indices               = new NativeArray<int>(totalIndices, Allocator.Persistent),
-            };
+                if (!buffers.IsCreated)
+                    return;
 
-            // Increment the leak-guard counter AFTER all streams are allocated.
-            Interlocked.Increment(ref LayerMeshData.LiveAllocCount);
+                int totalVerts   = buffers.VertexCount[0];
+                int totalIndices = buffers.TotalIndexCount;
+                if (totalVerts == 0 || totalIndices == 0)
+                    return;
 
-            // Phase 3: Copy managed temp data into NativeArray streams.
-            // S55: accumulate tight AABB while copying positions (worker-thread; no main-thread scan needed).
-            int vBase = 0;
-            int iBase = 0;
-            float3 bMin = new float3(float.MaxValue);
-            float3 bMax = new float3(float.MinValue);
-            foreach (var f in tempFeatures)
-            {
-                double extentInv = f.Extent > 0.0 ? 1.0 / f.Extent : 0.0;
+                // Phase 2: declare the mesh buffers on the MeshData (off-main-thread safe) and grab stream views.
+                md.SetVertexBufferParams(totalVerts, FillVertexDescriptors);
+                NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
+                NativeArray<Vector2>            s1 = md.GetVertexData<Vector2>(1);
+                NativeArray<Vector4>            s2 = md.GetVertexData<Vector4>(2);
+                NativeArray<Vector4>            s3 = md.GetVertexData<Vector4>(3);
+                md.SetIndexBufferParams(totalIndices, IndexFormat.UInt32);
+                NativeArray<int> indices = md.GetIndexData<int>();
 
-                // S13 D2 gamma fix (moved off main thread — S48): convert sRGB→linear here.
-                // Color.linear applies the IEC 61966-2-1 ramp.
-                // white.linear == white: S11 uniform-color behavior is preserved.
-                // Thread-safe: Color.linear is pure math (no engine access).
-                Color linearColor = f.FeatureColor.linear;
-                var   colorVec    = new Vector4(linearColor.r, linearColor.g, linearColor.b, linearColor.a);
-
-                for (int i = 0; i < f.Verts.Length; i++)
+                // Phase 3: copy the Burst geometry into the stream views, accumulating the tight AABB.
+                double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
+                float3 bMin = new float3(float.MaxValue);
+                float3 bMax = new float3(float.MinValue);
+                for (int i = 0; i < totalVerts; i++)
                 {
-                    float3 v = f.Verts[i];
-                    bMin = math.min(bMin, v); // S55: AABB accumulation
-                    bMax = math.max(bMax, v); // S55: AABB accumulation
-                    result.Stream0PositionNormal[vBase + i] = new FillPositionNormal
+                    float3 v = buffers.WorldPositions[i];
+                    bMin = math.min(bMin, v);
+                    bMax = math.max(bMax, v);
+                    s0[i] = new FillPositionNormal
                     {
                         Position = new Vector3(v.x, v.y, v.z),
                         Normal   = Vector3.up, // explicit +Y: flat XZ fill geometry (S34 contract)
                     };
 
-                    // UV0: tile-local [0,1] from pre-projection tile coordinates.
-                    // tileVerts[i].x = tile-space east; tileVerts[i].y = tile-space north.
-                    float u  = (float)(f.TileVerts[i].x * extentInv);
-                    float v2 = (float)(f.TileVerts[i].y * extentInv);
-                    result.Stream1Uv[vBase + i] = new Vector2(u, v2);
-
-                    // Constant tangent: +X direction, +1 bitangent sign (S34 requirement).
-                    result.Stream2Tangent[vBase + i] = FlatTangent;
-
-                    // Color: linearized sRGB (S13 fix, S48: moved off main thread).
-                    result.Stream3Color[vBase + i] = colorVec;
+                    double2 tv = buffers.TileVertices[i];
+                    s1[i] = new Vector2((float)(tv.x * extentInv), (float)(tv.y * extentInv));
+                    s2[i] = FlatTangent;                              // constant +X tangent (S34)
+                    s3[i] = featureColors[buffers.VertexFeatureIdx[i]]; // per-feature linear color
                 }
 
-                // Copy indices, offsetting by the vertex base within the combined buffer.
-                for (int i = 0; i < f.Indices.Length; i++)
-                    result.Indices[iBase + i] = vBase + f.Indices[i];
+                for (int i = 0; i < totalIndices; i++)
+                    indices[i] = buffers.TriangleIndices[i];
 
-                vBase += f.Verts.Length;
-                iBase += f.Indices.Length;
-            }
+                md.subMeshCount = 1;
+                md.SetSubMesh(0, new SubMeshDescriptor(0, totalIndices, MeshTopology.Triangles), NoValidate);
 
-            result.BoundsMin = bMin;
-            result.BoundsMax = bMax;
-            return result;
-        }
-
-        /// <summary>
-        /// Main-thread half: uploads a <see cref="LayerMeshData"/> produced by
-        /// <see cref="BuildMeshData"/> into a <see cref="Mesh"/> using the advanced NativeArray API.
-        ///
-        /// S48: uses SetVertexBufferParams + SetVertexBufferData(NativeArray) + SetIndexBufferParams +
-        /// SetIndexBufferData + SetSubMesh. No managed SetVertices/SetColors/SetTriangles in this path.
-        ///
-        /// Must be called on the Unity main thread (Mesh creation / SetVertexBufferParams require it).
-        /// Returns null when <paramref name="data"/> contains no polygon geometry.
-        ///
-        /// OWNERSHIP: UploadMesh does NOT dispose the payload (SetVertexBufferData copies data into the
-        /// Mesh GPU buffer; the source NativeArrays are still needed until after this call returns, but
-        /// the Mesh is independent). The CALLER must call data.Dispose() after this method returns.
-        /// </summary>
-        public static Mesh UploadMesh(LayerMeshData data)
-        {
-            if (!data.IsCreated || data.VertexCount == 0 || data.IndexCount == 0)
-                return null;
-
-            var mesh = new Mesh
-            {
-                name        = "MapFill",
-                indexFormat = IndexFormat.UInt32,
-            };
-
-            // SetVertexBufferParams: declares the layout (static readonly array — no per-call alloc).
-            mesh.SetVertexBufferParams(data.VertexCount, FillVertexDescriptors);
-
-            // Upload each stream from the NativeArray directly (no managed ToArray() copy).
-            // SetVertexBufferData<T> copies the data into the Mesh's vertex buffer — the source
-            // NativeArray is safe to Dispose after this call returns.
-            mesh.SetVertexBufferData(data.Stream0PositionNormal, 0, 0, data.VertexCount, stream: 0);
-            mesh.SetVertexBufferData(data.Stream1Uv, 0, 0, data.VertexCount, stream: 1);
-            mesh.SetVertexBufferData(data.Stream2Tangent, 0, 0, data.VertexCount, stream: 2);
-            mesh.SetVertexBufferData(data.Stream3Color, 0, 0, data.VertexCount, stream: 3);
-
-            // Index buffer. Skip Unity's main-thread index validation (O(indices)): the indices come from
-            // the Burst earcut/tessellation job and are covered by tests, so re-validating every index per
-            // tile upload is wasted work. DontRecalculateBounds just avoids a redundant intermediate compute
-            // here — the canonical bounds are set by RecalculateBounds() below.
-            const MeshUpdateFlags NoValidate =
-                MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
-            mesh.SetIndexBufferParams(data.IndexCount, IndexFormat.UInt32);
-            mesh.SetIndexBufferData(data.Indices, 0, 0, data.IndexCount, NoValidate);
-
-            // One sub-mesh covering all triangles.
-            mesh.subMeshCount = 1;
-            mesh.SetSubMesh(0, new SubMeshDescriptor(0, data.IndexCount, MeshTopology.Triangles), NoValidate);
-
-            // S55: tight AABB baked on the worker thread in BuildMeshData — assign directly.
-            // Replaces the main-thread O(vertex) RecalculateBounds() scan. The frustum-cull contract
-            // (snapshot/render tests) is satisfied because the AABB is tight (matches RecalculateBounds).
-            float3 c3   = (data.BoundsMin + data.BoundsMax) * 0.5f;
-            float3 s3   = data.BoundsMax - data.BoundsMin;
-            mesh.bounds = new Bounds(
-                new Vector3(c3.x, c3.y, c3.z),
-                new Vector3(s3.x, s3.y, s3.z));
-            return mesh;
-        }
-
-        /// <summary>
-        /// Synchronous convenience: <see cref="BuildMeshData"/> then <see cref="UploadMesh"/>,
-        /// then <see cref="LayerMeshData.Dispose"/>.
-        /// Used by tests that call the builder directly and by callers that need sync behavior.
-        /// Must be called on the Unity main thread (UploadMesh creates a Mesh).
-        /// </summary>
-        public static Mesh BuildMesh(
-            IReadOnlyList<MvtFeature> selectedFeatures,
-            Fill.PaintProperties      paint,
-            double                    zoom,
-            double                    extent,
-            TileId                    id,
-            double2                   tileOriginMerc)
-        {
-            LayerMeshData data = BuildMeshData(selectedFeatures, paint, zoom, extent, id, tileOriginMerc);
-            try
-            {
-                return UploadMesh(data);
+                vertexCount = totalVerts;
+                float3 c3 = (bMin + bMax) * 0.5f;
+                float3 sz = bMax - bMin;
+                bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
             }
             finally
             {
-                data.Dispose(); // always dispose, even if UploadMesh throws
+                buffers.Dispose();
             }
-        }
-
-        // ── Internal: managed projection (delegates to WebMercator.Forward — single source) ────────
-
-        /// <summary>
-        /// Pure C# projection: tile-space double2 → origin-relative float3 world positions.
-        /// Delegates the Mercator-forward step to <see cref="WebMercator.Forward"/> (T2 single
-        /// source of the Mercator literal). The tile→lon/lat conversion stays inline (atan(sinh(…))
-        /// form — not the Mercator literal). Safe to call from any thread (no Unity APIs, no NativeArray).
-        /// </summary>
-        private static float3[] ProjectVerticesManaged(
-            double2[] tileCoords,
-            int       tileZ, int tileX, int tileY,
-            double    extent,
-            double    originMercX, double originMercY)
-        {
-            const double TwoPi = 2.0 * math.PI_DBL;
-
-            int n      = tileCoords.Length;
-            var result = new float3[n];
-
-            double pow2z = math.pow(2.0, tileZ);
-
-            for (int i = 0; i < n; i++)
-            {
-                double px = tileCoords[i].x;
-                double py = tileCoords[i].y;
-
-                // Tile → normalised [0,1] map coordinates
-                double u = (tileX + px / extent) / pow2z;
-                double v = (tileY + py / extent) / pow2z;
-
-                // Normalised → lon/lat (radians then degrees for WebMercator.Forward).
-                double longitudeRad = u * TwoPi - math.PI_DBL;
-                double arg          = math.PI_DBL * (1.0 - 2.0 * v);
-                double sinhArg      = (math.exp(arg) - math.exp(-arg)) * 0.5;
-                double latitudeRad  = math.atan(sinhArg);
-
-                double latitudeDeg  = latitudeRad * (180.0 / math.PI_DBL);
-                double longitudeDeg = longitudeRad * (180.0 / math.PI_DBL);
-
-                // Delegate to the shared math module (single source of Mercator literal, T2).
-                double3 world = WebMercator.Forward(new GeoCoordinate3D
-                    { Longitude = longitudeDeg, Latitude = latitudeDeg, Altitude = 0.0 });
-
-                // Subtract origin in double, then cast to float — RTC precision
-                double dx = world.x - originMercX;
-                double dz = world.z - originMercY;
-
-                result[i] = new float3((float)dx, 0f, (float)dz);
-            }
-
-            return result;
         }
     }
 }

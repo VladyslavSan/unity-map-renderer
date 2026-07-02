@@ -119,22 +119,22 @@ namespace MapRenderer.Tests
             var paint = new Line.PaintProperties(paintLayer);
             var layout = new Line.LayoutProperties(paintLayer);
 
-            StyledLineTileBuilder.LayerMeshData data = default;
+            var mda = Mesh.AllocateWritableMeshData(1);
             try
             {
-                data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                StyledLineTileBuilder.WriteMeshData(
+                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
+                    out int vertexCount, out _);
 
-                Assert.IsTrue(data.IsCreated,
-                    "BuildMeshData must produce geometry for geolines features with a match expression.");
-                Assert.Greater(data.VertexCount, 0,
-                    "VertexCount must be > 0 when geometry is produced.");
+                Assert.Greater(vertexCount, 0,
+                    "WriteMeshData must produce geometry for geolines features with a match expression.");
 
-                // Collect distinct (linearized) colors from Stream3.
+                // Collect distinct (linearized) colors from Stream3, read back straight from the MeshData.
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
                 var distinctColors = new HashSet<(int r, int g, int b)>();
-                for (int i = 0; i < data.VertexCount; i++)
+                for (int i = 0; i < vertexCount; i++)
                 {
-                    var wc = data.Stream3WidthColor[i];
+                    var wc = s3[i];
                     // Quantize to 8-bit per channel (avoid float precision mismatches).
                     int r8 = (int)(wc.Color.x * 255f + 0.5f);
                     int g8 = (int)(wc.Color.y * 255f + 0.5f);
@@ -145,11 +145,11 @@ namespace MapRenderer.Tests
                 Assert.GreaterOrEqual(distinctColors.Count, 2,
                     $"A match expression mapping ≥2 distinct feature categories must produce " +
                     $"≥2 distinct linearized colors in Stream3 (got {distinctColors.Count}). " +
-                    "This proves the S12 data-driven bake path is wired through BuildMeshData.");
+                    "This proves the S12 data-driven bake path is wired through WriteMeshData.");
             }
             finally
             {
-                data.Dispose();
+                mda.Dispose();
             }
         }
 
@@ -176,21 +176,22 @@ namespace MapRenderer.Tests
             var paint = new Line.PaintProperties(paintLayer);
             var layout = new Line.LayoutProperties(paintLayer);
 
-            StyledLineTileBuilder.LayerMeshData data = default;
+            var mda = Mesh.AllocateWritableMeshData(1);
             try
             {
-                data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                StyledLineTileBuilder.WriteMeshData(
+                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
+                    out int vertexCount, out _);
 
-                Assert.IsTrue(data.IsCreated,
-                    "BuildMeshData must produce geometry for geolines features with a constant color.");
-                Assert.Greater(data.VertexCount, 0, "VertexCount must be > 0.");
+                Assert.Greater(vertexCount, 0,
+                    "WriteMeshData must produce geometry for geolines features with a constant color.");
 
                 // All vertices should have the same baked color (within 1-unit quantization).
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
                 var distinctColors = new HashSet<(int r, int g, int b)>();
-                for (int i = 0; i < data.VertexCount; i++)
+                for (int i = 0; i < vertexCount; i++)
                 {
-                    var wc = data.Stream3WidthColor[i];
+                    var wc = s3[i];
                     int r8 = (int)(wc.Color.x * 255f + 0.5f);
                     int g8 = (int)(wc.Color.y * 255f + 0.5f);
                     int b8 = (int)(wc.Color.z * 255f + 0.5f);
@@ -204,7 +205,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
-                data.Dispose();
+                mda.Dispose();
             }
         }
 
@@ -241,23 +242,22 @@ namespace MapRenderer.Tests
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.WidthKind,
                 "WidthKind must be Feature for a [\"get\",...] match expression.");
 
-            StyledLineTileBuilder.LayerMeshData data = default;
+            var mda = Mesh.AllocateWritableMeshData(1);
             try
             {
-                data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                StyledLineTileBuilder.WriteMeshData(
+                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
+                    out int vertexCount, out _);
 
-                Assert.IsTrue(data.IsCreated,
-                    "BuildMeshData must produce geometry for geolines features with a data-driven width.");
-                Assert.Greater(data.VertexCount, 0, "VertexCount must be > 0.");
+                Assert.Greater(vertexCount, 0,
+                    "WriteMeshData must produce geometry for geolines features with a data-driven width.");
 
-                // Collect distinct quantized WidthScale values from Stream3.
-                // Quantize to 1 decimal place to avoid float noise but distinguish thin vs thick.
+                // Collect distinct quantized WidthScale values from Stream3 (thin=2, thick=10 well-separated).
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
                 var distinctWidths = new HashSet<int>();
-                for (int i = 0; i < data.VertexCount; i++)
+                for (int i = 0; i < vertexCount; i++)
                 {
-                    var wc = data.Stream3WidthColor[i];
-                    // Round to nearest integer pixel width (thin=2, thick=10 are well-separated).
+                    var wc = s3[i];
                     int w = (int)(wc.WidthScale + 0.5f);
                     distinctWidths.Add(w);
                 }
@@ -265,11 +265,11 @@ namespace MapRenderer.Tests
                 Assert.GreaterOrEqual(distinctWidths.Count, 2,
                     $"A match expression mapping ≥2 distinct feature widths must produce " +
                     $"≥2 distinct WidthScale values in Stream3 (got {distinctWidths.Count}). " +
-                    "This proves the S14 data-driven width bake path is wired through BuildMeshData.");
+                    "This proves the S14 data-driven width bake path is wired through WriteMeshData.");
             }
             finally
             {
-                data.Dispose();
+                mda.Dispose();
             }
         }
 
@@ -306,22 +306,22 @@ namespace MapRenderer.Tests
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.OpacityKind,
                 "OpacityKind must be Feature for a [\"get\",...] match expression.");
 
-            StyledLineTileBuilder.LayerMeshData data = default;
+            var mda = Mesh.AllocateWritableMeshData(1);
             try
             {
-                data = StyledLineTileBuilder.BuildMeshData(
-                    features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc);
+                StyledLineTileBuilder.WriteMeshData(
+                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
+                    out int vertexCount, out _);
 
-                Assert.IsTrue(data.IsCreated,
-                    "BuildMeshData must produce geometry for geolines features with a data-driven opacity.");
-                Assert.Greater(data.VertexCount, 0, "VertexCount must be > 0.");
+                Assert.Greater(vertexCount, 0,
+                    "WriteMeshData must produce geometry for geolines features with a data-driven opacity.");
 
-                // Collect distinct quantized alpha values from Stream3 Color.w.
-                // 0.2 → ~51/255; 1.0 → 255/255; well-separated.
+                // Collect distinct quantized alpha values from Stream3 Color.w (0.2→~51/255; 1.0→255/255).
+                var s3 = mda[0].GetVertexData<StyledLineTileBuilder.LineWidthColor>(3);
                 var distinctAlphas = new HashSet<int>();
-                for (int i = 0; i < data.VertexCount; i++)
+                for (int i = 0; i < vertexCount; i++)
                 {
-                    var wc = data.Stream3WidthColor[i];
+                    var wc = s3[i];
                     int a8 = (int)(wc.Color.w * 255f + 0.5f);
                     distinctAlphas.Add(a8);
                 }
@@ -329,11 +329,11 @@ namespace MapRenderer.Tests
                 Assert.GreaterOrEqual(distinctAlphas.Count, 2,
                     $"A match expression mapping ≥2 distinct feature opacities must produce " +
                     $"≥2 distinct alpha values in Stream3 Color.w (got {distinctAlphas.Count}). " +
-                    "This proves the S14 data-driven opacity bake path is wired through BuildMeshData.");
+                    "This proves the S14 data-driven opacity bake path is wired through WriteMeshData.");
             }
             finally
             {
-                data.Dispose();
+                mda.Dispose();
             }
         }
     }

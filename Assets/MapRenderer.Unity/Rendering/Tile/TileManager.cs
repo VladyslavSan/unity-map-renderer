@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     /// <summary>
     /// Owns the tile lifecycle for <see cref="Map.MapView"/> — the cover→fetch→tessellate→consume→evict
     /// pipeline plus the S48/S51 disposal &amp; mesh-leak guards. Extracted from MapView as the biggest,
-    /// most cohesive cut of the decomposition: MapView keeps the camera, the <see cref="Style.StyledLayerSet"/>,
+    /// most cohesive cut of the decomposition: MapView keeps the camera, the <see cref="Style.RenderLayerSet"/>,
     /// and the scene origin; this object keeps the scheduler, the loaded-tile table, and all the in-flight
     /// async machinery, and is just ticked once per frame.
     ///
@@ -31,7 +31,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     ///   <item>the scene origin (Mercator) for tile placement,</item>
     ///   <item>tile-selection config (<see cref="TileSelectionConfig"/>) read from MapView's serialized fields.</item>
     /// </list>
-    /// The <see cref="Style.StyledLayerSet"/> (render bundles) is stable for the object's life, so it's injected
+    /// The <see cref="Style.RenderLayerSet"/> (render bundles) is stable for the object's life, so it's injected
     /// at construction.</para>
     ///
     /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as a
@@ -89,15 +89,17 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── S47 tessellation payload (S51: Task → UniTask) ────────────────────────────────────
 
         /// <summary>
-        /// Per-layer mesh data produced by one tile's background tessellation.
-        /// One element per fill layer, one element per line layer.
+        /// Tessellation payloads produced by one tile's background tessellation. S89 Stage C: a DENSE array —
+        /// one element per render layer bound to THIS task's source, in declared (draw) order. Each payload
+        /// carries its own global <see cref="Style.IRenderLayerTessellation.MaterialIndex"/>, so the consume
+        /// step no longer relies on <c>cursor == materialIndex</c>. Replaces the S83b decision-5c full-width
+        /// sparse union (a slot per layer, null for other-source layers) — no dead slots per source.
         /// </summary>
         private struct TessellationResult
         {
-            /// <summary>Per-fill-layer CPU mesh data (index matches _layers.Fills).</summary>
-            public Meshing.StyledFillTileBuilder.LayerMeshData[] LayerData;
-            /// <summary>S14: per-line-layer CPU mesh data (index matches _layers.Lines).</summary>
-            public Meshing.StyledLineTileBuilder.LayerMeshData[] LineLayerData;
+            /// <summary>Dense per-<c>(tile, source)</c> payloads in draw order; each knows its material index.
+            /// Empty (0-vertex) this-source layers still take a slot (freed at consume).</summary>
+            public Style.IRenderLayerTessellation[] Payloads;
         }
 
         /// <summary>
@@ -138,8 +140,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// </summary>
             public int[]                     DrawHandles;
             /// <summary>
-            /// S87: resumable per-mesh consume cursor — index of the next layer to upload, spanning fill
-            /// <c>[0..FillCount)</c> then line <c>[0..LineCount)</c>. Advanced by
+            /// S87: resumable per-mesh consume cursor — a dense index over this source's tessellation
+            /// payloads (draw order), <c>[0..denseCount)</c>. Advanced by
             /// <see cref="ConsumeTessellationTask"/> as the per-frame mesh/vertex budget allows; the tile is
             /// <see cref="Built"/> only once the cursor reaches the end. 0 until consume starts. While
             /// <c>0 &lt; ConsumeCursor &lt; total</c> the tile is partially consumed (HasTessellationTask is
@@ -261,7 +263,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         // ── Injected collaborators (stable for life) ─────────────────────────────────────────
-        private readonly Style.StyledLayerSet _layers; // owned by MapView; this reads bundles/materials/counts
+        private readonly Style.RenderLayerSet _layers; // owned by MapView; this reads the ordered render layers
 
         // ── Live state ─────────────────────────────────────────────────────────────────────────────────
         // S83b: per-source pipeline registry (replaces the single _scheduler/_source/_ownsSource). The
@@ -334,7 +336,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S84: running count of genuine (non-cancellation) fetch errors, for bounded logging.
         private int _fetchErrorCount;
 
-        public TileManager(Style.StyledLayerSet layers)
+        public TileManager(Style.RenderLayerSet layers)
         {
             _layers = layers;
         }
@@ -344,7 +346,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// S83b multi-source entry (the <see cref="Map.View.SetStyle"/> path). Applies <paramref name="specs"/>
         /// — one per rendered source-id, already resolved (inline <c>tiles[]</c> or via S83a TileJSON) — as
-        /// the pipeline registry, and (re)builds the backend from the current <see cref="StyledLayerSet"/>.
+        /// the pipeline registry, and (re)builds the backend from the current <see cref="RenderLayerSet"/>.
         ///
         /// <para>Handles BOTH first call and RESTYLE in one pass (decision 7):</para>
         /// <list type="number">
@@ -433,30 +435,28 @@ namespace MapRenderer.Unity.Rendering.Tile
             _instanced?.Dispose();
             _instanced = backend switch
             {
-                Map.RenderBackend.Brg        => new BRGBackend.TileRenderer(_layers),
-                Map.RenderBackend.GameObject => new GOBackend.TileRenderer(FlattenLayerMaterials(_layers), FlattenLayerNames(_layers)),
-                _                            => new EntBackend.TileRenderer(FlattenLayerMaterials(_layers), FlattenLayerNames(_layers)),
+                Map.RenderBackend.Brg        => new BRGBackend.TileRenderer(LayerMaterials(_layers)),
+                Map.RenderBackend.GameObject => new GOBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers)),
+                _                            => new EntBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers)),
             };
         }
 
-        /// <summary>Flattens the styled layer set's materials (fills in declared order, then lines) — the
-        /// material list every backend indexes by <c>materialIndex</c>.</summary>
-        private static List<Material> FlattenLayerMaterials(Style.StyledLayerSet layers)
+        /// <summary>The per-layer materials in declared order — the single list every backend indexes by
+        /// <c>materialIndex</c> (<c>index == draw order == material index</c>; no fills-then-lines flatten).</summary>
+        private static List<Material> LayerMaterials(Style.RenderLayerSet layers)
         {
-            var mats = new List<Material>(layers.FillCount + layers.LineCount);
-            for (int i = 0; i < layers.FillCount; i++) mats.Add(layers.Fills[i].Material);
-            for (int i = 0; i < layers.LineCount; i++) mats.Add(layers.Lines[i].Material);
+            var mats = new List<Material>(layers.Count);
+            for (int i = 0; i < layers.Count; i++) mats.Add(layers[i].Material);
             return mats;
         }
 
-        /// <summary>Flattens the per-layer style ids in the same (fills then lines) order as
-        /// <see cref="FlattenLayerMaterials"/>, so the Entities backend can name each layer entity after its
-        /// style layer (e.g. "water") in the Entities Hierarchy instead of the shared material name.</summary>
-        private static List<string> FlattenLayerNames(Style.StyledLayerSet layers)
+        /// <summary>The per-layer style ids in the same declared order as <see cref="LayerMaterials"/>, so the
+        /// Entities/GameObject backends can name each layer entity after its style layer (e.g. "water") in the
+        /// Hierarchy instead of the shared material name.</summary>
+        private static List<string> LayerNames(Style.RenderLayerSet layers)
         {
-            var names = new List<string>(layers.FillCount + layers.LineCount);
-            for (int i = 0; i < layers.FillCount; i++) names.Add(layers.Fills[i].StyleLayer?.Id);
-            for (int i = 0; i < layers.LineCount; i++) names.Add(layers.Lines[i].StyleLayer?.Id);
+            var names = new List<string>(layers.Count);
+            for (int i = 0; i < layers.Count; i++) names.Add(layers[i].StyleLayer?.Id);
             return names;
         }
 
@@ -591,7 +591,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// on fetch completion; ConsumeTessellationResults polls and CONSUMES completed UniTasks
         /// (uploads mesh + creates GameObjects). Neither step blocks on tessellation.
         ///
-        /// The caller (MapView) runs <see cref="StyledLayerSet.ApplyZoom"/> and refreshes the scene
+        /// The caller (MapView) runs <see cref="RenderLayerSet.ApplyZoom"/> and refreshes the scene
         /// origin BEFORE this — the origin is passed in so tile placement and camera sync share it.
         /// </summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
@@ -939,86 +939,82 @@ namespace MapRenderer.Unity.Rendering.Tile
         private UniTask<TessellationResult> KickTessellationTask(
             LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam, string sourceId)
         {
-            var layerRecordsSnapshot     = _layers.SnapshotFills();
-            var lineRecordsSnapshot      = _layers.SnapshotLines();
-            double zoom          = cam.Zoom;
-            double2 tileOrigin   = lt.TileOriginMerc;
+            var layersSnapshot = _layers.SnapshotLayers();
+            double  zoom       = cam.Zoom;
+            double2 tileOrigin = lt.TileOriginMerc;
+            int     n          = layersSnapshot.Length;
+
+            // S89 Stage C: DENSE per-(tile, source) produce. Collect this-source layers in declared (draw)
+            // order; each dense slot d carries its global material index materialIndices[d]. No full-width
+            // sparse union / decision-5c null slots.
+            int dense = 0;
+            for (int li = 0; li < n; li++)
+                if (SourceIdOf(layersSnapshot[li].StyleLayer) == sourceId) dense++;
+            var materialIndices = new int[dense];
+            for (int li = 0, d = 0; li < n; li++)
+                if (SourceIdOf(layersSnapshot[li].StyleLayer) == sourceId) materialIndices[d++] = li;
+
+            // ── MAIN THREAD: pre-allocate one writable MeshDataArray per this-source layer ──
+            // Mesh.AllocateWritableMeshData is main-thread only (spike-verified); the worker writes into these
+            // in place, the main thread applies at consume. Every allocated array is wrapped in a
+            // MeshDataTessellation below (written OR 0-vertex) so it is disposed exactly once on the main
+            // thread — including on a faulted tile (see the catch + ensure-wrapped loop).
+            var mdas = new Mesh.MeshDataArray[dense];
+            for (int d = 0; d < dense; d++)
+                mdas[d] = Style.MeshDataTessellation.AllocateTracked(1);
 
             return UniTask.RunOnThreadPool(() =>
             {
-                MvtTile mvtTile = MvtDecoder.Decode(mvtBytes);
-
-                // ── Fill layers ────────────────────────────────────────────────
-                // S83b: the result stays FULL-WIDTH (every fill slot), but THIS source's task populates only
-                // the layers bound to THIS source-id; layers of other sources get an empty LayerMeshData
-                // (identical to the no-features path). So the global materialIndex is preserved and the union
-                // across source-records covers all layers — see decision 5c.
-                var layerData = new Meshing.StyledFillTileBuilder.LayerMeshData[layerRecordsSnapshot.Length];
-
-                for (int li = 0; li < layerRecordsSnapshot.Length; li++)
+                // One payload per this-source render layer, in draw order. Fill and line share ONE loop — each
+                // IRenderLayer writes its geometry straight into its pre-allocated MeshData.
+                var payloads = new Style.IRenderLayerTessellation[dense];
+                try
                 {
-                    var rec = layerRecordsSnapshot[li];
+                    MvtTile mvtTile = MvtDecoder.Decode(mvtBytes);
 
-                    var features = (SourceIdOf(rec.StyleLayer) != sourceId)
-                        ? (IReadOnlyList<MvtFeature>)System.Array.Empty<MvtFeature>()
-                        : MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(rec.StyleLayer, mvtTile, zoom);
-                    if (features.Count == 0)
+                    for (int d = 0; d < dense; d++)
                     {
-                        layerData[li] = new Meshing.StyledFillTileBuilder.LayerMeshData
-                        {
-                            Features = new List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
-                        };
-                        continue;
-                    }
+                        int li    = materialIndices[d];
+                        var layer = layersSnapshot[li];
 
-                    MvtLayer mvtLayer = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(
-                        rec.StyleLayer, mvtTile);
-                    if (mvtLayer == null)
-                    {
-                        layerData[li] = new Meshing.StyledFillTileBuilder.LayerMeshData
-                        {
-                            Features = new List<Meshing.StyledFillTileBuilder.FeatureMeshData>()
-                        };
-                        continue;
-                    }
+                        int    verts  = 0;
+                        Bounds bounds = default;
 
-                    layerData[li] = Meshing.StyledFillTileBuilder.BuildMeshData(
-                        features, rec.Paint, zoom, mvtLayer.Extent, id, tileOrigin);
+                        var features = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
+                            layer.StyleLayer, mvtTile, zoom);
+                        if (features.Count > 0)
+                        {
+                            MvtLayer mvtLayer = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(
+                                layer.StyleLayer, mvtTile);
+                            if (mvtLayer != null)
+                                layer.WriteInto(mdas[d][0], features, zoom, mvtLayer.Extent, id, tileOrigin,
+                                    out verts, out bounds);
+                        }
+
+                        payloads[d] = new Style.MeshDataTessellation(
+                            mdas[d], verts, bounds, layer.StyleLayer?.Id ?? "TileMesh", li);
+                    }
+                }
+                catch
+                {
+                    // A malformed tile (decode/tessellation fault) yields an empty tile — parity with the old
+                    // faulted-UniTask path (ConsumeTessellationTask marks it Built with no geometry). Fall
+                    // through so EVERY allocated array is still wrapped and disposed (no native leak).
                 }
 
-                // ── S14: Line layers ───────────────────────────────────────────
-                // Feature selection routes through SourceLayerResolver seam (tooth #6 — same as fills).
-                var lineLayerData = new Meshing.StyledLineTileBuilder.LayerMeshData[lineRecordsSnapshot.Length];
+                // Ensure every allocated array is wrapped exactly once, so the main-thread consume disposes it
+                // even if the loop above threw partway through.
+                for (int d = 0; d < dense; d++)
+                    if (payloads[d] == null)
+                        payloads[d] = new Style.MeshDataTessellation(mdas[d], 0, default, "TileMesh", materialIndices[d]);
 
-                for (int li = 0; li < lineRecordsSnapshot.Length; li++)
-                {
-                    var rec = lineRecordsSnapshot[li];
-
-                    // S83b: skip layers of other sources (empty slot → default LayerMeshData, IsCreated=false).
-                    if (SourceIdOf(rec.StyleLayer) != sourceId)
-                        continue;
-
-                    var features = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
-                        rec.StyleLayer, mvtTile, zoom);
-                    if (features.Count == 0)
-                        continue; // IsCreated=false, no dispose needed
-
-                    MvtLayer mvtLayer = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(
-                        rec.StyleLayer, mvtTile);
-                    if (mvtLayer == null)
-                        continue;
-
-                    lineLayerData[li] = Meshing.StyledLineTileBuilder.BuildMeshData(
-                        features, rec.Paint, rec.Layout, zoom, mvtLayer.Extent, id, tileOrigin);
-                }
-
-                return new TessellationResult { LayerData = layerData, LineLayerData = lineLayerData };
+                return new TessellationResult { Payloads = payloads };
             }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
         }
 
         /// <summary>
         /// S87 resumable per-MESH consume. Uploads + registers tile-layer meshes starting at
-        /// <see cref="LoadedTile.ConsumeCursor"/> (fill <c>[0..FillCount)</c> then line <c>[0..LineCount)</c>),
+        /// <see cref="LoadedTile.ConsumeCursor"/> (a dense index over this source's payloads, in draw order),
         /// consuming layers until a budget binds (<paramref name="meshBudget"/> meshes OR
         /// <paramref name="vertBudget"/> vertices — checked before each layer, so at most one-mesh overshoot;
         /// a single mesh cannot be split) or the tile is fully consumed. Each consumed layer's NativeArrays
@@ -1055,44 +1051,40 @@ namespace MapRenderer.Unity.Rendering.Tile
             // IsCompleted is true). Per-layer NativeArrays are disposed as each layer is consumed.
             TessellationResult result = task.GetAwaiter().GetResult();
 
-            int fillCount   = (result.LayerData     != null) ? math.min(_layers.FillCount, result.LayerData.Length)     : 0;
-            int lineCount   = (result.LineLayerData != null) ? math.min(_layers.LineCount, result.LineLayerData.Length) : 0;
-            int totalLayers = fillCount + lineCount;
+            int denseCount        = result.Payloads?.Length ?? 0;
+            int currentLayerCount = _layers.Count;
 
             _consumeScratchMeshes.Clear();
             _consumeScratchHandles.Clear();
 
-            // Consume from the cursor until a budget binds or all layers are done. Skipped (empty-geometry)
-            // layers are free — they only advance the cursor. The pump guarantees positive budget, so at
-            // least one layer is processed per call → progress is guaranteed (a lone huge mesh consumes in
-            // one go, one-mesh overshoot).
+            // Consume the dense per-source payloads from the cursor until a budget binds or all are done.
+            // Empty (0-vertex) layers are free — they only advance the cursor. The pump guarantees positive
+            // budget, so at least one layer is processed per call → progress is guaranteed (a lone huge mesh
+            // consumes in one go, one-mesh overshoot).
             int cursor = lt.ConsumeCursor;
-            while (cursor < totalLayers && meshesConsumed < meshBudget && vertsConsumed < vertBudget)
+            while (cursor < denseCount && meshesConsumed < meshBudget && vertsConsumed < vertBudget)
             {
-                Mesh mesh;
-                int  materialIndex;
-                int  layerVerts;
-                if (cursor < fillCount)
-                {
-                    int li     = cursor;
-                    layerVerts = result.LayerData[li].VertexCount;
-                    using (PmMeshUpload.Auto())
-                        mesh = Meshing.StyledFillTileBuilder.UploadMesh(result.LayerData[li]);
-                    result.LayerData[li].Dispose();              // consumed — free its NativeArrays now
-                    materialIndex = li;
-                }
-                else
-                {
-                    int li     = cursor - fillCount;             // 0-based line layer index
-                    layerVerts = result.LineLayerData[li].VertexCount;
-                    using (PmMeshUpload.Auto())
-                        mesh = Meshing.StyledLineTileBuilder.UploadMesh(result.LineLayerData[li]);
-                    result.LineLayerData[li].Dispose();
-                    materialIndex = _layers.FillCount + li;      // flattened material order: fills then lines
-                }
+                // S89 C: the payload carries its own material index (draw order); the cursor is just a dense
+                // resume position. A payload whose material index no longer exists (restyle shrank the layer
+                // set mid-flight) is freed without registering — the backend would otherwise throw on it.
+                Style.IRenderLayerTessellation payload = result.Payloads[cursor];
                 cursor++;
 
-                if (mesh == null) continue; // empty layer — disposed above, no AddLayer, no budget charge
+                int materialIndex = payload?.MaterialIndex ?? -1;
+                int layerVerts    = payload?.VertexCount ?? 0;
+
+                if (payload == null || (uint)materialIndex >= (uint)currentLayerCount)
+                {
+                    payload?.Dispose();
+                    continue;
+                }
+
+                Mesh mesh;
+                using (PmMeshUpload.Auto())
+                    mesh = payload.Upload();
+                payload.Dispose();                               // consumed — free its NativeArrays now
+
+                if (mesh == null) continue; // empty layer — no AddLayer, no budget charge
 
                 int handle;
                 using (PmAddTileLayer.Auto())
@@ -1110,7 +1102,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             AppendMeshes(ref lt.Meshes, _consumeScratchMeshes);
             AppendHandles(ref lt.DrawHandles, _consumeScratchHandles);
 
-            bool complete = cursor >= totalLayers;
+            bool complete = cursor >= denseCount;
             if (complete)
             {
                 // Dispose the whole result (idempotent) — also frees any layers the active style does not
@@ -1151,16 +1143,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             arr = merged;
         }
 
-        /// <summary>S48/S87: disposes every LayerMeshData NativeArray in a result (idempotent — IsCreated
-        /// guard, so layers already disposed during a partial consume are safe no-ops).</summary>
+        /// <summary>S48/S87: disposes every payload in a result (null-slot- and idempotent-safe — a payload
+        /// already disposed during a partial consume, or a null empty-layer slot, is a no-op). The single
+        /// place a <see cref="TessellationResult"/>'s NativeArrays are freed, called from every discard path.</summary>
         private static void DisposeWholeResult(TessellationResult result)
         {
-            if (result.LayerData != null)
-                for (int li = 0; li < result.LayerData.Length; li++)
-                    result.LayerData[li].Dispose();
-            if (result.LineLayerData != null)
-                for (int li = 0; li < result.LineLayerData.Length; li++)
-                    result.LineLayerData[li].Dispose();
+            if (result.Payloads == null) return;
+            for (int li = 0; li < result.Payloads.Length; li++)
+                result.Payloads[li]?.Dispose();
         }
 
         /// <summary>
@@ -1247,21 +1237,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 // Task completed (succeeded, faulted, or cancelled).
                 if (task.Status == UniTaskStatus.Succeeded)
-                {
-                    TessellationResult result = task.GetAwaiter().GetResult();
-                    if (result.LayerData != null)
-                    {
-                        for (int li = 0; li < result.LayerData.Length; li++)
-                            result.LayerData[li].Dispose();
-                    }
-                    // S14: dispose line layer NativeArrays too.
-                    if (result.LineLayerData != null)
-                    {
-                        for (int li = 0; li < result.LineLayerData.Length; li++)
-                            result.LineLayerData[li].Dispose();
-                    }
-                }
-                // Faulted/cancelled: no LayerData produced, nothing to dispose.
+                    DisposeWholeResult(task.GetAwaiter().GetResult());
+                // Faulted/cancelled: no payloads produced, nothing to dispose.
 
                 _pendingDisposal.RemoveAt(i);
             }
@@ -1350,7 +1327,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// Releases all tile GameObjects and Mesh assets, drains tessellation tasks, and disposes the
-        /// scheduler and (if owned) the data source. Does NOT dispose the StyledLayerSet — MapView owns
+        /// scheduler and (if owned) the data source. Does NOT dispose the RenderLayerSet — MapView owns
         /// that and disposes it AFTER this (tile renderers reference layer materials, so the order matters).
         ///
         /// <para>Idempotent and construction-safe: every collection it drains is empty before the first
@@ -1380,20 +1357,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     // S48: dispose the produced NativeArrays (or no-op if faulted/cancelled).
                     if (tessTask.Status == UniTaskStatus.Succeeded)
-                    {
-                        TessellationResult result = tessTask.GetAwaiter().GetResult();
-                        if (result.LayerData != null)
-                        {
-                            for (int li = 0; li < result.LayerData.Length; li++)
-                                result.LayerData[li].Dispose();
-                        }
-                        // S14: dispose line NativeArrays.
-                        if (result.LineLayerData != null)
-                        {
-                            for (int li = 0; li < result.LineLayerData.Length; li++)
-                                result.LineLayerData[li].Dispose();
-                        }
-                    }
+                        DisposeWholeResult(tessTask.GetAwaiter().GetResult());
                 }
             }
 
@@ -1406,20 +1370,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Thread.Sleep(1);
 
                 if (task.Status == UniTaskStatus.Succeeded)
-                {
-                    TessellationResult result = task.GetAwaiter().GetResult();
-                    if (result.LayerData != null)
-                    {
-                        for (int li = 0; li < result.LayerData.Length; li++)
-                            result.LayerData[li].Dispose();
-                    }
-                    // S14: dispose line NativeArrays.
-                    if (result.LineLayerData != null)
-                    {
-                        for (int li = 0; li < result.LineLayerData.Length; li++)
-                            result.LineLayerData[li].Dispose();
-                    }
-                }
+                    DisposeWholeResult(task.GetAwaiter().GetResult());
             }
             _pendingDisposal.Clear();
 

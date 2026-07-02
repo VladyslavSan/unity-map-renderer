@@ -5,7 +5,7 @@
 //
 // S48 extension: TessellationResult now holds NativeArray-backed LayerMeshData payloads.
 // The NativeArray leak guard is NON-VACUOUS:
-//   - StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount tracks live allocations.
+//   - MeshDataTessellation.DebugLiveAllocCount tracks live allocations.
 //   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
 //   - A deliberately-leaked NativeArray MUST produce a non-zero counter (positive control).
 //
@@ -33,6 +33,7 @@ using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Unity.Rendering.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
@@ -278,7 +279,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// S48 Non-vacuous positive control: deliberately allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
         /// (backed by NativeArrays) via <see cref="StyledFillTileBuilder.BuildMeshData"/> and do NOT
-        /// dispose it. Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/> is
+        /// dispose it. Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/> is
         /// non-zero, proving the counter has teeth — a deliberately-leaked NativeArray is detected.
         ///
         /// The payload is disposed at test end so it does not pollute subsequent tests.
@@ -300,29 +301,33 @@ namespace MapRenderer.Tests
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
-            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
 
-            // Allocate — deliberately do NOT dispose.
-            var leaked = StyledFillTileBuilder.BuildMeshData(
-                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
+            // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
+            var mda = MeshDataTessellation.AllocateTracked(1);
+            StyledFillTileBuilder.WriteMeshData(
+                mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
+                out int vc, out Bounds b);
 
-            Assert.IsTrue(leaked.IsCreated,
-                "Positive control requires IsCreated=true (NativeArrays allocated). " +
+            Assert.Greater(vc, 0,
+                "Positive control requires geometry (vertices written). " +
                 "If no geometry was produced the counter test would be vacuous.");
 
-            long countAfterAlloc = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            var leaked = new MeshDataTessellation(mda, vc, b, "leak-positive-control", materialIndex: 0);
 
-            // Assert the counter reflects the un-Disposed allocation.
+            long countAfterAlloc = MeshDataTessellation.DebugLiveAllocCount;
+
+            // Assert the counter reflects the un-disposed allocation.
             Assert.Greater(countAfterAlloc, countBefore,
-                $"S48 positive control FAILED: DebugLiveAllocCount did not increase after BuildMeshData " +
+                $"S48 positive control FAILED: DebugLiveAllocCount did not increase after AllocateTracked " +
                 $"(before={countBefore}, after={countAfterAlloc}). The leak guard is vacuous — a " +
-                "deliberately-leaked NativeArray must be detected (counter must be non-zero relative to baseline). " +
-                "Check that Interlocked.Increment is called in BuildMeshData after NativeArray allocation.");
+                "deliberately-leaked writable MeshDataArray must be detected. " +
+                "Check that Interlocked.Increment is called in MeshDataTessellation.AllocateTracked.");
 
             // Clean up: dispose the leaked payload so it doesn't affect subsequent tests.
             leaked.Dispose();
 
-            long countAfterDispose = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            long countAfterDispose = MeshDataTessellation.DebugLiveAllocCount;
             Assert.AreEqual(countBefore, countAfterDispose,
                 $"After explicit Dispose, counter must return to baseline " +
                 $"(baseline={countBefore}, after dispose={countAfterDispose}).");
@@ -335,13 +340,13 @@ namespace MapRenderer.Tests
         /// not yet produced at release time) must have its NativeArrays disposed via the
         /// <c>_pendingDisposal</c> holding pen after the tessellation task completes.
         ///
-        /// Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/> returns to
+        /// Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/> returns to
         /// baseline after the full race cycle, proving no NativeArray leak.
         /// </summary>
         [Test]
         public void NativeArray_ReleaseMidFlight_NoLeakedNativeArray()
         {
-            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
@@ -391,7 +396,7 @@ namespace MapRenderer.Tests
                 long held = countBefore;
                 {
                     int spins = 0;
-                    while ((held = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount) <= countBefore
+                    while ((held = MeshDataTessellation.DebugLiveAllocCount) <= countBefore
                            && spins++ < 10000)
                         Thread.Sleep(1);
                 }
@@ -421,7 +426,7 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(go);
                 go = null;
 
-                long countAfter = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                long countAfter = MeshDataTessellation.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfter,
                     $"S48 DECISIVE: DebugLiveAllocCount must return to baseline after load+mid-flight-release cycle. " +
                     $"Baseline: {countBefore}, After cycle: {countAfter}. " +
@@ -443,13 +448,13 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// S48 consume-path NativeArray balance: build tiles to completion (normal consume path),
-        /// then teardown. Asserts <see cref="StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount"/>
+        /// then teardown. Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/>
         /// returns to baseline after the full load+destroy cycle.
         /// </summary>
         [Test]
         public void NativeArray_BuildAndRelease_NoLeakedNativeArray()
         {
-            long countBefore = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
@@ -472,7 +477,7 @@ namespace MapRenderer.Tests
                 // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
                 // should have been disposed (in ConsumeTessellationTask's finally block after UploadMesh).
                 // Counter must already be at baseline (consume-path disposes immediately after upload).
-                long countAfterConsume = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                long countAfterConsume = MeshDataTessellation.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfterConsume,
                     $"After normal consume (ConsumeTessellationTask), NativeArray counter must equal baseline. " +
                     $"Baseline={countBefore}, After consume={countAfterConsume}. " +
@@ -482,7 +487,7 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(go);
                 go = null;
 
-                long countAfterTeardown = StyledFillTileBuilder.LayerMeshData.DebugLiveAllocCount;
+                long countAfterTeardown = MeshDataTessellation.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfterTeardown,
                     $"After Teardown, NativeArray counter must equal baseline. " +
                     $"Baseline={countBefore}, After teardown={countAfterTeardown}.");

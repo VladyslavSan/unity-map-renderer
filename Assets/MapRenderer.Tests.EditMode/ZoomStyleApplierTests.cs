@@ -1,7 +1,7 @@
-// Unity EditMode only — uses StyledLayerSet, MaterialFactory, ZoomStyleApplier.
+// Unity EditMode only — uses RenderLayerSet, MaterialFactory, ZoomStyleApplier.
 // NOT included in Tools/core-tests.
 //
-// S54: retargeted off the retired LayerStack MonoBehaviour onto the live StyledLayerSet
+// S54: retargeted off the retired LayerStack MonoBehaviour onto the live RenderLayerSet
 // (the production "style → GPU layers" path) + MaterialFactory. The teeth are unchanged:
 // per-layer distinct materials, ordered queues, premultiplied-alpha color, mesh-reference-
 // unchanged (build-once / restyle-via-uniforms), and zero-GC on the swept zoom hot path.
@@ -34,7 +34,7 @@ namespace MapRenderer.Tests
     ///   4. Allocation gate: <c>ApplyZoom</c> with SWEEPING zoom allocates zero GC bytes
     ///      (acceptance #4 — Unity-side full path including Material.SetFloat/SetColor).
     ///
-    /// S54: drives the live <see cref="StyledLayerSet"/> / <see cref="MaterialFactory"/> path (the
+    /// S54: drives the live <see cref="RenderLayerSet"/> / <see cref="MaterialFactory"/> path (the
     /// production "style → GPU layers" machinery), replacing the retired LayerStack MonoBehaviour.
     /// </summary>
     [TestFixture]
@@ -55,10 +55,10 @@ namespace MapRenderer.Tests
     ]
 }";
 
-        private static StyledLayerSet BuildTwoLayerSet(double initialZoom = 0.0)
+        private static RenderLayerSet BuildTwoLayerSet(double initialZoom = 0.0)
         {
             var style = StyleParser.Parse(TwoLayerStyleJson);
-            var set = new StyledLayerSet();
+            var set = new RenderLayerSet();
             set.Build(style, initialZoom, MapMaterialSetTestUtil.Load());
             return set;
         }
@@ -155,28 +155,29 @@ namespace MapRenderer.Tests
         // ── 3. Per-layer distinct Material instances (acceptance #5) ─────────────
 
         [Test]
-        public void StyledLayerSet_PerLayerMaterials_AreDistinctInstances()
+        public void RenderLayerSet_PerLayerMaterials_AreDistinctInstances()
         {
             using var set = BuildTwoLayerSet();
-            Assert.AreEqual(1, set.FillCount, "Expected one fill layer.");
-            Assert.AreEqual(1, set.LineCount, "Expected one line layer.");
+            Assert.AreEqual(2, set.Count, "Expected two render layers (one fill, one line).");
+            Assert.IsInstanceOf<MapRenderer.Core.Style.Fill.StyleLayer>(set[0].StyleLayer, "Layer 0 is the fill.");
+            Assert.IsInstanceOf<MapRenderer.Core.Style.Line.StyleLayer>(set[1].StyleLayer, "Layer 1 is the line.");
 
-            Material m0 = set.Fills[0].Material;
-            Material m1 = set.Lines[0].Material;
+            Material m0 = set[0].Material;
+            Material m1 = set[1].Material;
 
             Assert.IsFalse(ReferenceEquals(m0, m1),
                 "Each layer must have its own distinct Material instance (never shared).");
         }
 
         [Test]
-        public void StyledLayerSet_DeclaredOrder_QueueIsStrictlyIncreasing()
+        public void RenderLayerSet_DeclaredOrder_QueueIsStrictlyIncreasing()
         {
             using var set = BuildTwoLayerSet();
 
-            // Declared order: fill0 (index 0) then line1 (index 1). A single monotonic draw index is
-            // assigned across fills AND lines, so the fill's queue must be lower than the line's.
-            int q0 = set.Fills[0].Material.renderQueue;
-            int q1 = set.Lines[0].Material.renderQueue;
+            // Declared order: fill (index 0) then line (index 1). A single monotonic draw index is assigned
+            // across ALL layers, so the fill's queue must be lower than the line's.
+            int q0 = set[0].Material.renderQueue;
+            int q1 = set[1].Material.renderQueue;
 
             Assert.Less(q0, q1,
                 "Layer 0 (fill, declared first) must have a lower render queue than layer 1 (line) " +

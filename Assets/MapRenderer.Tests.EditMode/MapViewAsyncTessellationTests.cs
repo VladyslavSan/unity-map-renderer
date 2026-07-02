@@ -186,34 +186,31 @@ namespace MapRenderer.Tests
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
             int capturedThreadId = mainThreadId; // will be overwritten in the task
 
-            // Run BuildMeshData on a background task and capture the thread id.
+            // AllocateWritableMeshData is main-thread only; tessellate INTO it on a background task and
+            // capture the thread id (S89 Stage B: the worker-write path, spike-guarded).
+            var mda = Mesh.AllocateWritableMeshData(1);
             var task = Task.Run(() =>
             {
                 capturedThreadId = Thread.CurrentThread.ManagedThreadId;
-                return StyledFillTileBuilder.BuildMeshData(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
+                StyledFillTileBuilder.WriteMeshData(
+                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
+                    out int vc, out _);
+                return vc;
             });
 
-            StyledFillTileBuilder.LayerMeshData data = task.GetAwaiter().GetResult();
+            int vertexCount = task.GetAwaiter().GetResult();
 
             try
             {
                 Assert.AreNotEqual(mainThreadId, capturedThreadId,
-                    "Tooth 2: BuildMeshData must run on a background ThreadPool thread (not the main thread). " +
+                    "Tooth 2: WriteMeshData must run on a background ThreadPool thread (not the main thread). " +
                     $"Main thread id: {mainThreadId}, captured thread id: {capturedThreadId}.");
 
-                // S48: use IsCreated / VertexCount instead of the managed Features list
-                // (Features is retained for legacy compat; prefer stream-based assertions).
-                Assert.IsTrue(data.IsCreated, "BuildMeshData must produce geometry (IsCreated = true)");
-                Assert.Greater(data.VertexCount, 0, "BuildMeshData must produce at least one vertex");
-                // Also check legacy Features list is populated (backward compat).
-                Assert.IsNotNull(data.Features, "BuildMeshData must populate Features list");
-                Assert.Greater(data.Features.Count, 0, "BuildMeshData must produce at least one feature");
+                Assert.Greater(vertexCount, 0, "WriteMeshData must produce at least one vertex off the main thread");
             }
             finally
             {
-                // S48: must dispose NativeArrays produced by BuildMeshData.
-                data.Dispose();
+                mda.Dispose(); // never applied — dispose the writable array
             }
         }
 
@@ -375,13 +372,13 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(mvtLayer);
 
                 var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-                Mesh syncMesh = StyledFillTileBuilder.BuildMesh(
+                Mesh syncMesh = TestTileMeshBuilder.BuildFill(
                     features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
                     new double2(bMin.x, bMin.y));
                 Assert.IsNotNull(syncMesh);
 
                 Assert.AreEqual(syncMesh.vertexCount, asyncMesh.vertexCount,
-                    "Tooth 3: Async live-loop mesh vertex count must equal direct sync BuildMesh output. " +
+                    "Tooth 3: Async live-loop mesh vertex count must equal direct sync builder output. " +
                     "Same feature set + same managed projection = same vertex layout.");
 
                 // Position comparison — both paths use the same ProjectVerticesManaged code,
@@ -604,29 +601,34 @@ namespace MapRenderer.Tests
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
-            // Sync path.
-            Mesh syncMesh = StyledFillTileBuilder.BuildMesh(
+            // Reference path: tessellate + apply entirely on THIS (main) thread.
+            Mesh syncMesh = TestTileMeshBuilder.BuildFill(
                 features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
 
-            // Split path: CPU data (off-main safe) + upload (main-thread).
-            // S48: BuildMeshData returns NativeArrays; must Dispose after upload.
-            var data = StyledFillTileBuilder.BuildMeshData(
-                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
-            Mesh splitMesh;
-            try
+            // Split path (production shape): allocate on main, WRITE off the main thread, apply on main.
+            var mda = Mesh.AllocateWritableMeshData(1);
+            var task = Task.Run(() =>
             {
-                splitMesh = StyledFillTileBuilder.UploadMesh(data);
-            }
-            finally
-            {
-                data.Dispose(); // S48: dispose NativeArrays after upload
-            }
+                StyledFillTileBuilder.WriteMeshData(
+                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
+                    out int vc, out _);
+                return vc;
+            });
+            int splitVertexCount = task.GetAwaiter().GetResult();
 
-            Assert.IsNotNull(syncMesh,  "Sync BuildMesh must return a mesh for the fixture");
-            Assert.IsNotNull(splitMesh, "Split BuildMeshData+UploadMesh must return a mesh for the fixture");
+            Mesh splitMesh = null;
+            if (splitVertexCount > 0)
+            {
+                splitMesh = new Mesh { indexFormat = UnityEngine.Rendering.IndexFormat.UInt32 };
+                Mesh.ApplyAndDisposeWritableMeshData(mda, splitMesh);
+            }
+            else mda.Dispose();
+
+            Assert.IsNotNull(syncMesh,  "Main-thread build must return a mesh for the fixture");
+            Assert.IsNotNull(splitMesh, "Off-main write + main apply must return a mesh for the fixture");
 
             Assert.AreEqual(syncMesh.vertexCount, splitMesh.vertexCount,
-                "BuildMeshData + UploadMesh must produce the same vertex count as synchronous BuildMesh.");
+                "Off-main WriteMeshData + main apply must produce the same vertex count as the main-thread build.");
 
             // Vertex positions must match exactly — both call the same ProjectVerticesManaged,
             // so there should be no ULP difference between the split and sync paths.
@@ -639,7 +641,7 @@ namespace MapRenderer.Tests
                 int last = syncVerts.Length - 1;
 
                 Assert.AreEqual(syncVerts[0],    splitVerts[0],
-                    "First vertex position must match between BuildMesh and BuildMeshData+UploadMesh.");
+                    "First vertex position must match between the main-thread and off-main builds.");
                 Assert.AreEqual(syncVerts[mid],  splitVerts[mid],
                     $"Middle vertex [{mid}] position must match.");
                 Assert.AreEqual(syncVerts[last], splitVerts[last],

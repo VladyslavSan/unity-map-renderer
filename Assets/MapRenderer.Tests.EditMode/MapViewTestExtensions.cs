@@ -72,8 +72,8 @@ namespace MapRenderer.Tests
             // tests wire once, never restyle-diff.
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
-            foreach (var f in mv.Layers.Fills) AddSpec(f.StyleLayer?.Source);
-            foreach (var l in mv.Layers.Lines) AddSpec(l.StyleLayer?.Source);
+            var layers = mv.Layers.Layers;
+            for (int i = 0; i < layers.Count; i++) AddSpec(layers[i].StyleLayer?.Source);
             mv.TileManager.SetSources(specs, view.Config.Backend);
 
             void AddSpec(string sid)
@@ -84,11 +84,25 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Number of fill render bundles MapView built from the style.</summary>
-        public static int FillLayerCount(this MapViewComponent view) => view.Layers.FillCount;
+        /// <summary>Number of fill render layers MapView built from the style. Counts by Core style type over
+        /// the one ordered render-layer list — the production type carries no fill/line discriminator (the
+        /// unification's point), so the fill/line split lives here in the test assembly.</summary>
+        public static int FillLayerCount(this MapViewComponent view)
+            => CountLayersOfType<MapRenderer.Core.Style.Fill.StyleLayer>(view);
 
-        /// <summary>Number of line render bundles MapView built from the style.</summary>
-        public static int LineLayerCount(this MapViewComponent view) => view.Layers.LineCount;
+        /// <summary>Number of line render layers MapView built from the style (see <see cref="FillLayerCount"/>).</summary>
+        public static int LineLayerCount(this MapViewComponent view)
+            => CountLayersOfType<MapRenderer.Core.Style.Line.StyleLayer>(view);
+
+        private static int CountLayersOfType<T>(MapViewComponent view)
+        {
+            var layers = view.Layers?.Layers;
+            if (layers == null) return 0;
+            int n = 0;
+            for (int i = 0; i < layers.Count; i++)
+                if (layers[i].StyleLayer is T) n++;
+            return n;
+        }
 
         // ── Tile lifecycle observability (forwarded to the TileManager) ──────────────────────────
 
@@ -149,7 +163,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Assigns the committed production <see cref="MapMaterialSet"/> so the view can build per-layer
         /// materials. Required since S58 retired the <c>Shader.Find</c> fallback — without a config the
-        /// factory returns null and <see cref="StyledLayerSet"/> builds zero layers. Returns the view for
+        /// factory returns null and <see cref="RenderLayerSet"/> builds zero layers. Returns the view for
         /// chaining: <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
         /// </summary>
         public static MapViewComponent WithTestMaterials(this MapViewComponent view)

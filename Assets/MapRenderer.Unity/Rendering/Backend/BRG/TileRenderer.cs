@@ -18,7 +18,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
     /// Draws tile-layer meshes via <see cref="BatchRendererGroup"/> instead of per-layer GameObjects.
     /// One <see cref="BatchDrawCommand"/> per (tile,layer) mesh, sharing one batch and one
     /// <see cref="GraphicsBuffer"/> for all per-instance data. Materials are registered once from the
-    /// <see cref="StyledLayerSet"/>; draw commands are emitted in ascending renderQueue order so the
+    /// <see cref="RenderLayerSet"/>; draw commands are emitted in ascending renderQueue order so the
     /// painter's-algorithm layer order is honoured (NOT GameObject child order).
     ///
     /// Per-instance buffer layout: see <see cref="MapInstanceData"/> (the single source of truth for
@@ -66,8 +66,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         private readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
         private int _nextHandle;
 
-        // Per-layer materials registered with BRG (same order: fills first, then lines).
-        // mat is referenced (not owned) — StyledLayerSet disposes materials on teardown.
+        // Per-layer materials registered with BRG in declared order (index == materialIndex == draw order).
+        // mat is referenced (not owned) — RenderLayerSet disposes materials on teardown.
         private readonly List<(BatchMaterialID id, Material mat)> _layerMaterials
             = new List<(BatchMaterialID, Material)>(16);
 
@@ -108,22 +108,19 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Constructs the BRG and registers each layer material from <paramref name="layers"/>.
-        /// Materials are referenced (not owned) — <see cref="StyledLayerSet"/> disposes them.
+        /// Constructs the BRG and registers each layer material from <paramref name="layerMaterials"/> — the
+        /// one ordered, per-layer material list in declared order (<c>index == materialIndex ==
+        /// AddTileLayer index</c>). Materials are referenced (not owned) — the <see cref="Style.RenderLayerSet"/>
+        /// disposes them. Draw order is decided per-item by <c>material.renderQueue</c> in <see cref="Rebuild"/>,
+        /// independent of this registration order.
         /// </summary>
-        public TileRenderer(Style.StyledLayerSet layers)
+        public TileRenderer(System.Collections.Generic.IReadOnlyList<Material> layerMaterials)
         {
             _brg = new BatchRendererGroup(OnPerformCulling, IntPtr.Zero);
 
-            for (int i = 0; i < layers.FillCount; i++)
+            for (int i = 0; i < layerMaterials.Count; i++)
             {
-                var mat   = layers.Fills[i].Material;
-                var brgId = _brg.RegisterMaterial(mat);
-                _layerMaterials.Add((brgId, mat));
-            }
-            for (int i = 0; i < layers.LineCount; i++)
-            {
-                var mat   = layers.Lines[i].Material;
+                var mat   = layerMaterials[i];
                 var brgId = _brg.RegisterMaterial(mat);
                 _layerMaterials.Add((brgId, mat));
             }
