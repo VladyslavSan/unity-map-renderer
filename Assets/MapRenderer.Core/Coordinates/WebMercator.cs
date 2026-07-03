@@ -39,7 +39,7 @@ namespace MapRenderer.Core.Geo
         /// Single source of truth: replaces the old private CameraPoseMath.TilePixelSize and
         /// the old public ViewInput.TilePixelSize (removed in S62).
         /// </summary>
-        public const double TilePixelSize = 256.0;
+        public const double TilePixelSize = 512.0;
 
         // ── Forward projection (the single source of the Mercator literal) ────────────────────────
 

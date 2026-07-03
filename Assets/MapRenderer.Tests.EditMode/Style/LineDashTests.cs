@@ -109,8 +109,11 @@ namespace MapRenderer.Tests
         [Test]
         public void DashCoverage_ZoomStable_CycleCountTimesWidthMIsConstantAcrossZoom()
         {
-            double zoom1 = 14.0;
-            double zoom2 = 15.0;
+            // S93 relabel: the 512 convention shifts every zoom number −1, so what was z14/z15 is now z13/z14 —
+            // the widthM / cycle counts are bit-identical to the pre-flip run (GroundResolution_512(13) ==
+            // GroundResolution_256(14)), keeping this discretization-sensitive check on the same footing.
+            double zoom1 = 13.0;
+            double zoom2 = 14.0;
             const double widthPx = 4.0;
             double mpp1 = CameraPoseMath.MetersPerPixel(zoom1);
             double mpp2 = CameraPoseMath.MetersPerPixel(zoom2);

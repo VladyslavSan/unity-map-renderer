@@ -193,6 +193,7 @@ namespace MapRenderer.Core.Data
             }
             catch
             {
+                bool removedByMe = false;
                 lock (_lock)
                 {
                     // Only clean up if we are still the registered fetch for this tile.
@@ -200,9 +201,13 @@ namespace MapRenderer.Core.Data
                     {
                         _inFlight.Remove(id);
                         _cts.Remove(id);
+                        removedByMe = true;
                     }
                 }
-                DisposeCtsIfUnregistered(id, tileCts);
+                // Disposal ownership follows removal: only the caller that removed the CTS disposes it. If
+                // Release() removed it instead (removedByMe stays false), it owns Cancel()+Dispose() — we must
+                // NOT dispose, or we race its Cancel() into an ObjectDisposedException.
+                if (removedByMe) tileCts.Dispose();
                 throw;
             }
 
@@ -214,6 +219,7 @@ namespace MapRenderer.Core.Data
             //    UniTask.SwitchToThreadPool forces the ThreadPool, so the continuation runs freely.
             await UniTask.SwitchToThreadPool();
 
+            bool ownsCts = false;
             lock (_lock)
             {
                 // Only cache the result if this CTS is still the registered one for this tile.
@@ -237,28 +243,15 @@ namespace MapRenderer.Core.Data
                     // nor suppressed; the next request re-fetches.
                     _inFlight.Remove(id);
                     _cts.Remove(id);
+                    ownsCts = true;
                 }
                 // else: tile was released while in-flight — discard result, don't cache.
             }
 
-            DisposeCtsIfUnregistered(id, tileCts);
+            // Disposal ownership follows removal (see the catch above): if Release() removed this CTS, it owns
+            // Cancel()+Dispose(); disposing here too would race its Cancel() into an ObjectDisposedException.
+            if (ownsCts) tileCts.Dispose();
             return response;
-        }
-
-        /// <summary>
-        /// Disposes <paramref name="tileCts"/> only if it has already been removed from <c>_cts</c>
-        /// (i.e. either the completion path or Release removed it). Avoids double-dispose when
-        /// Release() and the completion path race.
-        /// </summary>
-        private void DisposeCtsIfUnregistered(TileId id, CancellationTokenSource tileCts)
-        {
-            bool stillRegistered;
-            lock (_lock)
-            {
-                stillRegistered = _cts.TryGetValue(id, out var c) && c == tileCts;
-            }
-            if (!stillRegistered)
-                tileCts.Dispose();
         }
 
         public void Dispose()

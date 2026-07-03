@@ -22,11 +22,11 @@ namespace MapRenderer.Unity.Rendering.Map
         public int MinZoom = 0;
         public int MaxZoom = 14;
 
-        [Tooltip("S88: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
+        [Tooltip("S88/S93: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
                  "512 convention MapLibre vector tiles are authored for. Enters ONLY as a selection-zoom " +
-                 "offset (log2(256/OnScreenTilePx)); 512 ⇒ one level coarser ⇒ ~4× fewer, larger tiles over " +
-                 "the SAME ground span (paint/GroundResolution math is frozen). 256 = the dense legacy S71 " +
-                 "behaviour.")]
+                 "offset (log2(TilePixelSize/OnScreenTilePx)); since S93 unified on TilePixelSize=512, the " +
+                 "default 512 ⇒ offset 0 ⇒ camera zoom == tile zoom, ~4× fewer/larger tiles than the old 256 " +
+                 "convention. Set 256 for the dense legacy S71 density (offset +1, one level finer).")]
         public int OnScreenTilePx = 512;
 
         [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +

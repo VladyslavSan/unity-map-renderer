@@ -85,23 +85,23 @@ namespace MapRenderer.Jobs
 
         public void Dispose()
         {
-            if (!IsCreated) return;
+            if (!IsCreated) return;   // struct-level idempotency; NativeArray.Dispose() already no-ops per field
             IsCreated = false;
-            if (TileVertices.IsCreated)     TileVertices.Dispose();
-            if (RingOffsets.IsCreated)      RingOffsets.Dispose();
-            if (RingFeatureIdx.IsCreated)   RingFeatureIdx.Dispose();
-            if (PolyOuterRingIdx.IsCreated) PolyOuterRingIdx.Dispose();
-            if (PolyHoleListStart.IsCreated) PolyHoleListStart.Dispose();
-            if (PolyHoleCount.IsCreated)    PolyHoleCount.Dispose();
-            if (HoleRingIdxs.IsCreated)     HoleRingIdxs.Dispose();
-            if (TriangleIndices.IsCreated)  TriangleIndices.Dispose();
-            if (WorldPositions.IsCreated)   WorldPositions.Dispose();
-            if (VertexUp.IsCreated)         VertexUp.Dispose();
-            if (VertexFeatureIdx.IsCreated) VertexFeatureIdx.Dispose();
-            if (RingCount.IsCreated)        RingCount.Dispose();
-            if (VertexCount.IsCreated)      VertexCount.Dispose();
-            if (PolygonCount.IsCreated)     PolygonCount.Dispose();
-            if (HoleCount.IsCreated)        HoleCount.Dispose();
+            TileVertices.Dispose();
+            RingOffsets.Dispose();
+            RingFeatureIdx.Dispose();
+            PolyOuterRingIdx.Dispose();
+            PolyHoleListStart.Dispose();
+            PolyHoleCount.Dispose();
+            HoleRingIdxs.Dispose();
+            TriangleIndices.Dispose();
+            WorldPositions.Dispose();
+            VertexUp.Dispose();
+            VertexFeatureIdx.Dispose();
+            RingCount.Dispose();
+            VertexCount.Dispose();
+            PolygonCount.Dispose();
+            HoleCount.Dispose();
         }
     }
 }

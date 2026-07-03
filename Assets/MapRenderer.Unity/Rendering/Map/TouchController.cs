@@ -57,7 +57,7 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Degrees of heading change per degree of inter-finger-angle change.")]
         public float BearingSensitivity = 0.5f;
 
-        [Tooltip("Degrees of tilt change per device-pixel of vertical centroid movement.")]
+        [Tooltip("Degrees of tilt change per LOGICAL pixel of vertical centroid movement (density-independent).")]
         public float PitchSensitivity = 0.2f;
 
         // ── Clamps ────────────────────────────────────────────────────────────────────────────────
@@ -66,20 +66,16 @@ namespace MapRenderer.Unity.Rendering.Map
         public float MinZoom  = 0f;
         public float MaxZoom  = 22f;
 
-        // ── Disambiguation thresholds (device px, before DPI scaling) ─────────────────────────────
-        [Header("Disambiguation thresholds (device px)")]
-        [Tooltip("Inter-finger distance change (device px) needed to classify as a pinch.")]
+        // ── Disambiguation thresholds (LOGICAL px — constant physical size, S92 touch-DPI closure) ────
+        [Header("Disambiguation thresholds (logical px)")]
+        [Tooltip("Inter-finger distance change (logical px) needed to classify as a pinch.")]
         public float PinchDistanceThresholdPx = 10f;
 
         [Tooltip("Inter-finger angle change (degrees) needed to classify as a twist.")]
         public float TwistAngleThresholdDeg = 5f;
 
-        [Tooltip("Vertical centroid displacement (device px) needed to classify as a tilt drag.")]
+        [Tooltip("Vertical centroid displacement (logical px) needed to classify as a tilt drag.")]
         public float TiltCentroidThresholdPx = 10f;
-
-        // ── DPI fallback (deterministic headless default, mirrors ReferenceViewportHeightPx) ───────
-        [Tooltip("Fallback DPI used when Screen.dpi is 0 (headless/test mode).")]
-        public float DpiFallback = 96f;
 
         // ── Internal state ────────────────────────────────────────────────────────────────────────
         private TouchGestureRecognizer   _recognizer;
@@ -103,10 +99,11 @@ namespace MapRenderer.Unity.Rendering.Map
         // during play are picked up on next enable cycle).
         private void RebuildRecognizer()
         {
-            double dpiScale = Screen.dpi > 0f ? Screen.dpi : DpiFallback;
+            // The seam is fed LOGICAL px (Update divides by DevicePixelRatio), so thresholds and pitch
+            // sensitivity are already density-independent — normalization happens ONCE, at the position basis,
+            // mirroring the mouse seam (S92 touch-DPI closure). No per-density threshold scaling here.
             var cfg = new TouchGestureConfig
             {
-                DpiScale                   = dpiScale,
                 ZoomSensitivity            = ZoomSensitivity,
                 BearingSensitivity         = BearingSensitivity,
                 PitchSensitivity           = PitchSensitivity,
@@ -126,10 +123,15 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             if (Map == null || Map.Camera == null) return;
 
-            // Build per-frame view context (same pattern as Controller.Update).
+            // Build per-frame view context (same pattern as Controller.Update). The interaction seam runs in
+            // LOGICAL pixels (S92 D3): divide the viewport AND every touch contact by DPR so anchors and the
+            // render camera (MapCamera D1 frames vp/DPR) share one basis — else pinch/pan drifts off the
+            // fingers on a high-DPI panel. Density normalization lives ONLY here now; the recognizer's
+            // thresholds are plain logical px, mirroring the mouse seam. Guard ≤0 → 1.
+            double dpr = Map.Config.DevicePixelRatio > 0.0 ? Map.Config.DevicePixelRatio : 1.0;
             double2 vp = new double2(
                 camera != null ? camera.pixelWidth  : Screen.width,
-                camera != null ? camera.pixelHeight : Screen.height);
+                camera != null ? camera.pixelHeight : Screen.height) / dpr;
 
             var view = new ViewContext
             {
@@ -147,11 +149,11 @@ namespace MapRenderer.Unity.Rendering.Map
                 CoreTouchPhase corePh = MapCorePhase(t.phase);
                 if (corePh < 0) continue; // skip unknown phases
 
-                var pos = t.screenPosition; // Vector2, device px
+                var pos = t.screenPosition; // Vector2, device (physical) px
                 _samples.Add(new TouchSample
                 {
                     FingerId   = t.finger.index,
-                    PositionPx = new double2(pos.x, pos.y),
+                    PositionPx = new double2(pos.x, pos.y) / dpr, // logical px (S92 D3 seam)
                     Phase      = corePh,
                 });
             }

@@ -21,9 +21,10 @@ namespace MapRenderer.Tests
         private static ViewContext View(in CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = new double2(RefH, RefH), Projection = new SphericalProjection() };
 
-        // onScreenTilePx 256 ⇒ selection-zoom offset 0 ⇒ emitted z == IntegerZoom (predictable in tests).
+        // onScreenTilePx 512 == TilePixelSize (S93) ⇒ selection-zoom offset 0 ⇒ emitted z == IntegerZoom
+        // (the PRODUCTION default now, and predictable in tests). Was 256 under the old 256 convention.
         private static GlobeTileSelector Sel(int pad = 1)
-            => new GlobeTileSelector(padTiles: pad, minZoom: 0, maxZoom: 22, onScreenTilePx: 256);
+            => new GlobeTileSelector(padTiles: pad, minZoom: 0, maxZoom: 22, onScreenTilePx: 512);
 
         [Test]
         public void Z0_EmitsExactlyTheSingleWorldTile()
@@ -66,7 +67,10 @@ namespace MapRenderer.Tests
         public void NearPole_CoversAllColumns()
         {
             var buf = new List<TileId>();
-            Sel().SelectVisibleTiles(View(Cam(0, 84.0, 6.0)), buf); // cap reaches the (unmapped) pole
+            // S93 relabel: the 512 convention numbers every zoom −1, so the old z6 view is now z5 (the cap size
+            // is a physical quantity — GroundResolution_512(5) == GroundResolution_256(6) — so z5 now reaches
+            // the pole exactly as z6 did before). n derives from the emitted Z, so the assert self-adjusts.
+            Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf); // cap reaches the (unmapped) pole
 
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;

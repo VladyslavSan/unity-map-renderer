@@ -7,7 +7,6 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Jobs;
@@ -170,6 +169,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (totalVerts == 0 || totalIndices == 0)
                     return;
 
+                // The globe curves: earcut's flat triangles chord THROUGH the sphere (fills sink / facet at low
+                // zoom), so refine them (C-3) and write the subdivided geometry — which also carries the correct
+                // per-vertex east Tangent. The flat Mercator path below stays byte-identical.
+                IProjection proj = projection ?? DefaultProjection;
+                if (proj.ReversesWinding)
+                {
+                    WriteGlobeSubdivided(md, in buffers, proj, id, extent, tileOriginRender, featureColors,
+                        out vertexCount, out bounds);
+                    return; // finally still disposes buffers
+                }
+
                 // Phase 2: declare the mesh buffers on the MeshData (off-main-thread safe) and grab stream views.
                 md.SetVertexBufferParams(totalVerts, FillVertexDescriptors);
                 NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
@@ -200,8 +210,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                     double2 tv = buffers.TileVertices[i];
                     s1[i] = new Vector2((float)(tv.x * extentInv), (float)(tv.y * extentInv));
-                    s2[i] = FlatTangent;                              // constant +X tangent (S34)
-                    s3[i] = featureColors[buffers.VertexFeatureIdx[i]]; // per-feature linear color
+                    s2[i] = FlatTangent;                                 // Mercator: constant +X east (globe → subdivided path)
+                    s3[i] = featureColors[buffers.VertexFeatureIdx[i]];  // per-feature linear color
                 }
 
                 for (int i = 0; i < totalIndices; i++)
@@ -218,6 +228,70 @@ namespace MapRenderer.Unity.Rendering.Meshing
             finally
             {
                 buffers.Dispose();
+            }
+        }
+
+        // Globe fill (C-3): refine earcut's flat triangles onto the sphere (Burst job, projection devirtualised),
+        // then stream the subdivided geometry — which also carries the per-vertex east Tangent. Allocation-free:
+        // the earcut NativeArrays feed the job directly and the refined output lands in Temp-scope NativeLists.
+        private static void WriteGlobeSubdivided(
+            Mesh.MeshData md, in TileMeshBuffers buffers, IProjection proj, TileId id, double extent,
+            double3 tileOriginRender, List<Vector4> featureColors, out int vertexCount, out Bounds bounds)
+        {
+            vertexCount = 0;
+            bounds      = default;
+
+            int srcVerts   = buffers.VertexCount[0];
+            int srcIndices = buffers.TotalIndexCount;
+
+            var outV  = new NativeList<GlobeFillVertex>(srcVerts * 4, Allocator.Persistent);
+            var outIx = new NativeList<int>(srcIndices * 4, Allocator.Persistent);
+            try
+            {
+                GlobeFillSubdivideDispatch.Run(
+                    proj, buffers.TileVertices, buffers.TriangleIndices, buffers.VertexFeatureIdx,
+                    srcVerts, srcIndices, id, extent, tileOriginRender,
+                    GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
+                    GlobeFillSubdivideDispatch.DefaultMaxOutputVertices, outV, outIx);
+
+                int n = outV.Length, ni = outIx.Length;
+                if (n == 0 || ni == 0) return;
+
+                md.SetVertexBufferParams(n, FillVertexDescriptors);
+                NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
+                NativeArray<Vector2>            s1 = md.GetVertexData<Vector2>(1);
+                NativeArray<Vector4>            s2 = md.GetVertexData<Vector4>(2);
+                NativeArray<Vector4>            s3 = md.GetVertexData<Vector4>(3);
+                md.SetIndexBufferParams(ni, IndexFormat.UInt32);
+                NativeArray<int> indices = md.GetIndexData<int>();
+
+                double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
+                float3 bMin = new float3(float.MaxValue);
+                float3 bMax = new float3(float.MinValue);
+                for (int i = 0; i < n; i++)
+                {
+                    GlobeFillVertex fv = outV[i];
+                    float3 v = (float3)fv.World;
+                    bMin = math.min(bMin, v); bMax = math.max(bMax, v);
+                    float3 up = (float3)fv.Up;
+                    s0[i] = new FillPositionNormal { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
+                    s1[i] = new Vector2((float)(fv.Tile.x * extentInv), (float)(fv.Tile.y * extentInv));
+                    float3 east = (float3)fv.East;
+                    s2[i] = new Vector4(east.x, east.y, east.z, 1f);      // w=+1: same TBN handedness as the Mercator path
+                    s3[i] = featureColors[fv.Feature];
+                }
+                for (int i = 0; i < ni; i++) indices[i] = outIx[i];
+
+                md.subMeshCount = 1;
+                md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);
+                vertexCount = n;
+                float3 c3 = (bMin + bMax) * 0.5f; float3 sz = bMax - bMin;
+                bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
+            }
+            finally
+            {
+                outV.Dispose();
+                outIx.Dispose();
             }
         }
     }

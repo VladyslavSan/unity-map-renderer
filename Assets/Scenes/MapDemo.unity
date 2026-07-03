@@ -434,7 +434,7 @@ MonoBehaviour:
   StyleAssetPath: Fixtures/liberty.json
   InitialLatitude: 52.52
   InitialLongitude: 13.405
-  InitialZoom: 14
+  InitialZoom: 13
   CapFrameRateToRefreshRate: 1
 --- !u!114 &300000006
 MonoBehaviour:

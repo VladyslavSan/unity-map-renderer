@@ -87,7 +87,7 @@ namespace MapRenderer.Tests
             const double fov    = 60.0;
 
             const double earthCirc = 40075016.686;
-            const double tileSize  = 256.0;
+            const double tileSize  = 512.0; // S93: the 512 convention (was 256)
             double mpp      = earthCirc / (tileSize * Math.Pow(2.0, zoom));
             double halfFov  = fov * 0.5 * Math.PI / 180.0;
             double expected = (height * mpp) / (2.0 * Math.Tan(halfFov));

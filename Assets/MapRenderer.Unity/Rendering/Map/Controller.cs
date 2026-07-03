@@ -76,8 +76,16 @@ namespace MapRenderer.Unity.Rendering.Map
 
         public float MaxPitch = 60f;
 
-        [Header("Zoom clamp")] public float MinZoom = 0f;
-        public                        float MaxZoom = 22f;
+        [Header("Zoom clamp")]
+        [Tooltip("Device-derived MIN-zoom floor — recomputed each frame from the LOGICAL viewport (S92 D2) so " +
+                 "the most-zoomed-out level frames the whole world with a margin (no world-square grape). The " +
+                 "serialized value is only a frame-0 seed; it is overwritten live in Update.")]
+        public float MinZoom = 0f;
+        public float MaxZoom = 22f;
+
+        [Tooltip("Breathing-room margin (in zoom levels) for the device-derived MinZoom floor (S92 D2). " +
+                 "0.5 ⇒ the world is ~1.4× smaller than the viewport at the floor.")]
+        public float MinZoomMargin = 0.5f;
 
         // ── Camera framing (bridge — altitude derived from zoom, S42 D2) ──────────────────────────
         [Header("Camera framing — altitude derived from zoom (S42 D2)")]
@@ -104,11 +112,22 @@ namespace MapRenderer.Unity.Rendering.Map
             CameraPropertiesUpdate patch     = default;
             bool                   anyChange = false;
 
-            // Resolve the active projection and viewport once per frame.
+            // Resolve the active projection once per frame.
             IProjection projection = Map.Camera.Projection;
-            double2     vp         = new double2(
+
+            // The camera-interaction seam runs entirely in LOGICAL pixels (S92 D3): divide BOTH the viewport
+            // and the cursor by DPR at their single read sites, so everything downstream — the ViewContext,
+            // the gesture anchors, ScreenToGround/GroundToScreen — shares the render camera's logical basis
+            // (MapCamera D1 frames vp/DPR). Config.DevicePixelRatio is the SAME source the render reads, so
+            // reconstruction and render can't diverge → the anchored-pan pin holds under DPR≠1. Guard ≤0 → 1.
+            double dpr = Map.Config.DevicePixelRatio > 0.0 ? Map.Config.DevicePixelRatio : 1.0;
+            double2 vp = new double2(
                 Camera != null ? Camera.pixelWidth  : Screen.width,
-                Camera != null ? Camera.pixelHeight : Screen.height);
+                Camera != null ? Camera.pixelHeight : Screen.height) / dpr;
+
+            // Device-derived MIN-zoom floor from the (now logical) viewport (S92 D2): the most-zoomed-out level
+            // frames the whole world with breathing room instead of shrinking to a useless world-square grape.
+            MinZoom = (float)CameraPoseMath.MinZoomToFit(vp.x, vp.y, MinZoomMargin);
 
             // Build the per-frame view context (camera + live interaction viewport + projection).
             // The live viewport is used here so cursor positions and viewport are in the same pixel
@@ -131,7 +150,7 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 // Read cursor position once (used by both scroll-zoom and drag).
                 Vector2 mousePos = mouse.position.ReadValue();
-                double2 cursor   = new double2(mousePos.x, mousePos.y);
+                double2 cursor   = new double2(mousePos.x, mousePos.y) / dpr; // logical px (S92 D3 seam)
 
                 float scroll = mouse.scroll.ReadValue().y;
                 if (scroll != 0f)
@@ -192,11 +211,23 @@ namespace MapRenderer.Unity.Rendering.Map
                             _dragging      = true;
                         }
 
-                        var pi = GestureIntent.Pan(_grabbedGround, cursor);
-                        CameraPropertiesUpdate pan = ViewInput.Apply(pi, view);
-                        patch.Longitude = pan.Longitude;
-                        patch.Latitude  = pan.Latitude;
-                        anyChange       = true;
+                        // The globe uses a BOUNDED rotation solve — the planar affine anchored pan diverges near
+                        // the sphere's limb (spins the earth at low zoom). The planar path keeps ViewInput.ApplyPan.
+                        if (projection is SphericalProjection sphere)
+                        {
+                            GeoCoordinate3D newLookAt = sphere.PanLookAtForGrab(
+                                _grabbedGround, cursor, vp, Map.Camera.CurrentProperties);
+                            patch.Longitude = newLookAt.Longitude;
+                            patch.Latitude  = newLookAt.Latitude;
+                        }
+                        else
+                        {
+                            var pi = GestureIntent.Pan(_grabbedGround, cursor);
+                            CameraPropertiesUpdate pan = ViewInput.Apply(pi, view);
+                            patch.Longitude = pan.Longitude;
+                            patch.Latitude  = pan.Latitude;
+                        }
+                        anyChange = true;
                     }
                 }
                 else

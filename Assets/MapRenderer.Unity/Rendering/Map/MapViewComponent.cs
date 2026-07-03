@@ -58,7 +58,16 @@ namespace MapRenderer.Unity.Rendering.Map
         // "camera matrix frozen for this frame" point: any future Unity-camera-matrix consumer (symbol
         // screen-space placement) must be sequenced AFTER this call, here — not in Update, not in another
         // component's LateUpdate (Unity does not order those).
-        private void LateUpdate() => View?.Camera?.SyncToCamera();
+        private void LateUpdate()
+        {
+            var cam = View?.Camera;
+            if (cam == null) return;
+            // Refresh the DPI ratio from the (live, Inspector-tunable) config before the commit so the camera
+            // frames the logical viewport (S92 D1); Config is shared by reference with the Controller, so the
+            // render and the interaction seam can't diverge on DPR.
+            cam.DevicePixelRatio = Config.DevicePixelRatio;
+            cam.SyncToCamera();
+        }
 
         private void OnDestroy() => View?.Teardown();
 

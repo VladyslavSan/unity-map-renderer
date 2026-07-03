@@ -44,12 +44,13 @@ namespace MapRenderer.Tests
         // ── GroundResolution literal pin ─────────────────────────────────────────────────────────
 
         [Test]
-        public void GroundResolution_Zoom0_EqualsCircumferenceOver256()
+        public void GroundResolution_Zoom0_EqualsCircumferenceOver512()
         {
-            // The helper must match the published circumference / 256 at zoom 0.
-            double expected = EarthConstants.EquatorialCircumferenceMetres / 256.0;
+            // S93 (512 convention): GroundResolution(0) == published circumference / 512. Literal 512 (not
+            // WebMercator.TilePixelSize) so this guards the constant's VALUE rather than being a tautology.
+            double expected = EarthConstants.EquatorialCircumferenceMetres / 512.0;
             Assert.AreEqual(expected, WebMercator.GroundResolution(0), 1e-6,
-                "GroundResolution(0) must equal EquatorialCircumferenceMetres / TilePixelSize(256)");
+                "GroundResolution(0) must equal EquatorialCircumferenceMetres / TilePixelSize(512)");
         }
 
         [Test]
@@ -195,6 +196,38 @@ namespace MapRenderer.Tests
 
             Assert.AreEqual(P.x, back.x, 1e-6, "round-trip x");
             Assert.AreEqual(P.y, back.y, 1e-6, "round-trip y");
+        }
+
+        [Test]
+        public void MercatorPin_UnderDpr2_HoldsWithLogicalSeam_DriftsWithPhysical()
+        {
+            // S92: the logical interaction seam (Controller S92 D3) fixes retina Mercator pan/zoom for FREE —
+            // NO WebMercatorProjection edit (the GroundResolution/MetersPerPixel freeze holds). The render
+            // frames the LOGICAL viewport (MapCamera D1), so GroundToScreen(·, vpLogical) IS the render; the
+            // seam divides BOTH cursor and viewport by DPR before the projection call, so a grabbed point
+            // re-renders under the cursor. Skipping the ÷DPR (physical viewport) drifts it — same failure the
+            // globe D3 tooth pins, here for the planar case.
+            const double dpr = 2.0;
+            double2 vpPhysical = new double2(1920, 1080);
+            double2 vpLogical  = vpPhysical * (1.0 / dpr); // 960×540
+            var     c          = Cam(12, 20, 5.0);
+            double2 cursorPhys = new double2(1200, 700);   // off-centre physical pixel
+
+            // CORRECT seam: convert cursor + viewport to logical, then round-trip through the logical render.
+            double2         cursorLog = cursorPhys * (1.0 / dpr);
+            GeoCoordinate3D grabbed   = Proj.ScreenToGround(cursorLog, vpLogical, c);
+            double2         rendered  = Proj.GroundToScreen(grabbed, vpLogical, c) * dpr; // logical → physical
+            Assert.AreEqual(cursorPhys.x, rendered.x, 1e-6, "Mercator pin holds under DPR=2 (x)");
+            Assert.AreEqual(cursorPhys.y, rendered.y, 1e-6, "Mercator pin holds under DPR=2 (y)");
+
+            // BUG: feed the PHYSICAL cursor + viewport to the projection while the render stays logical — the
+            // ground offset is 2× too large, so the re-rendered point drifts far off the cursor.
+            GeoCoordinate3D grabbedBug  = Proj.ScreenToGround(cursorPhys, vpPhysical, c);
+            double2         renderedBug = Proj.GroundToScreen(grabbedBug, vpLogical, c) * dpr;
+            double          dx          = renderedBug.x - cursorPhys.x;
+            double          dy          = renderedBug.y - cursorPhys.y;
+            double          drift       = math.sqrt(dx * dx + dy * dy);
+            Assert.Greater(drift, 3.0, "the un-normalized (physical) seam drifts the Mercator pin under DPR≠1");
         }
 
         [Test]

@@ -15,16 +15,14 @@ namespace MapRenderer.Core.View
     /// </summary>
     public readonly struct TouchGestureConfig
     {
-        /// <summary>Device-pixel scale (Screen.dpi / reference). Use 1.0 in headless tests.</summary>
-        public double DpiScale { get; init; }
-
         /// <summary>log2(d/d0) multiplier → zoom-level delta.</summary>
         public double ZoomSensitivity { get; init; }
 
         /// <summary>Degrees of bearing change per degree of inter-finger-angle change.</summary>
         public double BearingSensitivity { get; init; }
 
-        /// <summary>Degrees of tilt change per device-pixel of vertical centroid movement.</summary>
+        /// <summary>Degrees of tilt change per LOGICAL pixel of vertical centroid movement (S92 touch-DPI
+        /// closure: positions are fed in logical px, so this is a density-independent physical rate).</summary>
         public double PitchSensitivity { get; init; }
 
         /// <summary>Minimum zoom level clamp (passed through to <see cref="GestureIntent.ZoomAt"/>).</summary>
@@ -37,8 +35,8 @@ namespace MapRenderer.Core.View
         public double MaxPitch { get; init; }
 
         /// <summary>
-        /// Minimum inter-finger distance change (device px) to classify as a pinch.
-        /// Scaled by <see cref="DpiScale"/> internally.
+        /// Minimum inter-finger distance change (LOGICAL px) to classify as a pinch. A constant physical
+        /// size — positions are fed in logical px, so no per-density scaling is applied here.
         /// </summary>
         public double PinchDistanceThresholdPx { get; init; }
 
@@ -48,8 +46,8 @@ namespace MapRenderer.Core.View
         public double TwistAngleThresholdDeg { get; init; }
 
         /// <summary>
-        /// Minimum vertical centroid displacement (device px) to classify as a parallel drag (tilt).
-        /// Scaled by <see cref="DpiScale"/> internally.
+        /// Minimum vertical centroid displacement (LOGICAL px) to classify as a parallel drag (tilt).
+        /// A constant physical size — positions are fed in logical px, so no per-density scaling here.
         /// </summary>
         public double TiltCentroidThresholdPx { get; init; }
     }
@@ -200,10 +198,12 @@ namespace MapRenderer.Core.View
             double dth = WrapPm180(angleDeg - _prevAngleDeg);   // (−180, 180]
             double2 dc = centroid - _prevCentroid;
 
-            // DPI-scaled thresholds.
-            double dpiScale  = _cfg.DpiScale > 0.0 ? _cfg.DpiScale : 1.0;
-            double pinchPx   = _cfg.PinchDistanceThresholdPx * dpiScale;
-            double tiltPx    = _cfg.TiltCentroidThresholdPx  * dpiScale;
+            // Thresholds in LOGICAL px (S92 touch-DPI closure). The recognizer is fed logical positions
+            // (TouchController divides the raw touch + viewport by DevicePixelRatio, matching the render and
+            // the mouse seam), so a threshold is already a constant physical size — density normalization
+            // happens ONCE, at the position basis, not again here.
+            double pinchPx   = _cfg.PinchDistanceThresholdPx;
+            double tiltPx    = _cfg.TiltCentroidThresholdPx;
             double twistDeg  = _cfg.TwistAngleThresholdDeg;
 
             // ── Family selection (once per chain) ─────────────────────────────────────────────
@@ -236,7 +236,7 @@ namespace MapRenderer.Core.View
                 // Emit TiltBy unconditionally every frame (even zero centroid shift) —
                 // so B-CLASSIFY row 1 "keeps emitting ONLY TiltBy" holds on injected pinch frames.
                 // Sign: -dc.y (drag-up → pitch decreases; drag-down → pitch increases) matches Controller.
-                double tiltDeltaDeg = -dc.y * (_cfg.PitchSensitivity / dpiScale);
+                double tiltDeltaDeg = -dc.y * _cfg.PitchSensitivity;
                 results.Add(GestureIntent.TiltBy(tiltDeltaDeg, _cfg.MaxPitch));
             }
             else // ZoomRotate

@@ -93,6 +93,20 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   when its last layer goes), so no live child is ever orphaned. (Seen: S53b follow-up — per-tile root
   entities.)
 
+- **Don't guard a native container `Dispose()` with `if (x.IsCreated)` — it's a bloat antipattern.**
+  `NativeArray`/`NativeList`/etc. `.Dispose()` already early-returns on `!IsCreated` (and on a default,
+  never-allocated value). So `if (x.IsCreated) x.Dispose();` adds a redundant check that does *nothing* —
+  just write `x.Dispose();`. Same for grow-realloc: `oldBuf.Dispose(); oldBuf = new NativeArray(...)` needs
+  no guard on the first (default) pass. A single struct-level idempotency flag (`if (!IsCreated) return;`
+  guarding a whole `Dispose()` body) is fine; per-field `IsCreated` guards are the smell.
+
+- **Don't hand-grow a `NativeArray` with dispose-realloc + a tracked capacity — use `NativeList`.** The
+  pattern `if (n > cap) { buf.Dispose(); buf = new NativeArray<T>(n, …); cap = n; }` reimplements, by hand,
+  exactly what `NativeList<T>.Resize(n, …)` does (grow-only backing buffer, set length). Declare a
+  `NativeList<T>`, `Resize(n, NativeArrayOptions.UninitializedMemory)` per use, pass `.AsArray()` at Burst
+  job boundaries (jobs take `NativeArray`), and `Dispose()` once. Deletes the cap variables and the
+  realloc blocks. (Seen: `StyledLineTileBuilder` — 7 scratch buffers + 4 hand-tracked caps → 7 `NativeList`s.)
+
 ## Test workflow
 
 - **Measuring per-frame GC allocation: only NUnit's `Is.Not.AllocatingGCMemory` is trustworthy here; the

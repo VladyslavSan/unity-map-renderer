@@ -50,17 +50,19 @@ namespace MapRenderer.Core.View
         /// <param name="onScreenTilePx">The logical-pixel size a selected tile should occupy on screen
         ///   (the "512 convention" MapLibre vector tiles are authored for). It enters ONLY as a selection-zoom
         ///   offset — <c>log2(WebMercator.TilePixelSize / onScreenTilePx)</c> — applied to the integer tile
-        ///   grid; the framing SPAN still reads the true camera zoom (see <see cref="CornerTile"/>), and the
-        ///   canonical <c>GroundResolution</c>/<c>TilePixelSize = 256</c> paint math is untouched. Default 512
-        ///   ⇒ offset −1 ⇒ one level coarser ⇒ ~4× fewer, larger tiles over the same ground span.</param>
+        ///   grid; the framing SPAN still reads the true camera zoom (see <see cref="CornerTile"/>). Since S93
+        ///   unified everything on the 512 convention (<c>TilePixelSize = 512</c>), the default 512 ⇒ offset 0
+        ///   ⇒ camera zoom == tile zoom (MapLibre-aligned), keeping S88's 512 density (~4× fewer, larger tiles
+        ///   than the old 256 convention).</param>
         public ViewportCornerTileSelector(int padTiles = 1, int minZoom = 0, int maxZoom = 22,
                                           int onScreenTilePx = 512)
         {
             _padTiles = padTiles < 0 ? 0 : padTiles;
             _minZoom  = minZoom;
             _maxZoom  = maxZoom;
-            // Power-of-two convention (256→0, 512→−1, 1024→−2); round covers non-power-of-two sizes.
-            double tilePx    = WebMercator.TilePixelSize;                 // frozen canonical 256 (paint anchor)
+            // Offset = log2(TilePixelSize / onScreenPx). With TilePixelSize=512 (S93): 512→0, 1024→−1, 256→+1;
+            // round covers non-power-of-two sizes.
+            double tilePx    = WebMercator.TilePixelSize;                 // 512 (S93 unified convention)
             double onScreenPx = onScreenTilePx > 0 ? onScreenTilePx : tilePx;
             _selectionZoomOffset = (int)math.round(math.log2(tilePx / onScreenPx));
         }

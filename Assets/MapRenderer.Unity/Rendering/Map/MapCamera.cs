@@ -46,19 +46,34 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>Altitude multiplier for art-direction (default 1).</summary>
         public readonly float AltitudeMultiplier;
 
+        /// <summary>
+        /// Device pixel ratio (physical ÷ logical px, S92 D1). The altitude is framed from the <b>logical</b>
+        /// viewport (<see cref="ViewportPx"/>.y ÷ this) so the map is the right size — and DPR-independent — on
+        /// a high-DPI panel, matching the tile selector's logical framing. Default 1; refreshed live from
+        /// <c>MapViewComponent.Config.DevicePixelRatio</c> each frame before <see cref="SyncToCamera"/>.
+        ///
+        /// <para><b>PAINT is NOT DPI-scaled</b> (this is the crux — S92 D1): only the altitude term divides by
+        /// DPR. A <c>stylePx</c>-wide line still renders <c>stylePx</c> logical px because the DPI-normalized
+        /// camera makes ground-per-physical-pixel <c>mpp/DPR</c>. Never <c>÷DPR</c> the paint path — that
+        /// double-applies (the <c>GroundResolution</c>/<c>MetersPerPixel</c> freeze).</para>
+        /// </summary>
+        public double DevicePixelRatio = 1.0;
+
         // ── Current state (includes the FOV lens — CameraProperties.VerticalFovDeg) ──────────────────
         private CameraProperties _current;
 
         public MapCamera(UnityEngine.Camera camera,
                          CameraProperties initial,
                          float       altitudeMultiplier = 1f,
-                         IProjection projection         = null)
+                         IProjection projection         = null,
+                         double      devicePixelRatio   = 1.0)
         {
             _camera = camera != null ? camera
                 : throw new ArgumentNullException(nameof(camera), "MapCamera requires a real UnityEngine.Camera.");
             _current           = initial;
             AltitudeMultiplier = altitudeMultiplier;
             Projection         = projection ?? new WebMercatorProjection();
+            DevicePixelRatio   = devicePixelRatio;
             SyncToCamera(); // seed the transform at construction so frame-0 is valid before the first commit
         }
 
@@ -96,7 +111,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public void SyncToCamera()
         {
-            double altitude = CameraPoseMath.AltitudeForZoom(_current.Zoom, ViewportPx.y, _current.VerticalFovDeg)
+            // Frame from the LOGICAL viewport height (S92 D1): ÷DPR brings the camera ~DPR× closer on a
+            // high-DPI panel so the map is the right size and DPR-independent. ViewportPx stays physical
+            // (raw from the camera); only this altitude term is normalized. Guard a non-positive DPR → 1.
+            double dpr      = DevicePixelRatio > 0.0 ? DevicePixelRatio : 1.0;
+            double altitude = CameraPoseMath.AltitudeForZoom(_current.Zoom, ViewportPx.y / dpr, _current.VerticalFovDeg)
                               * AltitudeMultiplier;
             if (altitude < 0.1) altitude = 0.1;
 

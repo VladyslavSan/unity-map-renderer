@@ -10,7 +10,7 @@ namespace MapRenderer.Core.View.Camera
     /// (S42). Now lives in Core so headless tests can exercise the full pose computation.
     ///
     /// <para><b>Altitude formula (D1 — S42 D2):</b>
-    ///   Web-Mercator ground resolution: metersPerPixel = EarthConstants.EquatorialCircumferenceMetres / (256 × 2^zoom).
+    ///   Web-Mercator ground resolution: metersPerPixel = EarthConstants.EquatorialCircumferenceMetres / (TilePixelSize × 2^zoom).
     ///   For a perspective camera looking straight down:
     ///   altitude = (viewportHeightPx × metersPerPixel) / (2 × tan(verticalFovDeg/2)).
     ///   Earth equatorial circumference: see EarthConstants.EquatorialCircumferenceMetres.</para>
@@ -77,6 +77,45 @@ namespace MapRenderer.Core.View.Camera
         }
 
         // ── Clip planes (derived from altitude — S42 D3) ──────────────────────────────────────────
+
+        // ── Fit-to-viewport minimum zoom (S92 D2) ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// The most-zoomed-out fractional zoom at which the whole Web-Mercator world still frames inside the
+        /// viewport with a little breathing room (S92 D2) — the device-derived floor for the zoom clamp,
+        /// replacing the hardcoded <c>MinZoom = 0</c> that let the map shrink to a useless world-square grape.
+        ///
+        /// <para>The world square is <c>tilePixelSize · 2^zoom</c> <b>logical</b> px per side, so it exactly
+        /// fits the shorter viewport side when <c>zoom_fit = log2(min(vpW, vpH) / tilePixelSize)</c>. The floor
+        /// is <c>zoom_fit − margin</c>: at the floor the world is <c>2^margin</c>× smaller than the viewport
+        /// (whole map visible, with margin) — never larger (grape), never cropped.</para>
+        ///
+        /// <para><b>Logical px in.</b> Feed the DPI-normalized viewport (<c>physicalPx / DevicePixelRatio</c>),
+        /// the same basis the DPI-normalized camera (D1) and the tile selector frame in — so the floor scales
+        /// with the viewport and with DPR. Projection-agnostic: the globe reuses this Mercator fit (Phase 1;
+        /// the disc ≈ the world extent at that scale).</para>
+        /// </summary>
+        /// <param name="viewportWidthLogical">Viewport width in logical (DPR-normalized) pixels.</param>
+        /// <param name="viewportHeightLogical">Viewport height in logical (DPR-normalized) pixels.</param>
+        /// <param name="tilePixelSize">Tile edge in px (the zoom→scale convention; <see cref="WebMercator.TilePixelSize"/>).</param>
+        /// <param name="margin">Breathing-room margin in zoom levels (≈0.25–0.5).</param>
+        /// <returns>The minimum-zoom floor (fractional).</returns>
+        public static double MinZoomToFit(double viewportWidthLogical, double viewportHeightLogical,
+                                          double tilePixelSize, double margin)
+        {
+            double minSide = math.min(viewportWidthLogical, viewportHeightLogical);
+            double zoomFit = math.log2(minSide / tilePixelSize);
+            return zoomFit - margin;
+        }
+
+        /// <summary>
+        /// <see cref="MinZoomToFit(double,double,double,double)"/> over the standard tile size
+        /// (<see cref="WebMercator.TilePixelSize"/>). The convenience the <c>Controller</c> calls so the tile
+        /// constant — projection math — stays in Core (the S73 adapter rule: no <c>WebMercator.*</c> in the
+        /// Unity input adapter).
+        /// </summary>
+        public static double MinZoomToFit(double viewportWidthLogical, double viewportHeightLogical, double margin)
+            => MinZoomToFit(viewportWidthLogical, viewportHeightLogical, TilePixelSize, margin);
 
         /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
         public static double NearClip(double altitude) => math.max(0.1, altitude * 0.01);

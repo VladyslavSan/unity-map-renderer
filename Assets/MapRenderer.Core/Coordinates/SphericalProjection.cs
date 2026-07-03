@@ -1,7 +1,6 @@
 // Engine-free: no UnityEngine dependency. The stateless ProjectPoint uses only Unity.Mathematics, so Burst
 // compiles it transitively when ProjectPointsJob calls SphericalProjection.ProjectPoint(...).
 
-using System;
 using Unity.Mathematics;
 using MapRenderer.Core.View.Camera;
 
@@ -73,19 +72,176 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public bool ReversesWinding => true; // ECEF→render (X,Z,Y) axis-swap is a reflection → flips winding
 
-        // ── Camera interaction (managed side) — globe camera is a future stage ────────────────────
+        // ── Camera interaction (managed side) — globe orbit ray-cast (S91-C) ──────────────────────
+        //
+        // Reconstructs the SAME render-space camera the renderer builds (MapCamera.SyncToCamera: altitude from
+        // AltitudeForZoom, orbit via CameraPoseMath.ComputePose, look-at at the render origin, +Y up) and the
+        // look-at ENU frame the geometry is rebased into (S91-C Slice 1). The render-space globe is a sphere of
+        // radius R centred at (0, −R, 0): the look-at surface point sits at the origin (+Y up), so the sphere
+        // centre is R straight down. ScreenToGround casts the pixel ray at that sphere; GroundToScreen is the
+        // exact inverse (perspective-project the rebased ECEF point). Consistency with the rendered camera is
+        // what pins the grabbed point under the cursor across a drag (the anchored-pan fixed-point iteration).
+        //
+        // AltitudeMultiplier (MapCamera art-direction knob, not carried on CameraProperties) is assumed 1 — the
+        // demo default; a non-default value would offset the reconstructed camera from the rendered one.
 
-        private const string CameraNotReady =
-            "Globe (spherical) camera interaction requires a 3D globe-camera pose — a future stage. " +
-            "Only geometry projection (ProjectPoint/Project/UpAt) is implemented.";
+        // Incidence-cosine below which the surface is treated as edge-on (no stable pan anchor). ~0.12 ≈ 7° off
+        // the limb — a thin band that, in screen space near the limb where dr/dθ→0, is only a few pixels wide.
+        private const double LimbGrazingCosine = 0.12;
+
+        private static double3 Sub(double3 a, double3 b)  => new double3(a.x - b.x, a.y - b.y, a.z - b.z);
+        private static double3 Add(double3 a, double3 b)  => new double3(a.x + b.x, a.y + b.y, a.z + b.z);
+        private static double3 Scale(double3 a, double s) => new double3(a.x * s, a.y * s, a.z * s);
+
+        /// <summary>Reconstructs the render-space camera (position + forward/up/right) and the render-ECEF ENU
+        /// basis at the look-at (east/up/north, double) plus the look-at's render-ECEF position (sceneOrigin).</summary>
+        private static void ReconstructView(in CameraProperties cam, double2 vp,
+            out double3 camPos, out double3 fwd, out double3 up, out double3 right,
+            out double3 east, out double3 upR, out double3 north, out double3 sceneOrigin)
+        {
+            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
+            CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value, out camPos, out fwd, out up);
+            right = math.cross(up, fwd); // Unity left-handed screen basis: right = up × forward
+
+            // Render-ECEF ENU basis at the look-at (double precision; axis-swap (X,Z,Y) matching ProjectPoint).
+            double lam  = cam.LookAt.Longitude * math.PI_DBL / 180.0;
+            double phi  = cam.LookAt.Latitude  * math.PI_DBL / 180.0;
+            double sinP = math.sin(phi), cosP = math.cos(phi), sinL = math.sin(lam), cosL = math.cos(lam);
+            double3 upE   = new double3(cosP * cosL, cosP * sinL, sinP);
+            double3 eastE = new double3(-sinL, cosL, 0.0);
+            double3 northE = math.cross(upE, eastE);
+            east  = new double3(eastE.x,  eastE.z,  eastE.y);
+            upR   = new double3(upE.x,    upE.z,    upE.y);
+            north = new double3(northE.x, northE.z, northE.y);
+            sceneOrigin = Scale(upR, Radius); // == ProjectPoint(lookAt).World
+        }
 
         /// <inheritdoc/>
         public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in CameraProperties camera)
-            => throw new NotSupportedException(CameraNotReady);
+            => CastGlobe(screenPx, viewportPx, in camera, out _);
+
+        /// <summary>Casts the pixel ray at the render-space globe and returns the ground point. <paramref name="hit"/>
+        /// is <c>true</c> when the ray actually intersects the sphere; on a miss (cursor past the limb) the result
+        /// is clamped to the silhouette and <paramref name="hit"/> is <c>false</c> — callers that need a real
+        /// anchor (the pan solve) must NOT rotate on a miss, or the grabbed point chases an unreachable target.</summary>
+        private GeoCoordinate3D CastGlobe(double2 screenPx, double2 viewportPx, in CameraProperties camera, out bool hit)
+        {
+            ReconstructView(in camera, viewportPx, out double3 camPos, out double3 fwd, out double3 up,
+                out double3 right, out double3 east, out double3 upR, out double3 north, out double3 sceneOrigin);
+
+            // Pixel ray in render-scene space.
+            double ndcX = (screenPx.x / viewportPx.x) * 2.0 - 1.0;
+            double ndcY = (screenPx.y / viewportPx.y) * 2.0 - 1.0;
+            double tanV = math.tan(camera.VerticalFovDeg * 0.5 * math.PI_DBL / 180.0);
+            double tanH = tanV * (viewportPx.x / viewportPx.y);
+            double3 dir = math.normalize(Add(fwd, Add(Scale(right, ndcX * tanH), Scale(up, ndcY * tanV))));
+
+            // Intersect the render-space globe: centre (0, −R, 0), radius R.
+            double3 centre = new double3(0.0, -Radius, 0.0);
+            double3 oc = Sub(camPos, centre);
+            double b  = math.dot(oc, dir);
+            double cc = math.dot(oc, oc) - Radius * Radius;
+            double disc = b * b - cc;
+            hit = disc >= 0.0;
+
+            double3 p;
+            if (hit)
+            {
+                double sq = math.sqrt(disc);
+                double t  = -b - sq;             // near hit
+                if (t < 0.0) t = -b + sq;        // camera inside the sphere ⇒ far hit
+                p = Add(camPos, Scale(dir, t));
+
+                // Grazing guard: within a thin band inside the limb the surface is nearly edge-on, so the
+                // anchored pin is numerically singular — GroundToScreen is hyper-sensitive there and a slow drag
+                // through the edge churns the look-at (a residual spin). Incidence = −dot(normal, rayDir): 1 =
+                // face-on, → 0 at the limb. Below the threshold there is no stable anchor, so report a miss and
+                // let the pan freeze (the returned point stays valid for ScreenToGround, which ignores `hit`).
+                double3 nrm = math.normalize(Sub(p, centre));
+                if (-math.dot(nrm, dir) < LimbGrazingCosine) hit = false;
+            }
+            else
+            {
+                // Ray misses the globe (cursor past the limb) — clamp to the silhouette: the ray's closest
+                // approach, pushed onto the sphere. The grabbed point can't pin here, but the result stays valid.
+                double3 nearPt = Add(camPos, Scale(dir, -b));
+                p = Add(centre, Scale(math.normalize(Sub(nearPt, centre)), Radius));
+            }
+
+            // render-scene → render-ECEF (ecef = p.x·east + p.y·up + p.z·north + sceneOrigin) → geodetic.
+            double3 ecef = Add(sceneOrigin, Add(Scale(east, p.x), Add(Scale(upR, p.y), Scale(north, p.z))));
+            double lat = math.asin(math.clamp(ecef.y / Radius, -1.0, 1.0)) * 180.0 / math.PI_DBL;
+            double lon = math.atan2(ecef.z, ecef.x) * 180.0 / math.PI_DBL;
+            return new GeoCoordinate3D { Latitude = lat, Longitude = lon, Altitude = 0.0 };
+        }
 
         /// <inheritdoc/>
         public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in CameraProperties camera)
-            => throw new NotSupportedException(CameraNotReady);
+        {
+            ReconstructView(in camera, viewportPx, out double3 camPos, out double3 fwd, out double3 up,
+                out double3 right, out double3 east, out double3 upR, out double3 north, out double3 sceneOrigin);
+
+            double3 ecef = ProjectPoint(new GeoCoordinate { Latitude = ground.Latitude, Longitude = ground.Longitude }).World;
+            double3 rel  = Sub(ecef, sceneOrigin);
+            // render-ECEF → render-scene: rebase·rel = (east·rel, up·rel, north·rel).
+            double3 rs = new double3(math.dot(east, rel), math.dot(upR, rel), math.dot(north, rel));
+
+            double3 d = Sub(rs, camPos);
+            double viewX = math.dot(d, right);
+            double viewY = math.dot(d, up);
+            double viewZ = math.dot(d, fwd); // toward the scene (camera forward)
+
+            double tanV = math.tan(camera.VerticalFovDeg * 0.5 * math.PI_DBL / 180.0);
+            double tanH = tanV * (viewportPx.x / viewportPx.y);
+            double ndcX = viewX / (viewZ * tanH);
+            double ndcY = viewY / (viewZ * tanV);
+            return new double2((ndcX * 0.5 + 0.5) * viewportPx.x, (ndcY * 0.5 + 0.5) * viewportPx.y);
+        }
+
+        /// <summary>
+        /// Anchored globe pan via a BOUNDED rotation solve (S91-C) — the globe-correct replacement for the
+        /// planar affine <c>ViewInput.ApplyPan</c>, which diverges on the globe near the limb (the screen↔ground
+        /// Jacobian explodes there, so at low zoom a minor drag spins the earth). Returns the new look-at that
+        /// brings <paramref name="grabbedGround"/> (captured at drag-start) toward <paramref name="cursorPx"/>.
+        ///
+        /// <para>The point currently under the cursor is <c>C = ScreenToGround(cursorPx)</c>; the grabbed point is
+        /// <c>G</c>. Rotating the look-at by the rotation that maps C→G (as unit ECEF vectors) moves G under the
+        /// cursor. The step is a rotation by <c>acos(C·G) ≤ π</c> — <b>bounded by construction</b>, so it can
+        /// never spin; as the drag holds, C→G and the rotation → 0 (converges). The ENU rebase references the
+        /// fixed north pole, so the pin is approximate (like the planar path), but it is always stable.</para>
+        /// </summary>
+        public GeoCoordinate3D PanLookAtForGrab(GeoCoordinate3D grabbedGround, double2 cursorPx, double2 viewportPx,
+            in CameraProperties cam)
+        {
+            GeoCoordinate3D under = CastGlobe(cursorPx, viewportPx, in cam, out bool hit);
+            // Cursor dragged off the globe: there is no ground point to pin the grab under, so FREEZE the pan
+            // (hold the look-at). Rotating toward the clamped silhouette instead makes the earth spin forever.
+            if (!hit) return cam.LookAt;
+
+            double3 g = ProjectPoint(new GeoCoordinate { Latitude = grabbedGround.Latitude, Longitude = grabbedGround.Longitude }).Up;
+            double3 c = ProjectPoint(new GeoCoordinate { Latitude = under.Latitude, Longitude = under.Longitude }).Up;
+            double3 l = ProjectPoint(new GeoCoordinate { Latitude = cam.LookAt.Latitude, Longitude = cam.LookAt.Longitude }).Up;
+
+            double3 lRot = RotateFromTo(l, c, g); // rotate the look-at by the rotation mapping C→G
+            double lat = math.asin(math.clamp(lRot.y, -1.0, 1.0)) * 180.0 / math.PI_DBL;
+            double lon = math.atan2(lRot.z, lRot.x) * 180.0 / math.PI_DBL;
+            return new GeoCoordinate3D { Latitude = lat, Longitude = lon, Altitude = 0.0 };
+        }
+
+        /// <summary>Rotates unit vector <paramref name="v"/> by the rotation that maps unit <paramref name="from"/>
+        /// onto unit <paramref name="to"/> (Rodrigues). Identity when they are (anti)parallel.</summary>
+        private static double3 RotateFromTo(double3 v, double3 from, double3 to)
+        {
+            double3 axis = math.cross(from, to);
+            double s = math.length(axis);   // sin(angle)
+            double cAng = math.dot(from, to); // cos(angle)
+            if (s < 1e-12) return v;         // aligned ⇒ no rotation
+            axis = new double3(axis.x / s, axis.y / s, axis.z / s);
+            double3 axv = math.cross(axis, v);
+            double d = math.dot(axis, v);
+            // v·cos + (axis×v)·sin + axis·(axis·v)·(1−cos)
+            return Add(Add(Scale(v, cAng), Scale(axv, s)), Scale(axis, d * (1.0 - cAng)));
+        }
 
         /// <inheritdoc/>
         public double ClampValidLatitude(double latitudeDegrees) => math.clamp(latitudeDegrees, -90.0, 90.0);

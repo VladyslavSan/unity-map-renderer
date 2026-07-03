@@ -29,11 +29,10 @@ namespace MapRenderer.Tests
         private static ViewContext MakeView(CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = Vp, Projection = Proj };
 
-        // Config with explicit far-from-boundary thresholds (DpiScale=1 for headless).
+        // Config with explicit far-from-boundary thresholds (thresholds are logical px; no DpiScale — S92).
         private static TouchGestureConfig Cfg(double maxPitch = 60)
             => new TouchGestureConfig
             {
-                DpiScale                   = 1.0,
                 ZoomSensitivity            = 1.0,
                 BearingSensitivity         = 1.0,
                 PitchSensitivity           = 1.0,

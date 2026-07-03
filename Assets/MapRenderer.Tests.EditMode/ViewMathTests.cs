@@ -731,6 +731,135 @@ namespace MapRenderer.Tests
                 "large (>0.5 m) — this is exactly the jitter floating-origin rebasing eliminates.");
         }
 
+        // ── S92 — pixel unification Phase 1 (DPI camera + device min-zoom) ───────────────────────
+
+        [Test]
+        public void AltitudeForZoom_DprNormalization_HalvesAt2x_IdenticalAt1x()
+        {
+            // T-DPI-CAMERA (arithmetic half): the camera frames the LOGICAL viewport (vp ÷ DPR, S92 D1).
+            // AltitudeForZoom is linear in viewport height, so ÷DPR divides the altitude by DPR:
+            //   DPR=2 ⇒ half the altitude (camera 2× closer ⇒ map 2× bigger),
+            //   DPR=1 ⇒ bit-identical to the pre-S92 physical-viewport altitude (the 952-test safety guard —
+            //           every existing camera test runs at DPR=1 and must be unaffected).
+            const double zoom = 6.0, fov = 60.0, vpH = 1080.0;
+            double altPhysical = CameraPoseMath.AltitudeForZoom(zoom, vpH,       fov);
+            double alt1        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 1.0, fov);
+            double alt2        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 2.0, fov);
+            Assert.AreEqual(altPhysical, alt1, 0.0, "DPR=1 is bit-identical to the physical-viewport altitude");
+            Assert.AreEqual(alt1 / 2.0, alt2, alt1 * 1e-12, "DPR=2 halves the altitude (camera 2× closer)");
+        }
+
+        [Test]
+        public void GroundResolution_BaseIs512AndHalvesPerZoom()
+        {
+            // T-PAINT-UNCHANGED (S92) + T-RELABEL base pin (S93): the paint scale is not DPI-normalized, and
+            // under the 512 convention GroundResolution(0) == equatorial circumference / 512. Literal 512 (not
+            // WebMercator.TilePixelSize) so this guards the constant's VALUE, not a tautology.
+            Assert.AreEqual(EarthConstants.EquatorialCircumferenceMetres / 512.0,
+                            WebMercator.GroundResolution(0.0), 1e-6, "GroundResolution(0) == circumference / 512");
+            for (int z = 0; z < 20; z++)
+                Assert.AreEqual(WebMercator.GroundResolution(z) / 2.0, WebMercator.GroundResolution(z + 1),
+                                WebMercator.GroundResolution(z) * 1e-12, $"res(z+1) == res(z)/2 at z={z}");
+            // CameraPoseMath.MetersPerPixel is the same single-sourced formula.
+            Assert.AreEqual(WebMercator.GroundResolution(5.0), CameraPoseMath.MetersPerPixel(5.0), 1e-9);
+        }
+
+        [Test]
+        public void MinZoomToFit_FramesWholeWorld_ScalesWithViewportAndDpr()
+        {
+            // T-MINZOOM: floor = log2(min(vp_logical) / tilePx) − margin. At the floor the world square
+            // (tilePx · 2^floor) is SMALLER than the shorter viewport side by exactly 2^margin (whole world
+            // visible, with breathing room) — never larger (grape), never cropped.
+            const double tile = WebMercator.TilePixelSize, margin = 0.5;
+            double2 vp    = new double2(1600, 1200); // logical px
+            double  floor = CameraPoseMath.MinZoomToFit(vp.x, vp.y, tile, margin);
+
+            double worldPx = tile * math.pow(2.0, floor);
+            double minSide = math.min(vp.x, vp.y);
+            Assert.Less(worldPx, minSide, "the whole world fits within the shorter viewport side (not a grape)");
+            Assert.AreEqual(minSide / math.pow(2.0, margin), worldPx, minSide * 1e-9,
+                            "world square is exactly `margin` zoom levels below the exact-fit size");
+
+            // Scales with the viewport: a 2× larger shorter side ⇒ +1 floor. A hardcoded/viewport-independent
+            // floor (the old MinZoom = 0) fails this — the floor MUST move with the viewport.
+            double floorBig = CameraPoseMath.MinZoomToFit(vp.x * 2, vp.y * 2, tile, margin);
+            Assert.AreEqual(floor + 1.0, floorBig, 1e-9, "2× viewport ⇒ +1 floor");
+            Assert.AreNotEqual(0.0, floor, "device-derived — not the old hardcoded 0");
+
+            // Uses LOGICAL px: physical 3200×2400 at DPR=2 ≡ logical 1600×1200 ⇒ same floor (scales with DPR).
+            Assert.AreEqual(floor, CameraPoseMath.MinZoomToFit(3200.0 / 2, 2400.0 / 2, tile, margin), 1e-12,
+                            "logical-px basis ⇒ the floor scales with DPR");
+        }
+
+        // ── S93 — pixel unification Phase 2 (512 zoom renumbering; camera zoom == tile zoom) ──────
+
+        [Test]
+        public void T_ALIGN_SelectionZoom_EqualsCameraZoom_At512Convention()
+        {
+            // T-ALIGN (decisive): with TilePixelSize == OnScreenTilePx == 512 the selection offset is 0, so the
+            // PRODUCTION-default selector emits tiles at Z == camera integer zoom (MapLibre-aligned). Falsifiable:
+            // the old 256 convention (offset −1) emitted Z == cameraZoom − 1.
+            var buf = new List<TileId>();
+            var merc = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22); // default onScreenTilePx = 512
+            foreach (int z in new[] { 3, 5, 8, 11 })
+            {
+                merc.SelectVisibleTiles(View(Cam(0, 0, z, 0), 1.0), buf);
+                Assert.IsNotEmpty(buf, $"Mercator cover non-empty at camera zoom {z}");
+                foreach (var t in buf) Assert.AreEqual(z, t.Z, $"camera zoom {z} must select tile z{z} (offset 0)");
+            }
+            // The globe selector shares the same offset derivation — assert it too.
+            var globe = (IVisibleTileSelector)new GlobeTileSelector(0, 0, 22); // default onScreenTilePx = 512
+            foreach (int z in new[] { 3, 5 })
+            {
+                globe.SelectVisibleTiles(
+                    new ViewContext { Camera = Cam(0, 0, z, 0), ViewportPx = new double2(RefH, RefH),
+                                      Projection = new SphericalProjection() }, buf);
+                Assert.IsNotEmpty(buf, $"globe cover non-empty at camera zoom {z}");
+                foreach (var t in buf) Assert.AreEqual(z, t.Z, $"globe: camera zoom {z} → tile z{z}");
+            }
+        }
+
+        [Test]
+        public void T_RELABEL_GroundResolutionAndAltitude_AreOld256ValuesShiftedOneZoom()
+        {
+            // T-RELABEL: the flip is a pure RELABEL — the physical scale at zoom z now equals the OLD 256 value
+            // at z+1 (GroundResolution_512(z) == GroundResolution_256(z+1)), so the same view is just numbered
+            // one lower. Assert GroundResolution against the explicit 256 formula (falsifiable — a rescale, not a
+            // relabel, breaks it); altitude inherits the shift (it is linear in GroundResolution).
+            const double circ = 40075016.686;
+            foreach (double z in new[] { 0.0, 3.0, 7.5, 14.0 })
+            {
+                double gr256AtZPlus1 = circ / (256.0 * math.pow(2.0, z + 1.0));
+                Assert.AreEqual(gr256AtZPlus1, WebMercator.GroundResolution(z), gr256AtZPlus1 * 1e-9,
+                                $"GroundResolution_512({z}) == GroundResolution_256({z}+1)");
+                double altNew       = CameraPoseMath.AltitudeForZoom(z, 1080.0, 60.0);
+                double altOldZPlus1 = (1080.0 * gr256AtZPlus1) / (2.0 * math.tan(Angle.FromDegrees(30.0).Radians));
+                Assert.AreEqual(altOldZPlus1, altNew, altNew * 1e-9, $"altitude_512({z}) == altitude_256({z}+1)");
+            }
+        }
+
+        [Test]
+        public void T_DENSITY_REBASED_DefaultSelectorKeepsThe512Density_AndIsAligned()
+        {
+            // T-DENSITY-REBASED: the S88 512 density win survives the flip. The production-default selector is
+            // one level COARSER than an explicit onScreenTilePx=256 selector over the same viewport — same span,
+            // ~4× fewer tiles — AND is now MapLibre-aligned (Z == cameraZoom, vs 256's cameraZoom+1). A
+            // count-only check could pass while Z silently misaligns, so assert Z on both.
+            var def  = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);                    // default 512
+            var e256 = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22, onScreenTilePx: 256);
+            var bDef = new List<TileId>();
+            var b256 = new List<TileId>();
+            foreach (int z in new[] { 4, 6, 9 })
+            {
+                def .SelectVisibleTiles(View(Cam(0, 0, z, 0), 16.0 / 9.0), bDef);
+                e256.SelectVisibleTiles(View(Cam(0, 0, z, 0), 16.0 / 9.0), b256);
+                Assert.IsNotEmpty(bDef); Assert.IsNotEmpty(b256);
+                Assert.AreEqual(z,     bDef[0].Z, $"default (512) aligned: camera z{z} → tile z{z}");
+                Assert.AreEqual(z + 1, b256[0].Z, $"explicit 256 is one level finer at camera z{z}");
+                Assert.Less(bDef.Count, b256.Count, $"512 density win preserved (fewer, larger tiles) at z{z}");
+            }
+        }
+
         // ── helpers ─────────────────────────────────────────────────────────────────────────
 
         /// <summary>Returns the tile at <paramref name="z"/> whose extent contains <paramref name="merc"/>.</summary>

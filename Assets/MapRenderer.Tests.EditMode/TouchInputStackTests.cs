@@ -147,5 +147,43 @@ namespace MapRenderer.Tests
             Assert.IsFalse(src.Contains("math.log2"),
                 "TouchController.cs must not contain 'math.log2' — pinch-to-zoom lives in TouchGestureRecognizer (T-TOUCHSTACK).");
         }
+
+        // ── S92 touch-DPI closure — the seam runs in LOGICAL px ──────────────────────────────────
+
+        /// <summary>
+        /// S92 (touch-DPI closure): the touch interaction seam must be DPI-normalized like the mouse seam —
+        /// <see cref="TouchController"/> divides the viewport + finger positions by
+        /// <c>DevicePixelRatio</c> so anchors share the render camera's logical basis (no retina pan/pinch
+        /// drift). This is the one regression point the headless gate can't exercise (DPR=1, no synthetic
+        /// touches), so guard it structurally — mirroring <c>MapControllerInputTests</c> for the mouse seam.
+        /// </summary>
+        [Test]
+        public void TouchController_DividesSeamByDevicePixelRatio()
+        {
+            string src = TouchControllerSource;
+            Assert.IsTrue(src.Contains("DevicePixelRatio"),
+                "TouchController.cs must read Config.DevicePixelRatio to run the interaction seam in logical px " +
+                "(S92 touch-DPI closure — else retina pan/pinch drifts off the fingers).");
+            // BOTH the viewport AND the finger positions must be divided (two '/ dpr' sites). A partial fix
+            // that normalizes only one still drifts the anchor — and this structural guard is the only durable
+            // protection (the functional path is DPR=1 / no-synthetic-touch and can't be exercised headless).
+            int dprDivisions = System.Text.RegularExpressions.Regex.Matches(src, "/ dpr").Count;
+            Assert.GreaterOrEqual(dprDivisions, 2,
+                $"TouchController.cs must divide BOTH the viewport AND the finger positions by dpr — found " +
+                $"{dprDivisions} '/ dpr' site(s), expected ≥2 (S92 touch-DPI closure).");
+        }
+
+        /// <summary>
+        /// S92: density normalization lives ONCE, at the position basis — NOT re-applied in the recognizer.
+        /// The vestigial (and mis-scaled) <c>DpiScale</c> knob is gone; its presence would signal a
+        /// double-normalization regression.
+        /// </summary>
+        [Test]
+        public void TouchController_NoDpiScale_DensityNormalizedOnceAtThePositionBasis()
+        {
+            Assert.IsFalse(TouchControllerSource.Contains("DpiScale"),
+                "TouchController.cs must not set DpiScale — density is normalized once by the ÷DevicePixelRatio " +
+                "seam; a DpiScale multiply would double-apply it (S92 touch-DPI closure).");
+        }
     }
 }

@@ -13,6 +13,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapController = MapRenderer.Unity.Rendering.Map.Controller;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 namespace MapRenderer.Tests
 {
     [TestFixture]
@@ -49,6 +50,43 @@ namespace MapRenderer.Tests
             ctrl.AltitudeMultiplier     = 1f;
 
             return (ctrl, cam, rootGo, camGo);
+        }
+
+        // ── S92 T-DPI-CAMERA (engine level) — MapCamera frames the logical viewport ──────────────
+
+        /// <summary>
+        /// S92 T-DPI-CAMERA (decisive): <see cref="MapCamera"/> frames the LOGICAL viewport (vp ÷ DPR, D1).
+        /// At tilt=0/heading=0 the camera sits directly overhead, so <c>position.y ≡ altitude</c>. DPR=2 puts
+        /// the camera at HALF the DPR=1 altitude (2× closer ⇒ map 2× bigger); DPR=1 is bit-identical to the
+        /// raw <see cref="CameraPoseMath.AltitudeForZoom"/> — the guard that the change never leaked into the
+        /// DPR=1 path that every other camera test runs on.
+        /// </summary>
+        [Test]
+        public void MapCamera_DevicePixelRatio_HalvesAltitudeAt2x_IdenticalAt1x()
+        {
+            var camGo = new GameObject("Camera_DprTest");
+            var cam   = camGo.AddComponent<Camera>();
+            cam.targetTexture = new RenderTexture((int)TestViewportHeight, (int)TestViewportHeight, 0);
+            try
+            {
+                var view = Cam(0.0, 0.0, 8.0);
+                double expected1 = CameraPoseMath.AltitudeForZoom(view.Zoom, cam.pixelHeight,       view.VerticalFovDeg);
+                double expected2 = CameraPoseMath.AltitudeForZoom(view.Zoom, cam.pixelHeight / 2.0, view.VerticalFovDeg);
+
+                // Each ctor seeds the transform via SyncToCamera, so position.y is set on construction.
+                var dpr1 = new MapCamera(cam, view, 1f, null, 1.0);
+                float y1 = cam.transform.position.y;
+                var dpr2 = new MapCamera(cam, view, 1f, null, 2.0);
+                float y2 = cam.transform.position.y;
+
+                Assert.AreEqual(expected1, y1, expected1 * 1e-5, "DPR=1 altitude == raw AltitudeForZoom(vp)");
+                Assert.AreEqual(expected2, y2, expected2 * 1e-5, "DPR=2 altitude == AltitudeForZoom(vp/2)");
+                Assert.AreEqual(y1 / 2.0, y2, y1 * 1e-4, "DPR=2 altitude is HALF the DPR=1 altitude");
+            }
+            finally
+            {
+                Object.DestroyImmediate(camGo);
+            }
         }
 
         // ── Tooth 1 (DECISIVE) — overhead at pitch 0 ─────────────────────────────────────────────
@@ -155,7 +193,7 @@ namespace MapRenderer.Tests
 
             // Hand-computed reference (double arithmetic to avoid float error in the reference itself).
             const double earthCirc    = 40075016.686;
-            const double tileSize     = 256.0;
+            const double tileSize     = 512.0; // S93: the 512 convention (was 256)
             double metersPerPixel     = earthCirc / (tileSize * System.Math.Pow(2.0, zoom));
             double halfFovRad         = fov * 0.5 * System.Math.PI / 180.0;
             float  expected           = (float)((height * metersPerPixel) / (2.0 * System.Math.Tan(halfFovRad)));

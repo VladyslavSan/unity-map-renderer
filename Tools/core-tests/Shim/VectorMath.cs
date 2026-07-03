@@ -19,5 +19,14 @@ namespace Unity.Mathematics
             => new float3(a.c0.x * b.x + a.c1.x * b.y + a.c2.x * b.z,
                           a.c0.y * b.x + a.c1.y * b.y + a.c2.y * b.z,
                           a.c0.z * b.x + a.c1.z * b.y + a.c2.z * b.z);
+
+        // S91-C: SphericalProjection.ScreenToGround/GroundToScreen (globe camera ray-cast).
+        public static double  dot(double3 a, double3 b)   => a.x * b.x + a.y * b.y + a.z * b.z;
+        public static double  length(double3 a)           => System.Math.Sqrt(dot(a, a));
+        public static double3 normalize(double3 a)
+        {
+            double len = length(a);
+            return len > 0.0 ? new double3(a.x / len, a.y / len, a.z / len) : a;
+        }
     }
 }

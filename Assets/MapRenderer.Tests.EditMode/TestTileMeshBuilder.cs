@@ -48,6 +48,20 @@ namespace MapRenderer.Tests
             return Finish(mda, vertexCount, bounds, "TestLine");
         }
 
+        /// <summary>Projection-aware line build (S91-C): bakes relative to the tile's SW corner projected
+        /// through <paramref name="projection"/> (the SAME origin the vertices use), so a globe fixture lays
+        /// its lines on the sphere. Mirrors the projection-aware <see cref="BuildFill"/>.</summary>
+        public static Mesh BuildLine(
+            IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
+            double zoom, double extent, TileId id, IProjection projection)
+        {
+            double3 renderOrigin = TileTessellationPipeline.ProjectTileCornerOrigin(id.Z, id.X, id.Y, projection);
+            var mda = Mesh.AllocateWritableMeshData(1);
+            StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id,
+                renderOrigin, out int vertexCount, out Bounds bounds, projection);
+            return Finish(mda, vertexCount, bounds, "TestLineGlobe");
+        }
+
         /// <summary>Tessellate a line layer and return only the written vertex count (0 = no geometry). Used
         /// by the S14 data-driven-bake teeth that only need "did the bake produce geometry?".</summary>
         public static int LineVertexCount(

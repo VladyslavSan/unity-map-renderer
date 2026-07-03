@@ -70,7 +70,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         [Tooltip("Initial zoom level (0 = world view). z14 is OpenFreeMap's maxzoom — densest data " +
                  "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
-        public double InitialZoom = 14.0;
+        public double InitialZoom = 13.0; // S93: 512 convention shifts zoom numbers −1 (old 14 → 13 = same view)
 
         [Tooltip("Vertical field-of-view (degrees) for the perspective camera — the initial camera lens " +
                  "(carried in CameraProperties, pushed to the Unity camera).")]
@@ -216,8 +216,11 @@ namespace MapRenderer.Unity.Rendering.Map
             // camera we skip: no MapView is built (the scene always has a main camera in practice).
             if (camera != null)
             {
-                // FOV + viewport come from initialView / the camera; only the altitude multiplier is side config.
-                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier, projection);
+                // FOV + viewport come from initialView / the camera; the altitude multiplier and the DPI ratio
+                // are side config. Seed DPR at construction (S92 D1) so the ctor's frame-0 SyncToCamera frames
+                // the logical viewport too — LateUpdate keeps it live thereafter.
+                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier, projection,
+                                              mapView.Config.DevicePixelRatio);
                 mapView.SetCamera(mapCamera);
             }
 
