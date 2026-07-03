@@ -16,6 +16,7 @@ using NUnit.Framework;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Jobs;
 
@@ -50,39 +51,42 @@ namespace MapRenderer.Tests
             int mainTid = Thread.CurrentThread.ManagedThreadId;
 
             // Reference: run on the main thread.
-            var refOut = new NativeArray<float3>(3, Allocator.Persistent);
+            var refOut = new NativeArray<double3>(3, Allocator.Persistent);
+            var refUp  = new NativeArray<double3>(3, Allocator.Persistent);
             try
             {
-                var coords = new NativeArray<double2>(3, Allocator.Persistent);
-                coords[0] = new double2(0, 0);
-                coords[1] = new double2(2048, 1024);
-                coords[2] = new double2(4095, 4095);
-                new ProjectTileToWebMercatorJob
+                var pts = new NativeArray<GeoCoordinate>(3, Allocator.Persistent);
+                pts[0] = new GeoCoordinate { Latitude = 0,   Longitude = 0 };
+                pts[1] = new GeoCoordinate { Latitude = 45,  Longitude = 30 };
+                pts[2] = new GeoCoordinate { Latitude = -60, Longitude = 179 };
+                new ProjectPointsJob<WebMercatorProjection>
                 {
-                    TileZ = 3, TileX = 2, TileY = 1, Extent = 4096,
-                    OriginMercX = 0, OriginMercY = 0,
-                    TileCoords = coords, WorldPositions = refOut,
+                    Projection = new WebMercatorProjection(),
+                    OriginWorld = new double3(0.0, 0.0, 0.0),
+                    Points = pts, WorldPositions = refOut, Normals = refUp,
                 }.Run(3);
-                coords.Dispose();
+                pts.Dispose();
 
                 var workerOut = RunOnWorker(() =>
                 {
-                    var outArr = new NativeArray<float3>(3, Allocator.Persistent);
-                    var wc = new NativeArray<double2>(3, Allocator.Persistent);
-                    wc[0] = new double2(0, 0);
-                    wc[1] = new double2(2048, 1024);
-                    wc[2] = new double2(4095, 4095);
-                    new ProjectTileToWebMercatorJob
+                    var outArr = new NativeArray<double3>(3, Allocator.Persistent);
+                    var outUp  = new NativeArray<double3>(3, Allocator.Persistent);
+                    var wpts = new NativeArray<GeoCoordinate>(3, Allocator.Persistent);
+                    wpts[0] = new GeoCoordinate { Latitude = 0,   Longitude = 0 };
+                    wpts[1] = new GeoCoordinate { Latitude = 45,  Longitude = 30 };
+                    wpts[2] = new GeoCoordinate { Latitude = -60, Longitude = 179 };
+                    new ProjectPointsJob<WebMercatorProjection>
                     {
-                        TileZ = 3, TileX = 2, TileY = 1, Extent = 4096,
-                        OriginMercX = 0, OriginMercY = 0,
-                        TileCoords = wc, WorldPositions = outArr,
+                        Projection = new WebMercatorProjection(),
+                        OriginWorld = new double3(0.0, 0.0, 0.0),
+                        Points = wpts, WorldPositions = outArr, Normals = outUp,
                     }.Run(3);
-                    wc.Dispose();
+                    wpts.Dispose();
+                    outUp.Dispose();
                     return outArr;
                 }, out int workerTid, out Exception ex);
 
-                Assert.IsNull(ex, $"ProjectTileToWebMercatorJob.Run() THREW off a RunOnThreadPool worker: {ex}");
+                Assert.IsNull(ex, $"ProjectPointsJob<WebMercatorProjection>.Run() THREW off a RunOnThreadPool worker: {ex}");
                 Assert.AreNotEqual(mainTid, workerTid, "spike must actually run off the main thread");
 
                 try
@@ -96,7 +100,7 @@ namespace MapRenderer.Tests
                 }
                 finally { if (workerOut.IsCreated) workerOut.Dispose(); }
             }
-            finally { refOut.Dispose(); }
+            finally { refOut.Dispose(); refUp.Dispose(); }
         }
 
         [Test]

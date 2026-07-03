@@ -17,23 +17,27 @@ namespace MapRenderer.Unity.Rendering.Backend
     internal interface ITileRenderBackend : IDisposable
     {
         /// <summary>
-        /// Registers a tile-layer mesh as a draw item. <paramref name="materialIndex"/> indexes the
-        /// flattened layer-material list (fills in declared order, then lines). <paramref name="tileId"/>
-        /// identifies the owning tile — the <see cref="Entities.TileRenderer"/> and
-        /// <see cref="GameObjects.TileRenderer"/> use it to group a tile's layers under one named parent
+        /// Registers a tile-layer mesh as a draw item. <paramref name="tileOriginRender"/> is the tile's
+        /// SW-corner projected render origin (S91-C, <c>double3</c>: Mercator <c>(mercX, 0, mercZ)</c>, globe
+        /// ECEF) — the Level-2 <see cref="Rebuild"/> places the item relative to the frame's scene origin.
+        /// <paramref name="materialIndex"/> indexes the flattened layer-material list (fills in declared order,
+        /// then lines). <paramref name="tileId"/> identifies the owning tile — the <see cref="Entities.TileRenderer"/>
+        /// and <see cref="GameObjects.TileRenderer"/> use it to group a tile's layers under one named parent
         /// (entity / GameObject) for the per-tile debug affordance; <see cref="BRG.TileRenderer"/> has no
         /// per-item hierarchy and ignores it. Returns a handle for <see cref="RemoveItem"/>.
         /// </summary>
-        int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex, TileId tileId);
+        int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId);
 
         /// <summary>Removes a previously registered draw item. Idempotent for unknown handles.</summary>
         void RemoveItem(int handle);
 
         /// <summary>
-        /// Per-frame: recompute every draw item's object-to-world from <paramref name="sceneOrigin"/>
-        /// (camera-relative floating origin) and refresh backend state for the upcoming render.
+        /// Per-frame: recompute every draw item's object-to-world from <paramref name="frame"/> (the
+        /// camera-relative <see cref="SceneFrame"/> — scene origin + rebase) and refresh backend state for the
+        /// upcoming render. For Mercator <paramref name="frame"/> is identity-rebase, so placement reduces to
+        /// the pre-S91 translation.
         /// </summary>
-        void Rebuild(double2 sceneOrigin);
+        void Rebuild(in SceneFrame frame);
 
         /// <summary>
         /// XZ scene-space bounding box covering all live tile draw items (each draw item's translation,

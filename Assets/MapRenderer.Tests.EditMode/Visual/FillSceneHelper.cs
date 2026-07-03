@@ -56,7 +56,10 @@ namespace MapRenderer.Tests.Visual
             string fillColorExpression = null,
             double styleZoom = 0.0,
             float viewSize = DefaultViewSize,
-            string layerName = "countries")
+            string layerName = "countries",
+            IProjection projection = null, // null ⇒ WebMercator; pass a SphericalProjection for a globe
+            bool fitToView = true)         // false ⇒ leave the transform at identity so the caller can place
+                                           //          the GO itself (e.g. the real ENU-rebase placement, S91-C)
         {
             byte[] bytes = FixtureBytes();
             MvtTile mvtTile = MvtDecoder.Decode(bytes);
@@ -79,11 +82,10 @@ namespace MapRenderer.Tests.Visual
 
             var features = FeatureSelector.SelectFeatures(fillStyleLayer, mvtTile, styleZoom);
 
-            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-            var origin = new double2(bMin.x, bMin.y);
-
+            // Origin is derived from (id, projection) inside BuildFill — a globe projection bakes relative to
+            // the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side origin.
             Mesh mesh = TestTileMeshBuilder.BuildFill(
-                features, paint, styleZoom, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, origin);
+                features, paint, styleZoom, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, projection);
 
             var mapGo = new GameObject("FillSceneHelper");
             var mf = mapGo.AddComponent<MeshFilter>();
@@ -102,7 +104,8 @@ namespace MapRenderer.Tests.Visual
             mr.sharedMaterial = mat;
 
             // FitToView: scale+center so the mesh fits in viewSize world units (same as MapFillBootstrap).
-            if (mesh != null) FitToView(mapGo.transform, mesh, viewSize);
+            // Skipped when the caller drives placement itself (real camera-relative ENU rebase, S91-C).
+            if (mesh != null && fitToView) FitToView(mapGo.transform, mesh, viewSize);
 
             return (mapGo, mat);
         }
@@ -112,7 +115,9 @@ namespace MapRenderer.Tests.Visual
         private static void FitToView(Transform t, Mesh mesh, float viewSize)
         {
             Bounds b   = mesh.bounds;
-            float maxDim = Mathf.Max(b.size.x, b.size.z, 1e-6f);
+            // Use all three dims: flat Mercator meshes have size.y ≈ 0 (so this equals the old XZ fit), but a
+            // globe (ECEF) mesh spans Y too and must be fit in 3D.
+            float maxDim = Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z), 1e-6f);
             float scale  = viewSize / maxDim;
             t.localScale    = Vector3.one * scale;
             t.localPosition = -b.center * scale;

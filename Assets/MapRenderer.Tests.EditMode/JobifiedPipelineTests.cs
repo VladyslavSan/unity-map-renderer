@@ -251,7 +251,7 @@ namespace MapRenderer.Tests
                 FeatureGeometries = polyGeoms,
                 Extent    = extent,
                 TileZ     = 0, TileX = 0, TileY = 0,
-                OriginMercX = originX, OriginMercY = originY,
+                OriginRender = new double3(originX, 0.0, originY), // == ProjectTileCornerOrigin bit-for-bit for Mercator
             };
 
             TileMeshBuffers buffers = TileTessellationPipeline.Schedule(pipelineInput);
@@ -307,7 +307,7 @@ namespace MapRenderer.Tests
             {
                 FeatureGeometries = polyGeoms, Extent = extent,
                 TileZ = 0, TileX = 0, TileY = 0,
-                OriginMercX = bMin.x, OriginMercY = bMin.y,
+                OriginRender = new double3(bMin.x, 0.0, bMin.y),
             };
 
             // Get single-tile reference.

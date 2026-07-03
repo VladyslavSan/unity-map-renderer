@@ -75,7 +75,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
         };
 
         // Constant tangent: +X direction, +1 bitangent sign (right-handed), valid for flat +Y-normal fill.
+        // S91-C bakes the projection's east into this stream for the globe; constant +X is Mercator-correct.
         private static readonly Vector4 FlatTangent = new Vector4(1f, 0f, 0f, 1f);
+
+        // S91-A: the projection the geometry is built with. Launch-time config (Bootstrapper) threads a
+        // chosen projection here in S91-C; until then this single seam defaults to WebMercator. The
+        // pipeline projects with the chosen Projection struct — WebMercator.Forward is hardcoded nowhere.
+        private static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         /// <summary>
         /// Tightly-packed Position + Normal struct for stream 0.
@@ -107,9 +113,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double                    zoom,
             double                    extent,
             TileId                    id,
-            double2                   tileOriginMerc,
+            double3                   tileOriginRender,
             out int                   vertexCount,
-            out Bounds                bounds)
+            out Bounds                bounds,
+            IProjection               projection = null) // null ⇒ WebMercator (launch-time config threads this in)
         {
             vertexCount = 0;
             bounds      = default;
@@ -149,7 +156,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 FeatureGeometries = geoms,
                 Extent            = extent,
                 TileZ             = id.Z, TileX = id.X, TileY = id.Y,
-                OriginMercX       = tileOriginMerc.x, OriginMercY = tileOriginMerc.y,
+                OriginRender      = tileOriginRender,
+                Projection        = projection ?? DefaultProjection,
             });
 
             try
@@ -177,13 +185,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 float3 bMax = new float3(float.MinValue);
                 for (int i = 0; i < totalVerts; i++)
                 {
-                    float3 v = buffers.WorldPositions[i];
+                    // double3 origin-relative → float3 only here at mesh-write (docs §8.2).
+                    float3 v = (float3)buffers.WorldPositions[i];
                     bMin = math.min(bMin, v);
                     bMax = math.max(bMax, v);
+                    // Normal = the projection-baked surface up (S91-A). Constant +Y for Mercator (identical
+                    // to the old hardcoded Vector3.up); the geodetic normal on the globe (S91-C).
+                    float3 up = (float3)buffers.VertexUp[i];
                     s0[i] = new FillPositionNormal
                     {
                         Position = new Vector3(v.x, v.y, v.z),
-                        Normal   = Vector3.up, // explicit +Y: flat XZ fill geometry (S34 contract)
+                        Normal   = new Vector3(up.x, up.y, up.z),
                     };
 
                     double2 tv = buffers.TileVertices[i];

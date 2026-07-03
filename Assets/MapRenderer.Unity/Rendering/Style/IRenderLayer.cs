@@ -50,7 +50,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// </summary>
         void WriteInto(
             Mesh.MeshData md, IReadOnlyList<MvtFeature> features, double zoom, double extent,
-            TileId id, double2 tileOriginMerc, out int vertexCount, out Bounds bounds);
+            TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds);
     }
 
     /// <summary>

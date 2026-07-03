@@ -10,6 +10,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
 
@@ -20,14 +21,19 @@ namespace MapRenderer.Tests
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        /// <summary>Synchronous fill-layer mesh build. Returns null when the layer produces no geometry.</summary>
+        /// <summary>Synchronous fill-layer mesh build. Returns null when the layer produces no geometry.
+        /// Pass <paramref name="projection"/> to build with a non-default projection (e.g. the globe).</summary>
         public static Mesh BuildFill(
             IReadOnlyList<MvtFeature> features, Fill.PaintProperties paint,
-            double zoom, double extent, TileId id, double2 origin)
+            double zoom, double extent, TileId id, IProjection projection = null)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
-            StyledFillTileBuilder.WriteMeshData(mda[0], features, paint, zoom, extent, id, origin,
-                out int vertexCount, out Bounds bounds);
+            // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
+            // Mercator: (mercX, 0, mercZ) == MercatorBounds().min; globe: the ECEF corner. Derive it from
+            // (id, projection) here (NOT a caller-supplied Mercator origin) so a globe fixture bakes correctly.
+            double3 renderOrigin = TileTessellationPipeline.ProjectTileCornerOrigin(id.Z, id.X, id.Y, projection);
+            StyledFillTileBuilder.WriteMeshData(mda[0], features, paint, zoom, extent, id,
+                renderOrigin, out int vertexCount, out Bounds bounds, projection);
             return Finish(mda, vertexCount, bounds, "TestFill");
         }
 
@@ -37,8 +43,8 @@ namespace MapRenderer.Tests
             double zoom, double extent, TileId id, double2 origin)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
-            StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id, origin,
-                out int vertexCount, out Bounds bounds);
+            StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id,
+                new double3(origin.x, 0.0, origin.y), out int vertexCount, out Bounds bounds);
             return Finish(mda, vertexCount, bounds, "TestLine");
         }
 
@@ -49,8 +55,8 @@ namespace MapRenderer.Tests
             double zoom, double extent, TileId id, double2 origin)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
-            StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id, origin,
-                out int vertexCount, out _);
+            StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id,
+                new double3(origin.x, 0.0, origin.y), out int vertexCount, out _);
             mda.Dispose(); // never applied — we only wanted the count
             return vertexCount;
         }

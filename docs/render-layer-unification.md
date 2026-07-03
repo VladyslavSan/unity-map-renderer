@@ -29,7 +29,7 @@ Status: **IN PROGRESS** (hand-driven). Author: cleanup epic, 2026-07-01.
   the fixture `geolines` layer — only +,−,*,/,sqrt, IEEE-exact between Burst and Mono) and **tight-tolerance
   (1e-9)** parity on the transcendental round join/cap (atan2/cos/sin may differ a ULP; triangle topology
   still exact). Isolated/test-only — touches NO live code. **Fill kernels** (`MvtDecodeJob`/`RingAssemblyJob`/
-  `EarcutJob`/`ProjectTileToWebMercatorJob` via `TileTessellationPipeline`) were already oracle-validated
+  `EarcutJob`/`ProjectTileJob` via `TileTessellationPipeline`) were already oracle-validated
   strict by `JobifiedPipelineTests` — so the geometry-Burst port (D1) is now complete. Remaining: **C** (per-
   `(tile,layer)` produce) + **D2** (wire the D1 jobs into the live lifecycle; `UniTask→JobHandle` + drain pen).
 - **Stage C (dense per-source produce) — DONE (2026-07-02, 915 EditMode green).** Killed the S83b

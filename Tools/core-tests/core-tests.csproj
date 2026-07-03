@@ -33,6 +33,7 @@
   <ItemGroup>
     <Compile Include="Shim/**/*.cs" />
     <Compile Include="CorePipelineTests.cs" />
+    <Compile Include="SphericalProjectionTests.cs" />
     <Compile Include="ShaderStructureTests.cs" />
     <Compile Include="ShaderPropertyParser.cs" />
     <Compile Include="InstanceStructShaderParityTests.cs" />
@@ -55,8 +56,11 @@
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
 
     <!-- S63: Managed IProjection + WebMercatorProjection (Core, engine-free) -->
+    <!-- S91: IProjection grew the geometry surface; ProjectionKind + ProjectedPoint value types -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/IProjection.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercatorProjection.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/SphericalProjection.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/ProjectedPoint.cs" />
 
     <!-- S62: EarthConstants — pure-geodetic WGS-84 constants, referenced by WebMercator/Ecef/CameraPoseMath -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/EarthConstants.cs" />
@@ -64,7 +68,6 @@
     <!-- S61: Projection math foundation (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/GeoCoordinate.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/Ecef.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/Coordinates/ProjectionMode.cs" />
 
     <!-- S06: tile cover / floating-origin / input math (Core, engine-free) -->
     <!-- S71: visible-tile-selection seam + default viewport-corner impl (replaces TileCover) -->
@@ -72,6 +75,7 @@
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewContext.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/IVisibleTileSelector.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewportCornerTileSelector.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/GlobeTileSelector.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/DeviceScaling.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
@@ -220,6 +224,7 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Filters/FeatureSelectorTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/GlobeTileSelectorTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Mvt/MvtPropertyDecodeTests.cs" />

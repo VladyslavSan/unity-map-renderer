@@ -15,6 +15,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Tests
 {
@@ -51,11 +52,11 @@ namespace MapRenderer.Tests
 
             try
             {
-                int h0 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
-                int h1 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 1, X = 0, Y = 0 });
-                int h2 = brg.AddTileLayer(Track(meshes), double2.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
+                int h0 = brg.AddTileLayer(Track(meshes), double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+                int h1 = brg.AddTileLayer(Track(meshes), double3.zero, 0, new TileId { Z = 1, X = 0, Y = 0 });
+                int h2 = brg.AddTileLayer(Track(meshes), double3.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
 
-                brg.Rebuild(double2.zero);
+                brg.Rebuild(SceneFrame.Mercator(double2.zero));
                 Assert.AreEqual(3, brg.ComputeEmitOrder(scratch),
                     "All three live items must be emitted after Rebuild.");
 
@@ -71,7 +72,7 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(2, brg.DrawItemCount, "Two items remain registered.");
 
                 // After a Rebuild the sorted list resyncs and the count is still 2.
-                brg.Rebuild(double2.zero);
+                brg.Rebuild(SceneFrame.Mercator(double2.zero));
                 Assert.AreEqual(2, brg.ComputeEmitOrder(scratch), "After Rebuild, two items remain.");
 
                 // Evict the rest without a Rebuild → nothing emitted (no zero-command range / no garbage).

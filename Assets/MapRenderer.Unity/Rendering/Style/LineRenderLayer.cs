@@ -84,9 +84,9 @@ namespace MapRenderer.Unity.Rendering.Style
 
         public void WriteInto(
             Mesh.MeshData md, IReadOnlyList<MvtFeature> features, double zoom, double extent,
-            TileId id, double2 tileOriginMerc, out int vertexCount, out Bounds bounds)
+            TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds)
             => Meshing.StyledLineTileBuilder.WriteMeshData(
-                md, features, _paint, _layout, zoom, extent, id, tileOriginMerc, out vertexCount, out bounds);
+                md, features, _paint, _layout, zoom, extent, id, tileOriginRender, out vertexCount, out bounds, projection);
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

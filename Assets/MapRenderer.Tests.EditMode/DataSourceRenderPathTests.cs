@@ -97,7 +97,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Runs the full managed pipeline on MVT bytes and returns SHA-256 hashes of the flat
         /// vertex position array and flat index array (both in pipeline order across all features).
-        /// Vertex positions are float3 world positions (output of ProjectTileToWebMercatorJob).
+        /// Vertex positions are double3 origin-relative world positions (TileToGeoJob → ProjectPointsJob).
         /// </summary>
         private static (string vertHash, string idxHash) BuildContentHashes(byte[] mvtBytes)
         {
@@ -136,23 +136,29 @@ namespace MapRenderer.Tests
 
                     // Not using 'using var' — CS1654 makes using-var NativeArrays read-only in C# 8+.
                     var tileCoords = new NativeArray<double2>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
-                    var worldPos   = new NativeArray<float3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var geo        = new NativeArray<GeoCoordinate>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var worldPos   = new NativeArray<double3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var vertUp     = new NativeArray<double3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 
                     for (int i = 0; i < vCount; i++)
                         tileCoords[i] = flatVerts[i];
 
                     try
                     {
-                        var job = new ProjectTileToWebMercatorJob
+                        new TileToGeoJob
                         {
-                            TileZ = 0, TileX = 0, TileY = 0,
-                            Extent       = extent,
-                            OriginMercX  = originX,
-                            OriginMercY  = originY,
-                            TileCoords   = tileCoords,
-                            WorldPositions = worldPos
-                        };
-                        job.Schedule(vCount, 64).Complete();
+                            TileZ = 0, TileX = 0, TileY = 0, Extent = extent,
+                            TileCoords = tileCoords, OutGeo = geo,
+                        }.Schedule(vCount, 64).Complete();
+
+                        new ProjectPointsJob<WebMercatorProjection>
+                        {
+                            Projection     = new WebMercatorProjection(),
+                            OriginWorld    = new double3(originX, 0.0, originY),
+                            Points         = geo,
+                            WorldPositions = worldPos,
+                            Normals        = vertUp,
+                        }.Schedule(vCount, 64).Complete();
 
                         for (int i = 0; i < vCount; i++)
                         {
@@ -169,7 +175,9 @@ namespace MapRenderer.Tests
                     finally
                     {
                         tileCoords.Dispose();
+                        geo.Dispose();
                         worldPos.Dispose();
+                        vertUp.Dispose();
                     }
                 }
             }

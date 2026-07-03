@@ -238,27 +238,61 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it — best float precision, no threshold/rebase machinery.
-            _sceneOrigin = cam.CenterMercator();
+            _sceneOrigin = cam.CenterMercator(); // kept for the SceneOrigin property (Mercator; read by tests)
 
+            // S91-C Slice 2: place tiles via the projection-agnostic scene frame built from the launch-time
+            // projection + the look-at. Mercator: rebase = identity and SceneOriginRender = (mercX, 0, mercZ)
+            // (== SceneFrame.Mercator(_sceneOrigin)), so placement is bit-for-bit the pre-S91 translation.
+            // Globe: rebase rotates every tile into the look-at's local ENU frame (up = +Y), so the same
+            // CameraPoseMath.ComputePose orbit frames it.
             using (PmInstancedRebuild.Auto())
-                TileManager.InstancedRebuild(_sceneOrigin);
+                TileManager.InstancedRebuild(BuildSceneFrame(cam));
 
             EnsureSelector();
             using (PmManagerTick.Auto())
                 TileManager.Tick(cam, BuildTileSelectionConfig());
         }
 
-        // ── S71: visible-tile selector, rebuilt only when its algorithm config changes ──────────
-        private int _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom, _selOnScreenTilePx;
+        /// <summary>
+        /// Builds the per-frame <see cref="Backend.SceneFrame"/> (Level-2 of the two-level RTC) from the
+        /// launch-time projection and the camera look-at: the render-space scene origin
+        /// (<c>projection.Project(lookAt)</c>) and the render→look-at-local-ENU rebase
+        /// (<c>transpose(projection.TangentBasisAt(lookAt))</c>). The look-at latitude is clamped to the
+        /// projection's valid range (<see cref="IProjection.ClampValidLatitude"/>) — ±85.05° for Web-Mercator
+        /// (matching <c>CenterMercator</c>), ±90° for the globe. For Web-Mercator the basis is the identity, so
+        /// the frame equals <c>SceneFrame.Mercator(_sceneOrigin)</c> bit-for-bit.
+        /// </summary>
+        private Backend.SceneFrame BuildSceneFrame(in CameraProperties cam)
+        {
+            IProjection proj = Camera.Projection;
+            var lookAt = new GeoCoordinate
+            {
+                Latitude  = proj.ClampValidLatitude(cam.LookAt.Latitude),
+                Longitude = cam.LookAt.Longitude,
+            };
+            return new Backend.SceneFrame(proj.Project(lookAt), math.transpose(proj.TangentBasisAt(lookAt)));
+        }
+
+        // ── S71: visible-tile selector, rebuilt only when its algorithm config (or projection) changes ──
+        private int  _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom, _selOnScreenTilePx;
+        private bool _selGlobe;
 
         private void EnsureSelector()
         {
-            if (TileManager.Selector == null ||
+            // S91-C Slice 3: first-cut selector dispatch by projection. The globe needs a spherical-cap cover;
+            // the Mercator corner-unprojection can't run there (SphericalProjection.ScreenToGround throws). This
+            // becomes a registry lookup when a third projection/selector arrives.
+            bool globe = Camera.Projection is SphericalProjection;
+            if (TileManager.Selector == null || _selGlobe != globe ||
                 _selPadTiles != _config.PadTiles || _selMinZoom != _config.MinZoom || _selMaxZoom != _config.MaxZoom ||
                 _selOnScreenTilePx != _config.OnScreenTilePx)
             {
-                TileManager.Selector = new ViewportCornerTileSelector(
-                    _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
+                TileManager.Selector = globe
+                    ? new GlobeTileSelector(
+                        _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx)
+                    : (IVisibleTileSelector)new ViewportCornerTileSelector(
+                        _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
+                _selGlobe = globe;
                 _selPadTiles = _config.PadTiles; _selMinZoom = _config.MinZoom; _selMaxZoom = _config.MaxZoom;
                 _selOnScreenTilePx = _config.OnScreenTilePx;
             }

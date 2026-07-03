@@ -18,6 +18,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
@@ -115,7 +116,7 @@ namespace MapRenderer.Tests.Visual
                 // Floating origin: the entity translation must equal TileLocalToScene(tileOrigin, sceneOrigin).
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
                 double2 sceneOrigin0 = cam0.CenterMercator();
-                ent.Rebuild(sceneOrigin0);
+                ent.Rebuild(SceneFrame.Mercator(sceneOrigin0));
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
 
                 bool found = false;
@@ -134,7 +135,7 @@ namespace MapRenderer.Tests.Visual
 
                 // Origin shift (look-at move): translation must track the new origin.
                 double2 sceneOrigin1 = MakeCam(10, 0, 0.0).CenterMercator();
-                ent.Rebuild(sceneOrigin1);
+                ent.Rebuild(SceneFrame.Mercator(sceneOrigin1));
                 float3 expected1 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
                 bool updated = false;
                 for (int h = 0; h < ent.DrawItemCount + 100; h++)

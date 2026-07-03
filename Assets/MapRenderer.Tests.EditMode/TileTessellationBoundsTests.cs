@@ -122,9 +122,9 @@ namespace MapRenderer.Tests
             var input = new TileTessellationPipeline.LayerInput
             {
                 FeatureGeometries = new List<uint[]> { MultiPointMoveTo(11) },
-                Extent      = 4096,
-                TileZ       = 0, TileX = 0, TileY = 0,
-                OriginMercX = 0, OriginMercY = 0,
+                Extent       = 4096,
+                TileZ        = 0, TileX = 0, TileY = 0,
+                OriginRender = default, // all rings degenerate ⇒ no geometry ⇒ origin irrelevant here
             };
 
             TileMeshBuffers buffers = default;

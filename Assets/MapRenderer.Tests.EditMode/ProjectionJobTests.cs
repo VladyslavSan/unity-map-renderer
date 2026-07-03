@@ -12,12 +12,12 @@ using MapRenderer.Jobs;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// EditMode tests for ProjectTileToWebMercatorJob.
+    /// EditMode tests for TileToGeoJob + ProjectPointsJob&lt;TProj&gt; (WebMercator + Spherical).
     ///
     /// (1) Parity test — job matches TileId.ToMercator − origin for known tile coords,
     ///     including a non-z0 tile to exercise the 2^z path.
     /// (2) Acceptance — all 239 countries' vertices project within MercatorBounds (± margin).
-    /// (3) Precision intent — origin-relative float3 magnitudes are smaller than absolute Mercator.
+    /// (3) Precision intent — origin-relative double3 magnitudes are smaller than absolute Mercator.
     ///
     /// Note: Tests run the job via managed fallback (.Run() / .Complete()), not Burst-compiled.
     /// They validate numeric correctness but do NOT prove Burst compilation.
@@ -30,26 +30,34 @@ namespace MapRenderer.Tests
         // Helper: run the job synchronously over a single tile coord.
         // -----------------------------------------------------------------------------------------
 
-        private static float3 Project(int z, int x, int y, double extent, double px, double py,
+        private static double3 Project(int z, int x, int y, double extent, double px, double py,
             double originX, double originY)
         {
             var coords = new NativeArray<double2>(1, Allocator.TempJob);
-            var result = new NativeArray<float3>(1, Allocator.TempJob);
+            var geo    = new NativeArray<GeoCoordinate>(1, Allocator.TempJob);
+            var result = new NativeArray<double3>(1, Allocator.TempJob);
+            var up     = new NativeArray<double3>(1, Allocator.TempJob);
             coords[0] = new double2(px, py);
 
-            new ProjectTileToWebMercatorJob
+            // tile → geodetic (projection-independent), then project through Web Mercator.
+            new TileToGeoJob
             {
-                TileZ = z, TileX = x, TileY = y,
-                Extent = extent,
-                OriginMercX = originX,
-                OriginMercY = originY,
-                TileCoords = coords,
-                WorldPositions = result
+                TileZ = z, TileX = x, TileY = y, Extent = extent,
+                TileCoords = coords, OutGeo = geo,
             }.Schedule(1, 1).Complete();
 
-            float3 r = result[0];
+            new ProjectPointsJob<WebMercatorProjection>
+            {
+                Projection = new WebMercatorProjection(),
+                OriginWorld = new double3(originX, 0.0, originY),
+                Points = geo, WorldPositions = result, Normals = up,
+            }.Schedule(1, 1).Complete();
+
+            double3 r = result[0];
             coords.Dispose();
+            geo.Dispose();
             result.Dispose();
+            up.Dispose();
             return r;
         }
 
@@ -85,13 +93,13 @@ namespace MapRenderer.Tests
                 double refDx = mercRef.x - originX;
                 double refDz = mercRef.y - originY;
 
-                float3 jobOut = Project(0, 0, 0, extent, px, py, originX, originY);
+                double3 jobOut = Project(0, 0, 0, extent, px, py, originX, originY);
 
-                Assert.That((double)jobOut.x, Is.EqualTo(refDx).Within(tol),
+                Assert.That(jobOut.x, Is.EqualTo(refDx).Within(tol),
                     $"X mismatch at px={px}, py={py}: job={jobOut.x:F2}, ref={refDx:F2}");
-                Assert.That((double)jobOut.z, Is.EqualTo(refDz).Within(tol),
+                Assert.That(jobOut.z, Is.EqualTo(refDz).Within(tol),
                     $"Z mismatch at px={px}, py={py}: job={jobOut.z:F2}, ref={refDz:F2}");
-                Assert.AreEqual(0.0f, jobOut.y, "Y should be 0.");
+                Assert.AreEqual(0.0, jobOut.y, "Y should be 0.");
             }
         }
 
@@ -125,11 +133,11 @@ namespace MapRenderer.Tests
                 double refDx = mercRef.x - originX;
                 double refDz = mercRef.y - originY;
 
-                float3 jobOut = Project(z, tx, ty, extent, px, py, originX, originY);
+                double3 jobOut = Project(z, tx, ty, extent, px, py, originX, originY);
 
-                Assert.That((double)jobOut.x, Is.EqualTo(refDx).Within(tol),
+                Assert.That(jobOut.x, Is.EqualTo(refDx).Within(tol),
                     $"X mismatch z={z} tx={tx} ty={ty} px={px}: job={jobOut.x:F4}, ref={refDx:F4}");
-                Assert.That((double)jobOut.z, Is.EqualTo(refDz).Within(tol),
+                Assert.That(jobOut.z, Is.EqualTo(refDz).Within(tol),
                     $"Z mismatch z={z} tx={tx} ty={ty} py={py}: job={jobOut.z:F4}, ref={refDz:F4}");
             }
         }
@@ -166,27 +174,32 @@ namespace MapRenderer.Tests
                     if (ring == null || ring.Count == 0) continue;
 
                     var coords = new NativeArray<double2>(ring.Count, Allocator.TempJob);
-                    var results = new NativeArray<float3>(ring.Count, Allocator.TempJob);
+                    var geo     = new NativeArray<GeoCoordinate>(ring.Count, Allocator.TempJob);
+                    var results = new NativeArray<double3>(ring.Count, Allocator.TempJob);
+                    var ups     = new NativeArray<double3>(ring.Count, Allocator.TempJob);
 
                     for (int i = 0; i < ring.Count; i++)
                         coords[i] = ring[i];
 
-                    new ProjectTileToWebMercatorJob
+                    new TileToGeoJob
                     {
-                        TileZ = 0, TileX = 0, TileY = 0,
-                        Extent = extent,
-                        OriginMercX = originX,
-                        OriginMercY = originY,
-                        TileCoords = coords,
-                        WorldPositions = results
+                        TileZ = 0, TileX = 0, TileY = 0, Extent = extent,
+                        TileCoords = coords, OutGeo = geo,
+                    }.Schedule(ring.Count, 64).Complete();
+
+                    new ProjectPointsJob<WebMercatorProjection>
+                    {
+                        Projection = new WebMercatorProjection(),
+                        OriginWorld = new double3(originX, 0.0, originY),
+                        Points = geo, WorldPositions = results, Normals = ups,
                     }.Schedule(ring.Count, 64).Complete();
 
                     for (int i = 0; i < ring.Count; i++)
                     {
-                        float3 wp = results[i];
+                        double3 wp = results[i];
                         // Reconstruct absolute mercator from origin-relative
-                        double absX = (double)wp.x + originX;
-                        double absZ = (double)wp.z + originY;
+                        double absX = wp.x + originX;
+                        double absZ = wp.z + originY;
 
                         Assert.That(absX, Is.GreaterThanOrEqualTo(bMin.x - marginX).And.LessThanOrEqualTo(bMax.x + marginX),
                             $"absX={absX:F2} out of [{bMin.x:F2}, {bMax.x:F2}]");
@@ -197,7 +210,9 @@ namespace MapRenderer.Tests
                     }
 
                     coords.Dispose();
+                    geo.Dispose();
                     results.Dispose();
+                    ups.Dispose();
                 }
             }
             Assert.Greater(totalChecked, 0, "Should have checked at least one vertex.");
@@ -230,15 +245,59 @@ namespace MapRenderer.Tests
 
             foreach (var c in corners)
             {
-                float3 wp = Project(0, 0, 0, extent, c[0], c[1], originX, originY);
+                double3 wp = Project(0, 0, 0, extent, c[0], c[1], originX, originY);
 
                 // Origin-relative x should be in [0, tileWidth] (with float rounding)
-                Assert.That((double)wp.x, Is.GreaterThanOrEqualTo(-1000.0).And.LessThanOrEqualTo(tileWidth + 1000.0),
+                Assert.That(wp.x, Is.GreaterThanOrEqualTo(-1000.0).And.LessThanOrEqualTo(tileWidth + 1000.0),
                     $"Origin-relative X={wp.x} out of tile width bounds.");
                 // Origin-relative z should be in [0, tileHeight] (note: Y-axis: top=low Mercator)
-                Assert.That((double)wp.z, Is.GreaterThanOrEqualTo(-tileHeight - 1000.0).And.LessThanOrEqualTo(tileHeight + 1000.0),
+                Assert.That(wp.z, Is.GreaterThanOrEqualTo(-tileHeight - 1000.0).And.LessThanOrEqualTo(tileHeight + 1000.0),
                     $"Origin-relative Z={wp.z} out of tile height bounds.");
             }
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // (4) Projection-agnostic job — same generic ProjectPointsJob<TProj>, Spherical struct → vertices on
+        //     the sphere. Proves the job is driven by the projection type (not hardcoded Mercator) AND that
+        //     Burst compiles ProjectPointsJob<SphericalProjection> (the second IProjection impl).
+        // -----------------------------------------------------------------------------------------
+
+        [Test]
+        public void Spherical_JobProjectsVerticesOntoTheSphere()
+        {
+            const double extent = 4096.0;
+
+            var coords = new NativeArray<double2>(4, Allocator.TempJob);
+            coords[0] = new double2(0, 0);
+            coords[1] = new double2(2048, 2048);
+            coords[2] = new double2(4096, 0);
+            coords[3] = new double2(1000, 3000);
+            var geo   = new NativeArray<GeoCoordinate>(4, Allocator.TempJob);
+            var world = new NativeArray<double3>(4, Allocator.TempJob);
+            var up    = new NativeArray<double3>(4, Allocator.TempJob);
+
+            new TileToGeoJob
+            {
+                TileZ = 3, TileX = 2, TileY = 1, Extent = extent,
+                TileCoords = coords, OutGeo = geo,
+            }.Schedule(4, 1).Complete();
+
+            new ProjectPointsJob<SphericalProjection>
+            {
+                Projection = new SphericalProjection(),
+                OriginWorld = new double3(0, 0, 0), // absolute render-space ECEF (no RTC) so |World| == R
+                Points = geo, WorldPositions = world, Normals = up,
+            }.Schedule(4, 1).Complete();
+
+            for (int i = 0; i < 4; i++)
+            {
+                double r = math.length(world[i]);
+                Assert.That(r, Is.EqualTo(R).Within(1.0), $"vertex {i} must lie on the sphere of radius R");
+                Assert.That(math.length(up[i]), Is.EqualTo(1.0).Within(1e-9), $"up {i} must be unit");
+                Assert.That(math.dot(world[i] / r, up[i]), Is.EqualTo(1.0).Within(1e-9), $"up {i} must be radial");
+            }
+
+            coords.Dispose(); geo.Dispose(); world.Dispose(); up.Dispose();
         }
     }
 }

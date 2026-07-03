@@ -19,8 +19,44 @@ namespace MapRenderer.Core.Geo
     /// <para><b>Overhead-correct (D5):</b> <see cref="ScreenToGround"/> is exact for <c>tilt=0</c>;
     /// the tilted ray-cast is a future internal upgrade of the same method, not a new interface member.</para>
     /// </summary>
-    public sealed class WebMercatorProjection : IProjection
+    public readonly struct WebMercatorProjection : IProjection
     {
+        // ── Projection math — the single shared kernel (stateless struct → usable in Burst & managed) ──
+
+        /// <summary>
+        /// The Web Mercator projection kernel: geodetic → render-space position + surface up. STATELESS —
+        /// the only input is the geodetic point (the EPSG:3857 radius is the fixed <see cref="WebMercator.R"/>).
+        /// Uses only <c>Unity.Mathematics</c> via <see cref="WebMercator.Forward"/> (the single-sourced
+        /// formula), so Burst compiles it when <c>ProjectPointsJob&lt;WebMercatorProjection&gt;</c> calls it
+        /// through the generic constraint; the OOP <see cref="Project"/>/<see cref="UpAt"/> call it too.
+        /// Mercator up is the constant planar +Y.
+        /// </summary>
+        public ProjectedPoint ProjectPoint(in GeoCoordinate geo)
+            => new ProjectedPoint
+            {
+                World = WebMercator.Forward(new GeoCoordinate3D { Latitude = geo.Latitude, Longitude = geo.Longitude, Altitude = 0.0 }),
+                Up    = new double3(0.0, 1.0, 0.0),
+            };
+
+        // ── Geometry (build side; docs §6) — conveniences forwarding to the kernel ─────────────────
+
+        /// <inheritdoc/>
+        public double3 Project(in GeoCoordinate geo) => ProjectPoint(geo).World;
+
+        /// <inheritdoc/>
+        public double3 UpAt(in GeoCoordinate geo) => new double3(0.0, 1.0, 0.0);
+
+        /// <inheritdoc/>
+        public float3x3 TangentBasisAt(in GeoCoordinate geo) => WebMercator.TangentBasis(geo); // constant east/up/north
+
+        /// <inheritdoc/>
+        public double MetersPerUnit => 1.0; // render units are Mercator metres
+
+        /// <inheritdoc/>
+        public bool ReversesWinding => false; // planar mapping preserves the tessellation winding
+
+        // ── Camera interaction (managed side) ───────────────────────────────────────────────────────
+
         /// <inheritdoc/>
         public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in CameraProperties camera)
         {

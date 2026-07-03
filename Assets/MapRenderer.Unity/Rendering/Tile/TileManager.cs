@@ -11,6 +11,7 @@ using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Jobs;
 using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
 using EntBackend = MapRenderer.Unity.Rendering.Backend.Entities;
 using GOBackend = MapRenderer.Unity.Rendering.Backend.GameObjects;
@@ -126,7 +127,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             public UniTask<TessellationResult> TessellationTask; // default until fetch completes; default after consumed
             public bool                      HasTessellationTask; // true when TessellationTask is valid
             public bool                      Built;            // mesh produced (or definitively absent/failed)
-            public double2                   TileOriginMerc;
+            /// <summary>S91-C: the tile's SW-corner projected render origin (double3) — the SINGLE bake-and-place
+            /// origin shared by the mesh bake and the tile transform. Mercator: (mercX, 0, mercZ); globe: ECEF.</summary>
+            public double3                   TileOriginRender;
             /// <summary>
             /// S51 leak guard: per-layer Mesh assets created by ConsumeTessellationTask. Must be
             /// explicitly destroyed on release/teardown (Unity does not destroy a Mesh asset just because
@@ -276,6 +279,11 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
         private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
+
+        // S91-C: the launch-time projection, cached each Tick from the TileSelectionConfig so the (possibly
+        // off-Tick) tessellation write bakes vertices with the SAME projection the tile origin + scene frame
+        // use. null ⇒ WebMercator (planar). Launch-constant, so any Tick's value is correct.
+        private IProjection _projection;
 
         // ── S71: the visible-tile-selection seam (default = ViewportCornerTileSelector; injected by MapView) ─
         // Held as the interface type so a future mixed-zoom (distance-LOD) impl drops in with no change here.
@@ -517,12 +525,12 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// Rebuilds the per-tile object-to-world transforms (and refreshes backend state) for all loaded
-        /// tiles from <paramref name="sceneOrigin"/> (S52 camera-relative rendering: the origin tracks the
+        /// tiles from <paramref name="frame"/> (S52/S91-C camera-relative rendering: the scene frame tracks the
         /// look-at). Called by MapView once per frame.
         /// </summary>
-        public void InstancedRebuild(double2 sceneOrigin)
+        public void InstancedRebuild(in Backend.SceneFrame frame)
         {
-            _instanced?.Rebuild(sceneOrigin);
+            _instanced?.Rebuild(frame);
         }
 
         /// <summary>
@@ -598,6 +606,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (_selector == null) return;
 
+            _projection = cfg.Projection; // cache for the tessellation bake (Level-1); same projection as origin + frame
+
             if (!_coverKeyInitialised ||
                 cam.LookAt.Longitude    != _coverKeyLon ||
                 cam.LookAt.Latitude     != _coverKeyLat ||
@@ -655,9 +665,13 @@ namespace MapRenderer.Unity.Rendering.Tile
                         }
                         _loaded[key] = new LoadedTile
                         {
-                            Request        = fetchReq,
-                            Built          = false,
-                            TileOriginMerc = FloatingOrigin.TileLocalOriginMercator(id),
+                            Request          = fetchReq,
+                            Built            = false,
+                            // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
+                            // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
+                            // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
+                            TileOriginRender = TileTessellationPipeline.ProjectTileCornerOrigin(
+                                id.Z, id.X, id.Y, cfg.Projection),
                         };
                     }
                 }
@@ -941,7 +955,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             var layersSnapshot = _layers.SnapshotLayers();
             double  zoom       = cam.Zoom;
-            double2 tileOrigin = lt.TileOriginMerc;
+            double3 tileOrigin = lt.TileOriginRender;
             int     n          = layersSnapshot.Length;
 
             // S89 Stage C: DENSE per-(tile, source) produce. Collect this-source layers in declared (draw)
@@ -988,7 +1002,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                                 layer.StyleLayer, mvtTile);
                             if (mvtLayer != null)
                                 layer.WriteInto(mdas[d][0], features, zoom, mvtLayer.Extent, id, tileOrigin,
-                                    out verts, out bounds);
+                                    _projection, out verts, out bounds);
                         }
 
                         payloads[d] = new Style.MeshDataTessellation(
@@ -1088,7 +1102,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 int handle;
                 using (PmAddTileLayer.Auto())
-                    handle = _instanced.AddTileLayer(mesh, lt.TileOriginMerc, materialIndex, id);
+                    handle = _instanced.AddTileLayer(mesh, lt.TileOriginRender, materialIndex, id);
                 _consumeScratchMeshes.Add(mesh);                 // S51: track for explicit destruction
                 _consumeScratchHandles.Add(handle);
                 meshesConsumed++;

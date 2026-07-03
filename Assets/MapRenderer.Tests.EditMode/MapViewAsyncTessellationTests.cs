@@ -193,8 +193,8 @@ namespace MapRenderer.Tests
             {
                 capturedThreadId = Thread.CurrentThread.ManagedThreadId;
                 StyledFillTileBuilder.WriteMeshData(
-                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
-                    out int vc, out _);
+                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                    new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
                 return vc;
             });
 
@@ -371,10 +371,8 @@ namespace MapRenderer.Tests
                 var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);
 
-                var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
                 Mesh syncMesh = TestTileMeshBuilder.BuildFill(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
-                    new double2(bMin.x, bMin.y));
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(syncMesh);
 
                 Assert.AreEqual(syncMesh.vertexCount, asyncMesh.vertexCount,
@@ -603,15 +601,15 @@ namespace MapRenderer.Tests
 
             // Reference path: tessellate + apply entirely on THIS (main) thread.
             Mesh syncMesh = TestTileMeshBuilder.BuildFill(
-                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin);
+                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
 
             // Split path (production shape): allocate on main, WRITE off the main thread, apply on main.
             var mda = Mesh.AllocateWritableMeshData(1);
             var task = Task.Run(() =>
             {
                 StyledFillTileBuilder.WriteMeshData(
-                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
-                    out int vc, out _);
+                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                    new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
                 return vc;
             });
             int splitVertexCount = task.GetAwaiter().GetResult();

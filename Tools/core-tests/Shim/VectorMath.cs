@@ -12,5 +12,12 @@ namespace Unity.Mathematics
             => new double3(a.y * b.z - a.z * b.y,
                            a.z * b.x - a.x * b.z,
                            a.x * b.y - a.y * b.x);
+
+        // S91-C: FloatingOrigin.TileToSceneRebased rotates a render-space delta into the look-at ENU frame.
+        // Matrix-vector product with column-major float3x3 (columns are the basis images): m·v = c0·x + c1·y + c2·z.
+        public static float3 mul(float3x3 a, float3 b)
+            => new float3(a.c0.x * b.x + a.c1.x * b.y + a.c2.x * b.z,
+                          a.c0.y * b.x + a.c1.y * b.y + a.c2.y * b.z,
+                          a.c0.z * b.x + a.c1.z * b.y + a.c2.z * b.z);
     }
 }

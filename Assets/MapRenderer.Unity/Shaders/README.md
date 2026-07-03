@@ -40,7 +40,7 @@ The shaders make **no flat-ground (XZ / +Y) assumption**. The geometric frame is
 
 What's still Mercator-tied is the **position** itself: the mesh builders project 2D tile geometry to a
 flat `Vector3(x, 0, y)` via `WebMercator.Forward`. Making *placement* projection-agnostic is the globe
-epic — `IProjection` bakes a blittable `ProjectionRules` (not yet built) handed to the Burst mesh job,
+epic — `IProjection` exposes a stateless `ProjectPoint` math + a `Kind` enum the Burst mesh job switches on,
 which emits `position + frame` for any projection; the mesh then bakes a non-zero-Y `across` + radial
 normals and **these shaders consume them with no change**. (Fill's `MapVertexModify` translate is the
 last per-vertex spot still written in XZ; it moves to the normal-relative frame with the same edit.)

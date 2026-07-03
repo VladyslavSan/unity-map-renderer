@@ -42,7 +42,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             public BatchMeshID     MeshId;
             public BatchMaterialID MatId;
             public int             LayerRenderQueue;   // material.renderQueue — sort key
-            public double2         TileOriginMerc;
+            public double3         TileOriginRender;   // SW-corner projected render origin (Mercator: (mercX,0,mercZ))
             public int             MaterialIndex;      // index into _layerMaterials for prop readback
         }
 
@@ -269,7 +269,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// the shared <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile
         /// hierarchy; BRG draws a flat instance buffer and does not use it.
         /// </summary>
-        public int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex, TileId tileId)
+        public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
             if (_disposed)   throw new ObjectDisposedException(nameof(TileRenderer));
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
@@ -290,7 +290,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 MeshId           = meshId,
                 MatId            = matId,
                 LayerRenderQueue = mat.renderQueue,
-                TileOriginMerc   = tileOriginMerc,
+                TileOriginRender = tileOriginRender,
                 MaterialIndex    = materialIndex,
             };
             return handle;
@@ -312,15 +312,16 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// Rebuilds the instance data buffer from all registered draw items using SoA layout.
         /// Must be called once per frame on the BRG path.
         ///
-        /// Recomputes per-instance objectToWorld from <paramref name="sceneOrigin"/> and reads
-        /// material props back from each layer material (no per-frame managed allocation in steady
-        /// state — buffer is grown on demand but never shrunk).
+        /// Recomputes per-instance objectToWorld from <paramref name="frame"/> (the camera-relative
+        /// <see cref="SceneFrame"/> — scene origin + rebase rotation) and reads material props back from each
+        /// layer material (no per-frame managed allocation in steady state — buffer is grown on demand but
+        /// never shrunk).
         ///
         /// SoA (Struct-of-Arrays): all instance O2W first, then all W2O, then all _BaseColor, etc.
         /// Byte offsets in ReRegisterBatch are computed from the current instance count N.
         /// The batch is re-registered whenever N changes (offsets change with N).
         /// </summary>
-        public void Rebuild(double2 sceneOrigin)
+        public void Rebuild(in SceneFrame frame)
         {
             if (_disposed || _items.Count == 0)
             {
@@ -350,32 +351,24 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // ── W2O block (12 floats per instance) ──────────────────────────────────────────
             int w2oBase = _plan.W2OFloatOffset * count; // = 12 * count
 
+            // S91-C: place each tile in the look-at's local ENU frame. The rebase is a proper (orthonormal)
+            // rotation, so O2W = [R | pos] and its RIGID inverse W2O = [Rᵀ | -Rᵀ·pos]. Building both directly
+            // from the float3x3 (no quaternion round-trip, no math.inverse) keeps the Mercator identity-rebase
+            // case bit-for-bit the pre-S91 translation-only packing (R = I ⇒ pos.y = 0 ⇒ old p1/p2/p3).
+            float3x3 rebase  = frame.Rebase;
+            float3x3 rebaseT = math.transpose(rebase);
+
             for (int si = 0; si < count; si++)
             {
                 int handle = _sortedItems[si].handle;
                 var item   = _items[handle];
 
-                float3 pos = FloatingOrigin.TileLocalToScene(item.TileOriginMerc, sceneOrigin);
+                float3   pos = FloatingOrigin.TileToSceneRebased(item.TileOriginRender, frame.SceneOriginRender, rebase);
+                float4x4 o2w = new float4x4(rebase,  pos);
+                float4x4 w2o = new float4x4(rebaseT, math.mul(rebaseT, -pos));
 
-                // O2W: Unity BRG packed float3x4 (see UnityDOTSInstancing.hlsl LoadDOTSInstancedData_float3x4).
-                // The HLSL reads p1/p2/p3 (three float4 packed words) and reconstructs the 4×4 matrix:
-                //   Row 0: [p1.x, p1.w, p2.z, p3.y] = [m00, m01, m02, m03]
-                //   Row 1: [p1.y, p2.x, p2.w, p3.z] = [m10, m11, m12, m13]
-                //   Row 2: [p1.z, p2.y, p3.x, p3.w] = [m20, m21, m22, m23]
-                // For identity scale + translate (tx,ty,tz):
-                //   p1 = [m00, m10, m20, m01] = [1,  0,  0,  0]
-                //   p2 = [m11, m21, m02, m12] = [1,  0,  0,  0]
-                //   p3 = [m22, m03, m13, m23] = [1, tx, ty, tz]
-                int b = o2wBase + si * 12;
-                _cpuBuffer[b +  0] = 1f;     _cpuBuffer[b +  1] = 0f;     _cpuBuffer[b +  2] = 0f;     _cpuBuffer[b +  3] = 0f;
-                _cpuBuffer[b +  4] = 1f;     _cpuBuffer[b +  5] = 0f;     _cpuBuffer[b +  6] = 0f;     _cpuBuffer[b +  7] = 0f;
-                _cpuBuffer[b +  8] = 1f;     _cpuBuffer[b +  9] = pos.x;  _cpuBuffer[b + 10] = pos.y;  _cpuBuffer[b + 11] = pos.z;
-
-                // W2O: inverse translate by (-tx, -ty, -tz) — same packed format.
-                int bw = w2oBase + si * 12;
-                _cpuBuffer[bw +  0] = 1f;    _cpuBuffer[bw +  1] = 0f;    _cpuBuffer[bw +  2] = 0f;    _cpuBuffer[bw +  3] = 0f;
-                _cpuBuffer[bw +  4] = 1f;    _cpuBuffer[bw +  5] = 0f;    _cpuBuffer[bw +  6] = 0f;    _cpuBuffer[bw +  7] = 0f;
-                _cpuBuffer[bw +  8] = 1f;    _cpuBuffer[bw +  9] = -pos.x; _cpuBuffer[bw + 10] = -pos.y; _cpuBuffer[bw + 11] = -pos.z;
+                PackPackedFloat3x4(_cpuBuffer, o2wBase + si * 12, o2w);
+                PackPackedFloat3x4(_cpuBuffer, w2oBase + si * 12, w2o);
             }
 
             // ── Material property blocks ─────────────────────────────────────────────────────
@@ -443,6 +436,20 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                     }
                 }
             }
+        }
+
+        /// <summary>
+        /// Packs a <see cref="float4x4"/> into Unity BRG's packed float3x4 slot (12 floats), matching the
+        /// layout UnityDOTSInstancing.hlsl <c>LoadDOTSInstancedData_float3x4</c> reconstructs:
+        ///   p1 = [m00,m10,m20,m01], p2 = [m11,m21,m02,m12], p3 = [m22,m03,m13,m23]
+        /// where <c>mᵣc = m.c{c}[r]</c> (float4x4 is column-major), i.e. the 12 floats are the first three
+        /// columns' xyz then the translation column's xyz, interleaved as below.
+        /// </summary>
+        private static void PackPackedFloat3x4(float[] buf, int b, in float4x4 m)
+        {
+            buf[b +  0] = m.c0.x; buf[b +  1] = m.c0.y; buf[b +  2] = m.c0.z; buf[b +  3] = m.c1.x;
+            buf[b +  4] = m.c1.y; buf[b +  5] = m.c1.z; buf[b +  6] = m.c2.x; buf[b +  7] = m.c2.y;
+            buf[b +  8] = m.c2.z; buf[b +  9] = m.c3.x; buf[b + 10] = m.c3.y; buf[b + 11] = m.c3.z;
         }
 
         // ── GraphicsBuffer / batch management ─────────────────────────────────────────────────

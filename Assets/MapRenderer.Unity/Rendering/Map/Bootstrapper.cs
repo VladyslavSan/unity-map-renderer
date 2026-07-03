@@ -80,6 +80,11 @@ namespace MapRenderer.Unity.Rendering.Map
                  "uncapped (1000+ FPS), which needlessly drives the GPU and heats the machine.")]
         public bool CapFrameRateToRefreshRate = true;
 
+        [Tooltip("Render on a 3D globe (SphericalProjection) instead of the flat Web-Mercator plane. " +
+                 "Launch-time only — the projection is a session constant (S91-C). First cut: a spherical-cap " +
+                 "tile cover at low-to-mid zoom; true pan/zoom input on the globe is a later stage.")]
+        public bool UseGlobe = false;
+
         private void Start()
         {
             // 0. Cap the frame rate to the display refresh (VSync) — uncapped rendering serves no
@@ -98,8 +103,10 @@ namespace MapRenderer.Unity.Rendering.Map
                 }, InitialZoom, 0, 0, VerticalFovDeg);
 
             // 2. Wire camera + components only — the style drives the sources. Wire builds the MapView over
-            //    the main camera; SetStyle (step 4) loads the multi-source pipeline.
-            Wire(gameObject, Camera.main, initialView);
+            //    the main camera; SetStyle (step 4) loads the multi-source pipeline. The projection is the
+            //    launch-time session constant (S91-C) — globe or planar.
+            Wire(gameObject, Camera.main, initialView,
+                 UseGlobe ? new SphericalProjection() : null);
 
             // 3. Ensure a directional light exists in the scene (for URP Lit fill shader).
             EnsureDirectionalLight();
@@ -170,7 +177,8 @@ namespace MapRenderer.Unity.Rendering.Map
         public static void Wire(
             GameObject       root,
             Camera           camera,
-            CameraProperties initialView = default)
+            CameraProperties initialView = default,
+            IProjection      projection  = null) // null ⇒ WebMercator (planar); SphericalProjection ⇒ globe
         {
             if (root == null)
             {
@@ -209,7 +217,7 @@ namespace MapRenderer.Unity.Rendering.Map
             if (camera != null)
             {
                 // FOV + viewport come from initialView / the camera; only the altitude multiplier is side config.
-                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier);
+                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier, projection);
                 mapView.SetCamera(mapCamera);
             }
 

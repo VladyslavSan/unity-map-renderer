@@ -17,6 +17,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Imaging;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Visual
@@ -43,7 +44,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
+                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
                 int h0 = r.AddTileLayer(mesh, o, 0, tid);
                 int h1 = r.AddTileLayer(mesh, o, 0, tid);
                 int h2 = r.AddTileLayer(mesh, o, 0, tid);
@@ -83,7 +84,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
+                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
                 int hWater = r.AddTileLayer(mesh, o, 0, tid);
                 int hRoad  = r.AddTileLayer(mesh, o, 1, tid);
 
@@ -105,7 +106,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
-                double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
+                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
                 int h = r.AddTileLayer(mesh, o, 0, tid);
                 Assert.AreEqual(mat.name, r.GetLayerEntityName(h),
                     "With no layer names, the entity name falls back to the material name (back-compat).");
@@ -125,9 +126,9 @@ namespace MapRenderer.Tests.Visual
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(tid);
                 double2 sceneOrigin0 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
-                int h = r.AddTileLayer(mesh, tileOrigin, 0, tid);
+                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
-                r.Rebuild(sceneOrigin0);
+                r.Rebuild(SceneFrame.Mercator(sceneOrigin0));
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
                 var (x0, z0) = r.GetInstanceTranslation(h);
                 Assert.That(x0, Is.EqualTo(expected0.x).Within(0.01f),
@@ -146,7 +147,7 @@ namespace MapRenderer.Tests.Visual
 
                 // Origin shift (a look-at move): translation must track the new origin.
                 double2 sceneOrigin1 = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
-                r.Rebuild(sceneOrigin1);
+                r.Rebuild(SceneFrame.Mercator(sceneOrigin1));
                 float3 expected1 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
                 var (x1, z1) = r.GetInstanceTranslation(h);
                 Assert.That(x1, Is.EqualTo(expected1.x).Within(0.01f),
@@ -178,10 +179,10 @@ namespace MapRenderer.Tests.Visual
                 float3  expected     = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
 
                 // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.Tick.
-                r.Rebuild(sceneOrigin);
+                r.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
                 // Tile consumed AFTER the Rebuild — must NOT be created at the origin.
-                int h = r.AddTileLayer(mesh, tileOrigin, 0, tid);
+                int h = r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, tid);
 
                 var (x, z) = r.GetInstanceTranslation(h);
                 Assert.That(x, Is.EqualTo(expected.x).Within(0.01f),
@@ -202,7 +203,7 @@ namespace MapRenderer.Tests.Visual
             var (mesh, mat) = FixtureFill();
             World before = World.DefaultGameObjectInjectionWorld;
             var r = new EntitiesTileRenderer(new[] { mat });
-            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }), 0, new TileId { Z = 0, X = 0, Y = 0 });
+            r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 }).ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
 
             r.Dispose();
             Assert.IsTrue(r.IsDisposed, "IsDisposed must be true after Dispose.");
@@ -226,9 +227,9 @@ namespace MapRenderer.Tests.Visual
             {
                 var tid = new TileId { Z = 0, X = 0, Y = 0 };
                 double2 o = FloatingOrigin.TileLocalOriginMercator(tid);
-                r.AddTileLayer(mesh, o, 0, tid);
+                r.AddTileLayer(mesh, o.ToRenderOrigin(), 0, tid);
                 // Warm up (JIT + first-tick system allocations).
-                for (int i = 0; i < 5; i++) r.Rebuild(o);
+                for (int i = 0; i < 5; i++) r.Rebuild(SceneFrame.Mercator(o));
 
                 const int N = 50;
 
@@ -250,7 +251,7 @@ namespace MapRenderer.Tests.Visual
                 string verdict;
                 try
                 {
-                    Assert.That(() => { for (int i = 0; i < N; i++) r.Rebuild(o); },
+                    Assert.That(() => { for (int i = 0; i < N; i++) r.Rebuild(SceneFrame.Mercator(o)); },
                                 new NUnit.Framework.Constraints.NotConstraint(allocates));
                     verdict = $"NO GC allocation over {N} Rebuilds";
                 }
@@ -310,8 +311,8 @@ namespace MapRenderer.Tests.Visual
                 controlGo.SetActive(false);
 
                 r = new EntitiesTileRenderer(new[] { mat });
-                r.AddTileLayer(mesh, tileOrigin, 0, new TileId { Z = 0, X = 0, Y = 0 });
-                r.Rebuild(tileOrigin);
+                r.AddTileLayer(mesh, tileOrigin.ToRenderOrigin(), 0, new TileId { Z = 0, X = 0, Y = 0 });
+                r.Rebuild(SceneFrame.Mercator(tileOrigin));
                 snapEg.Render(cam);
 
                 float controlCov = SnapshotCoverage.Analyse(snapControl.RawPixels, 512, 512, 26, 28, 38).FilledFraction;

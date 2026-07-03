@@ -36,6 +36,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
@@ -252,7 +253,7 @@ namespace MapRenderer.Tests.Visual
                     "Tiles must settle on the BRG path.");
 
                 // Force a Rebuild to populate the sorted draw list.
-                view.BrgRenderer().Rebuild(default);
+                view.BrgRenderer().Rebuild(SceneFrame.Mercator(default));
 
                 int[] queues = view.BrgRenderer().GetEmittedRenderQueues();
                 Assert.Greater(queues.Length, 0,
@@ -613,7 +614,7 @@ namespace MapRenderer.Tests.Visual
                 float3 expectedPos  = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
 
                 // Force Rebuild to populate the CPU buffer with the current sceneOrigin.
-                brg.Rebuild(sceneOrigin);
+                brg.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
                 // Enumerate draw items and check each one for the z0/0/0 tile.
                 // We don't have a direct handle-to-tileId map here, but for z0/0/0 with one style layer,
@@ -650,7 +651,7 @@ namespace MapRenderer.Tests.Visual
                 float3 expectedPos1  = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
 
                 // Rebuild with the new origin.
-                brg.Rebuild(sceneOrigin1);
+                brg.Rebuild(SceneFrame.Mercator(sceneOrigin1));
 
                 bool foundUpdated = false;
                 for (int handle = 0; handle < queues.Length + 100; handle++)
@@ -707,7 +708,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsNotNull(brg, "BRG must be non-null after Initialise with BRG backend.");
 
                 // Verify the BRG has a buffer after tile load.
-                view.BrgRenderer().Rebuild(default);
+                view.BrgRenderer().Rebuild(SceneFrame.Mercator(default));
                 // Note: HasBuffer may be false if no items registered yet (empty scene). Either way,
                 // after Teardown IsDisposed must be true.
 
@@ -771,8 +772,8 @@ namespace MapRenderer.Tests.Visual
                 double2 origin = default;
 
                 // Warm-up: first Rebuild may allocate (buffer creation, sorted-list growth).
-                brg.Rebuild(origin);
-                brg.Rebuild(origin);
+                brg.Rebuild(SceneFrame.Mercator(origin));
+                brg.Rebuild(SceneFrame.Mercator(origin));
 
                 // Measure: N more Rebuilds must not trigger GC gen-0.
                 // We check GC generation-0 collection count before and after.
@@ -783,7 +784,7 @@ namespace MapRenderer.Tests.Visual
 
                 const int N = 100;
                 for (int i = 0; i < N; i++)
-                    brg.Rebuild(origin);
+                    brg.Rebuild(SceneFrame.Mercator(origin));
 
                 int gcAfter = System.GC.CollectionCount(0);
 

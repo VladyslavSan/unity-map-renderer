@@ -4,6 +4,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Jobs
 {
@@ -18,7 +19,7 @@ namespace MapRenderer.Jobs
     ///   - Triangle indices are local (0..polyMergedVertCount-1) within each polygon.
     ///   - A global flat vertex array and globally-offset index array are accumulated on the main
     ///     thread after all earcut jobs complete.
-    ///   - ProjectTileToWebMercatorJob projects the merged polygon vertices to world space.
+    ///   - TileToGeoJob + ProjectPointsJob&lt;TProj&gt; project the merged vertices to world (double3 + up).
     ///
     /// This gives bit-identical output to the managed path (integer tile-space coords are exact;
     /// same earcut algorithm produces same indices).
@@ -141,7 +142,16 @@ namespace MapRenderer.Jobs
             /// <summary>MVT tile extent (typically 4096).</summary>
             public double Extent;
             public int TileZ, TileX, TileY;
-            public double OriginMercX, OriginMercY;
+
+            /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
+            /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
+            /// bake origin, shared with the tile transform (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the
+            /// corner's ECEF). Use <see cref="ProjectTileCornerOrigin"/> to compute it.</summary>
+            public double3 OriginRender;
+
+            /// <summary>S91: the projection the geometry is built with (a stateless struct behind
+            /// <see cref="MapRenderer.Core.Geo.IProjection"/>). Left <c>null</c> ⇒ Web Mercator (planar).</summary>
+            public MapRenderer.Core.Geo.IProjection Projection;
         }
 
         /// <summary>
@@ -413,11 +423,16 @@ namespace MapRenderer.Jobs
             }
 
             var outMergedVerts = new NativeArray<double2>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var outWorldPos    = new NativeArray<float3>(totalMergedVerts,  Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var outWorldPos    = new NativeArray<double3>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var outVertexUp    = new NativeArray<double3>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var outVertexFeat  = new NativeArray<int>(totalMergedVerts > 0 ? totalMergedVerts : 1,
                                                       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var outIndices     = new NativeArray<int>(totalIdxCount > 0 ? totalIdxCount : 1,
                                                       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            // The globe's ECEF axis-swap reflects the winding — reverse each triangle so front-faces point
+            // outward (back-face culling then shows the near hemisphere). Planar Mercator: no reversal.
+            bool reverseWinding = input.Projection != null && input.Projection.ReversesWinding;
 
             int globalVertBase = 0;
             int globalIdxBase  = 0;
@@ -433,8 +448,16 @@ namespace MapRenderer.Jobs
                     outVertexFeat[globalVertBase + i]  = featIdx; // S89 D2: per-vertex feature index for color
                 }
 
-                for (int i = 0; i < idxCount; i++)
-                    outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
+                if (reverseWinding)
+                    for (int t = 0; t + 2 < idxCount; t += 3) // swap v1/v2 of each triangle
+                    {
+                        outIndices[globalIdxBase + t]     = perPolyIdxArrays[pi][t]     + globalVertBase;
+                        outIndices[globalIdxBase + t + 1] = perPolyIdxArrays[pi][t + 2] + globalVertBase;
+                        outIndices[globalIdxBase + t + 2] = perPolyIdxArrays[pi][t + 1] + globalVertBase;
+                    }
+                else
+                    for (int i = 0; i < idxCount; i++)
+                        outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
 
                 globalVertBase += mergedVC;
                 globalIdxBase  += idxCount;
@@ -453,20 +476,27 @@ namespace MapRenderer.Jobs
                 scratchIsBridge[pi].Dispose(); scratchRemoved[pi].Dispose(); scratchIsEar[pi].Dispose();
             }
 
-            // ── Stage 4: project merged vertices to world space. ──────────────────────────────────
+            // ── Stage 4: tile→geodetic, then project to world space (S91). ─────────────────────────
             {
                 using var sPipelineProject = PmPipelineProject.Auto();
-                new ProjectTileToWebMercatorJob
+
+                // 4a: tile-space → geodetic surface points (projection-independent).
+                var geo = new NativeArray<GeoCoordinate>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                new TileToGeoJob
                 {
-                    TileZ          = input.TileZ,
-                    TileX          = input.TileX,
-                    TileY          = input.TileY,
-                    Extent         = input.Extent,
-                    OriginMercX    = input.OriginMercX,
-                    OriginMercY    = input.OriginMercY,
-                    TileCoords     = outMergedVerts,
-                    WorldPositions = outWorldPos,
+                    TileZ = input.TileZ, TileX = input.TileX, TileY = input.TileY, Extent = input.Extent,
+                    TileCoords = outMergedVerts, OutGeo = geo,
                 }.Run(totalMergedVerts);
+
+                // 4b: project through the chosen projection (struct type dispatch → ProjectPointsJob<TProj>).
+                // RTC origin (docs §5) = the caller-supplied SW-corner render origin — the SINGLE source now,
+                // shared with the tile transform (S91-C). The caller computes it via ProjectTileCornerOrigin
+                // with the SAME projection, so origin and vertices share one projection (Mercator: bit-for-bit
+                // the old internal recompute; correct for the globe too).
+                double3 originWorld = input.OriginRender;
+                ProjectionDispatch.Run(input.Projection, originWorld, geo, outWorldPos, outVertexUp, totalMergedVerts);
+
+                geo.Dispose();
             }
 
             // ── Build output TileMeshBuffers. ─────────────────────────────────────────────────────
@@ -483,6 +513,7 @@ namespace MapRenderer.Jobs
             {
                 TileVertices        = outMergedVerts,
                 WorldPositions      = outWorldPos,
+                VertexUp            = outVertexUp,
                 VertexFeatureIdx    = outVertexFeat,
                 TriangleIndices     = outIndices,
                 VertexCount         = vertCountFinal,
@@ -504,6 +535,36 @@ namespace MapRenderer.Jobs
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// The RTC render-space origin for a tile: the tile's SW corner (tile-space west+south, i.e. px=0,
+        /// py=extent) as geodetic, projected through the chosen projection. Mercator: ≈ MercatorBounds().min
+        /// (sub-nanometre drift from the lon/lat round-trip). Globe: the corner's ECEF. Projection-derived so
+        /// the origin and the vertices share one projection — correct for the globe, not just the plane.
+        ///
+        /// <para>S91-C: public and the SINGLE source of a tile's bake origin — both the mesh bake
+        /// (<see cref="LayerInput.OriginRender"/>) and the tile transform (via <c>TileManager</c>) call it, so
+        /// the two RTC levels cancel exactly.</para>
+        /// </summary>
+        public static double3 ProjectTileCornerOrigin(int tileZ, int tileX, int tileY, IProjection projection)
+        {
+            // Matches TileId.ToLonLat exactly (math.sinh, same u/v), so the Mercator origin equals
+            // MercatorBounds().min bit-for-bit — the tile-transform (FloatingOrigin) uses that, and the mesh
+            // must share it. (Sub-nm vs the vertices' exp-form sinh in TileToGeoJob — invisible.)
+            double pow2z = math.pow(2.0, tileZ);
+            double u     = tileX / pow2z;         // west edge (px = 0)
+            double v     = (tileY + 1.0) / pow2z; // south edge (py = extent)
+
+            var geo = new GeoCoordinate
+            {
+                Latitude  = math.atan(math.sinh(math.PI_DBL * (1.0 - 2.0 * v))) * 180.0 / math.PI_DBL,
+                Longitude = u * 360.0 - 180.0,
+            };
+            // null ⇒ planar default (no boxing — direct struct call).
+            return projection != null
+                ? projection.ProjectPoint(geo).World
+                : new WebMercatorProjection().ProjectPoint(geo).World;
+        }
 
         private static double LeftmostX(NativeArray<double2> verts, int start, int len)
         {

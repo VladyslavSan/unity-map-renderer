@@ -48,12 +48,12 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         }
 
         // One per live tile: the named container its layer children are grouped under, so the scene
-        // Hierarchy shows a per-tile tree. Carries the tile's mercator origin so Rebuild can reposition the
-        // whole subtree by writing only the container transform.
+        // Hierarchy shows a per-tile tree. Carries the tile's projected SW-corner render origin so Rebuild can
+        // reposition the whole subtree by writing only the container transform.
         private struct ContainerRec
         {
             public GameObject Go;
-            public double2    TileOriginMerc;
+            public double3    TileOriginRender;
             public int        ChildCount;   // layer children; container dies when this hits 0
         }
 
@@ -68,12 +68,12 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         private int  _nextHandle;
         private bool _disposed;
 
-        // Last scene origin seen by Rebuild — identical blink-fix rationale to EntitiesTileRenderer: a
+        // Last scene frame seen by Rebuild — identical blink-fix rationale to EntitiesTileRenderer: a
         // tile-layer is consumed AFTER the frame's Rebuild (MapView.Tick: InstancedRebuild → TileManager.Tick
-        // → AddTileLayer), so without caching the origin a fresh container would be created at the world
+        // → AddTileLayer), so without caching the frame a fresh container would be created at the world
         // origin and render there for one frame until the NEXT Rebuild repositioned it.
-        private double2 _lastSceneOrigin;
-        private bool    _hasSceneOrigin;
+        private SceneFrame _lastFrame;
+        private bool       _hasSceneOrigin;
 
         public TileRenderer(IReadOnlyList<Material> layerMaterials, IReadOnlyList<string> layerNames = null)
         {
@@ -147,27 +147,36 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // ── Draw item registration ────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Returns the scene-space position for <paramref name="tileOriginMerc"/> using the last
-        /// <see cref="Rebuild"/> origin, or the world origin if no Rebuild has run yet (in which case the
+        /// Returns the scene-space position for <paramref name="tileOriginRender"/> using the last
+        /// <see cref="Rebuild"/> frame, or the world origin if no Rebuild has run yet (in which case the
         /// next Rebuild fixes it). Used to place freshly-created containers without an origin "blink".
         /// </summary>
-        private float3 InitialScenePos(double2 tileOriginMerc)
-            => _hasSceneOrigin ? FloatingOrigin.TileLocalToScene(tileOriginMerc, _lastSceneOrigin) : float3.zero;
+        private float3 InitialScenePos(double3 tileOriginRender)
+            => _hasSceneOrigin
+                ? FloatingOrigin.TileToSceneRebased(tileOriginRender, _lastFrame.SceneOriginRender, _lastFrame.Rebase)
+                : float3.zero;
+
+        /// <summary>The container orientation for a freshly-created tile — the last frame's rebase rotation
+        /// (identity for Mercator), or identity if no Rebuild has run yet.</summary>
+        private quaternion InitialSceneRot()
+            => _hasSceneOrigin ? new quaternion(_lastFrame.Rebase) : quaternion.identity;
 
         /// <summary>
         /// Returns the existing container for <paramref name="tileId"/>, or creates one parented under the
-        /// backend root, named <c>"Tile z/x/y"</c> and positioned at the tile's current scene placement.
+        /// backend root, named <c>"Tile z/x/y"</c> and positioned + oriented at the tile's current scene
+        /// placement.
         /// </summary>
-        private GameObject GetOrCreateContainer(TileId tileId, double2 tileOriginMerc)
+        private GameObject GetOrCreateContainer(TileId tileId, double3 tileOriginRender)
         {
             if (_containers.TryGetValue(tileId, out var rec)) return rec.Go;
 
             var go = new GameObject($"Tile {tileId}");
             go.transform.SetParent(_root.transform, worldPositionStays: false);
-            float3 pos = InitialScenePos(tileOriginMerc);
+            float3 pos = InitialScenePos(tileOriginRender);
             go.transform.localPosition = new Vector3(pos.x, pos.y, pos.z);
+            go.transform.localRotation = InitialSceneRot(); // identity for Mercator; per-frame rebase for the globe
 
-            _containers[tileId] = new ContainerRec { Go = go, TileOriginMerc = tileOriginMerc, ChildCount = 0 };
+            _containers[tileId] = new ContainerRec { Go = go, TileOriginRender = tileOriginRender, ChildCount = 0 };
             return go;
         }
 
@@ -176,7 +185,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// Returns a handle for later removal. <paramref name="materialIndex"/> indexes the flattened
         /// layer-material list (fills then lines), matching the instanced backends.
         /// </summary>
-        public int AddTileLayer(Mesh mesh, double2 tileOriginMerc, int materialIndex, TileId tileId)
+        public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
             if (_disposed)    throw new ObjectDisposedException(nameof(TileRenderer));
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
@@ -184,7 +193,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
                 throw new ArgumentOutOfRangeException(nameof(materialIndex));
 
             Material   mat       = _layerMaterials[materialIndex];
-            GameObject container = GetOrCreateContainer(tileId, tileOriginMerc);
+            GameObject container = GetOrCreateContainer(tileId, tileOriginRender);
 
             // Name the child after its style layer ("water", "road-primary", …) so the Hierarchy reads
             // cleanly; fall back to the (shared) material name when no style id is available.
@@ -245,25 +254,28 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // ── Per-frame rebuild ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Refreshes each tile container's <c>localPosition</c> from <paramref name="sceneOrigin"/>
-        /// (origin ≡ look-at; camera-relative rendering). One transform write per tile, not per layer — the
-        /// layer children sit at the container origin and move with it. Does no material work
-        /// (<c>ZoomStyleApplier</c> mutates the shared materials live, same as the instanced backends).
+        /// Refreshes each tile container's <c>localPosition</c> and <c>localRotation</c> from
+        /// <paramref name="frame"/> (origin ≡ look-at; camera-relative rendering). One transform write per
+        /// tile, not per layer — the layer children sit at the container origin and move with it. Does no
+        /// material work (<c>ZoomStyleApplier</c> mutates the shared materials live, same as the instanced
+        /// backends). For Mercator the rebase is identity, so this reduces to the pre-S91 translation write.
         /// </summary>
-        public void Rebuild(double2 sceneOrigin)
+        public void Rebuild(in SceneFrame frame)
         {
             if (_disposed) return;
 
             // Cache so a tile-layer consumed later this frame (after this Rebuild) is created already
             // positioned, instead of blinking at the world origin for a frame.
-            _lastSceneOrigin = sceneOrigin;
-            _hasSceneOrigin  = true;
+            _lastFrame      = frame;
+            _hasSceneOrigin = true;
 
+            quaternion rot = new quaternion(frame.Rebase); // same orientation for every tile (identity for Mercator)
             foreach (var kv in _containers)
             {
                 if (kv.Value.Go == null) continue;
-                float3 pos = FloatingOrigin.TileLocalToScene(kv.Value.TileOriginMerc, sceneOrigin);
+                float3 pos = FloatingOrigin.TileToSceneRebased(kv.Value.TileOriginRender, frame.SceneOriginRender, frame.Rebase);
                 kv.Value.Go.transform.localPosition = new Vector3(pos.x, pos.y, pos.z);
+                kv.Value.Go.transform.localRotation = rot;
             }
         }
 

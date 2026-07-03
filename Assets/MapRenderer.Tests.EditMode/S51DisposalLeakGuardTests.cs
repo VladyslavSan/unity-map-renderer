@@ -306,8 +306,8 @@ namespace MapRenderer.Tests
             // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
             var mda = MeshDataTessellation.AllocateTracked(1);
             StyledFillTileBuilder.WriteMeshData(
-                mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, tileOrigin,
-                out int vc, out Bounds b);
+                mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out Bounds b);
 
             Assert.Greater(vc, 0,
                 "Positive control requires geometry (vertices written). " +

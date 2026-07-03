@@ -175,10 +175,8 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(mvtLayer, "The fixture must contain the 'countries' MVT layer");
                 Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
-                var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
                 Mesh directMesh = TestTileMeshBuilder.BuildFill(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
-                    new double2(bMin.x, bMin.y));
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
 
                 Assert.IsNotNull(directMesh,
                     "StyledFillTileBuilder.BuildMesh must produce a mesh for the 'countries' layer");

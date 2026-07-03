@@ -7,7 +7,8 @@ namespace MapRenderer.Jobs
 {
     /// <summary>
     /// Owns the native buffer lifetime for one tile's tessellation pipeline output.
-    /// Holds tile-space vertices (double2), projected world vertices (float3), and triangle indices.
+    /// Holds tile-space vertices (double2), projected world vertices (double3) + per-vertex up, and
+    /// triangle indices.
     /// Must be disposed on the main thread after the job chain completes and the mesh is built.
     ///
     /// Lifetime rule (NativeArray × cancellation safety):
@@ -44,13 +45,20 @@ namespace MapRenderer.Jobs
         /// <summary>
         /// Flat triangle index array (indices into <see cref="TileVertices"/>).
         /// Note: earcut produces indices into the merged ring (outer+bridge+holes). The pipeline
-        /// maps these back to world positions via ProjectTileToWebMercatorJob.
+        /// maps these back to world positions via ProjectPointsJob.
         /// </summary>
         public NativeArray<int> TriangleIndices;
 
         // ── Projection stage output ────────────────────────────────────────────────────────────
-        /// <summary>Projected float3 world positions (one per tile vertex). Length = total tile verts.</summary>
-        public NativeArray<float3> WorldPositions;
+        /// <summary>Projected origin-relative <c>double3</c> world positions (one per tile vertex).
+        /// Kept in double through projection; the fill builder casts to float3 only at mesh-write
+        /// (docs §8.2). Length = total tile verts.</summary>
+        public NativeArray<double3> WorldPositions;
+
+        /// <summary>S91-A: per-vertex surface up (unit; from the projection's <c>UpAt</c>). Constant
+        /// +Y for Mercator, the geodetic normal for the globe. Baked into the mesh Normal stream so the
+        /// shaders make no flat-ground assumption. Length = total tile verts.</summary>
+        public NativeArray<double3> VertexUp;
 
         /// <summary>S89 D2: feature index of each merged vertex (into the input FeatureGeometries list).
         /// Lets the fill stream-write assign per-feature color without re-deriving vertex→feature.</summary>
@@ -88,6 +96,7 @@ namespace MapRenderer.Jobs
             if (HoleRingIdxs.IsCreated)     HoleRingIdxs.Dispose();
             if (TriangleIndices.IsCreated)  TriangleIndices.Dispose();
             if (WorldPositions.IsCreated)   WorldPositions.Dispose();
+            if (VertexUp.IsCreated)         VertexUp.Dispose();
             if (VertexFeatureIdx.IsCreated) VertexFeatureIdx.Dispose();
             if (RingCount.IsCreated)        RingCount.Dispose();
             if (VertexCount.IsCreated)      VertexCount.Dispose();

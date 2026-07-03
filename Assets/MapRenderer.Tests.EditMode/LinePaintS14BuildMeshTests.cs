@@ -82,7 +82,8 @@ namespace MapRenderer.Tests
 
         // Shared build parameters (tile 0/0/0, merc origin=(0,0)).
         private static readonly TileId TestTileId = new TileId { Z = 0, X = 0, Y = 0 };
-        private static readonly double2 TestOriginMerc = new double2(0.0, 0.0);
+        // S91-C: WriteMeshData now takes a double3 render origin (Mercator: (mercX, 0, mercZ)); zero here.
+        private static readonly double3 TestOriginMerc = new double3(0.0, 0.0, 0.0);
         private const double TestExtent = 4096.0;
         private const double TestZoom   = 0.0;
 

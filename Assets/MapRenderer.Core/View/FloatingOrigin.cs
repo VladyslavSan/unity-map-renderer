@@ -13,9 +13,10 @@ namespace MapRenderer.Core.View
     /// <para><b>The two levels — and where each is applied:</b></para>
     /// <list type="number">
     ///   <item><b>Mesh vertices are tile-origin-relative.</b> The projection job
-    ///     (<c>ProjectTileToWebMercatorJob</c>) bakes each vertex as <c>(merc_vertex − tileOrigin)</c> cast to
-    ///     float32, where <c>tileOrigin</c> = <see cref="TileLocalOriginMercator"/>. The in-tile offset
-    ///     spans at most one tile (≈ <c>4.0075e7 / 2^z</c> m), so its float32 ULP shrinks with zoom.</item>
+    ///     (<c>ProjectPointsJob</c>) emits each vertex as <c>(merc_vertex − tileOrigin)</c> in double; the
+    ///     mesh-write casts it to float32, where <c>tileOrigin</c> = <see cref="TileLocalOriginMercator"/>.
+    ///     The in-tile offset spans at most one tile (≈ <c>4.0075e7 / 2^z</c> m), so its float32 ULP
+    ///     shrinks with zoom.</item>
     ///   <item><b>The tile GameObject local position is scene-origin-relative.</b> Its transform carries
     ///     <c>(tileOrigin − sceneOrigin)</c> cast to float32 (<see cref="TileLocalToScene"/>), where
     ///     <c>sceneOrigin</c> is the camera's look-at point, re-snapped every frame (camera-relative
@@ -39,7 +40,7 @@ namespace MapRenderer.Core.View
     public static class FloatingOrigin
     {
         /// <summary>
-        /// The Mercator min-corner of a tile — the origin that <c>ProjectTileToWebMercatorJob</c> bakes mesh
+        /// The Mercator min-corner of a tile — the origin that <c>ProjectPointsJob</c> bakes mesh
         /// vertices relative to. (Matches <c>MapFillBootstrap</c>/<c>JobifiedPipelineTests</c> which pass
         /// <c>TileId.MercatorBounds().min</c> as the projection origin.)
         /// </summary>
@@ -62,6 +63,48 @@ namespace MapRenderer.Core.View
         }
 
         /// <summary>
+        /// Projection-agnostic generalization of <see cref="TileLocalToScene"/> (S91-C): the tile
+        /// GameObject's local <b>position</b> in render space when the scene is rebased into the look-at's
+        /// local ENU frame — the placement that makes ONE camera-orbit pose
+        /// (<c>CameraPoseMath.ComputePose</c>, look-at at the render origin, up=+Y) work for BOTH the plane
+        /// and the globe.
+        ///
+        /// <para>The mesh vertices are baked tile-origin-relative (Level 1) about
+        /// <paramref name="tileOriginRender"/> = the tile's SW corner <i>projected through the chosen
+        /// projection</i> (<c>double3</c> — Mercator: <c>(mercX, 0, mercZ)</c>; globe: the corner's ECEF).
+        /// The Level-2 transform places the tile with:</para>
+        /// <list type="bullet">
+        ///   <item><b>position</b> = <c>rebase · (tileOriginRender − sceneOriginRender)</c> — this method;</item>
+        ///   <item><b>rotation</b> = <paramref name="rebase"/> — set once per frame (same for every tile:
+        ///     all tiles rotate into the one look-at frame), converted to a quaternion at the Unity seam.</item>
+        /// </list>
+        /// where <paramref name="rebase"/> = <c>transpose(projection.TangentBasisAt(lookAt))</c> (render→local
+        /// ENU) and <paramref name="sceneOriginRender"/> = <c>projection.Project(lookAt)</c>. The two compose
+        /// so a mesh vertex renders at <c>rebase · (project(v) − sceneOriginRender)</c> — the tileOrigin term
+        /// cancels exactly as in the flat two-level scheme, so meshes never rebake on camera motion.
+        ///
+        /// <para><b>Mercator reduces to the flat case.</b> Its tangent basis is the identity, so
+        /// <c>rebase = I</c> and this returns <c>(float3)(tileOriginRender − sceneOriginRender)</c> — with
+        /// the Mercator up-axis carrying no height (<c>y = 0</c>), identical to <see cref="TileLocalToScene"/>.
+        /// The rotation is <c>I</c> ⇒ identity quaternion (today's translation-only placement).</para>
+        ///
+        /// <para><paramref name="rebase"/> is a proper rotation (det +1) for both projections — the globe's
+        /// ECEF→render axis-swap reflection composes with the (East, Up, North) column order to restore
+        /// right-handedness — so it converts to a unit quaternion cleanly (no handedness flip).</para>
+        /// </summary>
+        public static float3 TileToSceneRebased(double3 tileOriginRender, double3 sceneOriginRender, float3x3 rebase)
+        {
+            // Delta in render space, cast to float32 (small once the scene origin is the near look-at).
+            float3 delta = new float3(
+                (float)(tileOriginRender.x - sceneOriginRender.x),
+                (float)(tileOriginRender.y - sceneOriginRender.y),
+                (float)(tileOriginRender.z - sceneOriginRender.z));
+
+            // Rotate the render-space delta into the look-at's local ENU frame (Mercator: rebase = I ⇒ delta).
+            return math.mul(rebase, delta);
+        }
+
+        /// <summary>
         /// Reproduces the GPU's two-float composition for a single vertex and returns the rendered
         /// render-space position. Used to <i>measure</i> floating-origin precision honestly (the headline
         /// "no jitter" gate): the engine bakes <c>(float)(merc − tileOrigin)</c> into the mesh and adds the
@@ -71,7 +114,7 @@ namespace MapRenderer.Core.View
         /// </summary>
         public static float3 RenderVertex(double2 mercVertex, double2 tileOriginMerc, double2 sceneOriginMerc)
         {
-            // Level 1: mesh vertex baked tile-origin-relative (what ProjectTileToWebMercatorJob writes).
+            // Level 1: mesh vertex baked tile-origin-relative (what ProjectPointsJob writes).
             float vLocalX = (float)(mercVertex.x - tileOriginMerc.x);
             float vLocalZ = (float)(mercVertex.y - tileOriginMerc.y);
 

@@ -70,46 +70,70 @@ Then `lon/lat → Mercator` (§2) or `→ ECEF` (§3) depending on mode.
   carries `O`. (Classic Cesium **Relative-To-Center**.)
 - Why mandatory: planar coords reach ±20 M m, globe ±6.37 M m — float32 alone jitters badly at world scale.
 
-## 6. Projection interface — ONE abstraction, which emits a Burst struct (LOCKED principle)
+## 6. Projection interface — ONE abstraction, a STRUCT usable in Burst (LOCKED principle)
 
-**There is a single projection abstraction: a managed OOP `IProjection` (`WebMercatorProjection` : planar,
-`EcefProjection` : globe). There is NOT a second, separately hand-authored static surface for the Burst
-jobs.** The render/job path does not duplicate the projection math — instead `IProjection` hands out a
-**blittable struct** that carries the projection *rules* into the Burst job. One source of truth ⇒ the
-managed path and the job path **cannot drift**.
+**There is a single projection abstraction: `IProjection`, implemented by a stateless `readonly struct` per
+projection (`WebMercatorProjection` : planar; `SphericalProjection` : globe). There is NOT a second,
+hand-authored surface for the Burst jobs — and NOT a second interface for the camera.** The projection math
+lives as ONE method (`ProjectPoint`) on the struct, called from BOTH the managed OOP path and the Burst job.
+One source of truth ⇒ the managed path and the job path **cannot drift**.
+
+**One interface, two concerns (maintainer decision, S91).** A projection is one concept; splitting its
+behaviour across two interfaces would scatter "everything about WebMercator" into two places. So the SAME
+`IProjection` carries both the **geometry** methods below AND the **camera-interaction** methods
+(`ScreenToGround` / `GroundToScreen` / `ClampValidLatitude` — the camera only needs a few things).
 
 ```csharp
-// The managed abstraction — chosen ONCE per session; lives on the main thread.
+// Implemented by a STATELESS readonly struct per projection; chosen ONCE per session.
 interface IProjection {
-    // Core RULES — must be blittable / Burst-emittable (see below). Pure geodetic → render-space math.
-    double3 Project(double lon, double lat, double height); // → render space (pre-RTC)
-    double3 UpAt(double lon, double lat);                   // local up (extrusion / normals)
-    double  MetersPerUnit { get; }                          // scale bookkeeping
+    // ── Geometry (build side) — GeoCoordinate = SURFACE point (no elevation) ──
+    ProjectedPoint ProjectPoint(in GeoCoordinate geo); // → { World (pre-RTC), Up } — the shared kernel
+    double3 Project(in GeoCoordinate geo);             // convenience → ProjectPoint(geo).World
+    double3 UpAt(in GeoCoordinate geo);                // convenience → ProjectPoint(geo).Up
+    double  MetersPerUnit { get; }
 
-    // The bridge: hand the rules to a job as a blittable value (no managed refs inside).
-    ProjectionRules ToBurstRules();                         // struct the Burst job projects with
+    // ── Camera interaction (managed side) ──
+    GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in CameraProperties cam);
+    double2         GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in CameraProperties cam);
+    double          ClampValidLatitude(double latitudeDegrees);
 }
-// WebMercatorProjection : planar ;  EcefProjection : globe
+// readonly struct WebMercatorProjection : IProjection   // planar
+// readonly struct SphericalProjection  : IProjection   // globe
 ```
 
-**Keep the rules blittable — no main-thread-only junk in the core.** Whatever ends up in the
-Burst-bound struct (`ProjectionRules`) must be pure values: **no managed references, no `UnityEngine.Camera`,
-no main-thread state.** View-/interaction-dependent operations are a **separate layer that *consumes* a
-projection — not part of the rules**:
-- **camera interaction** (screen↔ground unproject, zoom-to-cursor, anchored pan) needs the viewport + camera
-  pose — it lives on the managed interaction side and calls `IProjection`, but those methods are NOT in the
-  blittable rules;
-- **globe horizon occlusion** (`IsOccluded(renderPos, camera)` in the old sketch) needs the `Camera` — same
-  story: a view-layer concern, deliberately **removed from the rules interface above** (it was the smell that
-  motivated locking this principle).
+**The struct type IS the discriminator — no enum, no separate Burst copy.** Burst cannot hold a managed class
+or do virtual dispatch, but a *struct* implementing an interface is a blittable value type. So the projection
+job is generic over the concrete struct:
 
-**This reconciles S61's "an interface cannot run inside Burst" (`Coordinates/ProjectionMode.cs`).** Correct —
-and the interface never does. It runs on the **managed** side and *emits* the struct that runs in Burst.
-The `ProjectionMode` enum is the **interim** seam the S61 job path switches on; the durable design is
-`IProjection` → `ProjectionRules`. Camera-interaction code (S63) is the first real consumer and uses
-`IProjection` **directly** on the managed side (no enum, no Burst constraint there). The interface earns its
-second method only when a second real consumer (globe interaction) exists — don't pre-add globe/`Ecef` slop
-ahead of a working implementation.
+```csharp
+[BurstCompile] struct ProjectPointsJob<TProj> : IJobParallelFor where TProj : struct, IProjection {
+    TProj Projection; double3 OriginWorld;
+    NativeArray<GeoCoordinate> Points; NativeArray<double3> WorldPositions, Normals;
+    void Execute(int i) { var pp = Projection.ProjectPoint(Points[i]);   // Burst devirtualises + inlines
+                          WorldPositions[i] = pp.World - OriginWorld; Normals[i] = pp.Up; }
+}
+```
+
+Burst **specialises + inlines** `ProjectPointsJob<WebMercatorProjection>` and `<SphericalProjection>` — no
+boxing, no branch, no enum. Each concrete instantiation needs a `[assembly: RegisterGenericJobType(...)]` line
+for IL2CPP/AOT. The managed side picks the instantiation once per tile (`ProjectionDispatch`: `is
+SphericalProjection` → `ProjectPointsJob<SphericalProjection>`) — the one place projections are enumerated. On
+the managed side, assigning a struct to `IProjection` boxes it **once per session** (the camera holds it);
+negligible. This keeps engine-free `Core` free of `Unity.Burst` (the struct methods carry no Burst attribute;
+Burst compiles them transitively via the job's call graph).
+
+**The projection job does ONLY projection.** It takes `GeoCoordinate[]` (SURFACE points — no elevation) →
+world + normals. The tile→geodetic step is a separate, projection-independent `TileToGeoJob`, so the projection
+job is reusable for any geodetic input (symbols, and later terrain grids). `GeoCoordinate` (2D) encodes the
+surface-only scope; **elevated `GeoCoordinate3D` geometry is a future, more-complex path** (a height field
+supplies per-vertex altitude, and the shading normal comes from the height *gradient*, not `ProjectPoint`).
+
+**Rejected alternatives (for the record):** an enum + `switch` in the job (works, but a parallel enum to keep
+in sync — the struct type already discriminates); a `ProjectionRules`/`ProjectionParams` blittable struct (adds
+per-projection state the stateless model doesn't want); Burst `FunctionPointer`s (force `Unity.Burst` +
+`AOT.MonoPInvokeCallback`/`UnityEngine` into engine-free `Core`, breaking the fast dotnet core-tests). The
+interim `ProjectionMode` enum (S61) is retired. Camera-interaction code (S63) uses `IProjection` **directly**
+on the managed side (through the boxed struct; no Burst constraint there).
 
 ## 7. Axis conventions (Unity is left-handed, Y-up) — LOCKED defaults
 - **ECEF → Unity:** `unity = (X, Z, Y)` (swap Y/Z; flips right-handed Z-up → left-handed Y-up).
@@ -135,15 +159,26 @@ ahead of a working implementation.
    Planar mode: no subdivision.
 6. **Consistent winding & normals** as in §7; verify no mirroring across the ECEF→Unity handedness flip.
 
-## 9. DECISION PENDING — where projection is applied
-- **CPU at build:** bake final positions into the mesh. Simple shader; **projection switch = full rebuild**;
-  no smooth morph.
-- **GPU per-vertex:** store stable intermediate (tile-local / geodetic), project in the vertex shader.
-  Enables switch + **animated Mercator↔globe morph** (MapLibre-style) with no rebuild; more shader math,
-  needs per-tile relative origins for precision.
+## 9. DECIDED (2026-07-02) — CPU-at-build: project once during mesh modelling
+**The projection is applied ONCE, on the CPU at tessellation/mesh-build time** — bake the final projected
+positions (origin-relative `float3`) **plus the per-vertex frame** (up / tangent / across) into the mesh.
+The shader stays simple (positions are already final; it consumes the mesh-supplied frame, no per-vertex
+projection). The `IProjection` stateless `ProjectPoint` math is consumed on the **build/Burst side** (in the
+tessellation worker), not in the shader.
 
-Leaning **GPU per-vertex** (field-standard, enables the morph). CPU-build acceptable if a discrete toggle
-is enough for v1. Resolve before locking the vertex format and shader contract.
+**Rationale (maintainer):** projection is a **launch-time config constant** — chosen once at app start
+(Bootstrapper) and held for the session; switching it mid-app is not a supported use case. So the one real
+advantage of GPU-per-vertex (the animated Mercator↔globe morph, no rebuild) buys nothing here, and its cost
+(per-vertex shader projection + per-tile relative-origin precision handling) is pure overhead. "Model the
+mesh once and forget." A projection change, if ever needed, is a full rebuild — acceptable and out of scope.
+
+*(Rejected alternative — GPU-per-vertex:* store a stable geodetic/tile-local intermediate in the mesh and
+project in the vertex shader; enables a rebuild-free MapLibre-style morph. Field-standard, but only pays off
+when projection is a live runtime toggle — which it is not here.)*
+
+This locks the **vertex format** (final positions + baked frame) and the **shader contract** (frame-consuming,
+no projection). Downstream: curvature subdivision (§8.5) is a **build-time pass**; line width extrudes along
+the baked `cross(up, tangent)` (§8.4).
 
 ---
 

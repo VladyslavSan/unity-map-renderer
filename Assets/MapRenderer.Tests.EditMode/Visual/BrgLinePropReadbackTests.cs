@@ -21,6 +21,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Visual
@@ -97,8 +98,8 @@ namespace MapRenderer.Tests.Visual
 
                 // ── Register and Rebuild ──────────────────────────────────────────────────────
                 // materialIndex=0: FillCount=0 → lines[0] is at index 0.
-                int h = brg.AddTileLayer(mesh, double2.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
-                brg.Rebuild(double2.zero);
+                int h = brg.AddTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
+                brg.Rebuild(SceneFrame.Mercator(double2.zero));
 
                 // ── _Width readback (the direct line-prop pack proof) ─────────────────────────
                 float packedWidth = brg.GetInstancePropValue(h, widthId);

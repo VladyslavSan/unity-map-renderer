@@ -20,17 +20,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// S14 managed per-layer line mesh builder. Mirrors <see cref="StyledFillTileBuilder"/> but for
     /// line-type style layers.
     ///
-    /// Pipeline per feature (S89 D2): MvtGeometry.Decode + project to tile-local meters (managed, double2) →
-    ///   Burst <c>LineTessellationJob</c> per ring (run on this worker via <c>.Run()</c> into NativeArrays) →
-    ///   stream write into a <c>Mesh.MeshData</c>. The managed <c>LineTessellator</c> is retired from this
-    ///   path (differential oracle only). Decode + projection stay managed for now.
+    /// Pipeline per feature (S89 D2 / S91-B): MvtGeometry.Decode (managed) → project the centerline through
+    ///   the shared <c>ProjectPointsJob</c> (the SAME projection surface as fills — no bespoke
+    ///   WebMercator.Forward; run on this worker via <c>.Run()</c>) → Burst <c>LineTessellationJob</c> per ring
+    ///   (in the projected surface plane) → stream write into a <c>Mesh.MeshData</c>. The managed
+    ///   <c>LineTessellator</c> is retired from this path (differential oracle only). Mercator output is
+    ///   bit-for-bit the pre-S91 path; S91-C tessellates in the per-vertex tangent frame for the globe.
     ///
     /// S89 Stage B — <see cref="WriteMeshData"/> tessellates AND writes directly into a caller-allocated
     /// <see cref="Mesh.MeshData"/>, off the main thread (see <see cref="StyledFillTileBuilder"/> for the
     /// choreography). The bespoke NativeArray-stream payload + main-thread copy is gone.
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
-    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, +Y) interleaved via <see cref="LinePositionNormal"/>.
+    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, projection surface up; +Y for Mercator) interleaved via <see cref="LinePositionNormal"/>.
     ///   Stream 1 — TexCoord0: extrusion across-direction (Float32x3, 3D tangent-plane; Y=0 for Mercator).
     ///   Stream 2 — TexCoord1: side + distanceAlong (Float32x2).
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
@@ -88,8 +90,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         private const double DefaultMiterLimit    = 2.0;
         private const int    DefaultRoundSegments = 4;
 
-        // Constant +Y normal for all line vertices.
-        private static readonly Vector3 UpNormal = Vector3.up;
+        // S91-B: lines project through the SAME projection surface as fills (ProjectPointsJob), not a bespoke
+        // hardcoded WebMercator.Forward. Launch-time projection config threads a chosen projection here in
+        // S91-C; until then this single seam defaults to WebMercator (Mercator output is bit-for-bit).
+        private static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         // White vertex color = identity multiply.
         private static readonly Vector4 WhiteColor = new Vector4(1f, 1f, 1f, 1f);
@@ -111,9 +115,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double                    zoom,
             double                    extent,
             TileId                    id,
-            double2                   tileOriginMerc,
+            double3                   tileOriginRender,
             out int                   vertexCount,
-            out Bounds                bounds)
+            out Bounds                bounds,
+            IProjection               projection = null) // null ⇒ WebMercator (launch-time config threads this in)
         {
             vertexCount = 0;
             bounds      = default;
@@ -138,7 +143,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // Grow-only reusable Burst scratch: allocate once per tile, grow only when a longer path appears,
             // dispose once (finally). Sequential .Run() means each buffer is free for reuse before the next
             // ring — no per-ring malloc/free churn. The count arrays (size 1) are overwritten each ring.
-            NativeArray<double2>    inPts = default;
+            projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via WriteInto
+            double3 tileOrigin3 = tileOriginRender; // S91-C: the caller-supplied SW-corner render origin (Mercator: (mercX, 0, mercZ))
+            NativeArray<GeoCoordinate> geoScratch = default; // tile → geodetic surface points
+            NativeArray<double3>    projWorld = default; // origin-relative projected centerline
+            NativeArray<double3>    projUp    = default; // per-point surface up (constant +Y for Mercator)
+            NativeArray<double2>    inPts = default;     // tile coords in, then projected (x,z) for tessellation
             NativeArray<LineVertex> outV  = default;
             NativeArray<int>        outI  = default;
             var vcArr = new NativeArray<int>(1, Allocator.Persistent);
@@ -188,21 +198,39 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 {
                     if (ring == null || ring.Count < 2) continue;
 
-                    var worldPts = ProjectLineRing(ring, id.Z, id.X, id.Y, extent, tileOriginMerc.x, tileOriginMerc.y);
-                    if (worldPts == null || worldPts.Count < 2) continue;
+                    int n = ring.Count;
 
-                    // Burst line tessellation (Run() on this worker — see StyledFillTileBuilder for the
-                    // choreography; decode+projection stay managed and feed the double-precision job → strict
-                    // parity with the managed LineTessellator on the miter/butt path). Worst-case output sizing.
-                    int n    = worldPts.Count;
+                    // Worst-case tessellation output sizing; inPts also holds the n centerline points.
                     int capV = LineTessellationJob.MaxVertexCount(n, DefaultRoundSegments);
                     int capI = LineTessellationJob.MaxIndexCount(n, DefaultRoundSegments);
 
-                    if (n > inCap)      { if (inPts.IsCreated) inPts.Dispose(); inPts = new NativeArray<double2>(n,       Allocator.Persistent, NativeArrayOptions.UninitializedMemory); inCap   = n; }
-                    if (capV > outVCap) { if (outV.IsCreated)  outV.Dispose();  outV  = new NativeArray<LineVertex>(capV, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outVCap = capV; }
-                    if (capI > outICap) { if (outI.IsCreated)  outI.Dispose();  outI  = new NativeArray<int>(capI,        Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outICap = capI; }
+                    if (n > inCap)
+                    {
+                        if (inPts.IsCreated)      inPts.Dispose();
+                        if (geoScratch.IsCreated) geoScratch.Dispose();
+                        if (projWorld.IsCreated)  projWorld.Dispose();
+                        if (projUp.IsCreated)     projUp.Dispose();
+                        inPts      = new NativeArray<double2>(n,       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                        geoScratch = new NativeArray<GeoCoordinate>(n, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                        projWorld  = new NativeArray<double3>(n,       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                        projUp     = new NativeArray<double3>(n,       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                        inCap      = n;
+                    }
+                    if (capV > outVCap) { if (outV.IsCreated) outV.Dispose(); outV = new NativeArray<LineVertex>(capV, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outVCap = capV; }
+                    if (capI > outICap) { if (outI.IsCreated) outI.Dispose(); outI = new NativeArray<int>(capI,        Allocator.Persistent, NativeArrayOptions.UninitializedMemory); outICap = capI; }
 
-                    for (int k = 0; k < n; k++) inPts[k] = worldPts[k];
+                    // Project the centerline through the SAME jobs as fills (TileToGeoJob → ProjectPointsJob<TProj>) —
+                    // no bespoke WebMercator.Forward. inPts carries the tile coords in, then is overwritten with the
+                    // projected in-surface (east,north)=(x,z) for the flat tessellator (Mercator: bit-for-bit the old
+                    // ProjectLineRing). S91-C tessellates in the per-vertex tangent frame for the globe.
+                    for (int k = 0; k < n; k++) inPts[k] = ring[k];
+                    new TileToGeoJob
+                    {
+                        TileZ = id.Z, TileX = id.X, TileY = id.Y, Extent = extent,
+                        TileCoords = inPts, OutGeo = geoScratch,
+                    }.Run(n);
+                    ProjectionDispatch.Run(projection, tileOrigin3, geoScratch, projWorld, projUp, n);
+                    for (int k = 0; k < n; k++) inPts[k] = new double2(projWorld[k].x, projWorld[k].z);
 
                     new LineTessellationJob
                     {
@@ -222,6 +250,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     int ni = icArr[0];
                     if (nv == 0 || ni == 0) continue;
 
+                    // Surface up baked from the projection (constant +Y per ring for Mercator; S91-C makes it
+                    // per-vertex for the globe, propagated from the centerline through the tessellator).
+                    float3 upN     = (float3)projUp[0];
+                    Vector3 upNormal = new Vector3(upN.x, upN.y, upN.z);
+
                     int offset = tempVerts0.Count;
                     for (int k = 0; k < nv; k++)
                     {
@@ -232,7 +265,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         tempVerts0.Add(new LinePositionNormal
                         {
                             Position = new Vector3(pos.x, pos.y, pos.z),
-                            Normal   = UpNormal,
+                            Normal   = upNormal,
                         });
                         // Across as a 3D tangent-plane vector (magnitude = miter factor). Y=0 = flat Mercator;
                         // a globe projection bakes non-zero Y and the shader consumes it as-is.
@@ -252,9 +285,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
             }
             finally
             {
-                if (inPts.IsCreated) inPts.Dispose();
-                if (outV.IsCreated)  outV.Dispose();
-                if (outI.IsCreated)  outI.Dispose();
+                if (inPts.IsCreated)      inPts.Dispose();
+                if (geoScratch.IsCreated) geoScratch.Dispose();
+                if (projWorld.IsCreated)  projWorld.Dispose();
+                if (projUp.IsCreated)     projUp.Dispose();
+                if (outV.IsCreated)       outV.Dispose();
+                if (outI.IsCreated)       outI.Dispose();
                 vcArr.Dispose();
                 icArr.Dispose();
             }
@@ -292,49 +328,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
             float3 c3 = (bMin + bMax) * 0.5f;
             float3 sz = bMax - bMin;
             bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
-        }
-
-        // ── Private helpers ─────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Project a line ring from tile-space double2 coordinates to world-space double2 (meters, relative
-        /// to the scene origin). Uses the same full Web Mercator projection as
-        /// StyledFillTileBuilder.ProjectVerticesManaged — identical precision contract.
-        /// </summary>
-        private static List<double2> ProjectLineRing(
-            List<double2> ring,    int    z, int tileX, int tileY, double extent,
-            double        originX, double originY)
-        {
-            if (ring == null || ring.Count < 2) return null;
-
-            const double TwoPi = 2.0 * math.PI_DBL;
-
-            double pow2z  = math.pow(2.0, z);
-            var    result = new List<double2>(ring.Count);
-
-            foreach (var pt in ring)
-            {
-                double px = pt.x;
-                double py = pt.y;
-
-                double u = (tileX + px / extent) / pow2z;
-                double v = (tileY + py / extent) / pow2z;
-
-                double longitudeRad = u * TwoPi - math.PI_DBL;
-                double arg          = math.PI_DBL * (1.0 - 2.0 * v);
-                double sinhArg      = (math.exp(arg)     - math.exp(-arg)) * 0.5;
-                double latitudeRad  = math.atan(sinhArg);
-
-                double latitudeDeg  = latitudeRad  * (180.0 / math.PI_DBL);
-                double longitudeDeg = longitudeRad * (180.0 / math.PI_DBL);
-
-                double3 world = WebMercator.Forward(new GeoCoordinate3D
-                    { Longitude = longitudeDeg, Latitude = latitudeDeg, Altitude = 0.0 });
-
-                result.Add(new double2(world.x - originX, world.z - originY));
-            }
-
-            return result;
         }
     }
 }
