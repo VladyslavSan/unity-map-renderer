@@ -120,6 +120,12 @@ namespace MapRenderer.Tests
         /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
         public static int ReleasedMidFetchCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
 
+        /// <summary>S95: number of times the FULL cover recompute (select descent + request/release diff)
+        /// actually ran in the most recent Tick — 0 on an early-out Tick, else 1. Sum across N sub-tile
+        /// camera nudges to discriminate "recomputed every dirty tick" (today's behaviour) from a future
+        /// throttle.</summary>
+        public static int CoverRecomputesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.CoverRecomputesLastTick : 0;
+
         /// <summary>S55: tessellation kicks issued in the most recent Tick.</summary>
         public static int TessellationsKickedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TessellationsKickedLastTick : 0;
         /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
@@ -128,6 +134,12 @@ namespace MapRenderer.Tests
         public static int TilesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
+
+        /// <summary>S82: cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
+        /// decode/tessellate/upload).</summary>
+        public static int PreparedCacheHits(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheHits : 0;
+        /// <summary>S82: cumulative PreparedTileCache miss count (a cover-entry that genuinely re-prepared).</summary>
+        public static int PreparedCacheMisses(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheMisses : 0;
 
         /// <summary>S85: the pull-based tile/render telemetry snapshot.</summary>
         public static TileTelemetrySnapshot CaptureTelemetry(this MapViewComponent view)

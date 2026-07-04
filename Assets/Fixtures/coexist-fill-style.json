@@ -1,0 +1,18 @@
+{
+    "version": 8,
+    "name": "CoexistGreen",
+    "sources": {
+        "maplibre": { "type": "vector", "tiles": ["https://example.com/{z}/{x}/{y}.pbf"] }
+    },
+    "layers": [
+        {
+            "id": "countries-fill",
+            "type": "fill",
+            "source": "maplibre",
+            "source-layer": "countries",
+            "paint": {
+                "fill-color": ["rgba", 0, 255, 0, 1]
+            }
+        }
+    ]
+}

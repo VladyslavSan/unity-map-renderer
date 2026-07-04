@@ -55,6 +55,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         // RenderMeshUtility.AddComponents + EG batch registration; BRG = add a draw item). Separated so a
         // build-time spike is attributable to GPU upload vs ECS structural-change/batch churn.
         private static readonly ProfilerMarker PmAddTileLayer  = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer");
+        // S95: brackets the tessellation-kick MeshData allocation loop in KickTessellationTask
+        // (main-thread Mesh.AllocateWritableMeshData, one per this-source layer) — measure-first
+        // instrumentation so a Profiler trace can attribute cost to the allocate step specifically.
+        private static readonly ProfilerMarker PmMeshDataAllocate = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.MeshDataAllocate");
 
         /// <summary>
         /// Tile-selection knobs read from MapView's serialized (inspector-editable) fields and passed in
@@ -142,6 +146,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// used by ReleaseTile to unregister the draw items.
             /// </summary>
             public int[]                     DrawHandles;
+            /// <summary>
+            /// S82: parallel to <see cref="Meshes"/> — the global material index (layerId) of each tracked
+            /// mesh, in the same order. Set by <see cref="ConsumeTessellationTask"/> alongside Meshes/
+            /// DrawHandles; read by ReleaseTile's transfer-to-<see cref="PreparedTileCache"/> path (the cache
+            /// key is per layer, so it needs to know which layerId each tracked mesh belongs to).
+            /// </summary>
+            public int[]                     MaterialIndices;
             /// <summary>
             /// S87: resumable per-mesh consume cursor — a dense index over this source's tessellation
             /// payloads (draw order), <c>[0..denseCount)</c>. Advanced by
@@ -277,6 +288,29 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// valid Dictionary key and matches a pipeline built for an absent <c>source</c>).</summary>
         private static string SourceIdOf(StyleLayer layer) => layer?.Source ?? string.Empty;
 
+        /// <summary>
+        /// S82: the dense (declared-order) GLOBAL material indices whose style layer's source is
+        /// <paramref name="sourceId"/> — the same set <see cref="KickTessellationTask"/> tessellates for one
+        /// (tile, source) load. Shared by the kick, the ReleaseTile transfer-to-cache, and the Tick probe so
+        /// all three agree on exactly which layerIds make up "this tile's complete prepared set" (a
+        /// divergence here would desync the cache's completeness check from what is actually tessellated).
+        /// <paramref name="into"/> is cleared first; ONLY ever consumed synchronously within the same call on
+        /// the main thread (never captured across an await/thread boundary — see call sites).
+        /// </summary>
+        private void ComputeDenseLayerIds(string sourceId, List<int> into)
+        {
+            into.Clear();
+            // Reads the LIVE _layers directly (Count + indexer) — NOT SnapshotLayers()/ToArray(). Every
+            // caller of this method (the Tick probe, the ReleaseTile transfer) runs synchronously on the
+            // main thread, so there is no background-thread race to defend against here (unlike
+            // KickTessellationTask's OWN separate SnapshotLayers() call, which IS captured into a background
+            // closure and must stay a real copy). SnapshotLayers()/ToArray() would heap-allocate a fresh
+            // array on EVERY probe/release — exactly the per-Tick allocation the S95 zero-alloc contract
+            // (MapView_SteadyStateTick_DoesNotAllocateGCMemory) forbids.
+            for (int li = 0; li < _layers.Count; li++)
+                if (SourceIdOf(_layers[li].StyleLayer) == sourceId) into.Add(li);
+        }
+
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
         private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
 
@@ -319,8 +353,42 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S87: reusable scratch for one ConsumeTessellationTask call's newly-built meshes/handles (main-thread
         // only, not re-entrant). Cleared at the start of each call; merged into the tile's arrays at the end.
         // Reused so a partial consume frame doesn't allocate a fresh list per call.
-        private readonly List<Mesh> _consumeScratchMeshes  = new List<Mesh>(8);
-        private readonly List<int>  _consumeScratchHandles = new List<int>(8);
+        private readonly List<Mesh> _consumeScratchMeshes     = new List<Mesh>(8);
+        private readonly List<int>  _consumeScratchHandles    = new List<int>(8);
+        // S82: parallel to the two above — the global material index (layerId) of each newly-built mesh,
+        // so a Built record can later be transferred into PreparedTileCache keyed per layer.
+        private readonly List<int>  _consumeScratchMatIndices = new List<int>(8);
+
+        // S82: reusable scratch for the dense (declared-order) global material indices whose style layer's
+        // source is a given sourceId (ComputeDenseLayerIds). ONLY ever consumed synchronously on the main
+        // thread within the same call (transfer-to-cache, probe) — never captured across a thread boundary
+        // (KickTessellationTask copies it into a fresh int[] before scheduling the background task).
+        private readonly List<int> _denseLayerIdsScratch = new List<int>(8);
+
+        // ── S82: PreparedTileCache — cache built tile-layer Meshes so a revisit/style-toggle skips
+        // re-decode/re-tessellate/re-upload. Owns cached meshes; ReleaseTile transfers a Built tile's meshes
+        // here on eviction, the Tick probe TryTakes them back on a revisit. Constructed once, for the life of
+        // this TileManager; disposed (destroying every held Mesh) in Dispose(), BEFORE the backend.
+        private readonly PreparedTileCache _prepared;
+
+        /// <summary>S82: master toggle (from <see cref="Map.PreparedTileCacheConfig.Enabled"/>), read once at
+        /// construction. <see langword="false"/> reverts to pre-S82 behaviour exactly: the Tick probe
+        /// (~<see cref="Tick"/>'s request loop) never treats a tile as cached (always fetch/prepare), and
+        /// <see cref="ReleaseTile"/> never transfers a Built tile's meshes into <see cref="_prepared"/> (they
+        /// are destroyed immediately by <see cref="DestroyTrackedMeshes"/>, as before S82). The cache object
+        /// itself still exists but simply stays empty.</summary>
+        private readonly bool _cacheEnabled;
+
+        /// <summary>S82: the active style's opaque cache-key token — a constant default until S83's
+        /// SetStyle supplies a real stable per-style id. Plain auto-property; MapView sets it in SetStyle.</summary>
+        internal StyleToken CurrentStyle { get; set; } = StyleToken.Default;
+
+        /// <summary>S82: prepared-cache hit count (test/telemetry observability; never read from the live
+        /// tile loop). Forwards to the cache's own counter — bumped by the Tick probe on a full-tile hit.</summary>
+        internal int PreparedCacheHits => _prepared.Hits;
+
+        /// <summary>S82: prepared-cache miss count (see <see cref="PreparedCacheHits"/>).</summary>
+        internal int PreparedCacheMisses => _prepared.Misses;
 
         // ── S48 mid-flight discard holding pen ────────────────────────────────────────────────
         // When a tile is released mid-flight (ReleaseTile while TessellationTask is still running),
@@ -345,9 +413,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S84: running count of genuine (non-cancellation) fetch errors, for bounded logging.
         private int _fetchErrorCount;
 
-        public TileManager(Style.RenderLayerSet layers)
+        /// <summary>
+        /// S82: <paramref name="cacheConfig"/> supplies the <see cref="PreparedTileCache"/>'s master toggle
+        /// and byte/count budget (byte budget primary, count a belt-and-suspenders cap) — MapView passes its
+        /// <see cref="Map.MapViewConfig.PreparedCache"/> field through unchanged. Placeholder budget defaults
+        /// pending the maintainer's in-editor VRAM profiling (S82 Risk 3) — tunable, not load-bearing for
+        /// correctness (a too-small budget just lowers the hit rate). The cache is constructed regardless of
+        /// <see cref="Map.PreparedTileCacheConfig.Enabled"/> — disabled just means it is never Put into/probed.
+        /// </summary>
+        public TileManager(Style.RenderLayerSet layers, Map.PreparedTileCacheConfig cacheConfig)
         {
-            _layers = layers;
+            _layers        = layers;
+            _cacheEnabled  = cacheConfig.Enabled;
+            _prepared      = new PreparedTileCache(cacheConfig.ByteBudget, cacheConfig.MaxCount);
         }
 
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
@@ -381,6 +459,13 @@ namespace MapRenderer.Unity.Rendering.Tile
                 RenderTeardownRecord(ref lt);
             }
             _loaded.Clear();
+
+            // S82: purge the PreparedTileCache on EVERY SetSources call (first style AND every restyle) —
+            // a restyle rebuilds RenderLayerSet's layer indexing, so a held entry's layerId may no longer
+            // denote the same semantic layer, and pre-S83 StyleToken is a constant default shared by every
+            // style (so without this, a restyle could get a false HIT serving a prior style's baked
+            // geometry under a coincidentally-matching (tileId, layerId)). Destroys every held Mesh.
+            _prepared.Clear();
 
             // 2. Diff the pipeline registry by (SourceId, resolved Key).
             var kept = new List<SourcePipeline>(specs.Count);
@@ -494,6 +579,16 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>S84: number of tiles released while their fetch was still in-flight.</summary>
         internal int ReleasedMidFetchCount { get; private set; }
 
+        /// <summary>
+        /// S95: number of times the FULL cover recompute (<see cref="IVisibleTileSelector.SelectVisibleTiles"/>
+        /// descent + the request/release diff) actually ran in the most recent <see cref="Tick"/> — as
+        /// opposed to an early-out (<c>!_coverDirty &amp;&amp; pending == 0</c>). Reset to 0 at the top of every
+        /// Tick, set when the recompute block runs. A proxy for "how often is the expensive per-frame select
+        /// tax actually paid" — lets a test/reviewer sum this across N sub-tile camera nudges instead of
+        /// eyeballing a Profiler trace. Mirrors the <c>*LastTick</c> pattern below.
+        /// </summary>
+        internal int CoverRecomputesLastTick { get; private set; }
+
         /// <summary>S55: tessellation kicks issued in the most recent PumpPendingBuilds call.
         /// Exposed for tests; never call from production code.</summary>
         internal int TessellationsKickedLastTick { get; private set; }
@@ -554,6 +649,17 @@ namespace MapRenderer.Unity.Rendering.Tile
                 ReleasedMidFlightCount = ReleasedMidFlightCount,
                 ReleasedMidFetchCount  = ReleasedMidFetchCount,
                 FetchErrorCount        = _fetchErrorCount,
+
+                // S82: PreparedTileCache utilization — read straight off the live cache (Count/BytesHeld
+                // take its internal lock but allocate nothing; Hits/Misses/Evictions are plain int reads).
+                PreparedCacheEnabled    = _cacheEnabled,
+                PreparedCacheHits       = _prepared.Hits,
+                PreparedCacheMisses     = _prepared.Misses,
+                PreparedCacheEntryCount = _prepared.Count,
+                PreparedCacheMaxCount   = _prepared.MaxCount,
+                PreparedCacheBytesHeld  = _prepared.BytesHeld,
+                PreparedCacheByteBudget = _prepared.ByteBudget,
+                PreparedCacheEvictions  = _prepared.Evictions,
             };
         }
 
@@ -655,6 +761,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (Selector == null) return;
 
+            CoverRecomputesLastTick = 0; // S95: reset each Tick; set below only if the full recompute runs
+
             _projection = cfg.Projection; // cache for the tessellation bake (Level-1); same projection as origin + frame
 
             if (!_coverKeyInitialised ||
@@ -678,6 +786,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             if (!_coverDirty && pending == 0)
                 return;
+
+            CoverRecomputesLastTick = 1; // S95: the full recompute (descent + diff) runs this Tick
 
             using var sCoverSel = PmCoverSelect.Auto();
 
@@ -707,22 +817,53 @@ namespace MapRenderer.Unity.Rendering.Tile
                     var key = new LoadedKey(id, p.Slot);
                     if (!_loaded.ContainsKey(key))
                     {
-                        UniTask<TileResponse> fetchReq;
+                        // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
+                        // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
+                        // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
+                        double3 origin = TileTessellationPipeline.ProjectTileCornerOrigin(
+                            id.Z, id.X, id.Y, cfg.Projection);
+
+                        // S82: probe the PreparedTileCache BEFORE kicking a fetch — a full-tile hit (every
+                        // dense layerId of this (tile, source) present in the cache) skips decode/tessellate/
+                        // upload AND the fetch itself; the raw TileCache is simply never consulted on a hit.
+                        // Disabled (_cacheEnabled == false) skips the probe entirely — every tile is treated
+                        // as a miss, reverting to pre-S82 always-fetch/-prepare behaviour.
+                        bool allCached = false;
+                        if (_cacheEnabled)
                         {
-                            using var sSchedReq = PmSchedulerReq.Auto();
-                            // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
-                            fetchReq = p.Scheduler.Request(id).Preserve();
+                            ComputeDenseLayerIds(p.SourceId, _denseLayerIdsScratch);
+                            allCached = true;
+                            for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
+                            {
+                                if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIdsScratch[d])))
+                                {
+                                    allCached = false;
+                                    break;
+                                }
+                            }
                         }
-                        _loaded[key] = new LoadedTile
+
+                        if (allCached)
                         {
-                            Request          = fetchReq,
-                            Built            = false,
-                            // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
-                            // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
-                            // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
-                            TileOriginRender = TileTessellationPipeline.ProjectTileCornerOrigin(
-                                id.Z, id.X, id.Y, cfg.Projection),
-                        };
+                            _prepared.Hits++;
+                            _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
+                        }
+                        else
+                        {
+                            _prepared.Misses++;
+                            UniTask<TileResponse> fetchReq;
+                            {
+                                using var sSchedReq = PmSchedulerReq.Auto();
+                                // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
+                                fetchReq = p.Scheduler.Request(id).Preserve();
+                            }
+                            _loaded[key] = new LoadedTile
+                            {
+                                Request          = fetchReq,
+                                Built            = false,
+                                TileOriginRender = origin,
+                            };
+                        }
                     }
                 }
             }
@@ -801,7 +942,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     if (resp.HasData && resp.Bytes != null)
                     {
                         // Kick tessellation synchronously (wait inline).
-                        var tessTask = KickTessellationTask(lt, id, resp.Bytes, cam, sourceId);
+                        var tessTask = KickTessellationTask(lt, id, resp.Bytes, sourceId);
                         lt.HasTessellationTask = true;
                         lt.TessellationTask    = tessTask;
                     }
@@ -818,7 +959,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // normal pump). Kick inline here — drain ignores per-tick caps.
                 if (lt.FetchCompleted && lt.ReadyBytes != null && !lt.HasTessellationTask)
                 {
-                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, cam, sourceId);
+                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, sourceId);
                     lt.HasTessellationTask = true;
                     lt.ReadyBytes          = null;
                 }
@@ -945,7 +1086,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         pending++;
                         continue;
                     }
-                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, cam, sourceId);
+                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, sourceId);
                     lt.HasTessellationTask = true;
                     lt.ReadyBytes          = null;
                     tessKicked++;
@@ -1000,24 +1141,31 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///
         /// The task captures only value-type / immutable inputs (bytes, layer records are read-only
         /// after Initialise). No Unity.Object is captured or touched off-main.
+        ///
+        /// S82 Decision 2 (option A): the paint bake zoom is the tile's INTEGER zoom (<c>id.Z</c>), not the
+        /// fractional camera zoom — a tile is tessellated exactly once per load (never re-baked while
+        /// <see cref="LoadedTile.Built"/>), so baking at <c>id.Z</c> makes the prepared artifact a pure
+        /// function of <c>(styleId, tileId, layerId)</c> — the sound key <see cref="PreparedTileCache"/>
+        /// needs. <c>cam</c> is no longer read here (dropped from the signature; the 3 call sites still take
+        /// a <c>CameraProperties</c> for other purposes and simply stop forwarding it here).
         /// </summary>
         private UniTask<TessellationResult> KickTessellationTask(
-            LoadedTile lt, TileId id, byte[] mvtBytes, CameraProperties cam, string sourceId)
+            LoadedTile lt, TileId id, byte[] mvtBytes, string sourceId)
         {
             var layersSnapshot = _layers.SnapshotLayers();
-            double  zoom       = cam.Zoom;
+            double  zoom       = id.Z;
             double3 tileOrigin = lt.TileOriginRender;
-            int     n          = layersSnapshot.Length;
 
             // S89 Stage C: DENSE per-(tile, source) produce. Collect this-source layers in declared (draw)
             // order; each dense slot d carries its global material index materialIndices[d]. No full-width
-            // sparse union / decision-5c null slots.
-            int dense = 0;
-            for (int li = 0; li < n; li++)
-                if (SourceIdOf(layersSnapshot[li].StyleLayer) == sourceId) dense++;
+            // sparse union / decision-5c null slots. S82: computed via the shared helper (also used by the
+            // cache transfer/probe paths) — copied into a fresh array immediately since materialIndices is
+            // captured into the background closure below (the shared scratch list is reused synchronously
+            // elsewhere and must never be captured across the thread boundary).
+            ComputeDenseLayerIds(sourceId, _denseLayerIdsScratch);
+            int dense = _denseLayerIdsScratch.Count;
             var materialIndices = new int[dense];
-            for (int li = 0, d = 0; li < n; li++)
-                if (SourceIdOf(layersSnapshot[li].StyleLayer) == sourceId) materialIndices[d++] = li;
+            for (int d = 0; d < dense; d++) materialIndices[d] = _denseLayerIdsScratch[d];
 
             // ── MAIN THREAD: pre-allocate one writable MeshDataArray per this-source layer ──
             // Mesh.AllocateWritableMeshData is main-thread only (spike-verified); the worker writes into these
@@ -1025,8 +1173,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             // MeshDataTessellation below (written OR 0-vertex) so it is disposed exactly once on the main
             // thread — including on a faulted tile (see the catch + ensure-wrapped loop).
             var mdas = new Mesh.MeshDataArray[dense];
-            for (int d = 0; d < dense; d++)
-                mdas[d] = Style.MeshDataTessellation.AllocateTracked(1);
+            using (PmMeshDataAllocate.Auto())
+            {
+                for (int d = 0; d < dense; d++)
+                    mdas[d] = Style.MeshDataTessellation.AllocateTracked(1);
+            }
 
             return UniTask.RunOnThreadPool(() =>
             {
@@ -1121,6 +1272,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _consumeScratchMeshes.Clear();
             _consumeScratchHandles.Clear();
+            _consumeScratchMatIndices.Clear();
 
             // Consume the dense per-source payloads from the cursor until a budget binds or all are done.
             // Empty (0-vertex) layers are free — they only advance the cursor. The pump guarantees positive
@@ -1156,16 +1308,18 @@ namespace MapRenderer.Unity.Rendering.Tile
                     handle = _instanced.AddTileLayer(mesh, lt.TileOriginRender, materialIndex, id);
                 _consumeScratchMeshes.Add(mesh);                 // S51: track for explicit destruction
                 _consumeScratchHandles.Add(handle);
+                _consumeScratchMatIndices.Add(materialIndex);    // S82: which layerId this mesh belongs to
                 meshesConsumed++;
                 vertsConsumed += layerVerts;
             }
 
             lt.ConsumeCursor = cursor;
 
-            // Append this call's new meshes/handles to the tile's arrays (one realloc per partial frame; load
-            // time only — steady state never re-enters consume, so no per-frame GC there).
+            // Append this call's new meshes/handles/materialIndices to the tile's arrays (one realloc per
+            // partial frame; load time only — steady state never re-enters consume, so no per-frame GC there).
             AppendMeshes(ref lt.Meshes, _consumeScratchMeshes);
-            AppendHandles(ref lt.DrawHandles, _consumeScratchHandles);
+            AppendInts(ref lt.DrawHandles, _consumeScratchHandles);
+            AppendInts(ref lt.MaterialIndices, _consumeScratchMatIndices);
 
             bool complete = cursor >= denseCount;
             if (complete)
@@ -1197,8 +1351,10 @@ namespace MapRenderer.Unity.Rendering.Tile
             arr = merged;
         }
 
-        /// <summary>S87: appends freshly-registered draw handles to a tile's handle array (grows by realloc).</summary>
-        private static void AppendHandles(ref int[] arr, List<int> add)
+        /// <summary>S87/S82: appends freshly-produced ints to a tile's tracked int[] (grows by realloc).
+        /// Generic over the field's meaning — used for both DrawHandles and (S82) MaterialIndices, which are
+        /// parallel arrays built the same way, one realloc per partial-consume call.</summary>
+        private static void AppendInts(ref int[] arr, List<int> add)
         {
             if (add.Count == 0) return;
             int oldLen = arr?.Length ?? 0;
@@ -1233,11 +1389,97 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (_loaded.TryGetValue(key, out var lt))
             {
+                // S82: a fully-Built tile with tracked geometry TRANSFERS its meshes into the
+                // PreparedTileCache instead of letting RenderTeardownRecord destroy them (Model B — the
+                // cache takes ownership). Nulling lt.Meshes here makes DestroyTrackedMeshes's existing
+                // null-check a natural no-op — no separate "handed off" branch needed there.
+                //
+                // Scoped to THIS method (a genuine eviction) — deliberately NOT folded into
+                // RenderTeardownRecord, which SetSources ALSO calls for every record on a restyle (rebuilt
+                // backend + re-indexed RenderLayerSet). Caching those meshes there would file them under
+                // whatever CurrentStyle happens to be at that moment, risking a later hit under a
+                // coincidentally-matching (tileId, layerId) serving stale-style geometry — out of scope
+                // pre-S83 (styleId is a constant default) and sidestepped entirely by never transferring
+                // on that path; a restyle keeps today's always-destroy behaviour unchanged.
+                //
+                // _cacheEnabled == false skips the transfer entirely — RenderTeardownRecord's
+                // DestroyTrackedMeshes then destroys lt.Meshes exactly as it did pre-S82.
+                if (_cacheEnabled && lt.Built && lt.Meshes != null)
+                    TransferBuiltMeshesToCache(key.Tile, _pipelines[key.Slot].SourceId, ref lt);
+
                 RenderTeardownRecord(ref lt);
                 _loaded.Remove(key);
             }
             // Route the scheduler release to the OWNING pipeline — a record on source B never touches A.
             _pipelines[key.Slot].Scheduler.Release(key.Tile);
+        }
+
+        /// <summary>
+        /// S82: transfers a fully-Built record's tracked meshes into <see cref="_prepared"/> (Model B — the
+        /// cache now owns them), keyed per layer under <see cref="CurrentStyle"/>. Inserts one entry per
+        /// DENSE layerId of this (tile, source) — a real <see cref="Mesh"/> for a produced layer, a
+        /// <see langword="null"/> "empty-layer" marker for a dense layerId this record never produced a mesh
+        /// for — so the Tick probe's completeness check (which walks the SAME dense set via
+        /// <see cref="ComputeDenseLayerIds"/>) is exact: a partially-empty multi-layer tile still counts as a
+        /// full cache hit on revisit.
+        /// </summary>
+        private void TransferBuiltMeshesToCache(TileId id, string sourceId, ref LoadedTile lt)
+        {
+            ComputeDenseLayerIds(sourceId, _denseLayerIdsScratch);
+
+            int trackedCount = lt.MaterialIndices?.Length ?? 0;
+            for (int i = 0; i < trackedCount; i++)
+                _prepared.Put(new PreparedKey(CurrentStyle, id, lt.MaterialIndices[i]), lt.Meshes[i]);
+
+            for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
+            {
+                int layerId = _denseLayerIdsScratch[d];
+                bool covered = false;
+                for (int i = 0; i < trackedCount; i++)
+                    if (lt.MaterialIndices[i] == layerId) { covered = true; break; }
+                if (!covered)
+                    _prepared.Put(new PreparedKey(CurrentStyle, id, layerId), null);
+            }
+
+            lt.Meshes          = null;
+            lt.MaterialIndices = null;
+        }
+
+        /// <summary>
+        /// S82: builds a fully-Built <see cref="LoadedTile"/> record directly from a PreparedTileCache HIT
+        /// (the Tick request-loop's cache probe, called only once every dense layerId of
+        /// <paramref name="denseLayerIds"/> is confirmed <see cref="PreparedTileCache.Contains"/>). TryTakes
+        /// each layer's mesh (Model B — ownership transfers back to this record) and re-registers non-null
+        /// ones with the backend via <c>AddTileLayer</c>; a <see langword="null"/> (empty-layer marker) entry
+        /// is a no-op, reproducing the original prepare's "no mesh for this layer" outcome exactly. No fetch,
+        /// no decode, no tessellation, no upload — <see cref="TessellationsKickedLastTick"/> is untouched by
+        /// this path, which is the decisive falsifier a shallow (re-tessellating) cache would trip.
+        /// </summary>
+        private LoadedTile BuildTileFromCache(TileId id, double3 origin, List<int> denseLayerIds)
+        {
+            _consumeScratchMeshes.Clear();
+            _consumeScratchHandles.Clear();
+            _consumeScratchMatIndices.Clear();
+
+            for (int d = 0; d < denseLayerIds.Count; d++)
+            {
+                int layerId = denseLayerIds[d];
+                _prepared.TryTake(new PreparedKey(CurrentStyle, id, layerId), out Mesh mesh);
+                if (mesh == null) continue; // empty-layer marker — nothing to register
+
+                int handle;
+                using (PmAddTileLayer.Auto())
+                    handle = _instanced.AddTileLayer(mesh, origin, layerId, id);
+                _consumeScratchMeshes.Add(mesh);
+                _consumeScratchHandles.Add(handle);
+                _consumeScratchMatIndices.Add(layerId);
+            }
+
+            var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin };
+            AppendMeshes(ref lt.Meshes, _consumeScratchMeshes);
+            AppendInts(ref lt.DrawHandles, _consumeScratchHandles);
+            AppendInts(ref lt.MaterialIndices, _consumeScratchMatIndices);
+            return lt;
         }
 
         /// <summary>
@@ -1480,6 +1722,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 DestroyTrackedMeshes(ref lt);
             }
             _loaded.Clear();
+
+            // S82: destroy every Mesh the PreparedTileCache still holds (out-of-cover tiles handed off by
+            // ReleaseTile) — SAME "destroy meshes → dispose backend" ordering as the loop just above, so the
+            // backend never references a freed Mesh either way.
+            _prepared.Dispose();
 
             // Dispose the instanced backend AFTER destroying all tile meshes (it references mesh IDs that
             // become invalid when the Mesh assets are destroyed; this order keeps it from drawing freed

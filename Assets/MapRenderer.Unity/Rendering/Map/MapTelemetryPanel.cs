@@ -65,6 +65,38 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Lifetime count of genuine (non-cancellation) fetch errors.")]
         public int FetchErrorCount;
 
+        [Header("S82: Prepared-tile cache utilization (live — overwritten each frame)")]
+        [Tooltip("Master toggle for the PreparedTileCache (PreparedTileCacheConfig.Enabled). False means " +
+                 "every revisit re-fetches/re-tessellates/re-uploads — hits are always 0 in that state.")]
+        public bool PreparedCacheEnabled;
+
+        [Tooltip("Cumulative full-tile cache hits (a revisit/style-toggle that skipped decode/tessellate/upload).")]
+        public int PreparedCacheHits;
+
+        [Tooltip("Cumulative cache misses (a cover-entry that genuinely re-prepared).")]
+        public int PreparedCacheMisses;
+
+        [Tooltip("Hits / (Hits + Misses) * 100 — 0 while nothing has been probed yet (divide-by-zero guarded).")]
+        public double PreparedCacheHitRatePercent;
+
+        [Tooltip("Current number of prepared tile-layer entries held by the cache.")]
+        public int PreparedCacheEntryCount;
+
+        [Tooltip("The effective entry-count cap the cache evicts against (int.MaxValue = unbounded).")]
+        public int PreparedCacheMaxCount;
+
+        [Tooltip("Current estimated VRAM bytes held by the cache.")]
+        public long PreparedCacheBytesHeld;
+
+        [Tooltip("The effective byte budget the cache evicts against (long.MaxValue = unbounded).")]
+        public long PreparedCacheByteBudget;
+
+        [Tooltip("BytesHeld / ByteBudget * 100 — how full the cache is against its budget.")]
+        public double PreparedCacheFillPercent;
+
+        [Tooltip("Cumulative LRU evictions (an entry destroyed because the byte budget or count cap was exceeded).")]
+        public int PreparedCacheEvictions;
+
         private void Update() => Tick();
 
         /// <summary>
@@ -94,6 +126,21 @@ namespace MapRenderer.Unity.Rendering.Map
             ReleasedMidFlightCount = snap.ReleasedMidFlightCount;
             ReleasedMidFetchCount  = snap.ReleasedMidFetchCount;
             FetchErrorCount        = snap.FetchErrorCount;
+
+            PreparedCacheEnabled    = snap.PreparedCacheEnabled;
+            PreparedCacheHits       = snap.PreparedCacheHits;
+            PreparedCacheMisses     = snap.PreparedCacheMisses;
+            PreparedCacheEntryCount = snap.PreparedCacheEntryCount;
+            PreparedCacheMaxCount   = snap.PreparedCacheMaxCount;
+            PreparedCacheBytesHeld  = snap.PreparedCacheBytesHeld;
+            PreparedCacheByteBudget = snap.PreparedCacheByteBudget;
+            PreparedCacheEvictions  = snap.PreparedCacheEvictions;
+
+            int probes = snap.PreparedCacheHits + snap.PreparedCacheMisses;
+            PreparedCacheHitRatePercent = probes > 0 ? (double)snap.PreparedCacheHits / probes * 100.0 : 0.0;
+            PreparedCacheFillPercent = snap.PreparedCacheByteBudget > 0
+                ? (double)snap.PreparedCacheBytesHeld / snap.PreparedCacheByteBudget * 100.0
+                : 0.0;
         }
     }
 }

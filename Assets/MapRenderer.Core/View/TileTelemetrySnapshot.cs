@@ -66,5 +66,40 @@ namespace MapRenderer.Core.View
 
         /// <summary>Lifetime count of genuine (non-cancellation) fetch errors.</summary>
         public int FetchErrorCount { get; init; }
+
+        // ── S82: PreparedTileCache utilization ────────────────────────────────────────────────
+
+        /// <summary>Whether the <c>PreparedTileCache</c> is active (see
+        /// <see cref="Map.PreparedTileCacheConfig.Enabled"/>). <see langword="false"/> means every revisit
+        /// re-fetches/re-tessellates/re-uploads — <see cref="PreparedCacheHits"/> is always 0 in that state.</summary>
+        public bool PreparedCacheEnabled { get; init; }
+
+        /// <summary>Cumulative count of full-tile cache hits (a revisit/style-toggle that skipped
+        /// decode/tessellate/upload).</summary>
+        public int PreparedCacheHits { get; init; }
+
+        /// <summary>Cumulative count of cache misses (a cover-entry that genuinely re-prepared).</summary>
+        public int PreparedCacheMisses { get; init; }
+
+        /// <summary>Current number of prepared tile-layer entries held by the cache (produced meshes AND
+        /// empty-layer completeness markers).</summary>
+        public int PreparedCacheEntryCount { get; init; }
+
+        /// <summary>The effective entry-count cap the cache evicts against (the LIVE applied value — a
+        /// non-positive configured cap clamps up to <see cref="int.MaxValue"/>, i.e. unbounded).</summary>
+        public int PreparedCacheMaxCount { get; init; }
+
+        /// <summary>Current estimated VRAM bytes held by the cache (sum of every live entry's estimated
+        /// mesh size).</summary>
+        public long PreparedCacheBytesHeld { get; init; }
+
+        /// <summary>The effective byte budget the cache evicts against (the LIVE applied value — a
+        /// non-positive configured budget clamps up to <see cref="long.MaxValue"/>, i.e. unbounded).</summary>
+        public long PreparedCacheByteBudget { get; init; }
+
+        /// <summary>Cumulative count of LRU evictions (an entry destroyed because the byte budget or count
+        /// cap was exceeded — distinct from a <see cref="PreparedCacheHits"/> take-out, which removes an
+        /// entry without destroying it).</summary>
+        public int PreparedCacheEvictions { get; init; }
     }
 }

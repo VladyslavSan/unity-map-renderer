@@ -108,6 +108,7 @@ namespace MapRenderer.Tests
                 "MapRenderer.View.ApplyZoom.LineDash",
                 "MapRenderer.View.InstancedRebuild",
                 "MapRenderer.Tile.ManagerTick",
+                "MapRenderer.Tile.MeshDataAllocate",
                 "MapRenderer.Tile.AddLayer",
                 "MapRenderer.Tile.AddLayer.Root",
                 "MapRenderer.Tile.AddLayer.Register",

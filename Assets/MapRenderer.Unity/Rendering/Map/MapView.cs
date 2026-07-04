@@ -93,7 +93,9 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             _config     = config ?? throw new ArgumentNullException(nameof(config));
             Camera      = camera ?? throw new ArgumentNullException(nameof(camera));
-            TileManager = new Tile.TileManager(Layers);
+            // S82: the PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
+            // fields (placeholder budget defaults pending in-editor VRAM profiling, stage Risk 3).
+            TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
         }
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
@@ -133,6 +135,9 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             _style   = style;
             StyleId = styleId;
+            // S82: the PreparedTileCache's opaque cache-key token — constant default until S83 supplies a
+            // real per-style id (Risk 2); set before SetSources so a hit/miss probe this Tick already sees it.
+            TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
 

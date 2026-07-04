@@ -67,5 +67,14 @@ namespace MapRenderer.Unity.Rendering.Map
                  "editing the base .mat in Play live-tunes every layer. When unset, legacy shader-built defaults " +
                  "are used.")]
         public Materials.MapMaterialSet MaterialSet;
+
+        [Tooltip("S82: PreparedTileCache knobs — Enabled (master toggle) + ByteBudget/MaxCount (LRU bounds). " +
+                 "See PreparedTileCacheConfig's own field tooltips for detail.")]
+        public PreparedTileCacheConfig PreparedCache = new PreparedTileCacheConfig
+        {
+            Enabled    = true,
+            ByteBudget = 128L * 1024 * 1024,
+            MaxCount   = 1024,
+        };
     }
 }

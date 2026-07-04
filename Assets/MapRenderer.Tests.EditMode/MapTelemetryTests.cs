@@ -305,6 +305,103 @@ namespace MapRenderer.Tests
             }
         }
 
+        // ── S82: PreparedTileCache utilization on the telemetry surface ───────────────────────────
+
+        [Test]
+        public void PreparedCache_Snapshot_ReflectsHitsEntryCountBytesHeld_AfterEvictAndRevisit()
+        {
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_S82_PreparedCacheTelemetry");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            try
+            {
+                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.WithTestCamera();
+                view.Config.MaxBuildsPerTick        = 64;
+                view.Config.MaxTessellationsPerTick = 64;
+
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+                PumpUntilSettled(view);
+
+                var afterLoad = view.CaptureTelemetry();
+                Assert.IsTrue(afterLoad.PreparedCacheEnabled, "positive control: default config has the cache enabled");
+                Assert.Greater(afterLoad.PreparedCacheMisses, 0, "the first prepare must register >=1 miss");
+                Assert.AreEqual(0, afterLoad.PreparedCacheEntryCount,
+                    "nothing has been evicted into the cache yet — the live cover still owns every built mesh");
+                Assert.AreEqual(0, afterLoad.PreparedCacheBytesHeld);
+
+                // Evict the whole cover — pan far away; every Built tile transfers into the PreparedTileCache
+                // in THIS tick (release is unthrottled — the whole _toRelease diff is processed synchronously
+                // inside one Tick, no need to PumpUntilSettled to "finish" the eviction). Deliberately do NOT
+                // PumpUntilSettled here: letting the away-location's fresh fetches reach Built before panning
+                // back would transfer THEM into the cache too on the very next Tick (a released-but-Built
+                // tile always transfers), contaminating the entry-count assertions below with unrelated
+                // entries that have nothing to do with the revisit under test.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.Tick();
+
+                var afterEvict = view.CaptureTelemetry();
+                Assert.Greater(afterEvict.PreparedCacheEntryCount, 0,
+                    "evicted Built tiles must land in the PreparedTileCache — EntryCount must reflect reality.");
+                Assert.Greater(afterEvict.PreparedCacheBytesHeld, 0,
+                    "cached meshes must report non-zero held bytes — BytesHeld must reflect reality.");
+
+                // Revisit — pan back to the original (lon,lat) BEFORE the away-location tiles have had any
+                // chance to reach Built (see note above): the cache must serve a hit for every originally-
+                // cached tile, handing ownership (and the entry) back OUT (Model B TryTake).
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
+                view.Tick(); // the recompute (cover diff + probe) runs in THIS tick
+                var afterRevisitTick = view.CaptureTelemetry();
+
+                Assert.Greater(afterRevisitTick.PreparedCacheHits, 0,
+                    "DECISIVE: the revisit tick must register >=1 PreparedCacheHits — a hit must increment Hits.");
+                Assert.Less(afterRevisitTick.PreparedCacheEntryCount, afterEvict.PreparedCacheEntryCount,
+                    "TryTake (Model B) removes the entry on a hit — a revisit that hits every originally-cached " +
+                    "tile must strictly DECREASE EntryCount (a shallow impl that never drains EntryCount, or " +
+                    "that only grows it, fails this).");
+
+                PumpUntilSettled(view);
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        [Test]
+        public void CaptureTelemetry_PreparedCacheDisabled_ReportsDisabledAndZeroHits()
+        {
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_S82_PreparedCacheDisabled");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            // Set BEFORE WithTestCamera() — TileManager reads PreparedCache.Enabled once at construction
+            // (mirrors S82PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
+            view.Config.PreparedCache.Enabled = false;
+            view.WithTestCamera();
+            view.Config.MaxBuildsPerTick        = 64;
+            view.Config.MaxTessellationsPerTick = 64;
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+                PumpUntilSettled(view);
+
+                var snap = view.CaptureTelemetry();
+                Assert.IsFalse(snap.PreparedCacheEnabled, "the snapshot must reflect the disabled toggle.");
+                Assert.AreEqual(0, snap.PreparedCacheHits, "a disabled cache must never register a hit.");
+                Assert.Greater(snap.PreparedCacheMisses, 0,
+                    "positive control: the probe still counts a miss when disabled (it never finds anything cached).");
+                Assert.AreEqual(0, snap.PreparedCacheEntryCount, "a disabled cache never transfers a Built tile in.");
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
         // ── MapTelemetryPanel forwards the live snapshot ──────────────────────────────────────────
 
         [Test]
@@ -334,6 +431,20 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(snap.VisibleTileCount, panel.VisibleTileCount);
                 Assert.AreEqual(snap.LoadedTileCount, panel.LoadedTileCount);
                 Assert.AreEqual(snap.ConsumeBacklog, panel.ConsumeBacklog);
+
+                // S82: the cache section forwards too — positive control on Misses (the first prepare) so
+                // this isn't a vacuous 0==0 comparison.
+                Assert.Greater(snap.PreparedCacheMisses, 0, "positive control: the first prepare must register a miss");
+                Assert.AreEqual(snap.PreparedCacheEnabled, panel.PreparedCacheEnabled);
+                Assert.AreEqual(snap.PreparedCacheHits, panel.PreparedCacheHits);
+                Assert.AreEqual(snap.PreparedCacheMisses, panel.PreparedCacheMisses);
+                Assert.AreEqual(snap.PreparedCacheEntryCount, panel.PreparedCacheEntryCount);
+                Assert.AreEqual(snap.PreparedCacheBytesHeld, panel.PreparedCacheBytesHeld);
+                Assert.AreEqual(snap.PreparedCacheByteBudget, panel.PreparedCacheByteBudget);
+                Assert.AreEqual(snap.PreparedCacheEvictions, panel.PreparedCacheEvictions);
+                double expectedHitRate = (double)snap.PreparedCacheHits / (snap.PreparedCacheHits + snap.PreparedCacheMisses) * 100.0;
+                Assert.AreEqual(expectedHitRate, panel.PreparedCacheHitRatePercent, 1e-9,
+                    "the panel must derive the hit-rate percent from the same Hits/Misses the snapshot reports.");
             }
             finally
             {
