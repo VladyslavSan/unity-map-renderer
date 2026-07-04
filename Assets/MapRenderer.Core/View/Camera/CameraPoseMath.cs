@@ -120,8 +120,45 @@ namespace MapRenderer.Core.View.Camera
         /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
         public static double NearClip(double altitude) => math.max(0.1, altitude * 0.01);
 
-        /// <summary>Far clip plane from altitude (S42 D3: far = altitude · 4).</summary>
+        /// <summary>Far clip plane from altitude (S42 D3: far = altitude · 4). The plain overhead/globe form;
+        /// the planar view uses the geometry-aware overload below.</summary>
         public static double FarClip(double altitude) => altitude * 4.0;
+
+        /// <summary>
+        /// Geometry-aware far clip for the PLANAR (flat-ground) view: the slant distance to the farthest ground
+        /// point actually in view — the ray through a viewport <b>corner</b> (widest reach), from the camera at
+        /// height <c>altitude·cos(tilt)</c>. Depends on ALL camera parameters — altitude, tilt/pitch, vertical
+        /// FOV, and aspect (via the corner half-angle) — so it's tight when overhead (~×1.6, no wasted far
+        /// tiles) and grows as the camera pitches toward the horizon.
+        ///
+        /// <para><b>Bounded at ×4.</b> Near the horizon the corner ray approaches horizontal and the exact far
+        /// runs to ∞; two guards keep it sane: the ray angle is capped just short of 90°, and the whole result
+        /// is clamped to <c>altitude·4</c>. So the far never exceeds the overhead budget (bounding the tile
+        /// count) — the sky band above that distance is accepted rather than paid for with an exploding cover
+        /// (a distant horizon at a single zoom is what LOD is for, not a bigger far plane).</para>
+        ///
+        /// <para><b>Render ↔ selection share this.</b> <c>MapCamera.SyncToCamera</c> (planar branch) and
+        /// <c>FrustumTileSelector</c> both call it with the live camera, so the frustum the selector covers is
+        /// exactly the one that renders. The globe keeps <see cref="FarClip(double)"/> (it must reach the
+        /// sphere's limb, a different geometry).</para>
+        /// </summary>
+        public static double FarClip(double altitude, Angle tilt, double fovDegVertical, double aspect,
+                                     double capMultiplier = 4.0)
+        {
+            double halfV    = Angle.FromDegrees(fovDegVertical * 0.5).Radians;
+            double tanV     = math.tan(halfV);
+            double tanH     = tanV * aspect;
+            double halfDiag = math.atan(math.sqrt(tanV * tanV + tanH * tanH)); // corner half-angle
+
+            double h      = altitude * tilt.Cos;                 // camera height above the ground plane
+            double phi    = tilt.Radians + halfDiag;             // top-corner ray angle from vertical
+            double phiMax = 89.0 * math.PI_DBL / 180.0;          // cap just short of horizontal (else → ∞)
+            if (phi > phiMax) phi = phiMax;
+
+            double geom = h / math.cos(phi) * 1.1;               // slant distance to that ground point (+10%)
+            double cap  = altitude * capMultiplier;
+            return geom < cap ? geom : cap;
+        }
 
         // ── Pose computation ─────────────────────────────────────────────────────────────────────
 

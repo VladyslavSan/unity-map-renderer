@@ -44,7 +44,6 @@ namespace MapRenderer.Unity.Rendering.Map
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
     [RequireComponent(typeof(MapViewComponent))]
-    [RequireComponent(typeof(Controller))]
     public sealed class Bootstrapper : MonoBehaviour
     {
         // S83b: the STYLE is the single source of truth. One URI points at the style document; its
@@ -130,13 +129,17 @@ namespace MapRenderer.Unity.Rendering.Map
             // 5. Apply initial camera framing (perspective, altitude-from-zoom, overhead at pitch=0).
             //    Delegates to ApplyCameraTransform so frame-0 framing matches the runtime path and
             //    InitialZoom is respected (zoom 2 → continent scale, zoom 16 → street scale).
+            // Frame-0 belt-and-suspenders: the MapCamera built in Wire already framed the camera; re-applying
+            // via the Controller (when present) is harmless and keeps the interactive path identical.
             var ctrl = GetComponent<Controller>();
             if (ctrl != null && ctrl.Camera != null)
-            {
                 ctrl.ApplyCameraTransform(initialView);
-                if (ctrl.Camera.backgroundColor == default)
-                    ctrl.Camera.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
-            }
+
+            // Sky background on the main camera directly, so it applies with OR without an input Controller
+            // (the stress scene omits the Controller). Camera.main is the same camera Wire framed.
+            var mainCam = Camera.main;
+            if (mainCam != null && mainCam.backgroundColor == default)
+                mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
 
             Debug.Log($"[Bootstrapper] Started. styleUri={styleUri}, zoom={InitialZoom}, " +
                       $"center=({InitialLatitude:F2},{InitialLongitude:F2}).");
@@ -200,40 +203,41 @@ namespace MapRenderer.Unity.Rendering.Map
                 return;
             }
 
+            // The input Controller is OPTIONAL: the essential graph is the MapCamera onto MapView. A scene
+            // may omit it — e.g. an automated stress scene driven entirely by a script (TileLoadStressDriver)
+            // with no user to feed mouse/keyboard/touch — and the map still wires and renders.
             var ctrl = root.GetComponent<Controller>();
-            if (ctrl == null)
-            {
-                Debug.LogWarning("[Bootstrapper.Wire] No Controller found on root — wire-up skipped.");
-                return;
-            }
 
-            // Set the camera reference on the controller (may be null — guarded in Update).
-            ctrl.Camera = camera;
-
-            // ── Wire the MapCamera onto MapView ────────────────────────────────────────────────
-            // MapView owns the (single) MapCamera; SetCamera builds the MapView (it is valid from that point
-            // — an empty map until SetStyle loads data). MapCamera wraps a real Unity camera, so with no
-            // camera we skip: no MapView is built (the scene always has a main camera in practice).
+            // ── Wire the MapCamera onto MapView (the essential graph, controller-independent) ────────────
+            // MapView owns the (single) MapCamera; SetCamera builds the MapView (valid from that point — an
+            // empty map until SetStyle loads data). MapCamera wraps a real Unity camera, so with no camera
+            // we skip: no MapView is built (the scene always has a main camera in practice).
             if (camera != null)
             {
-                // FOV + viewport come from initialView / the camera; the altitude multiplier and the DPI ratio
-                // are side config. Seed DPR at construction (S92 D1) so the ctor's frame-0 SyncToCamera frames
-                // the logical viewport too — LateUpdate keeps it live thereafter.
-                var mapCamera = new MapCamera(camera, initialView, ctrl.AltitudeMultiplier, projection,
+                // FOV + viewport come from initialView / the camera; the altitude multiplier (from the
+                // Controller when present, else 1) and the DPI ratio are side config. Seed DPR at construction
+                // (S92 D1) so the ctor's frame-0 SyncToCamera frames the logical viewport too — LateUpdate
+                // keeps it live thereafter.
+                float altitudeMultiplier = ctrl != null ? ctrl.AltitudeMultiplier : 1f;
+                var mapCamera = new MapCamera(camera, initialView, altitudeMultiplier, projection,
                                               mapView.Config.DevicePixelRatio);
                 mapView.SetCamera(mapCamera);
             }
 
-            // Wire the controller to the view (data is loaded separately via SetStyle — see Start).
-            ctrl.Map = mapView;
+            // ── Input wiring — only when an input Controller is present ──────────────────────────────────
+            // A stress/headless scene omits the Controller; skip the desktop + touch input seams entirely.
+            if (ctrl != null)
+            {
+                ctrl.Camera = camera; // may be null — guarded in Controller.Update
+                ctrl.Map    = mapView;
 
-            // S74: wire the touch source alongside the desktop controller (same write seam).
-            // GetComponent-or-AddComponent so no committed scene edit is required; the scene
-            // validator only flags missing scripts, not runtime-added ones. A maintainer follow-up
-            // adds it to the MapRoot prefab so thresholds/sensitivities are tunable in the Inspector.
-            var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
-            touch.camera = camera;
-            touch.Map    = mapView;
+                // S74: wire the touch source alongside the desktop controller (same write seam).
+                // GetComponent-or-AddComponent so no committed scene edit is required; the scene validator
+                // only flags missing scripts, not runtime-added ones.
+                var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
+                touch.camera = camera;
+                touch.Map    = mapView;
+            }
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────

@@ -153,7 +153,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_ProfilerTest");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 

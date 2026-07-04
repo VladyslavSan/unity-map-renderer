@@ -7,5 +7,12 @@ namespace Unity.Mathematics
         public double y;
         public double z;
         public double3(double x, double y, double z) { this.x = x; this.y = y; this.z = z; }
+
+        // Arithmetic operators — parity with the real Unity.Mathematics double3 (used by ViewFrustum et al.).
+        public static double3 operator +(double3 a, double3 b) => new double3(a.x + b.x, a.y + b.y, a.z + b.z);
+        public static double3 operator -(double3 a, double3 b) => new double3(a.x - b.x, a.y - b.y, a.z - b.z);
+        public static double3 operator *(double3 a, double s)  => new double3(a.x * s, a.y * s, a.z * s);
+        public static double3 operator *(double s,  double3 a) => new double3(a.x * s, a.y * s, a.z * s);
+        public static double3 operator -(double3 a)            => new double3(-a.x, -a.y, -a.z);
     }
 }

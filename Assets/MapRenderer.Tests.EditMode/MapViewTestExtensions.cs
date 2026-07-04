@@ -4,6 +4,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
@@ -127,6 +128,10 @@ namespace MapRenderer.Tests
         public static int TilesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
+
+        /// <summary>S85: the pull-based tile/render telemetry snapshot.</summary>
+        public static TileTelemetrySnapshot CaptureTelemetry(this MapViewComponent view)
+            => view.TileManager != null ? view.TileManager.CaptureTelemetry() : default;
 
         /// <summary>True when the tile is loaded AND produced geometry. Backend-agnostic.</summary>
         public static bool TryGetBuiltTile(this MapViewComponent view, TileId id) => view.TileManager != null && view.TileManager.TryGetBuiltTile(id);

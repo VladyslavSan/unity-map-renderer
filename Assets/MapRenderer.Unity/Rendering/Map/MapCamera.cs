@@ -38,10 +38,14 @@ namespace MapRenderer.Unity.Rendering.Map
     public sealed class MapCamera
     {
         // ── Wrapped Unity camera (never null — ctor-enforced) ───────────────────────────────────────
-        private readonly UnityEngine.Camera _camera;
+        public readonly UnityEngine.Camera Camera;
 
         // ── Active projection (S63: default WebMercator; injectable for tests / future globe) ─────────
         public IProjection Projection { get; }
+
+        /// <summary>Far-plane policy — set by MapView from config so the render far matches the tile selector's
+        /// (a mismatch over/under-selects). Defaults to the planar geometry-aware far.</summary>
+        internal IFarPlanePolicy FarPlanePolicy { get; set; } = new GeometryAwareFarPlane();
 
         /// <summary>Altitude multiplier for art-direction (default 1).</summary>
         public readonly float AltitudeMultiplier;
@@ -57,10 +61,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// camera makes ground-per-physical-pixel <c>mpp/DPR</c>. Never <c>÷DPR</c> the paint path — that
         /// double-applies (the <c>GroundResolution</c>/<c>MetersPerPixel</c> freeze).</para>
         /// </summary>
-        public double DevicePixelRatio = 1.0;
+        public double DevicePixelRatio;
 
-        // ── Current state (includes the FOV lens — CameraProperties.VerticalFovDeg) ──────────────────
-        private CameraProperties _current;
 
         public MapCamera(UnityEngine.Camera camera,
                          CameraProperties initial,
@@ -68,9 +70,9 @@ namespace MapRenderer.Unity.Rendering.Map
                          IProjection projection         = null,
                          double      devicePixelRatio   = 1.0)
         {
-            _camera = camera != null ? camera
+            Camera = camera != null ? camera
                 : throw new ArgumentNullException(nameof(camera), "MapCamera requires a real UnityEngine.Camera.");
-            _current           = initial;
+            CurrentProperties           = initial;
             AltitudeMultiplier = altitudeMultiplier;
             Projection         = projection ?? new WebMercatorProjection();
             DevicePixelRatio   = devicePixelRatio;
@@ -78,11 +80,11 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>The current camera properties.</summary>
-        public CameraProperties CurrentProperties => _current;
+        public CameraProperties CurrentProperties { get; private set; }
 
         /// <summary>Live viewport size in pixels, straight from the wrapped camera (the camera IS the
         /// viewport — no fallback).</summary>
-        public double2 ViewportPx => new double2(_camera.pixelWidth, _camera.pixelHeight);
+        public double2 ViewportPx => new double2(Camera.pixelWidth, Camera.pixelHeight);
 
         /// <summary>
         /// Merge <paramref name="update"/> over the current properties. Updates <see cref="CurrentProperties"/>
@@ -91,7 +93,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public void Apply(CameraPropertiesUpdate update)
         {
-            _current = update.ApplyTo(_current);
+            CurrentProperties = update.ApplyTo(CurrentProperties);
         }
 
         /// <summary>Jump the current properties to an absolute <paramref name="props"/> state (the absolute
@@ -99,7 +101,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// camera is propagated once per frame by <see cref="SyncToCamera"/>.</summary>
         public void SetProperties(CameraProperties props)
         {
-            _current = props;
+            CurrentProperties = props;
         }
 
         /// <summary>
@@ -115,31 +117,34 @@ namespace MapRenderer.Unity.Rendering.Map
             // high-DPI panel so the map is the right size and DPR-independent. ViewportPx stays physical
             // (raw from the camera); only this altitude term is normalized. Guard a non-positive DPR → 1.
             double dpr      = DevicePixelRatio > 0.0 ? DevicePixelRatio : 1.0;
-            double altitude = CameraPoseMath.AltitudeForZoom(_current.Zoom, ViewportPx.y / dpr, _current.VerticalFovDeg)
+            double altitude = CameraPoseMath.AltitudeForZoom(CurrentProperties.Zoom, ViewportPx.y / dpr, CurrentProperties.VerticalFovDeg)
                               * AltitudeMultiplier;
             if (altitude < 0.1) altitude = 0.1;
 
             CameraPoseMath.ComputePose(altitude,
-                                       _current.Heading.Value,
-                                       _current.Tilt.Value,
+                                       CurrentProperties.Heading.Value,
+                                       CurrentProperties.Tilt.Value,
                                        out double3 pos,
                                        out double3 fwd,
                                        out double3 up);
 
-            _camera.orthographic = false;
-            _camera.fieldOfView  = (float)_current.VerticalFovDeg;
+            Camera.orthographic = false;
+            Camera.fieldOfView  = (float)CurrentProperties.VerticalFovDeg;
 
             // Orbit pose around the render origin (the look-at sits at origin under camera-relative
             // rendering, so there is no scene-origin term here).
-            _camera.transform.position = new Vector3((float)pos.x, (float)pos.y, (float)pos.z);
+            Camera.transform.position = new Vector3((float)pos.x, (float)pos.y, (float)pos.z);
 
             // LookRotation(forward, up): Core already orthogonalized up vs. fwd (closed-form, unit-length).
-            _camera.transform.rotation = Quaternion.LookRotation(
+            Camera.transform.rotation = Quaternion.LookRotation(
                 new Vector3((float)fwd.x, (float)fwd.y, (float)fwd.z),
                 new Vector3((float)up.x,  (float)up.y,  (float)up.z));
 
-            _camera.nearClipPlane = Mathf.Max(0.1f, (float)CameraPoseMath.NearClip(altitude));
-            _camera.farClipPlane  =                  (float)CameraPoseMath.FarClip(altitude);
+            Camera.nearClipPlane = Mathf.Max(0.1f, (float)CameraPoseMath.NearClip(altitude));
+            // The injected far policy (shared with the tile selector, per projection) — geometry-aware for the
+            // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far.
+            Camera.farClipPlane  = (float)FarPlanePolicy.FarMetres(
+                altitude, CurrentProperties.Tilt.Value, CurrentProperties.VerticalFovDeg, Camera.aspect);
         }
     }
 }

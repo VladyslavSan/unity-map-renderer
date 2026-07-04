@@ -282,7 +282,7 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Go");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.Config.PadTiles = 0; view.WithTestCamera();
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.GameObject;
@@ -306,9 +306,9 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(gor.ContainerCount, 0, "Consume must have created at least one per-tile container.");
 
                 // Floating origin: the container position must equal TileLocalToScene(tileOrigin, sceneOrigin).
-                // MapView.Tick set sceneOrigin = cam.CenterMercator() on the last pumped frame.
+                // The scene origin of the last pumped frame is the pumped camera's Mercator centre.
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
-                double2 sceneOrigin0 = view.SceneOrigin;
+                double2 sceneOrigin0 = cam0.CenterMercator();
                 float3  expected0    = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
                 Transform container  = gor.Container(new TileId { Z = 0, X = 0, Y = 0 });
                 Assert.IsNotNull(container, "A container must exist for the built z0/0/0 tile.");

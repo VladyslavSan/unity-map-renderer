@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Rendering.Map
         public MapViewComponent Map;
 
         [Tooltip("The camera providing the live viewport (set by Bootstrapper.Wire at runtime).")]
-        public new Camera camera;
+        public Camera camera;
 
         // ── Sensitivity ───────────────────────────────────────────────────────────────────────────
         [Header("Sensitivity")]

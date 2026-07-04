@@ -37,10 +37,14 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         public UniTask SetStyle(string styleUri, CancellationToken ct = default)
-            => View != null ? View.SetStyle(styleUri, ct) : UniTask.CompletedTask;
+        {
+            return View?.SetStyle(styleUri, ct) ?? UniTask.CompletedTask;
+        }
 
         public UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
-            => View != null ? View.SetStyle(style, styleId, ct) : UniTask.CompletedTask;
+        {
+            return View?.SetStyle(style, styleId, ct) ?? UniTask.CompletedTask;
+        }
 
         public MapCamera Camera => View?.Camera;
 
@@ -74,7 +78,6 @@ namespace MapRenderer.Unity.Rendering.Map
         // ── Internal test reads (forwarded so MapViewTestExtensions stays unchanged) ─────────────
         internal Tile.TileManager     TileManager => View?.TileManager;
         internal Style.RenderLayerSet Layers      => View?.Layers;
-        internal double2              SceneOrigin => View != null ? View.SceneOrigin : default;
         internal string               StyleId     => View?.StyleId;
     }
 }

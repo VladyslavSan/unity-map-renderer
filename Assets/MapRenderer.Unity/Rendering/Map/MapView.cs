@@ -75,14 +75,13 @@ namespace MapRenderer.Unity.Rendering.Map
         private StyleDocument _style;
 
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
-        private readonly Style.RenderLayerSet _layers = new Style.RenderLayerSet();
+        /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts
+        /// via <c>MapViewTestExtensions</c> (InternalsVisibleTo).</summary>
+        internal Style.RenderLayerSet Layers { get; } = new Style.RenderLayerSet();
 
-        // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only _layers).
+        // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only Layers).
         internal readonly Tile.TileManager TileManager;
 
-        // Camera-relative rendering: the scene's float render origin tracks the camera look-at every frame
-        // (recomputed in Tick), so the look-at always sits at the render origin. Exposed for tests.
-        private double2 _sceneOrigin;
 
         /// <summary>
         /// Builds the view over its <paramref name="config"/> (the Inspector knobs, shared by reference with
@@ -94,7 +93,7 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             _config     = config ?? throw new ArgumentNullException(nameof(config));
             Camera      = camera ?? throw new ArgumentNullException(nameof(camera));
-            TileManager = new Tile.TileManager(_layers);
+            TileManager = new Tile.TileManager(Layers);
         }
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
@@ -102,12 +101,11 @@ namespace MapRenderer.Unity.Rendering.Map
         // Tick safely no-ops until data is wired). Loading/changing data is SetStyle — an async operation
         // (fetch style + TileJSON) that fits the MonoBehaviour host's async Start naturally.
 
-        private string _styleId;
 
         /// <summary>S83b: the id of the active style (forward contract for S82's prepared-tile cache).
         /// For <see cref="SetStyle(string,CancellationToken)"/> it is the style URI; for the
         /// <see cref="StyleDocument"/> overload it is the caller-supplied id.</summary>
-        internal string StyleId => _styleId;
+        internal string StyleId { get; private set; }
 
         // S83b loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
         internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
@@ -134,9 +132,9 @@ namespace MapRenderer.Unity.Rendering.Map
         public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
         {
             _style   = style;
-            _styleId = styleId;
+            StyleId = styleId;
 
-            _layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
+            Layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
 
             var specs = await BuildSourceSpecs(style, ct);
             TileManager.SetSources(specs, _config.Backend);
@@ -207,12 +205,6 @@ namespace MapRenderer.Unity.Rendering.Map
             return specs;
         }
 
-        /// <summary>The scene root's current Mercator origin — this view's own per-frame state. Read by tests.</summary>
-        internal double2 SceneOrigin => _sceneOrigin;
-
-        /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts
-        /// via <c>MapViewTestExtensions</c> (InternalsVisibleTo).</summary>
-        internal Style.RenderLayerSet Layers => _layers;
 
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
@@ -234,15 +226,14 @@ namespace MapRenderer.Unity.Rendering.Map
             // ApplyZoom first — so a fractional-zoom-only change always pushes uniforms (fill/line zoom paint,
             // live _MetersPerPixel for pixel line width, zoom-step dasharrays).
             using (PmApplyZoom.Auto())
-                _layers.ApplyZoom(cam.Zoom);
+                Layers.ApplyZoom(cam.Zoom);
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it — best float precision, no threshold/rebase machinery.
-            _sceneOrigin = cam.CenterMercator(); // kept for the SceneOrigin property (Mercator; read by tests)
 
             // S91-C Slice 2: place tiles via the projection-agnostic scene frame built from the launch-time
             // projection + the look-at. Mercator: rebase = identity and SceneOriginRender = (mercX, 0, mercZ)
-            // (== SceneFrame.Mercator(_sceneOrigin)), so placement is bit-for-bit the pre-S91 translation.
+            // (== SceneFrame.Mercator(cam.CenterMercator())), so placement is bit-for-bit the pre-S91 translation.
             // Globe: rebase rotates every tile into the look-at's local ENU frame (up = +Y), so the same
             // CameraPoseMath.ComputePose orbit frames it.
             using (PmInstancedRebuild.Auto())
@@ -260,7 +251,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// (<c>transpose(projection.TangentBasisAt(lookAt))</c>). The look-at latitude is clamped to the
         /// projection's valid range (<see cref="IProjection.ClampValidLatitude"/>) — ±85.05° for Web-Mercator
         /// (matching <c>CenterMercator</c>), ±90° for the globe. For Web-Mercator the basis is the identity, so
-        /// the frame equals <c>SceneFrame.Mercator(_sceneOrigin)</c> bit-for-bit.
+        /// the frame equals <c>SceneFrame.Mercator(cam.CenterMercator())</c> bit-for-bit.
         /// </summary>
         private Backend.SceneFrame BuildSceneFrame(in CameraProperties cam)
         {
@@ -273,29 +264,30 @@ namespace MapRenderer.Unity.Rendering.Map
             return new Backend.SceneFrame(proj.Project(lookAt), math.transpose(proj.TangentBasisAt(lookAt)));
         }
 
-        // ── S71: visible-tile selector, rebuilt only when its algorithm config (or projection) changes ──
-        private int  _selPadTiles = int.MinValue, _selMinZoom, _selMaxZoom, _selOnScreenTilePx;
-        private bool _selGlobe;
+        // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
+        private (bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx)? _selectorInputs;
 
         private void EnsureSelector()
         {
-            // S91-C Slice 3: first-cut selector dispatch by projection. The globe needs a spherical-cap cover;
-            // the Mercator corner-unprojection can't run there (SphericalProjection.ScreenToGround throws). This
-            // becomes a registry lookup when a third projection/selector arrives.
             bool globe = Camera.Projection is SphericalProjection;
-            if (TileManager.Selector == null || _selGlobe != globe ||
-                _selPadTiles != _config.PadTiles || _selMinZoom != _config.MinZoom || _selMaxZoom != _config.MaxZoom ||
-                _selOnScreenTilePx != _config.OnScreenTilePx)
-            {
-                TileManager.Selector = globe
-                    ? new GlobeTileSelector(
-                        _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx)
-                    : (IVisibleTileSelector)new ViewportCornerTileSelector(
-                        _config.PadTiles, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
-                _selGlobe = globe;
-                _selPadTiles = _config.PadTiles; _selMinZoom = _config.MinZoom; _selMaxZoom = _config.MaxZoom;
-                _selOnScreenTilePx = _config.OnScreenTilePx;
-            }
+            var key = (globe, _config.LodMode, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
+            if (TileManager.Selector != null && _selectorInputs == key) return;
+            _selectorInputs = key;
+
+            // One universal FrustumTileSelector for every projection (occlusion via IProjection). LOD strategy
+            // from config; far-plane policy per projection — ray-sphere for a self-occluding globe
+            // (curvature-correct: tight near, limb far), geometry-aware for the flat atlas. The camera gets the
+            // SAME far so the rendered frustum is byte-for-byte the selected one.
+            ITileLodStrategy lod = _config.LodMode == TileLodMode.ScreenSpaceLod
+                ? new ScreenSpaceLodStrategy()
+                : new FlatLodStrategy();
+            IFarPlanePolicy far = Camera.Projection.TryGetHorizonOccluder(out _, out double occRadius)
+                ? new RaySphereFarPlane(occRadius)
+                : new GeometryAwareFarPlane();
+
+            Camera.FarPlanePolicy = far;
+            TileManager.Selector = new FrustumTileSelector(
+                _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx, lod, far);
         }
 
         /// <summary>
@@ -316,14 +308,22 @@ namespace MapRenderer.Unity.Rendering.Map
             };
 
         /// <summary>
+        /// S85: pull-based tile/render telemetry (observability only — never referenced from the live tile
+        /// loop). Forwards to <see cref="Tile.TileManager.CaptureTelemetry"/>; <see cref="TileManager"/> is
+        /// never null (built at construction), so there is no "before init" case to special-case here — an
+        /// unstyled view simply reports an empty cover.
+        /// </summary>
+        internal TileTelemetrySnapshot CaptureTelemetry() => TileManager.CaptureTelemetry();
+
+        /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
         /// RenderLayerSet's materials. Order matters: tiles first — their renderers reference layer
         /// materials. Idempotent (both disposes are). The MonoBehaviour host calls this from OnDestroy.
         /// </summary>
         public void Teardown()
         {
-            TileManager.Dispose();  // tiles first — their renderers reference _layers' materials
-            _layers.Dispose();
+            TileManager.Dispose();  // tiles first — their renderers reference Layers' materials
+            Layers.Dispose();
         }
     }
 }

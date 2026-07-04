@@ -98,6 +98,53 @@ namespace MapRenderer.Tests
             }
         }
 
+        // ── Cover-key: TILT must trigger a cover recompute (frustum selector integration) ─────────
+
+        /// <summary>
+        /// The frustum-based <c>FrustumTileSelector</c> makes the visible set depend on TILT — so
+        /// <c>TileManager.Tick</c>'s cover-recompute key MUST include tilt, else tilting the camera (the exact
+        /// bug scenario) leaves the far field toward the horizon stale. This drives the FULL TileManager path
+        /// (which the selector-level acceptance test bypasses): a stub source serves every tile, so
+        /// <c>LoadedTileCount == cover size</c>. Tilting from overhead to 60° with lon/lat/zoom/heading fixed
+        /// must GROW the cover (the horizon trapezoid). A tilt-blind key would leave the count unchanged.
+        /// </summary>
+        [Test]
+        public void TileCover_RecomputesOnTiltChange_FarFieldGrows()
+        {
+            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var go    = new GameObject("MapView_TiltCover");
+            var view  = go.AddComponent<MapView>().WithTestMaterials().WithTestCamera();
+            var style = MinimalStyle();
+            view.Config.MinZoom = 0; view.Config.MaxZoom = 22;
+            view.Config.MaxBuildsPerTick = 256;
+            view.Config.MaxTessellationsPerTick = 256;
+
+            try
+            {
+                // Overhead (tilt 0) cover.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
+                PumpUntilSettled(view);
+                int flat = view.LoadedTileCount();
+                Assert.Greater(flat, 0, "flat (overhead) cover must be non-empty");
+
+                // Change ONLY the tilt to 60° — lon/lat/zoom/heading are identical.
+                view.Camera.Apply(new CameraPropertiesUpdate { Tilt = 60 });
+                view.Tick();
+                PumpUntilSettled(view);
+                int tilted = view.LoadedTileCount();
+
+                Assert.Greater(tilted, flat,
+                    $"tilting to 60° must recompute the cover and request the horizon trapezoid " +
+                    $"(flat={flat}, tilted={tilted}); an unchanged count means TILT is missing from the " +
+                    $"TileManager cover-recompute key");
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
         // ── Tooth 1: no live .Schedule().Complete() — tessellation is deferred ≥ 1 frame ──────
 
         /// <summary>
@@ -117,7 +164,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -250,7 +297,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -343,7 +390,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -433,7 +480,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -492,7 +539,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -537,7 +584,7 @@ namespace MapRenderer.Tests
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 

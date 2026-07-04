@@ -14,6 +14,13 @@ namespace Unity.Mathematics
         public static double2 max(double2 a, double2 b)
             => new double2(System.Math.Max(a.x, b.x), System.Math.Max(a.y, b.y));
 
+        // ── double3 component-wise ─────────────────────────────────────────────────────
+        public static double3 min(double3 a, double3 b)
+            => new double3(System.Math.Min(a.x, b.x), System.Math.Min(a.y, b.y), System.Math.Min(a.z, b.z));
+
+        public static double3 max(double3 a, double3 b)
+            => new double3(System.Math.Max(a.x, b.x), System.Math.Max(a.y, b.y), System.Math.Max(a.z, b.z));
+
         // ── scalar double ────────────────────────────────────────────────────────────────
         public static double abs(double x)   => System.Math.Abs(x);
         public static double max(double a, double b) => System.Math.Max(a, b);

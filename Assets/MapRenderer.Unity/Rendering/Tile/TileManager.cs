@@ -285,15 +285,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         // use. null ⇒ WebMercator (planar). Launch-constant, so any Tick's value is correct.
         private IProjection _projection;
 
-        // ── S71: the visible-tile-selection seam (default = ViewportCornerTileSelector; injected by MapView) ─
-        // Held as the interface type so a future mixed-zoom (distance-LOD) impl drops in with no change here.
-        private IVisibleTileSelector _selector;
-
-        /// <summary>The visible-tile selection algorithm. Set by MapView (default
-        /// <see cref="ViewportCornerTileSelector"/>); a different <see cref="IVisibleTileSelector"/> is a
-        /// drop-in replacement. The consumer (this class) builds a <see cref="ViewContext"/> per tick and
-        /// owns the request/release transition — the seam returns just the set.</summary>
-        internal IVisibleTileSelector Selector { get => _selector; set => _selector = value; }
+        /// <summary>The visible-tile selection seam. Set by MapView (default <see cref="FrustumTileSelector"/>);
+        /// a different <see cref="IVisibleTileSelector"/> is a drop-in replacement. This consumer builds a
+        /// <see cref="ViewContext"/> per tick and owns the request/release transition — the seam returns just
+        /// the set.</summary>
+        internal IVisibleTileSelector Selector { get; set; }
 
         // Reused buffers — never reallocated in steady state.
         private readonly List<TileId>                      _cover     = new List<TileId>(64);
@@ -301,16 +297,21 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S83b: keyed by (tile, source-slot) — one record per (tile, source).
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new Dictionary<LoadedKey, LoadedTile>();
         private readonly List<LoadedKey>                   _toRelease = new List<LoadedKey>(32);
+        // S85: reused TileCoverStats scratch — never reallocated (CaptureTelemetry steady-state no-GC).
+        private readonly HashSet<int> _coverStatsX = new HashSet<int>();
+        private readonly HashSet<int> _coverStatsY = new HashSet<int>();
 
         private bool _coverDirty = true;
 
         // ── S50/S71: tile-selection key (scalar fields, no boxing) ─────────────────────────────
-        // S71: keyed on the FULL camera+viewport inputs the selector reads — fractional zoom, heading, and
-        // framing viewport size all change the covered set now (the old key tracked only integer zoom).
+        // S71: keyed on the FULL camera+viewport inputs the selector reads — fractional zoom, heading, TILT,
+        // and framing viewport size all change the covered set now (the old key tracked only integer zoom;
+        // tilt was added when the selector became frustum-based — before, tilt was invisible to selection).
         private double _coverKeyLon;
         private double _coverKeyLat;
         private double _coverKeyZoom;
         private double _coverKeyHeading;
+        private double _coverKeyTilt;
         private double _coverKeyViewportX;
         private double _coverKeyViewportY;
         private bool   _coverKeyInitialised;
@@ -508,6 +509,54 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// the per-frame mesh-count budget observable (bounds AddLayer / entity-add and GPU upload per frame).</summary>
         internal int MeshesConsumedLastTick { get; private set; }
 
+        /// <summary>
+        /// S85: pull-based runtime telemetry — the caller asks, this computes on demand (never published per
+        /// tick). Observability only: referenced ONLY from here and the debug readout panel — never from
+        /// <see cref="Tick"/>'s request/release decision, the selector, or <c>ReleaseTile</c>.
+        ///
+        /// <see cref="TileTelemetrySnapshot.FractionalZoom"/> reads <see cref="_coverKeyZoom"/> — the last
+        /// Tick's <c>cam.Zoom</c> — rather than a dedicated field: it is already cached for the cover-key
+        /// comparison and is current on every clean or dirty frame alike (a clean frame's cached value equals
+        /// the live one by definition of "clean").
+        /// </summary>
+        internal TileTelemetrySnapshot CaptureTelemetry()
+        {
+            var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_cover, _coverStatsX, _coverStatsY);
+
+            // One shared pass over _loaded for Pending + ConsumeBacklog (S85 decision — reuse the loop, not
+            // two). ConsumeBacklog mirrors PumpPendingBuilds' Phase-2 consume-entry condition plus the
+            // explicit !Built this method needs (that loop only ever sees _toRelease's !Built subset; this
+            // one walks every record, built or not).
+            int pending = 0, backlog = 0;
+            foreach (var kv in _loaded)
+            {
+                LoadedTile lt = kv.Value;
+                if (lt.Built) continue;
+                pending++;
+                if (lt.FetchCompleted && lt.HasTessellationTask && lt.TessellationTask.Status.IsCompleted())
+                    backlog++;
+            }
+
+            return new TileTelemetrySnapshot
+            {
+                VisibleTileCount       = _cover.Count,
+                CoverColumns           = columns,
+                CoverRows              = rows,
+                SelectionZoom          = maxZ,
+                IsMixedZoom            = minZ != maxZ,
+                CoverMinZoom           = minZ,
+                CoverMaxZoom           = maxZ,
+                FractionalZoom         = _coverKeyZoom,
+                LoadedTileCount        = _loaded.Count,
+                PendingTileCount       = pending,
+                ConsumeBacklog         = backlog,
+                InFlightFetches        = InFlightCount,
+                ReleasedMidFlightCount = ReleasedMidFlightCount,
+                ReleasedMidFetchCount  = ReleasedMidFetchCount,
+                FetchErrorCount        = _fetchErrorCount,
+            };
+        }
+
         /// <summary>The live BRG renderer, or null when not on the BRG backend / before <see cref="SetSources"/>.</summary>
         internal BRGBackend.TileRenderer BrgRenderer => _instanced as BRGBackend.TileRenderer;
 
@@ -604,7 +653,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
         {
-            if (_selector == null) return;
+            if (Selector == null) return;
 
             _projection = cfg.Projection; // cache for the tessellation bake (Level-1); same projection as origin + frame
 
@@ -613,6 +662,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 cam.LookAt.Latitude     != _coverKeyLat ||
                 cam.Zoom                != _coverKeyZoom ||
                 cam.Heading.Degrees     != _coverKeyHeading ||
+                cam.Tilt.Degrees        != _coverKeyTilt ||
                 cfg.FramingViewportPx.x != _coverKeyViewportX ||
                 cfg.FramingViewportPx.y != _coverKeyViewportY)
             {
@@ -639,7 +689,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 ViewportPx = cfg.FramingViewportPx,
                 Projection = cfg.Projection,
             };
-            _selector.SelectVisibleTiles(in view, _cover);
+            Selector.SelectVisibleTiles(in view, _cover);
 
             _coverSet.Clear();
             for (int i = 0; i < _cover.Count; i++)
@@ -689,6 +739,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _coverKeyLat         = cam.LookAt.Latitude;
             _coverKeyZoom        = cam.Zoom;
             _coverKeyHeading     = cam.Heading.Degrees;
+            _coverKeyTilt        = cam.Tilt.Degrees;
             _coverKeyViewportX   = cfg.FramingViewportPx.x;
             _coverKeyViewportY   = cfg.FramingViewportPx.y;
             _coverKeyInitialised = true;

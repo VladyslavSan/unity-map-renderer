@@ -21,10 +21,12 @@ namespace MapRenderer.Tests
         private static ViewContext View(in CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = new double2(RefH, RefH), Projection = new SphericalProjection() };
 
-        // onScreenTilePx 512 == TilePixelSize (S93) ⇒ selection-zoom offset 0 ⇒ emitted z == IntegerZoom
-        // (the PRODUCTION default now, and predictable in tests). Was 256 under the old 256 convention.
-        private static GlobeTileSelector Sel(int pad = 1)
-            => new GlobeTileSelector(padTiles: pad, minZoom: 0, maxZoom: 22, onScreenTilePx: 512);
+        // The universal FrustumTileSelector on the globe path (SphericalProjection ⇒ horizon occlusion). Flat
+        // LOD + ×4 far reproduce the previous single-zoom globe behaviour these tests lock. onScreenTilePx 512 ⇒
+        // offset 0 ⇒ emitted z == IntegerZoom.
+        private static FrustumTileSelector Sel(int pad = 1)
+            => new FrustumTileSelector(minZoom: 0, maxZoom: 22, onScreenTilePx: 512,
+                                       lod: new FlatLodStrategy(), farPolicy: new MultiplierFarPlane(4.0));
 
         [Test]
         public void Z0_EmitsExactlyTheSingleWorldTile()
@@ -64,19 +66,23 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void NearPole_CoversAllColumns()
+        public void NearPole_CoversAWideLongitudeWedge()
         {
             var buf = new List<TileId>();
-            // S93 relabel: the 512 convention numbers every zoom −1, so the old z6 view is now z5 (the cap size
-            // is a physical quantity — GroundResolution_512(5) == GroundResolution_256(6) — so z5 now reaches
-            // the pole exactly as z6 did before). n derives from the emitted Z, so the assert self-adjusts.
-            Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf); // cap reaches the (unmapped) pole
+            // Looking near a pole, converging meridians make the frustum footprint span MANY longitude columns
+            // (a wide wedge) and reach the pole-adjacent tile row. Unlike the old cap, the frustum does NOT cover
+            // ALL columns (that was over-cover of the far side) — only the wedge actually in view.
+            Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf);
 
             Assert.IsNotEmpty(buf);
             int n = 1 << buf[0].Z;
             var columns = new HashSet<int>();
-            foreach (var t in buf) columns.Add(t.X);
-            Assert.AreEqual(n, columns.Count, "near a pole the cap spans every longitude column");
+            bool reachesPoleRow = false;
+            foreach (var t in buf) { columns.Add(t.X); if (t.Y == 0) reachesPoleRow = true; }
+
+            Assert.Greater(columns.Count, n / 4, "near the pole the wedge spans many columns (convergence)");
+            Assert.Less(columns.Count, n, "but not ALL columns — the frustum covers only what's in view, not the cap's over-cover");
+            Assert.IsTrue(reachesPoleRow, "the cover reaches the pole-adjacent tile row (Y=0)");
         }
 
         [Test]
@@ -97,11 +103,58 @@ namespace MapRenderer.Tests
         }
 
         [Test]
+        public void Tilted_CoverExtendsTowardTheView_NotSymmetricCap()
+        {
+            // THE globe fix: at 60° tilt looking north, the cover must reach FARTHER north (toward the horizon,
+            // lower tile Y) than south (behind the camera). The old cap was tilt-blind → symmetric, so this
+            // fails for it. Heading 0 tilt 60 at the equator; north = lower Y.
+            var cam = new CameraProperties(
+                new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 6, heading: 0, tilt: 60);
+            var buf = new List<TileId>();
+            Sel(pad: 0).SelectVisibleTiles(
+                new ViewContext { Camera = cam, ViewportPx = new double2(RefH, RefH), Projection = new SphericalProjection() },
+                buf);
+
+            Assert.IsNotEmpty(buf);
+            int n = 1 << buf[0].Z;
+            int yLookAt = n / 2; // lat 0 → the middle tile row
+            int minY = int.MaxValue, maxY = int.MinValue;
+            foreach (var t in buf) { if (t.Y < minY) minY = t.Y; if (t.Y > maxY) maxY = t.Y; }
+
+            int northReach = yLookAt - minY; // rows toward the view direction
+            int southReach = maxY - yLookAt; // rows behind
+            Assert.Greater(northReach, southReach,
+                $"tilted view must reach farther toward the view (north={northReach}) than behind (south={southReach}) " +
+                "— a symmetric cap would not");
+        }
+
+        [Test]
         public void LowZoom_CoversTheNearHemisphere()
         {
             var buf = new List<TileId>();
             Sel(pad: 0).SelectVisibleTiles(View(Cam(0, 0, 1.0)), buf); // z=1, n=2 → 4 tiles, all visible
             Assert.AreEqual(4, buf.Count, "at z=1 the whole world (4 tiles) is within the saturated cap");
+        }
+
+        [Test]
+        public void RaySphereFarPlane_TightAtHighZoom_OpensTowardLimbAtLowZoom()
+        {
+            var far = new RaySphereFarPlane(SphericalProjection.Radius);
+            const double fov = 60.0, aspect = 16.0 / 9.0;
+            Angle overhead = Angle.FromDegrees(0.0);
+
+            // High zoom: the viewport corners hit local (near-flat) ground → far ≈ altitude, NOT the old ×4.
+            double altHi   = CameraPoseMath.AltitudeForZoom(13, 900.0, fov);
+            double ratioHi = far.FarMetres(altHi, overhead, fov, aspect) / altHi;
+            Assert.Greater(ratioHi, 1.0, "far must still reach the ground");
+            Assert.Less(ratioHi, 1.3, $"far is tight overhead at high zoom (got x{ratioHi:F2}, not x4)");
+
+            // Low zoom: the wide view sees PAST the horizon, so far opens toward the limb — a bigger multiple of
+            // altitude than at high zoom (proving it doesn't clip the curved globe).
+            double altLo   = CameraPoseMath.AltitudeForZoom(3, 900.0, fov);
+            double ratioLo = far.FarMetres(altLo, overhead, fov, aspect) / altLo;
+            Assert.Greater(ratioLo, ratioHi,
+                $"far opens toward the limb at low zoom (lo x{ratioLo:F2} > hi x{ratioHi:F2})");
         }
     }
 }

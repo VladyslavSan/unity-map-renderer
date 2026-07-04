@@ -71,7 +71,7 @@ namespace MapRenderer.Tests
             try
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.WithTestCamera();
                 view.Config.MaxBuildsPerTick = 64;
                 view.Config.MaxTessellationsPerTick = 64;
 

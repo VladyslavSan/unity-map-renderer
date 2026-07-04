@@ -189,7 +189,7 @@ namespace MapRenderer.Tests.Visual
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             // Backend defaults to Entities (S53c) — do NOT set it to Brg.
@@ -236,7 +236,7 @@ namespace MapRenderer.Tests.Visual
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg; // S49 BRG path
@@ -356,7 +356,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgOrderA");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     view.Config.Backend = RenderBackend.Brg;
@@ -406,7 +406,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgOrderB");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     view.Config.Backend = RenderBackend.Brg;
@@ -589,7 +589,7 @@ namespace MapRenderer.Tests.Visual
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg;
@@ -694,7 +694,7 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_Tooth5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg;
@@ -756,7 +756,7 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_NoAlloc");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg;
@@ -834,7 +834,7 @@ namespace MapRenderer.Tests.Visual
             var mapGo = new GameObject("MapView_BrgPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg;
@@ -1073,7 +1073,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgZoomLow");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 0; view.Config.MaxZoom = 2;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     view.Config.Backend = RenderBackend.Brg;
@@ -1125,7 +1125,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgZoomHigh");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     view.Config.Backend = RenderBackend.Brg;
@@ -1317,7 +1317,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgParityEntities");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     // Default backend = Entities.
@@ -1360,7 +1360,7 @@ namespace MapRenderer.Tests.Visual
                     var mapGo = new GameObject("BrgParityBrg");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
-                    view.Config.PadTiles = 0; view.WithTestCamera();
+                    view.WithTestCamera();
                     view.Config.MaxBuildsPerTick = 64;
                     view.Config.MaxTessellationsPerTick = 64;
                     view.Config.Backend = RenderBackend.Brg;

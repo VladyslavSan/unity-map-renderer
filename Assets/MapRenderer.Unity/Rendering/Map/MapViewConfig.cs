@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using MapRenderer.Core.View;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -14,10 +15,6 @@ namespace MapRenderer.Unity.Rendering.Map
     [Serializable]
     public sealed class MapViewConfig
     {
-        [Tooltip("S71: fixed safety ring (in tiles) added around the viewport-derived cover. Coverage itself " +
-                 "comes from unprojecting the viewport corners — this is slop margin, NOT the coverage knob.")]
-        public int PadTiles = 1;
-
         [Tooltip("Zoom clamp for tile selection.")]
         public int MinZoom = 0;
         public int MaxZoom = 14;
@@ -28,6 +25,11 @@ namespace MapRenderer.Unity.Rendering.Map
                  "default 512 ⇒ offset 0 ⇒ camera zoom == tile zoom, ~4× fewer/larger tiles than the old 256 " +
                  "convention. Set 256 for the dense legacy S71 density (offset +1, one level finer).")]
         public int OnScreenTilePx = 512;
+
+        [Tooltip("Tile detail policy for the frustum selector. Flat = uniform single-zoom cover (previous " +
+                 "behaviour). ScreenSpaceLod = near full-detail, far progressively coarser (constant-ish tile " +
+                 "count under tilt; no tiny far-field tiles).")]
+        public TileLodMode LodMode = TileLodMode.ScreenSpaceLod;
 
         [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +

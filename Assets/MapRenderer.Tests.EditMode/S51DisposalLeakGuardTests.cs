@@ -122,7 +122,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -194,7 +194,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             // MaxBuildsPerTick = 0 BEFORE initialise: prevents Phase-2 (consume) from running.
             // Tessellation tasks are KICKED (Phase-1) but never consumed, guaranteeing the tiles
             // are in HasTessellationTask=true, Built=false state when we evict them.
@@ -353,7 +353,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
             // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
             view.Config.MaxBuildsPerTick = 0;
@@ -461,7 +461,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -520,7 +520,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 

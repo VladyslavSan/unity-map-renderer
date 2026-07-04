@@ -150,7 +150,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_S87");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
             view.Config.MaxTessellationsPerTick = 64;           // kick all tiles
             view.Config.MaxVerticesPerTick      = int.MaxValue;
@@ -177,7 +177,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_S55_A");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick          = 64;
             view.Config.MaxTessellationsPerTick   = 1;  // one kick per Tick
             view.Config.MaxVerticesPerTick        = int.MaxValue;
@@ -288,7 +288,7 @@ namespace MapRenderer.Tests
                 var go   = new GameObject("MapView_S55_D_Throttled");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.WithTestCamera();
                 view.Config.MaxBuildsPerTick        = 64;
                 view.Config.MaxTessellationsPerTick = 1;
                 view.Config.MaxVerticesPerTick      = 1;
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests
                 var go   = new GameObject("MapView_S55_D_Uncapped");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-                view.Config.PadTiles = 0; view.WithTestCamera();
+                view.WithTestCamera();
                 view.Config.MaxBuildsPerTick        = 64;
                 view.Config.MaxTessellationsPerTick = 64;
                 view.Config.MaxVerticesPerTick      = int.MaxValue;
@@ -345,7 +345,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_S55_F");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick        = 64;
             view.Config.MaxTessellationsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
@@ -544,7 +544,7 @@ namespace MapRenderer.Tests
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             // S55 DEFAULT throttle values — the whole point is not to override them here.
             view.Config.MinZoom = Zoom; view.Config.MaxZoom = Zoom;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick        = 64;
             view.Config.MaxTessellationsPerTick = 2;      // S55 default
             view.Config.MaxVerticesPerTick      = 50000;  // S55 default
@@ -619,7 +619,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick        = 64;
             view.Config.MaxTessellationsPerTick = 64; // uncapped for fast settle
             view.Config.MaxVerticesPerTick      = int.MaxValue;

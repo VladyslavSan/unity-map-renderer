@@ -268,7 +268,7 @@ namespace MapRenderer.Tests
 
             // The bounded solve over the same drag stays within a modest total.
             var cSolve = c;
-            double solveTravel = 0; double prevLat = 0; prevLon = cSolve.LookAt.Longitude;
+            double solveTravel = 0; prevLon = cSolve.LookAt.Longitude;
             var prevLA = cSolve.LookAt;
             for (int i = 0; i < 30; i++)
             {

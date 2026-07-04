@@ -74,9 +74,14 @@
     <!-- S73: device-agnostic gesture intent vocabulary -->
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewContext.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/IVisibleTileSelector.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/View/ViewportCornerTileSelector.cs" />
-    <Compile Include="../../Assets/MapRenderer.Core/View/GlobeTileSelector.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/FrustumTileSelector.cs" />
+    <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/View/TileTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/TileCoverStats.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/TileLodStrategy.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/Camera/FarPlanePolicy.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/DeviceScaling.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/View/ViewFrustum.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/FloatingOrigin.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/ViewInput.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/View/GestureIntent.cs" />
@@ -167,6 +172,9 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewMathTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ViewInputTests.cs" />
+
+    <!-- S85: TileCoverStats + FrustumTileSelector aspect/Flat teeth (engine-free; shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/TileCoverStatsTests.cs" />
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/CameraInteractionTests.cs" />

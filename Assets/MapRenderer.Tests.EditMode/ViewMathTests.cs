@@ -57,7 +57,7 @@ namespace MapRenderer.Tests
             Assert.AreEqual(atLimit.y, m.y, 1e-6, "Extreme latitude clamps to the Mercator limit.");
         }
 
-        // ── S71: IVisibleTileSelector / ViewportCornerTileSelector ──────────────────────────────
+        // ── S71: IVisibleTileSelector / FrustumTileSelector ──────────────────────────────
         //
         // All behavioural teeth exercise the default impl THROUGH the seam: build a ViewContext
         // { Camera, ViewportPx, Projection } and call SelectVisibleTiles(in view, buf). The white-border
@@ -143,7 +143,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TFrame_CoversFramingGroundQuad()
         {
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(padTiles: 1, minZoom: 0, maxZoom: 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(minZoom: 0, maxZoom: 22);
             var buf = new List<TileId>();
 
             foreach (var fc in FrameCases())
@@ -168,6 +168,10 @@ namespace MapRenderer.Tests
                     double a = -halfH + (2.0 * halfH) * i / G;
                     double b = -halfV + (2.0 * halfV) * j / G;
                     double2 ground = FramingGround(in cam, a, b);
+                    // Finite atlas: a framing point past the world edge (very low zoom / ultra-wide viewport
+                    // sees beyond the sheet) is off-paper — there is no tile to cover it, and none should exist.
+                    if (math.abs(ground.x) > WebMercator.WorldExtent || math.abs(ground.y) > WebMercator.WorldExtent)
+                        continue;
                     TileId  need   = MercToTile(ground, z);
                     Assert.IsTrue(S.Contains(need),
                         $"[{fc.Name}] framing point (a={a:F0},b={b:F0}) → {need.Z}/{need.X}/{need.Y} not covered " +
@@ -184,7 +188,7 @@ namespace MapRenderer.Tests
             // Sample a dense SCREEN grid, unproject with the SAME projection/viewportPx the selector got,
             // and assert each maps into the set. Proves the bbox contains the quad interior (off-by-one
             // guard). This CANNOT catch a wrong viewportPx — that is T-FRAME's job.
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
             foreach (var fc in FrameCases())
@@ -206,6 +210,8 @@ namespace MapRenderer.Tests
                     {
                         Longitude = g.Longitude, Latitude = Proj.ClampValidLatitude(g.Latitude)
                     });
+                    if (math.abs(merc.x) > WebMercator.WorldExtent || math.abs(merc.y) > WebMercator.WorldExtent)
+                        continue; // finite atlas — off-paper points aren't covered
                     TileId need = MercToTile(merc, z);
                     Assert.IsTrue(S.Contains(need),
                         $"[{fc.Name}] screen px ({px.x:F0},{px.y:F0}) → {need.Z}/{need.X}/{need.Y} not in set.");
@@ -219,7 +225,7 @@ namespace MapRenderer.Tests
         public void Selector_TCeil_CountBoundedByFramingSpan()
         {
             const int pad = 1;
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(pad, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
             foreach (var fc in FrameCases())
@@ -242,7 +248,11 @@ namespace MapRenderer.Tests
                 }
                 double spanX = math.min(xMax - xMin, n);
                 double spanY = math.min(yMax - yMin, n);
-                long bound = (long)((math.ceil(spanX) + 2 * pad + 1) * (math.ceil(spanY) + 2 * pad + 1));
+                // Slack term +3 (was +1): the frustum cover follows the true footprint and its Chebyshev
+                // prefetch ring protrudes diagonally on a rotated viewport, so the padded count exceeds the
+                // rectangular-bbox model by a few tiles. Still an order-of-magnitude runaway guard (a NaN/wrap
+                // glitch emits far more), not a tight count spec.
+                long bound = (long)((math.ceil(spanX) + 2 * pad + 3) * (math.ceil(spanY) + 2 * pad + 3));
 
                 sel.SelectVisibleTiles(View(cam, fc.Aspect), buf);
                 Assert.LessOrEqual(buf.Count, bound,
@@ -256,7 +266,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TMonotone_XCountGrowsWithAspect()
         {
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
             int DistinctX(double aspect)
@@ -281,7 +291,7 @@ namespace MapRenderer.Tests
             // LESS ground (smaller mpp), so FEWER integer-z tiles fit — count DECREASES toward the next
             // level (the spec's prose said "grow"; the physics is the opposite — what matters is the
             // dependence, i.e. NOT invariant).
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
 
             int CountAt(double zoom)
@@ -307,7 +317,7 @@ namespace MapRenderer.Tests
             // At a 1:1 framing viewport, center (0,0), z2: the set must be a contiguous (hole-free) block
             // that contains the camera's own tile. The exact size is now a function of refH/pad (real span),
             // so we assert structure, not a hard-coded 3×3 (the old, under-covering oracle).
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(0, 0, 2.0), 1.0), buf);
 
@@ -345,8 +355,8 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TDensity_512IsOneLevelCoarserThan256()
         {
-            var sel512 = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22, onScreenTilePx: 512);
-            var sel256 = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22, onScreenTilePx: 256);
+            var sel512 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 512);
+            var sel256 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
             var b512 = new List<TileId>();
             var b256 = new List<TileId>();
 
@@ -375,8 +385,8 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TDefault_IsThe512Convention()
         {
-            var selDefault = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);      // default 512
-            var sel256     = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22, 256);
+            var selDefault = (IVisibleTileSelector)new FrustumTileSelector(0, 22);      // default 512
+            var sel256     = (IVisibleTileSelector)new FrustumTileSelector(0, 22, 256);
             var cam = Cam(0, 0, 10.0);
             var bDef = new List<TileId>();
             var b256 = new List<TileId>();
@@ -389,13 +399,159 @@ namespace MapRenderer.Tests
                 $"The 512 default must select fewer tiles than 256 (got {bDef.Count} vs {b256.Count}).");
         }
 
+        // ── T-LOD — the ScreenSpaceLod strategy: mixed-zoom, fewer tiles than flat, still gap-free ──
+
+        [Test]
+        public void Selector_LodScreenSpace_MixedZoom_FewerThanFlat_StillCovers()
+        {
+            var cam = new CameraProperties(new GeoCoordinate3D { Longitude = 13.4, Latitude = 52.5, Altitude = 0 },
+                                           13, heading: 0, tilt: 60);
+            var vc  = new ViewContext { Camera = cam, ViewportPx = new double2(1600, 900), Projection = Proj };
+
+            var flat = new List<TileId>();
+            new FrustumTileSelector(0, 22, 512, new FlatLodStrategy(), new GeometryAwareFarPlane())
+                .SelectVisibleTiles(vc, flat);
+            var lod = new List<TileId>();
+            new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), new GeometryAwareFarPlane())
+                .SelectVisibleTiles(vc, lod);
+
+            Assert.IsNotEmpty(lod);
+            int minZ = lod.Min(t => t.Z), maxZ = lod.Max(t => t.Z);
+            Assert.Less(minZ, maxZ, "LOD cover must be mixed-zoom — far tiles coarser than near.");
+            Assert.AreEqual(cam.IntegerZoom, maxZ, "near-field detail is at the target (camera) zoom.");
+            Assert.Less(lod.Count, flat.Count,
+                $"LOD must select fewer tiles than flat under tilt (lod={lod.Count}, flat={flat.Count}).");
+
+            // Gap-free: every point flat covers is still covered by SOME (possibly coarser) LOD tile.
+            bool CoveredByAny(List<TileId> tiles, double2 merc)
+            {
+                foreach (var t in tiles)
+                {
+                    long nn = 1L << t.Z;
+                    double2 f = MercToTileFrac(merc, t.Z);
+                    int fx = (int)math.floor(f.x), fy = (int)math.floor(f.y);
+                    if (fy < 0 || fy >= nn) continue;
+                    if (fx == t.X && fy == t.Y) return true;
+                }
+                return false;
+            }
+            foreach (var ft in flat)
+            {
+                double2 centreMerc = MercCentreOfTile(ft);
+                Assert.IsTrue(CoveredByAny(lod, centreMerc),
+                    $"LOD left a gap: flat tile {ft.Z}/{ft.X}/{ft.Y} centre uncovered by any LOD tile.");
+            }
+        }
+
+        /// <summary>Web-Mercator coordinate of a tile's centre.</summary>
+        private static double2 MercCentreOfTile(TileId t)
+        {
+            double2 ll = t.ToLonLat(0.5, 0.5, 1.0);
+            return WebMercator.FromLonLat(new GeoCoordinate3D { Longitude = ll.x, Latitude = ll.y });
+        }
+
+        // ── T-LOD-SPURIOUS — screen-space LOD must not emit far-coarse tiles off to the side ─────────
+        // Regression for the reported bug: keyed on the tile CENTRE distance, a huge coarse tile that merely
+        // grazes the frustum edge (far centre, NEAR edge) was emitted coarse instead of subdivided-and-culled
+        // — a z13 camera loaded a z4 globe tile / z8–z9 Mercator tile off to the side, outside the view.
+        // Keyed on the NEAREST point (the fix) it subdivides and the off-view part is culled. These poses have
+        // TEETH: pre-fix each emitted a tile ≥4 levels too coarse (below the target-3 bound); the bound still
+        // admits legit far-field coarsening (z10-z11 toward the horizon at deep tilt). Globe kept to shallow
+        // tilt — its conservative bounding-sphere descent makes LOD near-inert at steep tilt (separate issue).
+        [TestCase("mercator", 60.0, 30.0)]
+        [TestCase("mercator", 75.0, 30.0)]
+        [TestCase("globe",     0.0, 135.0)]
+        [TestCase("globe",    30.0,  30.0)]
+        public void Selector_LodScreenSpace_NoSpuriousCoarseTilesOffToTheSide(string projKind, double tiltDeg, double headingDeg)
+        {
+            IProjection proj = projKind == "globe" ? (IProjection)new SphericalProjection() : new WebMercatorProjection();
+            var cam = new CameraProperties(new GeoCoordinate3D { Longitude = 13.4, Latitude = 52.5, Altitude = 0 },
+                                           13, heading: headingDeg, tilt: tiltDeg);
+            var vc  = new ViewContext { Camera = cam, ViewportPx = new double2(1600, 900), Projection = proj };
+            IFarPlanePolicy far = proj.TryGetHorizonOccluder(out _, out double occR)
+                ? (IFarPlanePolicy)new RaySphereFarPlane(occR) : new GeometryAwareFarPlane();
+
+            var lod = new List<TileId>();
+            new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), far).SelectVisibleTiles(vc, lod);
+
+            Assert.IsNotEmpty(lod);
+            int minZ = lod.Min(t => t.Z);
+            Assert.GreaterOrEqual(minZ, cam.IntegerZoom - 3,
+                $"{projKind} tilt={tiltDeg}° heading={headingDeg}°: screen-space LOD emitted a spurious coarse " +
+                $"z{minZ} tile under a z{cam.IntegerZoom} camera (a far tile grazing the frustum, emitted coarse " +
+                $"instead of subdivided-and-culled).");
+        }
+
+        // ── T-LOD-FRUSTUM — no selected tile's quad lies wholly OUTSIDE the frustum ──────────────────
+        // The reported bug's core: the conservative 6-plane AABB test kept tiles diagonally past a frustum
+        // corner (a big AABB isn't fully behind any single plane), so the cover held tiles the camera can't
+        // see. The frustum's reverse AABB pre-cull rejects them. Invariant, checked with the EXACT reported
+        // pose (z13 tilt60 Berlin): every selected tile's ground quad, clipped against the 6 planes, survives.
+        // Pre-fix this failed on 11/1102/670, 11/1098/670, 12/2203/1341 (user-confirmed invisible in-editor).
+        [Test]
+        public void Selector_TiltedMercator_NoSelectedTileQuadOutsideFrustum()
+        {
+            var cam = new CameraProperties(new GeoCoordinate3D { Longitude = 13.405, Latitude = 52.52, Altitude = 0 },
+                                           13, heading: 0, tilt: 60, verticalFovDeg: 60);
+            double2 vp = new double2(1236.078, 709.647);
+            var vc = new ViewContext { Camera = cam, ViewportPx = vp, Projection = Proj };
+            var cover = new List<TileId>();
+            new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), new GeometryAwareFarPlane())
+                .SelectVisibleTiles(vc, cover);
+            Assert.IsNotEmpty(cover);
+
+            // Rebuild the frustum planes (same math as ViewFrustum.FromPose) and the render frame the selector used.
+            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
+            CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value, out double3 pos, out double3 fwd, out double3 up);
+            double near = math.max(0.1, CameraPoseMath.NearClip(altitude)), aspect = vp.x / vp.y;
+            double far = new GeometryAwareFarPlane().FarMetres(altitude, cam.Tilt.Value, cam.VerticalFovDeg, aspect);
+            double3 f = math.normalize(fwd), r = math.normalize(math.cross(f, up)), u = math.cross(r, f);
+            double hV = Angle.FromDegrees(cam.VerticalFovDeg * 0.5).Radians, sinV = math.sin(hV), cosV = math.cos(hV);
+            double hH = math.atan(math.tan(hV) * aspect), sinH = math.sin(hH), cosH = math.cos(hH);
+            var pn = new[] { f, new double3(-f.x, -f.y, -f.z), f*sinV - u*cosV, f*sinV + u*cosV, f*sinH - r*cosH, f*sinH + r*cosH };
+            var pd = new[] { -math.dot(f, pos + near*f), -math.dot(new double3(-f.x,-f.y,-f.z), pos + far*f),
+                             -math.dot(pn[2], pos), -math.dot(pn[3], pos), -math.dot(pn[4], pos), -math.dot(pn[5], pos) };
+            var la = new GeoCoordinate { Latitude = Proj.ClampValidLatitude(cam.LookAt.Latitude), Longitude = cam.LookAt.Longitude };
+            double3 origin = Proj.Project(la); float3x3 basis = Proj.TangentBasisAt(la);
+            double3 RP(TileId t, double px, double py)
+            {
+                double2 ll = t.ToLonLat(px, py, 1.0);
+                double3 w = Proj.Project(new GeoCoordinate { Latitude = ll.y, Longitude = ll.x });
+                double rx = w.x-origin.x, ry = w.y-origin.y, rz = w.z-origin.z;
+                return new double3(basis.c0.x*rx+basis.c0.y*ry+basis.c0.z*rz, basis.c1.x*rx+basis.c1.y*ry+basis.c1.z*rz, basis.c2.x*rx+basis.c2.y*ry+basis.c2.z*rz);
+            }
+            bool QuadMeetsFrustum(TileId t)
+            {
+                var poly = new List<double3> { RP(t,0,0), RP(t,1,0), RP(t,1,1), RP(t,0,1) };
+                for (int p = 0; p < 6; p++)
+                {
+                    var clipped = new List<double3>();
+                    for (int i = 0; i < poly.Count; i++)
+                    {
+                        double3 a = poly[i], b = poly[(i + 1) % poly.Count];
+                        double da = math.dot(pn[p], a) + pd[p], db = math.dot(pn[p], b) + pd[p];
+                        if (da >= 0) clipped.Add(a);
+                        if ((da >= 0) != (db >= 0)) clipped.Add(a + (b - a) * (da / (da - db)));
+                    }
+                    poly = clipped;
+                    if (poly.Count == 0) return false;
+                }
+                return true;
+            }
+
+            var outside = cover.Where(t => !QuadMeetsFrustum(t)).ToList();
+            Assert.IsEmpty(outside,
+                $"{outside.Count} selected tile(s) are wholly outside the frustum (the camera can't see them): " +
+                string.Join(" ", outside.Select(t => $"{t.Z}/{t.X}/{t.Y}")));
+        }
+
         // ── T-ROBUST — nasty camera points never crash and never boom the tile count ────────────
 
         [Test]
         public void Selector_TRobust_BadCameraPoints_NoCrash_NoCountBoom()
         {
             const int pad = 1;
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(pad, 0, 22); // default 512
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22); // default 512
             var buf = new List<TileId>();
 
             // Antimeridian, out-of-range longitudes, poles, beyond-Mercator latitudes, and extreme /
@@ -432,6 +588,9 @@ namespace MapRenderer.Tests
 
                 Assert.DoesNotThrow(() => sel.SelectVisibleTiles(View(cam, aspect), buf),
                     $"selection threw at {where}");
+                // Finite atlas: a look-at longitude off the sheet (|lon| > 180) may legitimately select nothing
+                // — the robustness contract there is only "no crash / no boom", not coverage.
+                if (math.abs(lon) > 180.0) continue;
                 Assert.Greater(buf.Count, 0, $"empty cover (white screen) at {where}");
 
                 int  z = buf[0].Z;
@@ -465,7 +624,7 @@ namespace MapRenderer.Tests
             Assert.AreEqual(typeof(List<TileId>), ps[1].ParameterType, "Second param must be List<TileId>.");
 
             // ViewContext carries EXACTLY { Camera, ViewportPx, Projection } — legitimate view state, and no
-            // algorithm knob (no padTiles / minZoom / maxZoom / selectionZoom of any kind).
+            // algorithm knob (no minZoom / maxZoom / selectionZoom of any kind).
             var members = typeof(ViewContext)
                 .GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name)
                 .Concat(typeof(ViewContext).GetFields(BindingFlags.Public | BindingFlags.Instance).Select(f => f.Name))
@@ -501,32 +660,14 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── T-WRAP / T-POLE / T-ALLOC (preserved guarantees, now through the seam) ──────────────
-
-        [Test]
-        public void Selector_TWrap_LongitudeAtAntimeridian()
-        {
-            // Center near +180°, wide viewport: the x-span straddles the seam → wrap includes column 0 and
-            // its western neighbour (n-1). n derives from the emitted selection zoom (OnScreenTilePx-aware),
-            // so the antimeridian guarantee holds at whatever resolution the selector chose.
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
-            var buf = new List<TileId>();
-            sel.SelectVisibleTiles(View(Cam(179.5, 0, 2.0), 16.0 / 9.0), buf);
-
-            int  z = buf.Count > 0 ? buf[0].Z : 2;
-            long n = 1L << z; // tiles per axis at the emitted zoom
-            var xs = new HashSet<int>(buf.Select(t => t.X));
-            Assert.IsTrue(xs.Contains(0), "Antimeridian wrap must include column x=0.");
-            Assert.IsTrue(xs.Contains((int)(n - 1)), $"…and the western neighbour x={n - 1} (n={n}).");
-            foreach (var t in buf) Assert.IsTrue(t.X >= 0 && t.X < n, $"Wrapped x must stay in [0,{n}): {t.X}");
-            Assert.AreEqual(buf.Count, buf.Distinct().Count(), "No duplicate (z,x,y) even at full world width.");
-        }
+        // ── T-POLE / T-ALLOC (preserved guarantees, now through the seam) ────────────────────────
+        // (T-WRAP deleted: Web-Mercator is a finite atlas sheet in this renderer — it does not wrap.)
 
         [Test]
         public void Selector_TPole_ClampsLatitudeRange()
         {
             // Near the north pole at z3 (n=8): every emitted y ∈ [0,7], never negative / never ≥ n.
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(0, 85.0, 3.0), 1.0), buf);
             foreach (var t in buf)
@@ -537,7 +678,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_ClampsSelectionZoom()
         {
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 14);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 14);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(View(Cam(0, 0, 20.0), 1.0), buf);
             foreach (var t in buf) Assert.AreEqual(14, t.Z, "Selection zoom must clamp to maxZoom.");
@@ -547,7 +688,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Selector_TAlloc_ReusesBuffer_NoGrowthOnRepeat()
         {
-            var sel = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);
+            var sel = (IVisibleTileSelector)new FrustumTileSelector(0, 22);
             var view = View(Cam(0, 0, 5.0), 16.0 / 9.0);
             var buf = new List<TileId>();
             sel.SelectVisibleTiles(view, buf);
@@ -632,7 +773,7 @@ namespace MapRenderer.Tests
             // (RefH·LiveAspect, RefH), pad = 1 tile). The framing-correct cover is larger than the old magic
             // rectangle, so this gate now measures a wider cover edge (still sub-mm — see below).
             const double LiveAspect    = 1.5;
-            var liveSelector = (IVisibleTileSelector)new ViewportCornerTileSelector(padTiles: 1, minZoom: 0, maxZoom: LiveZoom);
+            var liveSelector = (IVisibleTileSelector)new FrustumTileSelector(minZoom: 0, maxZoom: LiveZoom);
 
             double worstErr = 0.0;
             double worstCoordMag = 0.0;
@@ -800,15 +941,16 @@ namespace MapRenderer.Tests
             // PRODUCTION-default selector emits tiles at Z == camera integer zoom (MapLibre-aligned). Falsifiable:
             // the old 256 convention (offset −1) emitted Z == cameraZoom − 1.
             var buf = new List<TileId>();
-            var merc = (IVisibleTileSelector)new ViewportCornerTileSelector(0, 0, 22); // default onScreenTilePx = 512
+            var merc = (IVisibleTileSelector)new FrustumTileSelector(0, 22); // default onScreenTilePx = 512
             foreach (int z in new[] { 3, 5, 8, 11 })
             {
                 merc.SelectVisibleTiles(View(Cam(0, 0, z, 0), 1.0), buf);
                 Assert.IsNotEmpty(buf, $"Mercator cover non-empty at camera zoom {z}");
                 foreach (var t in buf) Assert.AreEqual(z, t.Z, $"camera zoom {z} must select tile z{z} (offset 0)");
             }
-            // The globe selector shares the same offset derivation — assert it too.
-            var globe = (IVisibleTileSelector)new GlobeTileSelector(0, 0, 22); // default onScreenTilePx = 512
+            // The universal selector on the globe path shares the same offset derivation — assert it too.
+            var globe = (IVisibleTileSelector)new FrustumTileSelector(0, 22, 512,
+                new FlatLodStrategy(), new MultiplierFarPlane(4.0));
             foreach (int z in new[] { 3, 5 })
             {
                 globe.SelectVisibleTiles(
@@ -845,8 +987,8 @@ namespace MapRenderer.Tests
             // one level COARSER than an explicit onScreenTilePx=256 selector over the same viewport — same span,
             // ~4× fewer tiles — AND is now MapLibre-aligned (Z == cameraZoom, vs 256's cameraZoom+1). A
             // count-only check could pass while Z silently misaligns, so assert Z on both.
-            var def  = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22);                    // default 512
-            var e256 = (IVisibleTileSelector)new ViewportCornerTileSelector(1, 0, 22, onScreenTilePx: 256);
+            var def  = (IVisibleTileSelector)new FrustumTileSelector(0, 22);                    // default 512
+            var e256 = (IVisibleTileSelector)new FrustumTileSelector(0, 22, onScreenTilePx: 256);
             var bDef = new List<TileId>();
             var b256 = new List<TileId>();
             foreach (int z in new[] { 4, 6, 9 })

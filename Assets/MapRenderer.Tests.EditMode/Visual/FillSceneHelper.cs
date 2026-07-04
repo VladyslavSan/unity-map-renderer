@@ -12,7 +12,6 @@ using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Materials;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
-using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Meshing;
 namespace MapRenderer.Tests.Visual
 {

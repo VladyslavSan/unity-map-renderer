@@ -93,7 +93,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -144,7 +144,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -207,7 +207,7 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc path under test
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 
@@ -284,7 +284,7 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Entities; // the default backend under measurement
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
-            view.Config.PadTiles = 0; view.WithTestCamera();
+            view.WithTestCamera();
             view.Config.MaxBuildsPerTick = 64;
             view.Config.MaxTessellationsPerTick = 64;
 

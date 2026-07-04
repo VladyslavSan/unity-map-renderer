@@ -46,6 +46,14 @@ namespace MapRenderer.Core.Geo
         /// <summary>Render-space metres per world unit (scale bookkeeping). 1.0 when render units are metres.</summary>
         double MetersPerUnit { get; }
 
+        // ── Render-space geometry the universal tile selector needs (planar vs globe) ───────────────
+
+        /// <summary>If the projected surface self-occludes (a closed convex body — the globe), outputs the
+        /// occluder sphere in the LOOK-AT render frame (look-at at the origin) and returns true; the tile-cover
+        /// then drops tiles whose bounding sphere is entirely beyond that sphere's horizon (back-face culling in
+        /// the selector). A planar projection does not self-occlude and returns false.</summary>
+        bool TryGetHorizonOccluder(out double3 renderCentre, out double radius);
+
         /// <summary>True when this projection's render mapping flips triangle winding vs the planar convention
         /// (the ECEF→render axis-swap `(X,Z,Y)` is a reflection). The tessellation pipeline reverses triangle
         /// order for these so front-faces point outward (back-face culling shows the near hemisphere). Planar

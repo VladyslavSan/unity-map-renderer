@@ -55,6 +55,13 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public bool ReversesWinding => false; // planar mapping preserves the tessellation winding
 
+        /// <inheritdoc/>
+        public bool TryGetHorizonOccluder(out double3 renderCentre, out double radius)
+        {
+            // A finite atlas sheet: it neither self-occludes nor repeats — one flat rectangle, no wrap.
+            renderCentre = default; radius = 0.0; return false;
+        }
+
         // ── Camera interaction (managed side) ───────────────────────────────────────────────────────
 
         /// <inheritdoc/>

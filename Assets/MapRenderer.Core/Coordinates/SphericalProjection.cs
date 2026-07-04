@@ -72,6 +72,14 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public bool ReversesWinding => true; // ECEF→render (X,Z,Y) axis-swap is a reflection → flips winding
 
+        /// <inheritdoc/>
+        public bool TryGetHorizonOccluder(out double3 renderCentre, out double radius)
+        {
+            // Render-space globe: sphere of Radius centred R below the look-at (look-at surface point at origin,
+            // +Y radial), so the centre is R straight down. Same regardless of look-at (the rebase makes it so).
+            renderCentre = new double3(0.0, -Radius, 0.0); radius = Radius; return true;
+        }
+
         // ── Camera interaction (managed side) — globe orbit ray-cast (S91-C) ──────────────────────
         //
         // Reconstructs the SAME render-space camera the renderer builds (MapCamera.SyncToCamera: altitude from

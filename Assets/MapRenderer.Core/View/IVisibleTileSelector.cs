@@ -9,7 +9,7 @@ namespace MapRenderer.Core.View
     /// <summary>
     /// The algorithm-agnostic <b>seam</b> every consumer talks to for "which tiles does the camera see".
     /// One call per frame; the concrete algorithm lives behind it (S71 ships the default
-    /// <see cref="ViewportCornerTileSelector"/>; a future distance-based-LOD impl is a drop-in replacement).
+    /// <see cref="FrustumTileSelector"/>; a future distance-based-LOD impl is a drop-in replacement).
     ///
     /// <para><b>What keeps it generic (do not change these properties):</b></para>
     /// <list type="bullet">
