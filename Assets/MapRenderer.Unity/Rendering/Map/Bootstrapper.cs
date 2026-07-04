@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
@@ -46,6 +47,12 @@ namespace MapRenderer.Unity.Rendering.Map
     [RequireComponent(typeof(MapViewComponent))]
     public sealed class Bootstrapper : MonoBehaviour
     {
+        /// <summary>Wires <see cref="VerifiedDisposable.LeakReporter"/> to <see cref="Debug.LogError"/> once
+        /// at startup, so a <see cref="VerifiedDisposable"/>-derived instance finalized without Dispose()
+        /// (a resource leak) surfaces in the Editor/Player log instead of Core's engine-free no-op default.</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void WireLeakReporter() => VerifiedDisposable.LeakReporter = Debug.LogError;
+
         // S83b: the STYLE is the single source of truth. One URI points at the style document; its
         // sources[] declare every data source (a vector source carries either inline tiles[] or a TileJSON
         // url, resolved at SetStyle time — S83a). The dated/hardcoded tile-URL template is gone: the

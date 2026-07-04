@@ -7,6 +7,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
 
@@ -27,7 +28,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
     ///
     /// Clean-room: design follows the MapLibre Style Spec and Unity BRG documentation.
     /// </summary>
-    internal sealed class TileRenderer : ITileRenderBackend
+    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
         // ── Reflected-once packing plan ───────────────────────────────────────────────────────
         // Built once at construction from MapInstanceData. Per-frame pack indexes MaterialEntries[]
@@ -52,7 +53,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         private GraphicsBuffer     _instanceBuffer;
         private BatchID            _batchId;
         private bool               _batchRegistered;
-        private bool               _disposed;
 
         // The instance count that was used when the batch was last registered.
         // SoA byte offsets depend on N, so batch must be re-registered when N changes.
@@ -131,8 +131,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// <summary>Number of currently registered draw items.</summary>
         public int DrawItemCount => _items.Count;
 
-        /// <summary>True if <see cref="Dispose"/> has been called.</summary>
-        public bool IsDisposed => _disposed;
+        // IsDisposed is inherited from VerifiedDisposable (public there too — no shadow needed).
 
         /// <summary>True if the instance GraphicsBuffer is allocated.</summary>
         public bool HasBuffer => _instanceBuffer != null;
@@ -271,7 +270,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
-            if (_disposed)   throw new ObjectDisposedException(nameof(TileRenderer));
+            ThrowIfDisposed();
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if ((uint)materialIndex >= (uint)_layerMaterials.Count)
                 throw new ArgumentOutOfRangeException(nameof(materialIndex));
@@ -302,7 +301,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// </summary>
         public void RemoveItem(int handle)
         {
-            if (_disposed) return;
+            if (IsDisposed) return;
             _items.Remove(handle);
         }
 
@@ -323,7 +322,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
-            if (_disposed || _items.Count == 0)
+            if (IsDisposed || _items.Count == 0)
             {
                 _sortedItems.Clear();
                 return;
@@ -494,7 +493,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// </summary>
         private void ReRegisterBatch(int instanceCount)
         {
-            if (_disposed || _brg == null) return;
+            if (IsDisposed || _brg == null) return;
 
             if (_batchRegistered)
             {
@@ -658,11 +657,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// Tooth 5 (S49): BRG + every GraphicsBuffer released on teardown. Process-global BRG
         /// failure to dispose would pollute other cameras/tests; this is load-bearing.
         /// </summary>
-        public void Dispose()
+        protected override void DoDispose()
         {
-            if (_disposed) return;
-            _disposed = true;
-
             if (_batchRegistered && _brg != null)
             {
                 _brg.RemoveBatch(_batchId);

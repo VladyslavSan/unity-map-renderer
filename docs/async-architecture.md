@@ -81,6 +81,31 @@ Two resource classes, two rules:
   (play) / `DestroyImmediate` (edit), **main thread only**. Therefore **never created off-thread**: async work
   produces only disposable *data*; the Mesh/GameObject is created and destroyed exclusively on the main thread.
 
+### The one rule, stated once — *data is a value type; the `Mesh` is a class with a single owner*
+
+This is the codebase-wide invariant the two rules above imply — the framing to reach for whenever a `Mesh`
+lifetime question comes up (it's forced by the platform, not a style choice: jobs *cannot* touch a
+`UnityEngine.Object`, and only the main thread can create/destroy the GPU resource):
+
+- **Blittable geometry *data* → value types, the job world.** `NativeArray` / `Mesh.MeshData` / `LayerMeshData`
+  are **structs** a Burst/worker job writes. They are disposed **deterministically at the
+  `ApplyAndDisposeWritableMeshData` boundary** and never held past consume — so they never need a dispose-once
+  guard (and a mutable-state struct couldn't safely have one; a struct copy has its own flag — see the
+  disposal-guard discussion). `ApplyAndDispose` is the exact point where the value-type *data* becomes the
+  reference-type *resource*.
+- **The `Mesh` GPU *resource* → a reference type, held by exactly ONE owner.** Created/destroyed only on the
+  main thread, and owned by exactly one place at all times: in-cover meshes by `TileManager._loaded`,
+  out-of-cover meshes by `PreparedTileCache` (**Model B**). An ownership transfer **nulls the source
+  reference** so the mesh is destroyed exactly once by whoever currently owns it — that null-on-transfer *is*
+  the double-free/leak guard. Teardown order is always **destroy meshes → then dispose the backend**.
+- **Corollary — the dispose-guard machinery only ever touches the *class* side.** A `VerifiedDisposable`-style
+  base / the `CountMeshObjects` leak baseline apply to the `Mesh`-owning **classes**; the job-side struct data
+  stays trivial by construction. That's why there are **two** leak-guard systems, one per resource class:
+  `NativeArray` alloc-vs-dispose counts (`LayerMeshData.DebugLiveAllocCount`) for the *data*, and `Mesh`
+  created-vs-destroyed counts (`CountMeshObjects`) for the *resource*. Caching the *data* would tangle the two
+  and invert the "arrays return to baseline after consume" invariant — which is exactly why S82 caches the
+  `Mesh`, not the `NativeArray`.
+
 **Cancellation ≠ cleanup.** A `CancellationToken` stops the *work*; allocated resources still need explicit
 disposal at all four exits: (1) **consumed** → dispose after main-thread upload; (2) **released-while-in-flight**
 → the discard path must `Dispose()` the result, not drop it (today's generation check silently drops — safe

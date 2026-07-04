@@ -47,3 +47,13 @@ essay. Keep the two in sync: when a rule changes, edit `conventions.md` and upda
   or put computed accessors/adapters as extension methods in the **test** assembly. Not allowed: `public`
   members with no production caller, `// for testing only` members, test helpers/factories inside production
   classes.
+
+- **Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class.** Blittable geometry
+  *data* (`NativeArray`/`Mesh.MeshData`/`LayerMeshData`) are **value-type structs** the jobs write, disposed
+  deterministically at the `ApplyAndDisposeWritableMeshData` boundary — never held, never a dispose-once guard.
+  The `Mesh` GPU *resource* is a **reference-type class** created/destroyed **main-thread only** and held by
+  **exactly one owner** (`TileManager._loaded` in cover / `PreparedTileCache` out of cover — Model B); a
+  transfer **nulls the source** so it's destroyed once (the double-free guard); teardown = destroy meshes →
+  dispose backend. Dispose-guard machinery + the `CountMeshObjects` leak baseline touch only the **class**
+  side; structs stay trivial. Full contract (exit paths, cancellation, teeth) in
+  **`docs/async-architecture.md` §"Disposal & cancellation contract"**.

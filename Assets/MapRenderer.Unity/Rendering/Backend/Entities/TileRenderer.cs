@@ -8,6 +8,7 @@ using Unity.Transforms;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
 
@@ -46,7 +47,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     /// Clean-room: design follows the Entities Graphics runtime-entity-creation documentation and the
     /// existing BRG backend's tile-origin math (<see cref="FloatingOrigin.TileLocalToScene"/>).
     /// </summary>
-    internal sealed class TileRenderer : ITileRenderBackend
+    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
         // One draw item = one layer entity (a child of its tile's root entity).
         private struct ItemRec
@@ -78,7 +79,6 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private readonly World _prevDefaultWorld;
         private ComponentSystemBase _initGroup, _simGroup, _presGroup;
         private int  _nextHandle;
-        private bool _disposed;
 
         // ── Profiler markers — split the per-frame EG drive so a MapView.Update spike is attributable ──
         // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
@@ -139,7 +139,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         /// <summary>True if a root entity is live for <paramref name="tileId"/>.</summary>
         public bool TileRootExists(TileId tileId)
-            => !_disposed && _tileRoots.TryGetValue(tileId, out var r) && _em.Exists(r.Root);
+            => !IsDisposed && _tileRoots.TryGetValue(tileId, out var r) && _em.Exists(r.Root);
 
         /// <summary>
         /// Number of layer entities the transform system has linked under <paramref name="tileId"/>'s root
@@ -149,7 +149,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public int RootChildBufferCount(TileId tileId)
         {
-            if (_disposed || !_tileRoots.TryGetValue(tileId, out var r) || !_em.Exists(r.Root)) return -1;
+            if (IsDisposed || !_tileRoots.TryGetValue(tileId, out var r) || !_em.Exists(r.Root)) return -1;
             if (!_em.HasComponent<Child>(r.Root)) return -1;
             return _em.GetBuffer<Child>(r.Root).Length;
         }
@@ -158,7 +158,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <paramref name="tileId"/> (via its <see cref="Parent"/> component).</summary>
         public bool IsParentedToTileRoot(int handle, TileId tileId)
         {
-            if (_disposed || !_items.TryGetValue(handle, out var item) || !_em.Exists(item.Entity)) return false;
+            if (IsDisposed || !_items.TryGetValue(handle, out var item) || !_em.Exists(item.Entity)) return false;
             if (!_tileRoots.TryGetValue(tileId, out var r) || !_em.HasComponent<Parent>(item.Entity)) return false;
             return _em.GetComponentData<Parent>(item.Entity).Value == r.Root;
         }
@@ -173,12 +173,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             => _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity) ? _em.GetName(rec.Entity) : null;
 #endif
 
-        /// <summary>True once <see cref="Dispose"/> has run.</summary>
-        public bool IsDisposed => _disposed;
+        // IsDisposed is inherited from VerifiedDisposable (public there too — no shadow needed).
 
         /// <summary>True if the draw item <paramref name="handle"/> still has a live entity.</summary>
         public bool EntityExists(int handle)
-            => !_disposed && _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity);
+            => !IsDisposed && _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity);
 
         /// <summary>
         /// Returns the world-space translation (X, Z) of the draw item's entity from the last
@@ -187,7 +186,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public (float x, float z) GetInstanceTranslation(int handle)
         {
-            if (_disposed || !_items.TryGetValue(handle, out var rec) || !_em.Exists(rec.Entity))
+            if (IsDisposed || !_items.TryGetValue(handle, out var rec) || !_em.Exists(rec.Entity))
                 return (float.NaN, float.NaN);
             float3 t = _em.GetComponentData<LocalToWorld>(rec.Entity).Position;
             return (t.x, t.z);
@@ -202,7 +201,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public Bounds ComputeSceneBounds(float tileSizeWorld)
         {
-            if (_disposed || _items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
+            if (IsDisposed || _items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
 
             float minX = float.MaxValue, maxX = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;
@@ -278,7 +277,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
-            if (_disposed)    throw new ObjectDisposedException(nameof(TileRenderer));
+            ThrowIfDisposed();
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if ((uint)materialIndex >= (uint)_layerMaterials.Count)
                 throw new ArgumentOutOfRangeException(nameof(materialIndex));
@@ -355,7 +354,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public void RemoveItem(int handle)
         {
-            if (_disposed) return;
+            if (IsDisposed) return;
             if (!_items.TryGetValue(handle, out var item)) return;
 
             if (_em.Exists(item.Entity)) _em.DestroyEntity(item.Entity);
@@ -396,7 +395,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
-            if (_disposed) return;
+            if (IsDisposed) return;
 
             // Cache so a tile-layer consumed later this frame (after this Rebuild) can be created
             // already positioned, instead of blinking at the world origin for a frame.
@@ -431,11 +430,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         // ── Teardown ────────────────────────────────────────────────────────────────────────────────
 
-        public void Dispose()
+        protected override void DoDispose()
         {
-            if (_disposed) return;
-            _disposed = true;
-
             _items.Clear();
             _tileRoots.Clear();
             if (_world != null && _world.IsCreated)

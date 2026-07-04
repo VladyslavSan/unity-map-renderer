@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 
 namespace MapRenderer.Core.Data
 {
@@ -56,7 +57,7 @@ namespace MapRenderer.Core.Data
     /// S51: migrated from Task&lt;TileResponse&gt; to UniTask&lt;TileResponse&gt;.
     /// No Task.Run, no Task.FromResult, no interop extensions.
     /// </summary>
-    public sealed class TileScheduler : IDisposable
+    public sealed class TileScheduler : VerifiedDisposable
     {
         private readonly IDataSource                                _source;
         private readonly TileCache                                  _cache;
@@ -69,7 +70,6 @@ namespace MapRenderer.Core.Data
         private readonly Func<DateTime>                             _clock;
         private readonly TimeSpan                                   _negativeTtl;
         private readonly object                                     _lock = new object();
-        private          bool                                       _disposed;
 
         /// <summary>Default negative-cache TTL for absent tiles (HTTP 404/204, missing file).</summary>
         public static readonly TimeSpan DefaultNegativeTtl = TimeSpan.FromSeconds(5);
@@ -115,7 +115,7 @@ namespace MapRenderer.Core.Data
         /// </summary>
         public UniTask<TileResponse> Request(TileId id, CancellationToken ct = default)
         {
-            if (_disposed) throw new ObjectDisposedException(nameof(TileScheduler));
+            ThrowIfDisposed();
 
             lock (_lock)
             {
@@ -254,13 +254,11 @@ namespace MapRenderer.Core.Data
             return response;
         }
 
-        public void Dispose()
+        protected override void DoDispose()
         {
             List<CancellationTokenSource> ctsToDispose = null;
             lock (_lock)
             {
-                if (_disposed) return;
-                _disposed = true;
                 if (_cts.Count > 0)
                 {
                     ctsToDispose = new List<CancellationTokenSource>(_cts.Values);

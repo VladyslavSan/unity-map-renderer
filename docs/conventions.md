@@ -228,3 +228,26 @@ assumes it handles lines too, and bolts line logic onto a fill builder. The reti
 
 *(Established S54 — the retired Gen-1 `MeshBuilder` / `TileMeshFactory` were the naming offenders this rule
 targets.)*
+
+## Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class
+
+Two resource classes, kept strictly apart (platform-forced, not stylistic — jobs can't touch a
+`UnityEngine.Object`, and only the main thread can create/destroy the GPU resource):
+
+- **Blittable geometry *data* = value-type structs in the job world** (`NativeArray`, `Mesh.MeshData`,
+  `LayerMeshData`). Written by Burst/worker jobs, disposed **deterministically at the
+  `ApplyAndDisposeWritableMeshData` boundary**, never held past consume — so a job-side struct **never carries
+  a dispose-once guard** (a struct copy has its own flag; mutable dispose-state on a value type is a footgun).
+- **The `Mesh` GPU *resource* = a reference-type class with exactly ONE owner.** Created/destroyed on the main
+  thread only, owned by exactly one place at all times (`TileManager._loaded` in cover, `PreparedTileCache`
+  out of cover — **Model B**); an ownership transfer **nulls the source reference** so the mesh is destroyed
+  exactly once (that null-on-transfer is the double-free guard). Teardown is always **destroy meshes → dispose
+  backend**.
+- **Corollary:** dispose-guard machinery (a `VerifiedDisposable`-style base, the `CountMeshObjects` leak
+  baseline) touches only the **class** side; struct data stays trivial. Two leak-guard systems, one per class:
+  `NativeArray` alloc-vs-dispose (`DebugLiveAllocCount`) for data, `Mesh` created-vs-destroyed
+  (`CountMeshObjects`) for the resource. (This is why S82 caches the `Mesh`, not the `NativeArray`.)
+
+**Full contract** — the four disposal exit paths, cancellation-≠-cleanup, and the leak-guard teeth — lives in
+**`docs/async-architecture.md` §"Disposal & cancellation contract"**; that doc is canonical, this is the
+one-screen summary.

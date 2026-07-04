@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
@@ -41,7 +42,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
-    internal sealed class TileManager
+    internal sealed class TileManager : VerifiedDisposable
     {
         // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
         // Namespace: MapRenderer.* — greppable per S46 acceptance. Names must match exactly
@@ -1637,12 +1638,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// scheduler and (if owned) the data source. Does NOT dispose the RenderLayerSet — MapView owns
         /// that and disposes it AFTER this (tile renderers reference layer materials, so the order matters).
         ///
-        /// <para>Idempotent and construction-safe: every collection it drains is empty before the first
-        /// <see cref="SetSources"/> and cleared after the first Dispose, and the backend is disposed via
-        /// <c>_instanced?.Dispose()</c> — so a second call (or a call on a never-styled manager) is a no-op
-        /// with no guard flag.</para>
+        /// <para>Idempotent: guarded by the inherited <see cref="VerifiedDisposable"/> Dispose() guard, so a
+        /// second call (or a call on a never-styled manager) is a no-op.</para>
         /// </summary>
-        public void Dispose()
+        protected override void DoDispose()
         {
             // S51/S48: drain outstanding tessellation UniTasks before tearing down.
             // Safe spin: tessellation UniTasks use configureAwait: false (UniTask.RunOnThreadPool),

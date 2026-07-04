@@ -51,6 +51,9 @@
     <Compile Include="../../Assets/MapRenderer.Core/Geometry/Earcut.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Imaging/SnapshotCoverage.cs" />
 
+    <!-- VerifiedDisposable: shared IDisposable base (Core, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Lifetime/VerifiedDisposable.cs" />
+
     <!-- S03: BYO data-source layer (Core, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/TileId.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Coordinates/WebMercator.cs" />
@@ -161,6 +164,7 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/TestSupport/TestDataSource.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/VerifiedDisposableTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/AngleTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ConstrainedAngleTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/ProjectionMathTests.cs" />

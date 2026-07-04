@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -64,7 +65,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     /// <c>Dispose</c>. The lock is kept for structural parity with <c>TileCache</c>'s template; there is no
     /// worker-thread access to guard against in practice.</para>
     /// </summary>
-    internal sealed class PreparedTileCache : IDisposable
+    internal sealed class PreparedTileCache : VerifiedDisposable
     {
         private struct Entry
         {
@@ -282,7 +283,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Destroys every held <see cref="Mesh"/> and clears the cache. Called by
         /// <c>TileManager.Dispose</c> AFTER the <c>_loaded</c> mesh-destroy loop and BEFORE the backend is
         /// disposed — the same "destroy meshes → dispose backend" ordering the rest of teardown honours.
-        /// Idempotent (an already-empty cache disposes to a no-op).</summary>
-        public void Dispose() => Clear();
+        /// Idempotent (the base's disposed guard makes a repeat call a no-op).</summary>
+        protected override void DoDispose() => Clear();
     }
 }

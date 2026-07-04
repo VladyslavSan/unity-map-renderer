@@ -1,6 +1,6 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View.Camera;
@@ -23,7 +23,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// Shared by reference with the tile pipeline; layers own their materials and destroy them on
     /// <see cref="Dispose"/>.</para>
     /// </summary>
-    internal sealed class RenderLayerSet : IDisposable
+    internal sealed class RenderLayerSet : VerifiedDisposable
     {
         private readonly List<IRenderLayer> _layers = new List<IRenderLayer>(16);
 
@@ -46,11 +46,13 @@ namespace MapRenderer.Unity.Rendering.Style
         /// or line-over-fill composites exactly as declared (they share one transparent band, ZWrite off, so
         /// the renderQueue offset alone decides order — see <see cref="LayerDrawOrder"/>). Non-renderable
         /// layers (background/raster/symbol) and layers whose material set is unconfigured take no slot.
-        /// Disposes any previously-built layers first.
+        /// Disposes any previously-built layers first (via <see cref="ClearLayers"/> — NOT <see cref="Dispose"/>:
+        /// a restyle calls this repeatedly over the object's life, so the teardown must not be gated by the
+        /// once-only disposed guard).
         /// </summary>
         public void Build(StyleDocument style, double initialZoom, Materials.MapMaterialSet settings = null)
         {
-            Dispose();
+            ClearLayers();
             if (style == null) return;
 
             int drawIndex = 0;
@@ -78,13 +80,19 @@ namespace MapRenderer.Unity.Rendering.Style
                 _layers[i].ApplyZoom(zoom, metersPerPixel);
         }
 
-        /// <summary>Disposes every render layer (each destroys its Material instance) and clears the list.</summary>
-        public void Dispose()
+        /// <summary>Disposes every render layer (each destroys its Material instance) and clears the list.
+        /// Reusable afterwards (unlike <see cref="Dispose"/>'s teardown) — called by BOTH <see cref="Build"/>
+        /// (every restyle) and <see cref="DoDispose"/> (real teardown), mirroring
+        /// <c>PreparedTileCache</c>'s <c>Clear()</c>/<c>Dispose()</c> split.</summary>
+        private void ClearLayers()
         {
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].Dispose();
             _layers.Clear();
         }
+
+        /// <inheritdoc cref="ClearLayers"/>
+        protected override void DoDispose() => ClearLayers();
 
         /// <summary>Destroys a per-layer <see cref="Material"/> instance (play → Destroy, edit → DestroyImmediate).
         /// Shared by the <see cref="IRenderLayer"/> implementations, which own their materials.</summary>

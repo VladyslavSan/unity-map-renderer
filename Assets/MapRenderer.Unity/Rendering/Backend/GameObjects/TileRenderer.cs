@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
 
@@ -38,7 +39,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     /// Clean-room: design follows the floating-origin tile math (<see cref="FloatingOrigin.TileLocalToScene"/>)
     /// shared with the instanced backends.
     /// </summary>
-    internal sealed class TileRenderer : ITileRenderBackend
+    internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
         // One draw item = one layer child GameObject (a child of its tile's container).
         private struct ItemRec
@@ -66,7 +67,6 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
         private GameObject _root;
         private int  _nextHandle;
-        private bool _disposed;
 
         // Last scene frame seen by Rebuild — identical blink-fix rationale to EntitiesTileRenderer: a
         // tile-layer is consumed AFTER the frame's Rebuild (MapView.Tick: InstancedRebuild → TileManager.Tick
@@ -93,15 +93,14 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// <summary>Number of live tile containers (one per tile that has ≥1 layer).</summary>
         public int ContainerCount => _containers.Count;
 
-        /// <summary>True once <see cref="Dispose"/> has run.</summary>
-        public bool IsDisposed => _disposed;
+        // IsDisposed is inherited from VerifiedDisposable (public there too — no shadow needed).
 
         /// <summary>The backend root's transform (null after dispose). Tests read the live Hierarchy through it.</summary>
         public Transform Root => _root != null ? _root.transform : null;
 
         /// <summary>The container transform for <paramref name="tileId"/>, or null if no live container.</summary>
         public Transform Container(TileId tileId)
-            => !_disposed && _containers.TryGetValue(tileId, out var c) && c.Go != null ? c.Go.transform : null;
+            => !IsDisposed && _containers.TryGetValue(tileId, out var c) && c.Go != null ? c.Go.transform : null;
 
         /// <summary>
         /// World-space translation (X, Z) of the draw item's owning container, or (NaN, NaN) for an
@@ -112,7 +111,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// </summary>
         public (float x, float z) GetInstanceTranslation(int handle)
         {
-            if (_disposed || !_items.TryGetValue(handle, out var item) || item.Go == null)
+            if (IsDisposed || !_items.TryGetValue(handle, out var item) || item.Go == null)
                 return (float.NaN, float.NaN);
             Vector3 t = item.Go.transform.position;
             return (t.x, t.z);
@@ -126,7 +125,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// </summary>
         public Bounds ComputeSceneBounds(float tileSizeWorld)
         {
-            if (_disposed || _containers.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
+            if (IsDisposed || _containers.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
 
             float minX = float.MaxValue, maxX = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;
@@ -187,7 +186,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {
-            if (_disposed)    throw new ObjectDisposedException(nameof(TileRenderer));
+            ThrowIfDisposed();
             if (mesh == null) throw new ArgumentNullException(nameof(mesh));
             if ((uint)materialIndex >= (uint)_layerMaterials.Count)
                 throw new ArgumentOutOfRangeException(nameof(materialIndex));
@@ -230,7 +229,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// </summary>
         public void RemoveItem(int handle)
         {
-            if (_disposed) return;
+            if (IsDisposed) return;
             if (!_items.TryGetValue(handle, out var item)) return;
 
             DestroyGo(item.Go);
@@ -262,7 +261,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {
-            if (_disposed) return;
+            if (IsDisposed) return;
 
             // Cache so a tile-layer consumed later this frame (after this Rebuild) is created already
             // positioned, instead of blinking at the world origin for a frame.
@@ -294,11 +293,8 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// Destroys the backend root (and with it every container + layer child). Does NOT destroy Mesh
         /// assets — TileManager owns those. Idempotent.
         /// </summary>
-        public void Dispose()
+        protected override void DoDispose()
         {
-            if (_disposed) return;
-            _disposed = true;
-
             _items.Clear();
             _containers.Clear();
             DestroyGo(_root); // destroys all containers + their layer children
