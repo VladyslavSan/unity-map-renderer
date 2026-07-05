@@ -147,7 +147,7 @@ namespace MapRenderer.Tests
                     {
                         new TileToGeoJob
                         {
-                            TileZ = 0, TileX = 0, TileY = 0, Extent = extent,
+                            Tile = new TileId { Z = 0, X = 0, Y = 0 }, Extent = extent,
                             TileCoords = tileCoords, OutGeo = geo,
                         }.Schedule(vCount, 64).Complete();
 

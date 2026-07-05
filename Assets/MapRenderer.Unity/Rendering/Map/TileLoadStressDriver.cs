@@ -7,7 +7,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <summary>
     /// A debug harness that automatically flies the camera to <b>stress the tile-load pipeline</b>: it
     /// orbits the look-at around a fixed city centre (Berlin by default) while sweeping the zoom in and out,
-    /// driving a continuous select → fetch → tessellate → consume → evict churn as the motion crosses
+    /// driving a continuous select → fetch → build → consume → evict churn as the motion crosses
     /// tile-zoom and tile-column boundaries — the worst case for frame time, made reproducible and
     /// hands-free. It replaces the interactive input <see cref="Controller"/> in the stress scene (which
     /// has no user to drive it).

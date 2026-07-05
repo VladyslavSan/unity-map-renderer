@@ -17,7 +17,7 @@ using MapRenderer.Jobs;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Parity and integration tests for the jobified decode + tessellation pipeline (S04).
+    /// Parity and integration tests for the jobified decode + mesh pipeline (S04).
     ///
     /// Structure:
     ///   (1) Decode job vs managed MvtGeometry.Decode — ring count + per-ring vertex content hash equal.
@@ -246,15 +246,15 @@ namespace MapRenderer.Tests
                 if (f.GeometryType == MvtGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
-            var pipelineInput = new TileTessellationPipeline.LayerInput
+            var pipelineInput = new TileMeshPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms,
                 Extent    = extent,
-                TileZ     = 0, TileX = 0, TileY = 0,
+                Tile      = new TileId { Z = 0, X = 0, Y = 0 },
                 OriginRender = new double3(originX, 0.0, originY), // == ProjectTileCornerOrigin bit-for-bit for Mercator
             };
 
-            TileMeshBuffers buffers = TileTessellationPipeline.Schedule(pipelineInput);
+            TileMeshBuffers buffers = TileMeshPipeline.Schedule(pipelineInput);
             try
             {
                 int vertCount  = buffers.VertexCount[0];
@@ -303,10 +303,10 @@ namespace MapRenderer.Tests
                     polyGeoms.Add(f.Geometry);
 
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-            var singleInput = new TileTessellationPipeline.LayerInput
+            var singleInput = new TileMeshPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms, Extent = extent,
-                TileZ = 0, TileX = 0, TileY = 0,
+                Tile = new TileId { Z = 0, X = 0, Y = 0 },
                 OriginRender = new double3(bMin.x, 0.0, bMin.y),
             };
 
@@ -315,7 +315,7 @@ namespace MapRenderer.Tests
             int    singleIndexCount = 0;
             string singleVertHash   = null;
             string singleIdxHash    = null;
-            TileMeshBuffers singleBuffers = TileTessellationPipeline.Schedule(singleInput);
+            TileMeshBuffers singleBuffers = TileMeshPipeline.Schedule(singleInput);
             try
             {
                 singleVertCount  = singleBuffers.VertexCount[0];
@@ -328,7 +328,7 @@ namespace MapRenderer.Tests
             // Schedule N tiles.
             var allBuffers = new TileMeshBuffers[N];
             for (int i = 0; i < N; i++)
-                allBuffers[i] = TileTessellationPipeline.Schedule(singleInput);
+                allBuffers[i] = TileMeshPipeline.Schedule(singleInput);
 
             int totalVerts = 0;
             try

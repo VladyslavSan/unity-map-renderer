@@ -1,10 +1,11 @@
-// Unity EditMode only — references MapRenderer.Jobs.TileTessellationPipeline.
+// Unity EditMode only — references MapRenderer.Jobs.TileMeshPipeline.
 // NOT included in Tools/core-tests (MapRenderer.Jobs depends on Unity.Collections).
 
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using MapRenderer.Jobs;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests
 {
@@ -12,32 +13,32 @@ namespace MapRenderer.Tests
     /// S06 Batch A, item (a): exact sizing pre-count + its never-fired capacity backstop.
     ///
     /// The pipeline now sizes its NativeArray decode buffers from
-    /// <see cref="TileTessellationPipeline.PrecountRingsAndVertices"/> — an exact walk of the command stream
+    /// <see cref="TileMeshPipeline.PrecountRingsAndVertices"/> — an exact walk of the command stream
     /// mirroring <c>MvtDecodeJob.Execute</c>. This makes under-allocation (and therefore the in-job
     /// out-of-range write) IMPOSSIBLE for any input, including a malformed multi-point MoveTo. The OOB write is
     /// PREVENTED, not merely reported post-hoc, in every build (the fix does not depend on
     /// <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c>).
     ///
-    /// <see cref="TileTessellationPipeline.EnsureCapacity"/> remains as a defense-in-depth backstop: a plain
+    /// <see cref="TileMeshPipeline.EnsureCapacity"/> remains as a defense-in-depth backstop: a plain
     /// <c>if (count &gt; capacity) throw</c> that, with exact sizing, never fires. Its boundary behaviour is
     /// still verified below so a future sizing-vs-decode desync would surface loudly.
     /// </summary>
     [TestFixture]
-    public class TileTessellationBoundsTests
+    public class TileMeshPipelineBoundsTests
     {
         [Test]
         public void EnsureCapacity_CountWithinCapacity_DoesNotThrow()
         {
-            Assert.DoesNotThrow(() => TileTessellationPipeline.EnsureCapacity(0, 0, "empty"));
-            Assert.DoesNotThrow(() => TileTessellationPipeline.EnsureCapacity(5, 10, "ring"));
-            Assert.DoesNotThrow(() => TileTessellationPipeline.EnsureCapacity(10, 10, "exact-fit"));
+            Assert.DoesNotThrow(() => TileMeshPipeline.EnsureCapacity(0, 0, "empty"));
+            Assert.DoesNotThrow(() => TileMeshPipeline.EnsureCapacity(5, 10, "ring"));
+            Assert.DoesNotThrow(() => TileMeshPipeline.EnsureCapacity(10, 10, "exact-fit"));
         }
 
         [Test]
         public void EnsureCapacity_CountExceedsCapacity_ThrowsLoudly()
         {
             var ex = Assert.Throws<InvalidOperationException>(
-                () => TileTessellationPipeline.EnsureCapacity(11, 10, "ring"));
+                () => TileMeshPipeline.EnsureCapacity(11, 10, "ring"));
             StringAssert.Contains("ring", ex.Message, "message must name the overflowing quantity");
             StringAssert.Contains("11", ex.Message, "message must report the actual count");
             StringAssert.Contains("10", ex.Message, "message must report the capacity");
@@ -47,9 +48,9 @@ namespace MapRenderer.Tests
         public void EnsureCapacity_OffByOne_Throws()
         {
             // The boundary: capacity N admits exactly N, rejects N+1.
-            Assert.DoesNotThrow(() => TileTessellationPipeline.EnsureCapacity(100, 100, "vertex"));
+            Assert.DoesNotThrow(() => TileMeshPipeline.EnsureCapacity(100, 100, "vertex"));
             Assert.Throws<InvalidOperationException>(
-                () => TileTessellationPipeline.EnsureCapacity(101, 100, "vertex"),
+                () => TileMeshPipeline.EnsureCapacity(101, 100, "vertex"),
                 "count == capacity + 1 must throw (the first out-of-range write).");
         }
 
@@ -57,7 +58,7 @@ namespace MapRenderer.Tests
         public void EnsureCapacity_LargeOverflow_Throws()
         {
             Assert.Throws<InvalidOperationException>(
-                () => TileTessellationPipeline.EnsureCapacity(int.MaxValue, 4096, "polygon"));
+                () => TileMeshPipeline.EnsureCapacity(int.MaxValue, 4096, "polygon"));
         }
 
         // ── Exact pre-count: the real fix for S06 item (a). ──────────────────────────────────────
@@ -74,7 +75,7 @@ namespace MapRenderer.Tests
         {
             var features = new List<uint[]> { MultiPointMoveTo(11) };
 
-            TileTessellationPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
+            TileMeshPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
 
             Assert.AreEqual(11, rings,    "MoveTo count=11 starts 11 rings");
             Assert.AreEqual(11, vertices, "MoveTo count=11 emits 11 vertices");
@@ -101,7 +102,7 @@ namespace MapRenderer.Tests
             };
             var features = new List<uint[]> { geom };
 
-            TileTessellationPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
+            TileMeshPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
 
             Assert.AreEqual(1, rings);
             Assert.AreEqual(4, vertices);
@@ -109,7 +110,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// End-to-end: the count=11 malformed Polygon feature must flow through
-        /// <see cref="TileTessellationPipeline.Schedule"/> WITHOUT overflow/corruption. Against the old
+        /// <see cref="TileMeshPipeline.Schedule"/> WITHOUT overflow/corruption. Against the old
         /// heuristic sizing this throws inside MvtDecodeJob (the 11th ring write lands out of the length-10
         /// OutRingFeatureIndex array; the EditMode collections-checks turn the silent release-build corruption
         /// into a loud throw). With exact sizing it completes cleanly. The 11 single-vertex rings are all
@@ -119,16 +120,16 @@ namespace MapRenderer.Tests
         [Test]
         public void Schedule_MultiPointMoveTo_Count11_CompletesWithoutOverflow()
         {
-            var input = new TileTessellationPipeline.LayerInput
+            var input = new TileMeshPipeline.LayerInput
             {
                 FeatureGeometries = new List<uint[]> { MultiPointMoveTo(11) },
                 Extent       = 4096,
-                TileZ        = 0, TileX = 0, TileY = 0,
+                Tile         = new TileId { Z = 0, X = 0, Y = 0 },
                 OriginRender = default, // all rings degenerate ⇒ no geometry ⇒ origin irrelevant here
             };
 
             TileMeshBuffers buffers = default;
-            Assert.DoesNotThrow(() => buffers = TileTessellationPipeline.Schedule(input),
+            Assert.DoesNotThrow(() => buffers = TileMeshPipeline.Schedule(input),
                 "exact pre-count sizing must prevent the in-job out-of-range write for a multi-point MoveTo");
 
             // All rings degenerate → no polygons → default buffers (IsCreated == false). Dispose is a no-op

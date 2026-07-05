@@ -27,7 +27,7 @@ namespace MapRenderer.Core.Geometry
     public static class LineTessellator
     {
         /// <summary>
-        /// Result of a polyline tessellation: flat vertex array and triangle indices,
+        /// Result of a polyline mesh build: flat vertex array and triangle indices,
         /// mirroring <see cref="Earcut.Result"/> shape.
         /// </summary>
         public readonly struct Result
@@ -50,7 +50,7 @@ namespace MapRenderer.Core.Geometry
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Tessellate <paramref name="line"/> into a ribbon mesh.
+        /// Build <paramref name="line"/> into a ribbon mesh.
         /// </summary>
         /// <param name="line">Polyline points in any consistent 2D space (world meters for S05).</param>
         /// <param name="joinType">Corner geometry style.</param>
@@ -246,7 +246,11 @@ namespace MapRenderer.Core.Geometry
             double muy = my / mLen;
             double dot = mux * n1.x + muy * n1.y;
             if (math.abs(dot) < 1e-12) return true;
-            return (1.0 / dot) > miterLimit;
+            // The miter factor is a MAGNITUDE (1/|cos(θ/2)|). Near a 180° hairpin normalize(n1+n2)
+            // is dominated by numerical residual and can point opposite n1, making dot a small NEGATIVE;
+            // a signed `1/dot > limit` then lets a huge negative factor slip past the bevel gate and the
+            // miter normal blows up (the "line across the whole screen" glitch). Compare the magnitude.
+            return math.abs(1.0 / dot) > miterLimit;
         }
 
         /// <summary>

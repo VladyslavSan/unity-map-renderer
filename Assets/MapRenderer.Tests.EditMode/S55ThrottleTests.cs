@@ -1,11 +1,11 @@
 // S55 acceptance tests — "Flatten tile-load lag spikes" throttle features.
 //
-// Tooth (a): Tessellation cap binds — MaxTessellationsPerTick limits kick-offs to at most N
-//            per Tick. Verified by asserting TessellationsKickedLastTick == cap (not all tiles)
+// Tooth (a): Mesh build cap binds — MaxMeshBuildsPerTick limits kick-offs to at most N
+//            per Tick. Verified by asserting MeshBuildsKickedLastTick == cap (not all tiles)
 //            on the first kick Tick, with >= 2 tiles in cover.
 //
 // Tooth (b): Per-MESH budget splits tiles across frames (S87 DECISIVE) — with the per-frame mesh-count
-//            budget (MaxBuildsPerTick) set to 1, a multi-layer tile is consumed one mesh per frame: at
+//            budget (MaxConsumesPerTick) set to 1, a multi-layer tile is consumed one mesh per frame: at
 //            least one frame consumes a mesh while completing NO tile (MeshesConsumedLastTick >= 1 &&
 //            TilesConsumedLastTick == 0) — proving consume is per-MESH, not per-tile. A tile-atomic consume
 //            can NEVER produce such a frame (it always completes the tile it touches). No frame exceeds the
@@ -24,7 +24,7 @@
 // Tooth (d): Settles identically — static cover with throttled vs uncapped settings produces
 //            the same tile count and AllTilesSettled() outcome.
 //
-// Tooth (e): Pixel parity — a throttled MapView (S55 defaults: MaxTessellationsPerTick=2,
+// Tooth (e): Pixel parity — a throttled MapView (S55 defaults: MaxMeshBuildsPerTick=2,
 //            MaxVerticesPerTick=50000) produces a non-blank settled render on the Entities
 //            backend, proving the throttle changes timing not output. Inconclusive when the
 //            snapshot is all-black (GPU context absent in batchmode). BRG-backend parity not
@@ -135,12 +135,12 @@ namespace MapRenderer.Tests
         // ── S87 shared helper ────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Builds a z=5 (9-tile) cover with Phase-2 consume BLOCKED (<c>MaxBuildsPerTick = 0</c>) and every
-        /// tile's tessellation KICKED and COMPLETED (uncapped kicks + a generous wait). After this returns,
-        /// each tile has a completed <c>TessellationTask</c> awaiting consume; nothing is Built yet — the
+        /// Builds a z=5 (9-tile) cover with consume BLOCKED (<c>MaxConsumesPerTick = 0</c>) and every
+        /// tile's mesh build KICKED and COMPLETED (uncapped kicks + a generous wait). After this returns,
+        /// each tile has a completed <c>MeshBuildTask</c> awaiting consume; nothing is Built yet — the
         /// caller sets the consume budget and pumps. Caller owns <c>Teardown()</c> + <c>DestroyImmediate(go)</c>.
         ///
-        /// The 2000ms wait covers all 9 concurrent tessellations on slow / single-core machines (a fixed
+        /// The 2000ms wait covers all 9 concurrent mesh builds on slow / single-core machines (a fixed
         /// 300ms was too tight — see S55 Tooth_c history). We cannot poll-for-all-completions without
         /// consuming, so a generous sleep is used.
         /// </summary>
@@ -151,64 +151,64 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
-            view.Config.MaxTessellationsPerTick = 64;           // kick all tiles
+            view.Config.MaxConsumesPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
+            view.Config.MaxMeshBuildsPerTick = 64;           // kick all tiles
             view.Config.MaxVerticesPerTick      = int.MaxValue;
             view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
             view.Tick(); Thread.Sleep(10);   // request
             view.Tick(); Thread.Sleep(10);   // observe → ReadyBytes
-            view.Tick(); Thread.Sleep(2000); // kick all; wait for every tessellation to complete
+            view.Tick(); Thread.Sleep(2000); // kick all; wait for every mesh build to complete
             return (go, view);
         }
 
-        // ── Tooth (a): Tessellation cap binds ────────────────────────────────────────────────
+        // ── Tooth (a): Mesh build cap binds ────────────────────────────────────────────────
 
         /// <summary>
-        /// MaxTessellationsPerTick=1 limits kick-offs to exactly 1 per Tick even when multiple
+        /// MaxMeshBuildsPerTick=1 limits kick-offs to exactly 1 per Tick even when multiple
         /// tiles have ready fetch bytes. Uses z=5 (known 9-tile cover like S51 tests) to guarantee >= 2 tiles.
         ///
         /// Timing note: with the two-tick kick pattern (fetch observe on Tick N, kick on Tick N+1),
-        /// TessellationsKickedLastTick is 0 on the observe tick and 1 on the first kick tick.
+        /// MeshBuildsKickedLastTick is 0 on the observe tick and 1 on the first kick tick.
         /// </summary>
         [Test]
-        public void Tooth_a_TessellationCapBinds()
+        public void Tooth_a_MeshBuildCapBinds()
         {
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_A");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick          = 64;
-            view.Config.MaxTessellationsPerTick   = 1;  // one kick per Tick
+            view.Config.MaxConsumesPerTick          = 64;
+            view.Config.MaxMeshBuildsPerTick   = 1;  // one kick per Tick
             view.Config.MaxVerticesPerTick        = int.MaxValue;
 
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
-                // Tick 1: request tiles. PumpPendingBuilds sees no tiles, then cover adds them.
+                // Tick 1: request tiles. PumpPending sees no tiles, then cover adds them.
                 view.Tick();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 2,
                     "Need at least 2 tiles at z=5 for the cap test to be non-vacuous.");
-                Assert.AreEqual(0, view.TessellationsKickedLastTick(),
+                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
                     "Tooth (a): after Tick 1 (requests only), no kicks issued yet.");
 
                 // Tick 2: observe completed fetches → ReadyBytes set. Still no kicks.
                 Thread.Sleep(2);
                 view.Tick();
-                Assert.AreEqual(0, view.TessellationsKickedLastTick(),
+                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
                     "Tooth (a): after observe Tick, kicks still 0 (kick deferred to next Tick).");
 
                 // Tick 3: first kick Tick — cap of 1 must bind.
                 view.Tick();
-                Assert.AreEqual(1, view.TessellationsKickedLastTick(),
+                Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
                     $"Tooth (a): cap=1 must limit kicks to exactly 1 on the first kick Tick " +
                     $"(loaded tiles = {view.LoadedTileCount()}).");
 
                 // Settle to confirm all tiles eventually complete under the cap.
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(),
-                    "Tiles must eventually settle even with MaxTessellationsPerTick=1.");
+                    "Tiles must eventually settle even with MaxMeshBuildsPerTick=1.");
             }
             finally
             {
@@ -221,7 +221,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// S87: consume is per-MESH, not per-tile. With the per-frame mesh-count budget
-        /// (<c>MaxBuildsPerTick</c>) set to 1, a multi-layer tile is uploaded one mesh per frame — so at
+        /// (<c>MaxConsumesPerTick</c>) set to 1, a multi-layer tile is uploaded one mesh per frame — so at
         /// least one frame uploads a mesh while completing NO tile (<c>MeshesConsumedLastTick &gt;= 1 &amp;&amp;
         /// TilesConsumedLastTick == 0</c>). A tile-atomic consume can NEVER produce such a frame (it always
         /// finishes the tile it touches), so this is the decisive falsifier. Also asserts no frame exceeds
@@ -238,7 +238,7 @@ namespace MapRenderer.Tests
                     "Need a multi-tile z=5 backlog so the per-mesh split is non-vacuous.");
 
                 // Consume ONE mesh per frame.
-                view.Config.MaxBuildsPerTick   = 1;
+                view.Config.MaxConsumesPerTick   = 1;
                 view.Config.MaxVerticesPerTick = int.MaxValue;
 
                 bool sawPartialTileFrame = false; // a frame that uploaded a mesh but completed NO tile
@@ -274,7 +274,7 @@ namespace MapRenderer.Tests
         // ── Tooth (d): Settles identically ────────────────────────────────────────────────
 
         /// <summary>
-        /// Throttled (MaxTessellationsPerTick=1, MaxVerticesPerTick=1) and uncapped settings
+        /// Throttled (MaxMeshBuildsPerTick=1, MaxVerticesPerTick=1) and uncapped settings
         /// must produce the same number of loaded tiles (static cover, same fixture).
         /// Tests that throttle does not permanently stall or drop tiles.
         /// </summary>
@@ -289,8 +289,8 @@ namespace MapRenderer.Tests
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 1;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 1;
                 view.Config.MaxVerticesPerTick      = 1;
                 try
                 {
@@ -310,8 +310,8 @@ namespace MapRenderer.Tests
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
                 view.Config.MaxVerticesPerTick      = int.MaxValue;
                 try
                 {
@@ -346,8 +346,8 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
@@ -453,7 +453,7 @@ namespace MapRenderer.Tests
                 int totalBacklogMeshes = totalTiles * layersPerTile;
 
                 // Recorders BEFORE the measured pump. CollectOnlyOnCurrentThread: the consume loop runs on
-                // the main thread, so PmAddTileLayer / PmMeshUpload register here; background tessellation
+                // the main thread, so PmAddTileLayer / PmMeshUpload register here; background mesh build
                 // (SetupBlockedBacklog, already done) does not.
                 using var addLayerRecorder = ProfilerRecorder.StartNew(
                     ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer", capacity: 64,
@@ -466,7 +466,7 @@ namespace MapRenderer.Tests
 
                 // ONE pump with a partial per-frame MESH budget (< the full backlog).
                 const int meshBudget = 3;
-                view.Config.MaxBuildsPerTick   = meshBudget;
+                view.Config.MaxConsumesPerTick   = meshBudget;
                 view.Config.MaxVerticesPerTick = int.MaxValue;
                 view.Tick();
 
@@ -510,7 +510,7 @@ namespace MapRenderer.Tests
         // ── Tooth (e): Pixel parity with S55 default throttle ────────────────────────────────────
 
         /// <summary>
-        /// A throttled MapView (S55 defaults: MaxTessellationsPerTick=2, MaxVerticesPerTick=50000)
+        /// A throttled MapView (S55 defaults: MaxMeshBuildsPerTick=2, MaxVerticesPerTick=50000)
         /// must render a non-blank settled fill cover on the default Entities backend. Proves the
         /// throttle changes timing, not output.
         ///
@@ -545,8 +545,8 @@ namespace MapRenderer.Tests
             // S55 DEFAULT throttle values — the whole point is not to override them here.
             view.Config.MinZoom = Zoom; view.Config.MaxZoom = Zoom;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 2;      // S55 default
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 2;      // S55 default
             view.Config.MaxVerticesPerTick      = 50000;  // S55 default
 
             try
@@ -604,12 +604,12 @@ namespace MapRenderer.Tests
         // ── Tooth (g): No new per-frame GC ───────────────────────────────────────────────────────
 
         /// <summary>
-        /// The 3 new <c>int</c> counter resets (<c>_tessellationsKickedLastTick</c> etc.) and
-        /// vertex-budget arithmetic in <c>PumpPendingBuilds</c> are scalar operations — no boxing.
+        /// The 3 new <c>int</c> counter resets (<c>_mesh buildsKickedLastTick</c> etc.) and
+        /// vertex-budget arithmetic in <c>PumpPending</c> are scalar operations — no boxing.
         /// Verified with <c>Is.Not.AllocatingGCMemory()</c> on the BRG backend (zero-alloc contract)
         /// in steady state (all tiles built, no pending work).
         ///
-        /// Mirrors <see cref="MapViewAsyncTessellationTests.Tooth6_SteadyStateTick_DoesNotAllocateGCMemory"/>.
+        /// Mirrors <see cref="MapViewAsyncMeshBuildTests.Tooth6_SteadyStateTick_DoesNotAllocateGCMemory"/>.
         /// </summary>
         [Test]
         public void Tooth_g_SteadyStateTick_NoNewGC_BrgBackend()
@@ -620,8 +620,8 @@ namespace MapRenderer.Tests
             view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64; // uncapped for fast settle
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64; // uncapped for fast settle
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
@@ -636,7 +636,7 @@ namespace MapRenderer.Tests
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
                 view.Tick();
 
-                // ── (a) within-cover pan: PumpPendingBuilds resets 3 int counters, then early-exits ──
+                // ── (a) within-cover pan: PumpPending resets 3 int counters, then early-exits ──
                 // The counters and budget locals are all scalar ints — must not box.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
                 Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
@@ -667,7 +667,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth_h_PartialTileEviction_NoLeak()
         {
-            long Live() => MapRenderer.Unity.Rendering.Style.MeshDataTessellation.DebugLiveAllocCount;
+            long Live() => MapRenderer.Unity.Rendering.Style.MeshDataPayload.DebugLiveAllocCount;
 
             long baseline = Live();
 
@@ -675,7 +675,7 @@ namespace MapRenderer.Tests
             try
             {
                 // Consume a few meshes at 1/frame so some tiles are left PARTIALLY consumed (cursor > 0).
-                view.Config.MaxBuildsPerTick   = 1;
+                view.Config.MaxConsumesPerTick   = 1;
                 view.Config.MaxVerticesPerTick = int.MaxValue;
                 for (int i = 0; i < 3; i++) view.Tick();
                 Assert.IsFalse(view.AllTilesSettled(),

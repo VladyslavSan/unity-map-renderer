@@ -1,0 +1,217 @@
+using System.Collections.Generic;
+using System.IO;
+using NUnit.Framework;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Geometry;
+using MapRenderer.Core.Mvt;
+using MapRenderer.Jobs;
+
+namespace MapRenderer.Tests
+{
+    /// <summary>
+    /// Planar differential oracle for <see cref="LineRibbonJob"/> (3D, Burst) vs the managed 2D reference
+    /// <see cref="LineTessellator.Triangulate"/>. Fed a FLAT centerline (points on the XZ plane, <c>up = +Y</c>),
+    /// the 3D array builder must reproduce the managed ribbon: mapping flat 2D <c>(x, y) → 3D (x, 0, y)</c>,
+    /// <c>Position → (x, 0, z)</c>, <c>Across → (nx, 0, nz)</c>, with <c>Position.y == 0</c> and <c>Across.y == 0</c>.
+    ///
+    /// <para>This is the safety net that needs no builder, no projection, and no GPU (S100). Parity is
+    /// TIGHT-TOLERANCE, not bit-exact: the single no-branch 3D formulation reorders the same float ops (an extra
+    /// normalize; the round arc swept in a local basis rather than global <c>atan2</c>), so vertices agree to
+    /// ~1e-9 — pixel-identical — but not to the last bit. Chasing bit-exactness would require reintroducing the
+    /// planar-special frame this stage deletes. Triangle topology (integer indices) must match EXACTLY.</para>
+    /// </summary>
+    [TestFixture]
+    public class LineRibbonJobTests
+    {
+        private const double Eps = 1e-9;
+
+        private static string FixturePath =>
+            Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
+
+        // ── Oracle harness ──────────────────────────────────────────────────────────────────────
+
+        private static (LineRibbonVertex[] verts, int[] indices) RunJob(
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments)
+        {
+            int capV = LineRibbonJob.MaxVertexCount(pts.Length, roundSegments);
+            int capI = LineRibbonJob.MaxIndexCount(pts.Length, roundSegments);
+
+            var points = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
+            var ups    = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
+            var outV   = new NativeArray<LineRibbonVertex>(capV == 0 ? 1 : capV, Allocator.TempJob);
+            var outI   = new NativeArray<int>(capI == 0 ? 1 : capI, Allocator.TempJob);
+            var vc     = new NativeArray<int>(1, Allocator.TempJob);
+            var ic     = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < pts.Length; i++)
+                {
+                    points[i] = new double3(pts[i].x, 0.0, pts[i].y); // flat centerline: 2D (x,y) → 3D (x,0,y)
+                    ups[i]    = new double3(0.0, 1.0, 0.0);            // Mercator up = +Y
+                }
+
+                new LineRibbonJob
+                {
+                    Points         = points,
+                    Ups            = ups,
+                    PointCount     = pts.Length,
+                    Join           = join,
+                    Cap            = cap,
+                    MiterLimit     = miterLimit,
+                    RoundSegments  = roundSegments,
+                    OutVertices    = outV,
+                    OutIndices     = outI,
+                    OutVertexCount = vc,
+                    OutIndexCount  = ic,
+                }.Schedule().Complete();
+
+                int nv = vc[0], ni = ic[0];
+                var verts   = new LineRibbonVertex[nv];
+                var indices = new int[ni];
+                for (int i = 0; i < nv; i++) verts[i]   = outV[i];
+                for (int i = 0; i < ni; i++) indices[i] = outI[i];
+                return (verts, indices);
+            }
+            finally
+            {
+                points.Dispose(); ups.Dispose(); outV.Dispose(); outI.Dispose(); vc.Dispose(); ic.Dispose();
+            }
+        }
+
+        /// <summary>Assert the 3D ribbon job matches the managed 2D reference for <paramref name="pts"/> under the
+        /// given style. Counts + indices exact; vertex geometry within <see cref="Eps"/>; the extruded plane's
+        /// out-of-plane component (Position.y / Across.y) must be zero.</summary>
+        private static void AssertParity(
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments, string label)
+        {
+            var managed  = LineTessellator.Triangulate(pts, join, cap, miterLimit, roundSegments);
+            var (jv, ji) = RunJob(pts, join, cap, miterLimit, roundSegments);
+
+            Assert.AreEqual(managed.Vertices.Length, jv.Length, $"{label}: vertex count");
+            Assert.AreEqual(managed.Indices.Length,  ji.Length, $"{label}: index count");
+
+            for (int i = 0; i < ji.Length; i++)
+                Assert.AreEqual(managed.Indices[i], ji[i], $"{label}: index[{i}]");
+
+            for (int i = 0; i < jv.Length; i++)
+            {
+                LineVertex m = managed.Vertices[i]; LineRibbonVertex j = jv[i];
+                Assert.AreEqual(m.Side,       j.Side,       $"{label}: v[{i}].Side");        // pure assignment
+                Assert.AreEqual(m.WidthScale, j.WidthScale, $"{label}: v[{i}].WidthScale");
+
+                Assert.AreEqual(m.Position.x,   j.Position.x,   Eps, $"{label}: v[{i}].Position.x");
+                Assert.AreEqual(m.Position.y,   j.Position.z,   Eps, $"{label}: v[{i}].Position.z (2D-y)");
+                Assert.AreEqual(0.0,            j.Position.y,   Eps, $"{label}: v[{i}].Position.y must be 0");
+                Assert.AreEqual(m.Normal.x,     j.Across.x,     Eps, $"{label}: v[{i}].Across.x");
+                Assert.AreEqual(m.Normal.y,     j.Across.z,     Eps, $"{label}: v[{i}].Across.z (2D-y)");
+                Assert.AreEqual(0.0,            j.Across.y,     Eps, $"{label}: v[{i}].Across.y must be 0");
+                Assert.AreEqual(m.DistanceAlong, j.DistanceAlong, Eps, $"{label}: v[{i}].DistanceAlong");
+            }
+        }
+
+        // ── Degenerate / smoke ───────────────────────────────────────────────────────────────────
+
+        [Test]
+        public void LessThanTwoPoints_ProducesZeroOutput()
+        {
+            var (jv, ji) = RunJob(new[] { new double2(5, 5) }, JoinType.Miter, CapType.Butt, 2.0, 4);
+            Assert.AreEqual(0, jv.Length, "< 2 points → 0 verts.");
+            Assert.AreEqual(0, ji.Length, "< 2 points → 0 indices.");
+        }
+
+        [Test]
+        public void DuplicateConsecutivePoints_CollapsedIdentically()
+        {
+            var pts = new[]
+            {
+                new double2(0, 0), new double2(0, 0),
+                new double2(10, 0), new double2(10, 0), new double2(20, 5),
+            };
+            AssertParity(pts, JoinType.Miter, CapType.Butt, 2.0, 4, "dup-collapse");
+        }
+
+        // ── Straight / miter / bevel / caps ────────────────────────────────────────────────────────
+
+        [Test]
+        public void TwoPoints_Butt_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0) },
+                            JoinType.Miter, CapType.Butt, 2.0, 4, "2pt-butt");
+
+        [Test]
+        public void MiterJoin_ShallowCorner_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 3) },
+                            JoinType.Miter, CapType.Butt, 4.0, 4, "miter-shallow");
+
+        [Test]
+        public void MiterJoin_SharpCorner_FallsBackToBevel_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(1, 1) },
+                            JoinType.Miter, CapType.Butt, 2.0, 4, "miter->bevel");
+
+        [Test]
+        public void BevelJoin_LeftTurn_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) },
+                            JoinType.Bevel, CapType.Butt, 2.0, 4, "bevel-left");
+
+        [Test]
+        public void BevelJoin_RightTurn_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) },
+                            JoinType.Bevel, CapType.Butt, 2.0, 4, "bevel-right");
+
+        [Test]
+        public void SquareCap_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) },
+                            JoinType.Miter, CapType.Square, 4.0, 4, "square-cap");
+
+        // ── Round join / cap (the local-basis arc sweep) ─────────────────────────────────────────────
+
+        [Test]
+        public void RoundJoin_BothTurns_Parity()
+        {
+            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) },
+                         JoinType.Round, CapType.Butt, 2.0, 4, "round-join-left");
+            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) },
+                         JoinType.Round, CapType.Butt, 2.0, 4, "round-join-right");
+        }
+
+        [Test]
+        public void RoundCap_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) },
+                            JoinType.Miter, CapType.Round, 4.0, 3, "round-cap");
+
+        [Test]
+        public void RoundCap_And_RoundJoin_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(18, 6), new double2(28, 6) },
+                            JoinType.Round, CapType.Round, 2.0, 4, "round-both");
+
+        // ── Fixture-wide oracle over real line geometry (geolines layer) ────────────────────────────
+
+        [Test]
+        public void Fixture_Geolines_Parity_MiterButt()
+        {
+            Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
+            var tile  = MvtDecoder.Decode(File.ReadAllBytes(FixturePath));
+            var layer = tile.GetLayer("geolines");
+            Assert.IsNotNull(layer, "geolines layer present in fixture");
+
+            int pathsChecked = 0;
+            foreach (var feature in layer.Features)
+            {
+                if (feature.GeometryType != MvtGeometryType.LineString || feature.Geometry == null)
+                    continue;
+
+                List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
+                foreach (var path in paths)
+                {
+                    if (path.Count < 2) continue;
+                    AssertParity(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4, $"geolines#{feature.Id}");
+                    pathsChecked++;
+                }
+            }
+
+            Assert.Greater(pathsChecked, 0, "expected at least one geoline path to build");
+        }
+    }
+}

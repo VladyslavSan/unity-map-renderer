@@ -114,7 +114,7 @@ namespace MapRenderer.Tests
         /// <summary>The scheduler's in-flight fetch count.</summary>
         public static int InFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.InFlightCount : 0;
 
-        /// <summary>Number of tiles released while their tessellation was still in-flight.</summary>
+        /// <summary>Number of tiles released while their mesh build was still in-flight.</summary>
         public static int ReleasedMidFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
 
         /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
@@ -126,8 +126,8 @@ namespace MapRenderer.Tests
         /// throttle.</summary>
         public static int CoverRecomputesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.CoverRecomputesLastTick : 0;
 
-        /// <summary>S55: tessellation kicks issued in the most recent Tick.</summary>
-        public static int TessellationsKickedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TessellationsKickedLastTick : 0;
+        /// <summary>S55: mesh build kicks issued in the most recent Tick.</summary>
+        public static int MeshBuildsKickedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshBuildsKickedLastTick : 0;
         /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
         public static int VerticesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
         /// <summary>S55/S87: number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
@@ -136,7 +136,7 @@ namespace MapRenderer.Tests
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
         /// <summary>S82: cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
-        /// decode/tessellate/upload).</summary>
+        /// decode/build/upload).</summary>
         public static int PreparedCacheHits(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheHits : 0;
         /// <summary>S82: cumulative PreparedTileCache miss count (a cover-entry that genuinely re-prepared).</summary>
         public static int PreparedCacheMisses(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheMisses : 0;
@@ -159,12 +159,12 @@ namespace MapRenderer.Tests
         /// <summary>True once every loaded tile has finished building (or is definitively absent).</summary>
         public static bool AllTilesSettled(this MapViewComponent view) => view.TileManager == null || view.TileManager.AllTilesSettled();
 
-        /// <summary>Deterministic drain — blocks until all in-flight fetch and tessellation complete, then
+        /// <summary>Deterministic drain — blocks until all in-flight fetch and mesh build complete, then
         /// consumes their results synchronously. After this returns, <see cref="AllTilesSettled"/> is true.</summary>
-        public static void DrainTessellation(this MapViewComponent view)
+        public static void DrainMeshBuilds(this MapViewComponent view)
         {
             if (view.Camera == null || view.TileManager == null) return;
-            view.TileManager.DrainTessellation(view.Camera.CurrentProperties);
+            view.TileManager.DrainMeshBuilds(view.Camera.CurrentProperties);
         }
 
         // ── Backend handles (null unless the matching backend is selected and Initialise has run) ─

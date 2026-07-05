@@ -11,7 +11,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// Fill <see cref="IRenderLayer"/>: a MapLibre <c>fill</c> layer as a runtime render object. Wraps the
     /// managed <see cref="Meshing.StyledFillTileBuilder"/> (unchanged) — this is pure indirection over the
-    /// existing tessellation code, so it is behaviour-preserving.
+    /// existing mesh-building code, so it is behaviour-preserving.
     /// </summary>
     internal sealed class FillRenderLayer : IRenderLayer
     {

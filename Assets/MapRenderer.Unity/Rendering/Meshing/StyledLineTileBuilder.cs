@@ -20,19 +20,29 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// S14 managed per-layer line mesh builder. Mirrors <see cref="StyledFillTileBuilder"/> but for
     /// line-type style layers.
     ///
-    /// Pipeline per feature (S89 D2 / S91-B): MvtGeometry.Decode (managed) → project the centerline through
-    ///   the shared <c>ProjectPointsJob</c> (the SAME projection surface as fills — no bespoke
-    ///   WebMercator.Forward; run on this worker via <c>.Run()</c>) → Burst <c>LineTessellationJob</c> per ring
-    ///   (in the projected surface plane) → stream write into a <c>Mesh.MeshData</c>. The managed
-    ///   <c>LineTessellator</c> is retired from this path (differential oracle only). Mercator output is
-    ///   bit-for-bit the pre-S91 path; S91-C tessellates in the per-vertex tangent frame for the globe.
+    /// Pipeline per feature (S100): MvtGeometry.Decode (managed) → curvature-subdivide the centerline in tile
+    ///   space per the projection's <see cref="IProjection.MaxRefineAngleRad"/> policy (a no-op for the flat
+    ///   Mercator, whose tolerance is ∞) → project the subdivided centerline to an origin-relative render-space
+    ///   <c>(point, up)</c> ARRAY through the managed <see cref="IProjection.ProjectPoint"/> → Burst
+    ///   <see cref="LineRibbonJob"/> (projection-agnostic; builds the ribbon in 3D with
+    ///   <c>across = cross(along, up)</c>) → stream write into a <c>Mesh.MeshData</c>.
     ///
-    /// S89 Stage B — <see cref="WriteMeshData"/> tessellates AND writes directly into a caller-allocated
+    /// <para>ONE code path for every projection. Winding is correct BY CONSTRUCTION — <c>across</c> is tied to the
+    /// same <c>up</c> the centerline was projected with (one frame), so there is no per-projection winding flip,
+    /// no separate tangent-basis second frame, and no curvature/handedness branch. The managed
+    /// <see cref="LineTessellator"/> is the planar differential oracle for <see cref="LineRibbonJob"/>
+    /// (<c>LineRibbonJobTests</c>). See <c>docs/mesh-pipeline.md</c> for how this line ordering
+    /// (Subdivide → Project → Triangulate) mirrors the fill one, <c>docs/coordinates-and-projections.md §7.1</c>,
+    /// and <c>GlobeLineWindingTests</c>.</para>
+    ///
+    /// S89 Stage B — <see cref="WriteMeshData"/> builds AND writes directly into a caller-allocated
     /// <see cref="Mesh.MeshData"/>, off the main thread (see <see cref="StyledFillTileBuilder"/> for the
-    /// choreography). The bespoke NativeArray-stream payload + main-thread copy is gone.
+    /// choreography). The centerline projection is a managed virtual-call loop (small polylines; the heavy
+    /// ribbon topology stays in Burst), which is what lets any <see cref="IProjection"/> — including one never
+    /// registered for Burst — flow through this single path (the S100 decisive tooth).
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
-    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, projection surface up; +Y for Mercator) interleaved via <see cref="LinePositionNormal"/>.
+    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, surface up; +Y for Mercator) interleaved via <see cref="LinePositionNormal"/>.
     ///   Stream 1 — TexCoord0: extrusion across-direction (Float32x3, 3D tangent-plane; Y=0 for Mercator).
     ///   Stream 2 — TexCoord1: side + distanceAlong (Float32x2).
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
@@ -86,20 +96,18 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // LineTessellator.Triangulate defaults — the Burst LineTessellationJob must match them for parity.
+        // LineTessellator.Triangulate defaults — LineRibbonJob (and its managed oracle) share them for parity.
         private const double DefaultMiterLimit    = 2.0;
         private const int    DefaultRoundSegments = 4;
 
-        // S91-C C-3 curvature subdivision (globe only): the max great-circle arc a single centerline segment may
-        // span before it is split — sub-points (linear in tile space) project onto the sphere so long chords stop
-        // faceting. ~2° ⇒ sagitta ≈ R·(1−cos1°) ≈ 1 km, sub-pixel at whole-globe scale; segments already shorter
-        // than this (any real zoom) are untouched. Per-segment split is capped so a degenerate span can't blow up.
-        private const double MaxCurveSegmentRad = 2.0 * math.PI_DBL / 180.0;
-        private const int    MaxCurveSegments   = 128;
+        // Per-segment curvature-subdivision cap: however far a segment's projected arc reaches, it is split into at
+        // most this many parts so a degenerate span can't blow up. The ANGLE tolerance is projection-supplied
+        // (IProjection.MaxRefineAngleRad); this is only the safety cap.
+        private const int MaxCurveSegments = 128;
 
-        // S91-B: lines project through the SAME projection surface as fills (ProjectPointsJob), not a bespoke
-        // hardcoded WebMercator.Forward. Launch-time projection config threads a chosen projection here in
-        // S91-C; until then this single seam defaults to WebMercator (Mercator output is bit-for-bit).
+        // S91-B: lines project through the SAME projection surface as fills, not a bespoke hardcoded
+        // WebMercator.Forward. Launch-time projection config threads a chosen projection here; until then this
+        // single seam defaults to WebMercator (Mercator output is bit-for-bit).
         private static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         // White vertex color = identity multiply.
@@ -108,11 +116,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // ── Public API ──────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Tessellate all line features for one style layer and write the geometry directly into
-        /// <paramref name="md"/> (a caller-allocated <c>Mesh.MeshData</c>, count-1 slot), off the main thread.
-        /// Returns <paramref name="vertexCount"/> = 0 (leaving <paramref name="md"/> untouched) when no line
-        /// geometry is produced. <paramref name="bounds"/> carries the worker-computed centerline AABB
-        /// (parity with the pre-S55 RecalculateBounds, which also ignored shader width extrusion).
+        /// Build all line features for one style layer and write the geometry directly into <paramref name="md"/>
+        /// (a caller-allocated <c>Mesh.MeshData</c>, count-1 slot), off the main thread. Returns
+        /// <paramref name="vertexCount"/> = 0 (leaving <paramref name="md"/> untouched) when no line geometry is
+        /// produced. <paramref name="bounds"/> carries the worker-computed centerline AABB (parity with the
+        /// pre-S55 RecalculateBounds, which also ignored shader width extrusion).
         /// </summary>
         public static void WriteMeshData(
             Mesh.MeshData             md,
@@ -137,7 +145,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JoinType joinType = layout.Join;
             CapType  capType  = layout.Cap;
 
-            // Phase 1: tessellate all features into temporary managed lists.
+            // First, build all features into temporary managed lists.
             var tempVerts0  = new List<LinePositionNormal>(512);
             var tempVerts1  = new List<Vector3>(512);
             var tempVerts2  = new List<Vector2>(512);
@@ -147,21 +155,22 @@ namespace MapRenderer.Unity.Rendering.Meshing
             float3 bMin = new float3(float.MaxValue);
             float3 bMax = new float3(float.MinValue);
 
-            // Reusable Burst scratch: NativeLists own their own grow-only capacity (Resize sizes each ring; the
-            // list keeps the high-water buffer), so there is no per-ring malloc/free churn and no hand-tracked
-            // caps. Sequential .Run() means each buffer is free for reuse before the next ring.
             projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via WriteInto
-            // S91-C: a curved-surface projection (the globe — its render mapping reverses winding) needs a
-            // PER-VERTEX tangent frame; the planar Mercator keeps the flat path bit-for-bit.
-            bool globe = projection.ReversesWinding;
-            double3 tileOrigin3 = tileOriginRender; // S91-C: the caller-supplied SW-corner render origin (Mercator: (mercX, 0, mercZ))
-            var geoScratch = new NativeList<GeoCoordinate>(Allocator.Persistent); // tile → geodetic surface points
-            var projWorld  = new NativeList<double3>(Allocator.Persistent);       // origin-relative projected centerline
-            var projUp     = new NativeList<double3>(Allocator.Persistent);       // per-point surface up (constant +Y for Mercator)
-            var inPts      = new NativeList<double2>(Allocator.Persistent);       // tile coords in, then projected (x,z) for tessellation
-            var subPts     = new NativeList<double2>(Allocator.Persistent);       // S91-C C-3: curvature-subdivided tile centerline (globe)
-            var outV       = new NativeList<LineVertex>(Allocator.Persistent);
-            var outI       = new NativeList<int>(Allocator.Persistent);
+            double maxRefineAngleRad = projection.MaxRefineAngleRad; // ∞ ⇒ flat sheet, subdivide never fires
+            double3 tileOrigin3 = tileOriginRender; // the caller-supplied SW-corner render origin
+
+            // Reusable Burst scratch: NativeLists own their own grow-only capacity (Resize sizes each ring; the
+            // list keeps the high-water buffer), so there is no per-ring malloc/free churn. Sequential .Run() means
+            // each buffer is free for reuse before the next ring.
+            var inTile    = new NativeList<double2>(Allocator.Persistent);       // original ring tile coords
+            var geoOrig   = new NativeList<GeoCoordinate>(Allocator.Persistent);  // original ring → geodetic
+            var upOrig    = new NativeList<double3>(Allocator.Persistent);        // original-point surface up (subdivision metric)
+            var subTile   = new NativeList<double2>(Allocator.Persistent);        // curvature-subdivided tile centerline
+            var subGeo    = new NativeList<GeoCoordinate>(Allocator.Persistent);  // subdivided → geodetic
+            var world     = new NativeList<double3>(Allocator.Persistent);        // subdivided, projected, origin-relative
+            var up        = new NativeList<double3>(Allocator.Persistent);        // subdivided per-point surface up
+            var outV      = new NativeList<LineRibbonVertex>(Allocator.Persistent);
+            var outI      = new NativeList<int>(Allocator.Persistent);
             var vcArr = new NativeArray<int>(1, Allocator.Persistent);
             var icArr = new NativeArray<int>(1, Allocator.Persistent);
 
@@ -193,7 +202,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
                 // width depends on the feature, _Width is set to 1.0 by BindLinePaintToApplier, so WidthScale
-                // carries the full evaluated pixel width; otherwise WidthScale stays the tessellator's factor.
+                // carries the full evaluated pixel width; otherwise WidthScale stays the ribbon's factor.
                 float featureWidthScale = 1f;
                 if (paint.Width.DependsOnFeature)
                 {
@@ -210,51 +219,49 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                     int n = ring.Count;
 
-                    // Size the projection buffers to the original ring (n points) — Resize grows the backing
-                    // buffer only when a longer ring appears, otherwise just sets the length.
-                    inPts.Resize(n, NativeArrayOptions.UninitializedMemory);
-                    geoScratch.Resize(n, NativeArrayOptions.UninitializedMemory);
-                    projWorld.Resize(n, NativeArrayOptions.UninitializedMemory);
-                    projUp.Resize(n, NativeArrayOptions.UninitializedMemory);
-
-                    // Project the centerline through the SAME jobs as fills (TileToGeoJob → ProjectPointsJob<TProj>) —
-                    // no bespoke WebMercator.Forward. inPts carries the tile coords in; projUp is the per-point surface
-                    // up (used by the planar +Y frame and the globe curvature test).
-                    for (int k = 0; k < n; k++) inPts[k] = ring[k];
+                    // 1) Project the ORIGINAL ring to per-point surface ups (the subdivision metric). Tile→geo via
+                    //    the shared projection-independent job; geo→up via the managed ProjectPoint (works for any
+                    //    IProjection, incl. types never registered for Burst — the S100 decisive tooth).
+                    inTile.Resize(n, NativeArrayOptions.UninitializedMemory);
+                    geoOrig.Resize(n, NativeArrayOptions.UninitializedMemory);
+                    upOrig.Resize(n, NativeArrayOptions.UninitializedMemory);
+                    for (int k = 0; k < n; k++) inTile[k] = ring[k];
                     new TileToGeoJob
                     {
-                        TileZ = id.Z, TileX = id.X, TileY = id.Y, Extent = extent,
-                        TileCoords = inPts.AsArray(), OutGeo = geoScratch.AsArray(),
+                        Tile = id, Extent = extent,
+                        TileCoords = inTile.AsArray(), OutGeo = geoOrig.AsArray(),
                     }.Run(n);
-                    ProjectionDispatch.Run(projection, tileOrigin3, geoScratch.AsArray(), projWorld.AsArray(), projUp.AsArray(), n);
+                    for (int k = 0; k < n; k++) upOrig[k] = projection.ProjectPoint(geoOrig[k]).Up;
 
-                    // Tessellation input. Planar Mercator tessellates in the projected (east,north)=(x,z) plane
-                    // (bit-for-bit the old path). The globe tessellates in TILE space (unique per centerline point —
-                    // the flattened ECEF xz would collide the sphere's front/back) AND curvature-subdivides each
-                    // segment (C-3): sub-points, linear in tile space, project onto the sphere so long chords stop
-                    // cutting through it (the ring faceting). The bake reconstructs the 3D frame per output vertex.
-                    NativeArray<double2> tessSrc;
-                    int                  tessN;
-                    if (globe)
+                    // 2) Curvature-subdivide the centerline in TILE space (linear sub-points that project onto the
+                    //    surface). Driven entirely by the projection's tolerance — ∞ ⇒ 1 step/segment ⇒ the
+                    //    original ring, so the flat Mercator path is the degenerate value, not a branch.
+                    int m = SubdivideCenterline(ring, upOrig.AsArray(), n, subTile, maxRefineAngleRad);
+
+                    // 3) Project the SUBDIVIDED centerline to the origin-relative (point, up) render-space array.
+                    subGeo.Resize(m, NativeArrayOptions.UninitializedMemory);
+                    world.Resize(m, NativeArrayOptions.UninitializedMemory);
+                    up.Resize(m, NativeArrayOptions.UninitializedMemory);
+                    new TileToGeoJob
                     {
-                        tessN   = SubdivideGlobeCenterline(ring, projUp.AsArray(), n, subPts);
-                        tessSrc = subPts.AsArray();
+                        Tile = id, Extent = extent,
+                        TileCoords = subTile.AsArray(), OutGeo = subGeo.AsArray(),
+                    }.Run(m);
+                    for (int k = 0; k < m; k++)
+                    {
+                        ProjectedPoint pp = projection.ProjectPoint(subGeo[k]);
+                        world[k] = pp.World - tileOrigin3; // origin-relative (RTC); translation-invariant ribbon math
+                        up[k]    = pp.Up;
                     }
-                    else
-                    {
-                        for (int k = 0; k < n; k++) inPts[k] = new double2(projWorld[k].x, projWorld[k].z);
-                        tessSrc = inPts.AsArray();
-                        tessN   = n;
-                    }
 
-                    // Worst-case tessellation output sizing — from the (possibly subdivided) point count.
-                    outV.Resize(LineTessellationJob.MaxVertexCount(tessN, DefaultRoundSegments), NativeArrayOptions.UninitializedMemory);
-                    outI.Resize(LineTessellationJob.MaxIndexCount(tessN, DefaultRoundSegments),  NativeArrayOptions.UninitializedMemory);
-
-                    new LineTessellationJob
+                    // 4) Build the ribbon in 3D from the (point, up) array — one path, winding by construction.
+                    outV.Resize(LineRibbonJob.MaxVertexCount(m, DefaultRoundSegments), NativeArrayOptions.UninitializedMemory);
+                    outI.Resize(LineRibbonJob.MaxIndexCount(m, DefaultRoundSegments),  NativeArrayOptions.UninitializedMemory);
+                    new LineRibbonJob
                     {
-                        InputPoints    = tessSrc,
-                        PointCount     = tessN,
+                        Points         = world.AsArray(),
+                        Ups            = up.AsArray(),
+                        PointCount     = m,
                         Join           = joinType,
                         Cap            = capType,
                         MiterLimit     = DefaultMiterLimit,
@@ -270,62 +277,30 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     if (nv == 0 || ni == 0) continue;
 
                     int offset = tempVerts0.Count;
-                    if (globe)
+                    for (int k = 0; k < nv; k++)
                     {
-                        // Globe: reconstruct each ribbon vertex's 3D frame from its TILE-space centerline point
-                        // (the tessellator preserves it as v.Position). Position lands ON the sphere; the up is
-                        // the radial normal; the 2D across is rotated into the local ENU tangent plane
-                        // (tile x → east, tile y → south = −north), so |across| stays the miter factor and the
-                        // shader extrudes the width within the surface tangent plane (the ribbon hugs the globe).
-                        for (int k = 0; k < nv; k++)
+                        LineRibbonVertex rv = outV[k];
+                        float3 pos    = (float3)rv.Position; // origin-relative render space
+                        float3 upN    = (float3)rv.Up;       // surface up (Normal / lighting)
+                        float3 across = (float3)rv.Across;   // 3D across, |across| = miter factor (Y=0 for Mercator)
+                        bMin = math.min(bMin, pos);
+                        bMax = math.max(bMax, pos);
+                        tempVerts0.Add(new LinePositionNormal
                         {
-                            LineVertex v  = outV[k];
-                            double2    ll = id.ToLonLat(v.Position.x, v.Position.y, extent);
-                            var g         = new GeoCoordinate { Latitude = ll.y, Longitude = ll.x };
-                            ProjectedPoint pp = projection.ProjectPoint(g);
-                            float3   pos    = (float3)(pp.World - tileOrigin3); // origin-relative (RTC)
-                            float3   up     = (float3)pp.Up;
-                            float3x3 tb     = projection.TangentBasisAt(g);     // c0=east, c1=up, c2=north
-                            float3   across = (float)v.Normal.x * tb.c0 - (float)v.Normal.y * tb.c2;
-                            bMin = math.min(bMin, pos);
-                            bMax = math.max(bMax, pos);
-                            tempVerts0.Add(new LinePositionNormal
-                            {
-                                Position = new Vector3(pos.x, pos.y, pos.z),
-                                Normal   = new Vector3(up.x, up.y, up.z),
-                            });
-                            tempVerts1.Add(new Vector3(across.x, across.y, across.z));
-                            tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
-                            tempVerts3.Add(new LineWidthColor { WidthScale = v.WidthScale * featureWidthScale, Color = featureColor });
-                        }
-                    }
-                    else
-                    {
-                        // Planar Mercator (unchanged): flat XZ ribbon, constant surface up = projUp[0] (+Y).
-                        float3  upN      = (float3)projUp[0];
-                        Vector3 upNormal = new Vector3(upN.x, upN.y, upN.z);
-                        for (int k = 0; k < nv; k++)
+                            Position = new Vector3(pos.x, pos.y, pos.z),
+                            Normal   = new Vector3(upN.x, upN.y, upN.z),
+                        });
+                        tempVerts1.Add(new Vector3(across.x, across.y, across.z));
+                        tempVerts2.Add(new Vector2(rv.Side, (float)rv.DistanceAlong));
+                        tempVerts3.Add(new LineWidthColor
                         {
-                            LineVertex v = outV[k];
-                            float3 pos = new float3((float)v.Position.x, 0f, (float)v.Position.y);
-                            bMin = math.min(bMin, pos);
-                            bMax = math.max(bMax, pos);
-                            tempVerts0.Add(new LinePositionNormal
-                            {
-                                Position = new Vector3(pos.x, pos.y, pos.z),
-                                Normal   = upNormal,
-                            });
-                            // Across as a 3D tangent-plane vector (magnitude = miter factor); Y=0 = flat Mercator.
-                            tempVerts1.Add(new Vector3((float)v.Normal.x, 0f, (float)v.Normal.y));
-                            tempVerts2.Add(new Vector2(v.Side, (float)v.DistanceAlong));
-                            tempVerts3.Add(new LineWidthColor
-                            {
-                                WidthScale = v.WidthScale * featureWidthScale,
-                                Color      = featureColor,
-                            });
-                        }
+                            WidthScale = rv.WidthScale * featureWidthScale,
+                            Color      = featureColor,
+                        });
                     }
 
+                    // No winding flip: `across = cross(along, up)` ties the ribbon to the same `up` the centerline
+                    // was projected with (one frame), so front-faces point outward for every projection.
                     for (int k = 0; k < ni; k++)
                         tempIndices.Add(offset + outI[k]);
                 }
@@ -333,11 +308,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             }
             finally
             {
-                inPts.Dispose();
-                subPts.Dispose();
-                geoScratch.Dispose();
-                projWorld.Dispose();
-                projUp.Dispose();
+                inTile.Dispose();
+                geoOrig.Dispose();
+                upOrig.Dispose();
+                subTile.Dispose();
+                subGeo.Dispose();
+                world.Dispose();
+                up.Dispose();
                 outV.Dispose();
                 outI.Dispose();
                 vcArr.Dispose();
@@ -347,7 +324,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (tempVerts0.Count == 0 || tempIndices.Count == 0)
                 return; // no geometry — md left untouched; caller disposes the unused MeshData
 
-            // Phase 2: declare the mesh buffers on the MeshData and grab stream views.
+            // Then declare the mesh buffers on the MeshData and grab stream views.
             int vCount = tempVerts0.Count;
             int iCount = tempIndices.Count;
 
@@ -379,22 +356,25 @@ namespace MapRenderer.Unity.Rendering.Meshing
             bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
         }
 
-        // ── S91-C C-3: globe curvature subdivision ─────────────────────────────────────────────────
+        // ── Curvature subdivision (projection-policy driven) ────────────────────────────────────────
 
         /// <summary>
-        /// Densifies a tile-space centerline (<paramref name="ring"/>) so each segment's projected great-circle
-        /// arc stays under <see cref="MaxCurveSegmentRad"/>. The arc a segment spans is read directly from the
-        /// per-point surface normals (<paramref name="up"/>, unit ECEF): <c>acos(dot(up[k], up[k+1]))</c>. Each
-        /// segment is split into that many equal parts by LINEAR interpolation in tile space; every sub-point
-        /// projects onto the sphere (the bake re-projects it), so the chord sagitta shrinks and the ribbon hugs
-        /// the globe instead of faceting. Writes the subdivided points into <paramref name="subPts"/> (grown on
-        /// demand) and returns their count. Globe only — the planar path never calls this.
+        /// Densifies a tile-space centerline (<paramref name="ring"/>) so each segment's projected arc stays under
+        /// <paramref name="maxRefineAngleRad"/> — the projection's <see cref="IProjection.MaxRefineAngleRad"/>
+        /// policy. The arc a segment spans is read from the per-point surface normals (<paramref name="up"/>, unit):
+        /// <c>acos(dot(up[k], up[k+1]))</c>. Each segment is split into that many equal parts by LINEAR
+        /// interpolation in tile space; every sub-point projects onto the surface (step 3 re-projects it), so long
+        /// chords stop faceting. Writes the subdivided points into <paramref name="subPts"/> (grown on demand) and
+        /// returns their count.
+        /// <para>A flat projection returns <c>maxRefineAngleRad = ∞</c>, so <see cref="SegmentSteps"/> yields 1 step
+        /// per segment and the output is the original ring — the Mercator path is the degenerate value of the SAME
+        /// code, with no capability flag.</para>
         /// </summary>
-        internal static int SubdivideGlobeCenterline(
-            List<double2> ring, NativeArray<double3> up, int n, NativeList<double2> subPts)
+        internal static int SubdivideCenterline(
+            List<double2> ring, NativeArray<double3> up, int n, NativeList<double2> subPts, double maxRefineAngleRad)
         {
             int count = 1; // the first point, then `segs` points per segment (sub-points + the segment end)
-            for (int k = 0; k < n - 1; k++) count += SegmentSteps(up[k], up[k + 1]);
+            for (int k = 0; k < n - 1; k++) count += SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
 
             subPts.Resize(count, NativeArrayOptions.UninitializedMemory);
 
@@ -402,7 +382,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             int w = 1;
             for (int k = 0; k < n - 1; k++)
             {
-                int     segs = SegmentSteps(up[k], up[k + 1]);
+                int     segs = SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
                 double2 a    = ring[k];
                 double2 b    = ring[k + 1];
                 for (int j = 1; j <= segs; j++)
@@ -414,13 +394,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             return w;
         }
 
-        /// <summary>Number of equal sub-segments a centerline segment is split into so its projected arc (the
-        /// angle between the two unit surface normals) stays under <see cref="MaxCurveSegmentRad"/>; ≥1, capped
-        /// at <see cref="MaxCurveSegments"/>.</summary>
-        private static int SegmentSteps(double3 upA, double3 upB)
+        /// <summary>Number of equal sub-segments a centerline segment is split into so its projected arc (the angle
+        /// between the two unit surface normals) stays under <paramref name="maxRefineAngleRad"/>; ≥1, capped at
+        /// <see cref="MaxCurveSegments"/>. A ∞ tolerance (flat projection) always yields 1 (no subdivision).</summary>
+        private static int SegmentSteps(double3 upA, double3 upB, double maxRefineAngleRad)
         {
             double ang  = math.acos(math.clamp(math.dot(upA, upB), -1.0, 1.0));
-            int    segs = (int)math.ceil(ang / MaxCurveSegmentRad);
+            int    segs = (int)math.ceil(ang / maxRefineAngleRad);
             if (segs < 1) segs = 1;
             if (segs > MaxCurveSegments) segs = MaxCurveSegments;
             return segs;

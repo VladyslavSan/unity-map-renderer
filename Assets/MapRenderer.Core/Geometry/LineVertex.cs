@@ -3,7 +3,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Join type for polyline corners. Baked at tessellation time — changing join type requires
+    /// Join type for polyline corners. Baked at mesh build time — changing join type requires
     /// a mesh rebuild (per ARCHITECTURE §2 styling model).
     /// </summary>
     public enum JoinType
@@ -30,7 +30,7 @@ namespace MapRenderer.Core.Geometry
     }
 
     /// <summary>
-    /// Cap type for polyline endpoints. Baked at tessellation time.
+    /// Cap type for polyline endpoints. Baked at mesh build time.
     /// </summary>
     public enum CapType
     {
@@ -52,7 +52,7 @@ namespace MapRenderer.Core.Geometry
     ///
     /// Mesh/shader contract (channel layout documented in StyledLineTileBuilder):
     /// <list type="bullet">
-    ///   <item><description><see cref="Position"/> — centerline point in the tessellation space (world meters for S05).</description></item>
+    ///   <item><description><see cref="Position"/> — centerline point in the mesh build space (world meters for S05).</description></item>
     ///   <item><description><see cref="Normal"/> — 2D extrusion normal in the same space. For straight segments and bevel/round
     ///     joins the length is 1. For miter joins the length equals the miter factor (1/cos(θ/2)), so the vertex shader
     ///     can uniformly apply: <c>worldPos.xz += normal * 0.5 * widthMeters</c>. IMPORTANT: do NOT pack these as SNORM
@@ -65,11 +65,11 @@ namespace MapRenderer.Core.Geometry
     /// </summary>
     public struct LineVertex
     {
-        /// <summary>Centerline position in tessellation space (world meters for S05).</summary>
+        /// <summary>Centerline position in mesh build space (world meters for S05).</summary>
         public double2 Position;
 
         /// <summary>
-        /// 2D extrusion normal in tessellation space. Length = 1 for straight/bevel/round vertices;
+        /// 2D extrusion normal in mesh build space. Length = 1 for straight/bevel/round vertices;
         /// length = 1/cos(θ/2) (miter factor) for miter join vertices. The vertex shader applies
         /// <c>worldPos += normal * 0.5 * widthMeters</c> uniformly — the miter factor is baked
         /// into the normal's length, not a separate attribute.

@@ -27,8 +27,8 @@ namespace MapRenderer.Core.Data
     /// configureAwait: false. configureAwait: false (no return) is REQUIRED: the alternative
     /// (UniTask.Run / RunOnThreadPool with the default configureAwait: true) posts the final
     /// continuation via UniTask.Yield() to the Unity PlayerLoop, which never advances when
-    /// polled synchronously from test helpers or DrainTessellation. Without the PlayerLoop pump,
-    /// the task never reaches Succeeded — GetResult() throws "Not yet completed" and DrainTessellation
+    /// polled synchronously from test helpers or DrainMeshBuilds. Without the PlayerLoop pump,
+    /// the task never reaches Succeeded — GetResult() throws "Not yet completed" and DrainMeshBuilds
     /// loops forever. Completing on the ThreadPool (no return) makes IsCompleted true immediately.
     ///
     /// UniTask.SwitchToThreadPool() is available in both the NetCore NuGet build (headless dotnet test)

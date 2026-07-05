@@ -1,11 +1,11 @@
 // S51 Acceptance Tooth 5 — Disposal/leak guard (DECISIVE).
 //
-// Drives load→release of N tiles including the race (release a tile whose tessellation
+// Drives load→release of N tiles including the race (release a tile whose mesh build
 // completed but wasn't consumed) and asserts zero orphaned Mesh objects.
 //
-// S48 extension: TessellationResult now holds NativeArray-backed LayerMeshData payloads.
+// S48 extension: MeshBuildResult now holds NativeArray-backed LayerMeshData payloads.
 // The NativeArray leak guard is NON-VACUOUS:
-//   - MeshDataTessellation.DebugLiveAllocCount tracks live allocations.
+//   - MeshDataPayload.DebugLiveAllocCount tracks live allocations.
 //   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
 //   - A deliberately-leaked NativeArray MUST produce a non-zero counter (positive control).
 //
@@ -41,9 +41,9 @@ namespace MapRenderer.Tests
     /// S51 acceptance tooth 5: disposal/leak guard for load→release race.
     ///
     /// Tests that:
-    ///   (a) A tile built normally (fetch + tessellate + consume) and then released destroys its Mesh.
-    ///   (b) A tile released mid-flight (tessellation started, not yet consumed) leaves zero orphaned Mesh
-    ///       after the tessellation UniTask completes.
+    ///   (a) A tile built normally (fetch + build + consume) and then released destroys its Mesh.
+    ///   (b) A tile released mid-flight (mesh build started, not yet consumed) leaves zero orphaned Mesh
+    ///       after the mesh build UniTask completes.
     ///   (c) Zero net Mesh objects after the full cycle (meshCountBefore == meshCountAfter for the
     ///       tile-owned Meshes).
     /// </summary>
@@ -123,15 +123,15 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             // Baseline: count Meshes before the map load.
             int meshBefore = CountMeshObjects();
 
             view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-            // Drive load: fetch → tessellate → consume (creates Mesh + GameObject).
+            // Drive load: fetch → build → consume (creates Mesh + GameObject).
             PumpUntilSettled(view);
             Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle before testing leak guard.");
             Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -170,21 +170,21 @@ namespace MapRenderer.Tests
         // ── Tooth 5b: Release mid-flight — no orphaned Mesh ──────────────────────────────────
 
         /// <summary>
-        /// The race: request tiles, kick tessellation tasks, then pan far away so tiles are
-        /// released while their tessellation is still in-flight (or just completed). After
-        /// the tessellation tasks complete, no Meshes must be created for the evicted tiles.
+        /// The race: request tiles, kick mesh build tasks, then pan far away so tiles are
+        /// released while their mesh build is still in-flight (or just completed). After
+        /// the mesh build tasks complete, no Meshes must be created for the evicted tiles.
         ///
-        /// This is the precise "race" described in S51 tooth 5: "release a tile whose tessellation
+        /// This is the precise "race" described in S51 tooth 5: "release a tile whose mesh build
         /// result completed but wasn't consumed". ReleaseTile removes the tile from _loaded; the next
-        /// PumpPendingBuilds snapshot (foreach over _loaded) excludes the released tile, so
-        /// ConsumeTessellationTask is never called for it — no Mesh is created.
+        /// PumpPending snapshot (foreach over _loaded) excludes the released tile, so
+        /// ConsumeMeshBuild is never called for it — no Mesh is created.
         ///
-        /// Positive control: the test uses MaxBuildsPerTick=0 during the eviction window to FORCE the
-        /// mid-flight state deterministically. Phase-1 (fetch→kick) still runs, but Phase-2 (consume)
-        /// is gated by MaxBuildsPerTick, so the tessellation task is in-flight when the tile is evicted.
-        /// After the eviction Tick, MaxBuildsPerTick is restored so the new cover can settle normally.
+        /// Positive control: the test uses MaxConsumesPerTick=0 during the eviction window to FORCE the
+        /// mid-flight state deterministically. The build (fetch→kick) still runs, but the consume
+        /// is gated by MaxConsumesPerTick, so the mesh build task is in-flight when the tile is evicted.
+        /// After the eviction Tick, MaxConsumesPerTick is restored so the new cover can settle normally.
         /// The test asserts view.ReleasedMidFlightCount() > 0 to prove the race genuinely occurred
-        /// (i.e., at least one tile had HasTessellationTask && !Built when released).
+        /// (i.e., at least one tile had HasMeshBuild && !Built when released).
         /// </summary>
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
@@ -195,11 +195,11 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
             view.WithTestCamera();
-            // MaxBuildsPerTick = 0 BEFORE initialise: prevents Phase-2 (consume) from running.
-            // Tessellation tasks are KICKED (Phase-1) but never consumed, guaranteeing the tiles
-            // are in HasTessellationTask=true, Built=false state when we evict them.
-            view.Config.MaxBuildsPerTick = 0;
-            view.Config.MaxTessellationsPerTick = 64;
+            // MaxConsumesPerTick = 0 BEFORE initialise: prevents the consume from running.
+            // Mesh build tasks are KICKED (build) but never consumed, guaranteeing the tiles
+            // are in HasMeshBuild=true, Built=false state when we evict them.
+            view.Config.MaxConsumesPerTick = 0;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
@@ -210,39 +210,39 @@ namespace MapRenderer.Tests
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → completes immediately).
                 view.Tick();
-                // Brief sleep so ThreadPool tessellation tasks can start (MaxBuildsPerTick=0 won't consume them).
+                // Brief sleep so ThreadPool mesh build tasks can start (MaxConsumesPerTick=0 won't consume them).
                 Thread.Sleep(5);
-                // Second Tick: fetch complete → tessellation tasks are kicked (Phase-1). Still not consumed.
+                // Second Tick: fetch complete → mesh build tasks are kicked (build). Still not consumed.
                 view.Tick();
 
-                // Pan far east — before tessellation results are consumed.
-                // MaxBuildsPerTick=0 guarantees tiles are still in-flight (HasTessellationTask && !Built).
+                // Pan far east — before mesh build results are consumed.
+                // MaxConsumesPerTick=0 guarantees tiles are still in-flight (HasMeshBuild && !Built).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts original tiles while they are in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
                 // This is the decisive assertion that separates "race exercised" from "vacuous pass".
-                // ReleasedMidFlightCount is incremented in ReleaseTile when HasTessellationTask &&
-                // !Built — meaning the tessellation was in-flight at the moment of release.
+                // ReleasedMidFlightCount is incremented in ReleaseTile when HasMeshBuild &&
+                // !Built — meaning the mesh build was in-flight at the moment of release.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
-                    "Positive control: at least one tile must have been released while its tessellation " +
-                    "was still in-flight (HasTessellationTask && !Built at the time of ReleaseTile). " +
-                    "If this is 0, the race did not occur — MaxBuildsPerTick=0 did not prevent consumption, " +
-                    "or no tiles had tessellation tasks by the eviction Tick. The leak-guard assertion " +
+                    "Positive control: at least one tile must have been released while its mesh build " +
+                    "was still in-flight (HasMeshBuild && !Built at the time of ReleaseTile). " +
+                    "If this is 0, the race did not occur — MaxConsumesPerTick=0 did not prevent consumption, " +
+                    "or no tiles had mesh build tasks by the eviction Tick. The leak-guard assertion " +
                     "would be vacuously true (nothing was built → nothing to orphan).");
 
-                // Restore MaxBuildsPerTick so the new cover settles normally.
-                view.Config.MaxBuildsPerTick = 64;
-                view.Config.MaxTessellationsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+                // Restore MaxConsumesPerTick so the new cover settles normally.
+                view.Config.MaxConsumesPerTick = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Let the tessellation UniTasks for the evicted tiles complete on the ThreadPool.
+                // Let the mesh build UniTasks for the evicted tiles complete on the ThreadPool.
                 // Then pump the new cover until it settles.
                 PumpUntilSettled(view, maxFrames: 500);
 
-                // The original tiles were evicted before tessellation was consumed.
-                // ReleaseTile removed them from _loaded. PumpPendingBuilds iterates _loaded each Tick,
-                // so the evicted tiles are absent from every subsequent snapshot — ConsumeTessellationTask
+                // The original tiles were evicted before mesh build was consumed.
+                // ReleaseTile removed them from _loaded. PumpPending iterates _loaded each Tick,
+                // so the evicted tiles are absent from every subsequent snapshot — ConsumeMeshBuild
                 // is never called for them. → No Mesh was created for the evicted tiles.
                 // → Only the new cover tiles (if any) created Meshes.
                 int meshAfterSettle = CountMeshObjects();
@@ -260,8 +260,8 @@ namespace MapRenderer.Tests
                     $"Orphaned Meshes after mid-flight release race + MapView.OnDestroy. " +
                     $"Baseline: {meshBefore}, Released mid-flight: {view.ReleasedMidFlightCount()}, " +
                     $"After settle: {meshAfterSettle}, After destroy: {meshAfterDestroy}. " +
-                    "ReleaseTile must remove evicted tiles from _loaded so PumpPendingBuilds excludes them " +
-                    "from the next iteration snapshot — ConsumeTessellationTask must never be called for " +
+                    "ReleaseTile must remove evicted tiles from _loaded so PumpPending excludes them " +
+                    "from the next iteration snapshot — ConsumeMeshBuild must never be called for " +
                     "them. OnDestroy must destroy all remaining tile Meshes. Zero orphaned Mesh required.");
             }
             finally
@@ -279,7 +279,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// S48 Non-vacuous positive control: deliberately allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
         /// (backed by NativeArrays) via <see cref="StyledFillTileBuilder.BuildMeshData"/> and do NOT
-        /// dispose it. Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/> is
+        /// dispose it. Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/> is
         /// non-zero, proving the counter has teeth — a deliberately-leaked NativeArray is detected.
         ///
         /// The payload is disposed at test end so it does not pollute subsequent tests.
@@ -301,10 +301,10 @@ namespace MapRenderer.Tests
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
-            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
+            long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
             // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
-            var mda = MeshDataTessellation.AllocateTracked(1);
+            var mda = MeshDataPayload.AllocateTracked(1);
             StyledFillTileBuilder.WriteMeshData(
                 mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
                 new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out Bounds b);
@@ -313,21 +313,21 @@ namespace MapRenderer.Tests
                 "Positive control requires geometry (vertices written). " +
                 "If no geometry was produced the counter test would be vacuous.");
 
-            var leaked = new MeshDataTessellation(mda, vc, b, "leak-positive-control", materialIndex: 0);
+            var leaked = new MeshDataPayload(mda, vc, b, "leak-positive-control", materialIndex: 0);
 
-            long countAfterAlloc = MeshDataTessellation.DebugLiveAllocCount;
+            long countAfterAlloc = MeshDataPayload.DebugLiveAllocCount;
 
             // Assert the counter reflects the un-disposed allocation.
             Assert.Greater(countAfterAlloc, countBefore,
                 $"S48 positive control FAILED: DebugLiveAllocCount did not increase after AllocateTracked " +
                 $"(before={countBefore}, after={countAfterAlloc}). The leak guard is vacuous — a " +
                 "deliberately-leaked writable MeshDataArray must be detected. " +
-                "Check that Interlocked.Increment is called in MeshDataTessellation.AllocateTracked.");
+                "Check that Interlocked.Increment is called in MeshDataPayload.AllocateTracked.");
 
             // Clean up: dispose the leaked payload so it doesn't affect subsequent tests.
             leaked.Dispose();
 
-            long countAfterDispose = MeshDataTessellation.DebugLiveAllocCount;
+            long countAfterDispose = MeshDataPayload.DebugLiveAllocCount;
             Assert.AreEqual(countBefore, countAfterDispose,
                 $"After explicit Dispose, counter must return to baseline " +
                 $"(baseline={countBefore}, after dispose={countAfterDispose}).");
@@ -336,17 +336,17 @@ namespace MapRenderer.Tests
         // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
 
         /// <summary>
-        /// S48 DECISIVE race test: a tile released mid-flight (tessellation in-flight, NativeArrays
+        /// S48 DECISIVE race test: a tile released mid-flight (mesh build in-flight, NativeArrays
         /// not yet produced at release time) must have its NativeArrays disposed via the
-        /// <c>_pendingDisposal</c> holding pen after the tessellation task completes.
+        /// <c>_pendingDisposal</c> holding pen after the mesh build task completes.
         ///
-        /// Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/> returns to
+        /// Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/> returns to
         /// baseline after the full race cycle, proving no NativeArray leak.
         /// </summary>
         [Test]
         public void NativeArray_ReleaseMidFlight_NoLeakedNativeArray()
         {
-            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
+            long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
@@ -354,10 +354,10 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
             view.WithTestCamera();
-            // MaxBuildsPerTick = 0: prevents Phase-2 (consume) — tessellation tasks are kicked but
-            // not consumed, ensuring HasTessellationTask=true when tiles are evicted.
-            view.Config.MaxBuildsPerTick = 0;
-            view.Config.MaxTessellationsPerTick = 64;
+            // MaxConsumesPerTick = 0: prevents the consume — mesh build tasks are kicked but
+            // not consumed, ensuring HasMeshBuild=true when tiles are evicted.
+            view.Config.MaxConsumesPerTick = 0;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -366,21 +366,21 @@ namespace MapRenderer.Tests
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
                 view.Tick();
                 Thread.Sleep(5);
-                // Second Tick: fetch complete → tessellation tasks are kicked (Phase-1). Not consumed.
+                // Second Tick: fetch complete → mesh build tasks are kicked (build). Not consumed.
                 view.Tick();
 
-                // Pan far east — evicting the original tiles while tessellation is in-flight.
+                // Pan far east — evicting the original tiles while mesh build is in-flight.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
 
                 // Positive control: at least one tile must have been released mid-flight.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
-                    "Positive control: at least one tile must have been released while its tessellation " +
+                    "Positive control: at least one tile must have been released while its mesh build " +
                     "was still in-flight. If this is 0, the race did not occur and the NativeArray balance " +
                     "assertion would be vacuously true.");
 
                 // ── Non-vacuous holding-pen assertion (DECISIVE — acceptance tooth #4) ────────────
-                // Spin on the ThreadPool until the stashed tessellation task completes and allocates
+                // Spin on the ThreadPool until the stashed mesh build task completes and allocates
                 // its NativeArray payload (Interlocked.Increment inside BuildMeshData, line 318 of
                 // StyledFillTileBuilder). While the payload sits undisposed in _pendingDisposal,
                 // DebugLiveAllocCount must be > countBefore — proving a real allocation passed
@@ -390,32 +390,32 @@ namespace MapRenderer.Tests
                 // would dispose the payload and decrement the counter before we can observe it —
                 // defeating the purpose of this assertion.
                 //
-                // The spin mirrors the DrainTessellation / Teardown patterns (Thread.Sleep(1) to
+                // The spin mirrors the DrainMeshBuilds / Teardown patterns (Thread.Sleep(1) to
                 // yield real CPU time to the ThreadPool; bounded by spins < 10000 to avoid infinite
                 // wait on unexpected failure).
                 long held = countBefore;
                 {
                     int spins = 0;
-                    while ((held = MeshDataTessellation.DebugLiveAllocCount) <= countBefore
+                    while ((held = MeshDataPayload.DebugLiveAllocCount) <= countBefore
                            && spins++ < 10000)
                         Thread.Sleep(1);
                 }
 
                 Assert.Greater(held, countBefore,
                     $"Non-vacuous leak guard (DECISIVE): DebugLiveAllocCount must be > countBefore " +
-                    $"(baseline={countBefore}, held={held}) while the stashed tessellation payload sits " +
+                    $"(baseline={countBefore}, held={held}) while the stashed mesh build payload sits " +
                     "undisposed in _pendingDisposal. This proves a real NativeArray allocation passed " +
                     "through the holding pen — deleting _pendingDisposal.Add in ReleaseTile or the " +
                     "disposal in DrainPendingDisposal would not make this assertion vacuous. " +
                     "If this fails with held==countBefore, the z5 fixture produced no geometry " +
                     "(confirm NativeArray_PositiveControl_LeakedAlloc_CounterNonZero still passes).");
 
-                // Restore MaxBuildsPerTick so the new cover can settle.
-                view.Config.MaxBuildsPerTick = 64;
-                view.Config.MaxTessellationsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+                // Restore MaxConsumesPerTick so the new cover can settle.
+                view.Config.MaxConsumesPerTick = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Let the ThreadPool tessellation tasks complete, then pump until the new cover settles.
+                // Let the ThreadPool mesh build tasks complete, then pump until the new cover settles.
                 // DrainPendingDisposal() is called inside each Tick — released tiles' NativeArrays are
                 // disposed as their tasks complete.
                 PumpUntilSettled(view, maxFrames: 500);
@@ -426,7 +426,7 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(go);
                 go = null;
 
-                long countAfter = MeshDataTessellation.DebugLiveAllocCount;
+                long countAfter = MeshDataPayload.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfter,
                     $"S48 DECISIVE: DebugLiveAllocCount must return to baseline after load+mid-flight-release cycle. " +
                     $"Baseline: {countBefore}, After cycle: {countAfter}. " +
@@ -448,13 +448,13 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// S48 consume-path NativeArray balance: build tiles to completion (normal consume path),
-        /// then teardown. Asserts <see cref="MeshDataTessellation.DebugLiveAllocCount"/>
+        /// then teardown. Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/>
         /// returns to baseline after the full load+destroy cycle.
         /// </summary>
         [Test]
         public void NativeArray_BuildAndRelease_NoLeakedNativeArray()
         {
-            long countBefore = MeshDataTessellation.DebugLiveAllocCount;
+            long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
@@ -462,8 +462,8 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -475,19 +475,19 @@ namespace MapRenderer.Tests
                     "z0/0/0 tile must be built (real load required for meaningful leak test).");
 
                 // At this point: LayerMeshData NativeArrays were allocated (in BuildMeshData) and
-                // should have been disposed (in ConsumeTessellationTask's finally block after UploadMesh).
+                // should have been disposed (in ConsumeMeshBuild's finally block after UploadMesh).
                 // Counter must already be at baseline (consume-path disposes immediately after upload).
-                long countAfterConsume = MeshDataTessellation.DebugLiveAllocCount;
+                long countAfterConsume = MeshDataPayload.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfterConsume,
-                    $"After normal consume (ConsumeTessellationTask), NativeArray counter must equal baseline. " +
+                    $"After normal consume (ConsumeMeshBuild), NativeArray counter must equal baseline. " +
                     $"Baseline={countBefore}, After consume={countAfterConsume}. " +
-                    "ConsumeTessellationTask must dispose all LayerMeshData in its finally block.");
+                    "ConsumeMeshBuild must dispose all LayerMeshData in its finally block.");
 
                 view.Teardown();
                 Object.DestroyImmediate(go);
                 go = null;
 
-                long countAfterTeardown = MeshDataTessellation.DebugLiveAllocCount;
+                long countAfterTeardown = MeshDataPayload.DebugLiveAllocCount;
                 Assert.AreEqual(countBefore, countAfterTeardown,
                     $"After Teardown, NativeArray counter must equal baseline. " +
                     $"Baseline={countBefore}, After teardown={countAfterTeardown}.");
@@ -502,14 +502,14 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── Tooth 5c: DrainTessellation then release — no orphaned Mesh ──────────────────────
+        // ── Tooth 5c: DrainMeshBuilds then release — no orphaned Mesh ──────────────────────
 
         /// <summary>
-        /// Use DrainTessellation() to force settle, verify a Mesh was created (real load),
+        /// Use DrainMeshBuilds() to force settle, verify a Mesh was created (real load),
         /// then destroy the MapView and verify zero orphaned Meshes.
         ///
-        /// Exercises the full pipeline: fetch → tessellate → consume (via DrainTessellation) →
-        /// destroy (via OnDestroy). Both consumption paths (Tick/PumpPendingBuilds and DrainTessellation)
+        /// Exercises the full pipeline: fetch → build → consume (via DrainMeshBuilds) →
+        /// destroy (via OnDestroy). Both consumption paths (Tick/PumpPending and DrainMeshBuilds)
         /// are covered by Tooth5a and Tooth5c respectively.
         /// </summary>
         [Test]
@@ -521,26 +521,26 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
-                view.Tick(); // kick fetch + tessellation
+                view.Tick(); // kick fetch + mesh build
 
-                // DrainTessellation: synchronous settle — waits for tessellation UniTasks to complete.
-                view.DrainTessellation();
+                // DrainMeshBuilds: synchronous settle — waits for mesh build UniTasks to complete.
+                view.DrainMeshBuilds();
                 Assert.IsTrue(view.AllTilesSettled(),
-                    "DrainTessellation must settle all tiles (tooth 5c positive control).");
+                    "DrainMeshBuilds must settle all tiles (tooth 5c positive control).");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
-                    "z0/0/0 tile must be built by DrainTessellation (real load required).");
+                    "z0/0/0 tile must be built by DrainMeshBuilds (real load required).");
 
                 int meshAfterLoad = CountMeshObjects();
                 Assert.Greater(meshAfterLoad - meshBefore, 0,
-                    "DrainTessellation must produce at least one Mesh (positive control for leak check).");
+                    "DrainMeshBuilds must produce at least one Mesh (positive control for leak check).");
 
                 // Release: Teardown (destroys Mesh assets) then destroy the GameObject.
                 // (See BuildAndRelease_NoOrphanedMesh for why Teardown() is called explicitly.)
@@ -550,10 +550,10 @@ namespace MapRenderer.Tests
 
                 int meshAfterDestroy = CountMeshObjects();
                 Assert.LessOrEqual(meshAfterDestroy, meshBefore,
-                    $"Orphaned Meshes after DrainTessellation + MapView.Teardown. " +
+                    $"Orphaned Meshes after DrainMeshBuilds + MapView.Teardown. " +
                     $"Baseline: {meshBefore}, After drain: {meshAfterLoad}, " +
                     $"After destroy: {meshAfterDestroy}. " +
-                    "All Meshes created by DrainTessellation→ConsumeTessellationTask must be " +
+                    "All Meshes created by DrainMeshBuilds→ConsumeMeshBuild must be " +
                     "destroyed by Teardown. Zero orphaned Mesh required.");
             }
             finally

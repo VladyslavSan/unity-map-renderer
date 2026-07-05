@@ -235,8 +235,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Estimated VRAM bytes for a prepared mesh — vertex buffer (stream 0's stride, since every
-        /// tessellated mesh has a populated stream 0) times vertex count, plus a flat 4 bytes/index (UInt32
-        /// index format — see <see cref="Style.MeshDataTessellation.Upload"/>). <see langword="null"/> (the
+        /// built mesh has a populated stream 0) times vertex count, plus a flat 4 bytes/index (UInt32
+        /// index format — see <see cref="Style.MeshDataPayload.Upload"/>). <see langword="null"/> (the
         /// empty-layer marker) is 0 bytes.</summary>
         private static long EstimateBytes(Mesh m)
         {

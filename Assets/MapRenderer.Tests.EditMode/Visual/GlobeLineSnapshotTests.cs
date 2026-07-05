@@ -42,7 +42,7 @@ namespace MapRenderer.Tests.Visual
             Assert.IsNotEmpty(features, "geolines must select features");
 
             Mesh mesh = TestTileMeshBuilder.BuildLine(features, paint, layout, 0.0, mvtLayer.Extent, tid, proj);
-            Assert.IsNotNull(mesh, "line tessellation must produce a mesh");
+            Assert.IsNotNull(mesh, "line mesh build must produce a mesh");
 
             // Line material — big world-metre width so borders read at globe scale (~25 km/px in this frame).
             var shader = Shader.Find("Map/Line");

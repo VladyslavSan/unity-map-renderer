@@ -53,7 +53,7 @@ namespace MapRenderer.Core.Geo
         public double MetersPerUnit => 1.0; // render units are Mercator metres
 
         /// <inheritdoc/>
-        public bool ReversesWinding => false; // planar mapping preserves the tessellation winding
+        public double MaxRefineAngleRad => double.PositiveInfinity; // flat atlas sheet — never subdivides (the split count → 0)
 
         /// <inheritdoc/>
         public bool TryGetHorizonOccluder(out double3 renderCentre, out double radius)

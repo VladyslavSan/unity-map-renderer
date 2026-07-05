@@ -1,7 +1,9 @@
 # unity-map-renderer — working notes for AI agents
 
 Unity-native (DOTS/ECS, C#) MapLibre-style vector map renderer. Read `ARCHITECTURE.md` for the design
-and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/conventions.md` for
+and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/mesh-pipeline.md`
+for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop),
+`docs/conventions.md` for
 generic coding conventions, `docs/step-0.md` for the current milestone, and
 **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
 workflow) — check it before debugging a shader/material/test-harness surprise.
@@ -92,9 +94,9 @@ test-code-bloat) live in **Coding conventions** below — don't restate them her
 
 ### Commit conventions — read `docs/commit-conventions.md`
 `type(scope): subject` ([Conventional Commits](https://www.conventionalcommits.org)). **The scope is a
-code-area tag, never a stage id** — `feat(tessellation): …`, not `feat(S89 D2): …` (a scope must be
+code-area tag, never a stage id** — `feat(meshing): …`, not `feat(S89 D2): …` (a scope must be
 legible without looking up a stage). Types: `feat` / `fix` / `refactor` / `perf` / `test` / `docs` /
-`chore`. Scope vocabulary (pick from — don't invent ad-hoc): `tessellation`, `tile-pipeline`,
+`chore`. Scope vocabulary (pick from — don't invent ad-hoc): `meshing`, `tile-pipeline`,
 `render-layers`, `style`, `decode`, `backends`, `camera`, `shaders`, `projection`, `backlog`, `docs`.
 Subject: imperative, lower-case, no period. A stage-linked commit records it in a **body trailer**
 (`Stage: S89 (render-layer unification)`), not the subject — above the mandated identity/session trailers.

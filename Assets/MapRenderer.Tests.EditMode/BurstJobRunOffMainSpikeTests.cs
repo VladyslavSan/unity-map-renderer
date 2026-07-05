@@ -1,7 +1,7 @@
 // S89 D2 contract guard: the low-risk vertical slice runs the Burst geometry kernels SYNCHRONOUSLY on the
 // existing UniTask.RunOnThreadPool worker via IJob.Run() / IJobParallelFor.Run() — NOT scheduled on Unity's
 // job workers. That keeps the kick/consume/holding-pen lifecycle unchanged (jobs run where managed
-// tessellation runs today) while moving Phase-1 geometry off managed List<>/array allocation onto
+// mesh build runs today) while moving the mesh-build geometry off managed List<>/array allocation onto
 // NativeArrays (the actual GC win). This is load-bearing: if a Unity upgrade makes Burst .Run() throw off a
 // raw threadpool thread (thread affinity), the whole approach breaks and this test names it precisely.
 //
@@ -116,29 +116,31 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void LineTessellationJob_RunOnThreadPoolWorker_UsesInternalTempSafely()
+        public void LineRibbonJob_RunOnThreadPoolWorker_UsesInternalTempSafely()
         {
-            // LineTessellationJob allocates Allocator.Temp INTERNALLY (dedup/tangent/normal/cumDist scratch),
-            // unlike the fill kernels which take caller scratch. Temp on a raw threadpool thread is the exact
-            // off-main risk — this proves it works there before the live line path depends on it.
+            // LineRibbonJob allocates Allocator.Temp INTERNALLY (dedup/along/cumDist scratch), unlike the fill
+            // kernels which take caller scratch. Temp on a raw threadpool thread is the exact off-main risk —
+            // this proves it works there before the live line path depends on it.
             int mainTid = Thread.CurrentThread.ManagedThreadId;
 
             int vc = -1, ic = -1;
             var result = RunOnWorker(() =>
             {
-                var pts   = new NativeArray<double2>(3, Allocator.Persistent);
-                var outV  = new NativeArray<LineVertex>(LineTessellationJob.MaxVertexCount(3, 4), Allocator.Persistent);
-                var outI  = new NativeArray<int>(LineTessellationJob.MaxIndexCount(3, 4), Allocator.Persistent);
+                var pts   = new NativeArray<double3>(3, Allocator.Persistent);
+                var ups   = new NativeArray<double3>(3, Allocator.Persistent);
+                var outV  = new NativeArray<LineRibbonVertex>(LineRibbonJob.MaxVertexCount(3, 4), Allocator.Persistent);
+                var outI  = new NativeArray<int>(LineRibbonJob.MaxIndexCount(3, 4), Allocator.Persistent);
                 var vcArr = new NativeArray<int>(1, Allocator.Persistent);
                 var icArr = new NativeArray<int>(1, Allocator.Persistent);
                 try
                 {
-                    pts[0] = new double2(0, 0);
-                    pts[1] = new double2(10, 0);
-                    pts[2] = new double2(20, 5);
-                    new LineTessellationJob
+                    pts[0] = new double3(0, 0, 0);
+                    pts[1] = new double3(10, 0, 0);
+                    pts[2] = new double3(20, 0, 5);
+                    for (int i = 0; i < 3; i++) ups[i] = new double3(0, 1, 0);
+                    new LineRibbonJob
                     {
-                        InputPoints = pts, PointCount = 3,
+                        Points = pts, Ups = ups, PointCount = 3,
                         Join = JoinType.Miter, Cap = CapType.Butt, MiterLimit = 2.0, RoundSegments = 4,
                         OutVertices = outV, OutIndices = outI,
                         OutVertexCount = vcArr, OutIndexCount = icArr,
@@ -147,12 +149,12 @@ namespace MapRenderer.Tests
                 }
                 finally
                 {
-                    pts.Dispose(); outV.Dispose(); outI.Dispose(); vcArr.Dispose(); icArr.Dispose();
+                    pts.Dispose(); ups.Dispose(); outV.Dispose(); outI.Dispose(); vcArr.Dispose(); icArr.Dispose();
                 }
             }, out int workerTid, out Exception ex);
 
             vc = result.Item1; ic = result.Item2;
-            Assert.IsNull(ex, $"LineTessellationJob.Run() THREW off a worker (Allocator.Temp off-thread?): {ex}");
+            Assert.IsNull(ex, $"LineRibbonJob.Run() THREW off a worker (Allocator.Temp off-thread?): {ex}");
             Assert.AreNotEqual(mainTid, workerTid, "spike must actually run off the main thread");
             Assert.Greater(vc, 0, "3-point polyline must produce line vertices off-main");
             Assert.Greater(ic, 0, "3-point polyline must produce indices off-main");

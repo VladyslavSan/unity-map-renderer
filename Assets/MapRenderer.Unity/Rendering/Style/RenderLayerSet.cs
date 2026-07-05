@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>The render layers in declared order (read-only view).</summary>
         public IReadOnlyList<IRenderLayer> Layers => _layers;
 
-        /// <summary>Snapshot copy for the background tessellation task (so the list can't mutate mid-flight).</summary>
+        /// <summary>Snapshot copy for the background geometry-build task (so the list can't mutate mid-flight).</summary>
         public IRenderLayer[] SnapshotLayers() => _layers.ToArray();
 
         /// <summary>

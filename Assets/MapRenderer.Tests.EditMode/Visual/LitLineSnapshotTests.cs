@@ -219,11 +219,17 @@ namespace MapRenderer.Tests.Visual
             Assert.That(passSrc, Does.Contain("InitializeStandardLitSurfaceData"),
                 "Line_LitForwardPass.hlsl must call InitializeStandardLitSurfaceData (not hand-assembled).");
 
-            // 6. Transparent state.
-            Assert.That(src, Does.Contain("ZWrite Off"),
-                "Line.shader must have ZWrite Off (transparent, painter's-algorithm layer order).");
-            Assert.That(src, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"),
-                "Line.shader must have standard alpha blend.");
+            // 6. Transparent state. The render state is S58-parameterized (Blend/ZWrite/ZTest/Cull hoisted to
+            // the SubShader), so assert the parameterized DIRECTIVE + the property DEFAULTS that encode the
+            // prior hardcoded transparent line (standard alpha blend, no depth write) — NOT comment text.
+            Assert.That(src, Does.Contain("Blend [_SrcBlend] [_DstBlend]"),
+                "Line.shader must declare parameterized blend (Blend [_SrcBlend] [_DstBlend]).");
+            Assert.That(src, Does.Match(@"_SrcBlend\([^)]*\)\s*=\s*5"),
+                "Line.shader _SrcBlend must default to 5 (SrcAlpha) — standard alpha blend.");
+            Assert.That(src, Does.Match(@"_DstBlend\([^)]*\)\s*=\s*10"),
+                "Line.shader _DstBlend must default to 10 (OneMinusSrcAlpha) — standard alpha blend.");
+            Assert.That(src, Does.Match(@"_ZWrite\([^)]*\)\s*=\s*0"),
+                "Line.shader _ZWrite must default to 0 (Off) — transparent, painter's-algorithm layer order.");
 
             // 7. The line mesh emits a NORMAL stream of +Y (0,1,0) for the lit shader.
             // S54: assert on the live StyledLineTileBuilder output directly (the retired

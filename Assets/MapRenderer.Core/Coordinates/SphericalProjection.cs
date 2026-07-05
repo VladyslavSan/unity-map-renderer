@@ -69,8 +69,13 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public double MetersPerUnit => 1.0; // render units are ECEF metres
 
+        /// <summary>Line-centerline subdivision tolerance: the max great-circle arc one centerline segment may
+        /// span before it is split (~2°, sagitta ≈ 1 km — sub-pixel at whole-globe scale). Surfaced as the
+        /// <see cref="MaxRefineAngleRad"/> policy so the builder subdivides generically, with no type check.</summary>
+        public const double MaxCurveSegmentRad = 2.0 * math.PI_DBL / 180.0;
+
         /// <inheritdoc/>
-        public bool ReversesWinding => true; // ECEF→render (X,Z,Y) axis-swap is a reflection → flips winding
+        public double MaxRefineAngleRad => MaxCurveSegmentRad; // sphere — split chords that would sag off the surface
 
         /// <inheritdoc/>
         public bool TryGetHorizonOccluder(out double3 renderCentre, out double radius)

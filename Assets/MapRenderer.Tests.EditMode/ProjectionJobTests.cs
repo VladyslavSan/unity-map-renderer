@@ -42,7 +42,7 @@ namespace MapRenderer.Tests
             // tile → geodetic (projection-independent), then project through Web Mercator.
             new TileToGeoJob
             {
-                TileZ = z, TileX = x, TileY = y, Extent = extent,
+                Tile = new TileId { Z = z, X = x, Y = y }, Extent = extent,
                 TileCoords = coords, OutGeo = geo,
             }.Schedule(1, 1).Complete();
 
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests
 
                     new TileToGeoJob
                     {
-                        TileZ = 0, TileX = 0, TileY = 0, Extent = extent,
+                        Tile = new TileId { Z = 0, X = 0, Y = 0 }, Extent = extent,
                         TileCoords = coords, OutGeo = geo,
                     }.Schedule(ring.Count, 64).Complete();
 
@@ -278,7 +278,7 @@ namespace MapRenderer.Tests
 
             new TileToGeoJob
             {
-                TileZ = 3, TileX = 2, TileY = 1, Extent = extent,
+                Tile = new TileId { Z = 3, X = 2, Y = 1 }, Extent = extent,
                 TileCoords = coords, OutGeo = geo,
             }.Schedule(4, 1).Complete();
 

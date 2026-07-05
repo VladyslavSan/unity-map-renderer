@@ -107,6 +107,15 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   job boundaries (jobs take `NativeArray`), and `Dispose()` once. Deletes the cap variables and the
   realloc blocks. (Seen: `StyledLineTileBuilder` — 7 scratch buffers + 4 hand-tracked caps → 7 `NativeList`s.)
 
+- **A job's internal scratch must be a LOCAL inside `Execute`, never an instance `NativeArray` field.** The
+  job-safety system validates *every* `NativeContainer` field at schedule time; a field you only allocate
+  inside `Execute` is `default` at schedule and throws `InvalidOperationException: The … <field> has not been
+  assigned or constructed. All containers must be valid when scheduling a job.` — even under `.Run()`, even
+  with Burst. It compiles clean, so it only shows at runtime (cost a full gate cycle in S100's `LineRibbonJob`).
+  Keep scratch as `var x = new NativeArray<T>(…, Allocator.Temp)` locals and pass values (not the arrays) into
+  helper methods — the pattern `LineRibbonJob`/`LineRibbonJob` follow. Only INPUT/OUTPUT containers
+  (assigned before scheduling) belong as job fields.
+
 ## Test workflow
 
 - **Measuring per-frame GC allocation: only NUnit's `Is.Not.AllocatingGCMemory` is trustworthy here; the

@@ -49,8 +49,8 @@ namespace MapRenderer.Core.View
         /// (built count == <see cref="LoadedTileCount"/> − <see cref="PendingTileCount"/>).</summary>
         public int PendingTileCount { get; init; }
 
-        /// <summary>Loaded records whose tessellation is COMPLETE but consume is budget-deferred (a subset
-        /// of <see cref="PendingTileCount"/>, which also lumps fetch-/tessellation-in-flight records) — the
+        /// <summary>Loaded records whose mesh build is COMPLETE but consume is budget-deferred (a subset
+        /// of <see cref="PendingTileCount"/>, which also lumps fetch-/mesh build-in-flight records) — the
         /// un-drained per-frame build backlog depth. The <c>s95-residual-tile-load-frame-stall</c>
         /// "measure first" signal.</summary>
         public int ConsumeBacklog { get; init; }
@@ -58,7 +58,7 @@ namespace MapRenderer.Core.View
         /// <summary>In-flight network fetches, summed across every source pipeline.</summary>
         public int InFlightFetches { get; init; }
 
-        /// <summary>Lifetime count of tiles released while their tessellation was still in-flight.</summary>
+        /// <summary>Lifetime count of tiles released while their mesh build was still in-flight.</summary>
         public int ReleasedMidFlightCount { get; init; }
 
         /// <summary>Lifetime count of tiles released while their fetch was still in-flight.</summary>
@@ -71,11 +71,11 @@ namespace MapRenderer.Core.View
 
         /// <summary>Whether the <c>PreparedTileCache</c> is active (see
         /// <see cref="Map.PreparedTileCacheConfig.Enabled"/>). <see langword="false"/> means every revisit
-        /// re-fetches/re-tessellates/re-uploads — <see cref="PreparedCacheHits"/> is always 0 in that state.</summary>
+        /// re-fetches/re-builds/re-uploads — <see cref="PreparedCacheHits"/> is always 0 in that state.</summary>
         public bool PreparedCacheEnabled { get; init; }
 
         /// <summary>Cumulative count of full-tile cache hits (a revisit/style-toggle that skipped
-        /// decode/tessellate/upload).</summary>
+        /// decode/build/upload).</summary>
         public int PreparedCacheHits { get; init; }
 
         /// <summary>Cumulative count of cache misses (a cover-entry that genuinely re-prepared).</summary>

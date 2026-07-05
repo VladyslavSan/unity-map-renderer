@@ -10,7 +10,8 @@
 //   • Full URP Lit property set (base/normal/metallic/occlusion/emission/detail maps, etc.)
 //     plus the _Opacity map paint property (the layer color is the standard _BaseColor).
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
-//   • Render state: hardcoded Cull Off (winding follow-up). ZWrite is driven by [_ZWrite]
+//   • Render state: the forward pass drives Cull via [_Cull] (default Off; winding is projection-correct
+//     so [_Cull]=Back culls back-faces on globe + Mercator alike). ZWrite is driven by [_ZWrite]
 //     (default 1.0 = opaque depth write, identical to stock URP Lit) so painter's-algorithm
 //     flat layers (S07) can set _ZWrite=0 + renderQueue=base+index for coplanar compositing.
 //     This restores stock URP Lit's `ZWrite [_ZWrite]` on the forward pass; the prior hardcoded
@@ -109,7 +110,7 @@ Shader "Map/Fill"
         // ── Map paint properties (S34/S13 additions) ─────────────────────────
         // These are the MapLibre-style styling knobs; they modulate the URP surface.
         // The layer color is the standard _BaseColor above; _Opacity modulates alpha.
-        _Opacity   ("Opacity", Range(0, 1)) = 1.0
+        _Opacity ("Opacity", Range(0, 1)) = 1.0
 
         // S13 fill paint properties (MapLibre Style Spec fill layer):
         // _FillOutlineColor: color of the optional fill outline (future outline pass).
@@ -117,33 +118,36 @@ Shader "Map/Fill"
         // _FillTranslate: xy = pixel offset (world/viewport per _FillTranslateAnchor). zw unused.
         // _FillTranslateAnchor: 0=map world-space, 1=viewport screen-space.
         // _FillPattern: sprite atlas index or flag for pattern fills. 0=no pattern (default).
-        _FillOutlineColor    ("Fill Outline Color", Color) = (0, 0, 0, 1)
-        _FillAntialias       ("Fill Antialias", Float) = 1.0
-        _FillTranslate       ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
+        _FillOutlineColor ("Fill Outline Color", Color) = (0, 0, 0, 1)
+        _FillAntialias ("Fill Antialias", Float) = 1.0
+        _FillTranslate ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
         _FillTranslateAnchor ("Fill Translate Anchor", Float) = 0.0
-        _FillPattern         ("Fill Pattern", Float) = 0.0
+        _FillPattern ("Fill Pattern", Float) = 0.0
     }
 
     SubShader
     {
         Tags
         {
-            "RenderType"             = "Opaque"
-            "Queue"                  = "Geometry"
-            "RenderPipeline"         = "UniversalPipeline"
-            "UniversalMaterialType"  = "Lit"
-            "IgnoreProjector"        = "True"
+            "RenderType" = "Opaque"
+            "Queue" = "Geometry"
+            "RenderPipeline" = "UniversalPipeline"
+            "UniversalMaterialType" = "Lit"
+            "IgnoreProjector" = "True"
         }
         LOD 300
 
-        // Cull Off: winding correctness is a deliberate follow-up (see ARCHITECTURE §2 / follow-ups.md).
-        // ZWrite [_ZWrite]: default 1.0 → opaque geometry writes depth (stock URP Lit behaviour);
-        //   S07 painter's-algorithm flat layers set _ZWrite=0 at runtime + renderQueue=base+index so
-        //   coplanar fills/lines composite in declared order with no z-fighting (ARCHITECTURE §2).
-        //   Only the ForwardLit pass inherits this; the depth/shadow/GBuffer passes force ZWrite On.
-        Cull Off
+        // Forward-pass render state — fully parameterized (S58). Defaults reproduce the prior
+        // behaviour: Blend driven by _SrcBlend/_DstBlend (1,0 = opaque), BlendOp Add, ZWrite [_ZWrite]
+        // (1 opaque; painter's-algorithm flat layers set 0), ZTest LEqual, Cull Off. Driven from C#
+        // via the typed tweaker layer and surfaced in the modular ShaderGUI. Only the forward pass is
+        // parameterized — the ShadowCaster/GBuffer/DepthOnly/DepthNormals passes keep their forced state.
+        Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+        BlendOp [_BlendOp]
+        AlphaToMask [_AlphaToMask]
         ZWrite [_ZWrite]
-        ZTest LEqual
+        ZTest [_ZTest]
+        Cull [_Cull]
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass 1: UniversalForward — lit pixels, all lights.
@@ -151,20 +155,11 @@ Shader "Map/Fill"
         Pass
         {
             Name "ForwardLit"
-            Tags { "LightMode" = "UniversalForward" }
-
-            // Forward-pass render state — fully parameterized (S58). Defaults reproduce the prior
-            // behaviour: Blend driven by _SrcBlend/_DstBlend (1,0 = opaque), BlendOp Add, ZWrite [_ZWrite]
-            // (1 opaque; painter's-algorithm flat layers set 0), ZTest LEqual, Cull Off. Driven from C#
-            // via the typed tweaker layer and surfaced in the modular ShaderGUI. Only the forward pass is
-            // parameterized — the ShadowCaster/GBuffer/DepthOnly/DepthNormals passes keep their forced state.
-            Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
-            BlendOp [_BlendOp]
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull [_Cull]
-            AlphaToMask [_AlphaToMask]
-
+            Tags
+            {
+                "LightMode" = "UniversalForward"
+            }
+            
             HLSLPROGRAM
             #pragma target 2.0
 
@@ -237,12 +232,14 @@ Shader "Map/Fill"
         Pass
         {
             Name "ShadowCaster"
-            Tags { "LightMode" = "ShadowCaster" }
+            Tags
+            {
+                "LightMode" = "ShadowCaster"
+            }
 
             ZWrite On
             ZTest LEqual
             ColorMask 0
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -273,11 +270,13 @@ Shader "Map/Fill"
         Pass
         {
             Name "GBuffer"
-            Tags { "LightMode" = "UniversalGBuffer" }
+            Tags
+            {
+                "LightMode" = "UniversalGBuffer"
+            }
 
             ZWrite On
             ZTest LEqual
-            Cull Off
 
             // Deferred path is not supported on OpenGL (same exclusion as URP Lit.shader).
             HLSLPROGRAM
@@ -345,11 +344,13 @@ Shader "Map/Fill"
         Pass
         {
             Name "DepthOnly"
-            Tags { "LightMode" = "DepthOnly" }
+            Tags
+            {
+                "LightMode" = "DepthOnly"
+            }
 
             ZWrite On
             ColorMask R
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -377,10 +378,12 @@ Shader "Map/Fill"
         Pass
         {
             Name "DepthNormals"
-            Tags { "LightMode" = "DepthNormals" }
+            Tags
+            {
+                "LightMode" = "DepthNormals"
+            }
 
             ZWrite On
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0

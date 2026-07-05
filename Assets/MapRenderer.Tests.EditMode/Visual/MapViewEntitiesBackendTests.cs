@@ -1,7 +1,7 @@
 // S53b increment 2 — Entities backend wired through MapView/TileManager.
 //
 // Proves the live path (not just the EntitiesTileRenderer unit): selecting RenderBackend.Entities
-// constructs the backend, ConsumeTessellationTask creates one entity per tile-layer, and the per-frame
+// constructs the backend, ConsumeMeshBuild creates one entity per tile-layer, and the per-frame
 // InstancedRebuild positions them via FloatingOrigin.TileLocalToScene. GPU-independent (reads the
 // entity's LocalToWorld translation), mirroring BrgBackendSnapshotTests' floating-origin tooth.
 
@@ -67,8 +67,8 @@ namespace MapRenderer.Tests.Visual
             var go   = new GameObject("MapView_EntOff");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
             try
             {
@@ -93,8 +93,8 @@ namespace MapRenderer.Tests.Visual
             var go   = new GameObject("MapView_Ent");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Entities;
             try
             {
@@ -111,7 +111,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsNull(view.GameObjectRenderer(),
                     "The Entities backend must NOT construct the GameObject renderer (backend selection is exclusive).");
                 Assert.Greater(ent.DrawItemCount, 0,
-                    "ConsumeTessellationTask must have created at least one tile-layer entity.");
+                    "ConsumeMeshBuild must have created at least one tile-layer entity.");
 
                 // Floating origin: the entity translation must equal TileLocalToScene(tileOrigin, sceneOrigin).
                 double2 tileOrigin   = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 0, X = 0, Y = 0 });
@@ -166,8 +166,8 @@ namespace MapRenderer.Tests.Visual
             var mapGo = new GameObject("MapView_EntPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 3; view.Config.MaxZoom = 3; view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Entities;
 
             var lightGo = new GameObject("EntPixelLight");

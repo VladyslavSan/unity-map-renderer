@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Rendering.Meshing;
 
 namespace MapRenderer.Tests
@@ -29,7 +30,7 @@ namespace MapRenderer.Tests
             try
             {
                 up[0] = upA; up[1] = upB;
-                return StyledLineTileBuilder.SubdivideGlobeCenterline(ring, up, 2, sub);
+                return StyledLineTileBuilder.SubdivideCenterline(ring, up, 2, sub, SphericalProjection.MaxCurveSegmentRad);
             }
             finally { up.Dispose(); }
         }

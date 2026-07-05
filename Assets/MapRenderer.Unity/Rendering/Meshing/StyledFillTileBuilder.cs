@@ -18,12 +18,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// S40 managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
     /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
-    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>TileTessellationPipeline</c>
+    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>TileMeshPipeline</c>
     ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
     ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core geometry
     ///   (<c>Earcut</c>/<c>PolygonAssembler</c>) is retired from this path (differential oracle only).
     ///
-    /// S89 Stage B — <see cref="WriteMeshData"/> tessellates AND writes directly into a caller-allocated
+    /// S89 Stage B — <see cref="WriteMeshData"/> builds the mesh AND writes directly into a caller-allocated
     /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread. The bespoke
     /// NativeArray-stream payload + main-thread <c>SetVertexBufferData</c> copy is gone: the worker populates
     /// the mesh buffers in place, and the main thread only allocates (at kick) and applies (at consume). The
@@ -48,11 +48,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// </summary>
     public static class StyledFillTileBuilder
     {
-        // MapRenderer.Tile.Tessellate — wraps the decode/assemble/earcut/project/write loop. Fires on a
+        // MapRenderer.Tile.BuildMesh — wraps the decode/assemble/earcut/project/write loop. Fires on a
         // background ThreadPool thread (S47/S51); ProfilerMarkerTests tooth-1b uses ProfilerRecorderOptions.Default
         // (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
-        private static readonly ProfilerMarker PmTessellate =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Tessellate");
+        private static readonly ProfilerMarker PmBuildMesh =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.BuildMesh");
 
         // Skip Unity's main-thread index validation (O(indices)) + the redundant intermediate bounds compute:
         // indices come from earcut and are covered by tests, and the canonical bounds are the worker-computed
@@ -96,7 +96,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // ── Public API ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Tessellate all fill features for one style layer and write the geometry directly into
+        /// Build the mesh for all fill features of one style layer and write it directly into
         /// <paramref name="md"/> (a caller-allocated <c>Mesh.MeshData</c>, count-1 slot). Runs the full
         /// decode/assemble/earcut/project loop plus the sRGB→linear color conversion off the main thread.
         ///
@@ -123,11 +123,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (selectedFeatures == null || selectedFeatures.Count == 0)
                 return;
 
-            using var sTessellate = PmTessellate.Auto();
+            // The "MapRenderer.Tile.BuildMesh" marker string is a telemetry contract asserted by
+            // ProfilerMarkerTests + MapViewAsyncMeshBuildTests — keep the string in sync with those if renamed.
+            using var sBuild = PmBuildMesh.Auto();
 
-            // Phase 1 (Burst): collect this layer's polygon features + their per-feature linear color, then
-            // run the Burst decode→assemble→earcut→project chain via TileTessellationPipeline (Run(), so it
-            // works on this worker thread). The managed List<>/array tessellation garbage is gone — geometry
+            // First (Burst): collect this layer's polygon features + their per-feature linear color, then
+            // run the Burst decode→assemble→earcut→project chain via TileMeshPipeline (Run(), so it
+            // works on this worker thread). The managed List<>/array mesh garbage is gone — geometry
             // lives in NativeArrays. Color stays managed (paint.Color is an expression over string keys).
             var geoms         = new List<uint[]>(selectedFeatures.Count);
             var featureColors = new List<Vector4>(selectedFeatures.Count); // linearized sRGB, parallel to geoms
@@ -150,11 +152,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (geoms.Count == 0)
                 return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
 
-            TileMeshBuffers buffers = TileTessellationPipeline.Schedule(new TileTessellationPipeline.LayerInput
+            TileMeshBuffers buffers = TileMeshPipeline.Schedule(new TileMeshPipeline.LayerInput
             {
                 FeatureGeometries = geoms,
                 Extent            = extent,
-                TileZ             = id.Z, TileX = id.X, TileY = id.Y,
+                Tile              = id,
                 OriginRender      = tileOriginRender,
                 Projection        = projection ?? DefaultProjection,
             });
@@ -173,14 +175,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 // zoom), so refine them (C-3) and write the subdivided geometry — which also carries the correct
                 // per-vertex east Tangent. The flat Mercator path below stays byte-identical.
                 IProjection proj = projection ?? DefaultProjection;
-                if (proj.ReversesWinding)
+                // A finite refine tolerance ⇒ a curved surface to subdivide onto; PositiveInfinity ⇒ the flat
+                // Mercator sheet, direct write. (Was a curvature capability flag; the fill's own 3° granularity
+                // constant in GlobeFillSubdivideDispatch is unchanged, so globe fill output stays byte-identical.)
+                if (!double.IsInfinity(proj.MaxRefineAngleRad))
                 {
                     WriteGlobeSubdivided(md, in buffers, proj, id, extent, tileOriginRender, featureColors,
                         out vertexCount, out bounds);
                     return; // finally still disposes buffers
                 }
 
-                // Phase 2: declare the mesh buffers on the MeshData (off-main-thread safe) and grab stream views.
+                // Then declare the mesh buffers on the MeshData (off-main-thread safe) and grab stream views.
                 md.SetVertexBufferParams(totalVerts, FillVertexDescriptors);
                 NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
                 NativeArray<Vector2>            s1 = md.GetVertexData<Vector2>(1);

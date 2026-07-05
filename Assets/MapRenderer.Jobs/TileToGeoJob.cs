@@ -22,9 +22,7 @@ namespace MapRenderer.Jobs
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct TileToGeoJob : IJobParallelFor
     {
-        [ReadOnly] public int    TileZ;
-        [ReadOnly] public int    TileX;
-        [ReadOnly] public int    TileY;
+        [ReadOnly] public TileId Tile;   // slippy-map address (z/x/y); blittable readonly struct, Burst-safe
         [ReadOnly] public double Extent;
 
         [ReadOnly]  public NativeArray<double2>       TileCoords; // (px, py) in tile space
@@ -34,9 +32,9 @@ namespace MapRenderer.Jobs
         {
             double2 tp = TileCoords[index];
 
-            double pow2z = math.pow(2.0, TileZ);
-            double u     = (TileX + tp.x / Extent) / pow2z;
-            double v     = (TileY + tp.y / Extent) / pow2z;
+            double pow2z = math.pow(2.0, Tile.Z);
+            double u     = (Tile.X + tp.x / Extent) / pow2z;
+            double v     = (Tile.Y + tp.y / Extent) / pow2z;
 
             double lonRad  = u * (2.0 * math.PI_DBL) - math.PI_DBL;
             double arg     = math.PI_DBL * (1.0 - 2.0 * v);

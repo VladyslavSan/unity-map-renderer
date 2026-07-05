@@ -33,6 +33,7 @@
   <ItemGroup>
     <Compile Include="Shim/**/*.cs" />
     <Compile Include="CorePipelineTests.cs" />
+    <Compile Include="LineMiterHairpinTests.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
     <Compile Include="ShaderStructureTests.cs" />
     <Compile Include="ShaderPropertyParser.cs" />

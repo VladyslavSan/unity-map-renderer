@@ -62,8 +62,8 @@ namespace MapRenderer.Tests.Visual
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             // Light so the URP Lit fill is bright enough for coverage.
             var lightGo = new GameObject("SceneLight");

@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Rendering.Map
     ///
     /// <para>Architecture: one render bundle per fill/line style layer (declared/painter's order), each with a
     /// per-layer Material + ZoomStyleApplier, held by the <see cref="RenderLayerSet"/>. The tile lifecycle
-    /// (cover→fetch→tessellate→consume→evict, disposal/leak guards) lives in <see cref="TileManager"/>, ticked
+    /// (cover→fetch→build→consume→evict, disposal/leak guards) lives in <see cref="TileManager"/>, ticked
     /// once per frame. Per-frame: push zoom uniforms, snap the render origin to the look-at, rebuild, tick.</para>
     ///
     /// <para>Steady-state no-GC: the ApplyZoom loop is a plain <c>for</c> over a <c>List</c> (struct
@@ -307,8 +307,8 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 FramingViewportPx       = Camera.ViewportPx / _config.DevicePixelRatio,
                 Projection              = Camera.Projection,
-                MaxBuildsPerTick        = _config.MaxBuildsPerTick,
-                MaxTessellationsPerTick = _config.MaxTessellationsPerTick,
+                MaxConsumesPerTick        = _config.MaxConsumesPerTick,
+                MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
                 MaxVerticesPerTick      = _config.MaxVerticesPerTick,
             };
 

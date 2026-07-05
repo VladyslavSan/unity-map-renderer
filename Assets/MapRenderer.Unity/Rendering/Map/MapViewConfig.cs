@@ -44,14 +44,14 @@ namespace MapRenderer.Unity.Rendering.Map
                  "consume MESH-by-mesh, so a single rich tile no longer lands in one frame. Pair with " +
                  "MaxVerticesPerTick (whichever binds first stops the frame). Raise for faster fill, lower " +
                  "for smoother FPS while loading. NOTE: 0 BLOCKS consume entirely (not 'uncapped').")]
-        public int MaxBuildsPerTick = 4;
+        public int MaxConsumesPerTick = 4;
 
-        [Tooltip("S55: Max tessellation kick-offs per Tick (Phase 1 throttle). " +
-                 "Caps how many background tessellation tasks are started per frame. Default 2 — " +
+        [Tooltip("S55: Max mesh build kick-offs per Tick (build throttle). " +
+                 "Caps how many background mesh build tasks are started per frame. Default 2 — " +
                  "tuned against the live Profiler to spread decode/earcut cost across frames.")]
-        public int MaxTessellationsPerTick = 2;
+        public int MaxMeshBuildsPerTick = 2;
 
-        [Tooltip("S55/S87: Per-frame VERTEX budget for Phase-2 consume (S87: per-MESH granularity). " +
+        [Tooltip("S55/S87: Per-frame VERTEX budget for consume (S87: per-MESH granularity). " +
                  "Default 50000. Layer meshes are consumed until the running vertex total hits this budget, " +
                  "then the rest defer to the next frame (one-mesh overshoot). 0 = uncapped.")]
         public int MaxVerticesPerTick = 50000;

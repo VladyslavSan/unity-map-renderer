@@ -47,7 +47,7 @@ namespace MapRenderer.Core.Style.Line
         //   side     — signed side value ∈{+1,−1} (from LineVertex.Side).
         //   offsetM  — perpendicular shift in world meters (same space as the normal).
         //
-        // Returns: displacement vector to be ADDED to the vertex's position in tessellation space.
+        // Returns: displacement vector to be ADDED to the vertex's position in mesh build space.
         //
         // Shader mirror:  unitDir_WS * input.sideAndDist.x * (miter * offsetM)
         // CPU equivalent: normal        * side               * offsetM

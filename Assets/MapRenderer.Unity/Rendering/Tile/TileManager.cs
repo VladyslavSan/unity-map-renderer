@@ -20,7 +20,7 @@ using GOBackend = MapRenderer.Unity.Rendering.Backend.GameObjects;
 namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
-    /// Owns the tile lifecycle for <see cref="Map.MapView"/> — the cover→fetch→tessellate→consume→evict
+    /// Owns the tile lifecycle for <see cref="Map.MapView"/> — the cover→fetch→build→consume→evict
     /// pipeline plus the S48/S51 disposal &amp; mesh-leak guards. Extracted from MapView as the biggest,
     /// most cohesive cut of the decomposition: MapView keeps the camera, the <see cref="Style.RenderLayerSet"/>,
     /// and the scene origin; this object keeps the scheduler, the loaded-tile table, and all the in-flight
@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     /// The <see cref="Style.RenderLayerSet"/> (render bundles) is stable for the object's life, so it's injected
     /// at construction.</para>
     ///
-    /// <para>The consume step (<see cref="ConsumeTessellationTask"/>) registers each tile-layer mesh as a
+    /// <para>The consume step (<see cref="ConsumeMeshBuild"/>) registers each tile-layer mesh as a
     /// draw item via the selected <see cref="Backend.ITileRenderBackend"/> (Entities, BRG, or GameObject). The
     /// backend is uniform behind that interface — TileManager has no per-backend branching.</para>
     ///
@@ -56,7 +56,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         // RenderMeshUtility.AddComponents + EG batch registration; BRG = add a draw item). Separated so a
         // build-time spike is attributable to GPU upload vs ECS structural-change/batch churn.
         private static readonly ProfilerMarker PmAddTileLayer  = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer");
-        // S95: brackets the tessellation-kick MeshData allocation loop in KickTessellationTask
+        // S95: brackets the mesh build-kick MeshData allocation loop in KickMeshBuild
         // (main-thread Mesh.AllocateWritableMeshData, one per this-source layer) — measure-first
         // instrumentation so a Profiler trace can attribute cost to the allocate step specifically.
         private static readonly ProfilerMarker PmMeshDataAllocate = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.MeshDataAllocate");
@@ -80,46 +80,46 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// GPU upload per frame — the responsiveness knob (pair with <see cref="MaxVerticesPerTick"/>;
             /// whichever binds first stops the frame). <b>0 blocks consume entirely</b> (used by tests to build
             /// a backlog) — it is NOT "uncapped"; set it high (e.g. 64) for effectively-uncapped.</summary>
-            public int          MaxBuildsPerTick;
-            /// <summary>S55: max tessellation kick-offs per Tick (Phase 1). Default 2 (MapView serialized field).
-            /// Caps the background tessellation fan-out per frame without dropping work.
+            public int          MaxConsumesPerTick;
+            /// <summary>S55: max mesh build kick-offs per Tick. Default 2 (MapView serialized field).
+            /// Caps the background mesh build fan-out per frame without dropping work.
             /// 0 means uncapped (same as int.MaxValue) so unset config structs are harmless.</summary>
-            public int          MaxTessellationsPerTick;
-            /// <summary>S55/S87: per-frame VERTEX budget for Phase-2 consume (S87: per-MESH granularity).
+            public int          MaxMeshBuildsPerTick;
+            /// <summary>S55/S87: per-frame VERTEX budget for consume (S87: per-MESH granularity).
             /// Default 50000. Layer meshes are consumed one at a time until the running vertex total reaches the
             /// budget, then the rest defer to the next Tick; the mesh that crosses the budget is still consumed
             /// (one-MESH overshoot, documented — a single mesh cannot be split). 0 means uncapped.</summary>
             public int          MaxVerticesPerTick;
         }
 
-        // ── S47 tessellation payload (S51: Task → UniTask) ────────────────────────────────────
+        // ── S47 mesh build payload (S51: Task → UniTask) ────────────────────────────────────
 
         /// <summary>
-        /// Tessellation payloads produced by one tile's background tessellation. S89 Stage C: a DENSE array —
+        /// Mesh build payloads produced by one tile's background mesh build. S89 Stage C: a DENSE array —
         /// one element per render layer bound to THIS task's source, in declared (draw) order. Each payload
-        /// carries its own global <see cref="Style.IRenderLayerTessellation.MaterialIndex"/>, so the consume
+        /// carries its own global <see cref="Style.IRenderLayerPayload.MaterialIndex"/>, so the consume
         /// step no longer relies on <c>cursor == materialIndex</c>. Replaces the S83b decision-5c full-width
         /// sparse union (a slot per layer, null for other-source layers) — no dead slots per source.
         /// </summary>
-        private struct TessellationResult
+        private struct MeshBuildResult
         {
             /// <summary>Dense per-<c>(tile, source)</c> payloads in draw order; each knows its material index.
             /// Empty (0-vertex) this-source layers still take a slot (freed at consume).</summary>
-            public Style.IRenderLayerTessellation[] Payloads;
+            public Style.IRenderLayerPayload[] Payloads;
         }
 
         /// <summary>
-        /// Per-tile live record: the in-flight fetch request, the tessellation UniTask, and the built tile
+        /// Per-tile live record: the in-flight fetch request, the mesh build UniTask, and the built tile
         /// container GameObject.
         ///
         /// S47/S51: the lifecycle is now:
         ///   1. Fetch (Request → UniTask[TileResponse] in-flight, stored as .Preserve())
-        ///   2. Tessellation kicked (TessellationTask in-flight; FetchCompleted = true)
-        ///   3. Tessellation consumed (Built = true; TessellationTask = default; Go = container)
+        ///   2. Mesh build kicked (MeshBuildTask in-flight; FetchCompleted = true)
+        ///   3. Mesh build consumed (Built = true; MeshBuildTask = default; Go = container)
         ///
         /// Mid-flight release protection: ReleaseTile removes the tile from _loaded immediately,
-        /// so PumpPendingBuilds and DrainTessellation — which iterate _loaded — never visit released
-        /// tiles. A tile released while its tessellation is in-flight will never have ConsumeTessellationTask
+        /// so PumpPending and DrainMeshBuilds — which iterate _loaded — never visit released
+        /// tiles. A tile released while its mesh build is in-flight will never have ConsumeMeshBuild
         /// called for it.
         ///
         /// Note: UniTask is a struct. .Preserve() on the stored UniTask allows polling .IsCompleted
@@ -128,45 +128,45 @@ namespace MapRenderer.Unity.Rendering.Tile
         private struct LoadedTile
         {
             public UniTask<TileResponse>     Request;
-            public bool                      FetchCompleted;   // fetch done; tessellation may be in-flight
-            public UniTask<TessellationResult> TessellationTask; // default until fetch completes; default after consumed
-            public bool                      HasTessellationTask; // true when TessellationTask is valid
+            public bool                      FetchCompleted;   // fetch done; mesh build may be in-flight
+            public UniTask<MeshBuildResult> MeshBuildTask; // default until fetch completes; default after consumed
+            public bool                      HasMeshBuild; // true when MeshBuildTask is valid
             public bool                      Built;            // mesh produced (or definitively absent/failed)
             /// <summary>S91-C: the tile's SW-corner projected render origin (double3) — the SINGLE bake-and-place
             /// origin shared by the mesh bake and the tile transform. Mercator: (mercX, 0, mercZ); globe: ECEF.</summary>
             public double3                   TileOriginRender;
             /// <summary>
-            /// S51 leak guard: per-layer Mesh assets created by ConsumeTessellationTask. Must be
+            /// S51 leak guard: per-layer Mesh assets created by ConsumeMeshBuild. Must be
             /// explicitly destroyed on release/teardown (Unity does not destroy a Mesh asset just because
-            /// nothing references it). Null until the tile is consumed; set by ConsumeTessellationTask.
+            /// nothing references it). Null until the tile is consumed; set by ConsumeMeshBuild.
             /// </summary>
             public Mesh[]                    Meshes;
             /// <summary>
             /// Backend draw-item handles for each tile-layer mesh registered with the
-            /// <see cref="Backend.ITileRenderBackend"/> (Entities, BRG, or GameObject). Set by ConsumeTessellationTask;
+            /// <see cref="Backend.ITileRenderBackend"/> (Entities, BRG, or GameObject). Set by ConsumeMeshBuild;
             /// used by ReleaseTile to unregister the draw items.
             /// </summary>
             public int[]                     DrawHandles;
             /// <summary>
             /// S82: parallel to <see cref="Meshes"/> — the global material index (layerId) of each tracked
-            /// mesh, in the same order. Set by <see cref="ConsumeTessellationTask"/> alongside Meshes/
+            /// mesh, in the same order. Set by <see cref="ConsumeMeshBuild"/> alongside Meshes/
             /// DrawHandles; read by ReleaseTile's transfer-to-<see cref="PreparedTileCache"/> path (the cache
             /// key is per layer, so it needs to know which layerId each tracked mesh belongs to).
             /// </summary>
             public int[]                     MaterialIndices;
             /// <summary>
-            /// S87: resumable per-mesh consume cursor — a dense index over this source's tessellation
+            /// S87: resumable per-mesh consume cursor — a dense index over this source's mesh build
             /// payloads (draw order), <c>[0..denseCount)</c>. Advanced by
-            /// <see cref="ConsumeTessellationTask"/> as the per-frame mesh/vertex budget allows; the tile is
+            /// <see cref="ConsumeMeshBuild"/> as the per-frame mesh/vertex budget allows; the tile is
             /// <see cref="Built"/> only once the cursor reaches the end. 0 until consume starts. While
-            /// <c>0 &lt; ConsumeCursor &lt; total</c> the tile is partially consumed (HasTessellationTask is
+            /// <c>0 &lt; ConsumeCursor &lt; total</c> the tile is partially consumed (HasMeshBuild is
             /// still true, the task is COMPLETE, and some layers are already in Meshes/DrawHandles).
             /// </summary>
             public int                       ConsumeCursor;
             /// <summary>
-            /// S55: MVT bytes received from fetch and awaiting a (capped) tessellation kick.
+            /// S55: MVT bytes received from fetch and awaiting a (capped) mesh build kick.
             /// Set when the fetch completes and the per-tick kick cap has been reached. Null in all
-            /// other states. Cleared (to null) when KickTessellationTask fires. The byte[] is GC-owned;
+            /// other states. Cleared (to null) when KickMeshBuild fires. The byte[] is GC-owned;
             /// no special disposal needed on eviction.</summary>
             public byte[]                    ReadyBytes;
         }
@@ -291,10 +291,10 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// S82: the dense (declared-order) GLOBAL material indices whose style layer's source is
-        /// <paramref name="sourceId"/> — the same set <see cref="KickTessellationTask"/> tessellates for one
+        /// <paramref name="sourceId"/> — the same set <see cref="KickMeshBuild"/> builds for one
         /// (tile, source) load. Shared by the kick, the ReleaseTile transfer-to-cache, and the Tick probe so
         /// all three agree on exactly which layerIds make up "this tile's complete prepared set" (a
-        /// divergence here would desync the cache's completeness check from what is actually tessellated).
+        /// divergence here would desync the cache's completeness check from what is actually built).
         /// <paramref name="into"/> is cleared first; ONLY ever consumed synchronously within the same call on
         /// the main thread (never captured across an await/thread boundary — see call sites).
         /// </summary>
@@ -304,7 +304,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Reads the LIVE _layers directly (Count + indexer) — NOT SnapshotLayers()/ToArray(). Every
             // caller of this method (the Tick probe, the ReleaseTile transfer) runs synchronously on the
             // main thread, so there is no background-thread race to defend against here (unlike
-            // KickTessellationTask's OWN separate SnapshotLayers() call, which IS captured into a background
+            // KickMeshBuild's OWN separate SnapshotLayers() call, which IS captured into a background
             // closure and must stay a real copy). SnapshotLayers()/ToArray() would heap-allocate a fresh
             // array on EVERY probe/release — exactly the per-Tick allocation the S95 zero-alloc contract
             // (MapView_SteadyStateTick_DoesNotAllocateGCMemory) forbids.
@@ -316,7 +316,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private Backend.ITileRenderBackend _instanced; // null only before SetSources / after Dispose
 
         // S91-C: the launch-time projection, cached each Tick from the TileSelectionConfig so the (possibly
-        // off-Tick) tessellation write bakes vertices with the SAME projection the tile origin + scene frame
+        // off-Tick) mesh build write bakes vertices with the SAME projection the tile origin + scene frame
         // use. null ⇒ WebMercator (planar). Launch-constant, so any Tick's value is correct.
         private IProjection _projection;
 
@@ -351,7 +351,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private double _coverKeyViewportY;
         private bool   _coverKeyInitialised;
 
-        // S87: reusable scratch for one ConsumeTessellationTask call's newly-built meshes/handles (main-thread
+        // S87: reusable scratch for one ConsumeMeshBuild call's newly-built meshes/handles (main-thread
         // only, not re-entrant). Cleared at the start of each call; merged into the tile's arrays at the end.
         // Reused so a partial consume frame doesn't allocate a fresh list per call.
         private readonly List<Mesh> _consumeScratchMeshes     = new List<Mesh>(8);
@@ -363,11 +363,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S82: reusable scratch for the dense (declared-order) global material indices whose style layer's
         // source is a given sourceId (ComputeDenseLayerIds). ONLY ever consumed synchronously on the main
         // thread within the same call (transfer-to-cache, probe) — never captured across a thread boundary
-        // (KickTessellationTask copies it into a fresh int[] before scheduling the background task).
+        // (KickMeshBuild copies it into a fresh int[] before scheduling the background task).
         private readonly List<int> _denseLayerIdsScratch = new List<int>(8);
 
         // ── S82: PreparedTileCache — cache built tile-layer Meshes so a revisit/style-toggle skips
-        // re-decode/re-tessellate/re-upload. Owns cached meshes; ReleaseTile transfers a Built tile's meshes
+        // re-decode/re-build/re-upload. Owns cached meshes; ReleaseTile transfers a Built tile's meshes
         // here on eviction, the Tick probe TryTakes them back on a revisit. Constructed once, for the life of
         // this TileManager; disposed (destroying every held Mesh) in Dispose(), BEFORE the backend.
         private readonly PreparedTileCache _prepared;
@@ -392,7 +392,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int PreparedCacheMisses => _prepared.Misses;
 
         // ── S48 mid-flight discard holding pen ────────────────────────────────────────────────
-        // When a tile is released mid-flight (ReleaseTile while TessellationTask is still running),
+        // When a tile is released mid-flight (ReleaseTile while MeshBuildTask is still running),
         // the UniTask has already been captured but not yet produced a result. We cannot dispose the
         // NativeArrays immediately — they don't exist yet. Instead we stash the UniTask here; each
         // Tick drains completed tasks, disposing their NativeArray payloads. Teardown spins to
@@ -400,7 +400,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         //
         // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Dispose
         // are all main-thread). No locking is required.
-        private readonly List<UniTask<TessellationResult>> _pendingDisposal = new List<UniTask<TessellationResult>>(8);
+        private readonly List<UniTask<MeshBuildResult>> _pendingDisposal = new List<UniTask<MeshBuildResult>>(8);
 
         // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
         // When a tile is released before its fetch completes (rapid zoom/cover churn), the preserved
@@ -571,7 +571,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int LoadedTileCount => _loaded.Count;
 
         /// <summary>
-        /// Number of tiles released while their tessellation was still in-flight (HasTessellationTask
+        /// Number of tiles released while their mesh build was still in-flight (HasMeshBuild
         /// and not yet Built at the moment of release). Incremented by ReleaseTile. Read by tests
         /// to prove the mid-flight race actually occurred in <c>S51DisposalLeakGuardTests</c>.
         /// </summary>
@@ -590,18 +590,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         internal int CoverRecomputesLastTick { get; private set; }
 
-        /// <summary>S55: tessellation kicks issued in the most recent PumpPendingBuilds call.
+        /// <summary>S55: mesh build kicks issued in the most recent PumpPending call.
         /// Exposed for tests; never call from production code.</summary>
-        internal int TessellationsKickedLastTick { get; private set; }
+        internal int MeshBuildsKickedLastTick { get; private set; }
 
-        /// <summary>S55/S87: sum of layer-mesh vertex counts consumed in the most recent PumpPendingBuilds call.</summary>
+        /// <summary>S55/S87: sum of layer-mesh vertex counts consumed in the most recent PumpPending call.</summary>
         internal int VerticesConsumedLastTick { get; private set; }
 
         /// <summary>S55/S87: number of tiles that reached <c>Built</c> (fully consumed) in the most recent
-        /// PumpPendingBuilds call. With S87's per-mesh consume a tile may take several ticks to complete.</summary>
+        /// PumpPending call. With S87's per-mesh consume a tile may take several ticks to complete.</summary>
         internal int TilesConsumedLastTick { get; private set; }
 
-        /// <summary>S87: number of layer MESHES uploaded + registered in the most recent PumpPendingBuilds call —
+        /// <summary>S87: number of layer MESHES uploaded + registered in the most recent PumpPending call —
         /// the per-frame mesh-count budget observable (bounds AddLayer / entity-add and GPU upload per frame).</summary>
         internal int MeshesConsumedLastTick { get; private set; }
 
@@ -620,7 +620,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_cover, _coverStatsX, _coverStatsY);
 
             // One shared pass over _loaded for Pending + ConsumeBacklog (S85 decision — reuse the loop, not
-            // two). ConsumeBacklog mirrors PumpPendingBuilds' Phase-2 consume-entry condition plus the
+            // two). ConsumeBacklog mirrors PumpPending's consume-entry condition plus the
             // explicit !Built this method needs (that loop only ever sees _toRelease's !Built subset; this
             // one walks every record, built or not).
             int pending = 0, backlog = 0;
@@ -629,7 +629,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt = kv.Value;
                 if (lt.Built) continue;
                 pending++;
-                if (lt.FetchCompleted && lt.HasTessellationTask && lt.TessellationTask.Status.IsCompleted())
+                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.Status.IsCompleted())
                     backlog++;
             }
 
@@ -737,7 +737,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// Test-only: true once every loaded tile has finished building (or is definitively absent).
-        /// S47/S51: returns false while any tile has a pending tessellation.
+        /// S47/S51: returns false while any tile has a pending mesh build.
         /// </summary>
         internal bool AllTilesSettled()
         {
@@ -751,9 +751,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// One frame of the tile loop. Allocation-free in steady state.
         ///
-        /// S47/S51: no main-thread tessellation. PumpPendingBuilds only KICKS background UniTasks
-        /// on fetch completion; ConsumeTessellationResults polls and CONSUMES completed UniTasks
-        /// (uploads mesh + creates GameObjects). Neither step blocks on tessellation.
+        /// S47/S51: no main-thread mesh build. PumpPending only KICKS background UniTasks
+        /// on fetch completion; ConsumeMeshBuilds polls and CONSUMES completed UniTasks
+        /// (uploads mesh + creates GameObjects). Neither step blocks on mesh build.
         ///
         /// The caller (MapView) runs <see cref="RenderLayerSet.ApplyZoom"/> and refreshes the scene
         /// origin BEFORE this — the origin is passed in so tile placement and camera sync share it.
@@ -764,7 +764,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             CoverRecomputesLastTick = 0; // S95: reset each Tick; set below only if the full recompute runs
 
-            _projection = cfg.Projection; // cache for the tessellation bake (Level-1); same projection as origin + frame
+            _projection = cfg.Projection; // cache for the mesh build bake (Level-1); same projection as origin + frame
 
             if (!_coverKeyInitialised ||
                 cam.LookAt.Longitude    != _coverKeyLon ||
@@ -783,7 +783,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // S84: observe any completed mid-flight-released fetch tasks (no unobserved-exception flood).
             DrainPendingFetchDisposal();
 
-            int pending = PumpPendingBuilds(cam, cfg.MaxBuildsPerTick, cfg.MaxTessellationsPerTick, cfg.MaxVerticesPerTick);
+            int pending = PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick);
 
             if (!_coverDirty && pending == 0)
                 return;
@@ -821,11 +821,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
                         // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
                         // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
-                        double3 origin = TileTessellationPipeline.ProjectTileCornerOrigin(
-                            id.Z, id.X, id.Y, cfg.Projection);
+                        double3 origin = TileMeshPipeline.ProjectTileCornerOrigin(id, cfg.Projection);
 
                         // S82: probe the PreparedTileCache BEFORE kicking a fetch — a full-tile hit (every
-                        // dense layerId of this (tile, source) present in the cache) skips decode/tessellate/
+                        // dense layerId of this (tile, source) present in the cache) skips decode/build/
                         // upload AND the fetch itself; the raw TileCache is simply never consulted on a hit.
                         // Disabled (_cacheEnabled == false) skips the probe entirely — every tile is treated
                         // as a miss, reverting to pre-S82 always-fetch/-prepare behaviour.
@@ -891,23 +890,23 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// S47 deterministic drain — blocks the calling thread until all in-flight fetch and
-        /// tessellation UniTasks complete, then consumes their results synchronously (uploads meshes +
+        /// mesh build UniTasks complete, then consumes their results synchronously (uploads meshes +
         /// creates GameObjects). After this returns, <see cref="AllTilesSettled()"/> is guaranteed
         /// true for all currently loaded tiles.
         ///
         /// This is a full drain: it handles tiles at any stage of the pipeline:
-        ///   (a) Fetch in-flight: spins until the fetch UniTask completes, then kicks tessellation inline.
-        ///   (b) Tessellation in-flight: spins until the UniTask completes, then consumes inline.
+        ///   (a) Fetch in-flight: spins until the fetch UniTask completes, then kicks mesh build inline.
+        ///   (b) Mesh build in-flight: spins until the UniTask completes, then consumes inline.
         ///   (c) Neither (tile not yet fetched): marks Built=true (nothing to do).
         ///
-        /// Safe: both fetch and tessellation UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
+        /// Safe: both fetch and mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
         /// so they complete on the ThreadPool and IsCompleted becomes true without needing the Unity
         /// PlayerLoop to advance. Spinning on IsCompleted from the main thread therefore does not
         /// deadlock (no PlayerLoop dependency to dead-end on).
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
         /// </summary>
-        internal void DrainTessellation(CameraProperties cam)
+        internal void DrainMeshBuilds(CameraProperties cam)
         {
             // Collect all unsettled records.
             var unsettled = new List<LoadedKey>(8);
@@ -921,7 +920,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 string sourceId = _pipelines[key.Slot].SourceId;
                 LoadedTile lt   = _loaded[key];
 
-                // (a) If fetch is still in-flight, spin until it completes and kick tessellation.
+                // (a) If fetch is still in-flight, spin until it completes and kick mesh build.
                 if (!lt.FetchCompleted)
                 {
                     var req = lt.Request;
@@ -942,41 +941,41 @@ namespace MapRenderer.Unity.Rendering.Tile
                     TileResponse resp = ObserveFetchOutcome(req, logErrors: true);
                     if (resp.HasData && resp.Bytes != null)
                     {
-                        // Kick tessellation synchronously (wait inline).
-                        var tessTask = KickTessellationTask(lt, id, resp.Bytes, sourceId);
-                        lt.HasTessellationTask = true;
-                        lt.TessellationTask    = tessTask;
+                        // Kick mesh build synchronously (wait inline).
+                        var tessTask = KickMeshBuild(lt, id, resp.Bytes, sourceId);
+                        lt.HasMeshBuild = true;
+                        lt.MeshBuildTask    = tessTask;
                     }
                     else
                     {
-                        // Absent/failed/cancelled fetch — nothing to tessellate.
+                        // Absent/failed/cancelled fetch — nothing to build.
                         lt.Built = true;
                         _loaded[key] = lt;
                         continue;
                     }
                 }
 
-                // (a2) S55: fetch completed with data but tessellation not yet kicked (cap-deferred in
+                // (a2) S55: fetch completed with data but mesh build not yet kicked (cap-deferred in
                 // normal pump). Kick inline here — drain ignores per-tick caps.
-                if (lt.FetchCompleted && lt.ReadyBytes != null && !lt.HasTessellationTask)
+                if (lt.FetchCompleted && lt.ReadyBytes != null && !lt.HasMeshBuild)
                 {
-                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, sourceId);
-                    lt.HasTessellationTask = true;
+                    lt.MeshBuildTask    = KickMeshBuild(lt, id, lt.ReadyBytes, sourceId);
+                    lt.HasMeshBuild = true;
                     lt.ReadyBytes          = null;
                 }
 
-                // (b) Tessellation in-flight — spin and consume.
-                if (lt.HasTessellationTask)
+                // (b) Mesh build in-flight — spin and consume.
+                if (lt.HasMeshBuild)
                 {
-                    var tessTask = lt.TessellationTask;
-                    // Safe spin: tessellation UniTask uses configureAwait: false (RunOnThreadPool),
+                    var tessTask = lt.MeshBuildTask;
+                    // Safe spin: mesh build UniTask uses configureAwait: false (RunOnThreadPool),
                     // so IsCompleted is true on the ThreadPool without needing the PlayerLoop.
                     // Thread.Sleep(1) yields real CPU time so the ThreadPool can complete the work.
                     int spins = 0;
                     while (!tessTask.Status.IsCompleted() && spins++ < 10000)
                         Thread.Sleep(1);
                     // Drain ignores per-frame caps: unbounded budget consumes ALL layers in one call → Built.
-                    ConsumeTessellationTask(id, ref lt, int.MaxValue, int.MaxValue, out _, out _);
+                    ConsumeMeshBuild(id, ref lt, int.MaxValue, int.MaxValue, out _, out _);
                 }
                 else
                 {
@@ -988,44 +987,44 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// S47/S51/S55 pump: two-phase pipeline per tile.
+        /// S47/S51/S55 pump: per tile, kick its mesh build then consume the built mesh.
         ///
-        /// Phase 1 (fetch→kick-tessellation): for tiles whose fetch completed, store bytes and kick a
-        /// background tessellation UniTask (S55: at most <paramref name="maxTessellationsPerTick"/> kicks
-        /// per Tick — bytes are retained in <see cref="LoadedTile.ReadyBytes"/> until the cap allows).
+        /// Mesh build (fetch→kick): for tiles whose fetch completed, store bytes and kick a background
+        /// mesh-build UniTask (S55: at most <paramref name="maxMeshBuildsPerTick"/> kicks per Tick — bytes are
+        /// retained in <see cref="LoadedTile.ReadyBytes"/> until the cap allows).
         ///
-        /// Phase 2 (tessellate→consume): for tiles whose tessellation UniTask is completed, consume the
-        /// result on the main thread (UploadMesh → backend registration) MESH-by-mesh (S87). The per-frame
-        /// budget is dual — at most <paramref name="maxBuildsPerTick"/> layer MESHES AND
+        /// Consume (build→upload): for tiles whose mesh-build UniTask is completed, consume the result on the
+        /// main thread (UploadMesh → backend registration) MESH-by-mesh (S87). The per-frame budget is dual —
+        /// at most <paramref name="maxConsumesPerTick"/> layer MESHES AND
         /// <paramref name="maxVerticesPerTick"/> vertices per frame, whichever binds first; a tile whose
         /// layers exceed the remaining budget is consumed partially and RESUMES (via its ConsumeCursor) on
         /// later Ticks — a single rich tile never lands in one frame.
         ///
-        /// Returns the count of tiles still pending (fetch or tessellation in-flight, or cap-deferred).
+        /// Returns the count of tiles still pending (fetch or mesh build in-flight, or cap-deferred).
         ///
         /// Greppability note: there is NO .Schedule().Complete() in this method.
         /// </summary>
-        private int PumpPendingBuilds(
+        private int PumpPending(
             CameraProperties cam,
-            int maxBuildsPerTick,
-            int maxTessellationsPerTick,
+            int maxConsumesPerTick,
+            int maxMeshBuildsPerTick,
             int maxVerticesPerTick)
         {
             using var sFetchPoll = PmFetchPoll.Auto();
 
             // Reset per-tick observability counters.
-            TessellationsKickedLastTick = 0;
+            MeshBuildsKickedLastTick = 0;
             VerticesConsumedLastTick    = 0;
             TilesConsumedLastTick       = 0;
             MeshesConsumedLastTick      = 0;
 
             // S55: treat 0 as uncapped for the kick + vertex caps (unset config field → harmless default).
-            int tessCap  = maxTessellationsPerTick > 0 ? maxTessellationsPerTick : int.MaxValue;
-            int vertsCap = maxVerticesPerTick      > 0 ? maxVerticesPerTick      : int.MaxValue;
+            int buildCap = maxMeshBuildsPerTick > 0 ? maxMeshBuildsPerTick : int.MaxValue;
+            int vertsCap = maxVerticesPerTick   > 0 ? maxVerticesPerTick   : int.MaxValue;
             // S87: the per-frame MESH-count cap is used directly — 0 BLOCKS consume (tests build a backlog
             // that way); set it high (e.g. 64) for effectively-uncapped. The asymmetry with the vertex cap
-            // (0 = uncapped) is intentional and documented on TileSelectionConfig.MaxBuildsPerTick.
-            int meshCap  = maxBuildsPerTick;
+            // (0 = uncapped) is intentional and documented on TileSelectionConfig.MaxConsumesPerTick.
+            int consumeCap = maxConsumesPerTick;
 
             _toRelease.Clear();
             foreach (var kv in _loaded)
@@ -1033,7 +1032,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     _toRelease.Add(kv.Key);
 
             int pending          = 0;
-            int tessKicked       = 0;
+            int buildsKicked       = 0;
             int meshesConsumed   = 0;
             int verticesConsumed = 0;
 
@@ -1044,12 +1043,12 @@ namespace MapRenderer.Unity.Rendering.Tile
                 string     sourceId = _pipelines[key.Slot].SourceId;
                 LoadedTile lt       = _loaded[key];
 
-                // ── Phase 2 (S87): consume a completed tessellation MESH-by-mesh under the dual budget ──
-                if (lt.FetchCompleted && lt.HasTessellationTask && lt.TessellationTask.Status.IsCompleted())
+                // ── Consume a completed mesh build MESH-by-mesh under the dual budget (S87) ──
+                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.Status.IsCompleted())
                 {
-                    int meshBudgetLeft = meshCap  - meshesConsumed;
+                    int meshBudgetLeft = consumeCap  - meshesConsumed;
                     int vertBudgetLeft = vertsCap - verticesConsumed;
-                    // Budget exhausted this frame (or meshCap == 0 → blocked): defer the rest to the next Tick.
+                    // Budget exhausted this frame (or consumeCap == 0 → blocked): defer the rest to the next Tick.
                     // The tile keeps its ConsumeCursor; pending++ keeps Tick pumping until it drains.
                     if (meshBudgetLeft <= 0 || vertBudgetLeft <= 0)
                     {
@@ -1057,7 +1056,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         continue;
                     }
 
-                    bool complete = ConsumeTessellationTask(
+                    bool complete = ConsumeMeshBuild(
                         id, ref lt, meshBudgetLeft, vertBudgetLeft,
                         out int meshesThisCall, out int vertsThisCall);
 
@@ -1071,28 +1070,28 @@ namespace MapRenderer.Unity.Rendering.Tile
                     continue;
                 }
 
-                // ── Tessellation in-flight ─────────────────────────────────────────────────────
-                if (lt.FetchCompleted && lt.HasTessellationTask)
+                // ── Mesh build in-flight ───────────────────────────────────────────────────────
+                if (lt.FetchCompleted && lt.HasMeshBuild)
                 {
                     pending++;
                     continue;
                 }
 
-                // ── Phase 1: kick tessellation from ReadyBytes ─────────────────────────────────
+                // ── Kick a mesh build from ReadyBytes ──────────────────────────────────────────
                 if (lt.FetchCompleted && lt.ReadyBytes != null)
                 {
-                    if (tessKicked >= tessCap)
+                    if (buildsKicked >= buildCap)
                     {
                         // Cap reached this tick — bytes retained for next Tick.
                         pending++;
                         continue;
                     }
-                    lt.TessellationTask    = KickTessellationTask(lt, id, lt.ReadyBytes, sourceId);
-                    lt.HasTessellationTask = true;
+                    lt.MeshBuildTask    = KickMeshBuild(lt, id, lt.ReadyBytes, sourceId);
+                    lt.HasMeshBuild = true;
                     lt.ReadyBytes          = null;
-                    tessKicked++;
-                    TessellationsKickedLastTick = tessKicked;
-                    pending++; // tessellation now in-flight
+                    buildsKicked++;
+                    MeshBuildsKickedLastTick = buildsKicked;
+                    pending++; // mesh build now in-flight
                     _loaded[key] = lt;
                     continue;
                 }
@@ -1111,7 +1110,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 TileResponse resp = ObserveFetchOutcome(lt.Request, logErrors: true);
                 if (resp.HasData && resp.Bytes != null)
                 {
-                    // Store bytes; kick deferred to a subsequent Tick (capped by tessCap).
+                    // Store bytes; kick deferred to a subsequent Tick (capped by buildCap).
                     lt.ReadyBytes = resp.Bytes;
                     pending++; // bytes awaiting kick
                 }
@@ -1127,12 +1126,12 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Starts a background <see cref="UniTask{TessellationResult}"/> that runs decode / assemble /
+        /// Starts a background <see cref="UniTask{MeshBuildResult}"/> that runs decode / assemble /
         /// earcut / project for all fill layers of one tile. Returns immediately (non-blocking).
         ///
         /// S51: uses UniTask.RunOnThreadPool(configureAwait: false) instead of Task.Run.
         /// configureAwait: false is REQUIRED: the default (true) posts the final continuation via
-        /// UniTask.Yield() to the Unity PlayerLoop. DrainTessellation() and the synchronous-spin
+        /// UniTask.Yield() to the Unity PlayerLoop. DrainMeshBuilds() and the synchronous-spin
         /// path in Dispose poll IsCompleted on the main thread WITHOUT pumping the PlayerLoop, so
         /// the task would never reach Succeeded with configureAwait: true. With configureAwait: false,
         /// completion stays on the ThreadPool and IsCompleted is true as soon as the work body returns.
@@ -1144,13 +1143,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// after Initialise). No Unity.Object is captured or touched off-main.
         ///
         /// S82 Decision 2 (option A): the paint bake zoom is the tile's INTEGER zoom (<c>id.Z</c>), not the
-        /// fractional camera zoom — a tile is tessellated exactly once per load (never re-baked while
+        /// fractional camera zoom — a tile is built exactly once per load (never re-baked while
         /// <see cref="LoadedTile.Built"/>), so baking at <c>id.Z</c> makes the prepared artifact a pure
         /// function of <c>(styleId, tileId, layerId)</c> — the sound key <see cref="PreparedTileCache"/>
         /// needs. <c>cam</c> is no longer read here (dropped from the signature; the 3 call sites still take
         /// a <c>CameraProperties</c> for other purposes and simply stop forwarding it here).
         /// </summary>
-        private UniTask<TessellationResult> KickTessellationTask(
+        private UniTask<MeshBuildResult> KickMeshBuild(
             LoadedTile lt, TileId id, byte[] mvtBytes, string sourceId)
         {
             var layersSnapshot = _layers.SnapshotLayers();
@@ -1171,20 +1170,20 @@ namespace MapRenderer.Unity.Rendering.Tile
             // ── MAIN THREAD: pre-allocate one writable MeshDataArray per this-source layer ──
             // Mesh.AllocateWritableMeshData is main-thread only (spike-verified); the worker writes into these
             // in place, the main thread applies at consume. Every allocated array is wrapped in a
-            // MeshDataTessellation below (written OR 0-vertex) so it is disposed exactly once on the main
+            // MeshDataPayload below (written OR 0-vertex) so it is disposed exactly once on the main
             // thread — including on a faulted tile (see the catch + ensure-wrapped loop).
             var mdas = new Mesh.MeshDataArray[dense];
             using (PmMeshDataAllocate.Auto())
             {
                 for (int d = 0; d < dense; d++)
-                    mdas[d] = Style.MeshDataTessellation.AllocateTracked(1);
+                    mdas[d] = Style.MeshDataPayload.AllocateTracked(1);
             }
 
             return UniTask.RunOnThreadPool(() =>
             {
                 // One payload per this-source render layer, in draw order. Fill and line share ONE loop — each
                 // IRenderLayer writes its geometry straight into its pre-allocated MeshData.
-                var payloads = new Style.IRenderLayerTessellation[dense];
+                var payloads = new Style.IRenderLayerPayload[dense];
                 try
                 {
                     MvtTile mvtTile = MvtDecoder.Decode(mvtBytes);
@@ -1208,14 +1207,14 @@ namespace MapRenderer.Unity.Rendering.Tile
                                     _projection, out verts, out bounds);
                         }
 
-                        payloads[d] = new Style.MeshDataTessellation(
+                        payloads[d] = new Style.MeshDataPayload(
                             mdas[d], verts, bounds, layer.StyleLayer?.Id ?? "TileMesh", li);
                     }
                 }
                 catch
                 {
-                    // A malformed tile (decode/tessellation fault) yields an empty tile — parity with the old
-                    // faulted-UniTask path (ConsumeTessellationTask marks it Built with no geometry). Fall
+                    // A malformed tile (decode/mesh build fault) yields an empty tile — parity with the old
+                    // faulted-UniTask path (ConsumeMeshBuild marks it Built with no geometry). Fall
                     // through so EVERY allocated array is still wrapped and disposed (no native leak).
                 }
 
@@ -1223,9 +1222,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // even if the loop above threw partway through.
                 for (int d = 0; d < dense; d++)
                     if (payloads[d] == null)
-                        payloads[d] = new Style.MeshDataTessellation(mdas[d], 0, default, "TileMesh", materialIndices[d]);
+                        payloads[d] = new Style.MeshDataPayload(mdas[d], 0, default, "TileMesh", materialIndices[d]);
 
-                return new TessellationResult { Payloads = payloads };
+                return new MeshBuildResult { Payloads = payloads };
             }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
         }
 
@@ -1239,8 +1238,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// also free any layers the active style does not render. Returns true when the tile is now fully
         /// consumed (<see cref="LoadedTile.Built"/>); false when partially consumed (resume next Tick).
         ///
-        /// Must be called on the Unity main thread, only when TessellationTask.IsCompleted, with positive
-        /// budget (the pump guards budget &lt;= 0). A partially-consumed tile keeps HasTessellationTask = true
+        /// Must be called on the Unity main thread, only when MeshBuildTask.IsCompleted, with positive
+        /// budget (the pump guards budget &lt;= 0). A partially-consumed tile keeps HasMeshBuild = true
         /// and !Built; its already-built meshes/handles live in lt.Meshes/lt.DrawHandles, the remaining layers
         /// stay alive in the Preserved task (re-fetched each call). Eviction's holding pen disposes the
         /// remainder (idempotent — already-consumed layers are no-ops).
@@ -1248,14 +1247,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// Mid-flight release: ReleaseTile removes the tile from _loaded, so this is never called for a
         /// released tile — the real discard protection is the _loaded-removal in ReleaseTile.
         /// </summary>
-        private bool ConsumeTessellationTask(
+        private bool ConsumeMeshBuild(
             TileId id, ref LoadedTile lt, int meshBudget, int vertBudget,
             out int meshesConsumed, out int vertsConsumed)
         {
             meshesConsumed = 0;
             vertsConsumed  = 0;
 
-            var task = lt.TessellationTask;
+            var task = lt.MeshBuildTask;
 
             // Faulted or cancelled — nothing to render; complete immediately.
             if (task.Status != UniTaskStatus.Succeeded)
@@ -1266,7 +1265,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // .GetResult() is Preserve-safe and re-callable across frames (the pump calls this only when
             // IsCompleted is true). Per-layer NativeArrays are disposed as each layer is consumed.
-            TessellationResult result = task.GetAwaiter().GetResult();
+            MeshBuildResult result = task.GetAwaiter().GetResult();
 
             int denseCount        = result.Payloads?.Length ?? 0;
             int currentLayerCount = _layers.Count;
@@ -1285,7 +1284,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // S89 C: the payload carries its own material index (draw order); the cursor is just a dense
                 // resume position. A payload whose material index no longer exists (restyle shrank the layer
                 // set mid-flight) is freed without registering — the backend would otherwise throw on it.
-                Style.IRenderLayerTessellation payload = result.Payloads[cursor];
+                Style.IRenderLayerPayload payload = result.Payloads[cursor];
                 cursor++;
 
                 int materialIndex = payload?.MaterialIndex ?? -1;
@@ -1333,11 +1332,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             return complete;
         }
 
-        /// <summary>S87: marks a tile fully consumed — clears the tessellation task and sets Built.</summary>
+        /// <summary>S87: marks a tile fully consumed — clears the mesh build task and sets Built.</summary>
         private static void FinishConsume(ref LoadedTile lt)
         {
-            lt.HasTessellationTask = false;
-            lt.TessellationTask    = default;
+            lt.HasMeshBuild = false;
+            lt.MeshBuildTask    = default;
             lt.Built               = true;
         }
 
@@ -1367,8 +1366,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>S48/S87: disposes every payload in a result (null-slot- and idempotent-safe — a payload
         /// already disposed during a partial consume, or a null empty-layer slot, is a no-op). The single
-        /// place a <see cref="TessellationResult"/>'s NativeArrays are freed, called from every discard path.</summary>
-        private static void DisposeWholeResult(TessellationResult result)
+        /// place a <see cref="MeshBuildResult"/>'s NativeArrays are freed, called from every discard path.</summary>
+        private static void DisposeWholeResult(MeshBuildResult result)
         {
             if (result.Payloads == null) return;
             for (int li = 0; li < result.Payloads.Length; li++)
@@ -1377,10 +1376,10 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// Releases a tile: scheduler release + unregister its instanced draw items + free its meshes.
-        /// Does NOT wait for in-flight work (non-blocking). Mid-flight tessellation is removed
-        /// from _loaded immediately so PumpPendingBuilds/DrainTessellation never visit it again.
+        /// Does NOT wait for in-flight work (non-blocking). Mid-flight mesh build is removed
+        /// from _loaded immediately so PumpPending/DrainMeshBuilds never visit it again.
         ///
-        /// S48 holding pen: when a tessellation UniTask is still in-flight at release time, its
+        /// S48 holding pen: when a mesh build UniTask is still in-flight at release time, its
         /// NativeArray payload has not yet been produced (it will be allocated on the ThreadPool
         /// after this method returns). We stash the UniTask in <see cref="_pendingDisposal"/>;
         /// <see cref="DrainPendingDisposal"/> polls it each Tick and disposes the payload when the
@@ -1453,8 +1452,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// each layer's mesh (Model B — ownership transfers back to this record) and re-registers non-null
         /// ones with the backend via <c>AddTileLayer</c>; a <see langword="null"/> (empty-layer marker) entry
         /// is a no-op, reproducing the original prepare's "no mesh for this layer" outcome exactly. No fetch,
-        /// no decode, no tessellation, no upload — <see cref="TessellationsKickedLastTick"/> is untouched by
-        /// this path, which is the decisive falsifier a shallow (re-tessellating) cache would trip.
+        /// no decode, no mesh build, no upload — <see cref="MeshBuildsKickedLastTick"/> is untouched by
+        /// this path, which is the decisive falsifier a shallow (re-building) cache would trip.
         /// </summary>
         private LoadedTile BuildTileFromCache(TileId id, double3 origin, List<int> denseLayerIds)
         {
@@ -1485,7 +1484,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// S83b: tears down a record's RENDER state — destroys its Mesh assets, unregisters its backend
-        /// draw items, and stashes any in-flight fetch/tessellation in the S48/S84 holding pens (so their
+        /// draw items, and stashes any in-flight fetch/mesh build in the S48/S84 holding pens (so their
         /// payloads are disposed, never consumed). Does <b>NOT</b> touch the scheduler/cache: that is the
         /// caller's choice — <see cref="ReleaseTile"/> follows with <c>Scheduler.Release</c> (evicts the
         /// cache); restyle (decision 7b) calls this ALONE for a kept source so its cached bytes survive.
@@ -1501,15 +1500,15 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _pendingFetchDisposal.Add(lt.Request);
             }
 
-            // A record with an unconsumed-or-partially-consumed tessellation must have its result's
+            // A record with an unconsumed-or-partially-consumed mesh build must have its result's
             // NativeArrays disposed — stash in the S48 holding pen (idempotent dispose makes a partial
             // record's already-consumed layers safe no-ops). Genuine mid-flight (task still running) is
             // counted; an S87 partial (task complete, cursor mid-way) is stashed but not counted.
-            if (lt.HasTessellationTask && !lt.Built)
+            if (lt.HasMeshBuild && !lt.Built)
             {
-                if (!lt.TessellationTask.Status.IsCompleted())
+                if (!lt.MeshBuildTask.Status.IsCompleted())
                     ReleasedMidFlightCount++;
-                _pendingDisposal.Add(lt.TessellationTask);
+                _pendingDisposal.Add(lt.MeshBuildTask);
             }
 
             // Unregister the instanced draw items before destroying Mesh assets (RemoveItem drops the draw
@@ -1614,7 +1613,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// Explicitly destroys all <see cref="Mesh"/> assets tracked in <paramref name="lt"/>.Meshes.
         ///
         /// S51 leak guard: a Mesh asset is NOT freed just because nothing references it.
-        /// <see cref="ConsumeTessellationTask"/> populates <c>lt.Meshes</c> with direct references to
+        /// <see cref="ConsumeMeshBuild"/> populates <c>lt.Meshes</c> with direct references to
         /// every Mesh it creates; this method iterates that array for reliable, deterministic destruction.
         /// After destruction, <c>lt.Meshes</c> is nulled to prevent double-free.
         /// Must be called on the Unity main thread (Object.Destroy constraint).
@@ -1634,7 +1633,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Releases all tile GameObjects and Mesh assets, drains tessellation tasks, and disposes the
+        /// Releases all tile GameObjects and Mesh assets, drains mesh build tasks, and disposes the
         /// scheduler and (if owned) the data source. Does NOT dispose the RenderLayerSet — MapView owns
         /// that and disposes it AFTER this (tile renderers reference layer materials, so the order matters).
         ///
@@ -1643,8 +1642,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         protected override void DoDispose()
         {
-            // S51/S48: drain outstanding tessellation UniTasks before tearing down.
-            // Safe spin: tessellation UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
+            // S51/S48: drain outstanding mesh build UniTasks before tearing down.
+            // Safe spin: mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
             // so IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning
             // here on the main thread is therefore deadlock-free.
             //
@@ -1653,9 +1652,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             // _pendingDisposal, drained separately below.)
             foreach (var kv in _loaded)
             {
-                if (kv.Value.HasTessellationTask)
+                if (kv.Value.HasMeshBuild)
                 {
-                    var tessTask = kv.Value.TessellationTask;
+                    var tessTask = kv.Value.MeshBuildTask;
                     // Thread.Sleep(1) yields real CPU time so the ThreadPool can complete the task.
                     int spins = 0;
                     while (!tessTask.Status.IsCompleted() && spins++ < 10000)
@@ -1709,7 +1708,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Destroy each tile's tracked Mesh assets.
             //
             // S51 leak guard: a Mesh asset is NOT freed just because nothing references it. lt.Meshes
-            // holds direct Mesh references (set by ConsumeTessellationTask) for reliable, index-safe
+            // holds direct Mesh references (set by ConsumeMeshBuild) for reliable, index-safe
             // destruction; DestroyTrackedMeshes iterates that array directly.
             //
             // Order: destroy meshes → dispose the backend (below), so the backend never references a

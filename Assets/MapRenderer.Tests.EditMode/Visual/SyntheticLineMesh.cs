@@ -67,7 +67,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Build a <see cref="Mesh"/> from a polyline point list (world-space double2 coords),
-        /// tessellated with <see cref="JoinType.Miter"/> / <see cref="CapType.Butt"/>.
+        /// built with <see cref="JoinType.Miter"/> / <see cref="CapType.Butt"/>.
         /// </summary>
         public static Mesh BuildFromPoints(IReadOnlyList<double2> pts,
             JoinType join = JoinType.Miter, CapType cap = CapType.Butt)

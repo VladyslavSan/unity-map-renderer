@@ -5,9 +5,9 @@ using UnityEngine.Rendering;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// S89 Stage B — the single per-<c>(tile, layer)</c> tessellation payload: a writable
+    /// S89 Stage B — the single per-<c>(tile, layer)</c> mesh payload: a writable
     /// <see cref="Mesh.MeshDataArray"/> (count 1) the worker populated, applied to a fresh <see cref="Mesh"/>
-    /// at consume. Replaces Stage A's per-type <c>FillTessellation</c>/<c>LineTessellation</c> handles —
+    /// at consume. Replaces Stage A's per-type fill/line payload handles —
     /// once the worker has written the <c>MeshData</c>, the payload is layer-type-agnostic.
     ///
     /// <para><b>Lifecycle (the S89 choreography):</b> the array is allocated on the MAIN THREAD at kick
@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <see cref="AllocateTracked"/>, decremented on Upload or Dispose. Net-zero after every load+release
     /// cycle; the S51 positive control asserts it goes positive on a deliberate leak.</para>
     /// </summary>
-    internal sealed class MeshDataTessellation : IRenderLayerTessellation
+    internal sealed class MeshDataPayload : IRenderLayerPayload
     {
         internal static long LiveAllocCount;
 
@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Global draw-order / material index of the render layer this payload belongs to (S89 C).</summary>
         public int MaterialIndex { get; }
 
-        public MeshDataTessellation(Mesh.MeshDataArray mda, int vertexCount, Bounds bounds, string meshName,
+        public MeshDataPayload(Mesh.MeshDataArray mda, int vertexCount, Bounds bounds, string meshName,
             int materialIndex)
         {
             _mda          = mda;

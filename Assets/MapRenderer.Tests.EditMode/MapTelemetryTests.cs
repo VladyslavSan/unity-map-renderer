@@ -60,7 +60,7 @@ namespace MapRenderer.Tests
         }");
 
         /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit (mirrors
-        /// <c>MapViewAsyncTessellationTests.PumpUntilSettled</c>).</summary>
+        /// <c>MapViewAsyncMeshBuildTests.PumpUntilSettled</c>).</summary>
         private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
@@ -102,8 +102,8 @@ namespace MapRenderer.Tests
                 view.Config.MaxZoom        = 14;
                 view.Config.OnScreenTilePx = 512;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 4.0), style: MinimalStyle());
                 PumpUntilSettled(view);
@@ -163,8 +163,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: TwoSourceStyle());
                 PumpUntilSettled(view);
@@ -197,8 +197,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 view.Tick(); // requests the cover; fetches kick and stay in-flight (SpinUntilReleased never returns)
@@ -231,8 +231,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 PumpUntilSettled(view);
@@ -265,13 +265,13 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
-                view.Config.MaxTessellationsPerTick = 64; // don't cap tessellation kicks
+                view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
+                view.Config.MaxMeshBuildsPerTick = 64; // don't cap mesh build kicks
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 
-                // Tessellations complete one at a time on the ThreadPool, so ConsumeBacklog trickles up
-                // (1, 2, ... ) across several Ticks before every loaded tile has finished tessellating.
+                // Mesh builds complete one at a time on the ThreadPool, so ConsumeBacklog trickles up
+                // (1, 2, ... ) across several Ticks before every loaded tile has finished building.
                 // Wait for it to STABILIZE at PendingTileCount (⇒ no record is still fetch/tess-in-flight) —
                 // stopping at the first non-zero backlog would race a partially-arrived batch.
                 TileTelemetrySnapshot snap = default;
@@ -284,14 +284,14 @@ namespace MapRenderer.Tests
                 }
 
                 Assert.Greater(snap.ConsumeBacklog, 0,
-                    "with MaxBuildsPerTick=0, completed tessellations must pile up as backlog, not be reported " +
+                    "with MaxConsumesPerTick=0, completed mesh builds must pile up as backlog, not be reported " +
                     "as a constant 0 (which would fail this throttled side).");
                 Assert.AreEqual(snap.PendingTileCount, snap.ConsumeBacklog,
-                    "nothing here is fetch/tessellation-in-flight — Pending IS the backlog in this scenario");
+                    "nothing here is fetch/mesh build-in-flight — Pending IS the backlog in this scenario");
                 Assert.AreEqual(0, snap.InFlightFetches);
 
                 // Raise the budget and drain — proves the OTHER side: real state that drains, not a stuck counter.
-                view.Config.MaxBuildsPerTick = 64;
+                view.Config.MaxConsumesPerTick = 64;
                 for (int f = 0; f < 200 && !view.AllTilesSettled(); f++)
                     view.Tick();
 
@@ -317,8 +317,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 PumpUntilSettled(view);
@@ -380,8 +380,8 @@ namespace MapRenderer.Tests
             // (mirrors S82PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
             view.Config.PreparedCache.Enabled = false;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -415,8 +415,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 PumpUntilSettled(view);
@@ -483,8 +483,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick        = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick        = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 2.0), style: MinimalStyle());
                 PumpUntilSettled(view);

@@ -6,7 +6,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs
 {
     /// <summary>
-    /// Owns the native buffer lifetime for one tile's tessellation pipeline output.
+    /// Owns the native buffer lifetime for one tile's mesh pipeline output.
     /// Holds tile-space vertices (double2), projected world vertices (double3) + per-vertex up, and
     /// triangle indices.
     /// Must be disposed on the main thread after the job chain completes and the mesh is built.
@@ -14,7 +14,7 @@ namespace MapRenderer.Jobs
     /// Lifetime rule (NativeArray × cancellation safety):
     ///   Never call <see cref="Dispose"/> while a job referencing these buffers is still in-flight.
     ///   Always <c>JobHandle.Complete()</c> before disposing, even on cancellation.
-    ///   The <see cref="TileTessellationPipeline"/> coordinator enforces this.
+    ///   The <see cref="TileMeshPipeline"/> coordinator enforces this.
     ///
     /// Allocator: <see cref="Allocator.Persistent"/> — tiles live for multiple frames;
     /// TempJob has a ~4-frame safety guard and will throw an error if the job takes longer.

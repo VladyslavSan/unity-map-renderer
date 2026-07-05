@@ -6,7 +6,7 @@ Foundational math the whole renderer builds on. Two projection modes are first-c
 - **ECEF globe** — Earth-Centered, Earth-Fixed 3D Cartesian; full spherical/ellipsoidal Earth.
 
 Geometry has **one source of truth — geodetic (lon, lat, height)** — and *projection is a pure function
-applied late*. Both modes feed the same geometry pipeline and shaders.
+applied late*. Both modes feed the same mesh pipeline and shaders.
 
 ---
 
@@ -146,25 +146,79 @@ on the managed side (through the boxed struct; no Burst constraint there).
   on the globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputePose`).
   (`Tilt`/`Heading` become `ConstrainedAngle` camera params — S68.)
 
+### 7.1 Handedness, winding & why the ECEF reflection is load-bearing
+*(the general coordinate-systems lesson — settled empirically by the de-reflection experiment, 2026-07-05)*
+
+**The `(X,Z,Y)` swap is a reflection, and that is not a bug.** Swapping two axes has determinant −1.
+ECEF is right-handed (Z-up); Unity render space is left-handed (Y-up). Mapping one to the other **must** be an
+orientation-reversing (odd) transform — there is no proper rotation from a right-handed to a left-handed frame.
+So `render = (X_ecef, Z_ecef, Y_ecef)` is a reflection *by necessity*.
+
+**Why it's load-bearing — the rebase.** Globe geometry renders as `rebase · (project(v) − sceneOrigin)`, where
+`rebase = transpose(IProjection.TangentBasisAt(lookAt))` is the per-frame tile-transform rotation (`SceneFrame.Rebase`).
+A backend converts it to a quaternion (`new quaternion(frame.Rebase)`) — and **a reflection has no quaternion**, so
+`rebase` MUST be a proper rotation (det +1). It is, because the reflection in `ProjectPoint`/`Ecef.Forward` (det −1)
+is exactly cancelled by the `(East, Up, North)` **column ordering** of `Ecef.TangentBasis` (also det −1):
+`(−1)·(−1) = +1`. The reflection and the column order are a **matched pair**. `GlobePlacementTests` guards this
+directly: *"det(B) must be +1 (proper rotation)"*.
+
+**Winding is a per-path concern, not a world-handedness property.** After the rebase, both projections render in
+the same right-handed local frame — there is no world-handedness difference to "fix". Front-face correctness is
+decided per geometry **construction**:
+- **Fills** map all three triangle vertices through `ProjectPoint` (one map) → self-consistent → the raw
+  MVT/earcut winding is already correct, **no flip**.
+- **Lines** build the centerline through `ProjectPoint` but the `across` extrusion through `TangentBasisAt` (a
+  *separate* frame) → the two maps disagree in orientation on the globe → the ribbon inverts → **needs a winding
+  reversal**. `IProjection.ReversesWinding` names this handedness fact; **only the line path consults it** (fills
+  ignore it). Pinned by Mercator-calibrated `GlobeFillWindingTests` / `GlobeLineWindingTests`.
+
+**The de-reflection experiment (rejected).** Hypothesis: make Spherical right-handed like Mercator
+(`(X,Z,Y)→(X,Z,−Y)`, a rotation) across `Ecef.Forward` / `TangentBasis` / `ProjectPoint` / `ReconstructView` +
+inverse trig, and drop the line flip. Measured, on a branch:
+1. **`det(TangentBasis) → −1`** ⇒ `GlobePlacementTests` fails (rebase is no longer a rotation ⇒ the tile-transform
+   quaternion is garbage). The reflection is structurally required — confirming the matched pair above.
+2. **Winding did not unify — it *swapped*.** A global de-reflection flips *every* mesh-local winding, so the fill
+   (which needed no flip) inverted while the line (which needed one) became correct — you trade the line flip for a
+   fill flip. `GlobeFillWindingTests` went red (globe +1 vs Mercator −1); the line test went green. Net zero.
+3. **Snapshots were unchanged (a render no-op).** The coordinated de-reflection composes straight back through the
+   rebase (`rebase' · project'` = `rebase · project`), so the *rendered pixels* are identical — the reflection is an
+   internal representation detail, invisible on screen.
+
+**Takeaways (general):**
+- A right↔left handedness change is necessarily a reflection; you cannot "rotate it away".
+- If a reflection is composed into a downstream **rotation** (here `rebase`), it is load-bearing — moving it flips
+  the downstream determinant and breaks any rotation-only consumer (quaternion, `LookRotation`).
+- Winding correctness lives with the geometry **construction**, not the projection's world handedness. Two paths
+  that build differently (single-map vs. two-map) can need opposite treatment under the *same* projection.
+- When handedness reasoning gets slippery, **don't derive the sign — calibrate to a known-good reference and test**
+  (both winding tests calibrate the globe against Mercator; snapshots catch a mirror the winding sign can't).
+
 ## 8. Low-level rules (invariants)
 1. **Geodetic is the source of truth.** Projection is a pure, late-applied function — never store
    pre-projected positions as canonical.
 2. **float64 core, float32 GPU (origin-relative).** No absolute world positions ever reach float32.
 3. **RTC/floating origin always on** (both modes).
-4. **Line width extrudes along the in-surface perpendicular:** `extrudeDir = normalize(cross(up, tangent))`.
-   Planar: `up = +Z` ⇒ the 2D perpendicular. Globe: `up = geodetic normal` ⇒ ribbon hugs the surface.
+4. **Line width extrudes along the in-surface perpendicular:** `across = normalize(cross(along, up))`.
+   Planar: `up = +Y` ⇒ the 2D perpendicular. Globe: `up = geodetic normal` ⇒ ribbon hugs the surface.
    (Width itself is meters, converted to pixels per the styling model — see ARCHITECTURE.md §2.)
+   *(Implemented S100 — `LineRibbonJob` builds the ribbon in 3D from a `(point, up)` array. NOTE the sign:
+   `cross(along, up)`, NOT `cross(up, along)` — the two differ by a reflection, and only the former winds the
+   flat Mercator ribbon like the confirmed-correct 2D reference. The sign is **calibrated** to that oracle,
+   not derived from handedness (§7.1); tying `across` to the same `up` the centerline was projected with makes
+   winding correct by construction for every projection, so there is no per-projection winding flip.)*
 5. **Globe needs curvature subdivision:** large straight primitives (ocean/country fills, long lines) must
    be subdivided so chords don't cut through the sphere — threshold by angular span / sagitta tolerance.
-   Planar mode: no subdivision.
+   Planar mode: no subdivision. *(Implemented S100 — the projection declares the tolerance as
+   `IProjection.MaxRefineAngleRad`; Mercator returns `∞`, so the split count falls out to zero and "no
+   subdivision" is the degenerate value, not a capability flag. Retired `IsCurved`/`ReversesWinding`.)*
 6. **Consistent winding & normals** as in §7; verify no mirroring across the ECEF→Unity handedness flip.
 
 ## 9. DECIDED (2026-07-02) — CPU-at-build: project once during mesh modelling
-**The projection is applied ONCE, on the CPU at tessellation/mesh-build time** — bake the final projected
+**The projection is applied ONCE, on the CPU at mesh-build time** — bake the final projected
 positions (origin-relative `float3`) **plus the per-vertex frame** (up / tangent / across) into the mesh.
 The shader stays simple (positions are already final; it consumes the mesh-supplied frame, no per-vertex
 projection). The `IProjection` stateless `ProjectPoint` math is consumed on the **build/Burst side** (in the
-tessellation worker), not in the shader.
+mesh-build worker), not in the shader.
 
 **Rationale (maintainer):** projection is a **launch-time config constant** — chosen once at app start
 (Bootstrapper) and held for the session; switching it mid-app is not a supported use case. So the one real

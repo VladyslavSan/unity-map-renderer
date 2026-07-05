@@ -1,4 +1,4 @@
-// S82 acceptance — PreparedTileCache MapView-integration teeth (real cover→fetch→tessellate→consume→evict
+// S82 acceptance — PreparedTileCache MapView-integration teeth (real cover→fetch→build→consume→evict
 // cycles through TileManager). Unity-only (Mesh, MonoBehaviour) — not included in the fast dotnet
 // core-tests project.
 //
@@ -8,7 +8,7 @@
 //
 // Teeth covered:
 //   - THE decisive revisit: prepare, evict (transfers to cache), revisit the SAME tile — assert (1) zero
-//     tessellation kicks + a cache hit on revisit, (2) a positive-control miss on the first visit, (3) the
+//     mesh build kicks + a cache hit on revisit, (2) a positive-control miss on the first visit, (3) the
 //     revisit content is pixel-identical (same Mesh object, same baked vertex color) to the original prepare.
 //   - Zoom-bake soundness: prepare at cam.Zoom=z1, revisit at cam.Zoom=z2 (same tile, id.Z unchanged) — the
 //     cached render must equal a fresh prepare AT id.Z, not at either fractional camera zoom.
@@ -95,12 +95,12 @@ namespace MapRenderer.Tests
             var (bMin, _) = id.MercatorBounds();
             var tileOrigin = new double3(bMin.x, 0.0, bMin.y);
 
-            var mda = MeshDataTessellation.AllocateTracked(1);
+            var mda = MeshDataPayload.AllocateTracked(1);
             StyledFillTileBuilder.WriteMeshData(
                 mda[0], features, paint, zoom, mvtLayer.Extent, id, tileOrigin, out int vc, out Bounds b);
             Assert.Greater(vc, 0, "Ground-truth build must produce geometry.");
 
-            var payload = new MeshDataTessellation(mda, vc, b, "ground-truth", materialIndex: 0);
+            var payload = new MeshDataPayload(mda, vc, b, "ground-truth", materialIndex: 0);
             Mesh mesh = payload.Upload();
             Color c0 = FirstVertexColor(mesh);
             Object.DestroyImmediate(mesh);
@@ -137,8 +137,8 @@ namespace MapRenderer.Tests
             var view     = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
@@ -167,15 +167,15 @@ namespace MapRenderer.Tests
                 // Revisit: pan back to the SAME (lon,lat) — the SAME tile re-enters cover.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.Tick(); // the recompute (cover diff + probe) runs in THIS tick
-                int kicksOnRevisitTick = view.TessellationsKickedLastTick();
+                int kicksOnRevisitTick = view.MeshBuildsKickedLastTick();
                 int hitsOnRevisitTick  = view.PreparedCacheHits();
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be re-built (from cache) on revisit.");
 
-                // DECISIVE (1): zero tessellation kicks + a registered hit on the revisit tick.
+                // DECISIVE (1): zero mesh build kicks + a registered hit on the revisit tick.
                 Assert.AreEqual(0, kicksOnRevisitTick,
-                    "DECISIVE: the revisit tick must issue ZERO tessellation kicks. A shallow (re-tessellating) " +
+                    "DECISIVE: the revisit tick must issue ZERO mesh build kicks. A shallow (re-building) " +
                     "cache implementation would bump this.");
                 Assert.Greater(hitsOnRevisitTick, 0,
                     "DECISIVE: the revisit tick must register >=1 PreparedCacheHit.");
@@ -214,8 +214,8 @@ namespace MapRenderer.Tests
             var view     = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             const double Z1 = 4.2, Z2 = 4.8;
@@ -252,7 +252,7 @@ namespace MapRenderer.Tests
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0, Zoom = Z2 });
                 view.Tick();
-                int kicksOnRevisit = view.TessellationsKickedLastTick();
+                int kicksOnRevisit = view.MeshBuildsKickedLastTick();
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
@@ -278,7 +278,7 @@ namespace MapRenderer.Tests
         [Test]
         public void NativeArrayInvariant_AfterLoadEvictRevisit()
         {
-            long baseline = MeshDataTessellation.DebugLiveAllocCount;
+            long baseline = MeshDataPayload.DebugLiveAllocCount;
 
             byte[] bytes = FixtureBytes();
             var style    = InterpFillStyle();
@@ -287,8 +287,8 @@ namespace MapRenderer.Tests
             var view     = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
@@ -296,23 +296,23 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
-                Assert.AreEqual(baseline, MeshDataTessellation.DebugLiveAllocCount,
+                Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "After the first (real) prepare, NativeArrays must already be back at baseline (disposed " +
-                    "immediately after upload in ConsumeTessellationTask — unchanged by S82).");
+                    "immediately after upload in ConsumeMeshBuild — unchanged by S82).");
 
                 // Evict → cache transfer (Mesh only; no NativeArrays are ever cached).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.Tick();
                 PumpUntilSettled(view);
-                Assert.AreEqual(baseline, MeshDataTessellation.DebugLiveAllocCount,
+                Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "The cache stores Mesh, never NativeArrays — must remain at baseline while a tile is cached.");
 
-                // Revisit → cache hit (no tessellation at all).
+                // Revisit → cache hit (no mesh build at all).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.Tick();
-                Assert.AreEqual(0, view.TessellationsKickedLastTick(), "Revisit must be a hit, not a re-prepare.");
+                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 PumpUntilSettled(view);
-                Assert.AreEqual(baseline, MeshDataTessellation.DebugLiveAllocCount,
+                Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "After a cache-hit revisit, NativeArray count must remain at baseline (falsifier: caching " +
                     "NativeArrays instead of Mesh would leave this non-zero).");
             }
@@ -322,7 +322,7 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(go);
             }
 
-            Assert.AreEqual(baseline, MeshDataTessellation.DebugLiveAllocCount,
+            Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                 "After full Teardown, NativeArray count must return to baseline.");
         }
 
@@ -338,8 +338,8 @@ namespace MapRenderer.Tests
             var view     = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             int meshBefore = CountMeshObjects();
@@ -398,8 +398,8 @@ namespace MapRenderer.Tests
             view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
             view.Config.Backend = backend;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try
@@ -415,13 +415,13 @@ namespace MapRenderer.Tests
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.Tick();
-                int kicks = view.TessellationsKickedLastTick();
+                int kicks = view.MeshBuildsKickedLastTick();
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
                     $"[{backend}] TrackedTile must be re-built (from cache) on revisit — falsifier: a backend " +
                     "that assumed it owned/destroyed the mesh on RemoveItem would draw nothing here.");
-                Assert.AreEqual(0, kicks, $"[{backend}] the revisit must be a cache hit (no re-tessellation).");
+                Assert.AreEqual(0, kicks, $"[{backend}] the revisit must be a cache hit (no re-mesh build).");
 
                 Mesh[] meshes = view.GetTileMeshes(TrackedTile);
                 Assert.IsNotNull(meshes);
@@ -458,8 +458,8 @@ namespace MapRenderer.Tests
             // precede WithTestCamera() in every other test in this file).
             view.Config.PreparedCache.Enabled = false;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick        = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
 
             try

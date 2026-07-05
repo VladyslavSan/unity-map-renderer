@@ -57,11 +57,11 @@ MapRenderer.Core (engine-free, headless-testable; UniTask via NetCore build)
   FileDataSource    : sync File.ReadAllBytes wrapped in UniTask.RunOnThreadPool (no Task)
   InMemory/Fixture  : UniTask.FromResult / UniTaskCompletionSource (tests)
   TileScheduler     : UniTask orchestration + cache
-  decode/tessellate/geometry: pure, sync
+  decode/triangulate/geometry: pure, sync
 
 MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Object lifecycle)
   UnityWebRequestDataSource : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
-  MapView tessellation/consume : UniTask.RunOnThreadPool → SwitchToMainThread
+  MapView mesh-build/consume : UniTask.RunOnThreadPool → SwitchToMainThread
   Mesh/GameObject create + Object.Destroy : MAIN THREAD ONLY
   cancellation : destroyCancellationToken
 ```
@@ -115,7 +115,7 @@ dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. W
 continuation resumes on the main thread — the single choke-point that owns the upload-vs-dispose branch.
 
 **Leak-guard test (teeth):** drive N tiles through load→release including the race (release a tile whose
-tessellation result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
+mesh build result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
 `NativeLeakDetection`/alloc-vs-dispose counts) and **zero orphaned `Mesh`** (created-vs-destroyed count).
 
 ## Packaging

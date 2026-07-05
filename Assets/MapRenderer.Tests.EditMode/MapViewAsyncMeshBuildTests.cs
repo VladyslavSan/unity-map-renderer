@@ -1,13 +1,13 @@
-// S47 acceptance tests — async non-blocking tile tessellation.
+// S47 acceptance tests — async non-blocking tile mesh build.
 //
 // Tooth 1: No .Schedule().Complete() on the live Update path. Behavioral: tiles do NOT transition
-//          fetch→Built in the same frame the fetch completes (tessellation is deferred ≥1 frame).
+//          fetch→Built in the same frame the fetch completes (mesh build is deferred ≥1 frame).
 // Tooth 2: Non-blocking — BuildMeshData runs off the main thread (verified via thread-id hook).
-// Tooth 2b: Main-thread PmTessellate sample count == 0 after async load (S46 profiler-marker harness);
+// Tooth 2b: Main-thread PmBuildMesh sample count == 0 after async load (S46 profiler-marker harness);
 //           pins the concrete numeric criterion from S47 tooth 2 acceptance.
 // Tooth 3: Correctness parity — async path produces same vertex count AND positions as sync StyledFillTileBuilder.BuildMesh.
 // Tooth 4: Cancellation (S04) — Released-mid-flight tile does not create a GameObject.
-// Tooth 5: Drain determinism — DrainTessellation() + AllTilesSettled() == true.
+// Tooth 5: Drain determinism — DrainMeshBuilds() + AllTilesSettled() == true.
 // Tooth 6: Steady-state alloc — Tick is alloc-free once settled.
 
 using System.Collections;
@@ -37,18 +37,18 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S47 async non-blocking tessellation acceptance tests.
+    /// S47 async non-blocking mesh build acceptance tests.
     ///
     /// Architecture note on tooth 1 / .Schedule().Complete() greppability:
     ///   The stage names 5 sites. Only ONE is on the live Update path: the old
     ///   StyledFillTileBuilder.cs:125 site (now replaced by managed projection in BuildMeshData).
     ///   The other sites are off-path test-only utilities:
-    ///     - TileTessellationPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
+    ///     - TileMeshPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
     ///   (S54 retired the Gen-1 MapFillBootstrap single-tile sync bootstrap entirely.)
     ///   A naive grep of the full tree finds these; they are intentionally not in the live Update path.
     /// </summary>
     [TestFixture]
-    public class MapViewAsyncTessellationTests
+    public class MapViewAsyncMeshBuildTests
     {
         // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
@@ -84,8 +84,8 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Pumps Tick() until every loaded tile has settled or a spin budget is hit.
-        /// With S47 async tessellation, each Tick() polls completed tasks, so a few spins +
-        /// Thread.Sleep(1) drain the ThreadPool tessellation naturally.
+        /// With S47 async mesh build, each Tick() polls completed tasks, so a few spins +
+        /// Thread.Sleep(1) drain the ThreadPool mesh build naturally.
         /// </summary>
         private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
@@ -116,8 +116,8 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials().WithTestCamera();
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 22;
-            view.Config.MaxBuildsPerTick = 256;
-            view.Config.MaxTessellationsPerTick = 256;
+            view.Config.MaxConsumesPerTick = 256;
+            view.Config.MaxMeshBuildsPerTick = 256;
 
             try
             {
@@ -145,19 +145,19 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── Tooth 1: no live .Schedule().Complete() — tessellation is deferred ≥ 1 frame ──────
+        // ── Tooth 1: no live .Schedule().Complete() — mesh build is deferred ≥ 1 frame ──────
 
         /// <summary>
         /// Behavioral test for tooth 1: on the same frame the fetch completes, the tile must NOT
-        /// transition to Built == true (tessellation is deferred to a later frame / poll cycle).
+        /// transition to Built == true (mesh build is deferred to a later frame / poll cycle).
         ///
         /// Setup: FixtureSource returns synchronously (Task.FromResult), so after the first Tick()
-        /// the fetch task IsCompleted == true. If tessellation were synchronous (old behavior), the
-        /// tile would be Built == true on that same Tick(). With S47 async, tessellation is kicked
+        /// the fetch task IsCompleted == true. If mesh build were synchronous (old behavior), the
+        /// tile would be Built == true on that same Tick(). With S47 async, mesh build is kicked
         /// as a background Task and must NOT be consumed in the same Tick().
         /// </summary>
         [Test]
-        public void Tooth1_TessellationDeferred_TileNotBuiltInSameFetchFrame()
+        public void Tooth1_MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
         {
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_T1");
@@ -165,8 +165,8 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -174,15 +174,15 @@ namespace MapRenderer.Tests
 
                 // First Tick: cover is dirty, tile is requested.
                 // FixtureSource returns synchronously, so fetch IsCompleted immediately.
-                // The tessellation Task is KICKED here but NOT consumed.
+                // The mesh build Task is KICKED here but NOT consumed.
                 view.Tick();
 
                 // Immediately after the first Tick, the tile should NOT yet be built.
-                // AllTilesSettled() must return false because tessellation is in-flight.
-                // (If this assertion fails, tessellation is synchronous in Tick — tooth 1 violated.)
+                // AllTilesSettled() must return false because mesh build is in-flight.
+                // (If this assertion fails, mesh build is synchronous in Tick — tooth 1 violated.)
                 Assert.IsFalse(view.AllTilesSettled(),
-                    "Tooth 1: After the Tick that kicks tessellation, AllTilesSettled() must be false. " +
-                    "Tessellation must be deferred to a later frame (async Task.Run path), not consumed " +
+                    "Tooth 1: After the Tick that kicks mesh build, AllTilesSettled() must be false. " +
+                    "Mesh build must be deferred to a later frame (async Task.Run path), not consumed " +
                     "synchronously in the same Tick() call that starts it.");
 
                 // Now let the async task complete and drain naturally.
@@ -203,7 +203,7 @@ namespace MapRenderer.Tests
         // ── Tooth 2: non-blocking — BuildMeshData runs off the main thread ────────────────────
 
         /// <summary>
-        /// Verifies that the decode/tessellation work runs on a background thread, not the main thread.
+        /// Verifies that the decode/mesh build work runs on a background thread, not the main thread.
         ///
         /// We use a test hook: override BuildMeshData via a test-only static delegate that records
         /// the thread id. Since we can't inject a hook into StyledFillTileBuilder directly, we
@@ -233,7 +233,7 @@ namespace MapRenderer.Tests
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
             int capturedThreadId = mainThreadId; // will be overwritten in the task
 
-            // AllocateWritableMeshData is main-thread only; tessellate INTO it on a background task and
+            // AllocateWritableMeshData is main-thread only; build INTO it on a background task and
             // capture the thread id (S89 Stage B: the worker-write path, spike-guarded).
             var mda = Mesh.AllocateWritableMeshData(1);
             var task = Task.Run(() =>
@@ -261,35 +261,35 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── Tooth 2b: S46 profiler-marker harness — main-thread PmTessellate count == 0 ────────
+        // ── Tooth 2b: S46 profiler-marker harness — main-thread PmBuildMesh count == 0 ────────
 
         /// <summary>
         /// Pins the concrete numeric criterion for S47 Tooth 2 ("max single-frame stall drops sharply
         /// vs the S46 baseline") using the S46 profiler-marker harness (ProfilerRecorder), as required
         /// by the reviewer.
         ///
-        /// S46 baseline (pre-S47 sync path): PmTessellate fired on the MAIN THREAD (>0 main-thread
+        /// S46 baseline (pre-S47 sync path): PmBuildMesh fired on the MAIN THREAD (>0 main-thread
         ///   hits) because BuildMesh was called synchronously inside Tick on the main thread.
         ///   Concrete baseline: ≥1 main-thread sample per tile built.
         ///
-        /// S47 async path: BuildMeshData (which fires PmTessellate) runs inside Task.Run on a
+        /// S47 async path: BuildMeshData (which fires PmBuildMesh) runs inside Task.Run on a
         ///   ThreadPool thread. The main thread never enters BuildMeshData during Tick.
-        ///   Concrete bound: ZERO main-thread PmTessellate samples after a full async tile load.
+        ///   Concrete bound: ZERO main-thread PmBuildMesh samples after a full async tile load.
         ///
         /// Two recorders (both CollectOnlyOnCurrentThread = main thread only):
-        ///   A) MapRenderer.Tile.Tessellate  → must be ZERO  (tessellate moved off main thread)
+        ///   A) MapRenderer.Tile.BuildMesh  → must be ZERO  (build moved off main thread)
         ///   B) MapRenderer.Mesh.Upload      → must be > ZERO (consume/upload still runs on main thread)
         ///
         /// Recorder B is the positive control: it confirms that PumpUntilSettled actually built the
         /// tile on this thread, so the ==0 for A is meaningful (not "nothing happened").
         ///
         /// [UnityTest] coroutine: yields frames so the profiler commits accumulated samples, mirroring
-        /// the technique used in ProfilerMarkerTests.ProfilerRecorder_TessellateMarker_HasSamplesAfterTileLoad.
+        /// the technique used in ProfilerMarkerTests.ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad.
         /// </summary>
         [UnityTest]
-        public IEnumerator Tooth2b_MainThreadTessellateMarker_ZeroHits_AfterAsyncLoad()
+        public IEnumerator Tooth2b_MainThreadBuildMarker_ZeroHits_AfterAsyncLoad()
         {
-            const string tessellateMarkerName = "MapRenderer.Tile.Tessellate";
+            const string buildMarkerName = "MapRenderer.Tile.BuildMesh";
             const string uploadMarkerName     = "MapRenderer.Mesh.Upload";
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
@@ -298,14 +298,14 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread restricts capture to the
-            // main (test) thread — so Task.Run background samples for PmTessellate are NOT counted.
+            // main (test) thread — so Task.Run background samples for PmBuildMesh are NOT counted.
             // SumAllSamplesInFrame accumulates sample hits per frame (not just durations).
             using var tessRecorder   = ProfilerRecorder.StartNew(
-                ProfilerCategory.Scripts, tessellateMarkerName, capacity: 64,
+                ProfilerCategory.Scripts, buildMarkerName, capacity: 64,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
             using var uploadRecorder = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, uploadMarkerName, capacity: 64,
@@ -316,7 +316,7 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
                 // Drive the async tile load. PumpUntilSettled calls Tick() repeatedly on the main thread.
-                // Tessellation runs on a background Task.Run thread; UploadMesh runs on this (main) thread.
+                // Mesh build runs on a background Task.Run thread; UploadMesh runs on this (main) thread.
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(),
@@ -338,26 +338,26 @@ namespace MapRenderer.Tests
                     uploadMainHits += uploadRecorder.GetSample(i).Count;
 
                 // ── Positive control: PmMeshUpload fired on the main thread (consume did run here) ──
-                // If this is 0, the tile never built — the tessellate==0 assertion would be vacuously
-                // true and meaningless. Upload runs in ConsumeTessellationTask on the main thread.
+                // If this is 0, the tile never built — the build==0 assertion would be vacuously
+                // true and meaningless. Upload runs in ConsumeMeshBuild on the main thread.
                 Assert.Greater(uploadMainHits, 0L,
                     $"Tooth 2b positive control: PmMeshUpload ('{uploadMarkerName}') must have fired " +
                     $">0 times on the main thread (got {uploadMainHits}). " +
-                    "If 0, no tile was built — the ==0 tessellate assertion would be vacuous. " +
+                    "If 0, no tile was built — the ==0 build assertion would be vacuous. " +
                     "Check AllTilesSettled() and that the fixture path is correct.");
 
-                // ── Concrete bound: PmTessellate == 0 on the main thread ─────────────────────────
-                // S46 baseline: ≥1 main-thread PmTessellate hit per tile (BuildMesh was synchronous).
-                // S47 bound:    0 main-thread PmTessellate hits (BuildMeshData runs in Task.Run).
-                // Delta: main-thread tessellate cost drops from full-tile duration to ZERO — the
+                // ── Concrete bound: PmBuildMesh == 0 on the main thread ─────────────────────────
+                // S46 baseline: ≥1 main-thread PmBuildMesh hit per tile (BuildMesh was synchronous).
+                // S47 bound:    0 main-thread PmBuildMesh hits (BuildMeshData runs in Task.Run).
+                // Delta: main-thread build cost drops from full-tile duration to ZERO — the
                 // largest possible improvement in main-thread blocking, confirming S47's headline fix.
                 Assert.AreEqual(0L, tessMainHits,
-                    $"Tooth 2b: PmTessellate ('{tessellateMarkerName}') fired {tessMainHits} time(s) " +
+                    $"Tooth 2b: PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) " +
                     $"on the main thread — expected 0. " +
                     "S46 baseline: ≥1 main-thread hit per tile (sync BuildMesh path). " +
                     "S47 async path: BuildMeshData runs in Task.Run (off main thread), so " +
-                    "PmTessellate must NEVER fire on the main thread during Tick. " +
-                    "If non-zero, tessellation is still synchronous on the main thread (S47 regressed). " +
+                    "PmBuildMesh must NEVER fire on the main thread during Tick. " +
+                    "If non-zero, mesh build is still synchronous on the main thread (S47 regressed). " +
                     $"Upload hits (positive control) = {uploadMainHits}.");
             }
             finally
@@ -370,7 +370,7 @@ namespace MapRenderer.Tests
         // ── Tooth 3: correctness parity — async path == sync path ──────────────────────────────
 
         /// <summary>
-        /// The async MapView live loop (tessellate off-main + upload on main) must produce the same
+        /// The async MapView live loop (build off-main + upload on main) must produce the same
         /// vertex count AND vertex positions as a direct synchronous call to StyledFillTileBuilder.BuildMesh.
         ///
         /// Note: S47 replaced the Burst <c>ProjectTileToWebMercatorJob</c> (which required
@@ -391,8 +391,8 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -456,20 +456,20 @@ namespace MapRenderer.Tests
         // ── Tooth 4: cancellation (S04) — released mid-flight tile is discarded ───────────────
 
         /// <summary>
-        /// Request tiles at z=5, kick tessellation mid-flight, pan far away to evict original tiles,
+        /// Request tiles at z=5, kick mesh build mid-flight, pan far away to evict original tiles,
         /// then verify no stale GameObjects are created for the evicted tiles after settle.
         ///
-        /// Verifies the S04 contract: a tessellation completing after ReleaseTile must not
+        /// Verifies the S04 contract: a mesh build completing after ReleaseTile must not
         /// create a GameObject for the released tile.
         ///
         /// Strategy:
         ///   - Start at z=5, lon=0: loads a 3x3 cover around tile (5,16,16).
-        ///   - One Tick kicks tessellation tasks for all fetched tiles.
+        ///   - One Tick kicks mesh build tasks for all fetched tiles.
         ///   - IMMEDIATELY pan far east (lon=170) — the cover is now around (5,31,16).
         ///     The two covers are non-overlapping, so all original tiles are evicted.
-        ///   - The eviction Tick releases all original tiles. Their tessellation tasks may still
+        ///   - The eviction Tick releases all original tiles. Their mesh build tasks may still
         ///     be running or just completed. ReleaseTile removes them from _loaded so subsequent
-        ///     PumpPendingBuilds snapshots exclude them — ConsumeTessellationTask is never called.
+        ///     PumpPending snapshots exclude them — ConsumeMeshBuild is never called.
         ///   - After full settle, original tiles must NOT be accessible as built tiles.
         /// </summary>
         [Test]
@@ -481,8 +481,8 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -492,11 +492,11 @@ namespace MapRenderer.Tests
                 // First Tick: tiles are added to _loaded, fetch tasks kicked (FixtureSource is sync,
                 // but TileScheduler's FetchAndCacheAsync has a Task.Run hop so they're not yet complete).
                 view.Tick();
-                // Second Tick: fetch tasks are likely complete now; tessellation tasks are kicked.
+                // Second Tick: fetch tasks are likely complete now; mesh build tasks are kicked.
                 Thread.Sleep(5); // ensure ThreadPool Task.Run hop completes
                 view.Tick();
 
-                // Pan far east immediately — before tessellation tasks complete.
+                // Pan far east immediately — before mesh build tasks complete.
                 // lon=170, z=5 → center tile (5,31,16), completely non-overlapping cover.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.Tick(); // cover recompute → evicts all original (5,16,*) tiles
@@ -512,7 +512,7 @@ namespace MapRenderer.Tests
                 // (It was removed from _loaded by ReleaseTile and must not be re-added.)
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "Tooth 4: Released tile must not have been re-created as a GameObject " +
-                    "even if its tessellation task completed after release.");
+                    "even if its mesh build task completed after release.");
 
                 // New cover must be built.
                 Assert.IsTrue(view.AllTilesSettled(), "New cover tiles must all settle.");
@@ -525,14 +525,14 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── Tooth 5: drain determinism — DrainTessellation() settles all tiles ──────────────────
+        // ── Tooth 5: drain determinism — DrainMeshBuilds() settles all tiles ──────────────────
 
         /// <summary>
-        /// DrainTessellation() must block until all outstanding tessellation tasks complete and
+        /// DrainMeshBuilds() must block until all outstanding mesh build tasks complete and
         /// AllTilesSettled() returns true immediately after.
         /// </summary>
         [Test]
-        public void Tooth5_DrainTessellation_SettlesAllTiles()
+        public void Tooth5_DrainMeshBuilds_SettlesAllTiles()
         {
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T5");
@@ -540,21 +540,21 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                // First Tick: kicks fetch (sync) and tessellation Task.
+                // First Tick: kicks fetch (sync) and mesh build Task.
                 view.Tick();
 
-                // DrainTessellation: blocks until tasks finish, then consumes them.
-                view.DrainTessellation();
+                // DrainMeshBuilds: blocks until tasks finish, then consumes them.
+                view.DrainMeshBuilds();
 
                 Assert.IsTrue(view.AllTilesSettled(),
-                    "Tooth 5: AllTilesSettled() must be true immediately after DrainTessellation().");
+                    "Tooth 5: AllTilesSettled() must be true immediately after DrainMeshBuilds().");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "Tooth 5: The z0/0/0 tile must be built after explicit drain.");
             }
@@ -572,7 +572,7 @@ namespace MapRenderer.Tests
         /// Verifies that the S47 async machinery (task polling, etc.) does not allocate in the
         /// steady-state Tick path.
         ///
-        /// The critical path: once all tessellation tasks are consumed and Built==true for all tiles,
+        /// The critical path: once all mesh build tasks are consumed and Built==true for all tiles,
         /// the early-out at "pending == 0 && !_coverDirty" fires, bypassing all async polling.
         /// </summary>
         [Test]
@@ -585,8 +585,8 @@ namespace MapRenderer.Tests
             var style = MinimalStyle();
             view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             try
             {
@@ -646,7 +646,7 @@ namespace MapRenderer.Tests
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
-            // Reference path: tessellate + apply entirely on THIS (main) thread.
+            // Reference path: build + apply entirely on THIS (main) thread.
             Mesh syncMesh = TestTileMeshBuilder.BuildFill(
                 features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
 

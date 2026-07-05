@@ -36,7 +36,7 @@ GPU:                                      [draw N]        [present N @ vblank]
    driver. Runs *while the main thread is already working on the next frame*. **[MODEL]**
 3. **GPU** — executes; the result is shown at the next presentation point.
 
-In this project the per-frame map work (`TileManager.Tick`, incl. the tessellation **kick** that calls
+In this project the per-frame map work (`TileManager.Tick`, incl. the mesh build **kick** that calls
 `AllocateWritableMeshData`) runs inside MonoBehaviour **`Update`** — i.e. in the main-thread box *before*
 render submission (`MapViewComponent.Update → MapView.Tick`; camera commit is in `LateUpdate`, just before
 culling).
@@ -159,7 +159,7 @@ Not everything main-thread is safe to move to the post-submit slot. Test each ac
 axes** (`endContextRendering` fires *after* frame N's cameras are culled + recorded — §1/§3):
 
 **Axis 1 — does it change what the cull sees ("the world")?** Frame N's scene is already extracted, so:
-- **Cull-neutral → relocatable, invisible to N:** decode, tessellate, project, cover-select, process the
+- **Cull-neutral → relocatable, invisible to N:** decode, build, project, cover-select, process the
   request queue, start pipelines, `AllocateWritableMeshData`, **and creating a `Mesh` + uploading its
   geometry** (a fresh Mesh nothing in N's draw list references).
 - **Cull-modifying → the ordered "commit," lands in N+1:** create/activate a `GameObject`, enable a
@@ -170,7 +170,7 @@ axes** (`endContextRendering` fires *after* frame N's cameras are culled + recor
 > modifying step.** Split every tile-pipeline action on that line.
 
 **Axis 2 — what thread bears the cost (once Axis 1 says cull-neutral)?**
-- **Pure CPU** (decode, tessellate, allocate staging, create the Mesh *object*, cover-select) → free on
+- **Pure CPU** (decode, build, allocate staging, create the Mesh *object*, cover-select) → free on
   *both* threads. Move freely.
 - **GPU upload** (`ApplyAndDispose`'s deferred transfer) → cheap on main, spends **render-thread** budget →
   only "free" if the render thread has headroom, and mostly-free on modern APIs (above). Keep it budgeted.
@@ -181,7 +181,7 @@ GL/GLES floor.
 
 **⚠ The load-bearing empirical risk — gate everything on this.** The pool's premise is **holding
 pre-allocated `MeshDataArray`s across ≥1 frame** until a background worker pops and fills one. This repo's own
-note calls an unapplied `MeshDataArray` "a native leak Unity tracks" (`MeshDataTessellation.cs`). The API
+note calls an unapplied `MeshDataArray` "a native leak Unity tracks" (`MeshDataPayload.cs`). The API
 contract permits a persistent allocation disposed whenever you like, but the **editor's leak/safety detection
 may warn per-frame** about the held-but-unapplied arrays. **[EMPIRICAL]** — a play-mode spike (allocate, hold
 N frames, watch the console + the safety-handle checks) must clear this **before** the pool is designed
@@ -191,8 +191,8 @@ hold).
 ## 5. The coupling to keep honest
 
 The pool's payoff is **conditional**:
-- It converts the tessellation **kick** into a fully-background step (the only main-thread anchor in
-  `KickTessellationTask` is the `AllocateWritableMeshData` loop — `TileManager.cs:1001-1029` documents that
+- It converts the mesh build **kick** into a fully-background step (the only main-thread anchor in
+  `KickMeshBuild` is the `AllocateWritableMeshData` loop — `TileManager.cs:1001-1029` documents that
   nothing else touches a `Unity.Object` off-main). That architectural win stands **independently**.
 - But it is "free" (no added frame time) **only if the main thread has slack** (§2). If `CoverSelect` is
   saturating the main thread every motion frame, the slack isn't there — so the pool and the S95 select-tax

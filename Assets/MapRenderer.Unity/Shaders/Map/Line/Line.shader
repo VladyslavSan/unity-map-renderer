@@ -15,8 +15,8 @@
 //   • Alpha = LineCoverage() × _Opacity (S05 formula; makes _Opacity functional).
 //   • Tiny +Y lift (0.001m) in Line_VertexExtrude, applied to every pass equally.
 //   • ForwardLit: S58-parameterized Blend/ZWrite/ZTest/Cull.
-//   • Passes 2-5: hardcode ZWrite On / Cull Off / ZTest LEqual (NOT SubShader-level params —
-//     SubShader level defaults to ZWrite 0 / ZTest LEqual; passes must override independently).
+//   • Passes 2-5: inherit the SubShader-parameterized Cull [_Cull]; override ZWrite On + ZTest LEqual
+//     (the SubShader ZWrite default 0 would break their depth/shadow writes).
 //
 // Shader name: Map/Line (replaces Hidden/Map/Line_S05_Deprecated in Materials/).
 //
@@ -160,26 +160,22 @@ Shader "Map/Line"
 
         // Two-sided ribbon; no depth write (coplanar layer ordering via render queue).
         // S58: parameterized — defaults (Cull Off / ZWrite Off / ZTest LEqual) reproduce the prior state.
-        Cull [_Cull]
+        Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
+        BlendOp [_BlendOp]
+        AlphaToMask [_AlphaToMask]
         ZWrite [_ZWrite]
         ZTest [_ZTest]
+        Cull [_Cull]
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: UniversalForward — lit forward-transparent pixels.
-        // ONLY pass. No GBuffer/ShadowCaster/DepthOnly/DepthNormals for transparent lines.
+        // The only pass that renders for the transparent queue; passes 2-5 (ShadowCaster/GBuffer/DepthOnly/
+        // DepthNormals) are S67 capability passes — present-but-inert (URP excludes Queue=Transparent).
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {
             Name "ForwardLit"
             Tags { "LightMode" = "UniversalForward" }
-
-            // S58: fully parameterized forward render state. Defaults reproduce the prior hardcode
-            // (Blend SrcAlpha OneMinusSrcAlpha / ZWrite Off / ZTest LEqual / Cull Off / BlendOp Add).
-            Blend[_SrcBlend][_DstBlend], [_SrcBlendAlpha][_DstBlendAlpha]
-            BlendOp [_BlendOp]
-            ZWrite [_ZWrite]
-            ZTest [_ZTest]
-            Cull [_Cull]
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -263,8 +259,8 @@ Shader "Map/Line"
         // ─────────────────────────────────────────────────────────────────────
         // Pass: ShadowCaster — CAPABILITY-ONLY (present-but-inert for transparent lines).
         // URP only invokes this for opaque-queue materials. S69 activates it.
-        // Hardcodes ZWrite On / Cull Off / ZTest LEqual — cannot inherit SubShader params
-        // (SubShader default ZWrite=0 would break shadow depth writes).
+        // Inherits the SubShader-parameterized Cull [_Cull]; overrides ZWrite On / ZTest LEqual
+        // (the SubShader ZWrite default 0 would break shadow depth writes).
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {
@@ -274,7 +270,6 @@ Shader "Map/Line"
             ZWrite On
             ZTest LEqual
             ColorMask 0
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -306,7 +301,6 @@ Shader "Map/Line"
 
             ZWrite On
             ColorMask R
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -336,7 +330,6 @@ Shader "Map/Line"
             Tags { "LightMode" = "DepthNormals" }
 
             ZWrite On
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 2.0
@@ -370,7 +363,6 @@ Shader "Map/Line"
 
             ZWrite On
             ZTest LEqual
-            Cull Off
 
             HLSLPROGRAM
             #pragma target 4.5

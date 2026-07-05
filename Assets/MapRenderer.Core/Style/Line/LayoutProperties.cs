@@ -5,7 +5,7 @@ namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
     /// The parsed MapLibre line <b>layout</b> properties for a single line style layer — the join/cap/limit
-    /// knobs baked at tessellate time, split out of the former <c>LinePaint</c>. Read from the layer's
+    /// knobs baked at build time, split out of the former <c>LinePaint</c>. Read from the layer's
     /// <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public Style Spec).
     ///
     /// Join and Cap are parsed once at construction into their typed enum values so the tessellator can

@@ -5,7 +5,7 @@
 
 ## Layers (split across two assemblies)
 - **`MapRenderer.Core`** — managed library: MVT decode, Web-Mercator / tile math, ring assembly,
-  clean-room earcut, fill tessellation. Uses `Unity.Mathematics` (`double2`). Note: in Unity 6
+  clean-room earcut, fill triangulation. Uses `Unity.Mathematics` (`double2`). Note: in Unity 6
   `double2` is type-forwarded to an engine module, so Core references the engine — a genuinely
   Unity-free Core would need its own vector struct (deferred; portability is a non-goal).
 - **`MapRenderer.Jobs`** — Burst + Collections. The per-vertex coordinate-transform job (tile→Mercator
@@ -51,4 +51,7 @@ sample-tile.bytes ─► MvtDecoder ─► MvtGeometry (command stream → rings
 - Read `extent` per layer (don't hardcode 4096).
 - `mesh.indexFormat = UInt32` (dense tiles exceed 65535 verts).
 - Single-tile precision: subtract the tile-origin Mercator (double), then cast to float.
-- Spike renders double-sided (`Cull Off`); fix winding as a deliberate follow-up.
+- Spike rendered double-sided (`Cull Off`) and deferred winding. RESOLVED: the raw MVT/earcut winding is
+  projection-correct for planar AND globe (the render mapping transforms verts + surface normal identically),
+  so fills front-face outward on both; the fill forward pass now drives `Cull [_Cull]`. See
+  `GlobeFillWindingTests`.

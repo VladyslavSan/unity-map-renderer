@@ -1,6 +1,6 @@
 // S89 Stage B test helper: synchronous fill/line mesh build for tests that used the retired
 // StyledFill/LineTileBuilder.BuildMesh / BuildMeshData+UploadMesh convenience. Allocates a writable
-// MeshDataArray on the (test) main thread, tessellates via WriteMeshData, and applies to a Mesh — the same
+// MeshDataArray on the (test) main thread, builds the mesh via WriteMeshData, and applies to a Mesh — the same
 // worker-write path the production pipeline uses at kick+consume, collapsed to one synchronous call.
 
 using System.Collections.Generic;
@@ -31,7 +31,7 @@ namespace MapRenderer.Tests
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
             // Mercator: (mercX, 0, mercZ) == MercatorBounds().min; globe: the ECEF corner. Derive it from
             // (id, projection) here (NOT a caller-supplied Mercator origin) so a globe fixture bakes correctly.
-            double3 renderOrigin = TileTessellationPipeline.ProjectTileCornerOrigin(id.Z, id.X, id.Y, projection);
+            double3 renderOrigin = TileMeshPipeline.ProjectTileCornerOrigin(id, projection);
             StyledFillTileBuilder.WriteMeshData(mda[0], features, paint, zoom, extent, id,
                 renderOrigin, out int vertexCount, out Bounds bounds, projection);
             return Finish(mda, vertexCount, bounds, "TestFill");
@@ -55,14 +55,14 @@ namespace MapRenderer.Tests
             IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, IProjection projection)
         {
-            double3 renderOrigin = TileTessellationPipeline.ProjectTileCornerOrigin(id.Z, id.X, id.Y, projection);
+            double3 renderOrigin = TileMeshPipeline.ProjectTileCornerOrigin(id, projection);
             var mda = Mesh.AllocateWritableMeshData(1);
             StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id,
                 renderOrigin, out int vertexCount, out Bounds bounds, projection);
             return Finish(mda, vertexCount, bounds, "TestLineGlobe");
         }
 
-        /// <summary>Tessellate a line layer and return only the written vertex count (0 = no geometry). Used
+        /// <summary>Build a line layer's mesh and return only the written vertex count (0 = no geometry). Used
         /// by the S14 data-driven-bake teeth that only need "did the bake produce geometry?".</summary>
         public static int LineVertexCount(
             IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,

@@ -17,7 +17,7 @@ Trailers (see below)
   restructuring), `perf`, `test`, `docs`, `chore` (build/infra/backlog/tooling).
 - **`scope`** — a **code-area tag from the vocabulary below**, NOT a project-tracking reference. A commit
   scope should tell a reader *what part of the codebase* changed at a glance — never make them go look up a
-  stage id to decode it. (Rationale: `feat(S89 D2):` forced a lookup; `feat(tessellation):` does not.)
+  stage id to decode it. (Rationale: `feat(S89 D2):` forced a lookup; `feat(meshing):` does not.)
 - **`subject`** — imperative, lower-case, no trailing period; ≤ ~72 chars.
 - Stage / backlog references (`S89`, its internal `D2`, etc.) do **not** go in the subject. If a commit
   ties to a stage, put it in a **body trailer** so it's traceable without cluttering the header:
@@ -27,7 +27,7 @@ Trailers (see below)
 
 | Scope | Area |
 |---|---|
-| `tessellation` | geometry → mesh: earcut, line expansion, MeshData writing, the Burst tessellation pipeline |
+| `meshing` | geometry → mesh: earcut, line expansion, MeshData writing, the Burst mesh pipeline |
 | `tile-pipeline` | `TileManager` lifecycle — fetch / kick / consume / release, scheduling, budgets |
 | `render-layers` | `IRenderLayer` / layer set / draw-order / material indexing |
 | `style` | expressions, paint/layout properties, filters, TileJSON/style parsing |
@@ -40,7 +40,7 @@ Trailers (see below)
 | `docs` | documentation |
 
 Add a scope here when a genuinely new area appears — don't stretch an existing one or invent an ad-hoc tag.
-Split by layer type (`fill` / `line`) only if a change is truly layer-specific and `tessellation` is too broad.
+Split by layer type (`fill` / `line`) only if a change is truly layer-specific and `meshing` is too broad.
 
 ## Project-specific trailers
 
@@ -50,9 +50,9 @@ Claude-Session). A stage-linked commit adds a `Stage:` trailer above those.
 ## Examples
 
 ```
-feat(tessellation): fills tessellate via burst geometry in the live pipeline
-refactor(tile-pipeline): dense per-source tessellation produce
-feat(tessellation): burst line kernel + differential oracle
+feat(meshing): fills build via burst geometry in the live pipeline
+refactor(tile-pipeline): dense per-source mesh-build produce
+feat(meshing): burst line kernel + differential oracle
 docs(backlog): native-tile-pipeline exploration spike
 fix(shaders): line AA edge width no longer clobbered by line-blur binding
 ```

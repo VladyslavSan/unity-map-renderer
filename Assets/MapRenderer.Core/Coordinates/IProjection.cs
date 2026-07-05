@@ -54,11 +54,18 @@ namespace MapRenderer.Core.Geo
         /// the selector). A planar projection does not self-occlude and returns false.</summary>
         bool TryGetHorizonOccluder(out double3 renderCentre, out double radius);
 
-        /// <summary>True when this projection's render mapping flips triangle winding vs the planar convention
-        /// (the ECEF→render axis-swap `(X,Z,Y)` is a reflection). The tessellation pipeline reverses triangle
-        /// order for these so front-faces point outward (back-face culling shows the near hemisphere). Planar
-        /// Mercator: false; globe (ECEF): true.</summary>
-        bool ReversesWinding { get; }
+        /// <summary>The projection's <b>subdivision policy</b>: the maximum surface-normal rotation (radians)
+        /// one primitive edge may subtend before the build side must split it, so a straight chord never sags
+        /// visibly off a curved surface. The build side always runs subdivision driven by this value — no
+        /// capability flag gates it: a flat projection returns <see cref="double.PositiveInfinity"/>, so the
+        /// split count falls out to zero and the flat case is the degenerate value, not a separate branch.
+        /// <para>Planar Mercator: <see cref="double.PositiveInfinity"/> (a flat sheet never subdivides). Globe
+        /// (ECEF sphere): a small tolerance (~2°). This replaces the former curvature/handedness capability
+        /// flags: winding is now derived by construction (line <c>across = cross(along, up)</c> ties
+        /// the ribbon to the same <c>up</c> its centerline was projected with — one frame, correct for every
+        /// projection — so no per-projection winding fact is needed; see <c>GlobeLineWindingTests</c> /
+        /// <c>docs §7.1</c>).</para></summary>
+        double MaxRefineAngleRad { get; }
 
         // ── Camera interaction (managed side) ───────────────────────────────────────────────────────
 

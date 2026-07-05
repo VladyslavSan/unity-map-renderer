@@ -73,7 +73,7 @@ namespace MapRenderer.Core.View
     /// <para><b>Known drawback — LOD-churn white flash.</b> Because the emitted zoom is distance-driven, panning
     /// toward the view vector continuously pulls far tiles nearer, so each crosses the threshold and its coarse
     /// tile is swapped for four tiles one zoom finer. Under the current instant tile-atomic consume the coarse
-    /// tile leaves the cover before its finer replacements have fetched+tessellated, so that patch flashes WHITE
+    /// tile leaves the cover before its finer replacements have fetched+built, so that patch flashes WHITE
     /// for a frame or two. It is inherent to any screen-space LOD without tile RETENTION — the fix is in the
     /// tile lifecycle (TileManager), not here: keep a parent tile drawable until its finer children are ready
     /// (retain-until-replaced), or cross-fade. <see cref="FlatLodStrategy"/> (uniform zoom) doesn't churn, so it

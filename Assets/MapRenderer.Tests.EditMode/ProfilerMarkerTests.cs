@@ -3,7 +3,7 @@
 // Tooth 1a (greppable presence): verify every MapRenderer.* marker name is reachable via the
 //   declared static fields (compile-time check; names are greppable in source).
 // Tooth 1b (wired-not-dead): ProfilerRecorder reads sample count > 0 after driving a tile load,
-//   proving MapRenderer.Tile.Tessellate is wired on the live MapView path (not dead code).
+//   proving MapRenderer.Tile.BuildMesh is wired on the live MapView path (not dead code).
 // Tooth 2 (no behavior change): covered by the existing suite (MapViewLiveLoopTests, pipeline tests).
 //
 // ProfilerRecorder notes:
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests
                 "MapRenderer.Tile.FetchPoll",
                 "MapRenderer.Scheduler.Request",
                 "MapRenderer.Tile.Decode",
-                "MapRenderer.Tile.Tessellate",
+                "MapRenderer.Tile.BuildMesh",
                 "MapRenderer.Mesh.Build",
                 "MapRenderer.Mesh.Upload",
                 "MapRenderer.Line.MeshBuild",
@@ -140,28 +140,28 @@ namespace MapRenderer.Tests
         //
         // Uses a [UnityTest] coroutine so we can yield a frame after the tile load completes,
         // giving the profiler a chance to commit the sample data. The recorder is started BEFORE
-        // the tile load so it captures the MapRenderer.Tile.Tessellate samples fired in BuildTile.
+        // the tile load so it captures the MapRenderer.Tile.BuildMesh samples fired in BuildTile.
         //
-        // S47 update: BuildMeshData (which fires PmTessellate) now runs on a ThreadPool thread inside
+        // S47 update: BuildMeshData (which fires PmBuildMesh) now runs on a ThreadPool thread inside
         // Task.Run. We must NOT use CollectOnlyOnCurrentThread — that would miss cross-thread samples.
         // ProfilerRecorderOptions.Default collects samples from all threads.
         [UnityTest]
-        public IEnumerator ProfilerRecorder_TessellateMarker_HasSamplesAfterTileLoad()
+        public IEnumerator ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad()
         {
-            const string markerName    = "MapRenderer.Tile.Tessellate";
+            const string markerName    = "MapRenderer.Tile.BuildMesh";
             const string bogusName     = "MapRenderer.__NoSuchMarker__";
 
             var go   = new GameObject("MapView_ProfilerTest");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
 
             // Start both recorders BEFORE the tile load — must be open when samples fire.
             // ProfilerCategory.Scripts matches the explicit category in each ProfilerMarker constructor.
             // Negative control (bogus name) verifies the count metric discriminates real hits from frames.
-            // S47: use Default (not CollectOnlyOnCurrentThread) — tessellate marker fires on ThreadPool.
+            // S47: use Default (not CollectOnlyOnCurrentThread) — build marker fires on ThreadPool.
             using var recorder      = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, markerName, capacity: 64,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame);

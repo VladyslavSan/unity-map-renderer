@@ -50,13 +50,13 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Loaded records not yet Built — the load-progress lag.")]
         public int PendingTileCount;
 
-        [Tooltip("Loaded records whose tessellation is complete but consume is budget-deferred.")]
+        [Tooltip("Loaded records whose mesh build is complete but consume is budget-deferred.")]
         public int ConsumeBacklog;
 
         [Tooltip("In-flight network fetches, summed across every source pipeline.")]
         public int InFlightFetches;
 
-        [Tooltip("Lifetime count of tiles released while their tessellation was still in-flight.")]
+        [Tooltip("Lifetime count of tiles released while their mesh build was still in-flight.")]
         public int ReleasedMidFlightCount;
 
         [Tooltip("Lifetime count of tiles released while their fetch was still in-flight.")]
@@ -67,10 +67,10 @@ namespace MapRenderer.Unity.Rendering.Map
 
         [Header("S82: Prepared-tile cache utilization (live — overwritten each frame)")]
         [Tooltip("Master toggle for the PreparedTileCache (PreparedTileCacheConfig.Enabled). False means " +
-                 "every revisit re-fetches/re-tessellates/re-uploads — hits are always 0 in that state.")]
+                 "every revisit re-fetches/re-builds/re-uploads — hits are always 0 in that state.")]
         public bool PreparedCacheEnabled;
 
-        [Tooltip("Cumulative full-tile cache hits (a revisit/style-toggle that skipped decode/tessellate/upload).")]
+        [Tooltip("Cumulative full-tile cache hits (a revisit/style-toggle that skipped decode/build/upload).")]
         public int PreparedCacheHits;
 
         [Tooltip("Cumulative cache misses (a cover-entry that genuinely re-prepared).")]

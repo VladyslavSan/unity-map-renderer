@@ -24,7 +24,7 @@ namespace MapRenderer.Tests
     ///       are proved self-intersecting via HasSelfIntersection(). Well-formed holed polygons
     ///       (all rings clean) must conserve area.
     ///   (d) [removed in S54] the Gen-1 sync mesh-builder index-format check; the async
-    ///       StyledFillTileBuilder upload path is covered by MapViewAsyncTessellationTests.
+    ///       StyledFillTileBuilder upload path is covered by MapViewAsyncMeshBuildTests.
     ///
     /// KNOWN SKIP POLYGONS (sample-tile fixture, all confirmed degenerate by HasSelfIntersection):
     ///   Four tiny clip-boundary slivers with self-intersecting rings (MVT tile-boundary artefacts).
@@ -314,7 +314,7 @@ namespace MapRenderer.Tests
         // -----------------------------------------------------------------------------------------
         // (d) Gen-1 MeshBuilder tests removed in S54 (MeshBuilder retired).
         //     UInt32 index format and vertex/index count are covered by
-        //     MapViewAsyncTessellationTests.BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh
+        //     MapViewAsyncMeshBuildTests.BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh
         //     and StyledFillTileBuilder tests (same assertions via StyledFillTileBuilder.BuildMesh).
         // -----------------------------------------------------------------------------------------
         // Helpers

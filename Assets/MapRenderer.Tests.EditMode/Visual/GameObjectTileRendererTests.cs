@@ -283,8 +283,8 @@ namespace MapRenderer.Tests.Visual
             var go   = new GameObject("MapView_Go");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
-            view.Config.MaxBuildsPerTick = 64;
-            view.Config.MaxTessellationsPerTick = 64;
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.GameObject;
             try
             {

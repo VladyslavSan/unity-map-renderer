@@ -9,7 +9,10 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Jobs
 {
     /// <summary>
-    /// Coordinates the Burst decode → ring assembly → earcut → projection job chain for one tile.
+    /// Coordinates the Burst decode → ring assembly → earcut → projection job chain for one tile — the
+    /// <b>fill</b> mesh pipeline (Decode → Assemble → Triangulate → Project; the globe Subdivide + the
+    /// mesh write happen in <c>StyledFillTileBuilder</c>). See <c>docs/mesh-pipeline.md</c> for the full
+    /// per-kind stage orderings (fills Triangulate before Project; lines the opposite).
     ///
     /// <b>Pipeline output layout:</b>
     /// The managed <c>Earcut.Triangulate</c> returns a polygon-local flat vertex array (outer +
@@ -31,7 +34,7 @@ namespace MapRenderer.Jobs
     /// multiple frames). <see cref="TileMeshBuffers.Dispose()"/> must be called after the pipeline
     /// handle completes — never dispose while jobs are in-flight.
     /// </summary>
-    public static class TileTessellationPipeline
+    public static class TileMeshPipeline
     {
         // Pipeline-stage profiler markers (MapRenderer.Pipeline.*).
         // These sit on the schedule-then-Complete main-thread path — exactly the stall the perf epic measures.
@@ -126,7 +129,7 @@ namespace MapRenderer.Jobs
         {
             if (count > capacity)
                 throw new InvalidOperationException(
-                    $"TileTessellationPipeline sizing overflow: {what} count {count} exceeds pre-sized " +
+                    $"TileMeshPipeline sizing overflow: {what} count {count} exceeds pre-sized " +
                     $"capacity {capacity}. With exact PrecountRingsAndVertices sizing this should be " +
                     "unreachable — it indicates a sizing-vs-decode desync (the pre-count walk no longer " +
                     "mirrors MvtDecodeJob.Execute). Fix the pre-count to match the decode job.");
@@ -141,7 +144,8 @@ namespace MapRenderer.Jobs
             public List<uint[]> FeatureGeometries;
             /// <summary>MVT tile extent (typically 4096).</summary>
             public double Extent;
-            public int TileZ, TileX, TileY;
+            /// <summary>The slippy-map address (z/x/y) of the tile being built.</summary>
+            public TileId Tile;
 
             /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
             /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
@@ -430,10 +434,11 @@ namespace MapRenderer.Jobs
             var outIndices     = new NativeArray<int>(totalIdxCount > 0 ? totalIdxCount : 1,
                                                       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            // The globe's ECEF axis-swap reflects the winding — reverse each triangle so front-faces point
-            // outward (back-face culling then shows the near hemisphere). Planar Mercator: no reversal.
-            bool reverseWinding = input.Projection != null && input.Projection.ReversesWinding;
-
+            // Winding is projection-independent: the render mapping transforms triangle vertices and the surface
+            // normal identically (the globe's ECEF axis-swap reflects both), so the front/back orientation is
+            // preserved and the raw earcut winding is correct for planar AND curved projections alike. (An earlier
+            // globe-only reversal, premised on the axis-swap "reflecting the winding", inverted the globe's
+            // front-faces — the reported "front renders as back" glitch. Guarded by GlobeFillWindingTests.)
             int globalVertBase = 0;
             int globalIdxBase  = 0;
             for (int pi = 0; pi < polyCount; pi++)
@@ -448,16 +453,8 @@ namespace MapRenderer.Jobs
                     outVertexFeat[globalVertBase + i]  = featIdx; // S89 D2: per-vertex feature index for color
                 }
 
-                if (reverseWinding)
-                    for (int t = 0; t + 2 < idxCount; t += 3) // swap v1/v2 of each triangle
-                    {
-                        outIndices[globalIdxBase + t]     = perPolyIdxArrays[pi][t]     + globalVertBase;
-                        outIndices[globalIdxBase + t + 1] = perPolyIdxArrays[pi][t + 2] + globalVertBase;
-                        outIndices[globalIdxBase + t + 2] = perPolyIdxArrays[pi][t + 1] + globalVertBase;
-                    }
-                else
-                    for (int i = 0; i < idxCount; i++)
-                        outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
+                for (int i = 0; i < idxCount; i++)
+                    outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
 
                 globalVertBase += mergedVC;
                 globalIdxBase  += idxCount;
@@ -484,7 +481,7 @@ namespace MapRenderer.Jobs
                 var geo = new NativeArray<GeoCoordinate>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 new TileToGeoJob
                 {
-                    TileZ = input.TileZ, TileX = input.TileX, TileY = input.TileY, Extent = input.Extent,
+                    Tile = input.Tile, Extent = input.Extent,
                     TileCoords = outMergedVerts, OutGeo = geo,
                 }.Run(totalMergedVerts);
 
@@ -546,14 +543,14 @@ namespace MapRenderer.Jobs
         /// (<see cref="LayerInput.OriginRender"/>) and the tile transform (via <c>TileManager</c>) call it, so
         /// the two RTC levels cancel exactly.</para>
         /// </summary>
-        public static double3 ProjectTileCornerOrigin(int tileZ, int tileX, int tileY, IProjection projection)
+        public static double3 ProjectTileCornerOrigin(TileId tile, IProjection projection)
         {
             // Matches TileId.ToLonLat exactly (math.sinh, same u/v), so the Mercator origin equals
             // MercatorBounds().min bit-for-bit — the tile-transform (FloatingOrigin) uses that, and the mesh
             // must share it. (Sub-nm vs the vertices' exp-form sinh in TileToGeoJob — invisible.)
-            double pow2z = math.pow(2.0, tileZ);
-            double u     = tileX / pow2z;         // west edge (px = 0)
-            double v     = (tileY + 1.0) / pow2z; // south edge (py = extent)
+            double pow2z = math.pow(2.0, tile.Z);
+            double u     = tile.X / pow2z;         // west edge (px = 0)
+            double v     = (tile.Y + 1.0) / pow2z; // south edge (py = extent)
 
             var geo = new GeoCoordinate
             {

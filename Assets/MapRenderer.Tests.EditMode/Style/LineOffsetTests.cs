@@ -27,7 +27,7 @@ namespace MapRenderer.Tests
         // ── Helpers ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Tessellate a straight horizontal line (A→B) and return (originalCenter, displacedCenter)
+        /// Build a straight horizontal line (A→B) and return (originalCenter, displacedCenter)
         /// pairs for every station (pair of left/right vertices at the same DistanceAlong).
         ///
         /// originalCenter  = midpoint of the two undisplaced vertex positions (= the centerline point).

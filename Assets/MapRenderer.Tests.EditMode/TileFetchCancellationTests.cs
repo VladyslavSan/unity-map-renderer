@@ -72,8 +72,8 @@ namespace MapRenderer.Tests
             {
                 view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxBuildsPerTick = 64;
-                view.Config.MaxTessellationsPerTick = 64;
+                view.Config.MaxConsumesPerTick = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 

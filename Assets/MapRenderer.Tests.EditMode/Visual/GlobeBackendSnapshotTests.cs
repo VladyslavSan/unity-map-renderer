@@ -40,7 +40,7 @@ namespace MapRenderer.Tests.Visual
             if (mat != null) mat.SetFloat("_Cull", 2f); // back-face cull → near hemisphere only
 
             // The SAME projected SW-corner origin the mesh was baked against (Level-1 == Level-2 origin).
-            double3 tileOriginRender  = TileTessellationPipeline.ProjectTileCornerOrigin(tid.Z, tid.X, tid.Y, proj);
+            double3 tileOriginRender  = TileMeshPipeline.ProjectTileCornerOrigin(tid, proj);
             double3 sceneOriginRender = proj.Project(lookAt);
             float3x3 rebase           = math.transpose(proj.TangentBasisAt(lookAt));
             var frame                 = new SceneFrame(sceneOriginRender, rebase);

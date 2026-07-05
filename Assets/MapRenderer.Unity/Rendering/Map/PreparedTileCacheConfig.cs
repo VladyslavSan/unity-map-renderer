@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Rendering.Map
     public struct PreparedTileCacheConfig
     {
         [Tooltip("S82: master toggle for the PreparedTileCache. Disabled reverts to pre-S82 behaviour " +
-                 "exactly — every revisit re-fetches/re-tessellates/re-uploads, and a released tile's " +
+                 "exactly — every revisit re-fetches/re-builds/re-uploads, and a released tile's " +
                  "meshes are destroyed immediately instead of transferred to the cache. Default true.")]
         public bool Enabled;
 
