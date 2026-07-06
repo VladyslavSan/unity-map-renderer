@@ -188,7 +188,7 @@ namespace MapRenderer.Tests.Visual
             var go   = new GameObject("MapView_Tooth1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -235,7 +235,7 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_Tooth2");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -355,7 +355,7 @@ namespace MapRenderer.Tests.Visual
                     var src  = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderA");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+                    view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;
@@ -405,7 +405,7 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgOrderB");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+                    view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;
@@ -588,7 +588,7 @@ namespace MapRenderer.Tests.Visual
             var go    = new GameObject("MapView_Tooth4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -693,7 +693,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_Tooth5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -755,7 +755,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_NoAlloc");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -833,7 +833,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var mapGo = new GameObject("MapView_BrgPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+            view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -1072,7 +1072,7 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomLow");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 0; view.Config.MaxZoom = 2;
+                    view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 2;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;
@@ -1124,7 +1124,7 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgZoomHigh");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;
@@ -1316,7 +1316,7 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgParityEntities");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;
@@ -1359,7 +1359,7 @@ namespace MapRenderer.Tests.Visual
                     var src   = TestDataSource.FromBytes(FixtureBytes());
                     var mapGo = new GameObject("BrgParityBrg");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-                    view.Config.MinZoom = 4; view.Config.MaxZoom = 6;
+                    view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;
                     view.WithTestCamera();
                     view.Config.MaxConsumesPerTick = 64;
                     view.Config.MaxMeshBuildsPerTick = 64;

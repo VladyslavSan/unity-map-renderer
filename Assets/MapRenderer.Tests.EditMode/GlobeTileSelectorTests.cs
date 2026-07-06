@@ -28,6 +28,34 @@ namespace MapRenderer.Tests
             => new FrustumTileSelector(minZoom: 0, maxZoom: 22, onScreenTilePx: 512,
                                        lod: new FlatLodStrategy(), farPolicy: new MultiplierFarPlane(4.0));
 
+        // Cause-A regression: a z13 tile must subtend the same ON-SCREEN size on the globe as on Mercator, so the
+        // covered tile count matches at every latitude. Before the projection-aware altitude scale
+        // (IProjection.AltitudeScaleAtLatitude), the globe over-covered ~2× at mid/high latitude (the Web-Mercator
+        // sec φ stretch): Berlin z13 was 24 globe vs 12 Mercator. Overhead (tilt 0), a demo-scale 1600×900 viewport.
+        [TestCase(0.0)]     // equator: cos φ = 1, already matched
+        [TestCase(52.52)]   // Berlin: the demo start — was the 2× case
+        [TestCase(84.0)]    // near the Mercator limit: the strongest sec φ
+        public void Z13_GlobeCoverMatchesMercator_AcrossLatitude(double lat)
+        {
+            int CountAt(IProjection proj, IFarPlanePolicy far)
+            {
+                var cam = new CameraProperties(
+                    new GeoCoordinate3D { Longitude = 0, Latitude = lat, Altitude = 0 }, 13, 0, 0);
+                var selector = new FrustumTileSelector(0, 22, 512, new ScreenSpaceLodStrategy(), far);
+                var buf = new List<TileId>();
+                selector.SelectVisibleTiles(
+                    new ViewContext { Camera = cam, ViewportPx = new double2(1600, 900), Projection = proj }, buf);
+                return buf.Count;
+            }
+
+            int merc  = CountAt(new WebMercatorProjection(), new GeometryAwareFarPlane());
+            int globe = CountAt(new SphericalProjection(),   new RaySphereFarPlane(SphericalProjection.Radius));
+
+            // Within 2 for tile-grid alignment jitter; the pre-fix 2× (off by ~12) fails this decisively.
+            Assert.That(globe, Is.EqualTo(merc).Within(2),
+                $"globe z13 cover must match Mercator at lat {lat}° (globe={globe}, merc={merc}) — projection-aware altitude scale");
+        }
+
         [Test]
         public void Z0_EmitsExactlyTheSingleWorldTile()
         {
@@ -66,12 +94,14 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void NearPole_CoversAWideLongitudeWedge()
+        public void NearPole_LowZoom_ZoomsInToMercatorScale_CompactCover()
         {
             var buf = new List<TileId>();
-            // Looking near a pole, converging meridians make the frustum footprint span MANY longitude columns
-            // (a wide wedge) and reach the pole-adjacent tile row. Unlike the old cap, the frustum does NOT cover
-            // ALL columns (that was over-cover of the far side) — only the wedge actually in view.
+            // With the projection-aware altitude scale (IProjection.AltitudeScaleAtLatitude), the globe scales
+            // altitude by cos φ near a pole so a z-tile is the same ON-SCREEN size as on Web-Mercator (which
+            // stretches by sec φ). At 84° that is cos(84°) ≈ 0.10 — a ~10× zoom-in — so the cover is a COMPACT
+            // patch of a few columns, NOT a wide overview wedge. (The pre-fix wide wedge WAS the un-scaled
+            // over-cover; Z13_GlobeCoverMatchesMercator_AcrossLatitude proves the derived Mercator parity.)
             Sel().SelectVisibleTiles(View(Cam(0, 84.0, 5.0)), buf);
 
             Assert.IsNotEmpty(buf);
@@ -80,9 +110,10 @@ namespace MapRenderer.Tests
             bool reachesPoleRow = false;
             foreach (var t in buf) { columns.Add(t.X); if (t.Y == 0) reachesPoleRow = true; }
 
-            Assert.Greater(columns.Count, n / 4, "near the pole the wedge spans many columns (convergence)");
-            Assert.Less(columns.Count, n, "but not ALL columns — the frustum covers only what's in view, not the cap's over-cover");
-            Assert.IsTrue(reachesPoleRow, "the cover reaches the pole-adjacent tile row (Y=0)");
+            // Teeth: dropping the cos φ scale re-inflates this to the old wide wedge (> n/4 columns), failing here.
+            Assert.Less(columns.Count, n / 4,
+                "near the pole the globe zooms in (cos φ) to a compact cover — a few columns, not a wide wedge");
+            Assert.IsTrue(reachesPoleRow, "the cover still reaches the pole-adjacent tile row (Y=0)");
         }
 
         [Test]

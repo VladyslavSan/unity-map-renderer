@@ -115,7 +115,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_TiltCover");
             var view  = go.AddComponent<MapView>().WithTestMaterials().WithTestCamera();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 22;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 22;
             view.Config.MaxConsumesPerTick = 256;
             view.Config.MaxMeshBuildsPerTick = 256;
 
@@ -163,7 +163,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_T1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -296,7 +296,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T2b");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -389,7 +389,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_T3");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -479,7 +479,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -538,7 +538,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -583,7 +583,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
-            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;

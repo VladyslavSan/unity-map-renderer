@@ -149,7 +149,7 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S87");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 0;            // 0 BLOCKS consume (build the backlog)
             view.Config.MaxMeshBuildsPerTick = 64;           // kick all tiles
@@ -176,7 +176,7 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_A");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick          = 64;
             view.Config.MaxMeshBuildsPerTick   = 1;  // one kick per Tick
@@ -287,7 +287,7 @@ namespace MapRenderer.Tests
                 var src  = TestDataSource.FromBytes(FixtureBytes());
                 var go   = new GameObject("MapView_S55_D_Throttled");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 1;
@@ -308,7 +308,7 @@ namespace MapRenderer.Tests
                 var src  = TestDataSource.FromBytes(FixtureBytes());
                 var go   = new GameObject("MapView_S55_D_Uncapped");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -344,7 +344,7 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S55_F");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -543,7 +543,7 @@ namespace MapRenderer.Tests
             var mapGo = new GameObject("S55_E_MapView");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             // S55 DEFAULT throttle values — the whole point is not to override them here.
-            view.Config.MinZoom = Zoom; view.Config.MaxZoom = Zoom;
+            view.Config.TileSelection.MinZoom = Zoom; view.Config.TileSelection.MaxZoom = Zoom;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 2;      // S55 default
@@ -618,7 +618,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_S55_G");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
-            view.Config.MinZoom = 2; view.Config.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
+            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64; // uncapped for fast settle

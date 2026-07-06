@@ -432,13 +432,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   Config:
-    MinZoom: 0
-    MaxZoom: 14
-    OnScreenTilePx: 512
-    LodMode: 1
+    TileSelection:
+      MinZoom: 0
+      MaxZoom: 14
+      OnScreenTilePx: 512
+      LodMode: 1
+      MercatorFarPlaneCap: 4
+      GlobeFarPlaneCap: 4
     DevicePixelRatio: 1
-    MaxBuildsPerTick: 4
-    MaxTessellationsPerTick: 2
+    MaxConsumesPerTick: 4
+    MaxMeshBuildsPerTick: 2
     MaxVerticesPerTick: 50000
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
@@ -535,6 +538,16 @@ MonoBehaviour:
   ReleasedMidFlightCount: 0
   ReleasedMidFetchCount: 0
   FetchErrorCount: 0
+  PreparedCacheEnabled: 0
+  PreparedCacheHits: 0
+  PreparedCacheMisses: 0
+  PreparedCacheHitRatePercent: 0
+  PreparedCacheEntryCount: 0
+  PreparedCacheMaxCount: 0
+  PreparedCacheBytesHeld: 0
+  PreparedCacheByteBudget: 0
+  PreparedCacheFillPercent: 0
+  PreparedCacheEvictions: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

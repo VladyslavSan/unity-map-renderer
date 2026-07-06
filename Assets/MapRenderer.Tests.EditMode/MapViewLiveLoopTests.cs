@@ -92,7 +92,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -143,7 +143,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -206,7 +206,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc path under test
-            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -283,7 +283,7 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Entities; // the default backend under measurement
-            view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;

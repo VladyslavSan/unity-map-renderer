@@ -165,8 +165,8 @@ namespace MapRenderer.Tests
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend                 = RenderBackend.Brg; // zero-alloc contract; avoid EG's intermittent alloc noise
-            view.Config.MinZoom                 = 0;
-            view.Config.MaxZoom                 = 14;    // matches TileLoadStressDriver.MaxZoom / MapViewConfig's default
+            view.Config.TileSelection.MinZoom                 = 0;
+            view.Config.TileSelection.MaxZoom                 = 14;    // matches TileLoadStressDriver.MaxZoom / MapViewConfig's default
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 256;
             view.Config.MaxMeshBuildsPerTick = 256;
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests
             var go   = new GameObject("MapView_S95_Counter");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5; // cheap z5 cover — this tooth is about the counter, not descent cost
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // cheap z5 cover — this tooth is about the counter, not descent cost
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;

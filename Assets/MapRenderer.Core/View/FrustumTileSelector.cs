@@ -79,8 +79,18 @@ namespace MapRenderer.Core.View
             if (z < _minZoom) z = _minZoom;
             if (z > _maxZoom) z = _maxZoom;
 
+            // Render-space scene frame (look-at at the origin), matching MapView.BuildSceneFrame.
+            var lookAt = new GeoCoordinate
+            {
+                Latitude  = proj.ClampValidLatitude(cam.LookAt.Latitude),
+                Longitude = cam.LookAt.Longitude,
+            };
+
             // Frustum from the SAME pose math the renderer uses (MapCamera.SyncToCamera), with the shared far.
-            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
+            // The projection-aware latitude scale (globe: cos φ; Mercator: 1) MUST match MapCamera's — else the
+            // covered frustum diverges from the rendered one.
+            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg)
+                              * proj.AltitudeScaleAtLatitude(lookAt.Latitude);
             if (altitude < 0.1) altitude = 0.1;
             CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value,
                 out double3 pos, out double3 fwd, out double3 up);
@@ -90,12 +100,6 @@ namespace MapRenderer.Core.View
             double far    = _farPolicy.FarMetres(altitude, cam.Tilt.Value, cam.VerticalFovDeg, aspect);
             ViewFrustum frustum = ViewFrustum.FromPose(pos, fwd, up, cam.VerticalFovDeg, aspect, near, far);
 
-            // Render-space scene frame (look-at at the origin), matching MapView.BuildSceneFrame.
-            var lookAt = new GeoCoordinate
-            {
-                Latitude  = proj.ClampValidLatitude(cam.LookAt.Latitude),
-                Longitude = cam.LookAt.Longitude,
-            };
             double3  origin = proj.Project(lookAt);
             float3x3 basis  = proj.TangentBasisAt(lookAt);
 

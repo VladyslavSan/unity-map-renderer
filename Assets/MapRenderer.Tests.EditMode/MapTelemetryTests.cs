@@ -97,10 +97,10 @@ namespace MapRenderer.Tests
             {
                 // Pin Flat + the planar far policy so the independent selector can't diverge for reasons
                 // unrelated to telemetry plumbing (ScreenSpaceLod / RaySphereFarPlane vs GeometryAwareFarPlane).
-                view.Config.LodMode        = TileLodMode.Flat;
-                view.Config.MinZoom        = 0;
-                view.Config.MaxZoom        = 14;
-                view.Config.OnScreenTilePx = 512;
+                view.Config.TileSelection.LodMode        = TileLodMode.Flat;
+                view.Config.TileSelection.MinZoom        = 0;
+                view.Config.TileSelection.MaxZoom        = 14;
+                view.Config.TileSelection.OnScreenTilePx = 512;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -115,7 +115,7 @@ namespace MapRenderer.Tests
                 // selector (BuildTileSelectionConfig/EnsureSelector) — same min/max zoom, on-screen px, Flat
                 // LOD, GeometryAwareFarPlane (planar default), same camera + framing viewport.
                 var independent = new FrustumTileSelector(
-                    view.Config.MinZoom, view.Config.MaxZoom, view.Config.OnScreenTilePx,
+                    view.Config.TileSelection.MinZoom, view.Config.TileSelection.MaxZoom, view.Config.TileSelection.OnScreenTilePx,
                     new FlatLodStrategy(), new GeometryAwareFarPlane());
                 var independentView = new ViewContext
                 {
@@ -161,7 +161,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -195,7 +195,7 @@ namespace MapRenderer.Tests
             var view    = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -229,7 +229,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -263,7 +263,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
                 view.Config.MaxMeshBuildsPerTick = 64; // don't cap mesh build kicks
@@ -315,7 +315,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -375,7 +375,7 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S82_PreparedCacheDisabled");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             // Set BEFORE WithTestCamera() — TileManager reads PreparedCache.Enabled once at construction
             // (mirrors S82PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
             view.Config.PreparedCache.Enabled = false;
@@ -413,7 +413,7 @@ namespace MapRenderer.Tests
             GameObject panelGo = null;
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
@@ -481,7 +481,7 @@ namespace MapRenderer.Tests
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract
             try
             {
-                view.Config.MinZoom = 2; view.Config.MaxZoom = 2;
+                view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;

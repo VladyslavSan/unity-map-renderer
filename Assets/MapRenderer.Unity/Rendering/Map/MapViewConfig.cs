@@ -15,22 +15,10 @@ namespace MapRenderer.Unity.Rendering.Map
     [Serializable]
     public sealed class MapViewConfig
     {
-        [Tooltip("Zoom clamp for tile selection.")]
-        public int MinZoom = 0;
-        public int MaxZoom = 14;
+        [Tooltip("Frustum tile-selection, LOD, and far-plane tuning — the visible-tile cover knobs. Collapsible.")]
+        public TileSelectionSettings TileSelection = new TileSelectionSettings();
 
-        [Tooltip("S88/S93: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
-                 "512 convention MapLibre vector tiles are authored for. Enters ONLY as a selection-zoom " +
-                 "offset (log2(TilePixelSize/OnScreenTilePx)); since S93 unified on TilePixelSize=512, the " +
-                 "default 512 ⇒ offset 0 ⇒ camera zoom == tile zoom, ~4× fewer/larger tiles than the old 256 " +
-                 "convention. Set 256 for the dense legacy S71 density (offset +1, one level finer).")]
-        public int OnScreenTilePx = 512;
-
-        [Tooltip("Tile detail policy for the frustum selector. Flat = uniform single-zoom cover (previous " +
-                 "behaviour). ScreenSpaceLod = near full-detail, far progressively coarser (constant-ish tile " +
-                 "count under tilt; no tiny far-field tiles).")]
-        public TileLodMode LodMode = TileLodMode.ScreenSpaceLod;
-
+        [Header("Display Scaling")]
         [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
                  "same PHYSICAL size across panel densities. At runtime the Bootstrapper OVERWRITES this from " +
@@ -39,6 +27,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "Start). Must be positive. Default 1.")]
         public double DevicePixelRatio = 1.0;
 
+        [Header("Performance Budgets")]
         [Tooltip("S87: Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
                  "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). S87 made " +
                  "consume MESH-by-mesh, so a single rich tile no longer lands in one frame. Pair with " +
@@ -56,6 +45,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "then the rest defer to the next frame (one-mesh overshoot). 0 = uncapped.")]
         public int MaxVerticesPerTick = 50000;
 
+        [Header("Rendering")]
         [Tooltip("Tile render backend. Entities (default) = per-tile entity hierarchy via Entities " +
                  "Graphics, inspectable in the Entities Hierarchy. Brg = hand-packed BatchRendererGroup, " +
                  "the zero-allocation production path. GameObject = one MeshFilter+MeshRenderer child per " +
@@ -76,5 +66,46 @@ namespace MapRenderer.Unity.Rendering.Map
             ByteBudget = 128L * 1024 * 1024,
             MaxCount   = 1024,
         };
+    }
+
+    /// <summary>
+    /// The frustum tile-selection + LOD + far-plane knobs, grouped into a nested <c>[Serializable]</c> class so
+    /// they render as ONE collapsible foldout in the Inspector (the same mechanism <see cref="PreparedTileCacheConfig"/>
+    /// uses) — the flat <c>[Header]</c> version couldn't be minimized. All value types; read live by
+    /// <see cref="MapView"/> every Tick.
+    ///
+    /// <para>Not to be confused with the runtime per-frame <c>TileManager.TileSelectionConfig</c> (viewport +
+    /// projection + budgets the selector consumes each frame) — this is the static, Inspector-authored tuning.</para>
+    /// </summary>
+    [Serializable]
+    public sealed class TileSelectionSettings
+    {
+        [Tooltip("Zoom clamp for tile selection.")]
+        public int MinZoom = 0;
+        public int MaxZoom = 14;
+
+        [Tooltip("S88/S93: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
+                 "512 convention MapLibre vector tiles are authored for. Enters ONLY as a selection-zoom " +
+                 "offset (log2(TilePixelSize/OnScreenTilePx)); since S93 unified on TilePixelSize=512, the " +
+                 "default 512 ⇒ offset 0 ⇒ camera zoom == tile zoom, ~4× fewer/larger tiles than the old 256 " +
+                 "convention. Set 256 for the dense legacy S71 density (offset +1, one level finer).")]
+        public int OnScreenTilePx = 512;
+
+        [Tooltip("Tile detail policy for the frustum selector. Flat = uniform single-zoom cover (previous " +
+                 "behaviour). ScreenSpaceLod = near full-detail, far progressively coarser (constant-ish tile " +
+                 "count under tilt; no tiny far-field tiles).")]
+        public TileLodMode LodMode = TileLodMode.ScreenSpaceLod;
+
+        [Tooltip("FLAT Web-Mercator far-plane cap (GeometryAwareFarPlane): the render + selection far distance " +
+                 "grows with tilt but is clamped to altitude × this. Higher = see/select farther under tilt " +
+                 "(more tiles); lower = tighter cover. The camera and the tile selector share ONE policy, so " +
+                 "this moves both together. Default 4.")]
+        public double MercatorFarPlaneCap = 4.0;
+
+        [Tooltip("GLOBE far-plane cap (RaySphereFarPlane): the horizon-aware far is clamped to altitude × this. " +
+                 "The globe reaches farther under tilt than the flat plane, so its default is higher (8). LOWER " +
+                 "this to cut globe over-cover under tilt (the Mercator-vs-globe tile-count gap at high pitch). " +
+                 "Shared by the camera and the selector. Default 8.")]
+        public double GlobeFarPlaneCap = 8.0;
     }
 }

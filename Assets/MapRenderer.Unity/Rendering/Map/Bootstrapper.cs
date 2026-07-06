@@ -64,10 +64,12 @@ namespace MapRenderer.Unity.Rendering.Map
         // https://) is used verbatim; a bare relative path is resolved under StreamingAssets as file://.
         // To use the live OpenFreeMap style instead, set this to
         // "https://tiles.openfreemap.org/styles/liberty".
+        [Header("Style")]
         [Tooltip("Style document URI — the single source of truth. file://, http(s):// or a bare path " +
                  "resolved under StreamingAssets. Its sources[] declare the tiles (inline or via TileJSON).")]
         public string StyleUri = "Fixtures/liberty.json";
 
+        [Header("Initial Camera")]
         [Tooltip("Initial map center latitude (decimal degrees, WGS-84).")]
         public double InitialLatitude = 52.52; // Berlin
 
@@ -82,6 +84,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "(carried in CameraProperties, pushed to the Unity camera).")]
         public double VerticalFovDeg = 60.0;
 
+        [Header("Session (launch-time constants)")]
         [Tooltip("Cap the frame rate to the display refresh rate (VSync) on Start. Off = render " +
                  "uncapped (1000+ FPS), which needlessly drives the GPU and heats the machine.")]
         public bool CapFrameRateToRefreshRate = true;

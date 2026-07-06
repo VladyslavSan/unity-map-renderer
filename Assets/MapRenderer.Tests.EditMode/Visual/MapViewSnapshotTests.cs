@@ -60,7 +60,7 @@ namespace MapRenderer.Tests.Visual
 
             var mapGo = new GameObject("MapView");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 3; view.Config.MaxZoom = 3;
+            view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;

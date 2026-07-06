@@ -270,12 +270,15 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
-        private (bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx)? _selectorInputs;
+        private (bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
+                 double mercFarCap, double globeFarCap)? _selectorInputs;
 
         private void EnsureSelector()
         {
+            var tileSelection = _config.TileSelection;
             bool globe = Camera.Projection is SphericalProjection;
-            var key = (globe, _config.LodMode, _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx);
+            var key = (globe, tileSelection.LodMode, tileSelection.MinZoom, tileSelection.MaxZoom,
+                       tileSelection.OnScreenTilePx, tileSelection.MercatorFarPlaneCap, tileSelection.GlobeFarPlaneCap);
             if (TileManager.Selector != null && _selectorInputs == key) return;
             _selectorInputs = key;
 
@@ -283,16 +286,16 @@ namespace MapRenderer.Unity.Rendering.Map
             // from config; far-plane policy per projection — ray-sphere for a self-occluding globe
             // (curvature-correct: tight near, limb far), geometry-aware for the flat atlas. The camera gets the
             // SAME far so the rendered frustum is byte-for-byte the selected one.
-            ITileLodStrategy lod = _config.LodMode == TileLodMode.ScreenSpaceLod
+            ITileLodStrategy lod = tileSelection.LodMode == TileLodMode.ScreenSpaceLod
                 ? new ScreenSpaceLodStrategy()
                 : new FlatLodStrategy();
             IFarPlanePolicy far = Camera.Projection.TryGetHorizonOccluder(out _, out double occRadius)
-                ? new RaySphereFarPlane(occRadius)
-                : new GeometryAwareFarPlane();
+                ? new RaySphereFarPlane(occRadius, tileSelection.GlobeFarPlaneCap)
+                : new GeometryAwareFarPlane(tileSelection.MercatorFarPlaneCap);
 
             Camera.FarPlanePolicy = far;
             TileManager.Selector = new FrustumTileSelector(
-                _config.MinZoom, _config.MaxZoom, _config.OnScreenTilePx, lod, far);
+                tileSelection.MinZoom, tileSelection.MaxZoom, tileSelection.OnScreenTilePx, lod, far);
         }
 
         /// <summary>

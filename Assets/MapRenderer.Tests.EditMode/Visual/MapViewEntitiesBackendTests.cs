@@ -66,7 +66,7 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_EntOff");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
@@ -92,7 +92,7 @@ namespace MapRenderer.Tests.Visual
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_Ent");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0; view.WithTestCamera();
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Entities;
@@ -165,7 +165,7 @@ namespace MapRenderer.Tests.Visual
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var mapGo = new GameObject("MapView_EntPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 3; view.Config.MaxZoom = 3; view.WithTestCamera();
+            view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3; view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.Backend = RenderBackend.Entities;

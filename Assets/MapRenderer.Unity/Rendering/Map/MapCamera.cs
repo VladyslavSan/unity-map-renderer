@@ -117,8 +117,11 @@ namespace MapRenderer.Unity.Rendering.Map
             // high-DPI panel so the map is the right size and DPR-independent. ViewportPx stays physical
             // (raw from the camera); only this altitude term is normalized. Guard a non-positive DPR → 1.
             double dpr      = DevicePixelRatio > 0.0 ? DevicePixelRatio : 1.0;
+            // Projection-aware latitude scale (globe: cos φ; Mercator: 1) so a z-tile is the same on-screen size
+            // on both projections — MUST match the tile selector's, so the covered frustum is the rendered one.
+            double latScale = Projection.AltitudeScaleAtLatitude(Projection.ClampValidLatitude(CurrentProperties.LookAt.Latitude));
             double altitude = CameraPoseMath.AltitudeForZoom(CurrentProperties.Zoom, ViewportPx.y / dpr, CurrentProperties.VerticalFovDeg)
-                              * AltitudeMultiplier;
+                              * AltitudeMultiplier * latScale;
             if (altitude < 0.1) altitude = 0.1;
 
             CameraPoseMath.ComputePose(altitude,

@@ -135,7 +135,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_Revisit");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -212,7 +212,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_ZoomBake");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -285,7 +285,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_NativeArrayInvariant");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -336,7 +336,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_LiveThenDestroyed");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -395,7 +395,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject($"MapView_S82_BackendReuse_{backend}");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             view.Config.Backend = backend;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;
@@ -452,7 +452,7 @@ namespace MapRenderer.Tests
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_CacheDisabled");
             var view     = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 4; view.Config.MaxZoom = 4;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
             // Set BEFORE WithTestCamera() — that call constructs MapView/TileManager, which reads
             // PreparedCache.Enabled once at construction (mirrors how MinZoom/MaxZoom above must also
             // precede WithTestCamera() in every other test in this file).

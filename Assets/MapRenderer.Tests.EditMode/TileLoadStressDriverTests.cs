@@ -154,7 +154,7 @@ namespace MapRenderer.Tests
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_StressDriver");
             var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 14;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 14;
             view.WithTestCamera();
             view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 

@@ -77,5 +77,18 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>Clamps a latitude to the valid geodetic range for this projection.</summary>
         double ClampValidLatitude(double latitudeDegrees);
+
+        /// <summary>The multiplier on the zoom→altitude (<see cref="CameraPoseMath.AltitudeForZoom"/>) that keeps
+        /// a fixed-zoom tile the same ON-SCREEN size — and therefore the same geographic extent and tile count —
+        /// at the given look-at latitude on THIS projection.
+        /// <para><c>AltitudeForZoom</c> targets the <b>equatorial</b> Web-Mercator ground resolution, latitude-
+        /// independent. Web-Mercator display <i>stretches</i> everything by sec(φ), so a z-tile is a constant
+        /// on-screen size at every latitude ⇒ Mercator returns <b>1</b> (no correction). The globe renders tiles
+        /// at their <i>true</i> size, which shrinks by cos(φ) toward the poles; at the same altitude that packs
+        /// ~sec(φ)× more tiles into the view. Scaling the altitude by <b>cos(φ)</b> (globe) brings the camera
+        /// closer so the on-screen tile size — hence the covered extent and tile count — matches Mercator's.
+        /// Both the render camera (<c>MapCamera.SyncToCamera</c>) and the tile selector apply it, so the covered
+        /// frustum stays the rendered one.</para></summary>
+        double AltitudeScaleAtLatitude(double latitudeDegrees);
     }
 }

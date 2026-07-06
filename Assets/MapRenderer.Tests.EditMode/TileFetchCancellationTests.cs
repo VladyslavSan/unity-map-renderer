@@ -70,7 +70,7 @@ namespace MapRenderer.Tests
             MapView    view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {
-                view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;

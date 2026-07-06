@@ -121,7 +121,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_A");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -193,7 +193,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_B");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             // MaxConsumesPerTick = 0 BEFORE initialise: prevents the consume from running.
             // Mesh build tasks are KICKED (build) but never consumed, guaranteeing the tiles
@@ -352,7 +352,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 5; view.Config.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
             // MaxConsumesPerTick = 0: prevents the consume — mesh build tasks are kicked but
             // not consumed, ensuring HasMeshBuild=true when tiles are evicted.
@@ -460,7 +460,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
@@ -519,7 +519,7 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_LeakGuard_C");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.MinZoom = 0; view.Config.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
