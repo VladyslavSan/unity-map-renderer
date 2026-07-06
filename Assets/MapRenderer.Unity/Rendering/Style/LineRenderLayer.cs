@@ -12,13 +12,13 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Line <see cref="IRenderLayer"/>: a MapLibre <c>line</c> layer as a runtime render object. Wraps the
-    /// managed <see cref="Meshing.StyledLineTileBuilder"/> (unchanged). Line width in pixel mode needs the
-    /// live ground resolution (<c>_MetersPerPixel</c>) and a zoom-dependent dasharray re-evaluated per frame —
-    /// both carried into <see cref="ApplyZoom"/>.
+    /// managed <see cref="Meshing.StyledLineTileBuilder"/> (unchanged). Line width in pixel mode is resolved
+    /// in screen space by the shader (S104); the per-frame work here is a zoom-dependent dasharray
+    /// re-evaluated in <see cref="ApplyZoom"/>.
     /// </summary>
     internal sealed class LineRenderLayer : IRenderLayer
     {
-        // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + _MetersPerPixel + per-line
+        // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + per-line
         // dash re-eval). LineDash isolates the per-line zoom-step dasharray re-evaluation. Preserved verbatim
         // from the retired StyledLayerSet so the S46 greppable-marker set is intact.
         private static readonly ProfilerMarker PmZoomLines =
@@ -64,14 +64,11 @@ namespace MapRenderer.Unity.Rendering.Style
             return new LineRenderLayer(layer, mat, paint, layout, applier);
         }
 
-        public void ApplyZoom(double zoom, float metersPerPixel)
+        public void ApplyZoom(double zoom)
         {
             using (PmZoomLines.Auto())
             {
                 _applier.ApplyZoom(zoom);
-                // Pixel-mode line width: the shader computes widthM = _Width(px) * _MetersPerPixel, and the
-                // world is Web-Mercator metres, so _MetersPerPixel must track the current zoom.
-                Material.SetFloat(ShaderProperties.Line.PropertyId.MetersPerPixel, metersPerPixel);
 
                 // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom (the engine's
                 // classification). A constant dash (the common case) is set once at bind time and skipped

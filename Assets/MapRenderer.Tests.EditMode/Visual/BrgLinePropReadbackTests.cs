@@ -1,14 +1,13 @@
 // S76 BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
 //
 // Directly constructs a BrgTileRenderer from a line-only RenderLayerSet (no MapView) and asserts that:
-//   1. FloatsPerInstance == 76 and MetadataEntryCount == 33 (exact plan-count tooth).
+//   1. FloatsPerInstance == 74 and MetadataEntryCount == 31 (exact plan-count tooth).
 //   2. _Width packed value == mat.GetFloat(_Width id) == 40 (non-NaN, the direct pack proof).
-//   3. _AaEdgeWidth packed == mat.GetFloat(_AaEdgeWidth id) AND > 0 (AA tooth: must never be 0).
-//   4. _Opacity SoA float offset == 46 (byte-identical-wire spot check: fill wire layout unchanged).
+//   3. _Opacity SoA float offset == 46 (byte-identical-wire spot check: fill wire layout unchanged).
 //
-// Falsifiability: the buggy build (no _Width / _AaEdgeWidth plan entry) makes GetInstancePropValue
-// return NaN instead of the material value → assertion !=  mat.GetFloat(id) FAILS. The non-NaN
-// check names the failure explicitly rather than silently passing through 0.
+// Falsifiability: the buggy build (no _Width plan entry) makes GetInstancePropValue return NaN instead
+// of the material value → assertion != mat.GetFloat(id) FAILS. The non-NaN check names the failure
+// explicitly rather than silently passing through 0.
 //
 // Pattern: mirrors BrgTileRendererEvictionTests (direct BrgTileRenderer construction, no MapView).
 
@@ -48,8 +47,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Headless CI gate: after Rebuild with a line material that has _Width=40,
-        /// the CPU buffer must contain 40.0 at the correct SoA slot for _Width, and the
-        /// _AaEdgeWidth slot must be > 0 (default 1.0, never 0).
+        /// the CPU buffer must contain 40.0 at the correct SoA slot for _Width.
         /// </summary>
         [Test]
         public void BrgLinePropReadback_PackedValuesMatchMaterial()
@@ -68,19 +66,14 @@ namespace MapRenderer.Tests.Visual
 
             // Pre-check: styler must have applied line-width=40 to the material.
             int widthId       = ShaderProperties.Line.PropertyId.Width;
-            int aaEdgeWidthId = ShaderProperties.Line.PropertyId.AaEdgeWidth;
             int opacityId     = ShaderProperties.PropertyId.Opacity;
 
             float matWidth      = mat.HasProperty(widthId)      ? mat.GetFloat(widthId)      : float.NaN;
-            float matAaEdgeWidth = mat.HasProperty(aaEdgeWidthId) ? mat.GetFloat(aaEdgeWidthId) : float.NaN;
             float matOpacity    = mat.HasProperty(opacityId)    ? mat.GetFloat(opacityId)    : float.NaN;
 
             Assert.That(matWidth, Is.EqualTo(40f).Within(1e-3f),
                 "Pre-check: mat._Width must be 40 after RenderLayerSet.Build with line-width:40. " +
                 "If NaN, the Line shader does not declare _Width in Properties{}.");
-            Assert.That(matAaEdgeWidth, Is.GreaterThan(0f),
-                "Pre-check: mat._AaEdgeWidth must be > 0 (shader default 1.0). " +
-                "If NaN/0, the Line shader does not declare _AaEdgeWidth in Properties{}.");
 
             var brg  = new BrgTileRenderer(new[] { set[0].Material });
             var mesh = new Mesh();
@@ -88,12 +81,12 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // ── Exact plan-count tooth ────────────────────────────────────────────────────
-                Assert.That(brg.FloatsPerInstance, Is.EqualTo(76),
-                    "BrgTileRenderer.FloatsPerInstance must be 76 (MapInstanceData: 24 transform + 52 material floats). " +
+                Assert.That(brg.FloatsPerInstance, Is.EqualTo(74),
+                    "BrgTileRenderer.FloatsPerInstance must be 74 (MapInstanceData: 24 transform + 50 material floats). " +
                     "An incompletely-generated plan (e.g. missing line props) produces a smaller value.");
 
-                Assert.That(brg.MetadataEntryCount, Is.EqualTo(33),
-                    "BrgTileRenderer.MetadataEntryCount must be 33 (2 transforms + 31 material props). " +
+                Assert.That(brg.MetadataEntryCount, Is.EqualTo(31),
+                    "BrgTileRenderer.MetadataEntryCount must be 31 (2 transforms + 29 material props). " +
                     "Missing entries mean the BRG batch omits those props from the GPU instancing table.");
 
                 // ── Register and Rebuild ──────────────────────────────────────────────────────
@@ -115,20 +108,6 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(packedWidth, Is.EqualTo(40f).Within(1e-3f),
                     $"Packed _Width must be 40.0 (the style's line-width). Got {packedWidth}.");
-
-                // ── _AaEdgeWidth readback (AA tooth: must never be 0) ─────────────────────────
-                float packedAa = brg.GetInstancePropValue(h, aaEdgeWidthId);
-
-                Assert.That(packedAa, Is.Not.NaN,
-                    "GetInstancePropValue(_AaEdgeWidth) returned NaN — no plan entry for _AaEdgeWidth. " +
-                    "S76: _AaEdgeWidth must be in MapInstanceData so it gets an SoA slot.");
-
-                Assert.That(packedAa, Is.EqualTo(matAaEdgeWidth).Within(1e-3f),
-                    $"Packed _AaEdgeWidth ({packedAa}) must equal mat.GetFloat(_AaEdgeWidth) ({matAaEdgeWidth}).");
-
-                Assert.That(packedAa, Is.GreaterThan(0f),
-                    $"Packed _AaEdgeWidth must be > 0 (shader default 1.0; 0 = no AA). Got {packedAa}. " +
-                    "If 0, the plan default for _AaEdgeWidth is wrong (must be 1.0, not 0).");
 
                 // ── _Opacity byte-identical-wire spot check ───────────────────────────────────
                 // _Opacity was at SoA float offset 46 before S76 and must remain there so the fill

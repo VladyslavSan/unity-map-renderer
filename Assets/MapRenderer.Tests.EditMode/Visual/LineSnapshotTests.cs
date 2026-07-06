@@ -91,7 +91,6 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",       1f);
-            mat.SetFloat("_AaEdgeWidth",   1f);   // antialiasing buffer (was _Blur pre-decouple)
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
         }
@@ -119,7 +118,6 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",      new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",       1f);
-            mat.SetFloat("_AaEdgeWidth",   1f);   // antialiasing buffer (was _Blur pre-decouple)
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return go;
         }

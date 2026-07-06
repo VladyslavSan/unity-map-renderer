@@ -87,10 +87,7 @@ namespace MapRenderer.Core.View
             };
 
             // Frustum from the SAME pose math the renderer uses (MapCamera.SyncToCamera), with the shared far.
-            // The projection-aware latitude scale (globe: cos φ; Mercator: 1) MUST match MapCamera's — else the
-            // covered frustum diverges from the rendered one.
-            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg)
-                              * proj.AltitudeScaleAtLatitude(lookAt.Latitude);
+            double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
             if (altitude < 0.1) altitude = 0.1;
             CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value,
                 out double3 pos, out double3 fwd, out double3 up);

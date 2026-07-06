@@ -55,10 +55,10 @@ namespace MapRenderer.Unity.Rendering.Style
             return new FillRenderLayer(layer, mat, paint, applier);
         }
 
-        public void ApplyZoom(double zoom, float metersPerPixel)
+        public void ApplyZoom(double zoom)
         {
             using (PmZoomFills.Auto())
-                _applier.ApplyZoom(zoom); // fills are zoom-only; metersPerPixel is a line concern
+                _applier.ApplyZoom(zoom);
         }
 
         public void WriteInto(

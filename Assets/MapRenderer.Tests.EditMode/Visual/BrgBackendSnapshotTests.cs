@@ -1262,9 +1262,9 @@ namespace MapRenderer.Tests.Visual
         /// (default) and BRG and asserts that BRG line coverage is within 20% of Entities coverage
         /// AND above a non-degenerate floor.
         ///
-        /// Falsifiability: before S76, BRG line props (_Width, _AaEdgeWidth, etc.) read garbage from
-        /// byte offset 0 (the transform matrix). The BRG line coverage would then be near-zero (no AA,
-        /// wrong width) while Entities coverage is correct — the BRG/Entities ratio would fail the
+        /// Falsifiability: before S76, BRG line props (_Width, _Opacity, etc.) read garbage from
+        /// byte offset 0 (the transform matrix). The BRG line coverage would then be near-zero (wrong
+        /// width) while Entities coverage is correct — the BRG/Entities ratio would fail the
         /// within-tolerance assertion. After S76, the plan provides correct SoA slots → BRG matches
         /// Entities within tolerance.
         ///
@@ -1337,10 +1337,11 @@ namespace MapRenderer.Tests.Visual
                         // Frame camera via the first loaded tile's world position.
                         // Entities backend uses GameObjects, so ComputeChildBounds applies — but for
                         // simplicity we use a fixed large orthoSize (tiles are at scene-relative positions).
-                        camera.transform.position = new Vector3(0f, 200f, 0f);
-                        camera.orthographicSize   = 200_000f;
-
-                        snapEntities.Render(camera);
+                        // Render through MapView's OWN camera (production path). A hand-rolled ortho camera is
+                        // an unsupported configuration for the screen-space line width (S104): its scale must
+                        // agree with the _MetersPerPixel the pipeline set, which only MapView's camera does.
+                        view.Camera.SyncToCamera();
+                        snapEntities.Render(view.Camera.Camera);
                         snapEntities.WritePng("brg-parity-entities.png");
                         var v = SnapshotCoverage.Analyse(snapEntities.RawPixels, SnapW, SnapH, BgR8, BgG8, BgB8);
                         filledEntities = v.FilledFraction;
@@ -1377,10 +1378,9 @@ namespace MapRenderer.Tests.Visual
                             "BRG render: must settle tiles at zoom=5.");
                         view.Tick();
 
-                        camera.transform.position = new Vector3(0f, 200f, 0f);
-                        camera.orthographicSize   = 200_000f;
-
-                        snapBrg.Render(camera);
+                        // Render through MapView's OWN camera (production path) — see the Entities block.
+                        view.Camera.SyncToCamera();
+                        snapBrg.Render(view.Camera.Camera);
                         snapBrg.WritePng("brg-parity-brg.png");
                         var v = SnapshotCoverage.Analyse(snapBrg.RawPixels, SnapW, SnapH, BgR8, BgG8, BgB8);
                         filledBrg = v.FilledFraction;
@@ -1445,7 +1445,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(ratio, Is.InRange(0.20f, 5.0f),
                     $"BRG line coverage ({filledBrg:P2}) must be within 5× of Entities coverage ({filledEntities:P2}). " +
                     $"Ratio = {ratio:F2}. " +
-                    "A ratio near 0 means BRG is not rendering lines (missing _Width/_AaEdgeWidth SoA slot — S76 bug). " +
+                    "A ratio near 0 means BRG is not rendering lines (missing _Width SoA slot — S76 bug). " +
                     "Re-run as PlayMode or inspect brg-parity-*.png.");
             }
             finally

@@ -131,9 +131,5 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public double ClampValidLatitude(double latitudeDegrees)
             => math.clamp(latitudeDegrees, -WebMercator.MaxLatitude, WebMercator.MaxLatitude);
-
-        /// <summary>1 — the Web-Mercator display stretches by sec(φ), so a z-tile is a constant on-screen size at
-        /// every latitude; no altitude correction needed. (See <see cref="IProjection.AltitudeScaleAtLatitude"/>.)</summary>
-        public double AltitudeScaleAtLatitude(double latitudeDegrees) => 1.0;
     }
 }

@@ -79,7 +79,6 @@ namespace MapRenderer.Tests
         public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in CameraProperties camera)
             => throw new System.NotSupportedException("RightHandedSphereProjection is a geometry-only test double.");
         public double ClampValidLatitude(double latitudeDegrees) => math.clamp(latitudeDegrees, -90.0, 90.0);
-        public double AltitudeScaleAtLatitude(double latitudeDegrees) => math.cos(latitudeDegrees * math.PI_DBL / 180.0);
     }
 
     public class RightHandedSphereProjectionWindingTests

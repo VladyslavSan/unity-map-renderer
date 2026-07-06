@@ -9,7 +9,7 @@
 // Include order: Line_LitInput.hlsl → Line_VertexExtrude.hlsl → Line_<Pass>.hlsl.
 //
 // Line_LitInput.hlsl must be included BEFORE this file (reads CBUFFER props:
-//   _Width, _WidthIsPixels, _MetersPerPixel, _GapWidth, _LineOffset, _LineTranslate).
+//   _Width, _WidthIsPixels, _GapWidth, _LineOffset, _LineTranslate).
 //
 // See docs/lit-rendering-design.md §"Line specifics (S33)" for the extrusion rationale.
 // Authored for URP 17.5 / Unity 6000.x. Clean-room map logic, not MapLibre or Unity source.
@@ -60,110 +60,84 @@ float3 Line_VertexExtrude(
     // Avoid div-by-zero on degenerate (cap) vertices.
     float3 unitDir_OS = (miter > 1e-6) ? (input.extrudeN / miter) : float3(0, 0, 0);
 
-    // ── Resolve width in meters ───────────────────────────────────────────────
-    // widthScale = per-feature scale, default 1.
-    float widthM = (_WidthIsPixels > 0.5)
-        ? _Width * _MetersPerPixel
-        : _Width;
-    widthM *= input.widthScale;
+    // ── S104: width & pixel-based line props resolved in SCREEN space — NO _MetersPerPixel uniform ─────────
+    // For pixel widths we MEASURE the local world-metres-per-screen-pixel along the across direction (the
+    // px→world scale — foreshortening-correct at any latitude/tilt/projection) instead of reading a per-frame
+    // CPU uniform. width, gap, line-offset and line-translate all convert through it.
 
-    // ── S14: gap-width in meters ──────────────────────────────────────────────
-    // Same unit conversion as width; NOT scaled by widthScale (layer-level property).
-    float gapM = (_WidthIsPixels > 0.5)
-        ? _GapWidth * _MetersPerPixel
-        : _GapWidth;
-
-    // ── Outer extrude radius ──────────────────────────────────────────────────
-    // gap=0 → outerM = 0.5*widthM (identical to previous solid path).
-    // gap>0 → outerM = 0.5*gapM + widthM (gap half-width + full line width from outer edge).
-    float outerM = (gapM > 1e-6) ? (0.5 * gapM + widthM) : (0.5 * widthM);
-
-    // ── Object-space → world-space frame ─────────────────────────────────────
-    // NORMALIZE strips parent scale (the decisive S05 fix) so _Width stays invariant in world meters.
-    float3x3 O2W = (float3x3)GetObjectToWorldMatrix();
-    float3 unitDir_WS = normalize(mul(O2W, unitDir_OS));
-
-    // Per-vertex surface up — from the mesh NORMAL stream, NOT a hardcoded +Y (+Y for Mercator, radial
-    // for a globe). The lateral/lift frame is built from this, so the shader makes no flat-ground assumption.
+    // World-space frame. NORMALIZE strips parent scale (the S05 fix) so extrusion is scale-invariant.
+    float3x3 objectToWorld = (float3x3)GetObjectToWorldMatrix();
+    float3 unitDir_WS = normalize(mul(objectToWorld, unitDir_OS));
+    // Per-vertex surface up from the mesh NORMAL stream (+Y for Mercator, radial for a globe) — no
+    // flat-ground assumption.
     float3 upWS = normalize(TransformObjectToWorldNormal(input.normalOS));
+    float3 centerWS = TransformObjectToWorld(input.positionOS.xyz);
 
-    // Lateral world half-width vector = unit world across-direction × miter factor × outerM.
-    float3 lateralWS = unitDir_WS * (miter * outerM);
-
-    // ── Antialiasing buffer (outer edge) ──────────────────────────────────────
-    // Extend the lateral extrude OUTWARD by (_AaEdgeWidth + _Blur) device pixels so the styled width stays
-    // a fully OPAQUE core and the fwidth coverage falloff (LineCoverage, the same width) lands entirely in
-    // this added buffer — never inside the line body. This is the standard line-AA model (opaque core +
-    // feathered edge): the interior is never made translucent, so overlapping roads/casings/joins
-    // composite cleanly with NO alpha accumulation. It also gives sub-pixel-width lines enough geometry
-    // to rasterize (≥ the buffer), so they render as a stable hairline instead of dropping pixels.
-    //   _AaEdgeWidth — internal AA buffer width (default 1px); _Blur — MapLibre line-blur (default 0px),
-    //   adds softening on top. Their sum is the buffer/feather width.
-    // pxHalf is measured in screen pixels from the projected centre/edge — perspective-correct, with no
-    // dependency on _MetersPerPixel. padScale also rescales innerFrac below so the gap inner edge tracks
-    // the widened |side| range.
-    float aaPx = _AaEdgeWidth + _Blur;   // AA buffer (+ line-blur softening) in device px per side
-    float padScale = 1.0;
+    // px→world scale. Non-pixel widths are already world metres (×1). Pixel widths measure it:
+    float pxToWorld = 1.0;
+    if (_WidthIsPixels > 0.5)
     {
-        float3 centerWS = TransformObjectToWorld(input.positionOS.xyz);
-        float4 clipC = TransformWorldToHClip(centerWS);
-        float4 clipE = TransformWorldToHClip(centerWS + lateralWS);
-        // Guard behind-camera vertices (w ≤ 0): leave padScale = 1 (no pad).
-        if (clipC.w > 1e-5 && clipE.w > 1e-5)
+        float4 clipCenter = TransformWorldToHClip(centerWS);
+        // A reference world length that projects to ~2% of NDC height (a few device px) at THIS depth under
+        // ANY projection: worldPerNdcY = |clip.w| / P[1][1] (perspective ⇒ depth-scaled; ortho ⇒ constant).
+        // Then MEASURE its actual on-screen size along `across`, so foreshortening (grazing tiles) is included.
+        float projY  = max(abs(UNITY_MATRIX_P._m11), 1e-6);
+        float refMag = (abs(clipCenter.w) / projY) * 0.02;
+        float4 clipRef = TransformWorldToHClip(centerWS + unitDir_WS * refMag);
+        float refPx = 0.01 * _ScreenParams.y;   // fallback (~the un-foreshortened target) if ref is behind camera
+        if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
         {
-            // NDC delta → device-pixel delta (the +0.5 NDC→pixel offset cancels in the difference).
-            float2 ndcDelta = (clipE.xy / clipE.w) - (clipC.xy / clipC.w);
-            float  pxHalf   = length(ndcDelta * 0.5 * _ScreenParams.xy);
-            if (pxHalf > 1e-5)
-                padScale = (pxHalf + aaPx) / pxHalf;   // add the AA buffer to each side
+            float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
+            refPx = length(ndcDelta * 0.5 * _ScreenParams.xy);
         }
+        // Clamp measured px so an edge-on `across` (refPx → 0) can't send pxToWorld to infinity (guard).
+        pxToWorld = refMag / max(refPx, 0.1);
     }
-    lateralWS *= padScale;
 
-    float3 offsetWS = lateralWS;
+    // Width / gap / outer radius in world metres (widthScale = per-feature; gap is layer-level).
+    float widthWorld = _Width * input.widthScale * pxToWorld;
+    float gapWorld   = _GapWidth * pxToWorld;
+    float outerWorld = (gapWorld > 1e-6) ? (0.5 * gapWorld + widthWorld) : (0.5 * widthWorld);
+
+    // Min-width floor (pixel widths only): half-width never below 0.5 px ⇒ a stable 1 px hairline.
+    // This is the sole thin-line safeguard now that edge AA is removed — the geometry IS the styled width
+    // and LineCoverage draws it with a hard edge, so a sub-pixel line would vanish without this floor.
+    float minHalfWorld = (_WidthIsPixels > 0.5) ? (0.5 * pxToWorld) : 0.0;
+    float3 lateralWS = unitDir_WS * max(miter * outerWorld, minHalfWorld);
+    float3 offsetWS  = lateralWS;
 
     // ── S44: line-offset ──────────────────────────────────────────────────────
-    // Shift the band center perpendicular to the centerline by offsetM.
-    // Multiplied by sideAndDist.x (∈{+1,−1}) so both vertices of a station shift by the same
-    // world vector (the extrusion normal flips between sides, cancelling the flip).
-    // NOT scaled by widthScale (layer-level offset, not per-feature).
-    //
-    // CPU mirror: LineOffset.Displace / LineOffset.OffsetMeters (Assets/MapRenderer.Core/Style/LineOffset.cs).
-    float offsetM = (_WidthIsPixels > 0.5) ? _LineOffset * _MetersPerPixel : _LineOffset;
-    offsetWS += unitDir_WS * input.sideAndDist.x * (miter * offsetM);
+    // Shift the band centre perpendicular to the centerline. ×sideAndDist.x so both station vertices shift by
+    // the same world vector. Layer-level (not per-feature). CPU mirror: LineOffset (Core/Style/LineOffset.cs).
+    offsetWS += unitDir_WS * input.sideAndDist.x * (miter * _LineOffset * pxToWorld);
 
     // ── Surface-normal lift (0.001 world-meters) ─────────────────────────────
     // Lift along the per-vertex surface up (NOT world +Y) to avoid coplanar z-fighting with fills under
     // any projection. Applied in every pass via this single helper — the silhouette single-site guarantee.
     offsetWS += upWS * 0.001;
 
-    // ── S14: line-translate ───────────────────────────────────────────────────
-    // Shift the ribbon by the specified pixel offset in world XZ.
-    // anchor=0 (map): px→world via _MetersPerPixel. Applied in world space as XZ offset.
-    // anchor=1 (viewport): approximated; apply same px→world path (documented approximation).
-    // NOT scaled by widthScale (layer-level offset, not per-feature).
-    float translateScale = _MetersPerPixel;
-    float3 translateWS = float3(_LineTranslate.x * translateScale, 0.0, _LineTranslate.y * translateScale);
-    offsetWS += translateWS;
+    // ── S14: line-translate ── pixel offset in world XZ. Off-axis, so pxToWorld is an approximation here (as
+    // the old _MetersPerPixel path was); layer-level, not per-feature.
+    offsetWS += float3(_LineTranslate.x * pxToWorld, 0.0, _LineTranslate.y * pxToWorld);
 
     // ── Round-trip to object space ────────────────────────────────────────────
     // Add world-space offset back to object-space position so GetVertexPositionInputs /
     // TransformObjectToHClip can work normally downstream.
-    float3x3 W2O = (float3x3)GetWorldToObjectMatrix();
-    float3 posOS = input.positionOS.xyz + mul(W2O, offsetWS);
+    float3x3 worldToObject = (float3x3)GetWorldToObjectMatrix();
+    float3 posOS = input.positionOS.xyz + mul(worldToObject, offsetWS);
 
     // ── S14: innerFrac for gap-width fragment clipping ────────────────────────
-    // innerFrac = fraction of [0,outerM] that is the inner (gap) hole, in [side]-space.
+    // innerFrac = fraction of [0,outerWorld] that is the inner (gap) hole, in [side]-space.
     // When gap=0, innerFrac=0 → no clipping in fragment (solid line path, unchanged).
-    // Inner hole: |side| < innerFrac (in normalized side-space).
-    // /padScale: |side| now spans the AA-padded range, so the gap inner-edge fraction shrinks to match.
-    innerFrac = (gapM > 1e-6) ? (0.5 * gapM / outerM) / padScale : 0.0;
+    // Inner hole: |side| < innerFrac (in normalized side-space). |side| spans the styled width now (no
+    // outset pad), so the raw gap/outer ratio is already in the right |side|-space.
+    innerFrac = (gapWorld > 1e-6) ? (0.5 * gapWorld / outerWorld) : 0.0;
 
     // ── Out parameters ────────────────────────────────────────────────────────
     side  = input.sideAndDist.x;  // ∈ {+1,−1}, interpolated for AA
-    // S43: dashU = distanceAlong / widthM — dimensionless position in line-width units.
-    // Mirror of LineDash.DashCoverage's "u = distanceAlong / widthM" (CPU D1 formula).
-    dashU = (widthM > 1e-6) ? (input.sideAndDist.y / widthM) : 0.0;
+    // S43: dashU = distanceAlong / widthWorld — dimensionless position in line-width units.
+    // Mirror of LineDash.DashCoverage's "u = distanceAlong / widthWorld" (CPU D1 formula).
+    dashU = (widthWorld > 1e-6) ? (input.sideAndDist.y / widthWorld) : 0.0;
 
     // ── Tangent (along the line) — derived, projection-agnostic ───────────────
     // Built from the surface up (normalOS) and the across-direction — no extra vertex stream and no
@@ -179,42 +153,40 @@ float3 Line_VertexExtrude(
 }
 
 // ── LineCoverage ──────────────────────────────────────────────────────────────
-// Computes the fwidth-smoothstep ribbon alpha from the three interpolated coverage inputs.
-// Used as the alpha multiplier in the forward pass and as the binary clip threshold
-// (clip(LineCoverage(...) - 0.5)) in every depth-writing pass.
+// Computes the ribbon alpha from the three interpolated coverage inputs: a HARD outer edge, a hard gap-hole
+// cut, opt-in line-blur, and dash coverage. Used as the alpha multiplier in the forward pass and as the
+// binary clip threshold (clip(LineCoverage(...) - 0.5)) in every depth-writing pass.
 //
-// FRAGMENT-STAGE function: uses fwidth(side) and fwidth(dashU). The three inputs MUST be
-// interpolated Varyings in every pass that calls this (not by-value constants).
-//
-// This is a pure extraction of the coverage formula from Line_LitForwardPass.hlsl — the
-// output is byte-for-byte identical to the inline code it replaces.
+// FRAGMENT-STAGE function: uses fwidth(dashU) (and fwidth(side) only when _Blur > 0). The three inputs MUST
+// be interpolated Varyings in every pass that calls this (not by-value constants).
 float LineCoverage(float side, float innerFrac, float dashU)
 {
-    // ── Outer and inner AA edges ──────────────────────────────────────────────
-    float absSide  = abs(side);
-    float feather  = fwidth(side);
-    // Feather ramp width = (_AaEdgeWidth + _Blur), matching the vertex-stage geometry buffer (aaPx) so
-    // the ramp ends exactly at the styled edge. _AaEdgeWidth (default 1) keeps AA always on; _Blur
-    // (line-blur, default 0) widens it. feather scales it from px into |side| units.
-    float aaRamp   = max(feather * (_AaEdgeWidth + _Blur), 1e-4);
+    // ── Outer + inner edges: HARD edges + opt-in line-blur (AA removed) ─────────────────────────────────────
+    // Edge antialiasing was removed: the styled edge is the HARD triangle silhouette (aliased). Thin lines
+    // stay visible via the vertex MIN-WIDTH FLOOR (half-width ≥ 0.5 px), not an AA feather buffer. `_Blur`
+    // (MapLibre line-blur) is a SEPARATE, opt-in soft edge (default 0 ⇒ hard) — it is NOT antialiasing, so
+    // it is kept. When AA returns it will be a different mechanism (single-pass cased-line compositing).
+    float absSide = abs(side);
 
-    // Outer edge: smoothstep from (|side|=1) inward. Identical to S05 solid formula.
-    float outerEdgeDist = 1.0 - absSide;
-    float outerAA       = smoothstep(0.0, aaRamp, outerEdgeDist);
+    // Outer edge: the ribbon spans |side| ≤ 1, so coverage is solid up to the rasterized silhouette.
+    float coverage = 1.0;
 
-    // S14: inner edge (gap hole): smoothstep from (|side|=innerFrac) outward.
-    // When innerFrac=0 (no gap), innerAA=1.0 → coverage = outerAA (unchanged, gap=0 path).
-    float innerAA = (innerFrac > 1e-6)
-        ? smoothstep(0.0, aaRamp, absSide - innerFrac)
-        : 1.0;
+    // S14 inner edge (gap hole): HARD cut — drop the inner |side| < innerFrac region for cased/hollow lines.
+    if (innerFrac > 1e-6)
+        coverage *= step(innerFrac, absSide);
 
-    float coverage = outerAA * innerAA;
+    // line-blur (MapLibre line-blur; opt-in soft edge): feathers the outer _Blur px inward. 0 ⇒ no-op (hard).
+    if (_Blur > 1e-6)
+    {
+        float feather = max(fwidth(side), 1e-6);
+        coverage *= smoothstep(0.0, feather * _Blur, 1.0 - absSide);
+    }
 
     // ── S43: dash coverage ────────────────────────────────────────────────────
     // _DashCount == 0: identity guard (solid line, no dashing). Byte-identical to pre-S43 path.
     // _DashCount >= 2: walk on/off runs (even index=on, odd=off); AA-feather transitions with fwidth.
     //
-    // dashU = distanceAlong / widthM (set in vertex, interpolated — NOT a constant).
+    // dashU = distanceAlong / widthWorld (set in vertex, interpolated — NOT a constant).
     // period = sum of all _DashArray entries (in line-width units).
     // phase  = fmod(dashU, period) — position within one dash cycle.
     //

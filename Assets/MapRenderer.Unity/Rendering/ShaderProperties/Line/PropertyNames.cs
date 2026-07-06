@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
     {
         // ── Style-bound (MapLibre line-* paint/layout; written by the styler) ──
         public const string Width               = "_Width";
-        public const string Blur                = "_Blur";  // MapLibre line-blur (NOT antialiasing — see AaEdgeWidth)
+        public const string Blur                = "_Blur";  // MapLibre line-blur (opt-in soft edge, NOT antialiasing)
         public const string GapWidth            = "_GapWidth";
         public const string LineTranslate       = "_LineTranslate";
         public const string LineTranslateAnchor = "_LineTranslateAnchor";
@@ -25,7 +25,5 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
 
         // ── Internal render params (NOT style properties; the styler never writes these) ──
         public const string WidthIsPixels  = "_WidthIsPixels";
-        public const string MetersPerPixel = "_MetersPerPixel";
-        public const string AaEdgeWidth    = "_AaEdgeWidth"; // antialiasing edge/buffer width, px/side
     }
 }

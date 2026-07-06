@@ -133,11 +133,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             // Ensure WidthIsPixels=1 so the shader interprets width as pixels.
             mat.SetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels, 1f);
 
-            // line-blur (MapLibre paint, spec default 0) → _Blur. This is ONLY the optional style blur;
-            // the shader ADDS it to the internal antialiasing buffer (_AaEdgeWidth). _AaEdgeWidth is
-            // deliberately NOT bound here — it is an internal render param that keeps its material default
-            // (1px), so AA stays on even when the style omits line-blur. (Historically _Blur doubled as the
-            // AA knob, so this very binding silently zeroed antialiasing — see ShaderProperties.Line.PropertyNames.AaEdgeWidth.)
+            // line-blur (MapLibre paint, spec default 0) → _Blur: an OPT-IN soft edge (default 0 = hard).
+            // NOT antialiasing — edge AA was removed; the shader draws a hard edge and floors thin-line width.
             if (!paint.Blur.DependsOnFeature)
                 applier.BindFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
 

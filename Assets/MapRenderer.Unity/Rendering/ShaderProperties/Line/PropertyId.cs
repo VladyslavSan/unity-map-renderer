@@ -22,7 +22,5 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
 
         // ── Internal render params ──
         public static readonly int WidthIsPixels  = Shader.PropertyToID(PropertyNames.WidthIsPixels);
-        public static readonly int MetersPerPixel = Shader.PropertyToID(PropertyNames.MetersPerPixel);
-        public static readonly int AaEdgeWidth    = Shader.PropertyToID(PropertyNames.AaEdgeWidth);
     }
 }

@@ -35,10 +35,10 @@ namespace MapRenderer.Unity.Rendering.Style
         /// referenced (not owned) by the render backend.</summary>
         Material Material { get; }
 
-        /// <summary>Push this layer's zoom-dependent uniforms for the frame. <paramref name="metersPerPixel"/>
-        /// is the live ground resolution — line width in pixel mode needs it; fills ignore it. Called once
-        /// per layer per frame from <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path).</summary>
-        void ApplyZoom(double zoom, float metersPerPixel);
+        /// <summary>Push this layer's zoom-dependent uniforms for the frame. Called once per layer per frame
+        /// from <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). Line width is resolved in
+        /// screen space (S104) — no metersPerPixel is threaded through any more.</summary>
+        void ApplyZoom(double zoom);
 
         /// <summary>
         /// Off-main-thread: build the mesh from this layer's <b>already-selected</b> features straight into

@@ -372,10 +372,10 @@ namespace MapRenderer.Tests
             // The S44 offset term must reference sideAndDist.x (the per-vertex side value).
             // This is the structural guarantee that the offset shifts the band CENTER,
             // not the half-width (which would be a symmetric widening, failing teeth 1/2/4).
-            Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * offsetM)"),
+            Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * _LineOffset * pxToWorld)"),
                 "Line_VertexExtrude.hlsl S44 offset term must multiply by sideAndDist.x " +
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +
-                "Grep: 'sideAndDist.x * (miter * offsetM)'");
+                "Grep: 'sideAndDist.x * (miter * _LineOffset * pxToWorld)'");
 
             // Also confirm _LineOffset is declared in Line_LitInput.hlsl.
             string inputPath = Path.Combine(repoRoot, "Assets", "MapRenderer.Unity", "Shaders",

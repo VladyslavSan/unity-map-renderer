@@ -110,7 +110,5 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         [InstancedProp(PropKind.Float,  0f)]             public float  _DashCount;
         [InstancedProp(PropKind.Float,  0f)]             public float  _LineOffset;
         [InstancedProp(PropKind.Float,  0f)]             public float  _WidthIsPixels;
-        [InstancedProp(PropKind.Float,  1f)]             public float  _MetersPerPixel;
-        [InstancedProp(PropKind.Float,  1f)]             public float  _AaEdgeWidth;  // default 1 — never 0 (AA tooth)
     }
 }

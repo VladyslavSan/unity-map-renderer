@@ -258,12 +258,5 @@ namespace MapRenderer.Core.Geo
 
         /// <inheritdoc/>
         public double ClampValidLatitude(double latitudeDegrees) => math.clamp(latitudeDegrees, -90.0, 90.0);
-
-        /// <summary>cos(φ) — the globe renders tiles at true size, which shrinks toward the poles; scaling the
-        /// altitude by cos(φ) keeps a z-tile's on-screen size (and the covered extent/count) matched to Mercator.
-        /// Floored so a near-pole latitude can't drive the altitude to zero. (See
-        /// <see cref="IProjection.AltitudeScaleAtLatitude"/>.)</summary>
-        public double AltitudeScaleAtLatitude(double latitudeDegrees)
-            => math.max(math.cos(math.clamp(latitudeDegrees, -90.0, 90.0) * math.PI_DBL / 180.0), 0.02);
     }
 }

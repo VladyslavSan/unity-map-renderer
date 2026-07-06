@@ -229,7 +229,7 @@ namespace MapRenderer.Unity.Rendering.Map
             CameraProperties cam = Camera.CurrentProperties;
 
             // ApplyZoom first — so a fractional-zoom-only change always pushes uniforms (fill/line zoom paint,
-            // live _MetersPerPixel for pixel line width, zoom-step dasharrays).
+            // zoom-step dasharrays for pixel line width).
             using (PmApplyZoom.Auto())
                 Layers.ApplyZoom(cam.Zoom);
 

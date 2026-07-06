@@ -36,8 +36,6 @@ namespace MapRenderer.Unity.Editor
 
             // (B) Internal render params — NOT style properties.
             Prop(ShaderProperties.Line.PropertyNames.WidthIsPixels,  "Width In Pixels");
-            Prop(ShaderProperties.Line.PropertyNames.MetersPerPixel, "Meters Per Pixel");
-            Prop(ShaderProperties.Line.PropertyNames.AaEdgeWidth,    "AA Edge Width (px / side)");
         }
     }
 }

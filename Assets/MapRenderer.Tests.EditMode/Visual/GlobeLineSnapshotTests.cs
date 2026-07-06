@@ -53,7 +53,6 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", 1f);
             mat.SetColor("_BaseColor",      new Color(1f, 0.85f, 0.2f, 1f)); // amber borders
             mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_AaEdgeWidth",    1f);
             mat.SetFloat("_Cull",           0f); // double-sided ribbons (winding-agnostic on the globe)
 
             var mapGo = new GameObject("GlobeLine");

@@ -116,7 +116,7 @@ Shader "Map/Line"
         // The line color is the standard _BaseColor above; _Opacity modulates alpha.
         _Opacity        ("Opacity (line-opacity)", Range(0, 1)) = 1.0
         _Width          ("Width (line-width, m or px)", Float) = 2.0
-        // line-blur (px, spec default 0): edge softening ADDED on top of _AaEdgeWidth. 0 = crisp.
+        // line-blur (px, spec default 0): opt-in soft edge (MapLibre line-blur, NOT antialiasing). 0 = hard.
         _Blur           ("Line Blur (line-blur, px)", Range(0, 8)) = 0.0
         // S14: line-gap-width — hollow/cased line. 0 = solid (default). Units = pixels (same as _Width).
         _GapWidth       ("Gap Width (line-gap-width, px)", Float) = 0.0
@@ -137,12 +137,6 @@ Shader "Map/Line"
         // (B) Internal render params — NOT style properties (the styler never writes these):
         [Toggle]
         _WidthIsPixels  ("Width In Pixels", Float)    = 0.0
-        _MetersPerPixel ("Meters Per Pixel", Float)   = 1.0
-        // AA edge/buffer width in device px PER SIDE (default 1). The lateral extrude is padded this many
-        // px past the styled width so the styled core stays fully opaque and the fwidth falloff lands in
-        // the buffer; it also guarantees sub-pixel lines rasterize (≥ this width). 0 = sharp edge but
-        // sub-pixel lines can drop pixels again. Effective feather = (_AaEdgeWidth + _Blur).
-        _AaEdgeWidth    ("AA Edge Width (px / side)", Range(0, 4)) = 1.0
     }
 
     SubShader

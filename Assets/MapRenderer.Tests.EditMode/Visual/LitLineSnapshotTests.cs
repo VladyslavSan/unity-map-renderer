@@ -33,9 +33,6 @@ namespace MapRenderer.Tests.Visual
     /// Test #5 (_Opacity): SetFloat("_Opacity", 0) → near-transparent; =1 → visible.
     ///   Proves _Opacity is functional (not hard-coded alpha=1).
     ///
-    /// Test #6 (fwidth feather): AA edge transition is sub-pixel continuous (smoothstep,
-    ///   not binary 0/1). Transition ≤ 3px. Preserves S05's smoothstep formula.
-    ///
     /// Test #7 (coplanar z-fighting): Fill + overlapping line, no z-fighting.
     ///   Fill and line both visible on the same scanline.
     ///
@@ -113,7 +110,6 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_AaEdgeWidth",    1f);   // antialiasing buffer (was _Blur pre-decouple)
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;
             return (go, mat);
         }
@@ -539,59 +535,6 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Test #6: fwidth sub-pixel feather edge (not binary 0/1) ────────────
-
-        [Test]
-        public void LitLine_EdgeAA_FwidthFeather_NotBinary()
-        {
-            // Render a horizontal line and verify the edge transition is ≤ 3px wide,
-            // and is NOT a hard binary step (partial-alpha pixels exist in the transition).
-            var (cameraGo, camera) = BuildCamera();
-            var (lineGo, mat)      = BuildSingleHorizontalLine(LineWidthM);
-
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            try
-            {
-                snap.Render(camera);
-                snap.WritePng("lit-line-aa-edge.png");
-
-                if (snap.IsAllBlack())
-                {
-                    using var blank = RenderBlank();
-                    if (blank.IsAllBlack())
-                    {
-                        Assert.Inconclusive("No GPU context — AA edge test skipped.");
-                        return;
-                    }
-                }
-
-                int col       = SnapW / 2;
-                int centerRow = SnapH / 2;
-
-                // Find top edge of the line band.
-                int topEdge = FindTopEdgeOfBand(snap.RawPixels, SnapW, SnapH, col, centerRow);
-
-                Assert.That(topEdge, Is.GreaterThanOrEqualTo(0),
-                    "Expected to find a non-background line band on the centre column.");
-
-                // Measure the AA transition above the top edge.
-                int transitionPx = MeasureTransitionBandAboveEdge(
-                    snap.RawPixels, SnapW, SnapH, col, topEdge);
-
-                Assert.That(transitionPx, Is.LessThanOrEqualTo(3),
-                    $"AA transition ≤ 3px expected (fwidth ~1px × _AaEdgeWidth=1). Got {transitionPx}px. " +
-                    "Check smoothstep(0, max(fwidth(side)*(_AaEdgeWidth+_Blur),1e-4), 1-abs(side)) in LineCoverage.");
-
-                Debug.Log($"[LitLineSnapshotTests] AA edge: topEdge row={topEdge}, transitionPx={transitionPx}");
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraGo);
-                Object.DestroyImmediate(lineGo);
-                Object.DestroyImmediate(mat);
-            }
-        }
-
         // ─── Test #7: Coplanar fill + line, no z-fighting ───────────────────────
 
         [Test]
@@ -656,56 +599,5 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Edge-finding helpers (same logic as LineSnapshotTests) ──────────────
-
-        private static int FindTopEdgeOfBand(byte[] pixels, int width, int height, int col, int centerRow)
-        {
-            bool IsNonBg(int row)
-            {
-                if (row < 0 || row >= height) return false;
-                int idx = (row * width + col) * 4;
-                return System.Math.Abs(pixels[idx]   - BgR8) +
-                       System.Math.Abs(pixels[idx+1] - BgG8) +
-                       System.Math.Abs(pixels[idx+2] - BgB8) > SnapshotCoverage.Tolerance;
-            }
-            int seed = centerRow;
-            if (!IsNonBg(seed))
-            {
-                bool found = false;
-                for (int d = 1; d <= 16; d++)
-                {
-                    if (IsNonBg(centerRow - d)) { seed = centerRow - d; found = true; break; }
-                    if (IsNonBg(centerRow + d)) { seed = centerRow + d; found = true; break; }
-                }
-                if (!found) return -1;
-            }
-            int top = seed;
-            while (top - 1 >= 0 && IsNonBg(top - 1)) top--;
-            return top;
-        }
-
-        private static int MeasureTransitionBandAboveEdge(
-            byte[] pixels, int width, int height, int col, int topEdgeRow)
-        {
-            if (topEdgeRow <= 0) return 0;
-            int interiorRow = topEdgeRow + 2;
-            if (interiorRow >= height) interiorRow = topEdgeRow;
-            int interiorIdx = (interiorRow * width + col) * 4;
-            int interiorBrightness = pixels[interiorIdx] + pixels[interiorIdx + 1] + pixels[interiorIdx + 2];
-            int bgBrightness  = BgR8 + BgG8 + BgB8;
-            int halfRange     = System.Math.Max((interiorBrightness - bgBrightness) / 2, 10);
-            int partialThresh = bgBrightness + halfRange;
-            int count = 0;
-            for (int row = topEdgeRow - 1; row >= 0; row--)
-            {
-                int idx        = (row * width + col) * 4;
-                int brightness = pixels[idx] + pixels[idx + 1] + pixels[idx + 2];
-                int distFromBg = brightness - bgBrightness;
-                if (distFromBg <= 5) break;
-                if (brightness >= partialThresh) { count++; if (count > 10) break; continue; }
-                count++;
-            }
-            return count;
-        }
     }
 }

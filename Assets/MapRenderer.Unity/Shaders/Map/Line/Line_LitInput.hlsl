@@ -6,11 +6,9 @@
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream: full UnityPerMaterial + line-specific paint properties
 //   style-bound (_Opacity, _Width, _Blur=line-blur, …) + internal render params (_WidthIsPixels,
-//   _MetersPerPixel, _AaEdgeWidth); color rides standard _BaseColor.
 //   DOTS bridge extended for line props; InitializeStandardLitSurfaceData preserved verbatim.
 //
 // S33/S66: This is a DELIBERATE FORK of Fill_LitInput.hlsl for the line layer.
-//      The line needs additional CBUFFER props (_Width, _Blur, _WidthIsPixels, _MetersPerPixel, _AaEdgeWidth).
 //      We CANNOT #include Fill_LitInput.hlsl and add to it — that would produce a duplicate
 //      UnityPerMaterial CBUFFER, which the HLSL compiler rejects.
 //      SRP Batcher requires the CBUFFER to be IDENTICAL in every pass of the line shader,
@@ -70,7 +68,7 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // (A) Style-bound — MapLibre line-* paint/layout:
 // _Opacity             — line-opacity: overall opacity [0,1], multiplied onto AA coverage.
 // _Width               — line-width: width in pixels (_WidthIsPixels=1) or meters.
-// _Blur                — line-blur (px, spec default 0): edge softening ADDED on top of _AaEdgeWidth.
+// _Blur                — line-blur (px, spec default 0): opt-in soft edge (NOT antialiasing). 0 = hard edge.
 // _GapWidth            — line-gap-width (px): cased/hollow line. 0 = solid; >0 = outer extrude, discard inner.
 // _LineTranslate       — line-translate: float4(x, y, 0, 0) in pixels.
 // _LineTranslateAnchor — line-translate-anchor: 0 = "map" (world), 1 = "viewport" (clip approx).
@@ -91,14 +89,7 @@ float  _LineOffset;
 
 // (B) Internal render params — NOT style properties; the styler never writes these:
 // _WidthIsPixels       — 0 = _Width is meters, 1 = pixels.
-// _MetersPerPixel      — px→m conversion for pixel-mode width / offset / translate.
-// _AaEdgeWidth         — antialiasing edge/buffer width in device px PER SIDE (default 1). The lateral
-//                        extrude is padded this many px past the styled width so the styled core stays
-//                        opaque and the fwidth coverage falloff lands in the buffer. Effective feather
-//                        width = (_AaEdgeWidth + _Blur).
 float  _WidthIsPixels;
-float  _MetersPerPixel;
-float  _AaEdgeWidth;
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
@@ -131,8 +122,6 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _LineOffset)
     // Line — (B) internal render params (not style):
     UNITY_DOTS_INSTANCED_PROP(float , _WidthIsPixels)
-    UNITY_DOTS_INSTANCED_PROP(float , _MetersPerPixel)
-    UNITY_DOTS_INSTANCED_PROP(float , _AaEdgeWidth)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 static float4 unity_DOTS_Sampled_BaseColor;
@@ -161,8 +150,6 @@ static float  unity_DOTS_Sampled_DashCount;
 static float  unity_DOTS_Sampled_LineOffset;
 // Line — (B) internal render param statics:
 static float  unity_DOTS_Sampled_WidthIsPixels;
-static float  unity_DOTS_Sampled_MetersPerPixel;
-static float  unity_DOTS_Sampled_AaEdgeWidth;
 
 void SetupDOTSMapLineMaterialPropertyCaches()
 {
@@ -192,8 +179,6 @@ void SetupDOTSMapLineMaterialPropertyCaches()
     unity_DOTS_Sampled_LineOffset           = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _LineOffset);
     // (B) internal render params:
     unity_DOTS_Sampled_WidthIsPixels        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _WidthIsPixels);
-    unity_DOTS_Sampled_MetersPerPixel       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _MetersPerPixel);
-    unity_DOTS_Sampled_AaEdgeWidth          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _AaEdgeWidth);
 }
 
 #undef UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES
@@ -225,8 +210,6 @@ void SetupDOTSMapLineMaterialPropertyCaches()
 #define _LineOffset             unity_DOTS_Sampled_LineOffset
 // Line — (B) internal render param redirects:
 #define _WidthIsPixels          unity_DOTS_Sampled_WidthIsPixels
-#define _MetersPerPixel         unity_DOTS_Sampled_MetersPerPixel
-#define _AaEdgeWidth            unity_DOTS_Sampled_AaEdgeWidth
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 

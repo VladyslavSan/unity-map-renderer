@@ -68,16 +68,15 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Pushes per-frame zoom-dependent uniforms to every layer. The live ground resolution
-        /// (<c>_MetersPerPixel</c>, needed by pixel-mode line width) is computed once and handed to each
-        /// layer; fills ignore it. Alloc-free: a plain <c>for</c> over the list (struct enumerator-free),
+        /// Pushes per-frame zoom-dependent uniforms to every layer (fill/line zoom paint, zoom-step
+        /// dasharrays). Line width is resolved in screen space by the shader (S104), so no ground resolution
+        /// is threaded through. Alloc-free: a plain <c>for</c> over the list (struct enumerator-free),
         /// each layer's <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
         /// </summary>
         public void ApplyZoom(double zoom)
         {
-            float metersPerPixel = (float)CameraPoseMath.MetersPerPixel(zoom);
             for (int i = 0; i < _layers.Count; i++)
-                _layers[i].ApplyZoom(zoom, metersPerPixel);
+                _layers[i].ApplyZoom(zoom);
         }
 
         /// <summary>Disposes every render layer (each destroys its Material instance) and clears the list.
