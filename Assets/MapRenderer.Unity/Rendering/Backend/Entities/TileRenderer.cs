@@ -80,7 +80,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private ComponentSystemBase _initGroup, _simGroup, _presGroup;
         private int  _nextHandle;
 
-        // ── Profiler markers — split the per-frame EG drive so a MapView.Update spike is attributable ──
+        // ── Profiler markers — split the per-frame EG drive so a per-frame spike is attributable ──
         // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
         // InitGroup/SimGroup/PresGroup: the three system-group ticks. PresGroup runs EntitiesGraphicsSystem
         // (instance-data upload + BRG batch (re)registration) and is the usual culprit when tiles churn.
@@ -100,11 +100,10 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private static readonly ProfilerMarker PmAddRegister = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Register");
         private static readonly ProfilerMarker PmAddParent   = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Parent");
 
-        // Last scene frame seen by Rebuild. A new tile-layer is consumed AFTER the frame's Rebuild
-        // has already run (MapView.Tick: InstancedRebuild → TileManager.Tick → AddTileLayer), so without
-        // this we'd create the entity at LocalToWorld.identity (world origin) and it would render there
-        // for one frame until the NEXT Rebuild repositioned it — the zoom "blink in the corner". Caching
-        // the frame lets AddTileLayer place the entity correctly the instant it is created.
+        // Last scene frame seen by Rebuild. AddTileLayer may be called AFTER Rebuild within the same frame,
+        // so without caching the frame we'd create the entity at LocalToWorld.identity (world origin) and it
+        // would render there for one frame until the NEXT Rebuild repositioned it — the zoom "blink in the
+        // corner". Caching the frame lets AddTileLayer place the entity correctly the instant it is created.
         private SceneFrame _lastFrame;
         private bool       _hasSceneOrigin;
 

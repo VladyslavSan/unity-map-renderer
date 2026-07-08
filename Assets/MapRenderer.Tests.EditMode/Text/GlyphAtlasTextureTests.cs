@@ -1,0 +1,143 @@
+// Unity-only (needs UnityEngine.Texture2D) — NOT added to core-tests.csproj. Complements the engine-free
+// core-tests T3 (SdfDistanceFieldTests, raw-bitmap iso-crossing/graded-band checks) by exercising the
+// REAL Texture2D upload path (GlyphAtlasTexture), which core-tests cannot touch.
+
+using System;
+using System.IO;
+using NUnit.Framework;
+using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Text;
+using MapRenderer.Unity.Text;
+
+namespace MapRenderer.Tests.Text
+{
+    /// <summary>
+    /// S18 Unity-side batch — T3 texel-from-texture: uploads a decoded glyph's atlas region via
+    /// <see cref="GlyphAtlasTexture"/> and reads a texel on the glyph's edge back from the uploaded
+    /// <see cref="Texture2D"/>'s CPU-side buffer, confirming it matches the source
+    /// <see cref="GlyphAtlas.Pixels"/> byte exactly AND is graded (mid-range), not flat 0/255 — the
+    /// same "real SDF, not a coverage bitmap" guard <c>SdfDistanceFieldTests</c> applies to the raw
+    /// decoded bitmap, now applied end-to-end through the GPU-texture upload.
+    /// </summary>
+    [TestFixture]
+    public class GlyphAtlasTextureTests
+    {
+        // Same mid-band thresholds as SdfDistanceFieldTests: "graded", not pinning an exact width.
+        private const int MidBandLo = 32;
+        private const int MidBandHi = 223;
+
+        // ── Fixture loader (walk-up from cwd then AppContext — works in Unity batch mode AND dotnet) ─
+
+        private static byte[] LoadFixture(string fileName)
+        {
+            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+            foreach (string start in starts)
+            {
+                string dir = start;
+                for (int i = 0; i < 16 && dir != null; i++)
+                {
+                    string p = Path.Combine(dir, "Assets", "Fixtures", "glyphs", "NotoSansRegular", fileName);
+                    if (File.Exists(p)) return File.ReadAllBytes(p);
+                    dir = Directory.GetParent(dir)?.FullName;
+                }
+            }
+            throw new FileNotFoundException(
+                $"{fileName} not found. Tried walking up from cwd={Directory.GetCurrentDirectory()}" +
+                $" and AppContext.BaseDirectory={AppContext.BaseDirectory}");
+        }
+
+        private static SdfGlyph LoadUppercaseA()
+            => GlyphPbfDecoder.Decode(LoadFixture("0-255.pbf.bytes")).Stacks[0].Glyphs[65u];
+
+        [Test]
+        public void Upload_DecodedGlyph_TexelOnEdgeMatchesCpuPixelsAndIsGraded()
+        {
+            SdfGlyph a = LoadUppercaseA();
+            var atlas = new GlyphAtlas();
+            GlyphAtlasEntry entry = atlas.Append(a);
+
+            var atlasTexture = new GlyphAtlasTexture();
+            try
+            {
+                atlasTexture.Upload(atlas);
+                Texture2D texture = atlasTexture.Texture;
+
+                Assert.IsNotNull(texture, "Upload must create a Texture2D once the atlas has packed a glyph");
+                Assert.AreEqual(atlas.Size.x, texture.width);
+                Assert.AreEqual(atlas.Size.y, texture.height);
+
+                int2 local = FindGradedTexelLocal(a.Bitmap, entry.CellSize);
+                byte expected = a.Bitmap[local.y * entry.CellSize.x + local.x];
+
+                // GetPixelData<byte> reads the texture's CPU-side buffer directly (1 byte/texel for
+                // R8, no float round-trip, no channel ambiguity if the format ever falls back to
+                // Alpha8 — unlike GetPixel().r, which would silently read 0 from an Alpha8 texture).
+                var raw = texture.GetPixelData<byte>(0);
+                int px = entry.AtlasOrigin.x + local.x;
+                int py = entry.AtlasOrigin.y + local.y;
+                byte actual = raw[py * texture.width + px];
+
+                Assert.AreEqual(expected, actual,
+                    $"texel at cell-local ({local.x},{local.y}) must round-trip byte-exact through the uploaded texture");
+                Assert.Greater(actual, MidBandLo, "the edge texel must be graded (mid-range), not flat 0/255 -- an SDF, not a coverage bitmap");
+                Assert.Less(actual, MidBandHi, "the edge texel must be graded (mid-range), not flat 0/255 -- an SDF, not a coverage bitmap");
+            }
+            finally
+            {
+                atlasTexture.Dispose();
+            }
+        }
+
+        [Test]
+        public void Upload_EmptyAtlas_IsANoOp()
+        {
+            var atlas = new GlyphAtlas(); // nothing appended -> Size.y == 0
+            var atlasTexture = new GlyphAtlasTexture();
+
+            Assert.DoesNotThrow(() => atlasTexture.Upload(atlas));
+            Assert.IsNull(atlasTexture.Texture, "an atlas with nothing packed yet must not create a Texture2D");
+        }
+
+        [Test]
+        public void Upload_AfterGrowth_RecreatesTextureAtNewSize()
+        {
+            FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixture("0-255.pbf.bytes")).Stacks[0];
+            var atlas = new GlyphAtlas();
+            var atlasTexture = new GlyphAtlasTexture();
+
+            try
+            {
+                atlas.Append(stack.Glyphs[65u]); // 'A'
+                atlasTexture.Upload(atlas);
+                int2 firstSize = new int2(atlasTexture.Texture.width, atlasTexture.Texture.height);
+
+                // Appending enough more glyphs to force the packer/atlas to grow taller.
+                foreach (var kv in stack.Glyphs) atlas.Append(kv.Value);
+                atlasTexture.Upload(atlas);
+
+                Assert.AreEqual(atlas.Size.x, atlasTexture.Texture.width);
+                Assert.AreEqual(atlas.Size.y, atlasTexture.Texture.height);
+                Assert.GreaterOrEqual(atlasTexture.Texture.height, firstSize.y, "the re-uploaded texture must cover the grown atlas");
+            }
+            finally
+            {
+                atlasTexture.Dispose();
+            }
+        }
+
+        /// <summary>Finds the first cell-local (x,y) whose CPU bitmap byte falls in the graded mid-band.</summary>
+        private static int2 FindGradedTexelLocal(byte[] bitmap, int2 cellSize)
+        {
+            for (int y = 0; y < cellSize.y; y++)
+            {
+                for (int x = 0; x < cellSize.x; x++)
+                {
+                    byte v = bitmap[y * cellSize.x + x];
+                    if (v > MidBandLo && v < MidBandHi) return new int2(x, y);
+                }
+            }
+            throw new InvalidOperationException("fixture precondition: 'A' must contain at least one graded mid-band texel");
+        }
+    }
+}

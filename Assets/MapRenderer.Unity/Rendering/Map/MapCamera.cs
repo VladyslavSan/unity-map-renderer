@@ -14,11 +14,11 @@ namespace MapRenderer.Unity.Rendering.Map
     ///
     /// <para><b>State vs. propagation are separated.</b> <see cref="Apply"/> / <see cref="SetProperties"/>
     /// only mutate <see cref="CurrentProperties"/> — the live "most recent state" — and do NOT touch the Unity
-    /// camera. The transform is propagated ONCE per frame by <see cref="SyncToCamera"/> (driven from
-    /// <c>MapViewComponent.LateUpdate</c>), so many setters in a frame collapse to a single commit from the
-    /// final merged state. <see cref="SyncToCamera"/> is the "camera matrix is frozen for this frame" point:
-    /// anything reading the Unity camera matrix (e.g. future symbol/label screen-space placement) MUST run
-    /// AFTER it, sequenced in the same LateUpdate — never in <c>Update</c> (before the commit). Smooth,
+    /// camera. The transform is propagated ONCE per frame by <see cref="SyncToCamera"/> (the first step of
+    /// <c>MapView.LateUpdate</c>), so many setters in a frame collapse to a single commit from the final merged
+    /// state. <see cref="SyncToCamera"/> is the "camera committed for this frame" point: anything reading the
+    /// Unity camera matrix (e.g. label screen-space placement) MUST run AFTER it, sequenced in the same
+    /// <c>MapView.LateUpdate</c> — which is exactly the ordered camera→tiles→labels pipeline there. Smooth,
     /// animated control is a separate <c>CameraController</c> (future), layered on top.</para>
     ///
     /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at, so the camera
@@ -106,10 +106,10 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Propagate <see cref="CurrentProperties"/> to the wrapped Unity camera (transform + FOV + clip) —
-        /// the single per-frame commit, driven from <c>MapViewComponent.LateUpdate</c>. Idempotent: pushing
-        /// the same state twice is harmless (no dirty tracking). This is the "camera matrix frozen for this
-        /// frame" point — any Unity-camera-matrix consumer (future symbol screen-space placement) must run
-        /// AFTER it.
+        /// the single per-frame commit, the first step of <c>MapView.LateUpdate</c>. Idempotent: pushing the same
+        /// state twice is harmless (no dirty tracking). This is the "camera committed for this frame" point —
+        /// any Unity-camera-matrix consumer (label screen-space placement) must run AFTER it, later in the same
+        /// <c>MapView.LateUpdate</c>.
         /// </summary>
         public void SyncToCamera()
         {

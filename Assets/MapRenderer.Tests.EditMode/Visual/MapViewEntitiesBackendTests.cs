@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.Visual
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
                 Thread.Sleep(1);
             }
@@ -192,10 +192,10 @@ namespace MapRenderer.Tests.Visual
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                     style: MinimalStyle());
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                { view.Tick(); Thread.Sleep(1); }
+                { view.LateUpdate(); Thread.Sleep(1); }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "Entities path must load + settle tiles.");
-                view.Tick(); // staleness: one more frame so the last tile's entity is positioned + uploaded
+                view.LateUpdate(); // staleness: one more frame so the last tile's entity is positioned + uploaded
 
                 float tileSizeZ3 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 3));
                 var ent = view.EntitiesRenderer();

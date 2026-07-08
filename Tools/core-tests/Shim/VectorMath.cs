@@ -20,6 +20,15 @@ namespace Unity.Mathematics
                           a.c0.y * b.x + a.c1.y * b.y + a.c2.y * b.z,
                           a.c0.z * b.x + a.c1.z * b.y + a.c2.z * b.z);
 
+        // S20 T2: LabelScreenProjection.TryProjectAnchor's view-projection apply. Column-major float4x4,
+        // same convention as the float3x3 overload above: m·v = c0·x + c1·y + c2·z + c3·w.
+        public static float4 mul(float4x4 a, float4 b)
+            => new float4(
+                a.c0.x * b.x + a.c1.x * b.y + a.c2.x * b.z + a.c3.x * b.w,
+                a.c0.y * b.x + a.c1.y * b.y + a.c2.y * b.z + a.c3.y * b.w,
+                a.c0.z * b.x + a.c1.z * b.y + a.c2.z * b.z + a.c3.z * b.w,
+                a.c0.w * b.x + a.c1.w * b.y + a.c2.w * b.z + a.c3.w * b.w);
+
         // S91-C: SphericalProjection.ScreenToGround/GroundToScreen (globe camera ray-cast).
         public static double  dot(double3 a, double3 b)   => a.x * b.x + a.y * b.y + a.z * b.z;
         public static double  length(double3 a)           => System.Math.Sqrt(dot(a, a));

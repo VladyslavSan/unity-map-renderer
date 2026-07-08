@@ -91,7 +91,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests
 
                 // Change ONLY the tilt to 60° — lon/lat/zoom/heading are identical.
                 view.Camera.Apply(new CameraPropertiesUpdate { Tilt = 60 });
-                view.Tick();
+                view.LateUpdate();
                 PumpUntilSettled(view);
                 int tilted = view.LoadedTileCount();
 
@@ -175,7 +175,7 @@ namespace MapRenderer.Tests
                 // First Tick: cover is dirty, tile is requested.
                 // FixtureSource returns synchronously, so fetch IsCompleted immediately.
                 // The mesh build Task is KICKED here but NOT consumed.
-                view.Tick();
+                view.LateUpdate();
 
                 // Immediately after the first Tick, the tile should NOT yet be built.
                 // AllTilesSettled() must return false because mesh build is in-flight.
@@ -491,15 +491,15 @@ namespace MapRenderer.Tests
 
                 // First Tick: tiles are added to _loaded, fetch tasks kicked (FixtureSource is sync,
                 // but TileScheduler's FetchAndCacheAsync has a Task.Run hop so they're not yet complete).
-                view.Tick();
+                view.LateUpdate();
                 // Second Tick: fetch tasks are likely complete now; mesh build tasks are kicked.
                 Thread.Sleep(5); // ensure ThreadPool Task.Run hop completes
-                view.Tick();
+                view.LateUpdate();
 
                 // Pan far east immediately — before mesh build tasks complete.
                 // lon=170, z=5 → center tile (5,31,16), completely non-overlapping cover.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.Tick(); // cover recompute → evicts all original (5,16,*) tiles
+                view.LateUpdate(); // cover recompute → evicts all original (5,16,*) tiles
 
                 // Original center tile must be gone from _loaded.
                 Assert.IsFalse(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
@@ -548,7 +548,7 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
                 // First Tick: kicks fetch (sync) and mesh build Task.
-                view.Tick();
+                view.LateUpdate();
 
                 // DrainMeshBuilds: blocks until tasks finish, then consumes them.
                 view.DrainMeshBuilds();
@@ -596,21 +596,21 @@ namespace MapRenderer.Tests
 
                 // Prime reused buffers to steady capacity.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
 
                 // ── (a) within-cover pan: full recompute, zero allocation ──
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "Tooth 6a: MapView.Tick must not allocate during a within-cover pan. " +
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                    "Tooth 6a: MapView.LateUpdate must not allocate during a within-cover pan. " +
                     "The S47 async polling loop must allocate only on fetch-completion edges, not here.");
 
                 Assert.AreEqual(16, view.LoadedTileCount(),
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles.");
 
                 // ── (b) static frame early-out ──
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "Tooth 6b: A static frame must early-out with zero allocation.");
             }
             finally

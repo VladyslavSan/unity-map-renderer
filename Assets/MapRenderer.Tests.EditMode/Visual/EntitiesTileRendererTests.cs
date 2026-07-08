@@ -178,7 +178,7 @@ namespace MapRenderer.Tests.Visual
                 double2 sceneOrigin  = FloatingOrigin.TileLocalOriginMercator(new TileId { Z = 1, X = 1, Y = 1 });
                 float3  expected     = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin);
 
-                // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.Tick.
+                // Frame's Rebuild runs first (no items yet) — seeds the scene origin, like MapView.LateUpdate.
                 r.Rebuild(SceneFrame.Mercator(sceneOrigin));
 
                 // Tile consumed AFTER the Rebuild — must NOT be created at the origin.

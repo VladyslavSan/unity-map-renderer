@@ -332,6 +332,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S83b: keyed by (tile, source-slot) — one record per (tile, source).
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new Dictionary<LoadedKey, LoadedTile>();
         private readonly List<LoadedKey>                   _toRelease = new List<LoadedKey>(32);
+
+        // S105: optional observers for the DECOUPLED symbol-label subsystem. Fired on the MAIN THREAD at
+        // the existing fetch-complete / release points, sharing the already-fetched MVT bytes (no re-fetch,
+        // no touching the mesh/disposal path). Exception-isolated: a throwing observer must never fault the
+        // tile pipeline (mirrors ObserveFetchOutcome's per-tile fault isolation).
+        internal System.Action<string, TileId, byte[]> SymbolTileBytesReady { get; set; }
+        internal System.Action<string, TileId>         SymbolTileReleased   { get; set; }
         // S85: reused TileCoverStats scratch — never reallocated (CaptureTelemetry steady-state no-GC).
         private readonly HashSet<int> _coverStatsX = new HashSet<int>();
         private readonly HashSet<int> _coverStatsY = new HashSet<int>();
@@ -1113,6 +1120,18 @@ namespace MapRenderer.Unity.Rendering.Tile
                     // Store bytes; kick deferred to a subsequent Tick (capped by buildCap).
                     lt.ReadyBytes = resp.Bytes;
                     pending++; // bytes awaiting kick
+
+                    // S105: hand the freshly-fetched bytes to the symbol subsystem (read-only share — the
+                    // mesh build also decodes them). Fired once per fetch, here, BEFORE ReadyBytes is
+                    // nulled at kick. Exception-isolated so a bad symbol build never faults the pump.
+                    if (SymbolTileBytesReady != null)
+                    {
+                        try { SymbolTileBytesReady(sourceId, id, resp.Bytes); }
+                        catch (System.Exception ex)
+                        {
+                            Debug.LogWarning($"[TileManager] symbol observer (bytes-ready) threw for {id}: {ex.Message}");
+                        }
+                    }
                 }
                 else
                 {
@@ -1412,6 +1431,16 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
             // Route the scheduler release to the OWNING pipeline — a record on source B never touches A.
             _pipelines[key.Slot].Scheduler.Release(key.Tile);
+
+            // S105: drop this tile's symbol labels (exception-isolated, as for the bytes-ready hook).
+            if (SymbolTileReleased != null)
+            {
+                try { SymbolTileReleased(_pipelines[key.Slot].SourceId, key.Tile); }
+                catch (System.Exception ex)
+                {
+                    Debug.LogWarning($"[TileManager] symbol observer (released) threw for {key.Tile}: {ex.Message}");
+                }
+            }
         }
 
         /// <summary>

@@ -43,5 +43,9 @@ namespace Unity.Mathematics
         public static int max(int a, int b) => System.Math.Max(a, b);
         public static int min(int a, int b) => System.Math.Min(a, b);
         public static int abs(int x)        => System.Math.Abs(x);
+
+        // ── scalar float (S19: TextQuadLayout block-bbox/blockWidth tracking) ──────────────
+        public static float max(float a, float b) => a > b ? a : b;
+        public static float min(float a, float b) => a < b ? a : b;
     }
 }

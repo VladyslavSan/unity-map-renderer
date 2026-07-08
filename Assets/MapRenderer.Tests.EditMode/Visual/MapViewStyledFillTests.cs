@@ -77,7 +77,7 @@ namespace MapRenderer.Tests.Visual
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -521,7 +521,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_Tick_CallsApplyZoom_Structurally()
         {
-            // Proves that MapView.Tick() calls ApplyZoom by checking FillLayerCount > 0
+            // Proves that MapView.LateUpdate() calls ApplyZoom by checking FillLayerCount > 0
             // after Initialise with a zoom-opacity style, and that ApplyZoom was invoked at
             // least once (by checking the material's float has been set from its default 0→0.3).
             // Uses a Standard material to bypass the Fill shader availability issue.
@@ -555,7 +555,7 @@ namespace MapRenderer.Tests.Visual
                     "If 0, RenderLayerSet.Build is not creating bundles for zoom-dependent layers.");
 
                 // Tick once to pump tiles and fire ApplyZoom.
-                view.Tick();
+                view.LateUpdate();
 
                 // ── DECISIVE: ApplyZoom is called in Tick — proven by ZoomStyleApplier test above.
                 // Structural assertion: Tick does not throw, the fill bundle count is still 1 after Tick.

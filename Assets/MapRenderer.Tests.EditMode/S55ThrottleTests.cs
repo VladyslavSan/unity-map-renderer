@@ -125,7 +125,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -155,9 +155,9 @@ namespace MapRenderer.Tests
             view.Config.MaxMeshBuildsPerTick = 64;           // kick all tiles
             view.Config.MaxVerticesPerTick      = int.MaxValue;
             view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
-            view.Tick(); Thread.Sleep(10);   // request
-            view.Tick(); Thread.Sleep(10);   // observe → ReadyBytes
-            view.Tick(); Thread.Sleep(2000); // kick all; wait for every mesh build to complete
+            view.LateUpdate(); Thread.Sleep(10);   // request
+            view.LateUpdate(); Thread.Sleep(10);   // observe → ReadyBytes
+            view.LateUpdate(); Thread.Sleep(2000); // kick all; wait for every mesh build to complete
             return (go, view);
         }
 
@@ -187,7 +187,7 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
 
                 // Tick 1: request tiles. PumpPending sees no tiles, then cover adds them.
-                view.Tick();
+                view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 2,
                     "Need at least 2 tiles at z=5 for the cap test to be non-vacuous.");
                 Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
@@ -195,12 +195,12 @@ namespace MapRenderer.Tests
 
                 // Tick 2: observe completed fetches → ReadyBytes set. Still no kicks.
                 Thread.Sleep(2);
-                view.Tick();
+                view.LateUpdate();
                 Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
                     "Tooth (a): after observe Tick, kicks still 0 (kick deferred to next Tick).");
 
                 // Tick 3: first kick Tick — cap of 1 must bind.
-                view.Tick();
+                view.LateUpdate();
                 Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
                     $"Tooth (a): cap=1 must limit kicks to exactly 1 on the first kick Tick " +
                     $"(loaded tiles = {view.LoadedTileCount()}).");
@@ -247,7 +247,7 @@ namespace MapRenderer.Tests
                 int  frames              = 0;
                 while (!view.AllTilesSettled() && frames < 5000)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     int m = view.MeshesConsumedLastTick();
                     int t = view.TilesConsumedLastTick();
                     if (m > maxMeshesInAnyFrame) maxMeshesInAnyFrame = m;
@@ -468,7 +468,7 @@ namespace MapRenderer.Tests
                 const int meshBudget = 3;
                 view.Config.MaxConsumesPerTick   = meshBudget;
                 view.Config.MaxVerticesPerTick = int.MaxValue;
-                view.Tick();
+                view.LateUpdate();
 
                 int meshesConsumed = view.MeshesConsumedLastTick();
                 Assert.AreEqual(meshBudget, meshesConsumed,
@@ -559,7 +559,7 @@ namespace MapRenderer.Tests
                 // Pump to settle — throttle spreads kicks/consumes across many ticks.
                 for (int f = 0; f < 5000 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     Thread.Sleep(1);
                 }
 
@@ -632,19 +632,19 @@ namespace MapRenderer.Tests
 
                 // Prime reused internal buffers to steady capacity.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
 
                 // ── (a) within-cover pan: PumpPending resets 3 int counters, then early-exits ──
                 // The counters and budget locals are all scalar ints — must not box.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "Tooth (g-a): MapView.Tick must not allocate during a within-cover pan. " +
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                    "Tooth (g-a): MapView.LateUpdate must not allocate during a within-cover pan. " +
                     "The 3 new S55 int counter resets must be scalar, never boxing.");
 
                 // ── (b) static frame early-out ──
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "Tooth (g-b): Static-frame Tick must early-out with zero allocation.");
             }
             finally
@@ -677,7 +677,7 @@ namespace MapRenderer.Tests
                 // Consume a few meshes at 1/frame so some tiles are left PARTIALLY consumed (cursor > 0).
                 view.Config.MaxConsumesPerTick   = 1;
                 view.Config.MaxVerticesPerTick = int.MaxValue;
-                for (int i = 0; i < 3; i++) view.Tick();
+                for (int i = 0; i < 3; i++) view.LateUpdate();
                 Assert.IsFalse(view.AllTilesSettled(),
                     "Must be mid-consume (partial tiles present) before the eviction.");
 
@@ -685,7 +685,7 @@ namespace MapRenderer.Tests
                 // Block further kicks-into-consume timing is irrelevant; we measure after teardown.
                 view.Camera.Apply(
                     new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
-                for (int i = 0; i < 6; i++) { view.Tick(); Thread.Sleep(5); } // release old + drain holding pen
+                for (int i = 0; i < 6; i++) { view.LateUpdate(); Thread.Sleep(5); } // release old + drain holding pen
             }
             finally
             {

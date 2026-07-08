@@ -11,10 +11,12 @@
 //   Adding a struct field no shader declares → fails reverse.
 //
 // Exact counts (lessons.md: assert the exact known total, never `>`):
-//   struct material-prop fields == 31, Line DOTS props == 26, Fill DOTS props == 19.
+//   struct material-prop fields == 29, Line DOTS props == 24, Fill DOTS props == 19.
 //   A regex that silently matches nothing fails the exact count, not the forward/reverse check.
 //
 // History: introduced S76 to lock struct+shader counts and prevent re-introducing the BRG line-prop bug.
+//   Counts dropped by 2 line props (31→29, 26→24) when _MetersPerPixel (S104) and _AaEdgeWidth (line-AA
+//   removal, 0b910c7) were retired; the set-equality/forward/reverse checks confirm the removal is consistent.
 
 using System;
 using System.Collections.Generic;
@@ -86,28 +88,29 @@ namespace MapRenderer.Tests
         // ── Exact count guards (lessons.md: assert exact, never >) ───────────────────────────
 
         /// <summary>
-        /// Struct must have exactly 31 material-prop fields (excludes unity_* transforms).
-        /// Delta from today: 19 pre-existing + 12 new line props = 31.
+        /// Struct must have exactly 29 material-prop fields (excludes unity_* transforms).
+        /// Delta from today: 19 pre-existing + 10 line props = 29 (was 12 line props before
+        /// _MetersPerPixel (S104) and _AaEdgeWidth (line-AA removal) were retired).
         /// A vacuous regex (matches nothing) fails this immediately.
         /// </summary>
         [Test]
-        public void StructMaterialFieldCount_IsExactly31()
+        public void StructMaterialFieldCount_IsExactly29()
         {
             var fields = ParseStructMaterialFields(out _);
-            Assert.That(fields.Count, Is.EqualTo(31),
-                $"MapInstanceData must have exactly 31 material-prop fields " +
-                $"(14 common Lit+Opacity + 5 fill-only + 12 line-only). " +
+            Assert.That(fields.Count, Is.EqualTo(29),
+                $"MapInstanceData must have exactly 29 material-prop fields " +
+                $"(14 common Lit+Opacity + 5 fill-only + 10 line-only). " +
                 $"Found {fields.Count}: {string.Join(", ", fields.Keys)}");
         }
 
-        /// <summary>Line_LitInput.hlsl DOTS block must have exactly 26 props.</summary>
+        /// <summary>Line_LitInput.hlsl DOTS block must have exactly 24 props.</summary>
         [Test]
-        public void LineDotsPropCount_IsExactly26()
+        public void LineDotsPropCount_IsExactly24()
         {
             var props = ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
-            Assert.That(props.Count, Is.EqualTo(26),
-                $"Line_LitInput.hlsl DOTS block must have exactly 26 UNITY_DOTS_INSTANCED_PROP entries " +
-                $"(13 common Lit + _Opacity + 12 line-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
+            Assert.That(props.Count, Is.EqualTo(24),
+                $"Line_LitInput.hlsl DOTS block must have exactly 24 UNITY_DOTS_INSTANCED_PROP entries " +
+                $"(13 common Lit + _Opacity + 10 line-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
         }
 
         /// <summary>Fill_LitInput.hlsl DOTS block must have exactly 19 props.</summary>

@@ -66,7 +66,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -160,13 +160,13 @@ namespace MapRenderer.Tests
                 // Evict: pan far away — the whole cover (including TrackedTile) leaves; Built tiles transfer
                 // to the PreparedTileCache.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
                 PumpUntilSettled(view);
 
                 // Revisit: pan back to the SAME (lon,lat) — the SAME tile re-enters cover.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
-                view.Tick(); // the recompute (cover diff + probe) runs in THIS tick
+                view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
                 int kicksOnRevisitTick = view.MeshBuildsKickedLastTick();
                 int hitsOnRevisitTick  = view.PreparedCacheHits();
                 PumpUntilSettled(view);
@@ -246,12 +246,12 @@ namespace MapRenderer.Tests
 
                 // Evict, then revisit at cam.Zoom = Z2 — same tile (same lon/lat, same clamped z=4).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
                 PumpUntilSettled(view);
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0, Zoom = Z2 });
-                view.Tick();
+                view.LateUpdate();
                 int kicksOnRevisit = view.MeshBuildsKickedLastTick();
                 PumpUntilSettled(view);
 
@@ -302,14 +302,14 @@ namespace MapRenderer.Tests
 
                 // Evict → cache transfer (Mesh only; no NativeArrays are ever cached).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "The cache stores Mesh, never NativeArrays — must remain at baseline while a tile is cached.");
 
                 // Revisit → cache hit (no mesh build at all).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.AreEqual(0, view.MeshBuildsKickedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
@@ -355,7 +355,7 @@ namespace MapRenderer.Tests
                 // Evict — transfers to the cache (well within the default byte budget / count cap; nothing
                 // else competes for eviction here).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
                 PumpUntilSettled(view);
 
@@ -409,12 +409,12 @@ namespace MapRenderer.Tests
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must be built on first visit.");
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must leave the cover.");
                 PumpUntilSettled(view);
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
-                view.Tick();
+                view.LateUpdate();
                 int kicks = view.MeshBuildsKickedLastTick();
                 PumpUntilSettled(view);
 
@@ -476,7 +476,7 @@ namespace MapRenderer.Tests
 
                 // Evict: pan far away — the tile leaves the cover.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
 
                 // DECISIVE (no transfer): disabled must destroy the released mesh immediately, exactly like
@@ -491,7 +491,7 @@ namespace MapRenderer.Tests
 
                 // Revisit: pan back to the same tile.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
-                view.Tick();
+                view.LateUpdate();
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be rebuilt on revisit.");

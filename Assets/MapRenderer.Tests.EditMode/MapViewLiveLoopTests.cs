@@ -76,7 +76,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -220,9 +220,9 @@ namespace MapRenderer.Tests
 
                 // Prime the reused buffers (_cover, _coverSet, _toRelease) to steady capacity.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
 
                 // ── (a) THE PAN CASE ──
                 // A small center nudge stays within the loaded z2 cover (one z2 tile spans ~10,000 km
@@ -230,8 +230,8 @@ namespace MapRenderer.Tests
                 // Tick runs the full recompute: TileCover.Cover + _coverSet rebuild + request/release
                 // scan + floating-origin rebase loop + ApplyZoom loop. All must allocate ZERO bytes.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "MapView.Tick must not allocate during a within-cover pan (cover recompute path: " +
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                    "MapView.LateUpdate must not allocate during a within-cover pan (cover recompute path: " +
                     "ApplyZoom loop + TileCover.Cover + set rebuild + request/release scan + rebase). " +
                     "A failure means a per-frame List/Task/closure/LINQ leaked into the hot path.");
 
@@ -239,7 +239,7 @@ namespace MapRenderer.Tests
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
                 // ── (b) the fully-static frame also early-outs allocation-free. ──
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
                 // ── (c) a heading/tilt change still ticks alloc-free. ──
@@ -248,7 +248,7 @@ namespace MapRenderer.Tests
                 // is identical, so request/release find nothing and the recompute stays zero-alloc. (Tilt is
                 // not in the cover key — the selector has no tilt branch, D3.)
                 view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 });
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");
 
                 // ── (d) AT SCALE: zero-alloc must hold over MANY frames, not just one. ──
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests
                 // must stay clean at the SAME N — otherwise the divergence would be shared-Tick-path churn,
                 // not EG-specific. (Same N as the Entities verdict so the comparison is genuine.)
                 const int N = 50;
-                Assert.That(() => { for (int i = 0; i < N; i++) view.Tick(); }, Is.Not.AllocatingGCMemory(),
+                Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); }, Is.Not.AllocatingGCMemory(),
                     $"BRG.Tick must not allocate across {N} steady-state frames — proving the zero-alloc " +
                     "contract holds at the scale where the Entities backend trips the recorder.");
             }
@@ -296,13 +296,13 @@ namespace MapRenderer.Tests
 
                 // Prime reused buffers, identical to the BRG test.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.Tick();
+                view.LateUpdate();
 
                 // Same within-cover pan as BRG case (a): full cover recompute, no new tiles loaded.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                view.Tick(); // consume the pan; now steady.
+                view.LateUpdate(); // consume the pan; now steady.
                 Assert.AreEqual(16, view.LoadedTileCount(),
                     "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles");
 
@@ -314,7 +314,7 @@ namespace MapRenderer.Tests
                 string verdict;
                 try
                 {
-                    Assert.That(() => { for (int i = 0; i < N; i++) view.Tick(); },
+                    Assert.That(() => { for (int i = 0; i < N; i++) view.LateUpdate(); },
                                 Is.Not.AllocatingGCMemory());
                     verdict = $"NO GC allocation across {N} steady-state Ticks";
                 }
@@ -324,7 +324,7 @@ namespace MapRenderer.Tests
                     // prints blank here, so report the trip (intermittent: a single Tick does not trip).
                     verdict = $"ALLOCATES across {N} Ticks (GC.Alloc recorder tripped; intermittent)";
                 }
-                TestContext.WriteLine($"[S53b alloc] MapView.Tick (Backend=Entities) steady-state: {verdict}");
+                TestContext.WriteLine($"[S53b alloc] MapView.LateUpdate (Backend=Entities) steady-state: {verdict}");
             }
             finally
             {

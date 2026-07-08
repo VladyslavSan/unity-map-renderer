@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Visual
                 // Pump to settle all tiles.
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     Thread.Sleep(1);
                 }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,

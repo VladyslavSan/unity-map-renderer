@@ -102,9 +102,10 @@ namespace MapRenderer.Core.Style
             StyleLayer layer;
             switch (layerType)
             {
-                case StyleLayerType.Line: layer = new Line.StyleLayer(); break;
-                case StyleLayerType.Fill: layer = new Fill.StyleLayer(); break;
-                default:                  layer = new StyleLayer();      break;
+                case StyleLayerType.Line:   layer = new Line.StyleLayer();   break;
+                case StyleLayerType.Fill:   layer = new Fill.StyleLayer();   break;
+                case StyleLayerType.Symbol: layer = new Symbol.StyleLayer(); break;
+                default:                    layer = new StyleLayer();        break;
             }
 
             layer.Raw = json;

@@ -121,6 +121,15 @@ namespace MapRenderer.Core.Mvt
             return Encoding.UTF8.GetString(_b, s, e - s);
         }
 
+        /// <summary>Reads a length-delimited field as a raw byte array (protobuf <c>bytes</c>).</summary>
+        public byte[] ReadBytes()
+        {
+            var (s, e) = ReadLengthDelimited();
+            var result = new byte[e - s];
+            Array.Copy(_b, s, result, 0, e - s);
+            return result;
+        }
+
         /// <summary>Skips a field of the given wire type.</summary>
         public void SkipField(int wireType)
         {

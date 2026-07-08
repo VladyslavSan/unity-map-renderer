@@ -65,7 +65,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -201,7 +201,7 @@ namespace MapRenderer.Tests
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                view.Tick(); // requests the cover; fetches kick and stay in-flight (SpinUntilReleased never returns)
+                view.LateUpdate(); // requests the cover; fetches kick and stay in-flight (SpinUntilReleased never returns)
 
                 var snap = view.CaptureTelemetry();
                 Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
@@ -215,7 +215,7 @@ namespace MapRenderer.Tests
             {
                 // Release the held fetches and drain so nothing leaks (observe-on-teardown discipline).
                 release.Cancel();
-                for (int f = 0; f < 300; f++) { view.Tick(); Thread.Sleep(1); }
+                for (int f = 0; f < 300; f++) { view.LateUpdate(); Thread.Sleep(1); }
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }
@@ -277,7 +277,7 @@ namespace MapRenderer.Tests
                 TileTelemetrySnapshot snap = default;
                 for (int f = 0; f < 3000; f++)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     snap = view.CaptureTelemetry();
                     if (snap.PendingTileCount > 0 && snap.ConsumeBacklog == snap.PendingTileCount) break;
                     Thread.Sleep(1);
@@ -293,7 +293,7 @@ namespace MapRenderer.Tests
                 // Raise the budget and drain — proves the OTHER side: real state that drains, not a stuck counter.
                 view.Config.MaxConsumesPerTick = 64;
                 for (int f = 0; f < 200 && !view.AllTilesSettled(); f++)
-                    view.Tick();
+                    view.LateUpdate();
 
                 Assert.IsTrue(view.AllTilesSettled(), "raising the budget must let the tiles finish settling");
                 Assert.AreEqual(0, view.CaptureTelemetry().ConsumeBacklog, "the backlog must drain to 0");
@@ -338,7 +338,7 @@ namespace MapRenderer.Tests
                 // tile always transfers), contaminating the entry-count assertions below with unrelated
                 // entries that have nothing to do with the revisit under test.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.Tick();
+                view.LateUpdate();
 
                 var afterEvict = view.CaptureTelemetry();
                 Assert.Greater(afterEvict.PreparedCacheEntryCount, 0,
@@ -350,7 +350,7 @@ namespace MapRenderer.Tests
                 // chance to reach Built (see note above): the cache must serve a hit for every originally-
                 // cached tile, handing ownership (and the entry) back OUT (Model B TryTake).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.Tick(); // the recompute (cover diff + probe) runs in THIS tick
+                view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
                 var afterRevisitTick = view.CaptureTelemetry();
 
                 Assert.Greater(afterRevisitTick.PreparedCacheHits, 0,
@@ -492,14 +492,14 @@ namespace MapRenderer.Tests
 
                 // Prime reused buffers (TileCoverStats' two HashSet<int>, the CaptureTelemetry _loaded pass)
                 // to steady capacity before measuring.
-                view.Tick();
+                view.LateUpdate();
                 view.CaptureTelemetry();
 
                 Assert.That(() =>
                 {
                     for (int i = 0; i < 64; i++)
                     {
-                        view.Tick();
+                        view.LateUpdate();
                         view.CaptureTelemetry();
                     }
                 },

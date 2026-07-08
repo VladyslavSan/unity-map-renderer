@@ -19,15 +19,12 @@ namespace MapRenderer.Unity.Rendering.Materials
     public sealed class MapMaterialSet : ScriptableObject
     {
         [Tooltip("Base material for all fill (polygon) layers. Cloned per style layer.")]
-        [SerializeField] private Material _fillMaterial;
+        [SerializeField] public Material FillMaterial;
 
         [Tooltip("Base material for all line layers. Cloned per style layer.")]
-        [SerializeField] private Material _lineMaterial;
-
-        /// <summary>Base material for fill (polygon) layers. May be null if unassigned.</summary>
-        public Material FillMaterial => _fillMaterial;
-
-        /// <summary>Base material for line layers. May be null if unassigned.</summary>
-        public Material LineMaterial => _lineMaterial;
+        [SerializeField] public Material LineMaterial;
+        
+        [Tooltip("Base material for symbol text render items. Cloned per style layer.")]
+        [SerializeField] public Material SymbolText;
     }
 }

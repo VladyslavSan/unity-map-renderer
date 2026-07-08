@@ -47,32 +47,28 @@ The four new passes call `LineCoverage(side, innerFrac, dashU)` and `clip(covera
 **interpolated varyings** in every pass (not computed per-vertex constants). This is why the line
 depth passes carry those three interpolators even though depth passes normally carry only `positionCS`.
 
-## Antialiasing model — opaque core + edge buffer
+## Antialiasing model — hard edge (edge AA removed)
 
-The line is **opaque-core + feathered-edge**: `Line_VertexExtrude()` pads the lateral extrude OUTWARD by
-`(_AaEdgeWidth + _Blur)` device pixels (perspective-correct, measured per-vertex from the projected
-centre/edge), and `LineCoverage`'s `fwidth` smoothstep falls off over that same width — so the styled width
-stays `coverage = 1` (fully opaque) and only the buffer is partial. The interior is never made translucent,
-so overlapping roads/casings/joins composite with **no alpha accumulation**.
-
-**Two distinct properties — do NOT merge them** (see `docs/lessons-learned.md` § Shaders & HLSL):
+**Edge antialiasing was removed (2026-07-06, commit `0b910c7`).** `LineCoverage` draws a **hard** outer
+edge — the ribbon spans `|side| ≤ 1` and coverage is `1` up to the rasterized silhouette (aliased). The gap
+hole is a hard cut at `|side| < innerFrac`. Thin lines stay visible via the **min-width floor** in
+`Line_VertexExtrude()` (half-width `≥ 0.5 px` ⇒ a stable 1 px hairline) — the sole thin-line safeguard now.
 
 | Property | Meaning | Default | Style-bound? |
 |---|---|---|---|
-| `_AaEdgeWidth` | internal AA buffer/edge width, px per side | 1 | **no** (engine plumbing) |
-| `_Blur` | MapLibre **`line-blur`** paint | 0 | yes (`MaterialFactory` binds `line-blur`) |
+| `_Blur` | MapLibre **`line-blur`** — an opt-in inward soft edge (NOT antialiasing) | 0 (hard) | yes (`MaterialFactory` binds `line-blur`) |
 
-`_AaEdgeWidth` was once named `_Blur`; that collided with the `line-blur` style term (`line-X → _X`), so the
-styler bound its spec-default `0` over it and **silently zeroed antialiasing on every backend**. Internal
-render params (`_AaEdgeWidth`, `_WidthIsPixels`, `_MetersPerPixel`) are kept in a separate labeled group
-from the style-bound `line-*` props in `Line_LitInput.hlsl` / `Line.shader` — keep that boundary.
+`_Blur` is a real spec paint property, not AA; `0` ⇒ hard edge. It was once *also* the AA knob, which
+collided with the `line-blur` style term (`line-X → _X`) and silently zeroed AA — the internal AA width later
+became `_AaEdgeWidth` (now removed with the AA model). The naming lesson still stands: never name an internal
+render param after a `line-*`/`fill-*` term (see `docs/lessons-learned.md` § Shaders & HLSL), and keep the
+two prop groups labeled-separate in `Line_LitInput.hlsl` / `Line.shader`.
 
-**Known residual artifact (DEFERRED): sub-pixel lines over-thicken.** The pad is *geometric*, so a line
-narrower than the buffer (e.g. ~0.3px) is fattened to ~`0.3 + 2·_AaEdgeWidth` ≈ 2.3px and blurred; two such
-thin lines close together have their buffers overlap into a smeared mess. Fixing it needs coverage-conserving
-sub-pixel handling (clamp geometry to ~1px, scale alpha by the true width ratio) — which re-opens the
-translucent-overlap problem and likely needs the whole-layer composite. Tracked in
-`agents-devloop/stages/S70-line-antialiasing-subpixel-crawl.md` § "Known residual artifact".
+**Why removed, and what a correct AA looks like:** per-line transparent-fade AA cannot composite a crisp
+**cased** line (two stacked transparent draws — the fill's fade skirt bleeds the casing), and neither a wider
+fade nor MSAA fixes it. The full reasoning + the single-pass-cased-line path forward live in
+**`docs/line-antialiasing.md`** (the SSOT). Stages `S70` / `S77` (the removed opaque-core buffer + its
+sub-pixel over-thicken artifact) are superseded by that note.
 
 ## Render-state design
 

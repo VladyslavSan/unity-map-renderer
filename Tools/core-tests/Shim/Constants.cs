@@ -19,5 +19,8 @@ namespace Unity.Mathematics
 
         /// <summary>Single-precision epsilon.</summary>
         public const float EPSILON = 1.1920929e-7f;
+
+        /// <summary>Single-precision sqrt(2). S19: TextQuadLayout's radial-offset corner diagonal (RadialOffset/SQRT2).</summary>
+        public const float SQRT2 = 1.41421356f;
     }
 }

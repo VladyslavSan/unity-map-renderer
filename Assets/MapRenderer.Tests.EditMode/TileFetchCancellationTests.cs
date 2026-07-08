@@ -78,13 +78,13 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 
                 // Tiles enter cover; fetches kick and stay in-flight (CancelFaultingSource never returns).
-                view.Tick();
+                view.LateUpdate();
                 Thread.Sleep(5);
-                view.Tick();
+                view.LateUpdate();
 
                 // Churn: pan far so the original tiles are released while their fetch is still in-flight.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.Tick();
+                view.LateUpdate();
 
                 // Positive control (non-vacuous): the cancel-mid-fetch race must actually have happened.
                 Assert.Greater(view.ReleasedMidFetchCount(), 0,
@@ -95,7 +95,7 @@ namespace MapRenderer.Tests
                 // observes them. Without the fix, the dropped faulted tasks would go unobserved.
                 for (int f = 0; f < 300; f++)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     Thread.Sleep(1);
                 }
 

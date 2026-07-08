@@ -1,7 +1,6 @@
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
-using Unity.Mathematics;
 using MapRenderer.Core.Style;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -50,28 +49,13 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // ── Frame / teardown lifecycle (also driven explicitly by tests) ─────────────────────────
 
-        public void Tick()               => View?.Tick();
-        public void UpdateFrame(double dt) => View?.UpdateFrame(dt);
-        public void Teardown()           => View?.Teardown();
+        public void Teardown() => View?.Teardown();
 
-        private void Update()    => View?.UpdateFrame(Time.deltaTime);
-
-        // Single per-frame camera commit. Input controllers mutate MapCamera.CurrentProperties during their
-        // Update; LateUpdate runs after ALL of them, so this propagates the final merged state to the Unity
-        // camera exactly once — and before rendering (LateUpdate precedes culling/render). This is the
-        // "camera matrix frozen for this frame" point: any future Unity-camera-matrix consumer (symbol
-        // screen-space placement) must be sequenced AFTER this call, here — not in Update, not in another
-        // component's LateUpdate (Unity does not order those).
-        private void LateUpdate()
-        {
-            var cam = View?.Camera;
-            if (cam == null) return;
-            // Refresh the DPI ratio from the (live, Inspector-tunable) config before the commit so the camera
-            // frames the logical viewport (S92 D1); Config is shared by reference with the Controller, so the
-            // render and the interaction seam can't diverge on DPR.
-            cam.DevicePixelRatio = Config.DevicePixelRatio;
-            cam.SyncToCamera();
-        }
+        // The whole per-frame pipeline (camera commit -> tiles -> labels) lives in MapView.LateUpdate; this is
+        // just the Unity trigger. LateUpdate (not Update) so it runs AFTER the input Controller's Update, which
+        // is where the camera props are mutated — so the frame always sees this frame's input. See
+        // MapView.LateUpdate for the ordered sequence and why it's one snapshot.
+        public void LateUpdate() => View?.LateUpdate();
 
         private void OnDestroy() => View?.Teardown();
 

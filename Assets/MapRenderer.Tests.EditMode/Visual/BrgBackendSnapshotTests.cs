@@ -168,7 +168,7 @@ namespace MapRenderer.Tests.Visual
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
                 Thread.Sleep(1);
             }
@@ -367,14 +367,14 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); Thread.Sleep(1);
+                            view.LateUpdate(); Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style A: BRG must load and settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
                         // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Frame the camera on the actual BRG scene bounds (same for both styles).
                         // Must be computed here (after tiles settle + Rebuild runs in Tick).
@@ -417,14 +417,14 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); Thread.Sleep(1);
+                            view.LateUpdate(); Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style B: BRG must load and settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
                         // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Re-frame camera on Style B's own scene bounds.
                         // Both styles use zoom=3 centered at (0,0), so the tile layout is the same, but
@@ -867,18 +867,18 @@ namespace MapRenderer.Tests.Visual
 
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
-                    view.Tick();
+                    view.LateUpdate();
                     Thread.Sleep(1);
                 }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "BRG path must load + settle tiles.");
 
                 // Settle-loop staleness fix: the loop exits as soon as AllTilesSettled() is true,
-                // WITHOUT running another Tick. Within MapView.Tick, BrgRebuild runs BEFORE the
+                // WITHOUT running another Tick. Within MapView.LateUpdate, BrgRebuild runs BEFORE the
                 // TileManager consumes the final tile's draw items, so _sortedItems (read by
                 // ComputeSceneBounds and OnPerformCulling) lags one frame behind _items. One more
                 // Tick mirrors production's next frame and rebuilds _sortedItems from the full set.
-                view.Tick();
+                view.LateUpdate();
 
                 // BRG path: no child MeshRenderers exist. Frame the camera on the BRG scene bounds.
                 // Compute the tile size at z=3 (Web Mercator), then query ComputeSceneBounds so the
@@ -1084,14 +1084,14 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); Thread.Sleep(1);
+                            view.LateUpdate(); Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=1 render: BRG must settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
                         // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Frame camera on zoom=1 scene bounds (large tiles, set once for both renders).
                         float tileSize1 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 1));
@@ -1136,14 +1136,14 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); Thread.Sleep(1);
+                            view.LateUpdate(); Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=5 render: BRG must settle tiles.");
 
                         // One more Tick so _sortedItems is rebuilt from the full draw-item set after
                         // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Frame camera on zoom=5 tile bounds (each tile is 1/32 of the zoom=1 extent).
                         // Both renders must be framed on their own tile bounds so they fill the camera
@@ -1328,11 +1328,11 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); System.Threading.Thread.Sleep(1);
+                            view.LateUpdate(); System.Threading.Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Entities render: must settle tiles at zoom=5.");
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Frame camera via the first loaded tile's world position.
                         // Entities backend uses GameObjects, so ComputeChildBounds applies — but for
@@ -1372,11 +1372,11 @@ namespace MapRenderer.Tests.Visual
 
                         for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                         {
-                            view.Tick(); System.Threading.Thread.Sleep(1);
+                            view.LateUpdate(); System.Threading.Thread.Sleep(1);
                         }
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "BRG render: must settle tiles at zoom=5.");
-                        view.Tick();
+                        view.LateUpdate();
 
                         // Render through MapView's OWN camera (production path) — see the Entities block.
                         view.Camera.SyncToCamera();

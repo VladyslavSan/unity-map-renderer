@@ -2,9 +2,10 @@
 //
 // Validates the four-way set equality:
 //   • sharedCBUFFER (from ShaderProperties/PropertyNames.cs CBUFFER region, 14)
-//   • ShaderProperties/Line/PropertyNames.cs (12 line-only), ShaderProperties/Fill/PropertyNames.cs (5 fill-only)
-//   • Line_LitInput.hlsl CBUFFER (26 after stripping companions)
+//   • ShaderProperties/Line/PropertyNames.cs (10 line-only), ShaderProperties/Fill/PropertyNames.cs (5 fill-only)
+//   • Line_LitInput.hlsl CBUFFER (24 after stripping companions)
 //   • Fill_LitInput.hlsl CBUFFER (19 after stripping companions)
+//   (line counts dropped by 2 — _MetersPerPixel (S104) + _AaEdgeWidth (line-AA removal) retired)
 //   • Line/Fill DOTS blocks (must equal their respective CBUFFER sets)
 //   • Line.shader / Fill.shader Properties{} blocks (must be supersets of the registry)
 //
@@ -35,12 +36,12 @@ namespace MapRenderer.Tests
         // ── Exact count guards ───────────────────────────────────────────────────────────────────
 
         [Test]
-        public void LineCbufferCount_IsExactly26()
+        public void LineCbufferCount_IsExactly24()
         {
             var set = ShaderPropertyParser.ParseCbufferMembers(
                 Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
-            Assert.That(set.Count, Is.EqualTo(26),
-                $"Line_LitInput.hlsl CBUFFER (after companion strip) must have exactly 26 members. " +
+            Assert.That(set.Count, Is.EqualTo(24),
+                $"Line_LitInput.hlsl CBUFFER (after companion strip) must have exactly 24 members. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
         }
 
@@ -64,12 +65,12 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void LinePropertyNamesCount_IsExactly12()
+        public void LinePropertyNamesCount_IsExactly10()
         {
             var set = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingLineDir, "PropertyNames.cs"));
-            Assert.That(set.Count, Is.EqualTo(12),
-                $"ShaderProperties/Line/PropertyNames.cs must have exactly 12 const string values. " +
+            Assert.That(set.Count, Is.EqualTo(10),
+                $"ShaderProperties/Line/PropertyNames.cs must have exactly 10 const string values. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
         }
 
@@ -175,7 +176,7 @@ namespace MapRenderer.Tests
         [Test]
         public void LineDots_EqualsLineCbuffer()
         {
-            // Line DOTS block keys must equal the Line CBUFFER set (both 26, every CBUFFER prop is instanced).
+            // Line DOTS block keys must equal the Line CBUFFER set (both 24, every CBUFFER prop is instanced).
             var lineDotsKeys = new HashSet<string>(
                 ShaderPropertyParser.ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl")).Keys);
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(

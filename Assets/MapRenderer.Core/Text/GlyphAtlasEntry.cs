@@ -1,0 +1,41 @@
+// Engine-free: no UnityEngine dependency.
+// Construction convention: object initializer with named members (see docs/conventions.md).
+// BLITTABLE: this struct crosses into the S19/S20 Burst jobs as a NativeArray<GlyphAtlasEntry> element
+// at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
+// pattern LineRibbonVertex/GeoCoordinate already use) — keep it to blittable fields only: no byte[],
+// no string, no reference types.
+
+using Unity.Mathematics;
+
+namespace MapRenderer.Core.Text
+{
+    /// <summary>
+    /// One packed glyph's location + metrics inside a <see cref="GlyphAtlas"/>. Deliberately does NOT
+    /// bake a UV rect — Core stays float/precision-free; S19 computes
+    /// <c>uv = AtlasOrigin / atlasSize</c> (dividing by the <see cref="GlyphAtlas.Size"/> the atlas
+    /// exposes) at the point it actually needs UVs.
+    /// </summary>
+    public readonly struct GlyphAtlasEntry
+    {
+        /// <summary>The Unicode codepoint this entry represents (matches <see cref="SdfGlyph.Codepoint"/>).</summary>
+        public uint Codepoint { get; init; }
+
+        /// <summary>Top-left pixel origin of this glyph's packed cell within the atlas.</summary>
+        public int2 AtlasOrigin { get; init; }
+
+        /// <summary>
+        /// Packed cell size in pixels: <c>(Width + 2*GlyphSdf.Buffer, Height + 2*GlyphSdf.Buffer)</c> —
+        /// identical to the source <see cref="SdfGlyph.CellSize"/> this entry was appended from.
+        /// </summary>
+        public int2 CellSize { get; init; }
+
+        /// <summary>Left side-bearing in pixels (may be negative) — copied from the source glyph.</summary>
+        public int Left { get; init; }
+
+        /// <summary>Distance from the baseline to the glyph's top in pixels (may be negative).</summary>
+        public int Top { get; init; }
+
+        /// <summary>Horizontal advance in pixels.</summary>
+        public int Advance { get; init; }
+    }
+}

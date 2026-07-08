@@ -10,7 +10,10 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Source;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -42,7 +45,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/>, and owns its
     /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so there are no
     /// "is it wired yet" null guards and no lifecycle flag: before <see cref="SetStyle(string,CancellationToken)"/>
-    /// runs it is simply an empty map whose <see cref="Tick"/> selects a cover but has no sources to fetch from,
+    /// runs it is simply an empty map whose <see cref="LateUpdate"/> selects a cover but has no sources to fetch from,
     /// so it renders nothing — a safe no-op, not an invalid state.
     ///
     /// <para>Architecture: one render bundle per fill/line style layer (declared/painter's order), each with a
@@ -82,6 +85,25 @@ namespace MapRenderer.Unity.Rendering.Map
         // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only Layers).
         internal readonly Tile.TileManager TileManager;
 
+        // ── S20 Slice 1: the per-frame label placement path (F1) — a SEPARATE path from the tile lifecycle
+        // above, never a static per-(tile,layer) mesh (T5). Needs no ctor dependency (unlike TileManager).
+        /// <summary>The dedicated per-frame label renderer. <c>internal</c>: test surface (job-parity /
+        /// alloc / structural teeth read it via <c>MapViewTestExtensions</c>-style InternalsVisibleTo).</summary>
+        internal LabelPlacementSystem Labels { get; }
+
+        /// <summary>
+        /// Candidate labels for this frame — no collision yet (Slice 1: every label whose anchor projects
+        /// on-screen is placed; Slice 2 adds the greedy sort-key survivor selection). <b>Demo-only seam for
+        /// S20 Slice 1</b> (<c>SyntheticLabelSource</c> sets this from hand-built labels over a real SDF
+        /// atlas); S105 replaces the setter with real data from a parsed <c>Symbol</c> style layer +
+        /// decoded point features — this property's shape does not need to change for that.
+        /// </summary>
+        public IReadOnlyList<LabelInstance> LabelInstances { get; set; }
+
+        /// <summary>The uploaded R8 SDF glyph atlas backing every <see cref="LabelInstances"/> quad's UVs.
+        /// Demo-only seam for S20 Slice 1 (see <see cref="LabelInstances"/>) — MapView does not own this
+        /// texture (it is not disposed by <see cref="Teardown"/>); its owner disposes it.</summary>
+        public GlyphAtlasTexture LabelAtlas { get; set; }
 
         /// <summary>
         /// Builds the view over its <paramref name="config"/> (the Inspector knobs, shared by reference with
@@ -96,7 +118,21 @@ namespace MapRenderer.Unity.Rendering.Map
             // S82: the PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
             // fields (placeholder budget defaults pending in-editor VRAM profiling, stage Risk 3).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
+            // S20: one label system per view, owning this view's camera (constructed here, after Camera is
+            // set — a field initializer would see a null Camera).
+            Labels      = new LabelPlacementSystem(Camera, _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null);
+            // S105: the decoupled symbol-label subsystem observes TileManager's fetch/release lifecycle
+            // (sharing already-fetched bytes) and produces the real map labels Labels.Tick renders. It clones
+            // the per-symbol-layer materials (per-layer text-halo-*) from the same MapMaterialSet.SymbolText base.
+            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet);
+            TileManager.SymbolTileBytesReady = _symbols.OnTileBytesReady;
+            TileManager.SymbolTileReleased   = _symbols.OnTileReleased;
         }
+
+        // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
+        // LabelInstances/LabelAtlas seam below is used only when the style has NO symbol layers.
+        private readonly SymbolLabelSubsystem _symbols;
+        private readonly List<LabelInstance> _labelBuffer = new List<LabelInstance>();
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
         // There is no separate "Initialise": the map is fully valid at construction (an empty map whose
@@ -140,6 +176,7 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
+            _symbols.SetStyle(_style); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             var specs = await BuildSourceSpecs(style, ct);
             TileManager.SetSources(specs, _config.Backend);
@@ -163,7 +200,8 @@ namespace MapRenderer.Unity.Rendering.Map
             foreach (var sl in style.Layers)
             {
                 bool rendered = sl is MapRenderer.Core.Style.Fill.StyleLayer
-                             || sl is MapRenderer.Core.Style.Line.StyleLayer;
+                             || sl is MapRenderer.Core.Style.Line.StyleLayer
+                             || sl is MapRenderer.Core.Style.Symbol.StyleLayer; // S105: fetch symbol sources too
                 if (!rendered) continue;
                 string sid = sl.Source ?? string.Empty;
                 if (seen.Add(sid)) ordered.Add(sid);
@@ -214,39 +252,65 @@ namespace MapRenderer.Unity.Rendering.Map
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Deterministic frame update — the MonoBehaviour host feeds <c>Time.deltaTime</c>; tests feed an
-        /// explicit dt. The camera drives its own transform on <see cref="MapCamera.Apply"/> (no per-frame
-        /// animation), so a frame is just the tile loop; dt is retained for a future CameraController.
+        /// One frame of the live loop, mirroring (and driven from) <c>MapViewComponent.LateUpdate</c>. Runs in
+        /// LateUpdate on purpose: the input <c>Controller</c> mutates the camera props in its <c>Update</c>, and
+        /// Unity runs every LateUpdate after every Update, so this pipeline is GUARANTEED to see this frame's
+        /// input — no execution-order attributes needed. The whole per-frame pipeline lives HERE, in one ordered
+        /// pass off a SINGLE camera snapshot, so tiles and labels are frame-coherent by construction (the pan-lag
+        /// fix — they used to sample the look-at in two different phases):
+        /// <list type="number">
+        ///   <item>commit the camera (DPI refresh + <see cref="MapCamera.SyncToCamera"/>) — the merged input
+        ///         state from every controller this frame;</item>
+        ///   <item>move the tiles — push zoom uniforms, then rebase every loaded tile onto the look-at's
+        ///         floating origin;</item>
+        ///   <item>place the labels — project their anchors against the SAME snapshot + just-committed camera.</item>
+        /// </list>
+        /// Allocation-free in steady state.
         /// </summary>
-        public void UpdateFrame(double dt) => Tick();
-
-        /// <summary>
-        /// One frame of the live loop. Pushes zoom uniforms (always, even on a clean-cover frame), refreshes
-        /// the scene origin, then ticks the <see cref="Tile.TileManager"/>. Allocation-free in steady state.
-        /// </summary>
-        public void Tick()
+        public void LateUpdate()
         {
-            CameraProperties cam = Camera.CurrentProperties;
+            // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
+            //    rebase and the label projection below both read the just-committed pose. DPI is refreshed from
+            //    the live config before the commit (it feeds the altitude framing).
+            Camera.DevicePixelRatio = _config.DevicePixelRatio;
+            Camera.SyncToCamera();
 
-            // ApplyZoom first — so a fractional-zoom-only change always pushes uniforms (fill/line zoom paint,
-            // zoom-step dasharrays for pixel line width).
+            // ONE snapshot for the rest of the frame — tiles and labels share it, so they can't diverge.
+            CameraProperties cameraProperties = Camera.CurrentProperties;
+            Backend.SceneFrame sceneFrame = BuildSceneFrame(cameraProperties);
+
+            // 2. Move the tiles. ApplyZoom first — so a fractional-zoom-only change always pushes uniforms
+            //    (fill/line zoom paint, zoom-step dasharrays for pixel line width).
             using (PmApplyZoom.Auto())
-                Layers.ApplyZoom(cam.Zoom);
+                Layers.ApplyZoom(cameraProperties.Zoom);
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it — best float precision, no threshold/rebase machinery.
-
             // S91-C Slice 2: place tiles via the projection-agnostic scene frame built from the launch-time
             // projection + the look-at. Mercator: rebase = identity and SceneOriginRender = (mercX, 0, mercZ)
             // (== SceneFrame.Mercator(cam.CenterMercator())), so placement is bit-for-bit the pre-S91 translation.
             // Globe: rebase rotates every tile into the look-at's local ENU frame (up = +Y), so the same
             // CameraPoseMath.ComputePose orbit frames it.
             using (PmInstancedRebuild.Auto())
-                TileManager.InstancedRebuild(BuildSceneFrame(cam));
+                TileManager.InstancedRebuild(sceneFrame);
 
             EnsureSelector();
             using (PmManagerTick.Auto())
-                TileManager.Tick(cam, BuildTileSelectionConfig());
+                TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
+
+            // 3. Place the labels against the SAME snapshot the tiles used (never a second BuildSceneFrame).
+            //    Production: the symbol subsystem's real map labels (when the style has symbol layers).
+            //    Fallback: the demo LabelInstances/LabelAtlas seam (SyntheticLabelSource), used only when a
+            //    style has NO symbol layers — so a leftover demo component can't mask the real feature.
+            if (_symbols.HasSymbolLayers)
+            {
+                _symbols.CollectInto(_labelBuffer);
+                Labels.Tick(sceneFrame, _labelBuffer, _symbols.Atlas, _symbols.LayerMaterials);
+            }
+            else
+            {
+                Labels.Tick(sceneFrame, LabelInstances, LabelAtlas);
+            }
         }
 
         /// <summary>
@@ -325,13 +389,19 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
-        /// RenderLayerSet's materials. Order matters: tiles first — their renderers reference layer
-        /// materials. Idempotent (both disposes are). The MonoBehaviour host calls this from OnDestroy.
+        /// RenderLayerSet's materials, then the label placement system's mesh/material/native buffers.
+        /// Order matters: tiles first — their renderers reference layer materials.
+        /// <see cref="Labels"/> is independent of both, so its position isn't load-bearing, but it is
+        /// NOT responsible for <see cref="LabelAtlas"/> — that texture is demo/S105-owned, disposed by
+        /// its own owner, never here. Idempotent (every dispose here is). The MonoBehaviour host calls
+        /// this from OnDestroy.
         /// </summary>
         public void Teardown()
         {
             TileManager.Dispose();  // tiles first — their renderers reference Layers' materials
             Layers.Dispose();
+            Labels.Dispose();
+            _symbols.Dispose();     // S105: destroy the shared glyph atlas texture + manager
         }
     }
 }

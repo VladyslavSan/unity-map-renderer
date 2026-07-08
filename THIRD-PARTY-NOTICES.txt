@@ -107,6 +107,17 @@ Assets/Fixtures/maplibre-demo-style.json
   copyrighted work under MapLibre's Apache-2.0 license (which applies to
   MapLibre GL JS source code, not the style schemas or Natural Earth data).
 
+Assets/Fixtures/glyphs/NotoSansRegular/*.pbf.bytes
+  (0-255.pbf.bytes, 1536-1791.pbf.bytes, 64256-64511.pbf.bytes, 65024-65279.pbf.bytes)
+  Pre-baked SDF glyph-bitmap ranges for the "Noto Sans Regular, ..." font stack, fetched from
+  MapLibre's public "demotiles" glyph endpoint (S18 — glyph-atlas/SDF text rendering).
+  Underlying font: Noto (multiple faces in the stack) — SIL Open Font License 1.1 (OFL-1.1).
+  Fetch endpoint: https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf
+  Bundled as an offline, deterministic test fixture (glyph-PBF decode: GlyphPbfDecodeTests / T2).
+  License: the OFL applies to the Noto font data the SDF bitmaps are derived from; the OFL text
+  is available at https://scripts.sil.org/OFL — no copyleft on our own code (font data is not
+  linked/derivative in the copyleft sense; it is bundled as data, per OFL §1/§2 permitted use).
+
 LIVE NETWORK ENDPOINT (runtime only)
 -------------------------------------
 https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf

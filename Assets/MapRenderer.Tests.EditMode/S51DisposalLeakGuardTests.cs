@@ -87,7 +87,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -209,16 +209,16 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → completes immediately).
-                view.Tick();
+                view.LateUpdate();
                 // Brief sleep so ThreadPool mesh build tasks can start (MaxConsumesPerTick=0 won't consume them).
                 Thread.Sleep(5);
                 // Second Tick: fetch complete → mesh build tasks are kicked (build). Still not consumed.
-                view.Tick();
+                view.LateUpdate();
 
                 // Pan far east — before mesh build results are consumed.
                 // MaxConsumesPerTick=0 guarantees tiles are still in-flight (HasMeshBuild && !Built).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.Tick(); // cover recompute → evicts original tiles while they are in-flight
+                view.LateUpdate(); // cover recompute → evicts original tiles while they are in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
                 // This is the decisive assertion that separates "race exercised" from "vacuous pass".
@@ -364,14 +364,14 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
-                view.Tick();
+                view.LateUpdate();
                 Thread.Sleep(5);
                 // Second Tick: fetch complete → mesh build tasks are kicked (build). Not consumed.
-                view.Tick();
+                view.LateUpdate();
 
                 // Pan far east — evicting the original tiles while mesh build is in-flight.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.Tick(); // cover recompute → evicts tiles → stashes in _pendingDisposal
+                view.LateUpdate(); // cover recompute → evicts tiles → stashes in _pendingDisposal
 
                 // Positive control: at least one tile must have been released mid-flight.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
@@ -529,7 +529,7 @@ namespace MapRenderer.Tests
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
-                view.Tick(); // kick fetch + mesh build
+                view.LateUpdate(); // kick fetch + mesh build
 
                 // DrainMeshBuilds: synchronous settle — waits for mesh build UniTasks to complete.
                 view.DrainMeshBuilds();

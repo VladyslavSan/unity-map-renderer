@@ -7,7 +7,7 @@
 // allocation meter on Unity Mono per docs/lessons-learned.md:112-131). Excluded from core-tests.csproj.
 //
 // Tooth (a): TileScheduler.Request is alloc-free on the cache-hit / in-flight-share fast paths.
-// Tooth (b): MapView.Tick's cover-recompute (select descent + request/release diff) is alloc-free at
+// Tooth (b): MapView.LateUpdate's cover-recompute (select descent + request/release diff) is alloc-free at
 //            STALL SCALE — a high-zoom (z12+), ScreenSpaceLod, large mixed-zoom cover mirroring
 //            TileLoadStressDriver's Berlin sweep — NOT a re-run of MapViewLiveLoopTests' shallow z2 case.
 // Tooth (d): CoverRecomputesLastTick sums to N over N sub-tile nudges — a BASELINE documenting today's
@@ -72,7 +72,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -203,9 +203,9 @@ namespace MapRenderer.Tests
                 // Prime the reused buffers (_cover, _coverSet, _toRelease, the selector's _stack) to steady
                 // capacity before measuring — mirrors MapViewLiveLoopTests' priming ticks.
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 + 1e-6 });
-                view.Tick();
+                view.LateUpdate();
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52,        Longitude = 13.405 });
-                view.Tick();
+                view.LateUpdate();
 
                 int loadedBefore = view.LoadedTileCount();
 
@@ -214,8 +214,8 @@ namespace MapRenderer.Tests
                 // exact-equality check in TileManager.Tick still trips _coverDirty.
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 - 1e-6 });
 
-                Assert.That(() => view.Tick(), Is.Not.AllocatingGCMemory(),
-                    "MapView.Tick must not allocate during a sub-tile nudge over a deep (z12+), mixed-zoom, " +
+                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
+                    "MapView.LateUpdate must not allocate during a sub-tile nudge over a deep (z12+), mixed-zoom, " +
                     "large ScreenSpaceLod cover — the recompute path (quadtree descent + request/release " +
                     "diff) at STALL SCALE, not the shallow z2 case. A failure means the descent boxes a LOD " +
                     "context, allocates a scratch list per call, or LINQs over the cover.");
@@ -273,7 +273,7 @@ namespace MapRenderer.Tests
                 {
                     lat += 1e-6; // sub-tile nudge each iteration — same tile stays selected, _coverDirty trips
                     view.Camera.Apply(new CameraPropertiesUpdate { Latitude = lat });
-                    view.Tick();
+                    view.LateUpdate();
                     recomputes += view.CoverRecomputesLastTick();
                 }
 

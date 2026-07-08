@@ -69,7 +69,7 @@ namespace MapRenderer.Tests
         {
             for (int f = 0; f < maxFrames; f++)
             {
-                view.Tick();
+                view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
                 Thread.Sleep(1);
@@ -101,7 +101,7 @@ namespace MapRenderer.Tests
                 "MapRenderer.Pipeline.RingAssembly",
                 "MapRenderer.Pipeline.Earcut",
                 "MapRenderer.Pipeline.Project",
-                // Per-frame MapView.Update sub-phases + EG-drive split (added to localise live zoom spikes).
+                // Per-frame MapView.LateUpdate sub-phases + EG-drive split (added to localise live zoom spikes).
                 "MapRenderer.View.ApplyZoom",
                 "MapRenderer.View.ApplyZoom.Fills",
                 "MapRenderer.View.ApplyZoom.Lines",

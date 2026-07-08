@@ -34,7 +34,35 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   shader uses `(_AaEdgeWidth + _Blur)`. **Rule:** before naming a `_X` property, grep `PropertyNames.cs` /
   `PaintProperties.cs`; reserve style-derived names for real bindings, and give internal params clearly
   non-style names (cf. `_WidthIsPixels`, `_MetersPerPixel`). Keep the two kinds in **separate, labeled
-  groups** in the CBUFFER / Properties block so the boundary is visible.
+  groups** in the CBUFFER / Properties block so the boundary is visible. *(Update 2026-07-06: line edge AA and
+  `_AaEdgeWidth` were later removed — lines render a hard edge now, `docs/line-antialiasing.md`. The naming
+  rule above is unaffected and still binding.)*
+
+- **Per-line transparent-fade AA cannot render a crisp *cased* line — it's a compositing problem, not a
+  coverage one, and MSAA doesn't fix it.** A cased road is two stacked transparent draws (casing under, fill
+  over; `Queue=Transparent`, `ZWrite Off`). Any shader-space alpha fade on the fill's edge ramps to
+  *transparent*, which over the casing **bleeds the casing colour through** → the fill↔casing boundary blurs.
+  Inset / outset / straddle all bleed (fade = transparency = show-through); MSAA only cleans geometry
+  coverage while the two layers still *blend*, so it gives the same mush at higher cost. There is also a
+  hard trilemma for any shader fade: {solid core, unchanged apparent width, antialiased} — pick two. After a
+  long exploration this is why edge AA was removed entirely (hard edge + min-width floor kept); the real fix
+  is architectural — a **single-pass cased line** (one draw, colour-by-signed-distance, AA only the outer
+  silhouette). Full write-up + the parked outset-AA stash: **`docs/line-antialiasing.md`**.
+
+## Rendering loop & camera
+
+- **Under camera-relative rendering a pure PAN never moves the camera — so tile/label frame-coherence is a
+  snapshot-PHASE problem, not a camera-matrix one.** The camera orbits the scene origin (the look-at sits at
+  world origin every frame), so a pan only changes each frame's `SceneOriginRender` (the floating-origin
+  rebase); the `worldToCameraMatrix`/`projectionMatrix` are unchanged. A ~1-frame "labels lag the map during
+  pan" was NOT stale matrices — forcing `ResetWorldToCameraMatrix()`/`ResetProjectionMatrix()`, pinning
+  `Camera.worldToCameraMatrix`, and re-projecting at `RenderPipelineManager.beginCameraRendering` ALL did
+  nothing. The cause: tiles were rebased in the `Update` phase while the camera commit + label placement ran
+  in `LateUpdate`, two different phases racing the input `Controller.Update` (sibling MonoBehaviour `Update`
+  order is unspecified in Unity). Fix: run the whole per-frame pipeline — commit camera → move tiles → place
+  labels — in ONE pass off a SINGLE `CurrentProperties` snapshot, driven from `LateUpdate`. Unity runs every
+  `LateUpdate` after every `Update`, so it always sees this frame's input with no `DefaultExecutionOrder`
+  fragility, and tiles+labels can't diverge. (2026-07-07, S20.)
 
 ## DOTS / Entities Graphics
 
@@ -138,6 +166,17 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
     many frames or you will under-report. (Beware the `Is` name collision: alias
     `using Is = UnityEngine.TestTools.Constraints.Is;` + `using NIs = NUnit.Framework.Is;`, or instantiate
     `new AllocatingGCMemoryConstraint()` and wrap in `NUnit.Framework.Constraints.NotConstraint`.)
+
+- **A headless camera→RenderTexture readback is vertically MIRRORED vs the on-screen render.** The shipping
+  on-screen path renders through URP's intermediate RT and blits to the backbuffer (that blit flips Y); a
+  direct `camera.targetTexture` → `ReadPixels` snapshot lacks that blit, so its rows are the vertical mirror
+  of what ships on screen. `_ProjectionParams.x` is `-1` in BOTH paths, so a shader CANNOT branch on it to
+  self-correct (a symbol shader that lands glyphs upright on screen renders them upside-down in the readback).
+  For snapshot tests: on-screen is the ground truth (eyeball it live), and any test asserting absolute
+  vertical orientation/position from the readback must un-mirror the buffer first (flip rows), or assert only
+  flip-invariant axes (horizontal). `SymbolAtlasOrientationSnapshotTests` un-mirrors then checks glyph
+  uprightness + horizontal centering; absolute vertical position is a verified-live eyeball item, not
+  machine-checked. (2026-07-07, S20.)
 
 - **Unity batch `-runTests` does not reliably generate/persist `.meta` for new or renamed files.** A new
   `.cs`/`.asmdef` may run once without a committed `.meta`. Force generation with a dedicated

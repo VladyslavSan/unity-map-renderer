@@ -91,13 +91,20 @@ lists + Attributes/Varyings fields.
 
 ## Layer opacity & antialiasing — opaque cores, feathered edges
 
+> **The line *antialiasing* half of this section is SUPERSEDED (2026-07-06, commit `0b910c7`).** Line edge AA
+> was removed — lines now render a **hard edge** with a min-width floor; there is no `_AaEdgeWidth` and no
+> feather buffer. The opacity / straight-alpha-blend / self-overlap discussion below still holds. For the AA
+> state, the trilemma that motivated removal, and the single-pass-cased-line path forward, see the SSOT
+> **`docs/line-antialiasing.md`**.
+
 Every MapLibre paint layer has an `*-opacity`, and per-feature opacity is baked into the vertex alpha
 (`StyledFill/LineTileBuilder` → `vColor.a`). For that alpha to actually composite, the painter contract
 uses straight **alpha blending** (`Blend SrcAlpha OneMinusSrcAlpha, One OneMinusSrcAlpha` — the 4-arg form
 carries destination alpha correctly). Opaque layers (α=1) render byte-identically to the old `One/Zero`
 path; α<1 now blends. (Was a silent no-op until that fix.)
 
-**The AA model is opaque-core + feathered-edge — NOT whole-shape translucency.** Line geometry is extruded
+**(SUPERSEDED — removed 2026-07-06; historical, see the banner above.)** The AA model *was*
+opaque-core + feathered-edge — NOT whole-shape translucency. Line geometry is extruded
 **`(_AaEdgeWidth + _Blur)` device-pixels past the styled width** (measured per-vertex from the projected
 centre/edge, so it's perspective-correct), and `LineCoverage`'s `fwidth` falloff (the same width) lands
 entirely in that added buffer. So the styled width stays `coverage = 1` (fully opaque) and only the edge is
@@ -184,8 +191,8 @@ so URP excludes it from the opaque depth/GBuffer prepasses until S69 introduces 
 activation that can move the line to an opaque queue.
 
 ### CBUFFER fork (Line_LitInput.hlsl)
-The line needs its style-bound paint props (`_Width`, `_Blur` = line-blur, …) plus internal render params
-(`_WidthIsPixels`, `_MetersPerPixel`, `_AaEdgeWidth`) in `UnityPerMaterial` in addition to the fill's
+The line needs its style-bound paint props (`_Width`, `_Blur` = line-blur, …) plus the internal render param
+`_WidthIsPixels` in `UnityPerMaterial` in addition to the fill's
 properties — kept in two separate labeled groups so style names never collide with internal ones. We cannot `#include Fill_LitInput.hlsl` and append — the HLSL
 compiler rejects a duplicate `CBUFFER_START(UnityPerMaterial)`. The solution is a deliberate
 verbatim fork: `Line_LitInput.hlsl` ← `LitInput.hlsl`, with the full URP Lit CBUFFER body
@@ -266,7 +273,7 @@ copied" branch of the ticket, not the pure-derive branch.*
   Advanced) are full-fidelity.
 - A single **"Map Paint"** foldout (registered via `FillAdditionalFoldouts`, occupying the slot where
   Details normally sits) draws `_Color` and `_Opacity`, plus the line knobs (`_Width`, `_Blur` = line-blur,
-  `_WidthIsPixels`, `_MetersPerPixel`, `_AaEdgeWidth`) gated on `material.HasProperty("_Width")`. `_Width` exists only on
+  `_WidthIsPixels`) gated on `material.HasProperty("_Width")`. `_Width` exists only on
   `MapRenderer/Line`, so one shared `CustomEditor` (`MapRenderer.Unity.Editor.MapLitShaderGUI`) serves both
   `MapRenderer/Fill` and `MapRenderer/Line` and shows the line knobs only on the line material.
 - `MapExpandable.MapPaint = 1 << 4` is the foldout's persisted expand-state bit — outside URP's

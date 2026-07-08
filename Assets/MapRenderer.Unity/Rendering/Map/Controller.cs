@@ -35,14 +35,13 @@ namespace MapRenderer.Unity.Rendering.Map
     ///   Sign convention: <c>-delta.y</c> for tilt (drag-up → pitch decreases, toward overhead),
     ///   <c>+delta.x</c> for heading (drag-right → bearing increases).</para>
     ///
-    /// <para><b>D5 — Ordering:</b> this Update only queues patches on the camera system. The actual
-    ///   camera advance + tile loop runs in <see cref="View.Update"/> (via
-    ///   <see cref="View.UpdateFrame"/>). Unity does NOT guarantee the ordering of sibling
-    ///   MonoBehaviour Updates, but the result is still correct: patches set the instant-path
-    ///   current props which MapView.Advance picks up either this frame or next. For deterministic
-    ///   ordering with no per-frame latency, <see cref="Map"/> should wire the camera via
-    ///   <see cref="View.SetCamera"/> and call <see cref="ApplyCameraTransform"/> from within a
-    ///   controlled context — used by tests.</para>
+    /// <para><b>D5 — Ordering:</b> this <c>Update</c> only queues patches onto <see cref="MapCamera.CurrentProperties"/>.
+    ///   The whole per-frame pipeline (camera commit → tile rebase → label placement) then runs in one ordered
+    ///   pass in <see cref="MapView.LateUpdate"/> off a single snapshot of those props. That pipeline is in
+    ///   <c>LateUpdate</c> ON PURPOSE: Unity runs every LateUpdate after every Update, so this controller's
+    ///   patches are ALWAYS folded in the same frame they were produced — no sibling-order dependency, no
+    ///   <c>DefaultExecutionOrder</c>, no whole-map-vs-input latency. And because camera, tiles and labels all
+    ///   read the one snapshot, none can lag the others.</para>
     ///
     /// <para><b>Camera-transform helpers:</b>
     ///   <see cref="ApplyCameraTransform(CameraProperties)"/> and <see cref="AltitudeForZoom"/> are

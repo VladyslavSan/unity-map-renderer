@@ -12,5 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4e10350998eb54293b8e5a1c56527691, type: 3}
   m_Name: MapMaterialSet
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapMaterialSet
-  _fillMaterial: {fileID: 2100000, guid: fcbc652aad19f496999d2a827430c2b9, type: 2}
-  _lineMaterial: {fileID: 2100000, guid: dcd09bd3c233842c39a12f0bd2c29b3b, type: 2}
+  FillMaterial: {fileID: 2100000, guid: fcbc652aad19f496999d2a827430c2b9, type: 2}
+  LineMaterial: {fileID: 2100000, guid: dcd09bd3c233842c39a12f0bd2c29b3b, type: 2}
+  SymbolText: {fileID: 2100000, guid: 7a9225c22565d4bd8beb73beb2abde94, type: 2}

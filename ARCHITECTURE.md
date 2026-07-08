@@ -37,8 +37,16 @@ that aren't your differentiator.
 - the ECS rendering layer (this *is* the product) — meshes / materials / GPU-driven draw
 
 **Vendor as clean permissive dependencies — don't reinvent** (one-line notice each):
-- **text shaping** (i18n) → `HarfBuzzSharp` (MIT) — an entire subfield; never hand-roll
-- **SDF glyphs** → TextMeshPro SDF, or generate offline
+- **text bidi** (UAX #9, mixed LTR/RTL) → a **managed** ICU-derived lib (ICU4N / BidiReshapeSharp) when
+  mixed-direction labels arrive — never hand-roll full UAX #9. (S18 ships only bounded Arabic joining +
+  single-run RTL, which *is* small enough to own; see below.)
+- **text shaping** (full GSUB/GPOS glyph-index shaping) → `HarfBuzzSharp` (MIT) — an entire subfield; never
+  hand-roll — **BUT** only relevant to the *beyond-parity* "Model B" (runtime SDF from shipped fonts by glyph
+  index). Our locked model consumes MapLibre's **glyph-PBF SDF** (codepoint-keyed), which pre-bakes the
+  rasterisation offline and needs no runtime shaper — so HarfBuzz is **not** on the parity path (MapLibre
+  itself doesn't use it; it uses an ICU subset via `mapbox-gl-rtl-text`). See `stages/S18` §6.1 / R1.
+- **SDF glyphs** → MapLibre **glyph-PBF** (codepoint-keyed, fetched from the style `glyphs` URL); NOT
+  TextMeshPro, NOT runtime font rasterisation. (Model B / TextMeshPro kept only as a deferred beyond-parity option.)
 - *(if MVT via lib instead of hand-roll)* → `protobuf-net` (MIT) / `Google.Protobuf` (BSD)
 - *(later, geometry ops)* → **Clipper2** (Boost) — **not** GEOS (LGPL copyleft)
 

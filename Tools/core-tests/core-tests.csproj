@@ -263,6 +263,31 @@
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/FillPaintTests.cs" />
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/LinePaintTests.cs" />
 
+    <!-- S105 Slice 1: Symbol style layer + text-field resolver (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/PropertyNames.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/PaintProperties.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/LayoutProperties.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/StyleLayer.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/TextFieldResolver.cs" />
+
+    <!-- S105 Slice 1: A1 symbol-layer parse + A2 text-field resolution (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/SymbolStyleLayerTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/TextFieldResolverTests.cs" />
+
+    <!-- S105 Slice 2: point-feature extraction (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/SymbolLabel.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Style/Symbol/SymbolFeatureExtractor.cs" />
+
+    <!-- S105 Slice 2: A3 extraction over the fixture centroids layer (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorTests.cs" />
+
+    <!-- S105 Slice 3: StyledSymbolTileBuilder (engine-free, like GlyphManager) — extract → request glyphs
+         → shape → LabelInstance. -->
+    <Compile Include="../../Assets/MapRenderer.Unity/Text/StyledSymbolTileBuilder.cs" />
+
+    <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped LabelInstances, no synthetic source. -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/Placement/StyledSymbolTileBuilderTests.cs" />
+
     <!-- S43: LineDash (Core source, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Style/Line/LineDash.cs" />
 
@@ -274,5 +299,101 @@
 
     <!-- S44: Engine-free tests (shared verbatim) -->
     <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Style/LineOffsetTests.cs" />
+
+    <!-- S18 Slice 1: glyph-PBF decode + data carriers (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/SdfGlyph.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/FontStackGlyphs.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphPbfRange.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphSdf.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphPbfDecoder.cs" />
+
+    <!-- S18 Slice 1: T2 glyph-PBF decode test (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/GlyphPbfDecodeTests.cs" />
+
+    <!-- S18 Slice 2: atlas packing + CPU atlas (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphAtlasEntry.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphAtlasPacker.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphAtlas.cs" />
+
+    <!-- S18 Slice 2: T3 SDF-crispness + atlas packing/blit tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/SdfDistanceFieldTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/GlyphAtlasTests.cs" />
+    <!-- S105 Slice 3b: fixed-size atlas (Size-constant + graceful overflow) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/GlyphAtlasFixedSizeTests.cs" />
+
+    <!-- S18 Slice 3: clean-room shaper (Option Y, no HarfBuzz) — Core source, engine-free -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/PositionedGlyph.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextDirection.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/ShapedRun.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/IGlyphMetricsProvider.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/FontStack.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/ShapingRequest.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/ITextShaper.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/ArabicJoining.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/BidiReorder.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/CodepointTextShaper.cs" />
+
+    <!-- S18 Slice 3: T1 Arabic shaping golden + teeth (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/TextShapingTests.cs" />
+
+    <!-- S18 Slice 4: font-stack resolution + fallback + glyph cache (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphRangeKey.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphRangeResponse.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/IGlyphSource.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphCache.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/GlyphResolution.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/FontStackResolver.cs" />
+
+    <!-- S18 Slice 4: T5 font-stack fallback tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/FontStackFallbackTests.cs" />
+
+    <!-- S18 Unity-side batch: GlyphManager (fetch/decode/cache/atlas wiring) — engine-free despite
+         living under Assets/MapRenderer.Unity/Text (see its file header: no UnityEngine reference). -->
+    <Compile Include="../../Assets/MapRenderer.Unity/Text/GlyphManager.cs" />
+
+    <!-- S18 Unity-side batch: fake in-memory IGlyphSource test double (mirrors TestDataSource) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/TestSupport/TestGlyphSource.cs" />
+
+    <!-- S18 Unity-side batch: GlyphManager fetch/decode/cache/atlas tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/GlyphManagerTests.cs" />
+
+    <!-- S19: symbol layout (text-only) — Core source, engine-free -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/SymbolQuad.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextAnchor.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextJustify.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextLayoutOptions.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/IGlyphAtlasView.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextLayoutResult.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/TextQuadLayout.cs" />
+
+    <!-- S19 Slice 1: layout tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/TextQuadLayoutTests.cs" />
+    <!-- S19 Slice 2: anchor/offset/justify tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/TextAnchorOffsetJustifyTests.cs" />
+    <!-- S19 Slice 3: word-wrap tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/TextWrapTests.cs" />
+    <!-- S19 Slice 4: RTL layout tests (shared verbatim) -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/TextRtlLayoutTests.cs" />
+    <!-- TextQuadLayoutAllocTests.cs is Unity-only (UnityEngine.TestTools.Constraints) — NOT registered here. -->
+
+    <!-- S20 Slice 1: placement/billboard math (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelPaint.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelInstance.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/BillboardVertex.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/PlacedQuad.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
+
+    <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelBox.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelCollision.cs" />
+
+    <!-- S20 Slice 1: T3 billboard golden + zoom-independence, T2 screen-projection golden + culling
+         (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/Placement/LabelScreenProjectionTests.cs" />
+
+    <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
+    <Compile Include="../../Assets/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionTests.cs" />
   </ItemGroup>
 </Project>

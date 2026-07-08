@@ -68,10 +68,10 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         private GameObject _root;
         private int  _nextHandle;
 
-        // Last scene frame seen by Rebuild — identical blink-fix rationale to EntitiesTileRenderer: a
-        // tile-layer is consumed AFTER the frame's Rebuild (MapView.Tick: InstancedRebuild → TileManager.Tick
-        // → AddTileLayer), so without caching the frame a fresh container would be created at the world
-        // origin and render there for one frame until the NEXT Rebuild repositioned it.
+        // Last scene frame seen by Rebuild — identical blink-fix rationale to EntitiesTileRenderer.
+        // AddTileLayer may be called AFTER Rebuild within the same frame; caching the frame lets a
+        // freshly-added container be positioned immediately. Without it the container would be created at
+        // the world origin and render there for one frame until the NEXT Rebuild repositioned it.
         private SceneFrame _lastFrame;
         private bool       _hasSceneOrigin;
 
