@@ -12,6 +12,7 @@ using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Common;
 using MapRenderer.Jobs;
 using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
 using EntBackend = MapRenderer.Unity.Rendering.Backend.Entities;
@@ -1651,13 +1652,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (lt.Meshes == null) return;
             for (int i = 0; i < lt.Meshes.Length; i++)
-            {
-                if (lt.Meshes[i] != null)
-                {
-                    if (Application.isPlaying) Object.Destroy(lt.Meshes[i]);
-                    else                       Object.DestroyImmediate(lt.Meshes[i], allowDestroyingAssets: true);
-                }
-            }
+                lt.Meshes[i].DestroySafely(allowDestroyingAssets: true);
             lt.Meshes = null;
         }
 

@@ -211,5 +211,108 @@ namespace MapRenderer.Tests.Text.Placement
                 Box(0, 0, 1, 1, sortKey: 5f, featureIndex: 3, tileKey: 100),
                 Box(0, 0, 1, 1, sortKey: 5f, featureIndex: 3, tileKey: 100)));
         }
+
+        // ── DIFFERENTIAL: grid-accelerated SelectSurvivors == brute-force reference ────────────────────
+        // The grid is a pure prefilter, so its survivor set must be BIT-IDENTICAL to brute force over
+        // randomized inputs. This is the linchpin: the hand-built T1 cases above cannot expose the grid's
+        // real failure mode — a blocker missed because a candidate's cell coverage and the blocker's cell
+        // coverage disagree. So randomize seed × density × flag-mix, and deliberately include WIDE boxes
+        // that span many cells (the one dangerous case) plus tie-heavy sort keys (exercise the tiebreak).
+
+        private enum FlagMix { None, AllowSome, IgnoreSome, Both }
+
+        // count boxes with unique LabelIndex/FeatureIndex; positions/sizes chosen so wide boxes cover several
+        // 64px grid cells; sortKey drawn from a small set so ties are common (feature index still totally
+        // orders them). Deterministic per seed.
+        private static LabelBox[] RandomBoxes(int count, int seed, FlagMix mix)
+        {
+            var rng = new System.Random(seed);
+            var boxes = new LabelBox[count];
+            for (int i = 0; i < count; i++)
+            {
+                float x = (float)(rng.NextDouble() * 2000.0);
+                float y = (float)(rng.NextDouble() * 1200.0);
+                float w = 30f + (float)(rng.NextDouble() * 270.0); // up to 300px → spans many cells
+                float h = 10f + (float)(rng.NextDouble() * 40.0);
+                bool allow = (mix == FlagMix.AllowSome || mix == FlagMix.Both) && rng.NextDouble() < 0.2;
+                bool ignore = (mix == FlagMix.IgnoreSome || mix == FlagMix.Both) && rng.NextDouble() < 0.2;
+                boxes[i] = new LabelBox
+                {
+                    Min = new float2(x, y),
+                    Max = new float2(x + w, y + h),
+                    SortKey = rng.Next(0, 6),          // small range → frequent ties
+                    FeatureIndex = i,
+                    TileKey = rng.Next(0, 4),
+                    LabelIndex = i,
+                    AllowOverlap = allow,
+                    IgnorePlacement = ignore,
+                };
+            }
+            return boxes;
+        }
+
+        private static HashSet<int> SurvivorSet(LabelBox[] boxes, bool[] flags, int count)
+        {
+            var set = new HashSet<int>();
+            for (int i = 0; i < count; i++) if (flags[i]) set.Add(boxes[i].LabelIndex);
+            return set;
+        }
+
+        [Test]
+        public void SelectSurvivorsGrid_MatchesBruteForce_OverRandomizedInputs()
+        {
+            var grid = new LabelCollisionGrid();
+            int[] counts = { 1, 2, 3, 50, 500, 2000 };
+            int[] seeds = { 1, 7, 42, 101, 999, 31337 };
+            var mixes = new[] { FlagMix.None, FlagMix.AllowSome, FlagMix.IgnoreSome, FlagMix.Both };
+
+            foreach (int count in counts)
+            foreach (int seed in seeds)
+            foreach (FlagMix mix in mixes)
+            {
+                LabelBox[] input = RandomBoxes(count, seed, mix);
+                // SelectSurvivors sorts IN PLACE, so each path gets its own copy.
+                var bruteBoxes = (LabelBox[])input.Clone();
+                var gridBoxes = (LabelBox[])input.Clone();
+                var bruteFlags = new bool[count];
+                var gridFlags = new bool[count];
+
+                int nBrute = LabelCollision.SelectSurvivors(bruteBoxes, count, bruteFlags);
+                int nGrid = LabelCollision.SelectSurvivors(gridBoxes, count, gridFlags, grid);
+
+                string ctx = $"(count={count} seed={seed} mix={mix})";
+                Assert.AreEqual(nBrute, nGrid, $"survivor COUNT diverged {ctx}");
+                CollectionAssert.AreEquivalent(
+                    SurvivorSet(bruteBoxes, bruteFlags, count),
+                    SurvivorSet(gridBoxes, gridFlags, count),
+                    $"grid survivor SET must be identical to brute force {ctx} — a mismatch means the grid " +
+                    "missed a blocker (cell-coverage bug) or placed one it should have dropped");
+            }
+        }
+
+        // Grid instance is REUSED across calls with wildly different sizes/counts (as it is per-frame): a
+        // stale-state bug (uncleared cells, leftover nodes) would surface as a divergence on the second run.
+        [Test]
+        public void SelectSurvivorsGrid_ReusedInstance_StaysCorrectAcrossVaryingInputs()
+        {
+            var grid = new LabelCollisionGrid();
+            int[] sequence = { 2000, 3, 800, 1, 1500, 50 };
+            foreach (int count in sequence)
+            {
+                LabelBox[] input = RandomBoxes(count, seed: 2024 + count, mix: FlagMix.Both);
+                var bruteBoxes = (LabelBox[])input.Clone();
+                var gridBoxes = (LabelBox[])input.Clone();
+                var bruteFlags = new bool[count];
+                var gridFlags = new bool[count];
+
+                LabelCollision.SelectSurvivors(bruteBoxes, count, bruteFlags);
+                LabelCollision.SelectSurvivors(gridBoxes, count, gridFlags, grid);
+
+                CollectionAssert.AreEquivalent(
+                    SurvivorSet(bruteBoxes, bruteFlags, count),
+                    SurvivorSet(gridBoxes, gridFlags, count),
+                    $"reused grid diverged at count={count} — stale cell/node state not reset");
+            }
+        }
     }
 }

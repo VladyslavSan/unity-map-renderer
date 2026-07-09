@@ -100,6 +100,57 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
+        // 1b. SDF interior peak — DIAGNOSTIC for the "0.75 edge renders nearly transparent" finding.
+        // The fill shader treats distSample > _SdfEdge as inside; the fontnik convention puts the glyph
+        // OUTLINE at 191/255 ≈ 0.75 and the interior should climb well above it (toward 255) for any stroke
+        // more than a couple px thick. If a standard glyph's interior barely clears 0.75, either the glyph
+        // source encodes a shallow field OR our decode compresses the range. This measures the committed
+        // NotoSans fixture (a known-standard fontnik bake) to tell those apart: if IT reaches ~255, our
+        // pipeline is faithful and the live low-peak is an encoding property of the OTHER glyph source
+        // (→ a lower _SdfEdge is the correct per-source calibration, not a bug).
+        // =========================================================================================
+        [Test]
+        public void SdfInteriorPeak_StandardFontnikGlyphsClimbWellAbove075()
+        {
+            FontStackGlyphs stack = DecodeLatinRange().Stacks[0];
+
+            int globalMax = 0;
+            uint globalMaxCp = 0;
+            foreach (System.Collections.Generic.KeyValuePair<uint, SdfGlyph> kv in stack.Glyphs)
+            {
+                byte[] bmp = kv.Value.Bitmap;
+                if (bmp == null) continue;
+                for (int i = 0; i < bmp.Length; i++)
+                    if (bmp[i] > globalMax) { globalMax = bmp[i]; globalMaxCp = kv.Value.Codepoint; }
+            }
+
+            // Per-glyph peak + how much of the glyph is "solid" at the 0.75 iso, for thick-stroke letters.
+            string report = "";
+            foreach (uint cp in new uint[] { 66u /*B*/, 77u /*M*/, 111u /*o*/, 46u /*.*/ })
+            {
+                if (!stack.Glyphs.TryGetValue(cp, out SdfGlyph g) || g.Bitmap == null) continue;
+                int max = 0, above075 = 0, nonZero = 0;
+                foreach (byte b in g.Bitmap)
+                {
+                    if (b > max) max = b;
+                    if (b >= 191) above075++;
+                    if (b > 0) nonZero++;
+                }
+                report += $"  '{(char)cp}' cp{cp}: max={max} ({max / 255f:F2}), " +
+                          $"{above075}/{nonZero} inked px ≥0.75 ({(nonZero > 0 ? 100f * above075 / nonZero : 0):F0}%)\n";
+            }
+
+            TestContext.WriteLine($"[SdfPeak] globalMax={globalMax} ({globalMax / 255f:F3}) at cp{globalMaxCp}\n{report}");
+
+            // A standard fontnik SDF must reach near-255 somewhere (thick stroke centers). This is the
+            // decisive tooth: if the committed fixture ITSELF peaks low, the pipeline compresses the field.
+            Assert.GreaterOrEqual(globalMax, 240,
+                $"standard fontnik SDF interiors should approach 255 (1.0); global max byte = {globalMax} " +
+                $"(cp {globalMaxCp} = {globalMax / 255f:F3}). If this is low, our decode/atlas compresses the " +
+                $"field. Per-glyph peaks:\n{report}");
+        }
+
+        // =========================================================================================
         // 2. Space (codepoint 32) has no bitmap in the PBF — decoder must tolerate the absent
         //    `bitmap` field (whitespace/zero-advance glyphs) rather than throwing or fabricating one.
         // =========================================================================================

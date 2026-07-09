@@ -104,7 +104,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             var atlasTexture = BuildTinyAtlasTexture();
             var labels = BuildLabels(20, frame.SceneOriginRender);
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/SymbolText")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
 
             try
             {

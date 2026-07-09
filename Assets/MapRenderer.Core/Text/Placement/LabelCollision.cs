@@ -64,7 +64,7 @@ namespace MapRenderer.Core.Text.Placement
             if (count > survivor.Length)
                 throw new ArgumentOutOfRangeException(nameof(count), "count exceeds the survivor array length");
 
-            InsertionSort(boxes, count);
+            Sort(boxes, count);
 
             int survivors = 0;
             for (int i = 0; i < count; i++)
@@ -86,21 +86,73 @@ namespace MapRenderer.Core.Text.Placement
             return survivors;
         }
 
-        // Insertion sort: in place, zero-alloc, and stable (irrelevant here — ComparePlacementOrder is a
-        // total order — but it costs nothing). O(n²) matches the brute-force greedy that follows; visible
-        // on-screen label counts are modest (tens to low hundreds), well within budget for the first cut.
-        private static void InsertionSort(LabelBox[] a, int n)
+        /// <summary>
+        /// Grid-accelerated survivor selection — the production per-frame path. Behaviourally IDENTICAL to
+        /// the brute-force <see cref="SelectSurvivors(LabelBox[],int,bool[])"/> (same sort, same greedy rule,
+        /// same <see cref="Overlaps"/> decision); <paramref name="grid"/> only prunes which already-placed
+        /// blockers each candidate is tested against, turning the O(n²) scan into ~O(n·k). A differential
+        /// test locks this to the reference over randomized inputs. Pass a caller-owned <paramref name="grid"/>
+        /// reused across frames for zero per-frame GC (T4).
+        /// </summary>
+        public static int SelectSurvivors(LabelBox[] boxes, int count, bool[] survivor, LabelCollisionGrid grid)
         {
-            for (int i = 1; i < n; i++)
+            if (grid == null) return SelectSurvivors(boxes, count, survivor); // reference path
+            if (boxes == null) throw new ArgumentNullException(nameof(boxes));
+            if (survivor == null) throw new ArgumentNullException(nameof(survivor));
+            if (count <= 0) return 0;
+            if (count > boxes.Length)
+                throw new ArgumentOutOfRangeException(nameof(count), "count exceeds the boxes array length");
+            if (count > survivor.Length)
+                throw new ArgumentOutOfRangeException(nameof(count), "count exceeds the survivor array length");
+
+            Sort(boxes, count);
+            grid.Reset(boxes, count);
+
+            int survivors = 0;
+            for (int i = 0; i < count; i++)
             {
-                LabelBox key = a[i];
-                int j = i - 1;
-                while (j >= 0 && ComparePlacementOrder(in a[j], in key) > 0)
+                // Place if the label ignores collision, OR it overlaps no already-placed blocker (AllowOverlap
+                // short-circuits the query — an allow-overlap label is never tested, matching the reference).
+                bool place = boxes[i].AllowOverlap || !grid.OverlapsAny(in boxes[i], boxes);
+                survivor[i] = place;
+                if (place)
                 {
-                    a[j + 1] = a[j];
-                    j--;
+                    survivors++;
+                    // A placed label blocks later ones UNLESS it ignores placement — so only non-ignore
+                    // survivors enter the grid (exactly the reference's `survivor[j] && !IgnorePlacement`).
+                    if (!boxes[i].IgnorePlacement) grid.Insert(i, in boxes[i]);
                 }
-                a[j + 1] = key;
+            }
+            return survivors;
+        }
+
+        // In-place heapsort: O(n log n), zero managed allocation, no IComparer by-value copies (compares via
+        // ComparePlacementOrder(in,in) directly). Replaces the original O(n²) insertion sort, which collapsed
+        // at zoom-14-big-city label counts (thousands, not the "tens to low hundreds" the first cut assumed).
+        // Not stable — irrelevant here: ComparePlacementOrder is a TOTAL order (no two distinct labels tie),
+        // so the sorted result is unique regardless of stability.
+        private static void Sort(LabelBox[] a, int n)
+        {
+            for (int root = n / 2 - 1; root >= 0; root--) SiftDown(a, root, n); // build max-heap
+            for (int end = n - 1; end > 0; end--)
+            {
+                (a[0], a[end]) = (a[end], a[0]); // move current max to the sorted tail
+                SiftDown(a, 0, end);
+            }
+        }
+
+        // Restore the max-heap property at <paramref name="root"/> over a[0..n). "Max" is the LAST element in
+        // ComparePlacementOrder, so heapsort emits ascending placement order (lowest sort-key placed first).
+        private static void SiftDown(LabelBox[] a, int root, int n)
+        {
+            while (true)
+            {
+                int child = 2 * root + 1;
+                if (child >= n) break;
+                if (child + 1 < n && ComparePlacementOrder(in a[child], in a[child + 1]) < 0) child++;
+                if (ComparePlacementOrder(in a[root], in a[child]) >= 0) break;
+                (a[root], a[child]) = (a[child], a[root]);
+                root = child;
             }
         }
     }

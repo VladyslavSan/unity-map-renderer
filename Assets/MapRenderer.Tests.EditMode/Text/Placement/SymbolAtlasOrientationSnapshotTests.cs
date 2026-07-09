@@ -134,7 +134,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/SymbolText")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
             var snap = new SnapshotRenderer(Size, Size);
             GameObject meshGo = null;
             try

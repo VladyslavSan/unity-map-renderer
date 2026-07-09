@@ -6,12 +6,12 @@ using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
-using Sym = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S105 Slice 1 (A2): <see cref="Sym.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
+    /// S105 Slice 1 (A2): <see cref="SymbolStyle.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
     /// expression form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact label string; a missing
     /// property SKIPS the feature (returns null), never a blank label. Engine-free; runs in both runners.
     /// </summary>
@@ -34,20 +34,20 @@ namespace MapRenderer.Tests
         [Test]
         public void Token_SingleProperty_Resolves()
         {
-            Assert.AreEqual("Aruba", Sym.TextFieldResolver.Resolve(Field("'{NAME}'"), Aruba));
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME}'"), Aruba));
         }
 
         [Test]
         public void Expression_Get_Resolves()
         {
-            Assert.AreEqual("Aruba", Sym.TextFieldResolver.Resolve(Field("['get','NAME']"), Aruba));
+            Assert.AreEqual("Aruba", SymbolStyle.TextFieldResolver.Resolve(Field("['get','NAME']"), Aruba));
         }
 
         [Test]
         public void Token_MultiTokenWithLiterals_Resolves()
         {
             Assert.AreEqual("Afghanistan (Afg.)",
-                Sym.TextFieldResolver.Resolve(Field("'{NAME} ({ABBREV})'"), Afghanistan));
+                SymbolStyle.TextFieldResolver.Resolve(Field("'{NAME} ({ABBREV})'"), Afghanistan));
         }
 
         [Test]
@@ -55,33 +55,33 @@ namespace MapRenderer.Tests
         {
             // name:en absent → coalesce falls back to NAME.
             Assert.AreEqual("Aruba",
-                Sym.TextFieldResolver.Resolve(Field("['coalesce',['get','name:en'],['get','NAME']]"), Aruba));
+                SymbolStyle.TextFieldResolver.Resolve(Field("['coalesce',['get','name:en'],['get','NAME']]"), Aruba));
         }
 
         [Test]
         public void MissingProperty_Token_SkipsWithNull()
         {
-            Assert.IsNull(Sym.TextFieldResolver.Resolve(Field("'{missing}'"), Aruba),
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("'{missing}'"), Aruba),
                 "an unknown token resolving to empty text must SKIP the feature (null), not emit a blank label");
         }
 
         [Test]
         public void MissingProperty_Expression_SkipsWithNull()
         {
-            Assert.IsNull(Sym.TextFieldResolver.Resolve(Field("['get','missing']"), Aruba),
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(Field("['get','missing']"), Aruba),
                 "a get on a missing property must SKIP the feature (null), not emit a blank label");
         }
 
         [Test]
         public void LiteralNoTokens_PassesThrough()
         {
-            Assert.AreEqual("Airport", Sym.TextFieldResolver.Resolve(Field("'Airport'"), Aruba));
+            Assert.AreEqual("Airport", SymbolStyle.TextFieldResolver.Resolve(Field("'Airport'"), Aruba));
         }
 
         [Test]
         public void NullField_Skips()
         {
-            Assert.IsNull(Sym.TextFieldResolver.Resolve(null, Aruba));
+            Assert.IsNull(SymbolStyle.TextFieldResolver.Resolve(null, Aruba));
         }
     }
 }

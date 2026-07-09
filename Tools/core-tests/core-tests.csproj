@@ -387,6 +387,7 @@
     <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->
     <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelBox.cs" />
     <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelCollision.cs" />
+    <Compile Include="../../Assets/MapRenderer.Core/Text/Placement/LabelCollisionGrid.cs" />
 
     <!-- S20 Slice 1: T3 billboard golden + zoom-independence, T2 screen-projection golden + culling
          (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->

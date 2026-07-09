@@ -12,7 +12,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
-using Sym = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Tests; // TestGlyphSource
 
 namespace MapRenderer.Tests.Text.Placement
@@ -51,8 +51,8 @@ namespace MapRenderer.Tests.Text.Placement
             return new GlyphManager(TestGlyphSource.FromRanges(ranges));
         }
 
-        private static Sym.StyleLayer CentroidsLayer()
-            => new Sym.StyleLayer
+        private static SymbolStyle.StyleLayer CentroidsLayer()
+            => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
@@ -66,11 +66,11 @@ namespace MapRenderer.Tests.Text.Placement
         {
             MvtTile tile = MvtDecoder.Decode(LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
             var projection = new WebMercatorProjection();
-            Sym.StyleLayer layer = CentroidsLayer();
+            SymbolStyle.StyleLayer layer = CentroidsLayer();
 
             // Independent extractor pass (Slice 2) gives the ground-truth text/anchor/ordinal per label.
-            var extracted = new List<Sym.SymbolLabel>();
-            Sym.SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
+            var extracted = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
 
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Text.Placement
             AssertNamedLabel(extracted, labels, "Angola", 6);
         }
 
-        private static void AssertNamedLabel(List<Sym.SymbolLabel> extracted, List<LabelInstance> labels,
+        private static void AssertNamedLabel(List<SymbolStyle.SymbolLabel> extracted, List<LabelInstance> labels,
             string name, int expectedQuads)
         {
             int idx = extracted.FindIndex(e => e.Text == name);

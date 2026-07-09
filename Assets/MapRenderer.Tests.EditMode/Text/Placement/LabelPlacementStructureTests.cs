@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Text.Placement
             var twoLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender), MakeLabel(1, frame.SceneOriginRender) };
             var oneLabel = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender) };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/SymbolText")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
             try
             {
                 Assert.AreEqual(0, system.TickCount, "TickCount starts at 0 before any Tick.");

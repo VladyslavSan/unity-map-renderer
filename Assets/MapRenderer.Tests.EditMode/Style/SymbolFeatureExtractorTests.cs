@@ -9,12 +9,12 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
-using Sym = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S105 Slice 2 (A3): <see cref="Sym.SymbolFeatureExtractor.Extract"/> over the committed fixture's
+    /// S105 Slice 2 (A3): <see cref="SymbolStyle.SymbolFeatureExtractor.Extract"/> over the committed fixture's
     /// <c>centroids</c> layer (250 Point features with <c>NAME</c>/<c>ABBREV</c>) yields the right count,
     /// the right resolved text for the first feature (<c>"Aruba"</c>), an anchor that is the REAL
     /// tile→geo→project chain (not a stub), and honours the layer filter. Engine-free; both runners.
@@ -41,8 +41,8 @@ namespace MapRenderer.Tests
 
         private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
 
-        private static Sym.StyleLayer CentroidsLayer(string textField = "{NAME}", string filterJson = null)
-            => new Sym.StyleLayer
+        private static SymbolStyle.StyleLayer CentroidsLayer(string textField = "{NAME}", string filterJson = null)
+            => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
@@ -57,8 +57,8 @@ namespace MapRenderer.Tests
             MvtTile tile = MvtDecoder.Decode(LoadFixture());
             var projection = new WebMercatorProjection();
 
-            var labels = new List<Sym.SymbolLabel>();
-            Sym.SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, labels);
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, labels);
 
             // The fixture has 250 centroids features; one label per point feature with a NON-EMPTY NAME.
             // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the A2 skip
@@ -104,8 +104,8 @@ namespace MapRenderer.Tests
             MvtTile tile = MvtDecoder.Decode(LoadFixture());
             var projection = new WebMercatorProjection();
 
-            var labels = new List<Sym.SymbolLabel>();
-            Sym.SymbolFeatureExtractor.Extract(
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(
                 CentroidsLayer(filterJson: "[\"==\",[\"get\",\"ABBREV\"],\"Afg.\"]"),
                 tile, FixtureTile, 0.0, projection, labels);
 

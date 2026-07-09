@@ -4,12 +4,12 @@
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Style;
-using Sym = MapRenderer.Core.Style.Symbol;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S105 Slice 1 (A1): a <c>symbol</c> layer parses to the typed <see cref="Sym.StyleLayer"/> (NOT the
+    /// S105 Slice 1 (A1): a <c>symbol</c> layer parses to the typed <see cref="SymbolStyle.StyleLayer"/> (NOT the
     /// generic base) with its <c>text-*</c>/<c>symbol-*</c> paint+layout values — and an EMPTY symbol layer
     /// yields every MapLibre spec DEFAULT. Engine-free; runs in both runners.
     /// </summary>
@@ -37,9 +37,9 @@ namespace MapRenderer.Tests
             Assert.AreEqual(2, doc.Layers.Count);
 
             StyleLayer layer = doc.Layers[0];
-            Assert.IsInstanceOf<Sym.StyleLayer>(layer,
+            Assert.IsInstanceOf<SymbolStyle.StyleLayer>(layer,
                 "a 'symbol' layer must parse to the typed Symbol.StyleLayer, not the generic base");
-            var sym = (Sym.StyleLayer)layer;
+            var sym = (SymbolStyle.StyleLayer)layer;
 
             // text-field kept as raw JSON (resolved per-feature, not a scalar).
             Assert.IsNotNull(sym.Layout.TextField, "text-field must be retained (raw) for per-feature resolution");
@@ -61,7 +61,7 @@ namespace MapRenderer.Tests
         public void SymbolLayer_EmptyLayoutAndPaint_YieldsSpecDefaults()
         {
             StyleDocument doc = Parse(StyleJson);
-            var sym = (Sym.StyleLayer)doc.Layers[1];
+            var sym = (SymbolStyle.StyleLayer)doc.Layers[1];
 
             // Layout defaults.
             Assert.AreEqual(16f, sym.Layout.TextSize.Evaluate(0.0), 1e-6, "text-size default is 16");
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests
                 "text-padding default is 2 (the resolver applies the spec default; LabelInstance's carrier default is 0)");
             Assert.IsFalse(sym.Layout.TextAllowOverlap, "text-allow-overlap default is false");
             Assert.IsFalse(sym.Layout.TextIgnorePlacement, "text-ignore-placement default is false");
-            Assert.AreEqual(Sym.PropertyNames.PlacementPoint, sym.Layout.SymbolPlacement, "symbol-placement default is point");
+            Assert.AreEqual(SymbolStyle.PropertyNames.PlacementPoint, sym.Layout.SymbolPlacement, "symbol-placement default is point");
 
             // Paint defaults.
             Assert.AreEqual(0f, sym.Paint.HaloWidth.Evaluate(0.0), 1e-6, "text-halo-width default is 0");

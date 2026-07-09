@@ -4,6 +4,7 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -95,11 +96,6 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>Destroys a per-layer <see cref="Material"/> instance (play → Destroy, edit → DestroyImmediate).
         /// Shared by the <see cref="IRenderLayer"/> implementations, which own their materials.</summary>
-        internal static void DestroyMaterialInstance(Material mat)
-        {
-            if (mat == null) return;
-            if (Application.isPlaying) UnityEngine.Object.Destroy(mat);
-            else                       UnityEngine.Object.DestroyImmediate(mat);
-        }
+        internal static void DestroyMaterialInstance(Material mat) => mat.DestroySafely();
     }
 }

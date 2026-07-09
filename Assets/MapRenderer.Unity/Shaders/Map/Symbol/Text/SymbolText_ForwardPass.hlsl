@@ -1,4 +1,4 @@
-// Symbol_ForwardPass.hlsl — Map/SymbolText vertex + fragment (S20 Slice 1).
+// Symbol_ForwardPass.hlsl — Map/Symbol/Text vertex + fragment (S20 Slice 1).
 //
 // VERTEX: the Graphics.RenderMesh screen-space bypass (S20 plan Risk #1). Every BillboardVertex's
 // POSITION is ALREADY a logical screen-pixel coordinate (computed by LabelScreenProjection +
@@ -66,15 +66,22 @@ half4 SymbolPassFragment(SymbolVaryings input) : SV_Target
 {
     half distSample = SAMPLE_TEXTURE2D(_MainTex, sampler_MainTex, input.uv).r;
 
-    half aa = max(fwidth(distSample) * _SdfSoftness, 1e-5h);
-    half fillAlpha = smoothstep(_SdfEdge - aa, _SdfEdge + aa, distSample);
+    // Analytic screen-space AA (Chlumský msdfgen technique — public/MIT, clean-room-safe; NOT MapLibre's
+    // shader). Derive the field's screen-pixel scale from the LINEAR uv gradient + atlas texel size + the
+    // SDF's texel range — NOT fwidth of the nonlinearly-sampled distance (which is noisy AND size-blind, so
+    // it over-softened and forced a low _SdfEdge to stay visible). screenDist is then the signed distance
+    // from the fill edge in SCREEN PIXELS: the transition is a fixed ~1px at every zoom, and the body is
+    // solid the instant distSample passes _SdfEdge (the "above threshold => solid" behaviour we want).
+    float2 unitRange     = _SdfPixelRange * _MainTex_TexelSize.xy;   // SDF range, in uv units
+    float2 screenTexSize = 1.0 / max(fwidth(input.uv), 1e-6);        // screen px per uv unit
+    float  screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
 
-    // Halo: a second, WIDER threshold under the fill (Slice 1 linear px-approximation — see the input
-    // header's doc comment + README; Slice 3 calibrates this precisely).
-    half haloShift = _HaloWidthPx * _SdfDistancePerPixel;
-    half haloAA = aa + max(_HaloBlurPx * _SdfDistancePerPixel, 0.0h);
-    half haloEdge = saturate(_SdfEdge - haloShift);
-    half haloAlpha = smoothstep(haloEdge - haloAA, haloEdge + haloAA, distSample);
+    half screenDist = (distSample - _SdfEdge) * screenPxRange;       // signed screen px from the fill edge
+    half fillAlpha  = saturate(screenDist / max(_SdfSoftness, 1e-3h) + 0.5h);
+
+    // Halo: the SAME signed field, with the edge pushed OUT by _HaloWidthPx screen px and the transition
+    // widened by _HaloBlurPx — both now real screen pixels (size-independent), no px->SDF approximation.
+    half haloAlpha = saturate((screenDist + _HaloWidthPx) / max(_SdfSoftness + _HaloBlurPx, 1e-3h) + 0.5h);
 
     half4 result;
     result.rgb = lerp(_HaloColor.rgb, input.color.rgb, fillAlpha);

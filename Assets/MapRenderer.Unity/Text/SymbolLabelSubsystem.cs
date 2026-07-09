@@ -4,6 +4,7 @@
 using System;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
+using Unity.Profiling;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
@@ -13,7 +14,8 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
-using Sym = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Common;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Unity.Text
 {
@@ -47,13 +49,21 @@ namespace MapRenderer.Unity.Text
         // Flat symbol-layer list (index == LabelInstance.MaterialIndex), one per-layer material each (a
         // SymbolText clone with this layer's text-halo-* bound), and a source id → its layers' GLOBAL
         // indices map (only sources with symbol layers are observed).
-        private readonly List<Sym.StyleLayer> _allSymbolLayers = new();
+        private readonly List<SymbolStyle.StyleLayer> _allSymbolLayers = new();
         private Material[] _layerMaterials = Array.Empty<Material>();
         private Dictionary<string, List<int>> _layersBySource;
 
         private static readonly int HaloColorId = Shader.PropertyToID("_HaloColor");
         private static readonly int HaloWidthId = Shader.PropertyToID("_HaloWidthPx");
         private static readonly int HaloBlurId = Shader.PropertyToID("_HaloBlurPx");
+
+        // Per-tile build markers (Profiler window → "MapRenderer.Symbol"). Only the SYNCHRONOUS main-thread
+        // stages are marked — the shaping BuildAsync is awaited (its wall-clock includes glyph-fetch
+        // suspension, not CPU), so it is deliberately left unmarked to avoid polluting the timeline.
+        private static readonly ProfilerMarker PmTileDecode =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode");
+        private static readonly ProfilerMarker PmAtlasUpload =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.AtlasUpload");
 
         // Per-(source, tile) built labels + a generation stamp (a released-then-re-entered tile gets a new
         // generation, so a stale in-flight build discards its result instead of last-writer-wins clobber).
@@ -98,7 +108,7 @@ namespace MapRenderer.Unity.Text
             {
                 foreach (StyleLayer layer in style.Layers)
                 {
-                    if (!(layer is Sym.StyleLayer symbol) || symbol.Source == null) continue;
+                    if (!(layer is SymbolStyle.StyleLayer symbol) || symbol.Source == null) continue;
                     int index = _allSymbolLayers.Count; // == this layer's MaterialIndex
                     _allSymbolLayers.Add(symbol);
                     if (!_layersBySource.TryGetValue(symbol.Source, out List<int> indices))
@@ -139,16 +149,19 @@ namespace MapRenderer.Unity.Text
             _builder = new StyledSymbolTileBuilder(_glyphManager);
         }
 
-        private static void BindHalo(Material material, Sym.PaintProperties paint, double zoom)
+        private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom)
         {
             // Constant/zoom halo only (the locked first-cut scope). A data-driven (Feature/Composite) halo
             // would throw from Evaluate(zoom) — leave the material's inherited base halo rather than fault
             // the whole style load (data-driven halo is a documented follow-up).
             try
             {
-                var haloColor = paint.HaloColor.Evaluate(zoom); // MapRenderer.Core.Expressions.Color
+                var haloColor = paint.HaloColor.Evaluate(zoom); // MapRenderer.Core.Expressions.Color (sRGB)
+                // sRGB→linear (project is Linear color space; the shader consumes _HaloColor directly, and
+                // SetColor uploads raw floats with no gamma conversion) — mirrors the vertex text-color bake
+                // in LabelPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
                 material.SetColor(HaloColorId,
-                    new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A));
+                    new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A).linear);
                 material.SetFloat(HaloWidthId, paint.HaloWidth.Evaluate(zoom));
                 material.SetFloat(HaloBlurId, paint.HaloBlur.Evaluate(zoom));
             }
@@ -182,12 +195,14 @@ namespace MapRenderer.Unity.Text
 
             try
             {
-                MvtTile mvt = MvtDecoder.Decode(bytes); // decode-on-main (fast); a first-cut per F5 threading note
+                MvtTile mvt;
+                using (PmTileDecode.Auto())
+                    mvt = MvtDecoder.Decode(bytes); // decode-on-main (fast); a first-cut per F5 threading note
                 double zoom = _camera.CurrentProperties.Zoom;
 
                 // The source's layers + their global material indices (parallel lists), so each built label
                 // is stamped with its owning layer's MaterialIndex for the per-material draw grouping.
-                var layers = new List<Sym.StyleLayer>(layerIndices.Count);
+                var layers = new List<SymbolStyle.StyleLayer>(layerIndices.Count);
                 for (int k = 0; k < layerIndices.Count; k++) layers.Add(_allSymbolLayers[layerIndices[k]]);
 
                 var labels = new List<LabelInstance>();
@@ -203,7 +218,8 @@ namespace MapRenderer.Unity.Text
                 if (glyphCount > _lastUploadedGlyphCount)
                 {
                     _lastUploadedGlyphCount = glyphCount;
-                    _atlasTexture.Upload(_glyphManager.Atlas);
+                    using (PmAtlasUpload.Auto())
+                        _atlasTexture.Upload(_glyphManager.Atlas);
                 }
                 WarnOnAtlasOverflow();
             }
@@ -240,11 +256,7 @@ namespace MapRenderer.Unity.Text
         private void DisposePipeline()
         {
             for (int i = 0; i < _layerMaterials.Length; i++)
-            {
-                if (_layerMaterials[i] == null) continue;
-                if (Application.isPlaying) UnityEngine.Object.Destroy(_layerMaterials[i]);
-                else UnityEngine.Object.DestroyImmediate(_layerMaterials[i]);
-            }
+                _layerMaterials[i].DestroySafely();
             _layerMaterials = Array.Empty<Material>();
 
             _atlasTexture?.Dispose();

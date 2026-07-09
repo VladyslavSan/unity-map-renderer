@@ -1,7 +1,7 @@
-// Symbol_Input.hlsl — Map/SymbolText layer CBUFFER + SDF atlas sampler.
+// Symbol_Input.hlsl — Map/Symbol/Text layer CBUFFER + SDF atlas sampler.
 //
 // UNLIKE Fill_LitInput.hlsl / Line_LitInput.hlsl, this is NOT derived from URP's LitInput.hlsl — Symbol
-// is the affirmed F2 divergence (unlit SDF text, not a lit surface; see Shaders/Map/SymbolText/README.md).
+// is the affirmed F2 divergence (unlit SDF text, not a lit surface; see Shaders/Map/Symbol/Text/README.md).
 // No UnityPerMaterial DOTS-instancing bridge either: Symbol submits via Graphics.RenderMesh/RenderParams
 // (one draw call per frame, SRP-Batcher-compatible CBUFFER), never BatchRendererGroup — there is nothing
 // to instance.
@@ -25,15 +25,19 @@ CBUFFER_START(UnityPerMaterial)
 //   LabelPlacementSystem. Converts a vertex's logical-screen-px POSITION to clip space (the
 //   Graphics.RenderMesh screen-space bypass — see the pass body + README).
 float4 _ScreenParamsLogical;
+// _MainTex_TexelSize — (1/w, 1/h, w, h) of the SDF atlas, auto-populated by Unity. Used by the analytic AA
+//   to convert the SDF's texel range into screen pixels (see the fragment). In the CBUFFER for SRP Batcher.
+float4 _MainTex_TexelSize;
 // _SdfEdge          — the SDF's fill iso level, normalized [0,1]. 0.75 matches S18's on-disk convention
 //                      (GlyphSdf/SdfDistanceFieldTests.IsoLevel = 191/255 ≈ 0.75), NOT the generic 0.5.
-// _SdfSoftness       — extra multiplier on the fwidth-derived antialiasing half-width (1 = plain fwidth AA).
-// _SdfDistancePerPixel — approximate px -> normalized-SDF-distance conversion used only by the halo
-//   threshold shift below; Slice 1 ships a simple linear approximation (documented in the README) —
-//   precise px-calibration is a Slice 3 (paint tuning) follow-up.
+// _SdfSoftness       — antialiasing width in SCREEN PIXELS (~1 = a crisp 1px edge; higher = softer).
+// _SdfPixelRange     — the SDF distance field's range in ATLAS TEXELS: the texel count spanned by one unit
+//   of normalized distance value (≈ the fontnik radius, 8). The analytic AA scales the signed distance
+//   (distSample - _SdfEdge) by this to recover screen-pixel distance, so the edge is crisp at every zoom
+//   and the halo width/blur are real screen pixels. Tune if glyphs read too soft (raise) or aliased (lower).
 float _SdfEdge;
 float _SdfSoftness;
-float _SdfDistancePerPixel;
+float _SdfPixelRange;
 
 // (A) Style-bound — genuine MapLibre text-halo-* spec terms (production binds text-halo-color/width/blur
 // onto these BY NAME once S105 lands; Slice 1's demo leaves them at their Inspector/default values):

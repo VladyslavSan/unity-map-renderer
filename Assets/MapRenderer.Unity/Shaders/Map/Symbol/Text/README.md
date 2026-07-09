@@ -1,4 +1,4 @@
-# Map/SymbolText — the affirmed F2 divergence
+# Map/Symbol/Text — the affirmed F2 divergence
 
 `Shaders/README.md` states the project convention: every map layer mirrors stock URP Lit verbatim plus a
 documented logic delta (see `shaders-mirror-unitylit`). **`Symbol` does not follow that convention** — this

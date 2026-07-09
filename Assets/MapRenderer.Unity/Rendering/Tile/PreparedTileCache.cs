@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
+using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -246,12 +247,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Same main-thread guard <c>TileManager.DestroyTrackedMeshes</c> uses.</summary>
-        private static void DestroyMesh(Mesh m)
-        {
-            if (m == null) return;
-            if (Application.isPlaying) UnityEngine.Object.Destroy(m);
-            else                       UnityEngine.Object.DestroyImmediate(m, allowDestroyingAssets: true);
-        }
+        private static void DestroyMesh(Mesh m) => m.DestroySafely(allowDestroyingAssets: true);
 
         /// <summary>
         /// Destroys every held <see cref="Mesh"/> and empties the cache — reusable afterwards (unlike a true

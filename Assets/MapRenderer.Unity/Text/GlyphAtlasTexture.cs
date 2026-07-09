@@ -11,6 +11,7 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Text;
+using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Text
 {
@@ -47,7 +48,7 @@ namespace MapRenderer.Unity.Text
 
             if (_texture == null || _texture.width != size.x || _texture.height != size.y)
             {
-                if (_texture != null) DestroyTexture(_texture);
+                _texture.DestroySafely();
                 _texture = new Texture2D(size.x, size.y, TextureFormat.R8, mipChain: false, linear: true)
                 {
                     filterMode = FilterMode.Bilinear,
@@ -61,20 +62,8 @@ namespace MapRenderer.Unity.Text
 
         public void Dispose()
         {
-            if (_texture != null)
-            {
-                DestroyTexture(_texture);
-                _texture = null;
-            }
-        }
-
-        // Object.Destroy only works in Play mode; the headless EditMode test gate (and any Editor-side
-        // atlas preview) runs outside Play mode and must use DestroyImmediate instead — same
-        // Application.isPlaying guard TileManager.DestroyTrackedMeshes / RenderLayerSet.DestroyMaterialInstance use.
-        private static void DestroyTexture(Texture2D texture)
-        {
-            if (Application.isPlaying) UnityEngine.Object.Destroy(texture);
-            else UnityEngine.Object.DestroyImmediate(texture);
+            _texture.DestroySafely();
+            _texture = null;
         }
     }
 }

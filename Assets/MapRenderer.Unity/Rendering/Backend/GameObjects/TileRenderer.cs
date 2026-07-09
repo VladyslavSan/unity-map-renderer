@@ -5,6 +5,7 @@ using UnityEngine;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 {
@@ -280,14 +281,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
         // ── Teardown ────────────────────────────────────────────────────────────────────────────────
 
-        private static void DestroyGo(GameObject go)
-        {
-            if (go == null) return;
-            // Qualify Object: `using System;` (for the Argument*Exception types) makes a bare `Object`
-            // ambiguous with System.Object.
-            if (Application.isPlaying) UnityEngine.Object.Destroy(go);
-            else                       UnityEngine.Object.DestroyImmediate(go);
-        }
+        private static void DestroyGo(GameObject go) => go.DestroySafely();
 
         /// <summary>
         /// Destroys the backend root (and with it every container + layer child). Does NOT destroy Mesh

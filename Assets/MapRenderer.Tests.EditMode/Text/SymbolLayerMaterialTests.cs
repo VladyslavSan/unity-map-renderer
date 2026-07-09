@@ -40,7 +40,7 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
 
             var set = ScriptableObject.CreateInstance<MapMaterialSet>();
-            set.SymbolText = new Material(Shader.Find("Map/SymbolText"));
+            set.SymbolText = new Material(Shader.Find("Map/Symbol/Text"));
 
             StyleDocument style = StyleParser.Parse(TwoSymbolLayers.Replace('\'', '"'));
             var subsystem = new SymbolLabelSubsystem(mapCamera, set);
