@@ -2,7 +2,11 @@
 # Headless Unity test runner for unity-map-renderer.
 # Self-locating: run from anywhere inside the repo.
 #
-#   Tools/run-tests.sh [EditMode|PlayMode]   (default: EditMode)
+#   Tools/run-tests.sh [EditMode|PlayMode] [testFilter]   (default: EditMode, no filter)
+#
+# testFilter (optional) is passed straight to Unity's -testFilter (a regex over test
+# full names), e.g. 'MapRenderer.Tests.Visual' runs just the snapshot suites. Startup
+# (asset import + domain reload) still dominates; the filter only trims which tests run.
 #
 # Exit codes: 0 = compiled AND all tests passed; 2 = setup error (no repo / no
 # editor binary); 3 = a live Unity process is running (Editor open, project locked);
@@ -15,6 +19,7 @@ set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
 VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt" 2>/dev/null)"
 PLATFORM="${1:-EditMode}"
+FILTER="${2:-}"
 
 # Locate the Unity editor binary for this project's version (Unity Hub defaults).
 case "$(uname -s)" in
@@ -62,11 +67,53 @@ mkdir -p "$ROOT/Logs"
 RESULTS="$ROOT/Logs/test-results.xml"
 LOG="$ROOT/Logs/test-run.log"
 
-"$UNITY" -runTests -batchmode -projectPath "$ROOT" \
-  -testPlatform "$PLATFORM" \
-  -testResults "$RESULTS" \
-  -logFile "$LOG"
+run_unity() { # $1 = testResults path, $2 = logFile path
+  "$UNITY" -runTests -batchmode -projectPath "$ROOT" \
+    -testPlatform "$PLATFORM" \
+    ${FILTER:+-testFilter "$FILTER"} \
+    -testResults "$1" \
+    -logFile "$2"
+}
+
+# Cold- OR stale-shader-cache warm-up pass.
+# In batchmode, an un-cached shader variant compiles ASYNChronously and lands AFTER the first render
+# that needs it, so the measuring render is wrong (blank fills; a _NORMALMAP keyword toggle that
+# silently no-ops) — not real regressions. This bites two ways:
+#   • cold  cache — a fresh clone / wiped Library has no compiled variants at all; and
+#   • stale cache — you EDITED a shader, so the cache is non-empty but the changed shader's variants
+#                   are out of date and recompile (async) on first use.
+# A throwaway warm-up pass compiles+PERSISTS the current variants to Library/ShaderCache so the real
+# pass (a fresh process) reads them warm. A stamp file records the last FULL warmed run; we warm again
+# whenever the cache is empty, never warmed, or any .shader/.hlsl is newer than the stamp. Warm,
+# unchanged runs (the common case) pay nothing. Opt out with UMR_SKIP_SHADER_WARMUP=1. See
+# docs/lessons-learned.md.
+SHADER_CACHE="$ROOT/Library/ShaderCache"
+WARM_STAMP="$ROOT/Library/.umr-shader-warm-stamp"
+shaders_need_warmup() {
+  [ -d "$SHADER_CACHE" ] || return 0                          # cache absent  => cold
+  [ -z "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ] && return 0   # cache empty   => cold
+  [ -f "$WARM_STAMP" ] || return 0                            # never warmed  => warm up
+  # A shader source edited since the last warmed run => its variants are stale.
+  [ -n "$(find "$ROOT/Assets" -type f \( -name '*.shader' -o -name '*.hlsl' \) \
+            -newer "$WARM_STAMP" -print 2>/dev/null | head -1)" ] && return 0
+  return 1
+}
+if [ -z "${UMR_SKIP_SHADER_WARMUP:-}" ] && shaders_need_warmup; then
+  echo "Cold/stale shader cache — running a throwaway warm-up pass first so GPU-snapshot variants" >&2
+  echo "are compiled before the measuring run (set UMR_SKIP_SHADER_WARMUP=1 to skip)." >&2
+  run_unity "$ROOT/Logs/test-results.warmup.xml" "$ROOT/Logs/test-run.warmup.log"
+  echo "Warm-up pass complete (shader variants cached) — running the real test pass." >&2
+fi
+
+run_unity "$RESULTS" "$LOG"
 CODE=$?
+
+# Stamp the cache as warm-for-the-current-shaders, so the next run skips the warm-up unless a shader
+# changes. Only a FULL (unfiltered) run exercises every variant, so only it may claim the whole set is
+# warm; a filtered run warms just its subset and must not stamp the full set as current.
+if [ -z "$FILTER" ] && [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
+  touch "$WARM_STAMP"
+fi
 
 echo "exit: $CODE"
 if [ -f "$RESULTS" ]; then

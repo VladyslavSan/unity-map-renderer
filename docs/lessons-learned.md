@@ -181,3 +181,25 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
 - **Unity batch `-runTests` does not reliably generate/persist `.meta` for new or renamed files.** A new
   `.cs`/`.asmdef` may run once without a committed `.meta`. Force generation with a dedicated
   `-batchmode -quit` import, or delete+recreate the file. Never hand-author a `.meta`.
+
+- **A COLD `Library/ShaderCache` makes GPU-snapshot tests fail deterministically — it is NOT a real flake.**
+  In batchmode, an un-cached shader variant compiles *asynchronously* and lands AFTER the first render that
+  needs it, so the measuring render draws the wrong thing: fills come back blank (base variant not ready) and
+  a `_NORMALMAP` keyword toggle silently no-ops (its variant isn't compiled), so a lit render looks identical
+  with and without the map. `allowAsyncCompilation = false` in a `[SetUpFixture]` does **not** fix it (that
+  flag is inert in batchmode — verified). Reproduce reliably by wiping the cache
+  (`find Library/ShaderCache -mindepth 1 -delete`) then running: `S55ThrottleTests.Tooth_e` (blank coverage)
+  and `LitFillSnapshotTests.LitFill_NormalMap_ChangesShading` (flat-vs-normal diff = 0.0) fail every run cold,
+  and pass every run warm. This was the whole of the 2026-07-09 "flaky snapshot tests" scare — a per-commit
+  verify that reimported the `Library` each commit kept re-cooling the cache; there is no test defect.
+  The same trap fires when you **edit a shader**: the cache is non-empty but the changed shader's variants are
+  stale and recompile (async) on first use — a full cache is not a *current* one. (A content edit changes the
+  variant's hash, so it is effectively a cold/missing variant for that hash.)
+  **Fix (in `Tools/run-tests.sh`):** when the shader cache is cold OR stale, run one throwaway warm-up pass
+  first — its renders compile the variants and PERSIST them to `Library/ShaderCache`, so the real pass (a fresh
+  process) reads them warm and renders correctly. "Stale" is detected with a stamp file
+  (`Library/.umr-shader-warm-stamp`, touched only after a full unfiltered run): warm up if the cache is empty,
+  never warmed, or any `.shader`/`.hlsl` is newer than the stamp. Warm, unchanged runs — the common case — pay
+  nothing; opt out with `UMR_SKIP_SHADER_WARMUP=1`. (Rejected alternatives: `ShaderVariantCollection.WarmUp()`
+  — canonical but needs a hand-maintained collection of every shader×keyword; the async flag — inert.
+  2026-07-10.)
