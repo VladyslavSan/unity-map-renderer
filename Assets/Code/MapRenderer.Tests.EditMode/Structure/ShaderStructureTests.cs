@@ -10,7 +10,9 @@
 //   • THIRD-PARTY-NOTICES.txt has a UCL entry
 //   • UCL license text file exists
 //
-// These run via `dotnet test Tools/core-tests` in ~0.1s without Unity.
+// Runs in the Unity EditMode test assembly (moved from Tools/core-tests, which used
+// test-binary-relative path arithmetic that broke on the Assets/Code/ folder move). Paths are now
+// resolved via ShaderPropertyParser's AssetDatabase-anchored helpers — move-proof.
 // Complement to the Unity EditMode GPU tests in LitFillSnapshotTests.cs.
 //
 // History: originally S34 (flat Shaders/). Updated for S58 (the redundant _MapColor tint was
@@ -28,14 +30,11 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class ShaderStructureTests
     {
-        // Resolve repo root relative to the running test binary (Tools/core-tests/bin/Debug/net10.0/).
-        private static string RepoRoot => Path.GetFullPath(
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../../.."));
-
-        private static string ShadersDir => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders");
-        private static string CommonDir  => Path.Combine(ShadersDir, "Common");
-        private static string MapFillDir => Path.Combine(ShadersDir, "Map", "Fill");
-        private static string MapLineDir => Path.Combine(ShadersDir, "Map", "Line");
+        private static string RepoRoot   => ShaderPropertyParser.RepoRoot;
+        private static string ShadersDir => ShaderPropertyParser.ShadersDir;
+        private static string CommonDir  => ShaderPropertyParser.CommonDir;
+        private static string MapFillDir => ShaderPropertyParser.MapFillDir;
+        private static string MapLineDir => ShaderPropertyParser.MapLineDir;
 
         // ── File existence (S66 layout) ───────────────────────────────────────
 
@@ -438,9 +437,11 @@ namespace MapRenderer.Tests
         [Test]
         public void UnityCompanionLicenseFile_Exists()
         {
-            string path = Path.Combine(RepoRoot, "Assets", "Code", "ThirdParty", "UnityCompanionLicense.txt");
+            // Resolved by name via AssetDatabase (move-proof): the file lives under
+            // Assets/Code/ThirdParty/ today, but its exact folder isn't asserted here.
+            string path = ShaderPropertyParser.ResolveAssetPathByName("UnityCompanionLicense.txt");
             Assert.That(File.Exists(path), Is.True,
-                "Assets/Code/ThirdParty/UnityCompanionLicense.txt must exist (committed UCL text, S34 requirement).");
+                "UnityCompanionLicense.txt must exist (committed UCL text, S34 requirement).");
             string text = File.ReadAllText(path, Encoding.UTF8);
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "UnityCompanionLicense.txt must contain the actual UCL text.");

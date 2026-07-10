@@ -1,4 +1,6 @@
-// S79 No-Raw-String Material Access Guard — engine-free, ~0.1s via `dotnet test Tools/core-tests`.
+// S79 No-Raw-String Material Access Guard — runs in the Unity EditMode test assembly (moved from
+// Tools/core-tests, which used test-binary-relative path arithmetic that broke on the Assets/Code/
+// folder move). Paths are now resolved via ShaderPropertyParser's AssetDatabase-anchored helpers.
 //
 // Structural guards that enforce:
 //   1. Registry layout: six registry files exist under Rendering/ShaderProperties/{,Line,Fill}/.
@@ -24,8 +26,8 @@ namespace MapRenderer.Tests
     public class NoRawStringMaterialAccessGuardTests
     {
         private static string RepoRoot      => ShaderPropertyParser.RepoRoot;
-        private static string UnityDir      => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity");
-        private static string RenderingDir  => Path.Combine(UnityDir, "Rendering");
+        private static string UnityDir      => ShaderPropertyParser.UnityAssemblyRoot;
+        private static string RenderingDir  => ShaderPropertyParser.RenderingDir;
         private static string ShaderPropertiesDir => Path.Combine(RenderingDir, "ShaderProperties");
 
         // ── 1. Registry layout guard ─────────────────────────────────────────────────────────────

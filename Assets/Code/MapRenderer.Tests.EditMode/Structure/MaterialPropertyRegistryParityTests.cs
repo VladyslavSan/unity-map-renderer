@@ -1,4 +1,7 @@
-// S78/S79 Material Property Registry Parity Tests — engine-free, ~0.1s via `dotnet test Tools/core-tests`.
+// S78/S79 Material Property Registry Parity Tests — runs in the Unity EditMode test assembly
+// (moved from Tools/core-tests, which used test-binary-relative path arithmetic that broke on the
+// Assets/Code/ folder move). Paths are now resolved via ShaderPropertyParser's
+// AssetDatabase-anchored helpers — move-proof.
 //
 // Validates the four-way set equality:
 //   • sharedCBUFFER (from ShaderProperties/PropertyNames.cs CBUFFER region, 14)
@@ -25,13 +28,12 @@ namespace MapRenderer.Tests
     {
         // ── Paths ────────────────────────────────────────────────────────────────────────────────
 
-        private static string RepoRoot              => ShaderPropertyParser.RepoRoot;
-        private static string RenderingDir          => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Rendering");
-        private static string ShaderPropertiesDir   => Path.Combine(RenderingDir, "ShaderProperties");
-        private static string RenderingLineDir      => Path.Combine(ShaderPropertiesDir, "Line");
-        private static string RenderingFillDir      => Path.Combine(ShaderPropertiesDir, "Fill");
-        private static string MapLineDir        => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line");
-        private static string MapFillDir        => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Fill");
+        private static string RenderingDir        => ShaderPropertyParser.RenderingDir;
+        private static string ShaderPropertiesDir => Path.Combine(RenderingDir, "ShaderProperties");
+        private static string RenderingLineDir     => Path.Combine(ShaderPropertiesDir, "Line");
+        private static string RenderingFillDir     => Path.Combine(ShaderPropertiesDir, "Fill");
+        private static string MapLineDir           => ShaderPropertyParser.MapLineDir;
+        private static string MapFillDir           => ShaderPropertyParser.MapFillDir;
 
         // ── Exact count guards ───────────────────────────────────────────────────────────────────
 

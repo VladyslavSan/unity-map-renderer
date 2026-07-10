@@ -35,11 +35,6 @@
     <Compile Include="CorePipelineTests.cs" />
     <Compile Include="LineMiterHairpinTests.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
-    <Compile Include="ShaderStructureTests.cs" />
-    <Compile Include="ShaderPropertyParser.cs" />
-    <Compile Include="InstanceStructShaderParityTests.cs" />
-    <Compile Include="MaterialPropertyRegistryParityTests.cs" />
-    <Compile Include="NoRawStringMaterialAccessGuardTests.cs" />
 
     <!-- Real Core sources (single source of truth) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/ProtobufReader.cs" />

@@ -1,8 +1,11 @@
 // InstanceStructShaderParityTests — bidirectional shader⇄struct parity guard (never-again guard).
 //
-// Runs engine-free via `dotnet test Tools/core-tests` in ~0.1s. Text-parses both sides:
-//   • MapInstanceData.cs: struct field declarations (name + float-count)
+// Runs in the Unity EditMode test assembly (moved from Tools/core-tests). Compares both sides:
+//   • MapInstanceData.cs: struct field declarations (name + float-count), read via REFLECTION
+//     (typeof(MapInstanceData), granted access by MapRenderer.Unity's
+//     [InternalsVisibleTo("MapRenderer.Tests.EditMode")]) — not a text-parse of the .cs file.
 //   • Line_LitInput.hlsl / Fill_LitInput.hlsl: UNITY_DOTS_INSTANCED_PROP entries in each DOTS block
+//     (still text-parsed via ShaderPropertyParser.ParseDotsProps — HLSL has no reflection surface).
 //
 // Forward (per-shader): every DOTS prop has a same-name struct field of matching float-count.
 //   Removing _Width from the struct → fails over Line_LitInput.hlsl (the original bug direction).
@@ -12,78 +15,75 @@
 //
 // Exact counts (lessons.md: assert the exact known total, never `>`):
 //   struct material-prop fields == 29, Line DOTS props == 24, Fill DOTS props == 19.
-//   A regex that silently matches nothing fails the exact count, not the forward/reverse check.
+//   A regex/reflection pass that silently matches nothing fails the exact count, not the
+//   forward/reverse check.
 //
 // History: introduced S76 to lock struct+shader counts and prevent re-introducing the BRG line-prop bug.
 //   Counts dropped by 2 line props (31→29, 26→24) when _MetersPerPixel (S104) and _AaEdgeWidth (line-AA
 //   removal, 0b910c7) were retired; the set-equality/forward/reverse checks confirm the removal is consistent.
+//   Migrated out of Tools/core-tests (folder-move path breakage) with the struct-side text-parse
+//   replaced by reflection.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.RegularExpressions;
+using System.Reflection;
 using NUnit.Framework;
+using MapRenderer.Unity.Rendering.Backend.BRG;
 
 namespace MapRenderer.Tests
 {
     [TestFixture]
     public class InstanceStructShaderParityTests
     {
-        // Repo root and paths are now in ShaderPropertyParser.
-        private static string RepoRoot     => ShaderPropertyParser.RepoRoot;
-        private static string RenderingDir => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Rendering");
-        private static string MapFillDir   => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Fill");
-        private static string MapLineDir   => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line");
+        // Paths are anchored via ShaderPropertyParser (AssetDatabase-based, move-proof).
+        private static string MapFillDir => ShaderPropertyParser.MapFillDir;
+        private static string MapLineDir => ShaderPropertyParser.MapLineDir;
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Parses MapInstanceData.cs for public struct field declarations:
-        ///   public (float3x4|float4|float) _fieldName;
-        ///   public (float3x4|float4|float) unity_fieldName;
+        /// Reflects <see cref="MapInstanceData"/>'s public instance fields.
         /// Returns a dictionary of {name → floatCount} excluding the unity_* transform fields.
         /// </summary>
         private static Dictionary<string, int> ParseStructMaterialFields(out int totalFieldCount)
         {
-            string path = Path.Combine(RenderingDir, "Backend", "BRG", "MapInstanceData.cs");
-            Assert.That(File.Exists(path), Is.True, $"MapInstanceData.cs not found at: {path}");
-            string text = File.ReadAllText(path);
-
-            // Longest-first alternation: float3x4 before float4 before float.
-            // This prevents float from consuming the prefix of float4 or float3x4.
-            var regex = new Regex(
-                @"public\s+(float3x4|float4|float)\s+(_\w+|unity_\w+)\s*;",
-                RegexOptions.Multiline);
+            FieldInfo[] fields = typeof(MapInstanceData).GetFields(BindingFlags.Public | BindingFlags.Instance);
 
             var result = new Dictionary<string, int>(StringComparer.Ordinal);
             int allCount = 0;
 
-            foreach (Match m in regex.Matches(text))
+            foreach (FieldInfo field in fields)
             {
-                string typeName  = m.Groups[1].Value;
-                string fieldName = m.Groups[2].Value;
-                int    floats    = TypeToFloatCount(typeName);
                 allCount++;
 
                 // Exclude transform fields (unity_* prefix) from the material-prop map.
-                if (fieldName.StartsWith("unity_", StringComparison.Ordinal))
+                if (field.Name.StartsWith("unity_", StringComparison.Ordinal))
                     continue;
 
-                result[fieldName] = floats;
+                result[field.Name] = ReflectedFieldFloatCount(field.FieldType);
             }
 
             totalFieldCount = allCount;
             return result;
         }
 
-        // ParseDotsProps and TypeToFloatCount are now in ShaderPropertyParser (shared with
-        // MaterialPropertyRegistryParityTests). The private aliases below keep the call sites below
-        // unchanged so this test class remains readable without requiring grep-and-replace.
+        /// <summary>
+        /// Maps a reflected field's CLR type to a float count via <see cref="ShaderPropertyParser.TypeToFloatCount"/>.
+        /// Unity.Mathematics struct types (float4, float3x4, …) report their HLSL-matching name directly;
+        /// the C# <c>float</c> alias reflects as CLR "Single" and needs translating first.
+        /// </summary>
+        private static int ReflectedFieldFloatCount(Type fieldType)
+        {
+            string typeName = fieldType == typeof(float) ? "float" : fieldType.Name;
+            return ShaderPropertyParser.TypeToFloatCount(typeName);
+        }
+
+        // ParseDotsProps is in ShaderPropertyParser (shared with MaterialPropertyRegistryParityTests).
+        // The private alias below keeps the call sites below unchanged so this test class remains
+        // readable without requiring grep-and-replace.
         private static Dictionary<string, int> ParseDotsProps(string filePath)
             => ShaderPropertyParser.ParseDotsProps(filePath);
-
-        private static int TypeToFloatCount(string typeName)
-            => ShaderPropertyParser.TypeToFloatCount(typeName);
 
         // ── Exact count guards (lessons.md: assert exact, never >) ───────────────────────────
 

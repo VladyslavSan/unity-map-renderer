@@ -1,29 +1,83 @@
 // Shared, engine-free text-parsing helpers for shader/registry file inspection.
 // Used by InstanceStructShaderParityTests, MaterialPropertyRegistryParityTests, and
 // NoRawStringMaterialAccessGuardTests.
+//
+// Path resolution is move-proof: everything is anchored via UnityEditor.AssetDatabase (GUID-based
+// lookup + the MapRenderer.Unity.asmdef location), not relative filesystem arithmetic off a test
+// binary's location. Moving Assets/Code/MapRenderer.Unity as a whole keeps every derived path correct.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
+using UnityEditor;
+using UnityEngine;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Static text-parsing helpers for validating shader + registry file structure without the Unity engine.
-    /// All methods are self-contained file parsers; they do not reference the Unity C# API.
+    /// Static text-parsing helpers for validating shader + registry file structure, plus the
+    /// move-proof path anchors those parsers read from.
     /// </summary>
     internal static class ShaderPropertyParser
     {
-        // ── Repository root ──────────────────────────────────────────────────────────────────────
+        // ── Repository / assembly anchors ────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Absolute path to the repository root, resolved from the running test binary's base directory
-        /// (Tools/core-tests/bin/Debug/net10.0/ → five levels up).
+        /// Absolute path to the repository root. <see cref="Application.dataPath"/> is the project's
+        /// <c>Assets/</c> folder; its parent is the Unity project root, which is also the repo root
+        /// here (a stable Unity anchor, unlike relative arithmetic off a test binary's location).
+        /// Only needed for files that live outside <c>Assets/</c> (e.g. THIRD-PARTY-NOTICES.txt).
         /// </summary>
-        public static string RepoRoot => Path.GetFullPath(
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../../.."));
+        public static string RepoRoot => Directory.GetParent(Application.dataPath).FullName;
+
+        /// <summary>
+        /// Absolute path to the <c>MapRenderer.Unity</c> assembly root, resolved by locating its
+        /// asmdef via <see cref="AssetDatabase"/> — move-proof against the whole assembly being
+        /// relocated (e.g. the Assets/Code/ move). All shader/rendering sub-paths are expressed
+        /// relative to this anchor.
+        /// </summary>
+        public static string UnityAssemblyRoot => ResolveUnityAssemblyRoot();
+
+        public static string ShadersDir   => Path.Combine(UnityAssemblyRoot, "Shaders");
+        public static string RenderingDir => Path.Combine(UnityAssemblyRoot, "Rendering");
+        public static string MapFillDir   => Path.Combine(ShadersDir, "Map", "Fill");
+        public static string MapLineDir   => Path.Combine(ShadersDir, "Map", "Line");
+        public static string CommonDir    => Path.Combine(ShadersDir, "Common");
+
+        private static string ResolveUnityAssemblyRoot()
+        {
+            foreach (string guid in AssetDatabase.FindAssets("MapRenderer.Unity t:AssemblyDefinitionAsset"))
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (Path.GetFileName(assetPath) == "MapRenderer.Unity.asmdef")
+                    return Path.Combine(RepoRoot, Path.GetDirectoryName(assetPath));
+            }
+
+            Assert.Fail("Could not locate MapRenderer.Unity.asmdef via AssetDatabase.FindAssets — " +
+                "has the assembly been renamed or removed?");
+            return null;
+        }
+
+        /// <summary>
+        /// Resolves a single asset's absolute path by exact filename via <see cref="AssetDatabase"/>
+        /// (move-proof against folder reorganizations). Use for files whose containing folder isn't
+        /// itself asserted by structural tests (e.g. license text files).
+        /// </summary>
+        public static string ResolveAssetPathByName(string fileName)
+        {
+            string searchTerm = Path.GetFileNameWithoutExtension(fileName);
+            foreach (string guid in AssetDatabase.FindAssets(searchTerm))
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(guid);
+                if (Path.GetFileName(assetPath) == fileName)
+                    return Path.Combine(RepoRoot, assetPath);
+            }
+
+            Assert.Fail($"Could not locate asset by name via AssetDatabase: {fileName}");
+            return null;
+        }
 
         // ── DOTS block parser (moved here from InstanceStructShaderParityTests) ──────────────────
 
