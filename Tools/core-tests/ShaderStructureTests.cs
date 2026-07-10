@@ -32,7 +32,7 @@ namespace MapRenderer.Tests
         private static string RepoRoot => Path.GetFullPath(
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../../.."));
 
-        private static string ShadersDir => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders");
+        private static string ShadersDir => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders");
         private static string CommonDir  => Path.Combine(ShadersDir, "Common");
         private static string MapFillDir => Path.Combine(ShadersDir, "Map", "Fill");
         private static string MapLineDir => Path.Combine(ShadersDir, "Map", "Line");
@@ -109,9 +109,9 @@ namespace MapRenderer.Tests
         {
             // S56 requires per-layer shaders under Shaders/Map/<Layer>/, not the flat Shaders/ root.
             Assert.That(File.Exists(Path.Combine(MapFillDir, "Fill.shader")), Is.True,
-                "Fill.shader must live in Assets/MapRenderer.Unity/Shaders/Map/Fill/ (S56 layout).");
+                "Fill.shader must live in Assets/Code/MapRenderer.Unity/Shaders/Map/Fill/ (S56 layout).");
             Assert.That(File.Exists(Path.Combine(MapLineDir, "Line.shader")), Is.True,
-                "Line.shader must live in Assets/MapRenderer.Unity/Shaders/Map/Line/ (S56 layout).");
+                "Line.shader must live in Assets/Code/MapRenderer.Unity/Shaders/Map/Line/ (S56 layout).");
         }
 
         [Test]
@@ -438,9 +438,9 @@ namespace MapRenderer.Tests
         [Test]
         public void UnityCompanionLicenseFile_Exists()
         {
-            string path = Path.Combine(RepoRoot, "Assets", "ThirdParty", "UnityCompanionLicense.txt");
+            string path = Path.Combine(RepoRoot, "Assets", "Code", "ThirdParty", "UnityCompanionLicense.txt");
             Assert.That(File.Exists(path), Is.True,
-                "Assets/ThirdParty/UnityCompanionLicense.txt must exist (committed UCL text, S34 requirement).");
+                "Assets/Code/ThirdParty/UnityCompanionLicense.txt must exist (committed UCL text, S34 requirement).");
             string text = File.ReadAllText(path, Encoding.UTF8);
             Assert.That(text, Does.Contain("Unity Companion License"),
                 "UnityCompanionLicense.txt must contain the actual UCL text.");

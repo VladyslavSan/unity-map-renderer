@@ -22,7 +22,7 @@ Do **not** use `UnityEngine.Vector2` / `Vector3` / `Vector4` / `Quaternion` / `M
 computation or storage.
 
 **Why:**
-- **`Core` is engine-free.** `Assets/MapRenderer.Core/` must not reference `UnityEngine` at all — it is a
+- **`Core` is engine-free.** `Assets/Code/MapRenderer.Core/` must not reference `UnityEngine` at all — it is a
   plain managed library that compiles and runs in the `Tools/core-tests` `dotnet` project (no Unity). Its
   only "engine" dependency is `Unity.Mathematics`, which the `core-tests` shim (`Tools/core-tests/Shim.cs`)
   mirrors. So in `Core`, `UnityEngine.Vector*` is not merely discouraged — it breaks the engine-free build.

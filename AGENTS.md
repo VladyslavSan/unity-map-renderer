@@ -10,10 +10,10 @@ workflow) — check it before debugging a shader/material/test-harness surprise.
 Proprietary / all rights reserved.
 
 ## Project layout
-- `Assets/MapRenderer.Core/` — managed library: MVT decode, Web-Mercator/tile math, geometry, earcut.
-- `Assets/MapRenderer.Jobs/` — Burst + Collections jobs (coordinate transforms, etc.).
-- `Assets/MapRenderer.Unity/` — MonoBehaviours, mesh building, rendering glue.
-- `Assets/MapRenderer.Tests.EditMode/` — headless EditMode tests.
+- `Assets/Code/MapRenderer.Core/` — managed library: MVT decode, Web-Mercator/tile math, geometry, earcut.
+- `Assets/Code/MapRenderer.Jobs/` — Burst + Collections jobs (coordinate transforms, etc.).
+- `Assets/Code/MapRenderer.Unity/` — MonoBehaviours, mesh building, rendering glue.
+- `Assets/Code/MapRenderer.Tests.EditMode/` — headless EditMode tests.
 - `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
 - Assemblies are split via `.asmdef`; keep Core free of `MapRenderer.Unity` dependencies.
 
@@ -86,7 +86,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
   EditMode tests; validate via the recipe above before declaring done.
 - Engine-only behavior (mesh build, rendering, camera) lives in `MapRenderer.Unity`; verify it visually
   in the Editor (a step the user runs).
-- Vendored third-party code goes under `Assets/ThirdParty/<name>/` with its license, and an entry in
+- Vendored third-party code goes under `Assets/Code/ThirdParty/<name>/` with its license, and an entry in
   `THIRD-PARTY-NOTICES.txt`. Avoid copyleft (see `ARCHITECTURE.md` §4).
 
 The code-style rules (math types, `System.Math` ban, `in` params, data carriers, builder naming,

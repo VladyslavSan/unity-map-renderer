@@ -26,12 +26,12 @@ namespace MapRenderer.Tests
         // ── Paths ────────────────────────────────────────────────────────────────────────────────
 
         private static string RepoRoot              => ShaderPropertyParser.RepoRoot;
-        private static string RenderingDir          => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Rendering");
+        private static string RenderingDir          => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Rendering");
         private static string ShaderPropertiesDir   => Path.Combine(RenderingDir, "ShaderProperties");
         private static string RenderingLineDir      => Path.Combine(ShaderPropertiesDir, "Line");
         private static string RenderingFillDir      => Path.Combine(ShaderPropertiesDir, "Fill");
-        private static string MapLineDir        => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line");
-        private static string MapFillDir        => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders", "Map", "Fill");
+        private static string MapLineDir        => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line");
+        private static string MapFillDir        => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Fill");
 
         // ── Exact count guards ───────────────────────────────────────────────────────────────────
 

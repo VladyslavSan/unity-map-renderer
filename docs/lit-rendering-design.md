@@ -2,7 +2,7 @@
 
 **Status:** adopted convention — **S34 shipped**. S32 shipped a *shallow* fill (stripped surface).
 S34 establishes the real convention: **structural parity with URP's `Lit.shader` + the complete material
-surface.** Implementation: `Assets/MapRenderer.Unity/Shaders/`. Lines-migration: S33 (onto the S34 base).
+surface.** Implementation: `Assets/Code/MapRenderer.Unity/Shaders/`. Lines-migration: S33 (onto the S34 base).
 This is the reference design every map-geometry shader follows. Researched against URP's public docs
 (URP 17.5 / Unity 6000.x); version-dependent items flagged. Clean-room note: this concerns Unity's own
 URP rendering system — not MapLibre — so URP source/docs are fair reference.
@@ -18,7 +18,7 @@ URP rendering system — not MapLibre — so URP source/docs are fair reference.
 - Mesh must supply **UV0** (tile-space [0,1]) and **TANGENT** (float4(1,0,0,1) for flat XZ geometry) for
   normal/detail map sampling. `MeshBuilder.AddFeature(verts, indices, tileVerts, extent)` does this.
 - Every mirrored `*.hlsl` file carries a **UCL attribution header**; `THIRD-PARTY-NOTICES.txt` has the
-  UCL entry; `Assets/ThirdParty/UnityCompanionLicense.txt` holds the committed license text.
+  UCL entry; `Assets/Code/ThirdParty/UnityCompanionLicense.txt` holds the committed license text.
 - `shader_feature_local _NORMALMAP` and `shader_feature_local_fragment _METALLICSPECGLOSSMAP` pragmas
   are present in `Fill.shader` so normal/metallic maps compile into the shader variants.
 
@@ -247,7 +247,7 @@ bodies ARE attributed under UCL** (a UCL header on `MapLitShaderGUI.cs` + a `THI
 `MapLitShaderGUI.cs ← derived from LitShader.cs`). This is the `BaseShaderGUI`-fallback "URP GUI code is
 copied" branch of the ticket, not the pure-derive branch.*
 
-**Implementation (`Assets/MapRenderer.Unity/Editor/MapLitShaderGUI.cs`):**
+**Implementation (`Assets/Code/MapRenderer.Unity/Editor/MapLitShaderGUI.cs`):**
 - `MapLitShaderGUI : UnityEditor.BaseShaderGUI` — URP declares its `BaseShaderGUI` in the plain
   `UnityEditor` namespace (its `LitGUI` helper lives in `UnityEditor.Rendering.Universal.ShaderGUI`), so the
   base type's runtime `FullName` is `UnityEditor.BaseShaderGUI`. It is the public URP base, **not** raw

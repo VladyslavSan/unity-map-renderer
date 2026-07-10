@@ -11,17 +11,17 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
   Source: com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89), as
   shipped with Unity 6000.5.0f1. Copyright © 2020 Unity Technologies ApS.
   Licensed under the Unity Companion License for Unity-dependent projects.
-  License text: Assets/ThirdParty/UnityCompanionLicense.txt
+  License text: Assets/Code/ThirdParty/UnityCompanionLicense.txt
   Online:       http://www.unity3d.com/legal/licenses/Unity_Companion_License
   The Unity Companion License is NOT copyleft — it does not affect our proprietary code; only the
   copied/derived files listed below are subject to the UCL terms.
 
-  (a) Verbatim reference template — Assets/MapRenderer.Unity/Shaders/UnityLit/
+  (a) Verbatim reference template — Assets/Code/MapRenderer.Unity/Shaders/UnityLit/
       Unmodified copies of the URP Lit shader set, vendored as a diff baseline so our map shaders
       can be audited as a minimal delta against stock Lit. The ONLY changes from upstream are the
       shader name (Universal Render Pipeline/Lit → Template/UnityLit) and include paths (rewritten
       to local-relative). Reference-only; bound to no material at runtime.
-      See Assets/MapRenderer.Unity/Shaders/UnityLit/README.md for provenance + refresh procedure.
+      See Assets/Code/MapRenderer.Unity/Shaders/UnityLit/README.md for provenance + refresh procedure.
 
         UnityLit.shader              ← Lit.shader
         LitInput.hlsl                ← LitInput.hlsl
@@ -33,7 +33,7 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         LitDepthNormalsPass.hlsl     ← LitDepthNormalsPass.hlsl
         LitMetaPass.hlsl             ← LitMetaPass.hlsl
 
-  (b) Editable derivatives (verbatim-plus-delta) — Assets/MapRenderer.Unity/Shaders/Map/
+  (b) Editable derivatives (verbatim-plus-delta) — Assets/Code/MapRenderer.Unity/Shaders/Map/
       Each is a mirror-copy of a URP source file plus map-specific deltas (paint + tweakable
       render-state properties, the MapVertexModify / line-extrusion hook, coverage/alpha). Each
       carries a UCL attribution header documenting its delta from upstream.
@@ -63,7 +63,7 @@ Fill triangulation is a clean-room implementation of the ear-clipping algorithm.
 "earcut" project (ISC) was consulted only as an algorithm reference; no source was copied.
 
 UniTask 2.5.10 — Cysharp/UniTask
-  Vendored source: Assets/ThirdParty/UniTask/Runtime/ (committed, version-pinned, self-contained).
+  Vendored source: Assets/Code/ThirdParty/UniTask/Runtime/ (committed, version-pinned, self-contained).
   NuGet reference (headless dotnet test): UniTask 2.5.10 via Tools/core-tests/core-tests.csproj.
   Both distributions pinned to the same tag so the in-Editor and headless builds cannot drift on API.
   Author: Yoshifumi Kawai (Cysharp, Inc.)

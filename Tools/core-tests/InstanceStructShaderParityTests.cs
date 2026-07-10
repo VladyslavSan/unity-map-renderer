@@ -31,9 +31,9 @@ namespace MapRenderer.Tests
     {
         // Repo root and paths are now in ShaderPropertyParser.
         private static string RepoRoot     => ShaderPropertyParser.RepoRoot;
-        private static string RenderingDir => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Rendering");
-        private static string MapFillDir   => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders", "Map", "Fill");
-        private static string MapLineDir   => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity", "Shaders", "Map", "Line");
+        private static string RenderingDir => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Rendering");
+        private static string MapFillDir   => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Fill");
+        private static string MapLineDir   => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line");
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────
 

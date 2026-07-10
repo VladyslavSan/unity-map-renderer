@@ -120,7 +120,7 @@ mesh build result has completed but not yet been consumed); assert **zero leaked
 
 ## Packaging
 
-- **Editor build:** vendor UniTask under `Assets/ThirdParty/UniTask/` (committed, version-pinned,
+- **Editor build:** vendor UniTask under `Assets/Code/ThirdParty/UniTask/` (committed, version-pinned,
   self-contained) + `THIRD-PARTY-NOTICES.txt` entry. **Not UPM** — UPM resolves into the gitignored
   `Library/PackageCache` only when Unity runs, so a UPM dependency is unbuildable without Unity, defeating the
   engine-free goal.

@@ -6,7 +6,7 @@
 //   2. Migration completeness: no file under MapRenderer.Unity uses the old prefixed class names
 //      (LinePropertyId, FillPropertyId, LinePropertyNames, FillPropertyNames) or the compat-shim
 //      class declaration (class ShaderProperties). ShaderPropertiesToken is gone.
-//   3. No raw-string Material API: no file under Assets/MapRenderer.Unity/**/*.cs uses
+//   3. No raw-string Material API: no file under Assets/Code/MapRenderer.Unity/**/*.cs uses
 //      .Set/Get(Float|Color|Vector|Int|Texture)("...") or .HasProperty("...") string-literal forms.
 //   4. No bare literals in PropertyId files: every PropertyId.cs member is defined as
 //      Shader.PropertyToID(PropertyNames.X), never Shader.PropertyToID("_Foo").
@@ -24,7 +24,7 @@ namespace MapRenderer.Tests
     public class NoRawStringMaterialAccessGuardTests
     {
         private static string RepoRoot      => ShaderPropertyParser.RepoRoot;
-        private static string UnityDir      => Path.Combine(RepoRoot, "Assets", "MapRenderer.Unity");
+        private static string UnityDir      => Path.Combine(RepoRoot, "Assets", "Code", "MapRenderer.Unity");
         private static string RenderingDir  => Path.Combine(UnityDir, "Rendering");
         private static string ShaderPropertiesDir => Path.Combine(RenderingDir, "ShaderProperties");
 
