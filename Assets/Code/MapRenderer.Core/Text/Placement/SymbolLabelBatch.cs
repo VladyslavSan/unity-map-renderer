@@ -27,13 +27,33 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Point vs curved for record <c>r</c> (selects which detail array <see cref="Detail"/> indexes).</summary>
         public enum Kind : byte { Point = 0, Curved = 1 }
 
+        /// <summary>One tile's 4 render-space corners (ring order) for the screen-coverage pre-cull. A tile always
+        /// has exactly four, so they are named fields, not a length-4 slice of a flat array.</summary>
+        public struct TileQuad
+        {
+            public double3 TopLeft;
+            public double3 TopRight;
+            public double3 BottomRight;
+            public double3 BottomLeft;
+        }
+
         // ── per-label records, in collected order ──
         public Kind[]    Kinds      = Array.Empty<Kind>();
         public int[]     Detail     = Array.Empty<int>();   // index into Points[] or Curveds[]
         public int[]     WorldStart = Array.Empty<int>();   // start of this label's world points in WorldPoints
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
         public double3[] RepAnchor  = Array.Empty<double3>(); // the B-3 distance-cull point (RepresentativeAnchor)
+        public int[]     RecordTile = Array.Empty<int>();   // per record → unique-tile index (or -1 = never coverage-culled)
         public int       Count;                             // number of records (labels)
+
+        // ── per-tile screen-coverage pre-cull corners (render space; camera-INDEPENDENT, so stored once here) ──
+        // One TileQuad (4 render-space corners) per unique tile, indexed by tile. Projected from the tile address
+        // ONCE per rebuild; the per-frame pass (LabelTileCoverage) projects them to screen and flags tiles below
+        // the coverage threshold, and gather drops every record whose RecordTile is flagged. Keeping the coverage
+        // metric out of the build (only the fixed corners live here) is what preserves the version cache — see
+        // docs/label-tile-precull-design.md.
+        public TileQuad[] TileCorners = Array.Empty<TileQuad>();
+        public int        TileCount;
 
         // ── point details ──
         public PointStageInput[] Points     = Array.Empty<PointStageInput>(); // stable fields; dynamic patched per frame
@@ -77,20 +97,31 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Rewind all counts to reuse the buffers for a fresh rebuild (arrays keep their capacity).</summary>
         public void Reset()
         {
-            Count = 0; PointCount = 0; CurvedCount = 0;
+            Count = 0; PointCount = 0; CurvedCount = 0; TileCount = 0;
             QuadCount = 0; GlyphCount = 0; AnchorCount = 0; WorldPointCount = 0; AnchorFadeCount = 0;
             MaxBoxes = 0; MaxQuads = 0; MaxCandidates = 0;
             BuildId++;
         }
 
         // ── append helpers (geometric growth, never shrink) — the builder appends; the counts are the live length ──
-        public int AddRecord(Kind kind, int detail, int worldStart, int worldCount, in double3 repAnchor)
+        public int AddRecord(Kind kind, int detail, int worldStart, int worldCount, in double3 repAnchor, int recordTile)
         {
             Grow(ref Kinds, Count); Grow(ref Detail, Count); Grow(ref WorldStart, Count); Grow(ref WorldCount, Count);
-            Grow(ref RepAnchor, Count);
+            Grow(ref RepAnchor, Count); Grow(ref RecordTile, Count);
             Kinds[Count] = kind; Detail[Count] = detail; WorldStart[Count] = worldStart; WorldCount[Count] = worldCount;
-            RepAnchor[Count] = repAnchor;
+            RepAnchor[Count] = repAnchor; RecordTile[Count] = recordTile;
             return Count++;
+        }
+
+        /// <summary>Append a unique tile's 4 render-space corners (ring order) and return its tile index.</summary>
+        public int AddTile(in double3 topLeft, in double3 topRight, in double3 bottomRight, in double3 bottomLeft)
+        {
+            Grow(ref TileCorners, TileCount);
+            TileCorners[TileCount] = new TileQuad
+            {
+                TopLeft = topLeft, TopRight = topRight, BottomRight = bottomRight, BottomLeft = bottomLeft,
+            };
+            return TileCount++;
         }
 
         public int AddPoint(in PointStageInput input, int quadStart, int quadCount)

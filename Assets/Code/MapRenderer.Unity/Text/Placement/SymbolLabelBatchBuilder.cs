@@ -4,6 +4,8 @@
 
 using System.Collections.Generic;
 using Unity.Mathematics;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 
@@ -23,25 +25,67 @@ namespace MapRenderer.Unity.Text.Placement
     /// </summary>
     internal static class SymbolLabelBatchBuilder
     {
+        // Reused tile-dedup map (TileKey → unique-tile index), CLEARED not reallocated each Build so the demo
+        // hot path (which rebuilds every Tick) allocates nothing in steady state (T4). Build is main-thread only
+        // and non-reentrant (demo Tick + the subsystem's CurrentBatch both run on the main thread), so one shared
+        // instance is safe.
+        [System.ThreadStatic] private static Dictionary<long, int> _tileDedup;
+
         /// <summary>Rebuild <paramref name="batch"/> in place from <paramref name="labels"/> (collected order
         /// preserved so the collision ordinal — and thus the mesh — stays byte-identical). <paramref name="slotCount"/>
         /// clamps each label's material slot (mirrors the old per-frame ClampSlot).</summary>
-        public static void Build(SymbolLabelBatch batch, IReadOnlyList<LabelInstance> labels, int slotCount)
+        public static void Build(SymbolLabelBatch batch, IReadOnlyList<LabelInstance> labels, int slotCount,
+            IProjection projection = null)
         {
             batch.Reset();
             if (labels == null) return;
+
+            // Dedup tiles by TileKey → the batch's unique-tile index, so each tile's 4 render-space coverage-cull
+            // corners are projected + stored ONCE per rebuild (camera-independent), and every record records which
+            // tile it belongs to. Reused + cleared (see _tileDedup) so the demo hot path allocates nothing.
+            Dictionary<long, int> tileIndexByKey = _tileDedup ??= new Dictionary<long, int>();
+            tileIndexByKey.Clear();
 
             for (int i = 0; i < labels.Count; i++)
             {
                 LabelInstance label = labels[i];
                 if (label == null) continue; // nulls contributed no candidate/world-point in the old loop → omit
 
-                if (label.Placement == SymbolPlacement.Point) AddPoint(batch, label, slotCount);
-                else                                          AddCurved(batch, label, slotCount);
+                int tileIndex = ResolveTileIndex(batch, projection, tileIndexByKey, label.TileKey);
+                if (label.Placement == SymbolPlacement.Point) AddPoint(batch, label, slotCount, tileIndex);
+                else                                          AddCurved(batch, label, slotCount, tileIndex);
             }
         }
 
-        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount)
+        // Map a label's TileKey to the batch's unique-tile slot, projecting + storing its 4 render-space corners
+        // on first sight. Returns -1 when no projection is available (the demo / test seam) — that record then
+        // carries no tile and is never coverage-culled (the safe degenerate).
+        private static int ResolveTileIndex(SymbolLabelBatch batch, IProjection projection,
+            Dictionary<long, int> tileIndexByKey, long tileKey)
+        {
+            if (projection == null) return -1;
+            if (tileIndexByKey.TryGetValue(tileKey, out int idx)) return idx;
+
+            TileId tile = SymbolFeatureExtractor.UnpackTileKey(tileKey);
+            // Tile-local corners (extent 1) in ring order TL,TR,BR,BL → geo → render, via the SAME path that built
+            // AnchorRender (SymbolFeatureExtractor: ToLonLat → projection.Project). No MercatorBounds/flat-earth
+            // shortcut — this stays globe-correct.
+            double3 topLeft     = ProjectCorner(tile, 0.0, 0.0, projection);
+            double3 topRight    = ProjectCorner(tile, 1.0, 0.0, projection);
+            double3 bottomRight = ProjectCorner(tile, 1.0, 1.0, projection);
+            double3 bottomLeft  = ProjectCorner(tile, 0.0, 1.0, projection);
+            idx = batch.AddTile(topLeft, topRight, bottomRight, bottomLeft);
+            tileIndexByKey[tileKey] = idx;
+            return idx;
+        }
+
+        private static double3 ProjectCorner(in TileId tile, double px, double py, IProjection projection)
+        {
+            double2 lonLat = tile.ToLonLat(px, py, 1.0);
+            return projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+        }
+
+        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex)
         {
             // Copy this label's glyph quads into the flat pool (empty/absent layout → 0 quads, stages nothing later).
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
@@ -65,10 +109,10 @@ namespace MapRenderer.Unity.Text.Placement
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
             int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
-            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender);
+            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, tileIndex);
         }
 
-        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount)
+        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex)
         {
             // Copy glyphs.
             IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
@@ -107,7 +151,7 @@ namespace MapRenderer.Unity.Text.Placement
             int worldStart = batch.WorldPointCount;
             for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
-            batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep);
+            batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, tileIndex);
         }
     }
 }

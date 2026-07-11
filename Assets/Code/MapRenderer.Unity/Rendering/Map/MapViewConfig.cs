@@ -51,6 +51,14 @@ namespace MapRenderer.Unity.Rendering.Map
                  "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
         public int MaxReleasesPerTick = 4;
 
+        [Header("Labels")]
+        [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
+                 "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +
+                 "tilt-foreshortened horizon tile pile-up, whose labels are collision-discarded anyway. " +
+                 "Read live every Tick → tweak in Play to eyeball it. Default 0.05 (a tile must cover 5% of the " +
+                 "screen to keep its labels). Raise to cull more aggressively; set <= 0 to DISABLE the cull.")]
+        public double LabelTileCoverageCull = 0.05;
+
         [Header("Rendering")]
         [Tooltip("Tile render backend. Entities (default) = per-tile entity hierarchy via Entities " +
                  "Graphics, inspectable in the Entities Hierarchy. Brg = hand-packed BatchRendererGroup, " +

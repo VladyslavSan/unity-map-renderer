@@ -191,5 +191,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// x) — an opaque S20 tiebreak key, not a coordinate. Valid for z ≤ 19 (x,y &lt; 2^22).</summary>
         public static long PackTileKey(in TileId tile)
             => ((long)tile.Z << 44) | ((long)(tile.Y & 0x3FFFFF) << 22) | (long)(tile.X & 0x3FFFFF);
+
+        /// <summary>Inverse of <see cref="PackTileKey"/>: unpacks a tile key back to its <see cref="TileId"/>
+        /// (z/x/y). Used by the label tile-coverage pre-cull to recover a tile's corners from a batch record.</summary>
+        public static TileId UnpackTileKey(long key)
+            => new TileId { Z = (int)(key >> 44), Y = (int)((key >> 22) & 0x3FFFFF), X = (int)(key & 0x3FFFFF) };
     }
 }

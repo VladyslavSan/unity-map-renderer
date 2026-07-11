@@ -308,6 +308,9 @@ namespace MapRenderer.Unity.Rendering.Map
             //    Production: the symbol subsystem's real map labels (when the style has symbol layers).
             //    Fallback: the demo LabelInstances/LabelAtlas seam (SyntheticLabelSource), used only when a
             //    style has NO symbol layers — so a leftover demo component can't mask the real feature.
+            // Push the live-tunable label knobs (read from the shared config every Tick, so an Inspector tweak
+            // during Play takes effect the same frame — mirrors the DevicePixelRatio push above).
+            Labels.MinTileScreenCoverage = _config.LabelTileCoverageCull;
             if (_symbols.HasSymbolLayers)
             {
                 // A-1: PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already

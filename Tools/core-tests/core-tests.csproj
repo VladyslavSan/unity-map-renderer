@@ -408,6 +408,8 @@
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewDistance.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverage.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />

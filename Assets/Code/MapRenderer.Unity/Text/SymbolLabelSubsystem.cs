@@ -409,7 +409,9 @@ namespace MapRenderer.Unity.Text
             if (_store.Version != _batchVersion || quantize != _batchQuantize || slotCount != _batchSlotCount)
             {
                 _store.CollectInto(_batchCollect, quantize);
-                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount);
+                // Pass the projection so the batch stores each tile's render-space corners for the per-frame
+                // tile-coverage pre-cull (LabelTileCoverage). Corners are camera-independent → built once here.
+                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection);
                 _batchVersion   = _store.Version;
                 _batchQuantize  = quantize;
                 _batchSlotCount = slotCount;
