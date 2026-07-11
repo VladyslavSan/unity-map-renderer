@@ -135,6 +135,13 @@ namespace MapRenderer.Core.Text.Placement
         {
             if (a.SortKey < b.SortKey) return -1;
             if (a.SortKey > b.SortKey) return 1;
+            // A-5 hysteresis: at EQUAL sort key, an incumbent (placed last frame) sorts first, so the greedy pass
+            // keeps it over a newcomer that would otherwise win only on the arbitrary feature/tile tiebreak below
+            // (the tile-churn / reprojection flip that reads as flicker). Strictly BELOW SortKey: a lower-SortKey
+            // newcomer still sorts first and wins, so incumbency never blocks a genuinely higher-priority label.
+            // Since incumbency only ever RAISES priority, last frame's survivor set is a one-step fixed point (no
+            // oscillation) — and on a static frame the survivors are unchanged, so B-1's byte-identical skip holds.
+            if (a.WasPlacedLastFrame != b.WasPlacedLastFrame) return a.WasPlacedLastFrame ? -1 : 1;
             if (a.FeatureIndex != b.FeatureIndex) return a.FeatureIndex < b.FeatureIndex ? -1 : 1;
             if (a.TileKey != b.TileKey) return a.TileKey < b.TileKey ? -1 : 1;
             return 0;

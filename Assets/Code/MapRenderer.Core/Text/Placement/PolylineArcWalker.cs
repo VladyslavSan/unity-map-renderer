@@ -53,6 +53,21 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
+        /// A-2: the SCREEN arc distance from the start of a stable <see cref="LineAnchor"/> — the projected
+        /// position of a tile-space <c>(segment, t)</c> anchor along THIS frame's polyline. Feed the result to
+        /// <see cref="At(float, out float2, out float)"/> (± glyph offsets) to lay a curved label out around the
+        /// anchor. <paramref name="segment"/> is clamped to a valid segment; <paramref name="t"/> to [0,1].
+        /// </summary>
+        public float ArcDistanceAt(int segment, float t)
+        {
+            if (_count < 2) return 0f;
+            int seg = math.clamp(segment, 0, _count - 2);
+            float ct = math.saturate(t);
+            float segStart = _cumulative[seg];
+            return segStart + ct * (_cumulative[seg + 1] - segStart);
+        }
+
+        /// <summary>
         /// The point and tangent angle (radians, atan2 of the segment direction) at arc distance
         /// <paramref name="arc"/> from the start. Clamps to the endpoints. A single-point or empty polyline
         /// returns that point (or origin) with tangent 0.

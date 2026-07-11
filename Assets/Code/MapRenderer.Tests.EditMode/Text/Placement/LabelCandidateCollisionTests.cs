@@ -46,10 +46,14 @@ namespace MapRenderer.Tests.Text.Placement
                 return this;
             }
 
-            public HashSet<int> Survivors()
+            // Optional A-5 kept-set: candidates whose LabelIndex is in it are marked WasPlacedLastFrame (incumbents).
+            public HashSet<int> Survivors(HashSet<int> keptLabelIndices = null)
             {
                 LabelBox[] boxes = _boxes.ToArray();
                 LabelCandidate[] cands = _candidates.ToArray();
+                if (keptLabelIndices != null)
+                    for (int i = 0; i < cands.Length; i++)
+                        cands[i].WasPlacedLastFrame = keptLabelIndices.Contains(cands[i].LabelIndex);
                 var flags = new bool[cands.Length];
                 var grid = new LabelCollisionGrid();
                 int n = LabelCollision.SelectSurvivors(cands, cands.Length, boxes, boxes.Length, flags, grid);
@@ -224,6 +228,84 @@ namespace MapRenderer.Tests.Text.Placement
                 CollectionAssert.AreEquivalent(legacy, unified,
                     $"unified 1-box-candidate path must equal the legacy point path (count={count} seed={seed})");
             }
+        }
+
+        // ── A-5 sticky-placement hysteresis (anti-flicker). Incumbency (WasPlacedLastFrame) breaks EQUAL-sort-key
+        //    ties in favour of last frame's survivor, sitting below SortKey so it never blocks a higher-priority
+        //    newcomer. Teeth verify: the fixed-point (no oscillation / B-1-compatible), the killed tiebreak flip,
+        //    correct yielding, and within-frame determinism given a fixed kept-set. ──────────────────────────────
+
+        // Helper: a Scene builder for a fixed geometry reused across kept-sets (each test rebuilds it fresh — the
+        // Scene mutates its candidate array in Survivors()).
+        private static Scene ClusterAB()  // two overlapping equal-sort-key labels; feature(0) < feature(1)
+            => new Scene()
+                .Add(labelIndex: 0, sortKey: 10f, featureIndex: 0, rects: R((0, 0, 20, 20)))
+                .Add(labelIndex: 1, sortKey: 10f, featureIndex: 1, rects: R((5, 0, 25, 20)));
+
+        // ── FIXED POINT: feeding last frame's survivor set back in reproduces it exactly (idempotent). This is the
+        //    anti-oscillation + B-1-compatibility proof: a static frame's survivors don't change under hysteresis. ──
+        [Test]
+        public void SelectSurvivors_Hysteresis_IsFixedPoint()
+        {
+            var cold = ClusterAB().Survivors();                 // S = cold survivors (no history)
+            var withHistory = ClusterAB().Survivors(cold);      // feed S back as the kept-set
+            CollectionAssert.AreEquivalent(cold, withHistory,
+                "kept == last frame's survivors must reproduce that same set (one-step fixed point → no oscillation)");
+            // And a third pass over the second result is still S — genuinely stable, not a 2-cycle.
+            CollectionAssert.AreEquivalent(cold, ClusterAB().Survivors(withHistory), "stable across a further step");
+        }
+
+        // ── KILLS THE TIEBREAK FLIP (the actual flicker): equal sort keys, decided cold by the arbitrary feature
+        //    tiebreak — but whichever was placed last frame stays placed. This is the tile-churn/reprojection flip
+        //    that A-5 exists to stop. ──
+        [Test]
+        public void SelectSurvivors_Hysteresis_OverridesFeatureTiebreak_KeepingTheIncumbent()
+        {
+            CollectionAssert.AreEquivalent(new[] { 0 }, ClusterAB().Survivors(),
+                "cold: the lower feature index (0) wins the equal-sort-key tie");
+            CollectionAssert.AreEquivalent(new[] { 1 }, ClusterAB().Survivors(new HashSet<int> { 1 }),
+                "kept={1}: incumbency overrides the feature tiebreak — the label placed last frame stays placed");
+            CollectionAssert.AreEquivalent(new[] { 0 }, ClusterAB().Survivors(new HashSet<int> { 0 }),
+                "kept={0}: the other incumbent likewise holds its slot (no flip either direction)");
+        }
+
+        // ── YIELDS TO A GENUINELY HIGHER-PRIORITY NEWCOMER: incumbency sits BELOW SortKey, so a strictly lower-
+        //    SortKey newcomer still wins and the stale incumbent drops (no absolute lock). ──
+        [Test]
+        public void SelectSurvivors_Hysteresis_YieldsToLowerSortKeyNewcomer()
+        {
+            var scene = new Scene()
+                .Add(labelIndex: 0, sortKey: 20f, featureIndex: 0, rects: R((0, 0, 20, 20)))   // incumbent, LOWER priority
+                .Add(labelIndex: 1, sortKey: 10f, featureIndex: 1, rects: R((5, 0, 25, 20)));  // newcomer, HIGHER priority
+            CollectionAssert.AreEquivalent(new[] { 1 }, scene.Survivors(new HashSet<int> { 0 }),
+                "an incumbent must yield to a strictly higher-priority (lower-sort-key) newcomer — incumbency is a " +
+                "tiebreak, not a lock, so it never blocks a genuinely higher-priority label");
+        }
+
+        // ── WITHIN-FRAME DETERMINISM given a fixed kept-set: the survivor set is independent of candidate input
+        //    order (T1 permutation-invariance still holds — it is only the GLOBAL history-independence A-5 trades). ──
+        [Test]
+        public void SelectSurvivors_Hysteresis_IsPermutationInvariant_GivenFixedKeptSet()
+        {
+            var kept = new HashSet<int> { 1 }; // make label 1 the incumbent in an equal-sort-key cluster
+            Scene BuildOrdered(bool reversed)
+            {
+                var s = new Scene();
+                if (reversed)
+                {
+                    s.Add(labelIndex: 1, sortKey: 10f, featureIndex: 1, rects: R((5, 0, 25, 20)));
+                    s.Add(labelIndex: 0, sortKey: 10f, featureIndex: 0, rects: R((0, 0, 20, 20)));
+                }
+                else
+                {
+                    s.Add(labelIndex: 0, sortKey: 10f, featureIndex: 0, rects: R((0, 0, 20, 20)));
+                    s.Add(labelIndex: 1, sortKey: 10f, featureIndex: 1, rects: R((5, 0, 25, 20)));
+                }
+                return s;
+            }
+            CollectionAssert.AreEquivalent(new[] { 1 }, BuildOrdered(false).Survivors(kept));
+            CollectionAssert.AreEquivalent(new[] { 1 }, BuildOrdered(true).Survivors(kept),
+                "with a fixed kept-set the survivor set does not depend on input order (incumbent 1 wins either way)");
         }
 
         // Deterministic random boxes with unique LabelIndex/FeatureIndex; wide enough to span several grid

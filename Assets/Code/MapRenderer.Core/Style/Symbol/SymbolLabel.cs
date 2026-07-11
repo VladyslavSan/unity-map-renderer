@@ -31,6 +31,12 @@ namespace MapRenderer.Core.Style.Symbol
         /// walks the per-frame projection of this path.</summary>
         public double3[] PathRender { get; init; }
 
+        /// <summary>A-2: the along-line anchors, computed ONCE at build time in tile space
+        /// (<see cref="LineAnchorPlacement.Compute"/>) as zoom-invariant <see cref="LineAnchor"/> topology so
+        /// line labels stay pinned to fixed world positions instead of sliding on zoom. Null/empty for point
+        /// labels; parallel in meaning to <see cref="PathRender"/> (same polyline the anchors index into).</summary>
+        public LineAnchor[] LineAnchors { get; init; }
+
         /// <summary>The resolved <c>text-field</c> string (never null/empty — empty resolutions are skipped).</summary>
         public string Text { get; init; }
 

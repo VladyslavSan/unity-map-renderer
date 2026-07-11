@@ -121,19 +121,22 @@ namespace MapRenderer.Unity.Rendering.Map
             // S20: one label system per view, owning this view's camera (constructed here, after Camera is
             // set — a field initializer would see a null Camera).
             Labels      = new LabelPlacementSystem(Camera, _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null);
-            // S105: the decoupled symbol-label subsystem observes TileManager's fetch/release lifecycle
-            // (sharing already-fetched bytes) and produces the real map labels Labels.Tick renders. It clones
-            // the per-symbol-layer materials (per-layer text-halo-*) from the same MapMaterialSet.SymbolText base.
-            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet, _config.PreparedCache.MaxCount);
+            // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders. It
+            // clones the per-symbol-layer materials (per-layer text-halo-*) from the same MapMaterialSet.SymbolText
+            // base. A-1: DATA arrives via the bytes-ready push (shared already-fetched bytes); the tile LIFECYCLE
+            // is PULLED — each frame we hand it TileManager's loaded set and it reconciles (no release/restore
+            // callbacks). cacheEnabled drives keep-warm-on-release so it matches the prepared mesh cache.
+            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet,
+                _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
             TileManager.SymbolTileBytesReady = _symbols.OnTileBytesReady;
-            TileManager.SymbolTileReleased   = _symbols.OnTileReleased;
-            TileManager.SymbolTileRestored   = _symbols.OnTileRestored;
         }
 
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
         // LabelInstances/LabelAtlas seam below is used only when the style has NO symbol layers.
         private readonly SymbolLabelSubsystem _symbols;
         private readonly List<LabelInstance> _labelBuffer = new List<LabelInstance>();
+        // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
+        private readonly List<Tile.LoadedTileKey> _symbolLoadedScratch = new List<Tile.LoadedTileKey>();
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
         // There is no separate "Initialise": the map is fully valid at construction (an empty map whose
@@ -305,12 +308,21 @@ namespace MapRenderer.Unity.Rendering.Map
             //    style has NO symbol layers — so a leftover demo component can't mask the real feature.
             if (_symbols.HasSymbolLayers)
             {
+                // A-1: PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already
+                // reflected) and reconcile the label store before collecting — restores kept-warm labels for
+                // cache-hit re-entries, releases tiles that left cover. Then aggregate the active labels.
+                TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
+                _symbols.ReconcileLoadedTiles(_symbolLoadedScratch);
                 _symbols.CollectInto(_labelBuffer);
-                Labels.Tick(sceneFrame, _labelBuffer, _symbols.Atlas, _symbols.LayerMaterials);
+                // B-1: thread the collected-set version so a static frame (unchanged set + camera + fades) skips
+                // the re-projection and re-submits the cached meshes. The demo path (else branch) passes no version
+                // → the sentinel → never skips (byte-parity). Reconcile/CollectInto above still run every frame.
+                Labels.Tick(sceneFrame, _labelBuffer, _symbols.Atlas, Time.deltaTime, _symbols.LayerMaterials,
+                    _symbols.Version);
             }
             else
             {
-                Labels.Tick(sceneFrame, LabelInstances, LabelAtlas);
+                Labels.Tick(sceneFrame, LabelInstances, LabelAtlas, Time.deltaTime);
             }
         }
 
@@ -399,6 +411,7 @@ namespace MapRenderer.Unity.Rendering.Map
             ActiveLabelTiles        = _symbols.ActiveTileCount,
             CachedLabelTiles        = _symbols.CachedTileCount,
             InputLabelCount         = Labels.LastInputLabelCount,
+            DistanceCulledLabels    = Labels.LastDistanceCulledCount,
             CollisionCandidateCount = Labels.LastCandidateCount,
             CollisionSurvivorCount  = Labels.LastSurvivorCount,
             PlacedQuadCount         = Labels.LastQuadCount,

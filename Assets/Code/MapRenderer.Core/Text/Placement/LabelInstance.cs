@@ -33,12 +33,23 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="Text.SymbolPlacement.LineCenter"/>; null for point labels. Projected + walked per frame.</summary>
         public double3[] PathRender { get; init; }
 
+        /// <summary>A-2: the zoom-invariant along-line anchors (tile-space <see cref="LineAnchor"/> topology,
+        /// computed once at build) the per-frame walk places the label at — one per repeat for
+        /// <see cref="Text.SymbolPlacement.Line"/>, one centred for <see cref="Text.SymbolPlacement.LineCenter"/>.
+        /// Null for point labels. Indexes into <see cref="PathRender"/>. Replaces the old fixed screen-px-from-start
+        /// anchor walk (which slid + popped on zoom).</summary>
+        public LineAnchor[] LineAnchors { get; init; }
+
         /// <summary>Per-glyph curved layout (<see cref="CurvedTextLayout"/>) for a line label; null for point
         /// labels (which use <see cref="Layout"/>). Placed along <see cref="PathRender"/> each frame (#5).</summary>
         public IReadOnlyList<CurvedGlyph> CurvedGlyphs { get; init; }
 
         /// <summary>Resolved `text-*` paint for this label.</summary>
         public LabelPaint Paint { get; init; }
+
+        /// <summary>A-3: the resolved label text — folded into the <see cref="CrossTileLabelKey"/> cross-tile
+        /// identity (so two different labels sharing a quantized cell never merge). Also handy for debugging.</summary>
+        public string Text { get; init; }
 
         /// <summary>`text-size` in pixels — the zoom-dependent style value S20 scales the baked-px quads by
         /// (<c>screenQuad = anchorScreen + bakedQuad * (TextSizePx / TextQuadLayout.OneEm)</c>, S19 T8a).</summary>
@@ -48,10 +59,8 @@ namespace MapRenderer.Core.Text.Placement
         /// priority: a lower sort key wins a collision against a higher one).</summary>
         public float SortKey { get; init; }
 
-        /// <summary>`symbol-spacing` in logical pixels — the along-line repeat distance for
-        /// <see cref="Text.SymbolPlacement.Line"/> (spec default 250; ignored for point / line-center). The
-        /// per-frame walk places one label instance per anchor at this screen-space spacing (#5 B4).</summary>
-        public float SpacingPx { get; init; }
+        // A-2: symbol-spacing is no longer a per-frame placement input — anchors are pre-computed at build time
+        // into LineAnchors (from SymbolLabel.SpacingPx), so LabelInstance carries no SpacingPx.
 
         /// <summary>`text-max-angle` in DEGREES — a curved line label whose adjacent-glyph line curvature
         /// exceeds this at any pair is dropped at that anchor (spec default 45; line placement only). #6.</summary>

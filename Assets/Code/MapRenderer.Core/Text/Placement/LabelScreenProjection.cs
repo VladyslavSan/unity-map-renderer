@@ -49,15 +49,22 @@ namespace MapRenderer.Core.Text.Placement
             if (!TryProjectPoint(renderPos, sceneOriginRender, viewProj, viewportLogicalPx, out screenPx, out depth))
                 return false; // behind the camera
 
+            return IsWithinViewportMargin(screenPx, viewportLogicalPx); // fully outside the viewport (+ margin)?
+        }
+
+        /// <summary>
+        /// True if <paramref name="screenPx"/> lies within the viewport plus the fixed <see cref="ViewportMarginPx"/>
+        /// margin — the point-anchor viewport cull, factored OUT of <see cref="TryProjectAnchor"/> so the B-2
+        /// projection job can do pure (behind-camera-only) projection while the serial staging pass applies this
+        /// cheap screen-bounds cull. <see cref="TryProjectAnchor"/> = <see cref="TryProjectPoint"/> + this, so the
+        /// two paths stay bit-identical.
+        /// </summary>
+        public static bool IsWithinViewportMargin(in float2 screenPx, in double2 viewportLogicalPx)
+        {
             float viewportX = (float)viewportLogicalPx.x;
             float viewportY = (float)viewportLogicalPx.y;
-            if (screenPx.x < -ViewportMarginPx || screenPx.x > viewportX + ViewportMarginPx ||
-                screenPx.y < -ViewportMarginPx || screenPx.y > viewportY + ViewportMarginPx)
-            {
-                return false; // fully outside the viewport (+ margin)
-            }
-
-            return true;
+            return screenPx.x >= -ViewportMarginPx && screenPx.x <= viewportX + ViewportMarginPx &&
+                   screenPx.y >= -ViewportMarginPx && screenPx.y <= viewportY + ViewportMarginPx;
         }
 
         /// <summary>

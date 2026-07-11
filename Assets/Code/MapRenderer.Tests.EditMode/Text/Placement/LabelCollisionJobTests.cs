@@ -1,0 +1,174 @@
+// Unity EditMode only — needs the job runtime (NativeArray / IJob). NOT registered in core-tests.csproj.
+// NOTE: EditMode batch runs the job Burst-compiled; this differential validates the native port against the
+// managed reference. The greedy survivor decision is integer/branch logic (no reassociated float math), so the
+// two must be BIT-IDENTICAL — hence exact-set equality, not tolerance.
+
+using System.Collections.Generic;
+using NUnit.Framework;
+using Unity.Collections;
+using Unity.Jobs;
+using Unity.Mathematics;
+using MapRenderer.Core.Text.Placement;
+using MapRenderer.Jobs;
+
+namespace MapRenderer.Tests.Text.Placement
+{
+    /// <summary>
+    /// B-4a: <see cref="LabelCollisionJob"/> (the Burst native port of the grid-accelerated greedy collision) must
+    /// produce the EXACT same survivor set as the managed
+    /// <see cref="LabelCollision.SelectSurvivors(LabelCandidate[],int,LabelBox[],int,bool[],LabelCollisionGrid)"/>
+    /// reference. The real hazard is the caller pre-sizing the grid node storage (a Burst job cannot grow it): an
+    /// under-count silently drops blocker inserts → a candidate isn't blocked → wrong survivors. So the differential
+    /// runs over ADVERSARIAL inputs — wide boxes spanning many cells, spans that force the cell-enlargement /
+    /// MaxGridDim path, and dense clusters — not just uniform random.
+    /// </summary>
+    [TestFixture]
+    public class LabelCollisionJobTests
+    {
+        private static HashSet<int> ManagedSurvivors(LabelCandidate[] cands, int candCount, LabelBox[] boxes, int boxCount)
+        {
+            var work = (LabelCandidate[])cands.Clone(); // SelectSurvivors sorts in place
+            var flags = new bool[candCount];
+            var grid = new LabelCollisionGrid();
+            LabelCollision.SelectSurvivors(work, candCount, boxes, boxCount, flags, grid);
+            var set = new HashSet<int>();
+            for (int i = 0; i < candCount; i++) if (flags[i]) set.Add(work[i].LabelIndex);
+            return set;
+        }
+
+        private static HashSet<int> NativeSurvivors(LabelCandidate[] cands, int candCount, LabelBox[] boxes, int boxCount)
+        {
+            var nc = new NativeArray<LabelCandidate>(candCount, Allocator.TempJob);
+            var nb = new NativeArray<LabelBox>(boxCount, Allocator.TempJob);
+            var ns = new NativeArray<byte>(candCount, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < candCount; i++) nc[i] = cands[i];
+                for (int i = 0; i < boxCount; i++) nb[i] = boxes[i];
+
+                LabelCollisionGridSizing.Dims dims = LabelCollisionGridSizing.ComputeDims(nb, boxCount);
+                int cells = dims.W * dims.H;
+                int nodeCap = math.max(1, LabelCollisionGridSizing.NodeUpperBound(nb, boxCount, in dims));
+                var cellHead = new NativeArray<int>(cells, Allocator.TempJob);
+                var nodeBox = new NativeArray<int>(nodeCap, Allocator.TempJob);
+                var nodeNext = new NativeArray<int>(nodeCap, Allocator.TempJob);
+                try
+                {
+                    for (int c = 0; c < cells; c++) cellHead[c] = -1;
+                    new LabelCollisionJob
+                    {
+                        Candidates = nc, CandidateCount = candCount, Boxes = nb, BoxCount = boxCount,
+                        Survivors = ns, OutSurvivorCount = outCount,
+                        CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                        GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                        GridW = dims.W, GridH = dims.H,
+                    }.Schedule().Complete();
+
+                    var set = new HashSet<int>();
+                    for (int i = 0; i < candCount; i++) if (ns[i] != 0) set.Add(nc[i].LabelIndex);
+                    Assert.AreEqual(set.Count, outCount[0], "OutSurvivorCount must match the flags");
+                    return set;
+                }
+                finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
+            }
+            finally { nc.Dispose(); nb.Dispose(); ns.Dispose(); outCount.Dispose(); }
+        }
+
+        private static void AssertSame(LabelCandidate[] cands, LabelBox[] boxes, string what)
+        {
+            CollectionAssert.AreEquivalent(
+                ManagedSurvivors(cands, cands.Length, boxes, boxes.Length),
+                NativeSurvivors(cands, cands.Length, boxes, boxes.Length),
+                $"native LabelCollisionJob survivor set must equal the managed reference ({what})");
+        }
+
+        // 1-box candidates (point-like) — fully exercises the grid, which is the B-4a risk. Box size range is a
+        // parameter so a case can force wide boxes (many cells) or a giant span (cell enlargement).
+        private static (LabelCandidate[], LabelBox[]) RandomScene(int count, int seed, float worldW, float worldH,
+            float wMin, float wMax, float hMin, float hMax)
+        {
+            var rng = new System.Random(seed);
+            var cands = new LabelCandidate[count];
+            var boxes = new LabelBox[count];
+            for (int i = 0; i < count; i++)
+            {
+                float x = (float)(rng.NextDouble() * worldW);
+                float y = (float)(rng.NextDouble() * worldH);
+                float w = wMin + (float)(rng.NextDouble() * (wMax - wMin));
+                float h = hMin + (float)(rng.NextDouble() * (hMax - hMin));
+                boxes[i] = new LabelBox
+                {
+                    Min = new float2(x, y), Max = new float2(x + w, y + h),
+                    SortKey = rng.Next(0, 6), FeatureIndex = i, TileKey = rng.Next(0, 4), LabelIndex = i,
+                };
+                cands[i] = new LabelCandidate
+                {
+                    BoxStart = i, BoxCount = 1, SortKey = boxes[i].SortKey, FeatureIndex = i,
+                    TileKey = boxes[i].TileKey, LabelIndex = i,
+                };
+            }
+            return (cands, boxes);
+        }
+
+        [Test]
+        public void NativeCollision_MatchesManaged_SmallBoxes([Values(1, 2, 3, 50, 500)] int count,
+                                                              [Values(1, 7, 42, 999)] int seed)
+        {
+            var (cands, boxes) = RandomScene(count, seed, 2000f, 1200f, 30f, 300f, 10f, 50f);
+            AssertSame(cands, boxes, $"small boxes count={count} seed={seed}");
+        }
+
+        // Wide boxes each spanning MANY 64px grid cells — the case where one box lands in a large cell block, so a
+        // node-storage under-count would drop inserts.
+        [Test]
+        public void NativeCollision_MatchesManaged_WideBoxes([Values(20, 200)] int count, [Values(3, 88) ] int seed)
+        {
+            var (cands, boxes) = RandomScene(count, seed, 3000f, 2000f, 400f, 900f, 300f, 700f);
+            AssertSame(cands, boxes, $"wide boxes count={count} seed={seed}");
+        }
+
+        // A span far larger than MaxGridDim*TargetCellPx (512*64 = 32768 px) — forces the cell-enlargement path, a
+        // different grid dim / node distribution the sizing must still bound exactly.
+        [Test]
+        public void NativeCollision_MatchesManaged_HugeSpan_ForcesCellEnlargement([Values(50, 400)] int count)
+        {
+            var (cands, boxes) = RandomScene(count, 5, 200000f, 150000f, 50f, 400f, 20f, 80f);
+            AssertSame(cands, boxes, $"huge span count={count}");
+        }
+
+        // A DENSE cluster: many overlapping boxes packed into a tiny region (one grid cell), so most drop — stresses
+        // the greedy blocking + the single-cell node chain.
+        [Test]
+        public void NativeCollision_MatchesManaged_DenseCluster()
+        {
+            var (cands, boxes) = RandomScene(300, 17, 100f, 100f, 40f, 60f, 20f, 30f);
+            AssertSame(cands, boxes, "dense cluster (300 boxes in ~2 cells)");
+        }
+
+        // Multi-box (curved-like) candidates interleaved with point candidates — the all-or-nothing range logic
+        // over the native grid must match the managed reference too.
+        [Test]
+        public void NativeCollision_MatchesManaged_MultiBoxCandidates()
+        {
+            // 2 curved (3 boxes each) + 3 points, overlapping in a shared region so collisions actually occur.
+            var boxes = new List<LabelBox>();
+            var cands = new List<LabelCandidate>();
+            void Add(int label, float sortKey, params (float, float, float, float)[] rects)
+            {
+                int start = boxes.Count;
+                foreach (var r in rects)
+                    boxes.Add(new LabelBox { Min = new float2(r.Item1, r.Item2), Max = new float2(r.Item3, r.Item4),
+                        SortKey = sortKey, FeatureIndex = label, TileKey = 0, LabelIndex = label });
+                cands.Add(new LabelCandidate { BoxStart = start, BoxCount = rects.Length, SortKey = sortKey,
+                    FeatureIndex = label, TileKey = 0, LabelIndex = label });
+            }
+            Add(0, 10f, (0, 0, 30, 12), (40, 0, 70, 12), (80, 0, 110, 12));   // curved (best key)
+            Add(1, 20f, (50, 2, 60, 10));                                     // point over curved-0 glyph 2
+            Add(2, 15f, (200, 0, 230, 12), (240, 0, 270, 12), (280, 0, 310, 12)); // curved, disjoint region
+            Add(3, 25f, (205, 2, 215, 10));                                   // point over curved-2 glyph 1
+            Add(4, 30f, (1000, 1000, 1020, 1012));                            // point, far away (always places)
+            AssertSame(cands.ToArray(), boxes.ToArray(), "multi-box + point candidates");
+        }
+    }
+}

@@ -93,10 +93,16 @@ namespace MapRenderer.Core.Style.Symbol
                     {
                         List<double2> path = paths[p];
                         if (path.Count < 2) continue; // need at least one segment to place along
+                        // A-2: anchors computed ONCE here in TILE space (zoom-invariant). symbol-spacing is px
+                        // at the tile's on-screen size (512 logical px per tile at integer zoom), so px → tile
+                        // units is `spacing · extent / TilePixelSize`. Projection-agnostic: uses only the layer
+                        // extent + the 512 convention, no projection scale.
+                        double spacingTileUnits = spacing * extent / WebMercator.TilePixelSize;
                         output.Add(new SymbolLabel
                         {
                             Placement = placement,
                             PathRender = ProjectPath(path, tileId, extent, projection),
+                            LineAnchors = LineAnchorPlacement.Compute(path, spacingTileUnits, placement),
                             Text = text,
                             TextSizePx = textSize,
                             PaddingPx = padding,

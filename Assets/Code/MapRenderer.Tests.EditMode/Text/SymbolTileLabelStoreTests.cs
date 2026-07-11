@@ -143,6 +143,162 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(10, back[0].FeatureIndex, "and they are A's, not B's — keys are (source, tile)");
         }
 
+        // ═══ A-1: the PULL/reconcile model (replaces the release/restore push-callbacks) ═══
+
+        private static List<SymbolTileLabelStore.Key> Loaded(params SymbolTileLabelStore.Key[] keys)
+            => new List<SymbolTileLabelStore.Key>(keys);
+
+        // ── THE zoom-out-then-in bug, now via reconcile: build (loaded) → reconcile without it (leaves cover,
+        //    kept warm) → reconcile with it again (cache-hit re-entry) restores the labels. No callbacks. ──
+        [Test]
+        public void Reconcile_LeaveThenReenter_RestoresLabels()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+            Assert.AreEqual(1, Collect(store).Count, "active tile renders");
+
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // tile left cover
+            Assert.AreEqual(0, Collect(store).Count, "out of cover → not rendered");
+            Assert.AreEqual(1, store.CachedTileCount, "…but kept warm");
+
+            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: true); // cache-hit re-entry (no re-fetch)
+            List<LabelInstance> back = Collect(store);
+            Assert.AreEqual(1, back.Count, "reconcile restores the kept-warm labels on re-entry");
+            Assert.AreEqual(1, back[0].FeatureIndex, "the SAME tile's labels");
+        }
+
+        // ── keepWarmOnRelease:false (mesh cache disabled) → a released tile is dropped, not kept warm, so a
+        //    later re-entry has nothing to restore (a re-fetch would rebuild it via BeginBuild instead). ──
+        [Test]
+        public void Reconcile_ReleaseWithoutKeepWarm_Drops()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: false);
+            Assert.AreEqual(0, store.CachedTileCount, "cache disabled → not kept warm");
+            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: false);
+            Assert.AreEqual(0, Collect(store).Count, "nothing to restore — a revisit must re-fetch/rebuild");
+        }
+
+        // ── Idempotent: reconciling twice with the same loaded set moves nothing (self-healing, no churn). ──
+        [Test]
+        public void Reconcile_SameSetTwice_IsNoOp()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var a = Key("src", 1); var b = Key("src", 2);
+            store.CompleteBuild(a, store.BeginBuild(a), Labels(1));
+            store.CompleteBuild(b, store.BeginBuild(b), Labels(2));
+
+            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true);
+            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true);
+            Assert.AreEqual(2, store.ActiveTileCount, "both stay active");
+            Assert.AreEqual(0, store.CachedTileCount, "nothing released");
+            Assert.AreEqual(2, Collect(store).Count);
+        }
+
+        // ── A loaded tile with no label entry yet (still fetching) is left untouched — its build is kicked by
+        //    the bytes-ready push, not by reconcile. Reconcile must not fabricate an entry for it. ──
+        [Test]
+        public void Reconcile_LoadedButUnbuilt_LeavesForBytesPush()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var pending = Key("src", 9);
+            store.ReconcileActiveSet(Loaded(pending), keepWarmOnRelease: true);
+            Assert.AreEqual(0, store.ActiveTileCount, "reconcile does not build — it only moves existing entries");
+            Assert.AreEqual(0, store.CachedTileCount);
+        }
+
+        // ── BeginBuild keeps an existing tile's stale labels visible through a rebuild (no empty flash) — the
+        //    labels only swap when the new build commits. ──
+        [Test]
+        public void BeginBuild_Rebuild_KeepsStaleLabelsUntilCommit()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+
+            int gen2 = store.BeginBuild(key); // a rebuild starts (e.g. zoom re-fetch)
+            Assert.AreEqual(1, Collect(store).Count, "the old labels keep rendering during the rebuild — no flash");
+            Assert.AreEqual(1, Collect(store)[0].FeatureIndex, "…and they are still the OLD labels");
+
+            store.CompleteBuild(key, gen2, Labels(2));
+            Assert.AreEqual(2, Collect(store)[0].FeatureIndex, "only when the rebuild commits do they swap");
+        }
+
+        // ═══ B-1: the collected-set Version stamp (drives the static-frame skip) ═══
+
+        // ── Every mutation that can change what CollectInto emits bumps Version. ──
+        [Test]
+        public void Version_BumpsOnEverySetChangingMutation()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+
+            long v0 = store.Version;
+            int gen = store.BeginBuild(key);
+            Assert.Greater(store.Version, v0, "BeginBuild bumps (an active entry appeared)");
+
+            long v1 = store.Version;
+            Assert.IsTrue(store.CompleteBuild(key, gen, Labels(1)));
+            Assert.Greater(store.Version, v1, "a committed CompleteBuild bumps (labels changed)");
+
+            long v2 = store.Version;
+            store.Release(key, transferredToCache: true);
+            Assert.Greater(store.Version, v2, "Release bumps (an active tile left the set)");
+
+            long v3 = store.Version;
+            store.Restore(key);
+            Assert.Greater(store.Version, v3, "Restore bumps (labels re-entered the set)");
+
+            long v4 = store.Version;
+            store.Clear();
+            Assert.Greater(store.Version, v4, "Clear bumps (restyle purge)");
+        }
+
+        // ── A SUPERSEDED CompleteBuild (returns false) must NOT bump — it changes nothing. ──
+        [Test]
+        public void Version_SupersededCompleteBuild_DoesNotBump()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            int gen1 = store.BeginBuild(key);
+            store.BeginBuild(key); // gen2 supersedes gen1
+            long v = store.Version;
+            Assert.IsFalse(store.CompleteBuild(key, gen1, Labels(1)), "the stale build does not commit");
+            Assert.AreEqual(v, store.Version, "…and does not bump the version");
+        }
+
+        // ── THE decisive tooth: a NO-OP ReconcileActiveSet (loaded set == active set) does NOT bump — otherwise
+        //    the static-frame skip would never engage (B-1 would be silent dead code). ──
+        [Test]
+        public void Version_NoOpReconcile_DoesNotBump()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var a = Key("src", 1); var b = Key("src", 2);
+            store.CompleteBuild(a, store.BeginBuild(a), Labels(1));
+            store.CompleteBuild(b, store.BeginBuild(b), Labels(2));
+
+            long v = store.Version;
+            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true); // nothing moves
+            store.ReconcileActiveSet(Loaded(a, b), keepWarmOnRelease: true);
+            Assert.AreEqual(v, store.Version, "a stable-membership reconcile must not bump (else the skip never fires)");
+        }
+
+        // ── A reconcile that ACTUALLY moves a tile (one left cover) bumps. ──
+        [Test]
+        public void Version_ReconcileThatReleases_Bumps()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var a = Key("src", 1);
+            store.CompleteBuild(a, store.BeginBuild(a), Labels(1));
+            long v = store.Version;
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // 'a' left cover → released
+            Assert.Greater(store.Version, v, "a reconcile that releases a tile bumps");
+        }
+
         // ── Clear (restyle) drops everything, active and cached. ──
         [Test]
         public void Clear_DropsActiveAndCached()

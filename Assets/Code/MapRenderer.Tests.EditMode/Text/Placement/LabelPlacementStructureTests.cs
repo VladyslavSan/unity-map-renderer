@@ -270,6 +270,33 @@ namespace MapRenderer.Tests.Text.Placement
             },
         };
 
+        // A-2: a curved label carries pre-computed LineAnchors (stable (segment,t) topology). These helpers
+        // build them from the RENDER-space test path by arc length — the same topology the extractor derives in
+        // tile space (for these straight/L test lines the segment structure is identical). AnchorAt gives the
+        // anchor at a fraction of total arc length; BandAnchors gives `n` anchors evenly within [lo,hi].
+        private static LineAnchor AnchorAt(double3[] path, double frac)
+        {
+            int n = path.Length;
+            var cum = new double[n];
+            for (int i = 1; i < n; i++) cum[i] = cum[i - 1] + math.length(path[i] - path[i - 1]);
+            double total = cum[n - 1];
+            double arc = math.clamp(frac, 0.0, 1.0) * total;
+            if (arc <= 0.0) return new LineAnchor(0, 0f);
+            if (arc >= total) return new LineAnchor(n - 2, 1f);
+            int seg = 0;
+            for (int i = 1; i < n; i++) if (cum[i] >= arc) { seg = i - 1; break; }
+            double segLen = cum[seg + 1] - cum[seg];
+            float t = segLen > 0.0 ? (float)((arc - cum[seg]) / segLen) : 0f;
+            return new LineAnchor(seg, t);
+        }
+
+        private static LineAnchor[] BandAnchors(double3[] path, int n, double lo, double hi)
+        {
+            var a = new LineAnchor[n];
+            for (int i = 0; i < n; i++) a[i] = AnchorAt(path, lo + (hi - lo) * (i + 0.5) / n);
+            return a;
+        }
+
         [Test]
         public void Tick_LineCenterPlacement_EmitsGlyphsDistributedAlongTheProjectedLine()
         {
@@ -296,6 +323,7 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Placement = SymbolPlacement.LineCenter,
                 PathRender = path,
+                LineAnchors = new[] { AnchorAt(path, 0.5) },
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,
@@ -357,14 +385,18 @@ namespace MapRenderer.Tests.Text.Placement
             var path = new double3[] { a, b };
             var glyphs = new List<CurvedGlyph> { MakeCurvedGlyph(0f), MakeCurvedGlyph(24f), MakeCurvedGlyph(48f) };
 
+            // A-2: line-center → one centred anchor; line → several build-time anchors along the line (the
+            // repetition is now driven by the pre-computed anchor set, not a per-frame screen-spacing walk).
             LabelInstance Curved(SymbolPlacement placement) => new LabelInstance
             {
                 Placement = placement,
                 PathRender = path,
+                LineAnchors = placement == SymbolPlacement.LineCenter
+                    ? new[] { AnchorAt(path, 0.5) }
+                    : BandAnchors(path, 6, 0.1, 0.9),
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,
-                SpacingPx = 40f,        // small vs the on-screen arc → several repeats for `line`
                 MaxAngleDeg = 45f,
                 KeepUpright = true,
                 AllowOverlap = true,    // isolate the repetition from collision suppression
@@ -395,10 +427,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── #5 B4 hang-guard: the along-line anchor count is HARD-CAPPED, so a tiny symbol-spacing (or a
-        //    degenerate projected line length) can never spin an unbounded loop. With spacing 1px on a wide
-        //    line the naive count is length/1 (hundreds→millions); the cap holds it to MaxAnchorsPerLine. The
-        //    test COMPLETING is itself the proof it does not hang. ──
+        // ── A-2 defence-in-depth: build-time anchor placement is already capped (see LineAnchorPlacementTests),
+        //    but the per-frame walk ALSO clamps the anchor iteration to MaxAnchorsPerLine (256) so a caller that
+        //    somehow hands a huge anchor array can never spin an unbounded loop. Feed 300 anchors, all inside the
+        //    fit band (allow-overlap, so none are dropped by collision) → exactly 256 place, not 300. ──
         [Test]
         public void Tick_LinePlacement_AnchorCount_IsHardCapped()
         {
@@ -421,10 +453,10 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Placement = SymbolPlacement.Line,
                 PathRender = path,
+                LineAnchors = BandAnchors(path, 300, 0.2, 0.8), // 300 anchors, all inside the fit band
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,
-                SpacingPx = 1f,        // pathological: naive anchor count = length/1
                 MaxAngleDeg = 45f,
                 KeepUpright = true,
                 AllowOverlap = true,   // don't let collision mask the cap — count the staged anchors directly
@@ -436,11 +468,9 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { label }, atlasTexture);
-                // MaxAnchorsPerLine (256) × 3 glyphs is the hard ceiling; a naive length/spacing loop would emit
-                // far more (and, on a near-plane-degenerate line, hang). Mirrors the private cap constant.
-                Assert.LessOrEqual(system.LastQuadCount, 256 * 3, "the along-line anchor loop is hard-capped");
-                Assert.Greater(system.LastQuadCount, 3, "…but it still repeats (not collapsed to one label)");
-                Assert.AreEqual(0, system.LastQuadCount % 3, "every staged anchor is a full 3-glyph label");
+                // 300 fitting anchors are clamped to MaxAnchorsPerLine (256) → exactly 256 × 3 glyphs; without
+                // the clamp all 300 would place (900 quads). Mirrors the private cap constant.
+                Assert.AreEqual(256 * 3, system.LastQuadCount, "the per-frame anchor iteration is hard-clamped to 256");
             }
             finally
             {
@@ -478,6 +508,9 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Placement = SymbolPlacement.LineCenter,
                 PathRender = path,
+                // Anchor pinned to the corner vertex (end of segment 0) so the label's glyphs deterministically
+                // straddle the ~90° bend — the geometry that text-max-angle must drop.
+                LineAnchors = new[] { new LineAnchor(0, 1f) },
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,
@@ -530,6 +563,7 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Placement = SymbolPlacement.LineCenter,
                 PathRender = path,
+                LineAnchors = new[] { AnchorAt(path, 0.5) },
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,
@@ -594,6 +628,7 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Placement = SymbolPlacement.LineCenter,
                 PathRender = path,
+                LineAnchors = new[] { AnchorAt(path, 0.5) },
                 CurvedGlyphs = glyphs,
                 Paint = LabelPaint.Default,
                 TextSizePx = 24f,

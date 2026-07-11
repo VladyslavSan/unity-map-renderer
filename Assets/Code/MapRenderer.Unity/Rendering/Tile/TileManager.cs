@@ -334,16 +334,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new Dictionary<LoadedKey, LoadedTile>();
         private readonly List<LoadedKey>                   _toRelease = new List<LoadedKey>(32);
 
-        // S105: optional observers for the DECOUPLED symbol-label subsystem. Fired on the MAIN THREAD at
-        // the existing fetch-complete / release points, sharing the already-fetched MVT bytes (no re-fetch,
-        // no touching the mesh/disposal path). Exception-isolated: a throwing observer must never fault the
-        // tile pipeline (mirrors ObserveFetchOutcome's per-tile fault isolation).
+        // S105: DATA-only push for the DECOUPLED symbol-label subsystem — fired on the MAIN THREAD when a
+        // tile's MVT bytes arrive, sharing the already-fetched bytes (no re-fetch, no touching the mesh/disposal
+        // path) so the subsystem can shape its labels. Exception-isolated: a throwing observer must never fault
+        // the tile pipeline (mirrors ObserveFetchOutcome's per-tile fault isolation). The tile LIFECYCLE
+        // (which tiles are loaded → which labels render) is NOT pushed — the subsystem PULLS it via
+        // CollectLoadedTileKeys and reconciles (A-1: fragile release/restore callbacks retired).
         internal System.Action<string, TileId, byte[]> SymbolTileBytesReady { get; set; }
-        // Release carries whether the tile's meshes TRANSFERRED to the PreparedTileCache (Model B). true ⇒ keep
-        // the labels warm (a later cache HIT re-shows the tile with no fetch, so no bytes-ready to rebuild them);
-        // false ⇒ a true eviction, drop them. SymbolTileRestored fires on that cache hit (BuildTileFromCache).
-        internal System.Action<string, TileId, bool>   SymbolTileReleased   { get; set; }
-        internal System.Action<string, TileId>         SymbolTileRestored   { get; set; }
         // S85: reused TileCoverStats scratch — never reallocated (CaptureTelemetry steady-state no-GC).
         private readonly HashSet<int> _coverStatsX = new HashSet<int>();
         private readonly HashSet<int> _coverStatsY = new HashSet<int>();
@@ -581,6 +578,22 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// per-frame loops iterate. With a single source (N=1) this equals the distinct tile count, so every
         /// existing assertion is preserved.</summary>
         internal int LoadedTileCount => _loaded.Count;
+
+        /// <summary>
+        /// A-1 pull surface: fill <paramref name="into"/> with the current loaded <c>(source, tile)</c>
+        /// membership — every record in <see cref="_loaded"/> mapped from its pipeline slot to its source-id.
+        /// The symbol-label subsystem calls this each frame and reconciles its active/cached label sets against
+        /// it (retiring the release/restore push-callbacks). Clears <paramref name="into"/> first; reuses the
+        /// caller's list, so it is allocation-free in steady state (no per-frame GC — the S95 zero-alloc
+        /// contract). Includes tiles still fetching (not yet built): those simply have no label entry yet, so
+        /// reconcile leaves them for the bytes-ready build push.
+        /// </summary>
+        internal void CollectLoadedTileKeys(List<LoadedTileKey> into)
+        {
+            into.Clear();
+            foreach (var kv in _loaded)
+                into.Add(new LoadedTileKey(_pipelines[kv.Key.Slot].SourceId, kv.Key.Tile));
+        }
 
         /// <summary>
         /// Number of tiles released while their mesh build was still in-flight (HasMeshBuild
@@ -859,18 +872,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                         {
                             _prepared.Hits++;
                             _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
-
-                            // S105: a cache HIT re-shows the tile with NO fetch — so the symbol subsystem gets
-                            // no bytes-ready. Restore its kept-warm labels (dropped-on-release would show the
-                            // tile's geometry with no labels — the zoom-out-then-in bug). Exception-isolated.
-                            if (SymbolTileRestored != null)
-                            {
-                                try { SymbolTileRestored(p.SourceId, id); }
-                                catch (System.Exception ex)
-                                {
-                                    Debug.LogWarning($"[TileManager] symbol observer (restored) threw for {id}: {ex.Message}");
-                                }
-                            }
+                            // S105/A-1: a cache HIT re-shows the tile with NO fetch (so no bytes-ready). The
+                            // symbol subsystem now PULLS this tile back into its loaded set and reconciles —
+                            // restoring its kept-warm labels — instead of us pushing a restore callback here.
                         }
                         else
                         {
@@ -1423,13 +1427,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         private void ReleaseTile(LoadedKey key)
         {
-            // Whether this tile's meshes transfer to the PreparedTileCache (Model B) — drives whether the symbol
-            // subsystem keeps its labels warm (cache hit later) or drops them. Captured BEFORE the transfer nulls
-            // lt.Meshes; matches the exact condition guarding TransferBuiltMeshesToCache below.
-            bool transferredToCache = false;
             if (_loaded.TryGetValue(key, out var lt))
             {
-                transferredToCache = _cacheEnabled && lt.Built && lt.Meshes != null;
+                // Whether this tile's meshes transfer to the PreparedTileCache (Model B) vs are destroyed now.
+                bool transferredToCache = _cacheEnabled && lt.Built && lt.Meshes != null;
                 // S82: a fully-Built tile with tracked geometry TRANSFERS its meshes into the
                 // PreparedTileCache instead of letting RenderTeardownRecord destroy them (Model B — the
                 // cache takes ownership). Nulling lt.Meshes here makes DestroyTrackedMeshes's existing
@@ -1453,17 +1454,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
             // Route the scheduler release to the OWNING pipeline — a record on source B never touches A.
             _pipelines[key.Slot].Scheduler.Release(key.Tile);
-
-            // S105: this tile's symbol labels follow its meshes — kept warm when transferred to the prepared
-            // cache (a later hit re-shows the tile with no fetch), dropped on a true eviction. Exception-isolated.
-            if (SymbolTileReleased != null)
-            {
-                try { SymbolTileReleased(_pipelines[key.Slot].SourceId, key.Tile, transferredToCache); }
-                catch (System.Exception ex)
-                {
-                    Debug.LogWarning($"[TileManager] symbol observer (released) threw for {key.Tile}: {ex.Message}");
-                }
-            }
+            // S105/A-1: no symbol-release callback — this tile just left _loaded, so the subsystem's next
+            // CollectLoadedTileKeys pull no longer reports it and its reconcile fades/drops the labels.
         }
 
         /// <summary>

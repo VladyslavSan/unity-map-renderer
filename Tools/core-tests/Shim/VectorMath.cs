@@ -33,6 +33,12 @@ namespace Unity.Mathematics
         public static double  dot(double3 a, double3 b)   => a.x * b.x + a.y * b.y + a.z * b.z;
         public static double  length(double3 a)           => System.Math.Sqrt(dot(a, a));
 
+        // A-2: LineAnchorPlacement (tile-space arc lengths) + the test world-anchor recovery use double2 metrics.
+        public static double  dot(double2 a, double2 b)   => a.x * b.x + a.y * b.y;
+        public static double  length(double2 a)           => System.Math.Sqrt(a.x * a.x + a.y * a.y);
+        public static double2 lerp(double2 a, double2 b, double t)
+            => new double2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+
         // float2 vector helpers (Unity.Mathematics parity).
         public static float   dot(float2 a, float2 b)      => a.x * b.x + a.y * b.y;
         public static float   length(float2 a)             => (float)System.Math.Sqrt(a.x * a.x + a.y * a.y);

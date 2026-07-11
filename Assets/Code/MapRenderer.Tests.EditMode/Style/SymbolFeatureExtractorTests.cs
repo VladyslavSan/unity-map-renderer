@@ -152,6 +152,9 @@ namespace MapRenderer.Tests
             Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line label");
             Assert.IsNotNull(first.PathRender, "a line label carries the projected path");
             Assert.GreaterOrEqual(first.PathRender.Length, 2, "a placeable line has >= 2 vertices");
+            // A-2: the extractor computes the zoom-invariant along-line anchors (line-center → exactly one).
+            Assert.IsNotNull(first.LineAnchors, "a line label carries its build-time anchors");
+            Assert.AreEqual(1, first.LineAnchors.Length, "line-center places a single centred anchor");
             Assert.AreEqual("L", first.Text);
 
             // The path IS the real tile->geo->project chain (recompute the first line's first vertex).

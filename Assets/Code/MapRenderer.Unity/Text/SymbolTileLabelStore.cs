@@ -6,6 +6,7 @@
 
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 
 namespace MapRenderer.Unity.Text
@@ -60,11 +61,26 @@ namespace MapRenderer.Unity.Text
             public KeyedEntry(Key key, Entry entry) { Key = key; Entry = entry; }
         }
 
-        // Max cached (out-of-cover) tiles kept warm; <= 0 == unbounded (mirrors a count-unbounded mesh cache).
+        // Max cached (out-of-cover) tiles kept warm. ALWAYS finite — a caller-supplied <= 0 ("unbounded" mesh
+        // cache) is clamped to HardCacheCap, never left uncapped: an unbounded warm-label FIFO would grow with
+        // every tile ever visited (the "always bound loops/collections, even at a laughably large value"
+        // principle — see the always-bound-loops lesson).
+        private const int HardCacheCap = 4096;
         private readonly int _cacheCap;
         private int _genCounter;
 
-        public SymbolTileLabelStore(int cacheCap) { _cacheCap = cacheCap; }
+        // B-1: monotonic version of the COLLECTED label set — bumped by every mutation that could change what
+        // CollectInto emits (BeginBuild / CompleteBuild-commit / Release / Restore / Clear). A NO-OP
+        // ReconcileActiveSet does NOT bump it (it only calls Release/Restore for actual moves), so a static
+        // frame's version is stable → the LabelPlacementSystem static-frame skip can trust "unchanged". Errs
+        // toward OVER-bumping (a spurious bump only costs a missed skip; a missed bump would freeze stale labels).
+        private long _version;
+
+        public SymbolTileLabelStore(int cacheCap)
+            => _cacheCap = cacheCap > 0 && cacheCap < HardCacheCap ? cacheCap : HardCacheCap;
+
+        /// <summary>B-1: monotonic version of the collected label set (see <see cref="_version"/>).</summary>
+        public long Version => _version;
 
         /// <summary>Active (in-cover) tile count — test/telemetry.</summary>
         public int ActiveTileCount => _active.Count;
@@ -74,14 +90,23 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>
         /// Reserve an active slot for a (re)build of <paramref name="key"/> and return the generation token the
-        /// matching <see cref="CompleteBuild"/> must present. A fresh fetch supersedes any cached copy of the
-        /// tile (its bytes changed / it fully missed the cache), so the cached entry is dropped here.
+        /// matching <see cref="CompleteBuild"/> must present.
+        ///
+        /// <para><b>Stale labels survive the rebuild.</b> If the tile already has an entry (active, or cached and
+        /// being pulled active by a re-fetch), its EXISTING labels are kept on the active side and only the
+        /// generation is bumped — so a rebuilding / reappearing tile keeps drawing its last labels until the new
+        /// build commits, rather than flashing empty for the fetch+shape window. A tile first seen this session
+        /// starts empty (no labels yet). The bumped generation still discards any superseded in-flight build.</para>
         /// </summary>
         public int BeginBuild(Key key)
         {
-            RemoveCached(key);
+            Entry entry = FindCurrent(key); // active or cached (a re-fetch of an out-of-cover tile)
+            RemoveCached(key);              // pull it fully onto the active side; keep its labels
             int gen = ++_genCounter;
-            _active[key] = new Entry { Generation = gen, Labels = null };
+            if (entry == null) entry = new Entry { Labels = null };
+            entry.Generation = gen;
+            _active[key] = entry;
+            _version++; // B-1: an active entry appeared/was re-generated
             return gen;
         }
 
@@ -95,6 +120,7 @@ namespace MapRenderer.Unity.Text
             Entry e = FindCurrent(key);
             if (e == null || e.Generation != gen) return false; // superseded or dropped mid-build
             e.Labels = labels;
+            _version++; // B-1: this tile's labels changed (membership may be unchanged — the case LoadedRevision missed)
             return true;
         }
 
@@ -109,10 +135,13 @@ namespace MapRenderer.Unity.Text
             {
                 _active.Remove(key);
                 if (transferredToCache) EnqueueCached(key, e);
+                _version++; // B-1: an active tile left the collected set
             }
-            else if (!transferredToCache)
+            else if (!transferredToCache && RemoveCached(key))
             {
-                RemoveCached(key); // not active but a stale cached copy exists → drop it
+                // not active but a stale cached copy existed → dropped it (cached tiles aren't collected, so this
+                // does NOT change CollectInto's output — but over-bumping is safe and keeps the rule simple).
+                _version++;
             }
         }
 
@@ -120,16 +149,55 @@ namespace MapRenderer.Unity.Text
         /// to the active set so they render again. A no-op if nothing was cached for it.</summary>
         public void Restore(Key key)
         {
-            if (RemoveCached(key, out Entry e)) _active[key] = e;
+            if (RemoveCached(key, out Entry e)) { _active[key] = e; _version++; } // B-1: labels re-entered the set
         }
 
+        // A-3: reused cross-tile dedup index (main-thread CollectInto only; not reentrant) — keyed by the
+        // stable (quantized-anchor, layer, text) identity, value = the winning label + its tile zoom/key for the
+        // finest-zoom-wins tiebreak. Reused so the per-frame dedup is allocation-free at capacity.
+        private readonly Dictionary<CrossTileLabelKey, DedupEntry> _dedup =
+            new Dictionary<CrossTileLabelKey, DedupEntry>();
+        private struct DedupEntry { public LabelInstance Label; public int Z; public long TileKey; }
+
         /// <summary>Aggregate every ACTIVE tile's labels into <paramref name="output"/> for this frame's
-        /// placement pass. Cached (out-of-cover) tiles are deliberately excluded — they must not render.</summary>
-        public void CollectInto(List<LabelInstance> output)
+        /// placement pass. Cached (out-of-cover) tiles are deliberately excluded — they must not render.
+        ///
+        /// <para>A-3: when <paramref name="quantizeMeters"/> &gt; 0, POINT labels are DEDUPED across tiles by
+        /// their <see cref="CrossTileLabelKey"/> — the same symbol present in a parent + child tile during a
+        /// zoom transition collapses to ONE (the finest tile zoom wins; ties broken by lowest tile key), so it
+        /// is not double-drawn and its identity is stable across the swap. Line labels are passed through
+        /// undeduped (per-anchor line identity is a follow-up). <paramref name="quantizeMeters"/> ≤ 0 disables
+        /// dedup entirely (every active label is emitted, order-preserving — the pre-A-3 behaviour).</para></summary>
+        public void CollectInto(List<LabelInstance> output, double quantizeMeters = 0.0)
         {
             output.Clear();
+            if (quantizeMeters <= 0.0)
+            {
+                foreach (KeyValuePair<Key, Entry> kv in _active)
+                    if (kv.Value.Labels != null) output.AddRange(kv.Value.Labels);
+                return;
+            }
+
+            _dedup.Clear();
             foreach (KeyValuePair<Key, Entry> kv in _active)
-                if (kv.Value.Labels != null) output.AddRange(kv.Value.Labels);
+            {
+                List<LabelInstance> labels = kv.Value.Labels;
+                if (labels == null) continue;
+                for (int i = 0; i < labels.Count; i++)
+                {
+                    LabelInstance label = labels[i];
+                    if (label == null) continue;
+                    // Only point labels carry a cross-tile identity in v1; line labels emit as-is.
+                    if (label.Placement != SymbolPlacement.Point) { output.Add(label); continue; }
+
+                    var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, quantizeMeters);
+                    int z = (int)(label.TileKey >> 44); // PackTileKey: z in the high bits (finest zoom wins)
+                    if (!_dedup.TryGetValue(key, out DedupEntry cur)
+                        || z > cur.Z || (z == cur.Z && label.TileKey < cur.TileKey))
+                        _dedup[key] = new DedupEntry { Label = label, Z = z, TileKey = label.TileKey };
+                }
+            }
+            foreach (KeyValuePair<CrossTileLabelKey, DedupEntry> kv in _dedup) output.Add(kv.Value.Label);
         }
 
         /// <summary>Drop everything (a restyle purges the mesh cache too).</summary>
@@ -138,6 +206,45 @@ namespace MapRenderer.Unity.Text
             _active.Clear();
             _cachedIndex.Clear();
             _cachedOrder.Clear();
+            _version++; // B-1: a restyle purged everything
+        }
+
+        // Reused reconcile scratch (main-thread, non-reentrant) — keeps ReconcileActiveSet allocation-free in
+        // steady state: Clear + Add-at-capacity on the set, and the two move-lists never grow once the cover
+        // stabilises (an unchanged loaded set collects nothing). Honours the per-frame no-GC contract.
+        private readonly HashSet<Key> _loadedScratch = new HashSet<Key>();
+        private readonly List<Key> _reconcileRelease = new List<Key>();
+        private readonly List<Key> _reconcileRestore = new List<Key>();
+
+        /// <summary>
+        /// A-1 PULL model: reconcile the active set against the tile pipeline's current loaded
+        /// <c>(source, tile)</c> membership, replacing the release/restore push-callbacks. For each currently
+        /// ACTIVE tile no longer in <paramref name="loaded"/>: release it (kept warm on the cached side iff
+        /// <paramref name="keepWarmOnRelease"/> — i.e. the prepared mesh cache is enabled, so a later hit can
+        /// restore it without a re-fetch; otherwise dropped). For each loaded tile whose labels are currently on
+        /// the CACHED side: restore it (a prepared-cache re-entry brings the tile back with no fetch, hence no
+        /// bytes-ready rebuild to resurrect the labels). A loaded tile with no entry yet is left untouched — its
+        /// build is kicked by the bytes-ready push when its MVT bytes arrive. Idempotent: a second call with the
+        /// same loaded set moves nothing.
+        /// </summary>
+        public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease)
+        {
+            _loadedScratch.Clear();
+            for (int i = 0; i < loaded.Count; i++) _loadedScratch.Add(loaded[i]);
+
+            // Release actives that left the loaded set (collect first — cannot mutate _active while iterating).
+            _reconcileRelease.Clear();
+            foreach (KeyValuePair<Key, Entry> kv in _active)
+                if (!_loadedScratch.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
+            for (int i = 0; i < _reconcileRelease.Count; i++)
+                Release(_reconcileRelease[i], keepWarmOnRelease);
+
+            // Restore cached tiles that re-entered the loaded set (a cache hit — no rebuild is coming).
+            _reconcileRestore.Clear();
+            for (int i = 0; i < loaded.Count; i++)
+                if (_cachedIndex.ContainsKey(loaded[i])) _reconcileRestore.Add(loaded[i]);
+            for (int i = 0; i < _reconcileRestore.Count; i++)
+                Restore(_reconcileRestore[i]);
         }
 
         private Entry FindCurrent(Key key)

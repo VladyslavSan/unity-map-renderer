@@ -112,6 +112,7 @@ namespace MapRenderer.Unity.Text
                             AnchorRender = s.AnchorRender,
                             Placement = SymbolPlacement.Point,
                             Layout = layout,
+                            Text = s.Text, // A-3: cross-tile identity
                             Paint = s.Paint,
                             TextSizePx = s.TextSizePx,
                             PaddingPx = s.PaddingPx,
@@ -135,12 +136,13 @@ namespace MapRenderer.Unity.Text
                         {
                             Placement = s.Placement,
                             PathRender = s.PathRender,
+                            LineAnchors = s.LineAnchors, // A-2: carry the build-time zoom-invariant anchors
                             CurvedGlyphs = curvedGlyphs,
+                            Text = s.Text, // A-3: carried for parity (line labels are excluded from dedup in v1)
                             Paint = s.Paint,
                             TextSizePx = s.TextSizePx,
                             PaddingPx = s.PaddingPx,
                             SortKey = s.SortKey,
-                            SpacingPx = s.SpacingPx,
                             MaxAngleDeg = s.MaxAngleDeg,
                             KeepUpright = s.KeepUpright,
                             FeatureIndex = s.FeatureIndex,

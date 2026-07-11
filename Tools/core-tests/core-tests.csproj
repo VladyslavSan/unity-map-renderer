@@ -394,6 +394,16 @@
 
     <!-- #5 B1: curved along-line text — Core helpers (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcWalker.cs" />
+    <!-- A-2: stable tile-space line anchors (engine-free) + their tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchor.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchorPlacement.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LineAnchorPlacementTests.cs" />
+    <!-- A-3: cross-tile label identity (engine-free) + its tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CrossTileLabelKey.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/CrossTileIdentityTests.cs" />
+    <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewDistance.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />

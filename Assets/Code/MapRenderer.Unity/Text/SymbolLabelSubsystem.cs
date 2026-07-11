@@ -14,20 +14,22 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
+using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Common;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// S105 Slice 3b — the DECOUPLED production symbol-label subsystem (fork ii): it owns the shared
-    /// production <see cref="GlyphManager"/> + fixed-size <see cref="GlyphAtlasTexture"/> +
-    /// <see cref="StyledSymbolTileBuilder"/>, and mirrors the tile set purely by OBSERVING
-    /// <see cref="Tile.TileManager"/>'s existing fetch-complete / release lifecycle (the
-    /// <c>SymbolTileBytesReady</c>/<c>SymbolTileReleased</c> hooks) — it never touches the mesh/disposal
-    /// pipeline and re-uses the already-fetched MVT bytes (no double download). Labels are the
-    /// placed-every-frame class, so this feeds <see cref="LabelPlacementSystem"/> via
-    /// <see cref="CollectInto"/>, never the static tile-render backend (S20 T5).
+    /// S105 — the DECOUPLED production symbol-label subsystem: it owns the shared production
+    /// <see cref="GlyphManager"/> + fixed-size <see cref="GlyphAtlasTexture"/> +
+    /// <see cref="StyledSymbolTileBuilder"/>. A-1 split of concerns: label DATA arrives via the
+    /// <see cref="Tile.TileManager"/> <c>SymbolTileBytesReady</c> push (already-fetched MVT bytes — no double
+    /// download, never touching the mesh/disposal pipeline), while the tile LIFECYCLE is PULLED — each frame
+    /// <see cref="ReconcileLoadedTiles"/> takes TileManager's current loaded set and reconciles which labels are
+    /// active/kept-warm (retiring the fragile release/restore push-callbacks). Labels are the placed-every-frame
+    /// class, so this feeds <see cref="LabelPlacementSystem"/> via <see cref="CollectInto"/>, never the static
+    /// tile-render backend (S20 T5).
     ///
     /// <para><b>Fixed atlas.</b> The glyph atlas is allocated big and FIXED (<see cref="AtlasDimension"/>,
     /// clamped to the GPU max) so its <c>Size</c> never changes as tiles append glyphs — a growing atlas
@@ -69,15 +71,26 @@ namespace MapRenderer.Unity.Text
         // (Model B) so labels survive a leave-cover → cache-hit → re-enter-cover round trip. Sized to the
         // prepared mesh cache's count cap so a cached tile's labels always outlive its meshes.
         private readonly SymbolTileLabelStore _store;
+        // A-1: whether the prepared mesh cache is enabled — drives keep-warm-on-release. Enabled ⇒ a released
+        // tile can return via a cache HIT (no re-fetch), so keep its labels warm to restore them; disabled ⇒
+        // a revisit always re-fetches (→ rebuild), so keeping warm is pointless → drop on release.
+        private readonly bool _cacheEnabled;
+        // A-1: reused scratch for the per-frame reconcile — LoadedTileKey (source, tile) mapped to store keys,
+        // filtered to sources that actually have symbol layers. Never reallocated in steady state.
+        private readonly List<SymbolTileLabelStore.Key> _reconcileKeys = new();
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
 
-        /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap (<= 0 == unbounded) —
-        /// bounds how many out-of-cover tiles' labels are kept warm so they never outlive their cached meshes.</param>
-        public SymbolLabelSubsystem(MapCamera camera, MapMaterialSet materialSet, int preparedCacheMaxCount = 0)
+        /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap — bounds how many
+        /// out-of-cover tiles' labels are kept warm (clamped to a finite hard cap inside the store even when
+        /// this is 0/unbounded).</param>
+        /// <param name="cacheEnabled">The prepared mesh cache's master toggle — see <see cref="_cacheEnabled"/>.</param>
+        public SymbolLabelSubsystem(MapCamera camera, MapMaterialSet materialSet,
+            int preparedCacheMaxCount = 0, bool cacheEnabled = true)
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
             _materialSet = materialSet;
+            _cacheEnabled = cacheEnabled;
             _store = new SymbolTileLabelStore(preparedCacheMaxCount);
         }
 
@@ -92,6 +105,11 @@ namespace MapRenderer.Unity.Text
         /// <summary>The shared SDF atlas texture backing every collected label's UVs (null before the first
         /// glyphs upload).</summary>
         public GlyphAtlasTexture Atlas => _atlasTexture;
+
+        /// <summary>B-1: the collected label set's monotonic version (<see cref="SymbolTileLabelStore.Version"/>),
+        /// threaded into <see cref="LabelPlacementSystem.Tick"/> so a static frame (unchanged set + camera + fades)
+        /// re-submits the cached meshes instead of re-projecting. Bumped by every set-changing store mutation.</summary>
+        public long Version => _store.Version;
 
         /// <summary>Active (in-cover) label-tile count — telemetry.</summary>
         public int ActiveTileCount => _store.ActiveTileCount;
@@ -189,20 +207,26 @@ namespace MapRenderer.Unity.Text
             BuildTileAsync(sourceId, tile, bytes, layerIndices).Forget();
         }
 
-        /// <summary>TileManager hook (MAIN THREAD): a tile left cover. <paramref name="transferredToCache"/>
-        /// true ⇒ its meshes went to the prepared cache — keep its labels warm so a later cache HIT can restore
-        /// them (the bug this fixes: a cache hit does NOT re-fetch, so dropped labels would never rebuild);
-        /// false ⇒ a true eviction, drop them.</summary>
-        public void OnTileReleased(string sourceId, TileId tile, bool transferredToCache)
+        /// <summary>
+        /// A-1 PULL reconcile (MAIN THREAD, once per frame): given the tile pipeline's current loaded
+        /// <c>(source, tile)</c> membership (from <see cref="TileManager.CollectLoadedTileKeys"/>), reconcile the
+        /// label store — release tiles that left cover (kept warm iff the mesh cache is enabled), restore
+        /// kept-warm labels for tiles that re-entered via a cache hit. Replaces the retired release/restore
+        /// push-callbacks: self-healing (a membership change is corrected next frame) and reentrancy-free
+        /// (nothing mutates mid-callback). Only keys for sources that actually have symbol layers are forwarded
+        /// — a non-symbol source's tiles can never match a label entry, so they are filtered out here.
+        /// </summary>
+        public void ReconcileLoadedTiles(IReadOnlyList<LoadedTileKey> loaded)
         {
-            _store.Release(new SymbolTileLabelStore.Key(sourceId, tile), transferredToCache);
-        }
-
-        /// <summary>TileManager hook (MAIN THREAD): a tile re-entered cover via a prepared-cache HIT (no
-        /// fetch, so no <see cref="OnTileBytesReady"/>) — restore its kept-warm labels to the active set.</summary>
-        public void OnTileRestored(string sourceId, TileId tile)
-        {
-            _store.Restore(new SymbolTileLabelStore.Key(sourceId, tile));
+            if (_layersBySource == null) return; // no style set yet
+            _reconcileKeys.Clear();
+            for (int i = 0; i < loaded.Count; i++)
+            {
+                LoadedTileKey k = loaded[i];
+                if (_layersBySource.ContainsKey(k.SourceId))
+                    _reconcileKeys.Add(new SymbolTileLabelStore.Key(k.SourceId, k.Tile));
+            }
+            _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled);
         }
 
         private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes, List<int> layerIndices)
@@ -248,8 +272,12 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>Aggregate every loaded tile's labels into <paramref name="output"/> for this frame's
-        /// <see cref="LabelPlacementSystem.Tick"/> (which then projects/collides/billboards them).</summary>
-        public void CollectInto(List<LabelInstance> output) => _store.CollectInto(output);
+        /// <see cref="LabelPlacementSystem.Tick"/> (which then projects/collides/billboards them). A-3: point
+        /// labels are deduped across tiles at a grid of one logical pixel at the CURRENT display zoom
+        /// (<see cref="WebMercator.GroundResolution"/>) — so the same symbol from a parent + child tile during a
+        /// zoom transition collapses to one, and the grid tracks zoom (a fixed grid cannot serve all zooms).</summary>
+        public void CollectInto(List<LabelInstance> output)
+            => _store.CollectInto(output, WebMercator.GroundResolution(_camera.CurrentProperties.Zoom));
 
         private void WarnOnAtlasOverflow()
         {

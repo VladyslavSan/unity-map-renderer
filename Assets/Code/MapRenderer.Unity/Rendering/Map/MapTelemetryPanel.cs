@@ -108,6 +108,10 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Labels fed into the last placement Tick (before projection cull) — sum over active tiles.")]
         public int SymbolInputLabelCount;
 
+        [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Tick (never projected/" +
+                 "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
+        public int SymbolDistanceCulledLabels;
+
         [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
                  "a curved/repeated line label is 1 per along-line anchor).")]
         public int SymbolCollisionCandidates;
@@ -167,6 +171,7 @@ namespace MapRenderer.Unity.Rendering.Map
             SymbolActiveLabelTiles    = sym.ActiveLabelTiles;
             SymbolCachedLabelTiles    = sym.CachedLabelTiles;
             SymbolInputLabelCount     = sym.InputLabelCount;
+            SymbolDistanceCulledLabels = sym.DistanceCulledLabels;
             SymbolCollisionCandidates = sym.CollisionCandidateCount;
             SymbolCollisionSurvivors  = sym.CollisionSurvivorCount;
             SymbolPlacedQuads         = sym.PlacedQuadCount;

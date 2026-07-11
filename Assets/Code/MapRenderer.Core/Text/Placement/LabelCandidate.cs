@@ -41,5 +41,21 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Opaque caller ordinal identifying the survivor after the candidate array is sorted in place
         /// (<see cref="LabelPlacementSystem"/> keys its per-candidate emit data by this).</summary>
         public int LabelIndex;
+
+        /// <summary>A-4: this candidate's cross-frame FADE identity (stable across frames + tile swaps) —
+        /// <see cref="LabelPlacementSystem"/> keys its persistent opacity record by this so a label eases in/out
+        /// instead of popping. Point labels: a fixed-grid quantized-anchor hash (zoom-STABLE, unlike the A-3
+        /// display-zoom dedup key); line labels: a within-tile (tile, feature, anchor) hash.</summary>
+        public long FadeId;
+
+        /// <summary>A-5: this candidate was a SURVIVOR last frame (looked up by <see cref="FadeId"/> against the
+        /// placement system's kept-set). It biases <see cref="LabelCollision.ComparePlacementOrder(in LabelCandidate,in LabelCandidate)"/>
+        /// as a sticky-placement (hysteresis) tiebreak — at EQUAL <see cref="SortKey"/>, an incumbent places before
+        /// a newcomer, so the arbitrary <see cref="FeatureIndex"/>/<see cref="TileKey"/> tiebreak can no longer
+        /// flip a near-tied pair frame-to-frame (tile churn / reprojection) → no z-fighting-style flicker. It sits
+        /// BELOW SortKey, so any strictly-higher-priority (lower-SortKey) newcomer still wins — incumbency never
+        /// blocks a genuinely higher-priority label. The placement layer sets this each frame (feedback of history
+        /// into collision — the one deliberately-relaxed spot of the "downstream of SelectSurvivors" rule).</summary>
+        public bool WasPlacedLastFrame;
     }
 }
