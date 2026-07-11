@@ -251,6 +251,14 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             }
         }
 
+        /// <summary>GameObject removal (Object.Destroy per child + container) has no batchable structural cost;
+        /// the loop is the implementation. Inspector-debug backend only. See <see cref="ITileRenderBackend.RemoveItems"/>.</summary>
+        public void RemoveItems(ReadOnlySpan<int> handles)
+        {
+            if (IsDisposed) return;
+            for (int i = 0; i < handles.Length; i++) RemoveItem(handles[i]);
+        }
+
         // ── Per-frame rebuild ──────────────────────────────────────────────────────────────────────
 
         /// <summary>

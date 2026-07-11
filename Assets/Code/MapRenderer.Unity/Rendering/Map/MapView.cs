@@ -67,6 +67,9 @@ namespace MapRenderer.Unity.Rendering.Map
         private static readonly ProfilerMarker PmApplyZoom        = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom");
         private static readonly ProfilerMarker PmInstancedRebuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.InstancedRebuild");
         private static readonly ProfilerMarker PmManagerTick      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.ManagerTick");
+        // The symbol reconcile + label AGGREGATION that runs before Labels.Tick — a candidate for the LateUpdate
+        // time the coarse markers didn't map (A-1 pull/reconcile + A-3 cross-tile dedup CollectInto).
+        private static readonly ProfilerMarker PmSymbolCollect    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Collect");
 
         // ── Injected collaborators (correct by construction — never null) ────────────────────────
         private readonly MapViewConfig _config;
@@ -311,9 +314,15 @@ namespace MapRenderer.Unity.Rendering.Map
                 // A-1: PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already
                 // reflected) and reconcile the label store before collecting — restores kept-warm labels for
                 // cache-hit re-entries, releases tiles that left cover. Then aggregate the active labels.
-                TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                _symbols.ReconcileLoadedTiles(_symbolLoadedScratch);
-                _symbols.CollectInto(_labelBuffer);
+                using (PmSymbolCollect.Auto())
+                {
+                    TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
+                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch);
+                    // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
+                    // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
+                    _symbols.PumpBuilds();
+                    _symbols.CollectInto(_labelBuffer);
+                }
                 // B-1: thread the collected-set version so a static frame (unchanged set + camera + fades) skips
                 // the re-projection and re-submits the cached meshes. The demo path (else branch) passes no version
                 // → the sentinel → never skips (byte-parity). Reconcile/CollectInto above still run every frame.
@@ -390,6 +399,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 MaxConsumesPerTick        = _config.MaxConsumesPerTick,
                 MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
                 MaxVerticesPerTick      = _config.MaxVerticesPerTick,
+                MaxReleasesPerTick      = _config.MaxReleasesPerTick,
             };
 
         /// <summary>

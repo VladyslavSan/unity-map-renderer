@@ -80,8 +80,25 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmProject =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Project");
 
+        // PmProject breakdown: ProjectFill = gather + projection (the SymbolProjectionJob wait above the threshold,
+        // else the serial main-thread fill); Stage = the managed staging loop that reads the projected screen
+        // positions and builds the collision candidates/boxes/quads. Splitting them answers the architecture
+        // question the timeline can't at a glance: is the Project cost a JOB WAIT (ProjectFill) or MANAGED main-
+        // thread work (Stage)? The two nest inside PmProject so the umbrella total is preserved.
+        private static readonly ProfilerMarker PmProjectFill =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.ProjectFill");
+
+        private static readonly ProfilerMarker PmStage =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Stage");
+
         private static readonly ProfilerMarker PmCollide =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Collide");
+
+        // Emit = the A-4 fade + per-slot quad-bucket assembly (managed, main thread) that runs AFTER collision and
+        // BEFORE the mesh upload. Separated from BuildSubmit (the Mesh write/upload) so the managed emit cost is
+        // not hidden inside the LabelTick umbrella — it is a candidate main-thread hot spot in its own right.
+        private static readonly ProfilerMarker PmEmit =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Emit");
 
         private static readonly ProfilerMarker PmBuildSubmit =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BuildSubmit");
@@ -197,18 +214,14 @@ namespace MapRenderer.Unity.Text.Placement
 
         // ── B-2: parallel symbol projection ─────────────────────────────────────────────────────────────────
         // Every visible symbol's screen geometry this frame — a point symbol's anchor, a line symbol's path
-        // vertices — is projected UP FRONT in one pass (SymbolProjectionJob when the count is high, else a serial
-        // loop), and the staging pass reads the precomputed screen positions instead of projecting inline. Generic
-        // over what a symbol RENDERS (text today, icon later): a symbol is projected as its anchor/path world
-        // points regardless. The flat world points go in _symbolPoints; _pointOffset[i] is label i's start in it
-        // (-1 = null / B-3-culled → skipped); the fill writes the parallel _symbolScreen/_symbolDepth/_symbolValid.
-        // Below the threshold the serial fill is cheaper than the Schedule+Complete overhead, so B-2 can only help,
-        // never regress the common (few-hundred-label) case. All reused + grown geometrically → zero per-frame GC.
-        private const int DefaultProjectionJobThreshold = 2048;
-        private const int ProjectionJobBatch = 64;
-        // internal (not const): a test forces the job path (threshold 0) or the serial path (int.MaxValue) to prove
-        // the two fills are equivalent without needing thousands of real labels.
-        internal int ProjectionJobThreshold = DefaultProjectionJobThreshold;
+        // vertices — is projected UP FRONT in one pass by the Burst SymbolProjectionJob, and the staging pass reads
+        // the precomputed screen positions instead of projecting inline. Generic over what a symbol RENDERS (text
+        // today, icon later): a symbol is projected as its anchor/path world points regardless. The flat world
+        // points go in _symbolPoints; _pointOffset[i] is label i's start in it (-1 = null / B-3-culled → skipped);
+        // the fill writes the parallel _symbolScreen/_symbolDepth/_symbolValid. The job is dispatched with .Run()
+        // (Burst-compiled, executed inline on the caller — no Schedule/Complete round-trip, no worker hand-off, no
+        // count threshold), so the projection is always Burst SIMD with zero managed fallback and zero per-frame GC.
+        // All buffers are reused + grown geometrically.
         private NativeList<double3> _symbolPoints;
         private NativeList<float2>  _symbolScreen;
         private NativeList<float>   _symbolDepth;
@@ -432,22 +445,28 @@ namespace MapRenderer.Unity.Text.Placement
                         // mul, and it is where the B-3 distance cull now runs — then project them all in one pass
                         // (parallel Burst job above the threshold, else serial). Staging reads the precomputed
                         // screen positions below rather than projecting each anchor/path inline.
-                        GatherSymbolPoints(labels, sceneOriginRender, cullRadius);
-                        ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx);
-
-                        for (int i = 0; i < labels.Count; i++)
+                        using (PmProjectFill.Auto())
                         {
-                            int off = _pointOffset[i];
-                            if (off < 0) continue; // null label or B-3-distance-culled (not gathered/projected)
+                            GatherSymbolPoints(labels, sceneOriginRender, cullRadius);
+                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx);
+                        }
 
-                            // Each Stage* returns HOW MANY candidates it staged: point → 0/1; curved → 0/1 for
-                            // line-center, 0..N for symbol-placement:line (one per along-line repeat anchor, B4).
-                            LabelInstance label = labels[i];
-                            candidateCount += label.Placement == SymbolPlacement.Point
-                                ? StagePointLabel(label, _symbolScreen[off], _symbolDepth[off], _symbolValid[off] != 0,
-                                    bearingRadians, viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount)
-                                : StageCurvedLabel(label, off, bearingRadians,
-                                    viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount);
+                        using (PmStage.Auto())
+                        {
+                            for (int i = 0; i < labels.Count; i++)
+                            {
+                                int off = _pointOffset[i];
+                                if (off < 0) continue; // null label or B-3-distance-culled (not gathered/projected)
+
+                                // Each Stage* returns HOW MANY candidates it staged: point → 0/1; curved → 0/1 for
+                                // line-center, 0..N for symbol-placement:line (one per along-line repeat anchor, B4).
+                                LabelInstance label = labels[i];
+                                candidateCount += label.Placement == SymbolPlacement.Point
+                                    ? StagePointLabel(label, _symbolScreen[off], _symbolDepth[off], _symbolValid[off] != 0,
+                                        bearingRadians, viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount)
+                                    : StageCurvedLabel(label, off, bearingRadians,
+                                        viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount);
+                            }
                         }
                     }
 
@@ -465,30 +484,33 @@ namespace MapRenderer.Unity.Text.Placement
                     //     emit its staged quads scaled by that opacity. A suppressed label is still staged this
                     //     frame, so it fades OUT in place from its live placement (no cross-frame quad cache); a
                     //     new label fades IN from 0. Records not seen this frame decay and are dropped (bounded).
-                    _seenFade.Clear();
-                    _placedLastFrame.Clear(); // A-5: rebuild this frame's incumbents for next frame's staging
-                    for (int s = 0; s < candidateCount; s++)
+                    using (PmEmit.Auto())
                     {
-                        LabelCandidate cand = _nCandidates[s]; // sorted in place by the collision job
-                        bool survived = _nSurvivors[s] != 0;
-                        _seenFade.Add(cand.FadeId);
-                        // A-5: incumbency tracks COLLISION survival (not opacity) — a just-born survivor still at
-                        // ~0 alpha is placed, so it must stay sticky. Keyed by FadeId (line labels: per-anchor).
-                        if (survived) _placedLastFrame.Add(cand.FadeId);
-                        float opacity = EaseFade(cand.FadeId, survived ? 1f : 0f, deltaTime);
-                        if (opacity <= FadeEpsilon) continue;
-
-                        CandidateEmit          emit   = _emit[cand.LabelIndex];
-                        NativeList<PlacedQuad> bucket = _slotQuads[emit.Slot];
-                        for (int k = 0; k < emit.QuadCount; k++)
+                        _seenFade.Clear();
+                        _placedLastFrame.Clear(); // A-5: rebuild this frame's incumbents for next frame's staging
+                        for (int s = 0; s < candidateCount; s++)
                         {
-                            PlacedQuad q = _stagedQuads[emit.QuadStart + k];
-                            q.Color.w *= opacity; // per-vertex alpha the shader emits — the fade, no shader change
-                            bucket.Add(q);
-                            totalQuads++;
+                            LabelCandidate cand = _nCandidates[s]; // sorted in place by the collision job
+                            bool survived = _nSurvivors[s] != 0;
+                            _seenFade.Add(cand.FadeId);
+                            // A-5: incumbency tracks COLLISION survival (not opacity) — a just-born survivor still at
+                            // ~0 alpha is placed, so it must stay sticky. Keyed by FadeId (line labels: per-anchor).
+                            if (survived) _placedLastFrame.Add(cand.FadeId);
+                            float opacity = EaseFade(cand.FadeId, survived ? 1f : 0f, deltaTime);
+                            if (opacity <= FadeEpsilon) continue;
+
+                            CandidateEmit          emit   = _emit[cand.LabelIndex];
+                            NativeList<PlacedQuad> bucket = _slotQuads[emit.Slot];
+                            for (int k = 0; k < emit.QuadCount; k++)
+                            {
+                                PlacedQuad q = _stagedQuads[emit.QuadStart + k];
+                                q.Color.w *= opacity; // per-vertex alpha the shader emits — the fade, no shader change
+                                bucket.Add(q);
+                                totalQuads++;
+                            }
                         }
+                        DecayUnseenFadeRecords(deltaTime);
                     }
-                    DecayUnseenFadeRecords(deltaTime);
                 }
 
                 // B-1: capture (or invalidate) the skip cache. Only a real build produces a cacheable static
@@ -678,30 +700,20 @@ namespace MapRenderer.Unity.Text.Placement
             _symbolValid.Resize(total,  NativeArrayOptions.UninitializedMemory);
             if (total == 0) return;
 
-            if (total >= ProjectionJobThreshold)
+            // .Run() Burst-compiles and executes the parallel-for inline on the calling thread: no Schedule/Complete
+            // round-trip, no worker hand-off, no count threshold — and no managed serial fallback that would run
+            // outside Burst. The caller blocks here regardless (staging reads the output immediately below), so an
+            // inline .Run() is strictly cheaper than Schedule().Complete() for this synchronous consume.
+            new SymbolProjectionJob
             {
-                new SymbolProjectionJob
-                {
-                    Points            = _symbolPoints.AsArray(),
-                    SceneOriginRender = sceneOriginRender,
-                    ViewProj          = viewProj,
-                    ViewportLogicalPx = viewportLogicalPx,
-                    OutScreen         = _symbolScreen.AsArray(),
-                    OutDepth          = _symbolDepth.AsArray(),
-                    OutValid          = _symbolValid.AsArray(),
-                }.Schedule(total, ProjectionJobBatch).Complete();
-            }
-            else
-            {
-                for (int k = 0; k < total; k++)
-                {
-                    bool ok = LabelScreenProjection.TryProjectPoint(_symbolPoints[k], sceneOriginRender, viewProj,
-                        viewportLogicalPx, out float2 s, out float d);
-                    _symbolScreen[k] = s;
-                    _symbolDepth[k]  = d;
-                    _symbolValid[k]  = (byte)(ok ? 1 : 0);
-                }
-            }
+                Points            = _symbolPoints.AsArray(),
+                SceneOriginRender = sceneOriginRender,
+                ViewProj          = viewProj,
+                ViewportLogicalPx = viewportLogicalPx,
+                OutScreen         = _symbolScreen.AsArray(),
+                OutDepth          = _symbolDepth.AsArray(),
+                OutValid          = _symbolValid.AsArray(),
+            }.Run(total);
         }
 
         // Grows the per-label offset map geometrically (T4). Indexed by label-list position.

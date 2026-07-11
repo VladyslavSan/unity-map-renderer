@@ -45,6 +45,12 @@ namespace MapRenderer.Unity.Rendering.Map
                  "then the rest defer to the next frame (one-mesh overshoot). 0 = uncapped.")]
         public int MaxVerticesPerTick = 50000;
 
+        [Tooltip("Stall #2: Per-frame budget of (tile, source) records fully RELEASED per Tick (backend " +
+                 "removal + mesh destroy/transfer + scheduler release). A zoom-out/fast-pan otherwise frees " +
+                 "the whole departing cover in one frame — the mirror image of the budgeted consume. Records " +
+                 "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
+        public int MaxReleasesPerTick = 4;
+
         [Header("Rendering")]
         [Tooltip("Tile render backend. Entities (default) = per-tile entity hierarchy via Entities " +
                  "Graphics, inspectable in the Entities Hierarchy. Brg = hand-packed BatchRendererGroup, " +

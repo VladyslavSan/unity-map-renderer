@@ -125,6 +125,50 @@ namespace MapRenderer.Tests
             Assert.AreEqual(expected.b, actual.b, eps, $"{message} (B: expected={expected.b:F4} actual={actual.b:F4})");
         }
 
+        // ── Stall #3: EG mesh registrations balance across the prepared-cache round-trip ─────────────
+        // The ID route (RegisterMesh per AddTileLayer, UnregisterMesh per removal) leaks if the cache path is
+        // asymmetric — BuildTileFromCache→AddTileLayer is a SECOND RegisterMesh site, eviction-to-cache is the
+        // matching UnregisterMesh site. A plain load→release wouldn't catch that; repeated round trips do — a
+        // missing unregister makes the near-cover registration count drift up each cycle.
+        [Test]
+        public void Stall3_MeshRegistrations_StableAcrossCacheRoundTrips_Entities()
+        {
+            var style = InterpFillStyle();
+            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var go    = new GameObject("MapView_S82_RegBalance");
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend               = RenderBackend.Entities; // the ID-route path under test
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // uncapped — synchronous whole-cover eviction each move
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                int rNear = view.RegisteredMeshCount();
+                Assert.Greater(rNear, 0, "loading the near cover must register >=1 EG mesh (Entities backend).");
+
+                for (int cycle = 0; cycle < 3; cycle++)
+                {
+                    // Evict to a far cover (transfers the near tiles to the prepared cache, unregistering them).
+                    view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                    PumpUntilSettled(view);
+                    // Revisit the SAME near view — a cache HIT re-registers via BuildTileFromCache→AddTileLayer.
+                    view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                    PumpUntilSettled(view);
+                    Assert.AreEqual(rNear, view.RegisteredMeshCount(),
+                        $"cycle {cycle}: EG mesh registrations must return to the post-load count. A drift means a " +
+                        "RegisterMesh on the cache-revisit path is not balanced by an UnregisterMesh on eviction " +
+                        "(the ID route's leak trap).");
+                }
+            }
+            finally { view.Teardown(); Object.DestroyImmediate(go); }
+        }
+
         // ── THE decisive revisit ───────────────────────────────────────────────────────────────
 
         [Test]
@@ -140,6 +184,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             try
             {
@@ -217,6 +262,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             const double Z1 = 4.2, Z2 = 4.8;
 
@@ -290,6 +336,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             try
             {
@@ -341,6 +388,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             int meshBefore = CountMeshObjects();
 
@@ -401,6 +449,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             try
             {
@@ -461,6 +510,7 @@ namespace MapRenderer.Tests
             view.Config.MaxConsumesPerTick        = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
             view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
 
             try
             {

@@ -289,5 +289,65 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(go);
             }
         }
+
+        // ── Stall #6 fix: a CLEAN camera with tiles still pending must NOT re-run the cover recompute ──
+
+        /// <summary>
+        /// The stall-#6 gate change: the expensive cover recompute (quadtree descent + request/release diff)
+        /// is now gated on <c>_coverDirty</c> ALONE — a static camera with tiles still in-flight no longer
+        /// forces it every frame. A GATED data source keeps every requested tile pending across ticks (its
+        /// fetch only completes on cancellation), so <c>pending &gt; 0</c> holds while the camera stays put.
+        ///
+        /// <para>Falsifiable: BEFORE the fix the gate was <c>!_coverDirty &amp;&amp; pending == 0</c>, so
+        /// <c>pending &gt; 0</c> forced the full recompute (CoverRecomputesLastTick == 1) every frame for zero
+        /// effect (the cover set is unchanged → the request/release loops are pure no-ops). This test asserts
+        /// 0 across those frames — it FAILS on the pre-fix gate. <c>PumpPending</c> still runs each tick, so
+        /// tiles keep progressing; this removes wasted work, it does not stall the pipeline.</para>
+        /// </summary>
+        [Test]
+        public void CoverRecompute_CleanCameraWithPendingTiles_IsSkipped_Stall6Fix()
+        {
+            // Per-tile gated fetch: stays pending until the tile's own token is cancelled (Release/teardown),
+            // so no shared-task double-consume, and teardown cancels each → prompt, no 10 s spin.
+            var src  = new TestDataSource((id, ct) =>
+            {
+                var utcs = new UniTaskCompletionSource<TileResponse>();
+                ct.Register(() => utcs.TrySetCanceled(ct));
+                return utcs.Task;
+            });
+            var go   = new GameObject("MapView_S95_CleanPending");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+
+                // Establish the cover + request the tiles (they then hang on the gated fetch).
+                view.LateUpdate();
+                Assert.Greater(view.LoadedTileCount(), 0, "cover established → tiles requested on the first tick.");
+                Assert.IsFalse(view.AllTilesSettled(), "gated source → requested tiles stay pending across ticks.");
+
+                // Same camera, tiles still pending: the recompute must be skipped every frame.
+                for (int i = 0; i < 5; i++)
+                {
+                    view.LateUpdate();
+                    Assert.IsFalse(view.AllTilesSettled(), "sanity: tiles remain pending (tokens not cancelled).");
+                    Assert.AreEqual(0, view.CoverRecomputesLastTick(),
+                        "clean camera + pending tiles must NOT re-run the cover recompute (was 1 pre-fix: " +
+                        "pending>0 forced the descent + request/release diff every frame for zero effect).");
+                }
+            }
+            finally
+            {
+                view.Teardown(); // cancels each tile's token → the gated fetches complete promptly
+                Object.DestroyImmediate(go);
+            }
+        }
     }
 }

@@ -3,6 +3,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
@@ -81,6 +82,51 @@ namespace MapRenderer.Unity.Text
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
 
+        // ── Stall #1 fix (Stage A): bounded symbol-build queue + coalesced atlas upload ──────────────
+        /// <summary>A queued deferred symbol build: the source's already-fetched MVT bytes and its layer
+        /// indices (the live <see cref="_layersBySource"/> list, NOT copied — <see cref="SetStyle"/> clears
+        /// the queue before rebuilding that map, so a queued entry never references a stale list). Readonly
+        /// fields + ctor (not <c>init</c>): MapRenderer.Unity has no IsExternalInit polyfill, and this mirrors
+        /// the local carrier idiom (<c>TileManager.LoadedKey</c>/<c>SourceKey</c>).</summary>
+        private readonly struct PendingSymbolBuild
+        {
+            public readonly string    SourceId;
+            public readonly TileId    Tile;
+            public readonly byte[]    Bytes;
+            public readonly List<int> LayerIndices;
+            public PendingSymbolBuild(string sourceId, TileId tile, byte[] bytes, List<int> layerIndices)
+            {
+                SourceId = sourceId; Tile = tile; Bytes = bytes; LayerIndices = layerIndices;
+            }
+        }
+
+        // Bytes-ready pushes land here (OnTileBytesReady ENQUEUES, never builds inline); PumpBuilds starts at
+        // most MaxBuildsPerFrame of them per frame. byte[] retention is bounded by the cover size.
+        private readonly Queue<PendingSymbolBuild> _buildQueue = new();
+        // The current loaded (source, tile) set, refreshed each frame by ReconcileLoadedTiles — PumpBuilds
+        // drops a queued build whose tile has since left the loaded set (a later re-entry is a fresh push).
+        private readonly HashSet<SymbolTileLabelStore.Key> _loadedNow = new();
+        // Cancels in-flight builds on restyle/teardown so a resumed build never touches disposed glyph/atlas
+        // state (closes the missing-token + restyle-vs-in-flight-build risks from the review). Recreated per
+        // SetStyle so each style has its own cancellation scope.
+        private CancellationTokenSource _buildCts = new();
+
+        /// <summary>Max symbol-tile builds STARTED per frame in <see cref="PumpBuilds"/> — the responsiveness
+        /// knob for stall #1. Default 1 (locked design default); MapView may serialize it later.</summary>
+        public int MaxBuildsPerFrame { get; set; } = 1;
+
+        /// <summary>Test seam (dependency-inversion, mirroring <c>IDataSource</c>): the glyph-source factory
+        /// <see cref="SetStyle"/> uses, overridable so an EditMode test can inject a fixture/gated
+        /// <c>TestGlyphSource</c> instead of the production web source. Null ⇒ the production
+        /// <see cref="GlyphSourceFactory.Create"/>.</summary>
+        internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride { get; set; }
+
+        // Per-frame observability (mirrors TileManager's *LastTick counters) — read by tests, never the live path.
+        internal int BuildsStartedLastPump { get; private set; }
+        internal int AtlasUploadsLastPump  { get; private set; }
+        internal int CancelledBuildCount   { get; private set; }
+        internal int QueuedBuildCount => _buildQueue.Count;
+
         /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap — bounds how many
         /// out-of-cover tiles' labels are kept warm (clamped to a finite hard cap inside the store even when
         /// this is 0/unbounded).</param>
@@ -127,6 +173,12 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
             _lastUploadedGlyphCount = 0;
             _loggedOverflow = false;
+            // Cancel any in-flight builds from the previous style and open a fresh cancellation scope, then
+            // drop queued builds (their layer-index lists belong to the old _layersBySource rebuilt below).
+            _buildCts.Cancel();
+            _buildCts.Dispose();
+            _buildCts = new CancellationTokenSource();
+            _buildQueue.Clear();
             DisposePipeline();
 
             _allSymbolLayers.Clear();
@@ -171,7 +223,8 @@ namespace MapRenderer.Unity.Text
                 return;
             }
             int dim = Math.Min(SystemInfo.maxTextureSize, AtlasDimension);
-            _glyphManager = new GlyphManager(GlyphSourceFactory.Create(style), new GlyphAtlas(dim, dim));
+            IGlyphSource glyphSource = (GlyphSourceFactoryOverride ?? GlyphSourceFactory.Create)(style);
+            _glyphManager = new GlyphManager(glyphSource, new GlyphAtlas(dim, dim));
             _atlasTexture = new GlyphAtlasTexture();
             _builder = new StyledSymbolTileBuilder(_glyphManager);
         }
@@ -198,13 +251,57 @@ namespace MapRenderer.Unity.Text
             }
         }
 
-        /// <summary>TileManager hook (MAIN THREAD): a tile's MVT bytes are ready — kick a deferred build for
-        /// its source's symbol layers, if any. Never throws (TileManager also isolates, belt and braces).</summary>
+        /// <summary>TileManager hook (MAIN THREAD): a tile's MVT bytes are ready — ENQUEUE a deferred build for
+        /// its source's symbol layers, if any. Never throws (TileManager also isolates, belt and braces).
+        ///
+        /// <para>Stall #1: this used to run the WHOLE build (decode + shape + atlas upload) synchronously on the
+        /// main thread for EVERY fetch completing this frame — an unbounded burst. It now only enqueues; the
+        /// per-frame <see cref="PumpBuilds"/> starts at most <see cref="MaxBuildsPerFrame"/> of them.</para></summary>
         public void OnTileBytesReady(string sourceId, TileId tile, byte[] bytes)
         {
             if (_builder == null || bytes == null) return;
             if (!_layersBySource.TryGetValue(sourceId, out List<int> layerIndices)) return;
-            BuildTileAsync(sourceId, tile, bytes, layerIndices).Forget();
+            _buildQueue.Enqueue(new PendingSymbolBuild(sourceId, tile, bytes, layerIndices));
+        }
+
+        /// <summary>
+        /// MAIN THREAD, once per frame from <see cref="Map.MapView"/> AFTER <see cref="ReconcileLoadedTiles"/>
+        /// (so <see cref="_loadedNow"/> reflects this frame's loaded set): start at most
+        /// <see cref="MaxBuildsPerFrame"/> queued builds — dropping any whose tile has since left the loaded
+        /// set — then perform AT MOST ONE atlas GPU upload if the shared atlas grew since the last upload
+        /// (coalescing every commit + glyph-range arrival that landed since last frame into one ≤16 MB blit).
+        ///
+        /// <para>Fixes stall #1: the old path built every fetch-completing tile inline and re-uploaded the
+        /// 16 MB atlas per glyph-adding tile; both are now bounded per frame. The dequeue loop runs at most
+        /// <c>_buildQueue.Count</c> iterations (a dropped stale entry is still a dequeue).</para>
+        /// </summary>
+        public void PumpBuilds()
+        {
+            BuildsStartedLastPump = 0;
+            AtlasUploadsLastPump  = 0;
+            if (_builder == null) return; // no glyph pipeline (style has no 'glyphs' URL) — nothing to do
+
+            // Start ≤ MaxBuildsPerFrame builds; drop queued entries whose tile left the loaded set.
+            while (_buildQueue.Count > 0 && BuildsStartedLastPump < MaxBuildsPerFrame)
+            {
+                PendingSymbolBuild item = _buildQueue.Dequeue();
+                var key = new SymbolTileLabelStore.Key(item.SourceId, item.Tile);
+                if (!_loadedNow.Contains(key)) continue; // left cover before we reached it — drop the build
+                BuildTileAsync(item.SourceId, item.Tile, item.Bytes, item.LayerIndices, _buildCts.Token).Forget();
+                BuildsStartedLastPump++;
+            }
+
+            // ONE coalesced atlas upload per frame — any glyphs appended by builds that committed since the
+            // last upload (this frame's inline-completing builds and any async ones that just resumed).
+            int glyphCount = _glyphManager.Atlas.Count;
+            if (glyphCount > _lastUploadedGlyphCount)
+            {
+                _lastUploadedGlyphCount = glyphCount;
+                using (PmAtlasUpload.Auto())
+                    _atlasTexture.Upload(_glyphManager.Atlas);
+                AtlasUploadsLastPump = 1;
+            }
+            WarnOnAtlasOverflow();
         }
 
         /// <summary>
@@ -220,50 +317,64 @@ namespace MapRenderer.Unity.Text
         {
             if (_layersBySource == null) return; // no style set yet
             _reconcileKeys.Clear();
+            _loadedNow.Clear(); // rebuilt here each frame; PumpBuilds reads it to drop builds for departed tiles
             for (int i = 0; i < loaded.Count; i++)
             {
                 LoadedTileKey k = loaded[i];
                 if (_layersBySource.ContainsKey(k.SourceId))
-                    _reconcileKeys.Add(new SymbolTileLabelStore.Key(k.SourceId, k.Tile));
+                {
+                    var storeKey = new SymbolTileLabelStore.Key(k.SourceId, k.Tile);
+                    _reconcileKeys.Add(storeKey);
+                    _loadedNow.Add(storeKey);
+                }
             }
             _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled);
         }
 
-        private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes, List<int> layerIndices)
+        private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes,
+            List<int> layerIndices, CancellationToken ct)
         {
             var key = new SymbolTileLabelStore.Key(sourceId, tile);
             int gen = _store.BeginBuild(key); // reserve the active slot (collected as empty until committed)
 
+            // Capture the main-thread inputs BEFORE hopping to the pool (Unity APIs are main-thread only):
+            // this build's own builder, the camera zoom + projection, and its layer list.
+            StyledSymbolTileBuilder builder     = _builder;
+            double                  zoom        = _camera.CurrentProperties.Zoom;
+            var                     projection  = _camera.Projection;
+            var layers = new List<SymbolStyle.StyleLayer>(layerIndices.Count);
+            for (int k = 0; k < layerIndices.Count; k++) layers.Add(_allSymbolLayers[layerIndices[k]]);
+
             try
             {
-                MvtTile mvt;
+                // Stage B: decode + feature-extract on the THREAD POOL — engine-free, touches no glyph cache /
+                // atlas / UnityEngine object, so it is worker-safe (this was the ~600ms main-thread burst).
+                await UniTask.SwitchToThreadPool();
+                List<StyledSymbolTileBuilder.ExtractedLayer> extracted;
                 using (PmTileDecode.Auto())
-                    mvt = MvtDecoder.Decode(bytes); // decode-on-main (fast); a first-cut per F5 threading note
-                double zoom = _camera.CurrentProperties.Zoom;
+                {
+                    MvtTile mvt = MvtDecoder.Decode(bytes);
+                    extracted = builder.ExtractLayers(mvt, tile, layers, zoom, projection, layerIndices);
+                }
 
-                // The source's layers + their global material indices (parallel lists), so each built label
-                // is stamped with its owning layer's MaterialIndex for the per-material draw grouping.
-                var layers = new List<SymbolStyle.StyleLayer>(layerIndices.Count);
-                for (int k = 0; k < layerIndices.Count; k++) layers.Add(_allSymbolLayers[layerIndices[k]]);
+                // Back to MAIN for glyph ensure + shape (they read the shared atlas). A restyle/teardown that
+                // cancelled while we were on the pool throws here — before touching the store/glyphs/atlas.
+                await UniTask.SwitchToMainThread(ct);
 
                 var labels = new List<LabelInstance>();
-                await _builder.BuildAsync(mvt, tile, layers, zoom, _camera.Projection, labels, layerIndices);
+                await builder.ShapeAsync(extracted, labels, ct);
+                ct.ThrowIfCancellationRequested();
 
-                // Commit — unless superseded by a newer build OR dropped mid-build. A tile RELEASED-to-cache
-                // mid-build is NOT stale: the store moved its entry to the cached side and CompleteBuild writes
-                // the labels there, so a later cache hit restores them (the released-mid-build variant of the bug).
-                if (!_store.CompleteBuild(key, gen, labels)) return;
-
-                // Re-upload only when new glyphs actually landed in the shared atlas (most tiles after the
-                // first few add none, since names repeat within a script).
-                int glyphCount = _glyphManager.Atlas.Count;
-                if (glyphCount > _lastUploadedGlyphCount)
-                {
-                    _lastUploadedGlyphCount = glyphCount;
-                    using (PmAtlasUpload.Auto())
-                        _atlasTexture.Upload(_glyphManager.Atlas);
-                }
-                WarnOnAtlasOverflow();
+                // Commit — unless superseded by a newer build OR dropped mid-build (released-to-cache is NOT
+                // stale: the store writes the labels to the cached side so a later hit restores them). The
+                // atlas GPU upload is coalesced into the next PumpBuilds — no atlas touch here.
+                _store.CompleteBuild(key, gen, labels);
+            }
+            catch (OperationCanceledException)
+            {
+                // Restyle/teardown mid-build — silent, never touches disposed state (closes the review's two
+                // latent lifetime risks). The reserved slot is dropped when SetStyle/Dispose Clears the store.
+                CancelledBuildCount++;
             }
             catch (Exception ex)
             {
@@ -289,6 +400,9 @@ namespace MapRenderer.Unity.Text
 
         public void Dispose()
         {
+            _buildCts.Cancel();   // stop any in-flight build before its glyph/atlas state is disposed below
+            _buildCts.Dispose();
+            _buildQueue.Clear();
             _store.Clear();
             DisposePipeline();
         }

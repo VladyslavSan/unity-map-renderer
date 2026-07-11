@@ -22,11 +22,13 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// B-2: the parallel symbol-projection pass. Every visible symbol's screen geometry (point anchors + line
-    /// paths) is projected up front — as a Burst job above a count threshold, else a serial loop — and the
-    /// staging pass reads the precomputed positions. Teeth: (1) the job's per-point output equals the inline
-    /// <see cref="LabelScreenProjection.TryProjectPoint"/> (one copy of the math); (2) the job-fill and serial-fill
-    /// paths produce a BYTE-IDENTICAL mesh over an INTERLEAVED scene (point + curved + B-3-culled + null) — the
-    /// real risk is the label→flat-point index mapping drifting when some labels aren't gathered.
+    /// paths) is projected up front by the Burst <see cref="SymbolProjectionJob"/> — dispatched with .Run()
+    /// (Burst inline, no Schedule/Complete, no count threshold) — and the staging pass reads the precomputed
+    /// positions. Teeth: (1) the job's per-point output equals the inline
+    /// <see cref="LabelScreenProjection.TryProjectPoint"/> (one copy of the math); (2) over an INTERLEAVED scene
+    /// (point + curved + B-3-culled + null) the pass places the gathered labels and excludes the ungathered ones
+    /// (the far point is culled, the null is skipped) with a STABLE mesh across repeated Ticks — the real risk is
+    /// the label→flat-point index mapping drifting when some labels aren't gathered.
     /// </summary>
     [TestFixture]
     public class LabelProjectionJobTests
@@ -83,16 +85,19 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── Tooth 2: job-fill (threshold 0) vs serial-fill (threshold int.MaxValue) → byte-identical mesh over an
-        //    interleaved scene. Proves the label→flat-point index mapping is correct when some labels aren't
-        //    gathered (null + B-3-culled) and point/curved advance the flat cursor by 1 vs N. ONE harness / camera
-        //    (two cameras' projection matrices differ by sub-ULP), two Ticks over the SAME scene — the sort keys
-        //    are all distinct so A-5 incumbency is a no-op across the two Ticks, and the default (+inf) deltaTime
-        //    snaps the fade both times, so the ONLY variable is the fill path. ──
+        // ── Tooth 2: over an INTERLEAVED scene (on-screen point + null gap + far-culled point + curved line + on-
+        //    screen point) the .Run() projection pass must (a) exclude the ungathered labels — the null is skipped,
+        //    the far point is B-3 distance-culled — and (b) still place the on-screen labels, with a mesh that is
+        //    STABLE across repeated Ticks. This is the label→flat-point index-mapping tooth: a mapping that drifted
+        //    when some labels aren't gathered (point/curved advance the flat cursor by 1 vs N; null/culled advance
+        //    by 0) would mis-project the on-screen labels off-screen (quads→0) or corrupt the cull count. The
+        //    stability check also guards the UninitializedMemory output buffers against a partial fill. Sort keys
+        //    are distinct so A-5 incumbency is a no-op across Ticks, and the default (+inf) deltaTime snaps the fade
+        //    both times, so a second Tick over identical inputs is byte-identical iff the fill is deterministic. ──
         [Test]
-        public void JobFill_And_SerialFill_ProduceIdenticalMesh_OverInterleavedScene()
+        public void JobFill_OverInterleavedScene_PlacesGathered_ExcludesUngathered_AndIsStable()
         {
-            using var h = new Harness(projectionJobThreshold: int.MaxValue); // start on the serial path
+            using var h = new Harness();
             List<LabelInstance> Scene() => new List<LabelInstance>
             {
                 h.Point(h.Origin, 0f, "A", 0),                             // on-screen point
@@ -102,44 +107,26 @@ namespace MapRenderer.Tests.Text.Placement
                 h.Point(h.Origin + new double3(50_000, 0, 0), 3f, "B", 3), // another on-screen point
             };
 
-            h.System.Tick(in h.Frame, Scene(), h.Atlas); // serial fill
-            var serialV = h.System.Mesh.vertices;        // capture before the next Tick overwrites the mesh
-            var serialT = h.System.Mesh.triangles;
-            var serialC = h.System.Mesh.colors;
-            var serialUv = h.System.Mesh.uv;
-            int serialQuads = h.System.LastQuadCount, serialCand = h.System.LastCandidateCount;
-            int serialSurv = h.System.LastSurvivorCount, serialCulled = h.System.LastDistanceCulledCount;
-            Assert.Greater(serialQuads, 0, "the scene must actually place something (else the test is vacuous)");
+            h.System.Tick(in h.Frame, Scene(), h.Atlas);
+            var firstV = h.System.Mesh.vertices;   // capture before the next Tick overwrites the persistent mesh
+            var firstT = h.System.Mesh.triangles;
+            var firstC = h.System.Mesh.colors;
+            var firstUv = h.System.Mesh.uv;
 
-            h.System.ProjectionJobThreshold = 0;         // force the parallel job path
-            h.System.Tick(in h.Frame, Scene(), h.Atlas); // job fill, identical inputs
+            // (a) the far point is culled and the null contributes nothing; (b) the two on-screen points at minimum
+            //     stage as candidates and something places — a broken index mapping would mis-project them off-
+            //     screen, dropping candidates below 2 and/or quads to 0.
+            Assert.AreEqual(1, h.System.LastDistanceCulledCount, "the far point must be B-3 distance-culled");
+            Assert.GreaterOrEqual(h.System.LastCandidateCount, 2, "the two on-screen points must stage (mapping intact)");
+            Assert.Greater(h.System.LastQuadCount, 0, "the on-screen labels must place (else the scene is vacuous / mapping broken)");
 
-            // Counts are exact (a wrong mapping would place/cull differently). Topology + the projection-INDEPENDENT
-            // attributes (colors, UVs — from the glyph/atlas, not the camera) are exact too. Vertex POSITIONS go
-            // through the projection, and Burst (which DOES compile the job in the Editor) reassociates/FMAs the
-            // clip.z/clip.w math, so they differ from the managed serial fill by ~1e-4 px — compared within a tight
-            // tolerance that still catches an index-mapping bug (that would be tens–hundreds of px off, not 1e-4).
-            Assert.AreEqual(serialQuads, h.System.LastQuadCount, "same quad count");
-            Assert.AreEqual(serialCand, h.System.LastCandidateCount, "same candidate count");
-            Assert.AreEqual(serialSurv, h.System.LastSurvivorCount, "same survivor count");
-            Assert.AreEqual(serialCulled, h.System.LastDistanceCulledCount, "same cull count");
-            Assert.AreEqual(serialT, h.System.Mesh.triangles, "triangle topology differs between serial- and job-fill");
-            Assert.AreEqual(serialC, h.System.Mesh.colors, "vertex colors differ (projection-independent — must be exact)");
-            Assert.AreEqual(serialUv, h.System.Mesh.uv, "UVs differ (projection-independent — must be exact)");
-            AssertVerticesApproxEqual(serialV, h.System.Mesh.vertices, 0.05f);
-        }
-
-        // Per-vertex tolerance compare — decisive for the index mapping (off by tens–hundreds of px on a bug),
-        // tolerant of the sub-ULP Burst-vs-managed projection difference.
-        private static void AssertVerticesApproxEqual(Vector3[] a, Vector3[] b, float tol)
-        {
-            Assert.AreEqual(a.Length, b.Length, "vertex count differs between serial- and job-fill");
-            for (int i = 0; i < a.Length; i++)
-            {
-                Assert.AreEqual(a[i].x, b[i].x, tol, $"vertex[{i}].x differs beyond FP noise (index mapping?)");
-                Assert.AreEqual(a[i].y, b[i].y, tol, $"vertex[{i}].y differs beyond FP noise (index mapping?)");
-                Assert.AreEqual(a[i].z, b[i].z, tol, $"vertex[{i}].z differs beyond FP noise (index mapping?)");
-            }
+            // Stability: an identical second Tick must reproduce the mesh bit-for-bit (deterministic fill over the
+            // UninitializedMemory buffers + a stable index mapping).
+            h.System.Tick(in h.Frame, Scene(), h.Atlas);
+            Assert.AreEqual(firstT, h.System.Mesh.triangles, "triangle topology drifted across identical Ticks");
+            Assert.AreEqual(firstC, h.System.Mesh.colors, "vertex colors drifted across identical Ticks");
+            Assert.AreEqual(firstUv, h.System.Mesh.uv, "UVs drifted across identical Ticks");
+            Assert.AreEqual(firstV, h.System.Mesh.vertices, "vertex positions drifted across identical Ticks (nondeterministic fill?)");
         }
 
         // ── Harness: a MapCamera + tiny atlas + label builders (point + a curved line spanning the view). ──
@@ -152,7 +139,7 @@ namespace MapRenderer.Tests.Text.Placement
             public readonly MapCamera Camera;
             private readonly GameObject _go;
 
-            public Harness(int projectionJobThreshold)
+            public Harness()
             {
                 _go = new GameObject("LabelProjectionJob_TestCamera");
                 var uCam = _go.AddComponent<Camera>();
@@ -162,10 +149,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Origin = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 });
                 Frame = new SceneFrame(Origin, float3x3.identity);
                 Atlas = BuildTinyAtlasTexture();
-                System = new LabelPlacementSystem(Camera, new Material(Shader.Find("Map/Symbol/Text")))
-                {
-                    ProjectionJobThreshold = projectionJobThreshold,
-                };
+                System = new LabelPlacementSystem(Camera, new Material(Shader.Find("Map/Symbol/Text")));
             }
 
             public LabelInstance Point(double3 anchor, float sortKey, string text, int feature)

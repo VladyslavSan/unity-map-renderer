@@ -11,6 +11,7 @@ using UnityEngine.Rendering;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Backend.Entities
 {
@@ -52,8 +53,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // One draw item = one layer entity (a child of its tile's root entity).
         private struct ItemRec
         {
-            public Entity Entity;
-            public TileId TileId;   // which tile root this layer hangs under
+            public Entity      Entity;
+            public TileId      TileId;   // which tile root this layer hangs under
+            public BatchMeshID MeshId;   // stall #3: the EG-registered mesh id, for UnregisterMesh on removal
         }
 
         // One per live tile: the named parent entity its layer entities are grouped under, so the
@@ -73,6 +75,30 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private readonly List<string>               _layerNames     = new List<string>();
         private readonly Dictionary<int, ItemRec>   _items          = new Dictionary<int, ItemRec>();
         private readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
+
+        // Stall #2: reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
+        // root the batch empties, destroyed in ONE EntityManager.DestroyEntity(NativeArray) structural change
+        // instead of one per layer. Persistent (reused every release); disposed in DoDispose.
+        private NativeList<Entity> _destroyScratch;
+
+        // ── Stall #3: ID-based layer creation (avoid the per-entity RenderMeshArray) ──────────────────
+        // EG's ID route: register each layer material ONCE + each mesh on add, and point the entity at them
+        // via MaterialMeshInfo.FromMeshIDAndMaterialID — no fresh one-element RenderMeshArray shared component
+        // (and its batch registration) per consumed mesh. Layer entities are Instantiated from a single
+        // prototype so they all share ONE archetype (no per-entity structural migration for the render set).
+        private EntitiesGraphicsSystem                 _eg;             // from `using Unity.Rendering` — NOT qualified (Unity.Rendering collides with MapRenderer.Unity.Rendering)
+        private BatchMaterialID[]                      _materialIds;   // one per layer material, registered once
+        private Entity                                 _layerPrototype; // Prefab-tagged; Instantiated per layer
+        private Mesh                                   _prototypeMesh;  // inert placeholder mesh for the prototype's RenderMeshArray
+
+        /// <summary>Stall #3 tooth: RenderMeshArray shared components created (the prototype's ONE). The old
+        /// path created one per AddTileLayer; this must stay ≤1 no matter how many layers are added.</summary>
+        internal int RenderMeshArraysCreated { get; private set; }
+
+        /// <summary>Stall #3 tooth: live EG-registered meshes (inc on RegisterMesh in AddTileLayer, dec on
+        /// UnregisterMesh in RemoveItem/RemoveItems). Must return to 0 after a full load→release (incl. the
+        /// prepared-cache round-trip) — catches the ID route's missing-unregister leak trap.</summary>
+        internal int RegisteredMeshCount { get; private set; }
 
         private World         _world;
         private EntityManager _em;
@@ -122,10 +148,45 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _prevDefaultWorld = World.DefaultGameObjectInjectionWorld;
             World.DefaultGameObjectInjectionWorld = _world; // Entities Graphics reads the default world.
             _em = _world.EntityManager;
+            _destroyScratch = new NativeList<Entity>(64, Allocator.Persistent);
 
             _initGroup = _world.GetExistingSystemManaged<InitializationSystemGroup>();
             _simGroup  = _world.GetExistingSystemManaged<SimulationSystemGroup>();
             _presGroup = _world.GetExistingSystemManaged<PresentationSystemGroup>(); // contains EntitiesGraphicsSystem
+
+            // Stall #3: register each layer material ONCE with EG (stable BatchMaterialID); meshes register
+            // per-add. Then build the single layer prototype every AddTileLayer instantiates.
+            _eg = _world.GetExistingSystemManaged<EntitiesGraphicsSystem>();
+            _materialIds = new BatchMaterialID[_layerMaterials.Count];
+            for (int i = 0; i < _layerMaterials.Count; i++)
+                _materialIds[i] = _layerMaterials[i] != null ? _eg.RegisterMaterial(_layerMaterials[i]) : default;
+            BuildLayerPrototype();
+        }
+
+        /// <summary>
+        /// Stall #3: builds the single layer-entity PROTOTYPE. <see cref="RenderMeshUtility.AddComponents"/>
+        /// stamps EG's full render component set (LocalToWorld, RenderBounds, MaterialMeshInfo, and the
+        /// RenderMeshArray shared component); we add Parent/LocalTransform (the transform hierarchy) and Prefab
+        /// (so the prototype itself never renders and is skipped by EG's queries). Every AddTileLayer
+        /// Instantiates this — instances share the prototype's archetype AND its single (inert, ID-overridden)
+        /// RenderMeshArray, so no per-entity array or structural migration is created. The placeholder mesh is
+        /// empty and never drawn (Prefab); it exists only because AddComponents requires a RenderMeshArray.
+        /// </summary>
+        private void BuildLayerPrototype()
+        {
+            if (_layerMaterials.Count == 0) return; // no layers → AddTileLayer never called; no prototype needed
+
+            _prototypeMesh = new Mesh { name = "MapLayerPrototype(inert)" };
+            var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
+            var rma  = new RenderMeshArray(new Material[] { _layerMaterials[0] }, new Mesh[] { _prototypeMesh });
+
+            _layerPrototype = _em.CreateEntity();
+            RenderMeshUtility.AddComponents(
+                _layerPrototype, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+            _em.AddComponent(_layerPrototype,
+                new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
+            _em.AddComponent<Prefab>(_layerPrototype); // exclude prototype from rendering/queries; Instantiate strips it
+            RenderMeshArraysCreated = 1; // ONLY the prototype's — instances share it, none created per layer
         }
 
         // ── Test / debug observability ──────────────────────────────────────────────────────────
@@ -135,6 +196,15 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         /// <summary>Number of live tile root entities (one per tile that has ≥1 layer).</summary>
         public int TileRootCount => _tileRoots.Count;
+
+        /// <summary>Stall #2 tooth: number of batched DestroyEntity structural changes performed by the LAST
+        /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow
+        /// loop-over-<see cref="RemoveItem"/> implementation leaves this 0.</summary>
+        internal int DestroyEntityBatchesLastRemove { get; private set; }
+
+        /// <summary>Stall #2 tooth: entities destroyed by the last <see cref="RemoveItems"/> batch (the record's
+        /// layer entities plus any tile root the batch emptied).</summary>
+        internal int EntitiesDestroyedLastRemove { get; private set; }
 
         /// <summary>True if a root entity is live for <paramref name="tileId"/>.</summary>
         public bool TileRootExists(TileId tileId)
@@ -286,26 +356,29 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             using (PmAddRoot.Auto())
                 root = GetOrCreateRoot(tileId, tileOriginRender);
 
-            Entity e;
+            Entity      e;
+            BatchMeshID meshId;
             using (PmAddRegister.Auto())
             {
-                var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
-                var rma  = new RenderMeshArray(new Material[] { mat }, new Mesh[] { mesh });
-
-                e = _em.CreateEntity();
-                RenderMeshUtility.AddComponents(
-                    e, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+                // Stall #3 ID route: Instantiate the shared-archetype prototype (ONE structural op, no fresh
+                // RenderMeshArray shared component / batch registration per layer), register the mesh with EG,
+                // and point the entity at (meshId, materialId). This replaces the old per-entity
+                // CreateEntity + RenderMeshUtility.AddComponents(new RenderMeshArray(...)) — the "prime suspect".
+                e      = _em.Instantiate(_layerPrototype);
+                meshId = _eg.RegisterMesh(mesh);
+                RegisteredMeshCount++;
+                // ID-based MaterialMeshInfo (ctor (materialID, meshID) in this EG version — no
+                // FromMeshIDAndMaterialID factory) → EG batches by the registered ids, ignoring the inert
+                // RenderMeshArray the instance carries from the prototype.
+                _em.SetComponentData(e, new MaterialMeshInfo(_materialIds[materialIndex], meshId));
             }
 
             using (PmAddParent.Auto())
             {
-            // Parent under the tile root with an identity local transform: LocalToWorldSystem then
-            // computes this entity's LocalToWorld = root.LocalToWorld each Rebuild tick. (RenderMeshUtility
-            // adds LocalToWorld but NOT Parent/LocalTransform — we add those so the transform system drives us.)
-            // Add both in ONE structural change (ComponentTypeSet) instead of two separate AddComponentData
-            // calls: each add migrates the entity to a new archetype/chunk, and tile churn during a zoom makes
-            // that per-entity cost a measured spike (MapRenderer.Tile.AddLayer). One migration, then set values.
-            _em.AddComponent(e, new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
+            // Parent + LocalTransform already exist on the instance (copied from the prototype's archetype by
+            // Instantiate), so these are pure SetComponentData — no per-entity archetype migration (the old
+            // ComponentTypeSet add was the measured MapRenderer.Tile.AddLayer spike). LocalToWorldSystem then
+            // computes this entity's LocalToWorld = root.LocalToWorld each Rebuild tick.
             _em.SetComponentData(e, new Parent { Value = root });
             _em.SetComponentData(e, LocalTransform.Identity);
 
@@ -342,7 +415,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _tileRoots[tileId] = rec;
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Entity = e, TileId = tileId };
+            _items[handle] = new ItemRec { Entity = e, TileId = tileId, MeshId = meshId };
             return handle;
         }
 
@@ -358,6 +431,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
             if (_em.Exists(item.Entity)) _em.DestroyEntity(item.Entity);
             _items.Remove(handle);
+            _eg.UnregisterMesh(item.MeshId); // stall #3: the ID route requires an explicit unregister
+            RegisteredMeshCount--;
 
             if (_tileRoots.TryGetValue(item.TileId, out var root))
             {
@@ -371,6 +446,51 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 {
                     _tileRoots[item.TileId] = root;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Stall #2: removes a whole record's layer entities (and any tile root the batch empties) in ONE
+        /// <c>EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;)</c> structural change instead of L+1 — the
+        /// per-layer structural-change cost was the release-storm spike. Same bookkeeping as
+        /// <see cref="RemoveItem"/> (child-count decrement, root-dies-at-0), just collected then destroyed once.
+        /// Idempotent for unknown handles. The Mesh assets are NOT destroyed here — TileManager owns them.
+        /// </summary>
+        public void RemoveItems(ReadOnlySpan<int> handles)
+        {
+            DestroyEntityBatchesLastRemove = 0;
+            EntitiesDestroyedLastRemove    = 0;
+            if (IsDisposed) return;
+
+            _destroyScratch.Clear();
+            for (int i = 0; i < handles.Length; i++)
+            {
+                if (!_items.TryGetValue(handles[i], out var item)) continue; // idempotent unknown handle
+                if (_em.Exists(item.Entity)) _destroyScratch.Add(item.Entity);
+                _items.Remove(handles[i]);
+                _eg.UnregisterMesh(item.MeshId); // stall #3: ID route requires explicit unregister
+                RegisteredMeshCount--;
+
+                if (_tileRoots.TryGetValue(item.TileId, out var root))
+                {
+                    root.ChildCount--;
+                    if (root.ChildCount <= 0)
+                    {
+                        if (_em.Exists(root.Root)) _destroyScratch.Add(root.Root);
+                        _tileRoots.Remove(item.TileId);
+                    }
+                    else
+                    {
+                        _tileRoots[item.TileId] = root;
+                    }
+                }
+            }
+
+            if (_destroyScratch.Length > 0)
+            {
+                _em.DestroyEntity(_destroyScratch.AsArray());
+                DestroyEntityBatchesLastRemove = 1;
+                EntitiesDestroyedLastRemove    = _destroyScratch.Length;
             }
         }
 
@@ -431,15 +551,25 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         protected override void DoDispose()
         {
+            if (_destroyScratch.IsCreated) _destroyScratch.Dispose();
             _items.Clear();
             _tileRoots.Clear();
             if (_world != null && _world.IsCreated)
             {
                 if (World.DefaultGameObjectInjectionWorld == _world)
                     World.DefaultGameObjectInjectionWorld = _prevDefaultWorld;
-                _world.Dispose(); // destroys all entities + the EG world state
+                _world.Dispose(); // destroys all entities + the EG world state (incl. its mesh/material registries)
             }
             _world = null;
+
+            // Stall #3: the world disposal tore down EG's registries wholesale, so no explicit Unregister* is
+            // needed for correctness. But the prototype's placeholder Mesh is a UnityEngine.Object we created —
+            // destroy it explicitly (a Mesh is not freed just because nothing references it).
+            if (_prototypeMesh != null)
+            {
+                _prototypeMesh.DestroySafely(allowDestroyingAssets: true);
+                _prototypeMesh = null;
+            }
         }
     }
 }

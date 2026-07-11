@@ -305,6 +305,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             _items.Remove(handle);
         }
 
+        /// <summary>BRG removal is a plain dict remove, so the batch is just the loop — no structural-change
+        /// cost to amortise (unlike the Entities backend). See <see cref="ITileRenderBackend.RemoveItems"/>.</summary>
+        public void RemoveItems(ReadOnlySpan<int> handles)
+        {
+            if (IsDisposed) return;
+            for (int i = 0; i < handles.Length; i++) _items.Remove(handles[i]);
+        }
+
         // ── Per-frame rebuild ─────────────────────────────────────────────────────────────────
 
         /// <summary>

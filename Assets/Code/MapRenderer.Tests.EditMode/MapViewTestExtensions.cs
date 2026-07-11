@@ -135,6 +135,17 @@ namespace MapRenderer.Tests
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
+        /// <summary>Stall #2: (tile, source) records fully released in the most recent Tick's DrainReleaseQueue.</summary>
+        public static int TilesReleasedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesReleasedLastTick : 0;
+        /// <summary>Stall #2: current deferred-release backlog depth (records that left cover and await drain).</summary>
+        public static int ReleaseQueueDepth(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleaseQueueDepth : 0;
+        /// <summary>Stall #2: batched DestroyEntity structural changes in the Entities backend's LAST RemoveItems call (0 or 1); 0 if not on the Entities backend.</summary>
+        public static int DestroyEntityBatchesLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.DestroyEntityBatchesLastRemove : 0;
+        /// <summary>Stall #2: entities destroyed by the Entities backend's last RemoveItems batch (layers + any emptied root).</summary>
+        public static int EntitiesDestroyedLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.EntitiesDestroyedLastRemove : 0;
+        /// <summary>Stall #3: live EG-registered meshes on the Entities backend (inc per AddTileLayer, dec per remove); -1 if not on the Entities backend.</summary>
+        public static int RegisteredMeshCount(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.RegisteredMeshCount : -1;
+
         /// <summary>S82: cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
         /// decode/build/upload).</summary>
         public static int PreparedCacheHits(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheHits : 0;

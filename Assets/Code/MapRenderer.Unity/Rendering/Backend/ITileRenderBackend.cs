@@ -32,6 +32,16 @@ namespace MapRenderer.Unity.Rendering.Backend
         void RemoveItem(int handle);
 
         /// <summary>
+        /// Removes many draw items in ONE backend operation where the backend supports it. The
+        /// <see cref="Entities.TileRenderer"/> destroys all the layer entities (plus any tile roots emptied by
+        /// the batch) via a single <c>EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;)</c> structural
+        /// change instead of one per layer — the stall-#2 fix for the release storm. <see cref="BRG.TileRenderer"/>
+        /// and <see cref="GameObjects.TileRenderer"/> fall back to a <see cref="RemoveItem"/> loop (their removal
+        /// is already cheap — a dict remove / a GameObject destroy). Idempotent for unknown handles.
+        /// </summary>
+        void RemoveItems(ReadOnlySpan<int> handles);
+
+        /// <summary>
         /// Per-frame: recompute every draw item's object-to-world from <paramref name="frame"/> (the
         /// camera-relative <see cref="SceneFrame"/> — scene origin + rebase) and refresh backend state for the
         /// upcoming render. For Mercator <paramref name="frame"/> is identity-rebase, so placement reduces to

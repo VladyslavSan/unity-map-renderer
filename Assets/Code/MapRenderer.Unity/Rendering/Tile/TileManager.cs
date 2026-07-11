@@ -91,6 +91,12 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// budget, then the rest defer to the next Tick; the mesh that crosses the budget is still consumed
             /// (one-MESH overshoot, documented — a single mesh cannot be split). 0 means uncapped.</summary>
             public int          MaxVerticesPerTick;
+            /// <summary>Stall #2: per-frame budget of (tile, source) RECORDS fully released per Tick (backend
+            /// removal + mesh destroy/transfer + scheduler release). A zoom-out/fast-pan otherwise releases the
+            /// whole departing cover in one frame — the mirror image of the budgeted consume. Records queued for
+            /// release linger in <c>_loaded</c> (still pumped) for a few frames until drained. 0 = uncapped.
+            /// Default 4 (mirrors <see cref="MaxConsumesPerTick"/>).</summary>
+            public int          MaxReleasesPerTick;
         }
 
         // ── S47 mesh build payload (S51: Task → UniTask) ────────────────────────────────────
@@ -334,6 +340,17 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly Dictionary<LoadedKey, LoadedTile> _loaded    = new Dictionary<LoadedKey, LoadedTile>();
         private readonly List<LoadedKey>                   _toRelease = new List<LoadedKey>(32);
 
+        // Stall #2: deferred-release queue. Tick ENQUEUES (tile, source) records that left the cover instead
+        // of releasing the whole departing set in one frame; DrainReleaseQueue frees up to MaxReleasesPerTick
+        // per Tick, ABOVE the cover gate so a clean frame still drains the backlog. _releaseQueued dedups
+        // across recomputes and lets PumpPending skip kicking a build for a record already condemned. Both are
+        // pre-sized and only touched during cover churn — the steady state never allocates here.
+        private readonly Queue<LoadedKey>                  _releaseQueue  = new Queue<LoadedKey>(64);
+        // Pre-sized (like _releaseQueue) so the FIRST Add during cover churn doesn't lazily allocate the
+        // HashSet's buckets — that first-Add allocation tripped the steady-state zero-GC tooth on a
+        // heading-change tick that churns an edge tile.
+        private readonly HashSet<LoadedKey>                _releaseQueued = new HashSet<LoadedKey>(64);
+
         // S105: DATA-only push for the DECOUPLED symbol-label subsystem — fired on the MAIN THREAD when a
         // tile's MVT bytes arrive, sharing the already-fetched bytes (no re-fetch, no touching the mesh/disposal
         // path) so the subsystem can shape its labels. Exception-isolated: a throwing observer must never fault
@@ -469,6 +486,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 RenderTeardownRecord(ref lt);
             }
             _loaded.Clear();
+            // Stall #2: the records were torn down wholesale above — drop the deferred-release bookkeeping too
+            // (a queued key referencing the old layer indexing / backend must not survive a restyle).
+            _releaseQueue.Clear();
+            _releaseQueued.Clear();
 
             // S82: purge the PreparedTileCache on EVERY SetSources call (first style AND every restyle) —
             // a restyle rebuilds RenderLayerSet's layer indexing, so a held entry's layerId may no longer
@@ -629,6 +650,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>S87: number of layer MESHES uploaded + registered in the most recent PumpPending call —
         /// the per-frame mesh-count budget observable (bounds AddLayer / entity-add and GPU upload per frame).</summary>
         internal int MeshesConsumedLastTick { get; private set; }
+
+        /// <summary>Stall #2: (tile, source) records fully released in the most recent
+        /// <see cref="DrainReleaseQueue"/> call — the per-frame release-budget observable.</summary>
+        internal int TilesReleasedLastTick { get; private set; }
+
+        /// <summary>Stall #2: current deferred-release backlog depth (records that left cover and await
+        /// <see cref="DrainReleaseQueue"/>).</summary>
+        internal int ReleaseQueueDepth => _releaseQueue.Count;
 
         /// <summary>
         /// S85: pull-based runtime telemetry — the caller asks, this computes on demand (never published per
@@ -808,14 +837,29 @@ namespace MapRenderer.Unity.Rendering.Tile
             // S84: observe any completed mid-flight-released fetch tasks (no unobserved-exception flood).
             DrainPendingFetchDisposal();
 
-            int pending = PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick);
+            // PumpPending always runs (above) so pending tiles keep progressing every frame. The EXPENSIVE
+            // cover recompute below (select descent + request/release diff) is gated on _coverDirty ALONE:
+            // a clean camera with tiles still pending must NOT re-run the descent — the cover set is
+            // unchanged, so the request/release loops would be pure no-ops that just re-tax the frame the
+            // consume is already loading (stall #6). PumpPending's pending count is no longer part of the gate.
+            PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick);
 
-            if (!_coverDirty && pending == 0)
+            if (!_coverDirty)
+            {
+                // Clean tick: the cover is unchanged, so _coverSet is still current — drain a budgeted slice of
+                // the deferred-release backlog (re-validated against it, stall #2) and skip the expensive
+                // recompute (stall #6). The drain runs EVERY frame, so a zoom-out backlog keeps whittling down
+                // even while the camera sits still.
+                DrainReleaseQueue(cfg.MaxReleasesPerTick);
                 return;
+            }
 
             CoverRecomputesLastTick = 1; // S95: the full recompute (descent + diff) runs this Tick
 
-            using var sCoverSel = PmCoverSelect.Auto();
+            // NOT `using var` — closed explicitly before DrainReleaseQueue at the end so the release cost is
+            // not mis-attributed to the CoverSelect marker (the drain must run AFTER _coverSet is updated below
+            // so its pan-back re-validation sees this frame's cover).
+            var sCoverSel = PmCoverSelect.Auto();
 
             // S71: select through the seam. Build the per-frame view context (camera + framing viewport +
             // active projection); the request/release transition below is unchanged (instant swap).
@@ -896,13 +940,18 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
             }
 
-            // Release records whose tile left the cover (route each to its OWNING pipeline's scheduler).
+            // Stall #2: records whose tile left the cover are ENQUEUED for deferred release, not freed here.
+            // DrainReleaseQueue (above, every frame) frees up to MaxReleasesPerTick of them per Tick.
+            // _releaseQueued dedups a record already queued by an earlier recompute.
             _toRelease.Clear();
             foreach (var kv in _loaded)
                 if (!_coverSet.Contains(kv.Key.Tile))
                     _toRelease.Add(kv.Key);
             for (int i = 0; i < _toRelease.Count; i++)
-                ReleaseTile(_toRelease[i]);
+            {
+                LoadedKey key = _toRelease[i];
+                if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
+            }
 
             _coverKeyLon         = cam.LookAt.Longitude;
             _coverKeyLat         = cam.LookAt.Latitude;
@@ -914,6 +963,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             _coverKeyInitialised = true;
 
             _coverDirty = false;
+
+            sCoverSel.Dispose(); // close the CoverSelect marker BEFORE the release drain (correct attribution)
+
+            // Stall #2: drain a budgeted slice of the deferred-release backlog AFTER the recompute updated
+            // _coverSet — so the re-validation sees this frame's cover (a tile that just re-entered on a
+            // pan-back is skipped/kept, not destroyed-and-refetched) — and the departures this recompute just
+            // enqueued start freeing this same frame, bounded to MaxReleasesPerTick.
+            DrainReleaseQueue(cfg.MaxReleasesPerTick);
         }
 
         /// <summary>
@@ -1108,6 +1165,14 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // ── Kick a mesh build from ReadyBytes ──────────────────────────────────────────
                 if (lt.FetchCompleted && lt.ReadyBytes != null)
                 {
+                    // Stall #2: don't start a NEW background build for a record already condemned to release
+                    // (DrainReleaseQueue will free it within a few frames). In-flight builds still finish and
+                    // land in the existing disposal pens; this only avoids kicking fresh work for a doomed tile.
+                    if (_releaseQueued.Contains(key))
+                    {
+                        pending++;
+                        continue;
+                    }
                     if (buildsKicked >= buildCap)
                     {
                         // Cap reached this tick — bytes retained for next Tick.
@@ -1415,6 +1480,33 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
+        /// Stall #2: releases up to <paramref name="budget"/> queued (tile, source) records this Tick (0 =
+        /// uncapped, D12-consistent). Runs every frame above the cover gate, so a clean tick still whittles a
+        /// zoom-out backlog. Each dequeued key is RE-VALIDATED: a tile that came back into the cover during
+        /// its 1–3 frame linger (<see cref="_coverSet"/> still contains it) or a record a restyle already
+        /// cleared (gone from <see cref="_loaded"/>) is SKIPPED — turning a fast pan-out-pan-back into a free
+        /// no-op instead of destroy+refetch. A skip does not consume budget (it is a pure dequeue).
+        /// </summary>
+        private void DrainReleaseQueue(int budget)
+        {
+            TilesReleasedLastTick = 0;
+            if (_releaseQueue.Count == 0) return;
+
+            int cap      = budget > 0 ? budget : int.MaxValue;
+            int released = 0;
+            while (released < cap && _releaseQueue.Count > 0)
+            {
+                LoadedKey key = _releaseQueue.Dequeue();
+                _releaseQueued.Remove(key);
+                // Re-validate: back in cover, or already gone (restyle) → skip without spending budget.
+                if (_coverSet.Contains(key.Tile) || !_loaded.ContainsKey(key)) continue;
+                ReleaseTile(key);
+                released++;
+            }
+            TilesReleasedLastTick = released;
+        }
+
+        /// <summary>
         /// Releases a tile: scheduler release + unregister its instanced draw items + free its meshes.
         /// Does NOT wait for in-flight work (non-blocking). Mid-flight mesh build is removed
         /// from _loaded immediately so PumpPending/DrainMeshBuilds never visit it again.
@@ -1555,13 +1647,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _pendingDisposal.Add(lt.MeshBuildTask);
             }
 
-            // Unregister the instanced draw items before destroying Mesh assets (RemoveItem drops the draw
-            // item — on Entities its layer entity + tile root once empty; the Mesh is freed just after).
+            // Unregister the instanced draw items before destroying Mesh assets — one batched call so the
+            // Entities backend drops this record's layer entities (+ the emptied tile root) in a SINGLE
+            // structural change (stall #2) instead of one per layer; the Mesh is freed just after.
             if (_instanced != null && lt.DrawHandles != null)
-            {
-                for (int hi = 0; hi < lt.DrawHandles.Length; hi++)
-                    _instanced.RemoveItem(lt.DrawHandles[hi]);
-            }
+                _instanced.RemoveItems(lt.DrawHandles);
 
             // S51 leak guard: destroy tracked Mesh assets explicitly (Unity does not free a Mesh asset just
             // because nothing references it). lt.Meshes holds direct references.

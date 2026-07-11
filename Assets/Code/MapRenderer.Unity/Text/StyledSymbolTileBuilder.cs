@@ -56,7 +56,45 @@ namespace MapRenderer.Unity.Text
         /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
         /// <paramref name="symbolLayers"/>) stamped onto each label's <see cref="LabelInstance.MaterialIndex"/>
         /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>
-        public async UniTask BuildAsync(
+        /// <summary>One symbol layer's extracted labels + the shaping inputs carried to <see cref="ShapeAsync"/>.
+        /// All fields are engine-free Core types, so the whole list is worker-safe.</summary>
+        public readonly struct ExtractedLayer
+        {
+            public readonly int               MaterialIndex;
+            public readonly FontStack         FontStack;
+            public readonly List<SymbolLabel> Labels;
+            public ExtractedLayer(int materialIndex, FontStack fontStack, List<SymbolLabel> labels)
+            { MaterialIndex = materialIndex; FontStack = fontStack; Labels = labels; }
+        }
+
+        /// <summary>
+        /// WORKER-SAFE (Stage B): SELECT + project each symbol layer's <see cref="SymbolLabel"/>s off the main
+        /// thread. Touches only <see cref="SymbolFeatureExtractor"/> + immutable parsed layers + the stateless
+        /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
+        /// may run it on the thread pool. Returns the shaping inputs <see cref="ShapeAsync"/> consumes on main.
+        /// </summary>
+        public List<ExtractedLayer> ExtractLayers(
+            MvtTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
+            double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null)
+        {
+            var result = new List<ExtractedLayer>(symbolLayers?.Count ?? 0);
+            if (tile == null || symbolLayers == null || projection == null) return result;
+            for (int l = 0; l < symbolLayers.Count; l++)
+            {
+                StyleLayer layer = symbolLayers[l];
+                if (layer == null) continue;
+                var labels = new List<SymbolLabel>();
+                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, labels);
+                if (labels.Count == 0) continue;
+                int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
+                result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = layer.Layout.TextFont }, labels));
+            }
+            return result;
+        }
+
+        /// <summary>Convenience (tests + the demo path): extract then shape in one call. The subsystem's live
+        /// path instead runs <see cref="ExtractLayers"/> on a worker and <see cref="ShapeAsync"/> on main.</summary>
+        public UniTask BuildAsync(
             MvtTile tile,
             TileId tileId,
             IReadOnlyList<StyleLayer> symbolLayers,
@@ -66,20 +104,27 @@ namespace MapRenderer.Unity.Text
             IReadOnlyList<int> materialIndices = null,
             CancellationToken ct = default)
         {
-            if (tile == null || symbolLayers == null || projection == null || output == null) return;
+            if (output == null) return UniTask.CompletedTask;
+            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices), output, ct);
+        }
 
-            var extracted = new List<SymbolLabel>();
-            for (int l = 0; l < symbolLayers.Count; l++)
+        /// <summary>
+        /// MAIN-THREAD: pass 1 requests every glyph range the pre-extracted labels need (async fetch/decode/
+        /// atlas-append), then pass 2 shapes + lays out + emits each <see cref="LabelInstance"/>. Reads the
+        /// shared glyph cache/atlas, so it runs on the main thread (Stage C moves shaping to a worker via an
+        /// immutable snapshot). Emission order matches the extractor's per-tile ordinal (stable FeatureIndex).
+        /// </summary>
+        public async UniTask ShapeAsync(
+            List<ExtractedLayer> extractedLayers, List<LabelInstance> output, CancellationToken ct = default)
+        {
+            if (extractedLayers == null || output == null) return;
+
+            for (int el = 0; el < extractedLayers.Count; el++)
             {
-                StyleLayer layer = symbolLayers[l];
-                if (layer == null) continue;
-
-                extracted.Clear();
-                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, extracted);
-                if (extracted.Count == 0) continue;
-
-                int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
-                var fontStack = new FontStack { Names = layer.Layout.TextFont };
+                ExtractedLayer    layerEx       = extractedLayers[el];
+                List<SymbolLabel> extracted     = layerEx.Labels;
+                int               materialIndex = layerEx.MaterialIndex;
+                FontStack         fontStack     = layerEx.FontStack;
 
                 // Pass 1 — REQUEST every glyph the labels need (async fetch/decode/atlas-append). Each
                 // (fontStack, range) is fetched at most once (GlyphManager caches), so repeated codepoints
