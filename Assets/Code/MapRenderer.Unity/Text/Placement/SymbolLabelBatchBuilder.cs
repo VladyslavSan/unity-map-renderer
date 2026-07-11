@@ -34,8 +34,12 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>Rebuild <paramref name="batch"/> in place from <paramref name="labels"/> (collected order
         /// preserved so the collision ordinal — and thus the mesh — stays byte-identical). <paramref name="slotCount"/>
         /// clamps each label's material slot (mirrors the old per-frame ClampSlot).</summary>
+        /// <param name="activeCount">Labels at index &lt; this are ACTIVE; index ≥ this are DEPARTING (a tile leaving
+        /// cover, retained for a fade-out — <see cref="Text.SymbolTileLabelStore.CollectInto(System.Collections.Generic.List{LabelInstance}, double, out int)"/>
+        /// puts them last). Each such record is flagged so the placement gather fades it out instead of popping.
+        /// Default <see cref="int.MaxValue"/> ⇒ every label is active (the demo / test seam, which has no store).</param>
         public static void Build(SymbolLabelBatch batch, IReadOnlyList<LabelInstance> labels, int slotCount,
-            IProjection projection = null)
+            IProjection projection = null, int activeCount = int.MaxValue)
         {
             batch.Reset();
             if (labels == null) return;
@@ -52,8 +56,9 @@ namespace MapRenderer.Unity.Text.Placement
                 if (label == null) continue; // nulls contributed no candidate/world-point in the old loop → omit
 
                 int tileIndex = ResolveTileIndex(batch, projection, tileIndexByKey, label.TileKey);
-                if (label.Placement == SymbolPlacement.Point) AddPoint(batch, label, slotCount, tileIndex);
-                else                                          AddCurved(batch, label, slotCount, tileIndex);
+                bool departing = i >= activeCount; // collected-order split: departing labels come last (see CollectInto)
+                if (label.Placement == SymbolPlacement.Point) AddPoint(batch, label, slotCount, tileIndex, departing);
+                else                                          AddCurved(batch, label, slotCount, tileIndex, departing);
             }
         }
 
@@ -85,7 +90,7 @@ namespace MapRenderer.Unity.Text.Placement
             return projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
         }
 
-        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex)
+        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex, bool departing)
         {
             // Copy this label's glyph quads into the flat pool (empty/absent layout → 0 quads, stages nothing later).
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
@@ -109,10 +114,10 @@ namespace MapRenderer.Unity.Text.Placement
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
             int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
-            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, tileIndex);
+            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, tileIndex, departing);
         }
 
-        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex)
+        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex, bool departing)
         {
             // Copy glyphs.
             IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
@@ -151,7 +156,7 @@ namespace MapRenderer.Unity.Text.Placement
             int worldStart = batch.WorldPointCount;
             for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
-            batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, tileIndex);
+            batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, tileIndex, departing);
         }
     }
 }

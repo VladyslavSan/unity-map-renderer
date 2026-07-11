@@ -264,6 +264,52 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "no stale labels committed after restyle.");
         }
 
+        // ── The production seam: CurrentBatch() threads CollectInto's active/departing split into the batch, so a
+        //    tile that just left cover comes back as DEPARTING records (which the placement layer fades out). Guards
+        //    the connector BETWEEN the two unit-tested sides (store split + placement fade) — where a future cleanup
+        //    could silently drop `activeCount` with every other test still green. [UnityTest] because the build hops
+        //    to the thread pool then back to main, so its labels commit only across pumped editor frames. ──
+        [UnityTest]
+        public IEnumerator CurrentBatch_TileLeftCover_FlagsRecordsDeparting()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+
+            // Build the tile active — pump frames until its (async) build commits label records into the batch.
+            _subsystem.OnTileBytesReady(SourceId, tile, _tileBytes);
+            SymbolLabelBatch active = null;
+            for (int f = 0; f < 200; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                active = _subsystem.CurrentBatch();
+                if (active.Count > 0) break;
+                yield return null;
+            }
+            Assert.Greater(active.Count, 0, "sanity: the active tile committed label records");
+            Assert.AreEqual(0, DepartingRecordCount(active), "nothing is departing while the tile is in cover");
+
+            // The tile leaves cover at t=100 → released to the warm cache AND retained as departing (grace applies
+            // because the prepared mesh cache is enabled by default). CurrentBatch is rebuilt BELOW — read `active`
+            // (the same reused batch instance) only before that.
+            _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
+            Assert.AreEqual(0, _subsystem.ActiveTileCount, "the tile left cover");
+            Assert.AreEqual(1, _subsystem.DepartingTileCount, "…and is departing (fading out), not dropped");
+
+            SymbolLabelBatch departing = _subsystem.CurrentBatch();
+            Assert.Greater(departing.Count, 0, "the departing tile's labels are still collected (so they can fade)");
+            Assert.AreEqual(departing.Count, DepartingRecordCount(departing),
+                "…and every record is flagged departing → the placement layer fades them out instead of popping");
+        }
+
+        private static int DepartingRecordCount(SymbolLabelBatch batch)
+        {
+            int n = 0;
+            for (int i = 0; i < batch.Count; i++) if (batch.RecordDeparting[i]) n++;
+            return n;
+        }
+
         private static byte[] LoadUp(params string[] relative)
         {
             string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };

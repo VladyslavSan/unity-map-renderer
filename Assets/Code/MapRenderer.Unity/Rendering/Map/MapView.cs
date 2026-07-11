@@ -319,14 +319,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 using (PmSymbolCollect.Auto())
                 {
                     TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch);
+                    // Pass this frame's wall-clock so the store can time the departing (leave-cover) fade-out window.
+                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch, Time.timeAsDouble);
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     _symbols.PumpBuilds();
                 }
-                // Lever C: the version-cached blittable label batch — rebuilt (collect + dedup + LabelInstance→SoA)
-                // ONLY when the set/zoom/slot-count changed, so a steady pan does none of that per frame. The label
-                // placement itself (project/collide/build) runs every frame — there is no idle-frame skip.
+                // Lever C: the blittable label batch — collect (+ cross-tile dedup) + LabelInstance→SoA, rebuilt every
+                // frame (allocation-free; the version cache was removed). Then project/collide/build the placement.
                 Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
                     _symbols.LayerMaterials);
             }

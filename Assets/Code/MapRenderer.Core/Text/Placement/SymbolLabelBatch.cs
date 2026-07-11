@@ -44,6 +44,7 @@ namespace MapRenderer.Core.Text.Placement
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
         public double3[] RepAnchor  = Array.Empty<double3>(); // the B-3 distance-cull point (RepresentativeAnchor)
         public int[]     RecordTile = Array.Empty<int>();   // per record → unique-tile index (or -1 = never coverage-culled)
+        public bool[]    RecordDeparting = Array.Empty<bool>(); // per record → its tile is leaving cover (fade OUT, don't pop)
         public int       Count;                             // number of records (labels)
 
         // ── per-tile screen-coverage pre-cull corners (render space; camera-INDEPENDENT, so stored once here) ──
@@ -104,12 +105,13 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         // ── append helpers (geometric growth, never shrink) — the builder appends; the counts are the live length ──
-        public int AddRecord(Kind kind, int detail, int worldStart, int worldCount, in double3 repAnchor, int recordTile)
+        public int AddRecord(Kind kind, int detail, int worldStart, int worldCount, in double3 repAnchor,
+            int recordTile, bool departing)
         {
             Grow(ref Kinds, Count); Grow(ref Detail, Count); Grow(ref WorldStart, Count); Grow(ref WorldCount, Count);
-            Grow(ref RepAnchor, Count); Grow(ref RecordTile, Count);
+            Grow(ref RepAnchor, Count); Grow(ref RecordTile, Count); Grow(ref RecordDeparting, Count);
             Kinds[Count] = kind; Detail[Count] = detail; WorldStart[Count] = worldStart; WorldCount[Count] = worldCount;
-            RepAnchor[Count] = repAnchor; RecordTile[Count] = recordTile;
+            RepAnchor[Count] = repAnchor; RecordTile[Count] = recordTile; RecordDeparting[Count] = departing;
             return Count++;
         }
 

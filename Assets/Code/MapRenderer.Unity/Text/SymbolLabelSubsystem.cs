@@ -160,6 +160,14 @@ namespace MapRenderer.Unity.Text
         /// prepared-cache hit re-shows them without a re-fetch).</summary>
         public int CachedTileCount => _store.CachedTileCount;
 
+        /// <summary>Departing (left cover, still fading out within the grace window) label-tile count — telemetry.</summary>
+        public int DepartingTileCount => _store.DepartingTileCount;
+
+        // Retain-as-departing: how long a tile's labels stay collected (fading out) after it leaves cover. Derived
+        // from the fade duration + a small margin so the grace ALWAYS exceeds the fade — the store purges a departing
+        // tile only after this window, by which point its labels have fully faded (a purge mid-fade would pop).
+        internal const double DepartingGraceSeconds = LabelPlacementSystem.FadeDurationSeconds + 0.2;
+
         /// <summary>
         /// Rebuild for a new style: group its symbol layers by source and (re)create the shared glyph
         /// pipeline from the style's <c>glyphs</c> URL. Idempotent — safe to call on every restyle.
@@ -309,7 +317,7 @@ namespace MapRenderer.Unity.Text
         /// (nothing mutates mid-callback). Only keys for sources that actually have symbol layers are forwarded
         /// — a non-symbol source's tiles can never match a label entry, so they are filtered out here.
         /// </summary>
-        public void ReconcileLoadedTiles(IReadOnlyList<LoadedTileKey> loaded)
+        public void ReconcileLoadedTiles(IReadOnlyList<LoadedTileKey> loaded, double nowSeconds = 0.0)
         {
             if (_layersBySource == null) return; // no style set yet
             _reconcileKeys.Clear();
@@ -324,7 +332,11 @@ namespace MapRenderer.Unity.Text
                     _loadedNow.Add(storeKey);
                 }
             }
-            _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled);
+            // Pass the wall-clock (from MapView) + the departing grace window so a tile that leaves cover keeps its
+            // labels COLLECTED (as departing) for the fade-out instead of popping. Grace applies only when the mesh
+            // cache is enabled (labels are dropped, not kept warm, on release otherwise → nothing to fade).
+            double grace = _cacheEnabled ? DepartingGraceSeconds : 0.0;
+            _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled, nowSeconds, grace);
         }
 
         private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes,
@@ -403,10 +415,12 @@ namespace MapRenderer.Unity.Text
         {
             double quantize  = WebMercator.GroundResolution(_camera.CurrentProperties.Zoom);
             int    slotCount = _layerMaterials.Length > 0 ? _layerMaterials.Length : 1;
-            _store.CollectInto(_batchCollect, quantize);
-            // Pass the projection so the batch stores each tile's render-space corners for the per-frame
-            // tile-coverage pre-cull (LabelTileCoverage). Corners are camera-independent → built once here.
-            SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection);
+            // CollectInto appends DEPARTING labels (tiles leaving cover, kept warm for a fade-out) after the active
+            // ones and reports the split; the builder flags the departing records so the placement gather fades them
+            // out instead of popping. Pass the projection so the batch stores each tile's render-space corners for
+            // the per-frame tile-coverage pre-cull (camera-independent → built here).
+            _store.CollectInto(_batchCollect, quantize, out int activeCount);
+            SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection, activeCount);
             return _batch;
         }
 

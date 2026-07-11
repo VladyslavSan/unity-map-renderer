@@ -69,6 +69,13 @@ namespace MapRenderer.Unity.Text
         private readonly int _cacheCap;
         private int _genCounter;
 
+        // Retain-as-departing: a tile released to the cached side within a grace window is still COLLECTED (as
+        // departing) so its labels fade OUT instead of popping when the tile leaves cover. key -> wall-clock expiry
+        // (seconds). Invariant: departing ⊆ cached — every "leaves cached" path funnels through RemoveCached, which
+        // clears the stamp, so a re-fetched / restored tile drops it automatically. Stamped by ReconcileActiveSet on
+        // release, purged at expiry. Empty ⇒ CollectInto emits ACTIVE only (the feature is off when grace ≤ 0).
+        private readonly Dictionary<Key, double> _departing = new Dictionary<Key, double>();
+
         public SymbolTileLabelStore(int cacheCap)
             => _cacheCap = cacheCap > 0 && cacheCap < HardCacheCap ? cacheCap : HardCacheCap;
 
@@ -77,6 +84,9 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>Cached (out-of-cover, kept-warm) tile count — test/telemetry.</summary>
         public int CachedTileCount => _cachedIndex.Count;
+
+        /// <summary>Departing (left cover, still inside the fade-out grace window) tile count — test/telemetry.</summary>
+        public int DepartingTileCount => _departing.Count;
 
         /// <summary>
         /// Reserve an active slot for a (re)build of <paramref name="key"/> and return the generation token the
@@ -155,12 +165,23 @@ namespace MapRenderer.Unity.Text
         /// undeduped (per-anchor line identity is a follow-up). <paramref name="quantizeMeters"/> ≤ 0 disables
         /// dedup entirely (every active label is emitted, order-preserving — the pre-A-3 behaviour).</para></summary>
         public void CollectInto(List<LabelInstance> output, double quantizeMeters = 0.0)
+            => CollectInto(output, quantizeMeters, out _);
+
+        /// <summary>As <see cref="CollectInto(List{LabelInstance}, double)"/>, but also appends DEPARTING labels
+        /// (tiles that left cover within the fade-out grace window, retained warm) AFTER the active ones, and reports
+        /// the split: <paramref name="activeCount"/> is the number of active labels written first; every label at
+        /// index ≥ that is departing (the caller marks those records so they fade OUT instead of popping). A departing
+        /// POINT label whose cross-tile identity is already claimed by an active label is skipped — the active copy
+        /// still shows, so the label transfers tiles seamlessly with no fade.</summary>
+        public void CollectInto(List<LabelInstance> output, double quantizeMeters, out int activeCount)
         {
             output.Clear();
             if (quantizeMeters <= 0.0)
             {
                 foreach (KeyValuePair<Key, Entry> kv in _active)
                     if (kv.Value.Labels != null) output.AddRange(kv.Value.Labels);
+                activeCount = output.Count;
+                AppendDeparting(output, quantizeMeters, claims: null);
                 return;
             }
 
@@ -184,6 +205,37 @@ namespace MapRenderer.Unity.Text
                 }
             }
             foreach (KeyValuePair<CrossTileLabelKey, DedupEntry> kv in _dedup) output.Add(kv.Value.Label);
+            activeCount = output.Count;
+            AppendDeparting(output, quantizeMeters, claims: _dedup);
+        }
+
+        // Append departing labels (retained past release) AFTER the active split. When deduping (claims != null), a
+        // departing POINT label whose cross-tile identity is already CLAIMED — by an active label, or by an earlier
+        // departing copy — is skipped (the claimed copy shows / fades; no double-draw). Line labels carry no
+        // cross-tile identity → always appended. Iterates _departing (not mutated here); labels come from the warm
+        // cached entries (departing ⊆ cached, but guard the lookup defensively).
+        private void AppendDeparting(List<LabelInstance> output, double quantizeMeters,
+            Dictionary<CrossTileLabelKey, DedupEntry> claims)
+        {
+            if (_departing.Count == 0) return;
+            foreach (KeyValuePair<Key, double> dep in _departing)
+            {
+                if (!_cachedIndex.TryGetValue(dep.Key, out LinkedListNode<KeyedEntry> node)) continue;
+                List<LabelInstance> labels = node.Value.Entry.Labels;
+                if (labels == null) continue;
+                for (int i = 0; i < labels.Count; i++)
+                {
+                    LabelInstance label = labels[i];
+                    if (label == null) continue;
+                    if (claims != null && label.Placement == SymbolPlacement.Point)
+                    {
+                        var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, quantizeMeters);
+                        if (claims.ContainsKey(key)) continue;                 // active/earlier copy already shows it
+                        claims[key] = new DedupEntry { Label = label, Z = 0, TileKey = label.TileKey }; // claim (ContainsKey only)
+                    }
+                    output.Add(label);
+                }
+            }
         }
 
         /// <summary>Drop everything (a restyle purges the mesh cache too).</summary>
@@ -192,6 +244,7 @@ namespace MapRenderer.Unity.Text
             _active.Clear();
             _cachedIndex.Clear();
             _cachedOrder.Clear();
+            _departing.Clear();
         }
 
         // Reused reconcile scratch (main-thread, non-reentrant) — keeps ReconcileActiveSet allocation-free in
@@ -212,7 +265,8 @@ namespace MapRenderer.Unity.Text
         /// build is kicked by the bytes-ready push when its MVT bytes arrive. Idempotent: a second call with the
         /// same loaded set moves nothing.
         /// </summary>
-        public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease)
+        public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease,
+            double nowSeconds = 0.0, double departingGraceSeconds = 0.0)
         {
             _loadedScratch.Clear();
             for (int i = 0; i < loaded.Count; i++) _loadedScratch.Add(loaded[i]);
@@ -222,14 +276,40 @@ namespace MapRenderer.Unity.Text
             foreach (KeyValuePair<Key, Entry> kv in _active)
                 if (!_loadedScratch.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
             for (int i = 0; i < _reconcileRelease.Count; i++)
-                Release(_reconcileRelease[i], keepWarmOnRelease);
+            {
+                Key key = _reconcileRelease[i];
+                Release(key, keepWarmOnRelease);
+                // Retain-as-departing: a tile kept warm on release fades out over the grace window. Stamp AFTER
+                // Release (whose EnqueueCached ran RemoveCached → cleared any prior stamp), and only if it actually
+                // landed on the cached side (keepWarm) and a grace window is set (grace ≤ 0 ⇒ feature off).
+                if (departingGraceSeconds > 0.0 && _cachedIndex.ContainsKey(key))
+                    _departing[key] = nowSeconds + departingGraceSeconds;
+            }
 
-            // Restore cached tiles that re-entered the loaded set (a cache hit — no rebuild is coming).
+            // Restore cached tiles that re-entered the loaded set (a cache hit — no rebuild is coming). Restore
+            // funnels through RemoveCached, which clears the departing stamp → a re-entered tile fades back IN.
             _reconcileRestore.Clear();
             for (int i = 0; i < loaded.Count; i++)
                 if (_cachedIndex.ContainsKey(loaded[i])) _reconcileRestore.Add(loaded[i]);
             for (int i = 0; i < _reconcileRestore.Count; i++)
                 Restore(_reconcileRestore[i]);
+
+            PurgeExpiredDeparting(nowSeconds);
+        }
+
+        // Drop departing stamps whose grace window elapsed (now >= expiry) or whose cached entry was FIFO-evicted
+        // (defensive — RemoveCached already unstamps on eviction). A purged tile's labels are no longer collected as
+        // departing, so they stop being staged/faded; the label stays warm on the cached side for a later cache hit.
+        // Grace exceeds the fade duration (see SymbolLabelSubsystem.DepartingGraceSeconds), so a purge only ever
+        // drops an already-faded (invisible) label — never mid-fade, which would pop.
+        private readonly List<Key> _departingPurgeScratch = new List<Key>();
+        private void PurgeExpiredDeparting(double nowSeconds)
+        {
+            if (_departing.Count == 0) return;
+            _departingPurgeScratch.Clear();
+            foreach (KeyValuePair<Key, double> kv in _departing)
+                if (nowSeconds >= kv.Value || !_cachedIndex.ContainsKey(kv.Key)) _departingPurgeScratch.Add(kv.Key);
+            for (int i = 0; i < _departingPurgeScratch.Count; i++) _departing.Remove(_departingPurgeScratch[i]);
         }
 
         private Entry FindCurrent(Key key)
@@ -249,6 +329,7 @@ namespace MapRenderer.Unity.Text
                 LinkedListNode<KeyedEntry> oldest = _cachedOrder.First; // FIFO: evict the oldest-released
                 _cachedOrder.RemoveFirst();
                 _cachedIndex.Remove(oldest.Value.Key);
+                _departing.Remove(oldest.Value.Key); // keep departing ⊆ cached
             }
         }
 
@@ -261,6 +342,7 @@ namespace MapRenderer.Unity.Text
                 entry = node.Value.Entry;
                 _cachedOrder.Remove(node);
                 _cachedIndex.Remove(key);
+                _departing.Remove(key); // departing ⊆ cached: any path out of cached (restore / re-fetch) clears it
                 return true;
             }
             entry = null;

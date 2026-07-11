@@ -215,6 +215,39 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the culled label is fully skipped");
         }
 
+        // ── Retain-as-departing: when a tile leaves cover its labels are flagged DEPARTING (RecordDeparting, set
+        //    from CollectInto's active/departing split) so they FADE OUT in place instead of popping — the tile-
+        //    UNLOAD analogue of the coverage-cull fade. Simulated here by building the batch with activeCount: the
+        //    same label is active first, then departing (activeCount excludes it). ──
+        [Test]
+        public void Tick_DepartingRecord_FadesOut_InsteadOfPopping()
+        {
+            using var h = new Harness();
+            var labels = new List<LabelInstance> { Point(h.Origin, sortKey: 0f, text: "A", feature: 0) };
+
+            // 1) Active (activeCount covers the label) → it places and snaps to full opacity.
+            var active = new SymbolLabelBatch();
+            SymbolLabelBatchBuilder.Build(active, labels, slotCount: 1, projection: null, activeCount: 1);
+            h.System.Tick(in h.Frame, active, h.Atlas); // default dt → snap to full
+            Assert.AreEqual(1, h.System.LastQuadCount, "the active label places");
+            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…at full opacity");
+
+            // 2) The tile leaves cover → the SAME label is now departing (activeCount: 0 flags every record). It
+            //    must keep drawing while it fades, not vanish for a frame.
+            var departing = new SymbolLabelBatch();
+            SymbolLabelBatchBuilder.Build(departing, labels, slotCount: 1, projection: null, activeCount: 0);
+            h.System.Tick(in h.Frame, departing, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "a departing-but-visible label keeps drawing (fading, not popping)");
+            float dim = MaxAlpha(h.System.Mesh);
+            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
+            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
+
+            // 3) After enough steps it finishes fading and is dropped — counted as departing (not coverage/distance).
+            for (int i = 0; i < 10; i++) h.System.Tick(in h.Frame, departing, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the departing label is fully skipped");
+            Assert.Greater(h.System.LastDepartingCulledCount, 0, "…and its skip is attributed to departing telemetry");
+        }
+
         // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres (a cross-tile
         //    no-op) and separates distinct ones — and it takes NO zoom parameter, so it cannot drift as the
         //    camera zooms (the bug a per-frame display-zoom grid would cause). ──

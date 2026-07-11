@@ -173,7 +173,10 @@ namespace MapRenderer.Unity.Text.Placement
         // A persistent per-FADE-identity opacity (LabelCandidate.FadeId) eased toward 1 (collision-placed) or 0
         // (suppressed / gone) at 1/FadeDurationSeconds per second, so a label eases in/out instead of popping.
         // PlacedQuad.Color.w already carries the alpha the shader emits — fade is pure CPU state, no shader change.
-        private const float FadeDurationSeconds = 0.3f;
+        // internal (not private): SymbolLabelSubsystem derives its departing-tile grace window from this so the grace
+        // always exceeds the fade — if this constant changes, the grace tracks it and a purge never drops a still-
+        // fading (visible) departing label (which would pop).
+        internal const float FadeDurationSeconds = 0.3f;
         // FIXED (zoom-INDEPENDENT) anchor-quantization for the POINT fade id. Must NOT be the A-3 display-zoom
         // dedup grid: that grid's cell size changes with zoom, so a zooming camera would step the id to a new
         // cell every fraction of a zoom level → every label's record misses → continuous re-fade (worse than the
@@ -272,6 +275,11 @@ namespace MapRenderer.Unity.Text.Placement
         /// mirrors <see cref="LastDistanceCulledCount"/>; a proxy for how much of the horizon tile pile-up was
         /// dropped whole.</summary>
         internal int LastTileCoverageCulledCount { get; private set; }
+
+        /// <summary>Retain-as-departing: labels skipped on the last Tick because their tile is leaving cover and the
+        /// label has already faded out (before that it stays STAGED, fading — no pop). Telemetry — a proxy for how
+        /// many tile-unload fade-outs completed this frame.</summary>
+        internal int LastDepartingCulledCount { get; private set; }
 
         /// <summary>The persistent billboard mesh <see cref="Tick"/> rebuilds every call. Test surface: headless
         /// EditMode has no player loop, so a <see cref="Graphics.RenderMesh"/> submission never appears under a
@@ -408,6 +416,7 @@ namespace MapRenderer.Unity.Text.Placement
                 LastSurvivorCount = 0;
                 LastDistanceCulledCount = 0;
                 LastTileCoverageCulledCount = 0;
+                LastDepartingCulledCount = 0;
 
                 int slotCount = (materials != null && materials.Count > 0) ? materials.Count : 1;
                 EnsureSlots(slotCount);
@@ -579,25 +588,31 @@ namespace MapRenderer.Unity.Text.Placement
             _forceFadeOut.Clear();
             for (int r = 0; r < batch.Count; r++)
             {
-                // Two pre-projection culls, cheapest first: the tile-coverage cull (whole tile too small on screen
-                // this frame — flag set by ComputeTileCoverageCull) and the B-3 distance cull (this label past the
-                // horizon radius).
-                bool tileCulled = batch.RecordTile[r] >= 0 && _tileCulled[batch.RecordTile[r]] != 0;
-                bool distCulled = !tileCulled &&
+                // Three fade-out triggers, cheapest first: the record's tile is LEAVING cover (retain-as-departing —
+                // flagged by the batch builder from CollectInto's active/departing split), the tile-coverage cull
+                // (whole tile too small on screen this frame — flag set by ComputeTileCoverageCull), and the B-3
+                // distance cull (this label past the horizon radius). A departing record is never also coverage/
+                // distance culled here — its fade-out is unconditional.
+                bool departing  = batch.RecordDeparting[r];
+                bool tileCulled = !departing && batch.RecordTile[r] >= 0 && _tileCulled[batch.RecordTile[r]] != 0;
+                bool distCulled = !departing && !tileCulled &&
                     LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius);
 
-                if (tileCulled || distCulled)
+                if (departing || tileCulled || distCulled)
                 {
                     // Don't pop a label that was on screen last frame: if its fade is still alive, KEEP staging it
                     // (so it eases out in place at its live position) and force its fade-out in emit. Only once it
-                    // has fully faded do we actually skip it — that is where the cull's perf win lands.
+                    // has fully faded do we actually skip it — that is where the perf win lands (and, for a departing
+                    // tile, where the store then purges it: grace > fade, so it is already invisible).
                     if (MarkFadeOutIfAlive(batch, r))
                     {
                         // fall through: gather it like a normal record; the emit loop drives its opacity to 0
                     }
                     else
                     {
-                        if (tileCulled) LastTileCoverageCulledCount++; else LastDistanceCulledCount++;
+                        if (departing) LastDepartingCulledCount++;
+                        else if (tileCulled) LastTileCoverageCulledCount++;
+                        else LastDistanceCulledCount++;
                         _sjPointOffset[r] = -1;
                         continue;
                     }

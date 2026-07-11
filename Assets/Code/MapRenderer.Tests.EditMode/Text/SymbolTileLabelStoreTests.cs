@@ -244,5 +244,108 @@ namespace MapRenderer.Tests.Text
             store.Restore(b);
             Assert.AreEqual(0, Collect(store).Count, "a restyle purges both sides");
         }
+
+        // ═══ Retain-as-departing: a tile leaving cover keeps its labels COLLECTED (fading) for a grace window ═══
+
+        // ── A released tile is stamped departing and STILL collected (so its labels fade out, not pop) until the
+        //    grace window elapses and a later reconcile purges it — the label staying warm on the cached side. ──
+        [Test]
+        public void Departing_ReleaseWithGrace_CollectedThenPurgedAfterWindow()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+
+            // Leaves cover at t=10 with a 0.5s grace → kept warm AND stamped departing.
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, store.DepartingTileCount, "the released tile is departing");
+            Assert.AreEqual(0, store.ActiveTileCount, "…and no longer active");
+            List<LabelInstance> during = Collect(store);
+            Assert.AreEqual(1, during.Count, "a departing tile is STILL collected (its labels fade out, not pop)");
+            Assert.AreEqual(1, during[0].FeatureIndex, "…and they are its own labels");
+
+            // A reconcile still inside the window keeps it departing + collected.
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.3, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, store.DepartingTileCount, "still within the grace window");
+            Assert.AreEqual(1, Collect(store).Count, "…still collected");
+
+            // Past the window → purged. The labels stay WARM (a cache hit still restores them) but are no longer
+            // collected as departing (by now they have fully faded, so this is not a pop).
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
+            Assert.AreEqual(0, store.DepartingTileCount, "grace elapsed → purged");
+            Assert.AreEqual(0, Collect(store).Count, "…no longer collected");
+            Assert.AreEqual(1, store.CachedTileCount, "but still kept warm for a cache-hit re-entry");
+        }
+
+        // ── A tile that re-enters cover WITHIN the grace window is restored to active (fades back in), not left
+        //    departing — the RemoveCached chokepoint clears the stamp (the departing ⊆ cached invariant). ──
+        [Test]
+        public void Departing_ReEntryWithinGrace_RestoredActive()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, store.DepartingTileCount, "departing after leaving cover");
+
+            store.ReconcileActiveSet(Loaded(key), keepWarmOnRelease: true, nowSeconds: 10.2, departingGraceSeconds: 0.5);
+            Assert.AreEqual(0, store.DepartingTileCount, "re-entry within grace clears the departing stamp");
+            Assert.AreEqual(1, store.ActiveTileCount, "…and the tile is active again");
+            Assert.AreEqual(1, Collect(store).Count, "…rendered as a normal active label (fades back in)");
+        }
+
+        // ── With no grace window (the default / cache-disabled path) a release retains nothing — pre-fade behaviour. ──
+        [Test]
+        public void Departing_GraceZero_NoRetention()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = Key("src", 1);
+            store.CompleteBuild(key, store.BeginBuild(key), Labels(1));
+            store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // grace defaults to 0 → feature off
+            Assert.AreEqual(0, store.DepartingTileCount, "grace 0 ⇒ nothing retained");
+            Assert.AreEqual(0, Collect(store).Count, "a released tile is not collected");
+        }
+
+        // ── CollectInto's out-activeCount splits active labels (first) from departing labels (appended last) — the
+        //    split the batch builder reads to flag which records fade out. ──
+        [Test]
+        public void Departing_CollectInto_SplitsActiveFromDeparting()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var a = Key("src", 1); var b = Key("src", 2);
+            store.CompleteBuild(a, store.BeginBuild(a), Labels(1));
+            store.CompleteBuild(b, store.BeginBuild(b), Labels(2));
+            // b leaves cover with grace → departing; a stays active.
+            store.ReconcileActiveSet(Loaded(a), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+
+            var output = new List<LabelInstance>();
+            store.CollectInto(output, quantizeMeters: 0.0, out int activeCount);
+            Assert.AreEqual(2, output.Count, "both the active and the departing label are collected");
+            Assert.AreEqual(1, activeCount, "exactly one is active; the departing come after the split");
+            Assert.AreEqual(1, output[0].FeatureIndex, "active label first");
+            Assert.AreEqual(2, output[activeCount].FeatureIndex, "departing label after the split");
+        }
+
+        // ── A departing POINT label whose cross-tile identity is already shown by an ACTIVE label is NOT collected
+        //    twice (no ghost fade under it) — the multi-source / dedup-winner case the per-record flag must handle. ──
+        [Test]
+        public void Departing_ClaimedByActiveLabel_NotDoubleCollected()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var a = Key("src", 1); var b = Key("src", 2);
+            // Same anchor (0)/material (0)/text → the SAME cross-tile identity, so the active copy claims it.
+            var la = new List<LabelInstance> { new LabelInstance { FeatureIndex = 1, Text = "x" } };
+            var lb = new List<LabelInstance> { new LabelInstance { FeatureIndex = 2, Text = "x" } };
+            store.CompleteBuild(a, store.BeginBuild(a), la);
+            store.CompleteBuild(b, store.BeginBuild(b), lb);
+            store.ReconcileActiveSet(Loaded(a), keepWarmOnRelease: true, nowSeconds: 10.0, departingGraceSeconds: 0.5);
+            Assert.AreEqual(1, store.DepartingTileCount, "b is departing");
+
+            var output = new List<LabelInstance>();
+            store.CollectInto(output, quantizeMeters: 1.0, out int activeCount); // dedup ON
+            Assert.AreEqual(1, output.Count, "the active copy shows; the departing twin is skipped (no double-draw)");
+            Assert.AreEqual(1, activeCount, "…and it is the active one (nothing appended after the split)");
+            Assert.AreEqual(1, output[0].FeatureIndex, "the surviving label is the active tile's");
+        }
     }
 }
