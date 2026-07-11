@@ -386,31 +386,27 @@ namespace MapRenderer.Unity.Text
         public void CollectInto(List<LabelInstance> output)
             => _store.CollectInto(output, WebMercator.GroundResolution(_camera.CurrentProperties.Zoom));
 
-        // Lever C step 2: the version-cached blittable label batch — the per-frame placement source of truth.
+        // Lever C step 2: the blittable label batch — the per-frame placement source of truth. Rebuilt EVERY frame
+        // from the current collected set. The version cache that skipped rebuilds on a stable collected set was
+        // removed: once the B-1 static-frame skip was retired it had this single caller, and its store-version bump
+        // discipline (a bump on every set-changing store mutation) was not worth the complexity. The rebuild is
+        // allocation-free — both CollectInto and Build reuse their buffers — so the cost is CPU only.
         private readonly SymbolLabelBatch      _batch        = new SymbolLabelBatch();
         private readonly List<LabelInstance>   _batchCollect = new List<LabelInstance>();
-        private long   _batchVersion  = long.MinValue;   // last store version the batch was built at
-        private double _batchQuantize = double.NaN;       // last A-3 dedup grid (zoom-dependent → re-dedup on zoom)
-        private int    _batchSlotCount = -1;              // last material-slot count (baked into each record's Slot)
 
-        /// <summary>The blittable <see cref="SymbolLabelBatch"/> for this frame, rebuilt ONLY when the collected set
-        /// changes: on a new <see cref="SymbolTileLabelStore.Version"/>, a zoom change (the A-3 dedup grid is
-        /// zoom-dependent), or a material-slot count change. On a steady pan (all three stable) it returns the cached
-        /// batch untouched — so neither the cross-tile dedup nor the LabelInstance→SoA conversion runs per frame.</summary>
+        /// <summary>The blittable <see cref="SymbolLabelBatch"/> for this frame, rebuilt every frame from the current
+        /// collected set: the A-3 cross-tile dedup (<see cref="SymbolTileLabelStore.CollectInto"/>) + the
+        /// LabelInstance→SoA conversion (<see cref="SymbolLabelBatchBuilder.Build"/>). Both reuse their buffers, so
+        /// the rebuild is allocation-free (CPU only). Tile-corner projection for the coverage pre-cull is
+        /// camera-independent, so it is done here too (not per Tick).</summary>
         public SymbolLabelBatch CurrentBatch()
         {
             double quantize  = WebMercator.GroundResolution(_camera.CurrentProperties.Zoom);
             int    slotCount = _layerMaterials.Length > 0 ? _layerMaterials.Length : 1;
-            if (_store.Version != _batchVersion || quantize != _batchQuantize || slotCount != _batchSlotCount)
-            {
-                _store.CollectInto(_batchCollect, quantize);
-                // Pass the projection so the batch stores each tile's render-space corners for the per-frame
-                // tile-coverage pre-cull (LabelTileCoverage). Corners are camera-independent → built once here.
-                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection);
-                _batchVersion   = _store.Version;
-                _batchQuantize  = quantize;
-                _batchSlotCount = slotCount;
-            }
+            _store.CollectInto(_batchCollect, quantize);
+            // Pass the projection so the batch stores each tile's render-space corners for the per-frame
+            // tile-coverage pre-cull (LabelTileCoverage). Corners are camera-independent → built once here.
+            SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection);
             return _batch;
         }
 

@@ -13,9 +13,9 @@ namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
     /// Converts the managed <see cref="LabelInstance"/> carriers of one collected label set into the blittable
-    /// <see cref="SymbolLabelBatch"/> SoA (Lever C step 2). Run ONCE per collected-set change (keyed on
-    /// <c>SymbolTileLabelStore.Version</c>) at the aggregation seam — off the per-frame path — so every frame's
-    /// gather/project/stage reads the SoA with no managed iteration and no per-frame conversion.
+    /// <see cref="SymbolLabelBatch"/> SoA (Lever C step 2). Run at the aggregation seam
+    /// (<see cref="Text.SymbolLabelSubsystem.CurrentBatch"/>) so every frame's gather/project/stage reads the SoA
+    /// directly; the conversion itself is allocation-free (reused buffers) but is CPU work on the main thread.
     ///
     /// <para>Resolves here exactly the managed bits the staging math can't: the glyph/quad copies out of the
     /// managed lists, the sRGB→linear vertex colour (<see cref="LabelPlacementSystem.LinearColor"/>, matched to

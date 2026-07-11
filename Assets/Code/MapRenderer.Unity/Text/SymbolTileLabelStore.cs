@@ -69,18 +69,8 @@ namespace MapRenderer.Unity.Text
         private readonly int _cacheCap;
         private int _genCounter;
 
-        // B-1: monotonic version of the COLLECTED label set — bumped by every mutation that could change what
-        // CollectInto emits (BeginBuild / CompleteBuild-commit / Release / Restore / Clear). A NO-OP
-        // ReconcileActiveSet does NOT bump it (it only calls Release/Restore for actual moves), so a static
-        // frame's version is stable → the LabelPlacementSystem static-frame skip can trust "unchanged". Errs
-        // toward OVER-bumping (a spurious bump only costs a missed skip; a missed bump would freeze stale labels).
-        private long _version;
-
         public SymbolTileLabelStore(int cacheCap)
             => _cacheCap = cacheCap > 0 && cacheCap < HardCacheCap ? cacheCap : HardCacheCap;
-
-        /// <summary>B-1: monotonic version of the collected label set (see <see cref="_version"/>).</summary>
-        public long Version => _version;
 
         /// <summary>Active (in-cover) tile count — test/telemetry.</summary>
         public int ActiveTileCount => _active.Count;
@@ -106,7 +96,6 @@ namespace MapRenderer.Unity.Text
             if (entry == null) entry = new Entry { Labels = null };
             entry.Generation = gen;
             _active[key] = entry;
-            _version++; // B-1: an active entry appeared/was re-generated
             return gen;
         }
 
@@ -120,7 +109,6 @@ namespace MapRenderer.Unity.Text
             Entry e = FindCurrent(key);
             if (e == null || e.Generation != gen) return false; // superseded or dropped mid-build
             e.Labels = labels;
-            _version++; // B-1: this tile's labels changed (membership may be unchanged — the case LoadedRevision missed)
             return true;
         }
 
@@ -135,13 +123,11 @@ namespace MapRenderer.Unity.Text
             {
                 _active.Remove(key);
                 if (transferredToCache) EnqueueCached(key, e);
-                _version++; // B-1: an active tile left the collected set
             }
-            else if (!transferredToCache && RemoveCached(key))
+            else if (!transferredToCache)
             {
-                // not active but a stale cached copy existed → dropped it (cached tiles aren't collected, so this
-                // does NOT change CollectInto's output — but over-bumping is safe and keeps the rule simple).
-                _version++;
+                // Not active but a stale cached copy may exist (cache-disabled path) → drop it.
+                RemoveCached(key);
             }
         }
 
@@ -149,7 +135,7 @@ namespace MapRenderer.Unity.Text
         /// to the active set so they render again. A no-op if nothing was cached for it.</summary>
         public void Restore(Key key)
         {
-            if (RemoveCached(key, out Entry e)) { _active[key] = e; _version++; } // B-1: labels re-entered the set
+            if (RemoveCached(key, out Entry e)) _active[key] = e;
         }
 
         // A-3: reused cross-tile dedup index (main-thread CollectInto only; not reentrant) — keyed by the
@@ -206,7 +192,6 @@ namespace MapRenderer.Unity.Text
             _active.Clear();
             _cachedIndex.Clear();
             _cachedOrder.Clear();
-            _version++; // B-1: a restyle purged everything
         }
 
         // Reused reconcile scratch (main-thread, non-reentrant) — keeps ReconcileActiveSet allocation-free in

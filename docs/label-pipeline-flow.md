@@ -63,17 +63,15 @@ never diverge.
 
 ---
 
-## 3. The version-cached batch — `SymbolLabelSubsystem.CurrentBatch()`
+## 3. The batch — `SymbolLabelSubsystem.CurrentBatch()`
 
-The bridge between the two clocks. It returns a blittable `SymbolLabelBatch` (Structure-of-Arrays) and
-**rebuilds it only when the collected set actually changed** — keyed on:
-
-- `SymbolTileLabelStore.Version` (labels added/removed), **or**
-- display **zoom** (the cross-tile dedup grid is zoom-dependent), **or**
-- material **slot count**.
-
-On a steady pan (all three stable) it returns the cached batch untouched — so neither the cross-tile dedup
-nor the `LabelInstance → SoA` conversion runs per frame. When it *does* rebuild, `SymbolLabelBatchBuilder`:
+The bridge between the two clocks. It returns a blittable `SymbolLabelBatch` (Structure-of-Arrays), rebuilt
+**every frame** from the current collected set. (An earlier version cache skipped the rebuild while the
+collected set / zoom / slot-count were all stable, keyed on a monotonic `SymbolTileLabelStore.Version`; it was
+removed once the B-1 static-frame skip retired left it a single caller — its per-mutation bump discipline
+wasn't worth the complexity. The rebuild is **allocation-free** — both `CollectInto` and the builder reuse
+their buffers — so the cost is CPU only: the cross-tile dedup + the `LabelInstance → SoA` conversion.) Each
+rebuild, `SymbolLabelBatchBuilder`:
 
 - flattens each label into the SoA in collected order (so collision ordinals — and the mesh — stay
   byte-identical);
@@ -81,7 +79,9 @@ nor the `LabelInstance → SoA` conversion runs per frame. When it *does* rebuil
 - **and, for the tile-coverage cull, projects each unique tile's 4 corners into render space once** (see §5).
 
 The batch carries a **`BuildId`** bumped on every rebuild; `LabelPlacementSystem` mirrors it into native
-buffers only when `BuildId` changes, never per frame.
+buffers only when `BuildId` changes. (With the version cache gone the batch rebuilds — and so `BuildId`
+advances — every frame, so the mirror now refreshes every frame; the gate still saves the copy on a genuinely
+idle frame where nothing calls `CurrentBatch`, and stays correct if batch caching is ever reintroduced.)
 
 ---
 
