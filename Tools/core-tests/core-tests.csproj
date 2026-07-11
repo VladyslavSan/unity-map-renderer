@@ -76,6 +76,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/FrustumTileSelector.cs" />
     <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolTelemetrySnapshot.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileCoverStats.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileLodStrategy.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/FarPlanePolicy.cs" />
@@ -283,6 +284,10 @@
          → shape → LabelInstance. -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/StyledSymbolTileBuilder.cs" />
 
+    <!-- Symbol tile-label store — engine-free lifecycle bookkeeping (active/cached mirror of the mesh cache). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolTileLabelStore.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolTileLabelStoreTests.cs" />
+
     <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped LabelInstances, no synthetic source. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/StyledSymbolTileBuilderTests.cs" />
 
@@ -362,6 +367,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextTransform.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextTranslateAnchor.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentMode.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolPlacement.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutOptions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IGlyphAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutResult.cs" />
@@ -385,12 +391,20 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTranslate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBearing.cs" />
+
+    <!-- #5 B1: curved along-line text — Core helpers (engine-free) + their tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcWalker.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
 
     <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBox.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCandidate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollision.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollisionGrid.cs" />
 
@@ -401,5 +415,6 @@
 
     <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateCollisionTests.cs" />
   </ItemGroup>
 </Project>

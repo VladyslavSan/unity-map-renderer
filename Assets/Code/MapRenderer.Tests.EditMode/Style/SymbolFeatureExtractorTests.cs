@@ -129,6 +129,45 @@ namespace MapRenderer.Tests
         }
 
         [Test]
+        public void Extract_LinePlacement_ProducesLineLabelsWithProjectedPath()
+        {
+            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            var projection = new WebMercatorProjection();
+
+            SymbolStyle.StyleLayer LineLayer(string placement) => new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "geolines",
+                // Literal text-field so every line feature resolves a label regardless of its properties.
+                LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}"),
+            };
+
+            var lineLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineLabels);
+
+            Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
+            SymbolStyle.SymbolLabel first = lineLabels[0];
+            Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.LineCenter, first.Placement);
+            Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line label");
+            Assert.IsNotNull(first.PathRender, "a line label carries the projected path");
+            Assert.GreaterOrEqual(first.PathRender.Length, 2, "a placeable line has >= 2 vertices");
+            Assert.AreEqual("L", first.Text);
+
+            // The path IS the real tile->geo->project chain (recompute the first line's first vertex).
+            MvtLayer geolines = tile.GetLayer("geolines");
+            List<List<double2>> paths = MvtGeometry.Decode(geolines.Features[0].Geometry);
+            double2 lonLat = FixtureTile.ToLonLat(paths[0][0].x, paths[0][0].y, geolines.Extent);
+            double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+            Assert.AreEqual(expected.x, first.PathRender[0].x, 1e-6, "path vertex is the real projection, not a stub");
+
+            // Teeth: a POINT-placement layer over the SAME line layer yields NOTHING — the geometry fork is real.
+            var pointOverLines = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
+            Assert.AreEqual(0, pointOverLines.Count, "point placement skips LineString features");
+        }
+
+        [Test]
         public void Extract_WithFilter_NarrowsToNamedFeature()
         {
             MvtTile tile = MvtDecoder.Decode(LoadFixture());

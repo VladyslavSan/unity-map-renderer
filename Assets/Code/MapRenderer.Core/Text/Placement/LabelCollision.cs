@@ -126,6 +126,94 @@ namespace MapRenderer.Core.Text.Placement
             return survivors;
         }
 
+        /// <summary>
+        /// The total placement order for <see cref="LabelCandidate"/>s — identical rule to the
+        /// <see cref="LabelBox"/> overload (lower <see cref="LabelCandidate.SortKey"/> first, then
+        /// <see cref="LabelCandidate.FeatureIndex"/>, then <see cref="LabelCandidate.TileKey"/>).
+        /// </summary>
+        public static int ComparePlacementOrder(in LabelCandidate a, in LabelCandidate b)
+        {
+            if (a.SortKey < b.SortKey) return -1;
+            if (a.SortKey > b.SortKey) return 1;
+            if (a.FeatureIndex != b.FeatureIndex) return a.FeatureIndex < b.FeatureIndex ? -1 : 1;
+            if (a.TileKey != b.TileKey) return a.TileKey < b.TileKey ? -1 : 1;
+            return 0;
+        }
+
+        /// <summary>
+        /// #5 (B3) — multi-box, all-or-nothing survivor selection over a set of <see cref="LabelCandidate"/>s
+        /// (each spanning a contiguous range of the flat <paramref name="boxes"/> array), UNIFIED across point
+        /// (1-box) and curved along-line (N-box) labels so a road name and a city name collide in the SAME
+        /// greedy pass. Sorts <paramref name="candidates"/><c>[0..candidateCount)</c> into placement order in
+        /// place (the boxes are NOT reordered — the grid stores absolute box indices), then greedily places a
+        /// candidate iff <see cref="LabelCandidate.AllowOverlap"/> OR every one of its boxes overlaps no
+        /// already-placed blocker; a placed candidate inserts ALL its boxes (unless it ignores placement).
+        /// Writes <paramref name="survivor"/><c>[i]</c> for SORTED candidate position <c>i</c> (identity is
+        /// <c>candidates[i].LabelIndex</c>) and returns the survivor count. Zero managed allocation (T4).
+        ///
+        /// <para><b>All-or-nothing / no self-block:</b> a candidate's boxes are TESTED (all must be free) and
+        /// only THEN inserted, so a curved label's adjacent glyph boxes — which naturally overlap — never
+        /// block one another. One colliding glyph drops the WHOLE label; a placed label blocks across its
+        /// whole run.</para>
+        /// </summary>
+        /// <param name="candidates">The candidates; reordered in place into placement order.</param>
+        /// <param name="candidateCount">Number of valid entries in <paramref name="candidates"/>.</param>
+        /// <param name="boxes">The flat box pool every candidate's <see cref="LabelCandidate.BoxStart"/> range
+        /// addresses; NOT reordered (stable indices).</param>
+        /// <param name="boxCount">Number of valid boxes in <paramref name="boxes"/> (bounds the grid extent).</param>
+        /// <param name="survivor">Caller-owned output flags, length &gt;= <paramref name="candidateCount"/>.</param>
+        /// <param name="grid">Reused spatial grid (must be non-null on this path — the acceleration is the point).</param>
+        public static int SelectSurvivors(
+            LabelCandidate[] candidates, int candidateCount,
+            LabelBox[] boxes, int boxCount,
+            bool[] survivor, LabelCollisionGrid grid)
+        {
+            if (candidates == null) throw new ArgumentNullException(nameof(candidates));
+            if (boxes == null) throw new ArgumentNullException(nameof(boxes));
+            if (survivor == null) throw new ArgumentNullException(nameof(survivor));
+            if (grid == null) throw new ArgumentNullException(nameof(grid));
+            if (candidateCount <= 0) return 0;
+            if (candidateCount > candidates.Length)
+                throw new ArgumentOutOfRangeException(nameof(candidateCount), "count exceeds the candidates array length");
+            if (candidateCount > survivor.Length)
+                throw new ArgumentOutOfRangeException(nameof(candidateCount), "count exceeds the survivor array length");
+            if (boxCount > boxes.Length)
+                throw new ArgumentOutOfRangeException(nameof(boxCount), "boxCount exceeds the boxes array length");
+
+            Sort(candidates, candidateCount);
+            grid.Reset(boxes, boxCount);
+
+            int survivors = 0;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                LabelCandidate c = candidates[i];
+                int start = c.BoxStart;
+                int end   = c.BoxStart + c.BoxCount;
+
+                // Place if it ignores collision, OR none of its boxes overlaps an already-placed blocker.
+                // Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate wins.
+                bool place = c.AllowOverlap;
+                if (!place)
+                {
+                    place = true;
+                    for (int b = start; b < end; b++)
+                    {
+                        if (grid.OverlapsAny(in boxes[b], boxes)) { place = false; break; }
+                    }
+                }
+
+                survivor[i] = place;
+                if (place)
+                {
+                    survivors++;
+                    // A placed candidate blocks later ones across its WHOLE run — unless it ignores placement.
+                    if (!c.IgnorePlacement)
+                        for (int b = start; b < end; b++) grid.Insert(b, in boxes[b]);
+                }
+            }
+            return survivors;
+        }
+
         // In-place heapsort: O(n log n), zero managed allocation, no IComparer by-value copies (compares via
         // ComparePlacementOrder(in,in) directly). Replaces the original O(n²) insertion sort, which collapsed
         // at zoom-14-big-city label counts (thousands, not the "tens to low hundreds" the first cut assumed).
@@ -144,6 +232,32 @@ namespace MapRenderer.Core.Text.Placement
         // Restore the max-heap property at <paramref name="root"/> over a[0..n). "Max" is the LAST element in
         // ComparePlacementOrder, so heapsort emits ascending placement order (lowest sort-key placed first).
         private static void SiftDown(LabelBox[] a, int root, int n)
+        {
+            while (true)
+            {
+                int child = 2 * root + 1;
+                if (child >= n) break;
+                if (child + 1 < n && ComparePlacementOrder(in a[child], in a[child + 1]) < 0) child++;
+                if (ComparePlacementOrder(in a[root], in a[child]) >= 0) break;
+                (a[root], a[child]) = (a[child], a[root]);
+                root = child;
+            }
+        }
+
+        // Candidate heapsort — identical structure to the LabelBox Sort/SiftDown above, over the candidate
+        // ComparePlacementOrder. (Duplicated rather than generic to keep the compare an `in`-by-ref call with
+        // no boxing/IComparer copies — the same reason the box path is hand-rolled.)
+        private static void Sort(LabelCandidate[] a, int n)
+        {
+            for (int root = n / 2 - 1; root >= 0; root--) SiftDown(a, root, n);
+            for (int end = n - 1; end > 0; end--)
+            {
+                (a[0], a[end]) = (a[end], a[0]);
+                SiftDown(a, 0, end);
+            }
+        }
+
+        private static void SiftDown(LabelCandidate[] a, int root, int n)
         {
             while (true)
             {

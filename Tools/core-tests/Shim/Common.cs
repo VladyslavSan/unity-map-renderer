@@ -14,6 +14,13 @@ namespace Unity.Mathematics
         public static double2 max(double2 a, double2 b)
             => new double2(System.Math.Max(a.x, b.x), System.Math.Max(a.y, b.y));
 
+        // ── float2 component-wise (curved-glyph AABB uses math.min/max(float2)) ─────────
+        public static float2 min(float2 a, float2 b)
+            => new float2(a.x < b.x ? a.x : b.x, a.y < b.y ? a.y : b.y);
+
+        public static float2 max(float2 a, float2 b)
+            => new float2(a.x > b.x ? a.x : b.x, a.y > b.y ? a.y : b.y);
+
         // ── double3 component-wise ─────────────────────────────────────────────────────
         public static double3 min(double3 a, double3 b)
             => new double3(System.Math.Min(a.x, b.x), System.Math.Min(a.y, b.y), System.Math.Min(a.z, b.z));

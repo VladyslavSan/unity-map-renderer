@@ -339,7 +339,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         // no touching the mesh/disposal path). Exception-isolated: a throwing observer must never fault the
         // tile pipeline (mirrors ObserveFetchOutcome's per-tile fault isolation).
         internal System.Action<string, TileId, byte[]> SymbolTileBytesReady { get; set; }
-        internal System.Action<string, TileId>         SymbolTileReleased   { get; set; }
+        // Release carries whether the tile's meshes TRANSFERRED to the PreparedTileCache (Model B). true ⇒ keep
+        // the labels warm (a later cache HIT re-shows the tile with no fetch, so no bytes-ready to rebuild them);
+        // false ⇒ a true eviction, drop them. SymbolTileRestored fires on that cache hit (BuildTileFromCache).
+        internal System.Action<string, TileId, bool>   SymbolTileReleased   { get; set; }
+        internal System.Action<string, TileId>         SymbolTileRestored   { get; set; }
         // S85: reused TileCoverStats scratch — never reallocated (CaptureTelemetry steady-state no-GC).
         private readonly HashSet<int> _coverStatsX = new HashSet<int>();
         private readonly HashSet<int> _coverStatsY = new HashSet<int>();
@@ -855,6 +859,18 @@ namespace MapRenderer.Unity.Rendering.Tile
                         {
                             _prepared.Hits++;
                             _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
+
+                            // S105: a cache HIT re-shows the tile with NO fetch — so the symbol subsystem gets
+                            // no bytes-ready. Restore its kept-warm labels (dropped-on-release would show the
+                            // tile's geometry with no labels — the zoom-out-then-in bug). Exception-isolated.
+                            if (SymbolTileRestored != null)
+                            {
+                                try { SymbolTileRestored(p.SourceId, id); }
+                                catch (System.Exception ex)
+                                {
+                                    Debug.LogWarning($"[TileManager] symbol observer (restored) threw for {id}: {ex.Message}");
+                                }
+                            }
                         }
                         else
                         {
@@ -1407,8 +1423,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         private void ReleaseTile(LoadedKey key)
         {
+            // Whether this tile's meshes transfer to the PreparedTileCache (Model B) — drives whether the symbol
+            // subsystem keeps its labels warm (cache hit later) or drops them. Captured BEFORE the transfer nulls
+            // lt.Meshes; matches the exact condition guarding TransferBuiltMeshesToCache below.
+            bool transferredToCache = false;
             if (_loaded.TryGetValue(key, out var lt))
             {
+                transferredToCache = _cacheEnabled && lt.Built && lt.Meshes != null;
                 // S82: a fully-Built tile with tracked geometry TRANSFERS its meshes into the
                 // PreparedTileCache instead of letting RenderTeardownRecord destroy them (Model B — the
                 // cache takes ownership). Nulling lt.Meshes here makes DestroyTrackedMeshes's existing
@@ -1424,7 +1445,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 //
                 // _cacheEnabled == false skips the transfer entirely — RenderTeardownRecord's
                 // DestroyTrackedMeshes then destroys lt.Meshes exactly as it did pre-S82.
-                if (_cacheEnabled && lt.Built && lt.Meshes != null)
+                if (transferredToCache)
                     TransferBuiltMeshesToCache(key.Tile, _pipelines[key.Slot].SourceId, ref lt);
 
                 RenderTeardownRecord(ref lt);
@@ -1433,10 +1454,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Route the scheduler release to the OWNING pipeline — a record on source B never touches A.
             _pipelines[key.Slot].Scheduler.Release(key.Tile);
 
-            // S105: drop this tile's symbol labels (exception-isolated, as for the bytes-ready hook).
+            // S105: this tile's symbol labels follow its meshes — kept warm when transferred to the prepared
+            // cache (a later hit re-shows the tile with no fetch), dropped on a true eviction. Exception-isolated.
             if (SymbolTileReleased != null)
             {
-                try { SymbolTileReleased(_pipelines[key.Slot].SourceId, key.Tile); }
+                try { SymbolTileReleased(_pipelines[key.Slot].SourceId, key.Tile, transferredToCache); }
                 catch (System.Exception ex)
                 {
                     Debug.LogWarning($"[TileManager] symbol observer (released) threw for {key.Tile}: {ex.Message}");

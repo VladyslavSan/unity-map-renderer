@@ -124,9 +124,10 @@ namespace MapRenderer.Unity.Rendering.Map
             // S105: the decoupled symbol-label subsystem observes TileManager's fetch/release lifecycle
             // (sharing already-fetched bytes) and produces the real map labels Labels.Tick renders. It clones
             // the per-symbol-layer materials (per-layer text-halo-*) from the same MapMaterialSet.SymbolText base.
-            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet);
+            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet, _config.PreparedCache.MaxCount);
             TileManager.SymbolTileBytesReady = _symbols.OnTileBytesReady;
             TileManager.SymbolTileReleased   = _symbols.OnTileReleased;
+            TileManager.SymbolTileRestored   = _symbols.OnTileRestored;
         }
 
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
@@ -386,6 +387,22 @@ namespace MapRenderer.Unity.Rendering.Map
         /// unstyled view simply reports an empty cover.
         /// </summary>
         internal TileTelemetrySnapshot CaptureTelemetry() => TileManager.CaptureTelemetry();
+
+        /// <summary>
+        /// Pull-based SYMBOL-label telemetry (observability only): the label subsystem's active/cached tile
+        /// counts + the placement pass's last-Tick candidate/survivor/quad counts. Composed here because the
+        /// subsystem (<see cref="_symbols"/>) and placement system (<see cref="Labels"/>) are owned by the
+        /// view, not the <see cref="TileManager"/>.
+        /// </summary>
+        internal SymbolTelemetrySnapshot CaptureSymbolTelemetry() => new SymbolTelemetrySnapshot
+        {
+            ActiveLabelTiles        = _symbols.ActiveTileCount,
+            CachedLabelTiles        = _symbols.CachedTileCount,
+            InputLabelCount         = Labels.LastInputLabelCount,
+            CollisionCandidateCount = Labels.LastCandidateCount,
+            CollisionSurvivorCount  = Labels.LastSurvivorCount,
+            PlacedQuadCount         = Labels.LastQuadCount,
+        };
 
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the

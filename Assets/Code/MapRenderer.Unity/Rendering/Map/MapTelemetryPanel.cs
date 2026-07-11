@@ -97,6 +97,27 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Cumulative LRU evictions (an entry destroyed because the byte budget or count cap was exceeded).")]
         public int PreparedCacheEvictions;
 
+        [Header("S105: Symbol labels (live — overwritten each frame)")]
+        [Tooltip("Active (in-cover) label-tile count — tiles whose labels feed this frame's placement pass.")]
+        public int SymbolActiveLabelTiles;
+
+        [Tooltip("Cached (out-of-cover) label-tile count — labels kept warm so a prepared-cache hit re-shows " +
+                 "the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.")]
+        public int SymbolCachedLabelTiles;
+
+        [Tooltip("Labels fed into the last placement Tick (before projection cull) — sum over active tiles.")]
+        public int SymbolInputLabelCount;
+
+        [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
+                 "a curved/repeated line label is 1 per along-line anchor).")]
+        public int SymbolCollisionCandidates;
+
+        [Tooltip("Collision survivors on the last Tick (candidates actually placed; the rest lost a collision).")]
+        public int SymbolCollisionSurvivors;
+
+        [Tooltip("Glyph quads submitted to the GPU on the last Tick (4 vertices each) — the drawn label load.")]
+        public int SymbolPlacedQuads;
+
         private void Update() => Tick();
 
         /// <summary>
@@ -141,6 +162,14 @@ namespace MapRenderer.Unity.Rendering.Map
             PreparedCacheFillPercent = snap.PreparedCacheByteBudget > 0
                 ? (double)snap.PreparedCacheBytesHeld / snap.PreparedCacheByteBudget * 100.0
                 : 0.0;
+
+            SymbolTelemetrySnapshot sym = Map.View.CaptureSymbolTelemetry();
+            SymbolActiveLabelTiles    = sym.ActiveLabelTiles;
+            SymbolCachedLabelTiles    = sym.CachedLabelTiles;
+            SymbolInputLabelCount     = sym.InputLabelCount;
+            SymbolCollisionCandidates = sym.CollisionCandidateCount;
+            SymbolCollisionSurvivors  = sym.CollisionSurvivorCount;
+            SymbolPlacedQuads         = sym.PlacedQuadCount;
         }
     }
 }

@@ -48,11 +48,28 @@ namespace MapRenderer.Core.Style.Symbol
         /// Overrides <see cref="TextOffset"/> when non-zero (see <c>TextQuadLayout</c>).</summary>
         public StyleProperty<float> TextRadialOffset { get; }
 
-        /// <summary>symbol-placement: "point" (default), "line", or "line-center". S20 renders point only.</summary>
-        public string SymbolPlacement { get; }
+        /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
+        /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>. An
+        /// unrecognized value degrades to point.</summary>
+        public SymbolPlacement SymbolPlacement { get; }
 
         /// <summary>symbol-sort-key: greedy placement priority (lower placed first). Default 0. Zoom-capable.</summary>
         public StyleProperty<float> SymbolSortKey { get; }
+
+        /// <summary>symbol-spacing: distance in PIXELS between repeated labels along a line
+        /// (<see cref="Text.SymbolPlacement.Line"/> only — ignored for point/line-center). Default 250 (spec),
+        /// minimum 1. Zoom-capable.</summary>
+        public StyleProperty<float> SymbolSpacing { get; }
+
+        /// <summary>text-max-angle: maximum DEGREE change between adjacent characters on a curved line label;
+        /// a label whose along-line curvature exceeds this at any glyph pair is dropped at that anchor (line /
+        /// line-center only). Default 45 (spec). Zoom-capable.</summary>
+        public StyleProperty<float> TextMaxAngle { get; }
+
+        /// <summary>text-keep-upright: when true (default), a curved line label that would read right-to-left is
+        /// walked reversed + flipped so it stays upright/left-to-right; when false the glyphs follow the raw
+        /// line direction (may render upside-down). line / line-center only.</summary>
+        public bool TextKeepUpright { get; }
 
         /// <summary>text-allow-overlap: skip collision, always place. Default false.</summary>
         public bool TextAllowOverlap { get; }
@@ -130,13 +147,24 @@ namespace MapRenderer.Core.Style.Symbol
                 ? new StyleProperty<float>(radialOffsetJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
-            SymbolPlacement = layout?.Get(PropertyNames.SymbolPlacement)?.AsString(PropertyNames.PlacementPoint)
-                              ?? PropertyNames.PlacementPoint;
+            SymbolPlacement = ParsePlacement(layout?.Get(PropertyNames.SymbolPlacement)?.AsString(null));
 
             JsonValue sortKeyJson = layout?.Get(PropertyNames.SymbolSortKey);
             SymbolSortKey = sortKeyJson != null
                 ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
+
+            JsonValue spacingJson = layout?.Get(PropertyNames.SymbolSpacing);
+            SymbolSpacing = spacingJson != null
+                ? new StyleProperty<float>(spacingJson, 250f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(250f);
+
+            JsonValue maxAngleJson = layout?.Get(PropertyNames.TextMaxAngle);
+            TextMaxAngle = maxAngleJson != null
+                ? new StyleProperty<float>(maxAngleJson, 45f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(45f);
+
+            TextKeepUpright = layout?.Get(PropertyNames.TextKeepUpright)?.AsBool(true) ?? true;
 
             TextAllowOverlap = layout?.Get(PropertyNames.TextAllowOverlap)?.AsBool(false) ?? false;
             TextIgnorePlacement = layout?.Get(PropertyNames.TextIgnorePlacement)?.AsBool(false) ?? false;
@@ -203,6 +231,14 @@ namespace MapRenderer.Core.Style.Symbol
             PropertyNames.TransformUppercase => Text.TextTransform.Uppercase,
             PropertyNames.TransformLowercase => Text.TextTransform.Lowercase,
             _                                => Text.TextTransform.None,
+        };
+
+        // Spec default "point"; absent/unrecognized -> point.
+        private static SymbolPlacement ParsePlacement(string s) => s switch
+        {
+            PropertyNames.PlacementLine       => Text.SymbolPlacement.Line,
+            PropertyNames.PlacementLineCenter => Text.SymbolPlacement.LineCenter,
+            _                                 => Text.SymbolPlacement.Point,
         };
 
         // Spec default "auto"; absent/unrecognized -> auto.

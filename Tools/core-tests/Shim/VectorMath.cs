@@ -36,7 +36,10 @@ namespace Unity.Mathematics
         // float2 vector helpers (Unity.Mathematics parity).
         public static float   dot(float2 a, float2 b)      => a.x * b.x + a.y * b.y;
         public static float   length(float2 a)             => (float)System.Math.Sqrt(a.x * a.x + a.y * a.y);
+        public static float   lengthsq(float2 a)           => a.x * a.x + a.y * a.y;
         public static float   distance(float2 a, float2 b) => length(a - b);
+        public static float2  lerp(float2 a, float2 b, float t) => new float2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+        public static float   lerp(float a, float b, float t)   => a + (b - a) * t;
         public static double3 normalize(double3 a)
         {
             double len = length(a);

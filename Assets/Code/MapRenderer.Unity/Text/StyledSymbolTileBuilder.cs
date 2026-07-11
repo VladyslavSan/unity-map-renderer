@@ -102,29 +102,56 @@ namespace MapRenderer.Unity.Text
                         FontStack = fontStack,
                         Metrics = resolver,
                     });
-                    // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
-                    // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default
-                    // — the parsed-inert bug this slice closes. A layer that sets none of them yields options
-                    // equal to Default, so unstyled labels are byte-identical.
-                    TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
-
-                    output.Add(new LabelInstance
+                    if (s.Placement == SymbolPlacement.Point)
                     {
-                        AnchorRender = s.AnchorRender,
-                        Layout = layout,
-                        Paint = s.Paint,
-                        TextSizePx = s.TextSizePx,
-                        PaddingPx = s.PaddingPx,
-                        SortKey = s.SortKey,
-                        FeatureIndex = s.FeatureIndex,
-                        TileKey = s.TileKey,
-                        AllowOverlap = s.AllowOverlap,
-                        IgnorePlacement = s.IgnorePlacement,
-                        MaterialIndex = materialIndex,
-                        TranslatePx = s.TranslatePx,
-                        TranslateAnchor = s.TranslateAnchor,
-                        RotationAlignment = s.RotationAlignment,
-                    });
+                        // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
+                        // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
+                        TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
+                        output.Add(new LabelInstance
+                        {
+                            AnchorRender = s.AnchorRender,
+                            Placement = SymbolPlacement.Point,
+                            Layout = layout,
+                            Paint = s.Paint,
+                            TextSizePx = s.TextSizePx,
+                            PaddingPx = s.PaddingPx,
+                            SortKey = s.SortKey,
+                            FeatureIndex = s.FeatureIndex,
+                            TileKey = s.TileKey,
+                            AllowOverlap = s.AllowOverlap,
+                            IgnorePlacement = s.IgnorePlacement,
+                            MaterialIndex = materialIndex,
+                            TranslatePx = s.TranslatePx,
+                            TranslateAnchor = s.TranslateAnchor,
+                            RotationAlignment = s.RotationAlignment,
+                        });
+                    }
+                    else
+                    {
+                        // #5: curved along-line label — per-glyph layout placed on the projected line each
+                        // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
+                        var curvedGlyphs = CurvedTextLayout.Layout(run, _glyphManager.Atlas);
+                        output.Add(new LabelInstance
+                        {
+                            Placement = s.Placement,
+                            PathRender = s.PathRender,
+                            CurvedGlyphs = curvedGlyphs,
+                            Paint = s.Paint,
+                            TextSizePx = s.TextSizePx,
+                            PaddingPx = s.PaddingPx,
+                            SortKey = s.SortKey,
+                            SpacingPx = s.SpacingPx,
+                            MaxAngleDeg = s.MaxAngleDeg,
+                            KeepUpright = s.KeepUpright,
+                            FeatureIndex = s.FeatureIndex,
+                            TileKey = s.TileKey,
+                            AllowOverlap = s.AllowOverlap,
+                            IgnorePlacement = s.IgnorePlacement,
+                            MaterialIndex = materialIndex,
+                            TranslatePx = s.TranslatePx,
+                            TranslateAnchor = s.TranslateAnchor,
+                        });
+                    }
                 }
             }
         }

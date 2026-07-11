@@ -19,8 +19,17 @@ namespace MapRenderer.Core.Style.Symbol
     {
         /// <summary>The point's anchor in render space, PRE-RTC (the same space
         /// <see cref="MapRenderer.Core.Geo.IProjection.Project"/> emits — S20's per-frame
-        /// <c>SceneOriginRender</c> rebase is applied later, not here).</summary>
+        /// <c>SceneOriginRender</c> rebase is applied later, not here). Used for
+        /// <see cref="Text.SymbolPlacement.Point"/>; a line label uses <see cref="PathRender"/> instead.</summary>
         public double3 AnchorRender { get; init; }
+
+        /// <summary><c>symbol-placement</c>. Default <see cref="Text.SymbolPlacement.Point"/>.</summary>
+        public SymbolPlacement Placement { get; init; }
+
+        /// <summary>The line's vertices in render space, PRE-RTC (only for <see cref="Text.SymbolPlacement.Line"/>
+        /// / <see cref="Text.SymbolPlacement.LineCenter"/>; null for point labels). Curved along-line text (#5)
+        /// walks the per-frame projection of this path.</summary>
+        public double3[] PathRender { get; init; }
 
         /// <summary>The resolved <c>text-field</c> string (never null/empty — empty resolutions are skipped).</summary>
         public string Text { get; init; }
@@ -33,6 +42,18 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>Evaluated <c>symbol-sort-key</c> (greedy placement priority; lower placed first).</summary>
         public float SortKey { get; init; }
+
+        /// <summary>Evaluated <c>symbol-spacing</c> in pixels — the along-line repeat distance for
+        /// <see cref="Text.SymbolPlacement.Line"/> (spec default 250; ignored for point / line-center). #5 B4.</summary>
+        public float SpacingPx { get; init; }
+
+        /// <summary>Evaluated <c>text-max-angle</c> in DEGREES — the max adjacent-glyph curvature a curved line
+        /// label may bend before it is dropped at that anchor (spec default 45; line placement only). #6.</summary>
+        public float MaxAngleDeg { get; init; }
+
+        /// <summary><c>text-keep-upright</c> — flip a right-to-left curved label so it reads left-to-right
+        /// (default true; line placement only). #6.</summary>
+        public bool KeepUpright { get; init; }
 
         /// <summary><c>text-allow-overlap</c>.</summary>
         public bool AllowOverlap { get; init; }

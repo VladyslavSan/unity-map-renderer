@@ -1,6 +1,7 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members (see docs/conventions.md).
 
+using System.Collections.Generic;
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
@@ -20,8 +21,21 @@ namespace MapRenderer.Core.Text.Placement
         /// space tile geometry projects into (<c>camera.Projection.Project(geo)</c>).</summary>
         public double3 AnchorRender { get; init; }
 
-        /// <summary>S19's size-independent, baked-px quads (<c>OneEm</c> = 24) + block bbox for this label.</summary>
+        /// <summary>S19's size-independent, baked-px quads (<c>OneEm</c> = 24) + block bbox for this label.
+        /// Point labels only; a line label carries <see cref="CurvedGlyphs"/> + <see cref="PathRender"/> instead.</summary>
         public TextLayoutResult Layout { get; init; }
+
+        /// <summary><c>symbol-placement</c>. Default <see cref="Text.SymbolPlacement.Point"/> — selects the
+        /// per-frame placement path (point anchor vs. curved along-line walk, #5).</summary>
+        public SymbolPlacement Placement { get; init; }
+
+        /// <summary>The line's render-space vertices (PRE-RTC), for <see cref="Text.SymbolPlacement.Line"/> /
+        /// <see cref="Text.SymbolPlacement.LineCenter"/>; null for point labels. Projected + walked per frame.</summary>
+        public double3[] PathRender { get; init; }
+
+        /// <summary>Per-glyph curved layout (<see cref="CurvedTextLayout"/>) for a line label; null for point
+        /// labels (which use <see cref="Layout"/>). Placed along <see cref="PathRender"/> each frame (#5).</summary>
+        public IReadOnlyList<CurvedGlyph> CurvedGlyphs { get; init; }
 
         /// <summary>Resolved `text-*` paint for this label.</summary>
         public LabelPaint Paint { get; init; }
@@ -33,6 +47,19 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>`symbol-sort-key` — greedy placement order (Slice 2). LOWER is placed FIRST (MapLibre
         /// priority: a lower sort key wins a collision against a higher one).</summary>
         public float SortKey { get; init; }
+
+        /// <summary>`symbol-spacing` in logical pixels — the along-line repeat distance for
+        /// <see cref="Text.SymbolPlacement.Line"/> (spec default 250; ignored for point / line-center). The
+        /// per-frame walk places one label instance per anchor at this screen-space spacing (#5 B4).</summary>
+        public float SpacingPx { get; init; }
+
+        /// <summary>`text-max-angle` in DEGREES — a curved line label whose adjacent-glyph line curvature
+        /// exceeds this at any pair is dropped at that anchor (spec default 45; line placement only). #6.</summary>
+        public float MaxAngleDeg { get; init; }
+
+        /// <summary>`text-keep-upright` — flip a right-to-left curved label so it still reads left-to-right
+        /// (default true; line placement only). #6.</summary>
+        public bool KeepUpright { get; init; }
 
         /// <summary>Feature index within its tile — the first Slice-2 stable tiebreak
         /// (<c>(SortKey, FeatureIndex, TileKey)</c>) when sort keys are equal.</summary>

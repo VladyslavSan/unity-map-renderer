@@ -26,6 +26,7 @@ namespace MapRenderer.Tests
             'layers': [
                 { 'id':'labels', 'type':'symbol', 'source':'src', 'source-layer':'centroids',
                   'layout': { 'text-field':'{NAME}', 'text-size':24, 'symbol-sort-key':3,
+                              'symbol-spacing':180, 'text-max-angle':30, 'text-keep-upright':false,
                               'text-allow-overlap':true, 'text-padding':5 },
                   'paint':  { 'text-color':'#ff0000', 'text-halo-color':'#ffffff', 'text-halo-width':1.5 } },
                 { 'id':'bare', 'type':'symbol', 'source':'src', 'source-layer':'centroids' }
@@ -50,6 +51,9 @@ namespace MapRenderer.Tests
             // Layout scalars.
             Assert.AreEqual(24f, sym.Layout.TextSize.Evaluate(0.0), 1e-6);
             Assert.AreEqual(3f, sym.Layout.SymbolSortKey.Evaluate(0.0), 1e-6);
+            Assert.AreEqual(180f, sym.Layout.SymbolSpacing.Evaluate(0.0), 1e-6, "symbol-spacing parses");
+            Assert.AreEqual(30f, sym.Layout.TextMaxAngle.Evaluate(0.0), 1e-6, "text-max-angle parses");
+            Assert.IsFalse(sym.Layout.TextKeepUpright, "text-keep-upright:false parses");
             Assert.AreEqual(5f, sym.Layout.TextPadding.Evaluate(0.0), 1e-6);
             Assert.IsTrue(sym.Layout.TextAllowOverlap, "text-allow-overlap:true must parse to true");
 
@@ -71,7 +75,10 @@ namespace MapRenderer.Tests
                 "text-padding default is 2 (the resolver applies the spec default; LabelInstance's carrier default is 0)");
             Assert.IsFalse(sym.Layout.TextAllowOverlap, "text-allow-overlap default is false");
             Assert.IsFalse(sym.Layout.TextIgnorePlacement, "text-ignore-placement default is false");
-            Assert.AreEqual(SymbolStyle.PropertyNames.PlacementPoint, sym.Layout.SymbolPlacement, "symbol-placement default is point");
+            Assert.AreEqual(SymbolPlacement.Point, sym.Layout.SymbolPlacement, "symbol-placement default is point");
+            Assert.AreEqual(250f, sym.Layout.SymbolSpacing.Evaluate(0.0), 1e-6, "symbol-spacing default is 250");
+            Assert.AreEqual(45f, sym.Layout.TextMaxAngle.Evaluate(0.0), 1e-6, "text-max-angle default is 45");
+            Assert.IsTrue(sym.Layout.TextKeepUpright, "text-keep-upright default is true");
 
             // Paint defaults.
             Assert.AreEqual(0f, sym.Paint.HaloWidth.Evaluate(0.0), 1e-6, "text-halo-width default is 0");

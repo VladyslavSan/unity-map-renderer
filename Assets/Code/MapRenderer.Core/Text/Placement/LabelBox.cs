@@ -83,5 +83,43 @@ namespace MapRenderer.Core.Text.Placement
                 IgnorePlacement = ignorePlacement,
             };
         }
+
+        /// <summary>
+        /// #5 (B3): the tight axis-aligned bound of ONE curved-label glyph — the AABB of the four ROTATED
+        /// cell corners, so the collision box tracks the drawn glyph on a sloped line. Mirrors
+        /// <see cref="BillboardMath.BuildQuad"/> exactly: same <c>textSizePx / OneEm</c> scale, same CCW
+        /// rotation about <paramref name="anchorScreenPx"/>, then grown by <paramref name="paddingPx"/> on
+        /// every edge. Only <see cref="Min"/>/<see cref="Max"/> are meaningful — the sort/flag fields live on
+        /// the owning <see cref="LabelCandidate"/>, not the per-glyph box.
+        /// </summary>
+        public static LabelBox BuildRotatedGlyph(
+            in float2 anchorScreenPx,
+            in SymbolQuad cell,
+            float textSizePx,
+            float rotationRadians,
+            float paddingPx)
+        {
+            float scale = textSizePx / TextQuadLayout.OneEm;
+
+            float2 tlLocal = cell.TopLeft * scale;
+            float2 brLocal = cell.BottomRight * scale;
+            float2 trLocal = new float2(brLocal.x, tlLocal.y);
+            float2 blLocal = new float2(tlLocal.x, brLocal.y);
+
+            math.sincos(rotationRadians, out float sin, out float cos);
+            float2 tl = anchorScreenPx + Rotate(tlLocal, sin, cos);
+            float2 tr = anchorScreenPx + Rotate(trLocal, sin, cos);
+            float2 br = anchorScreenPx + Rotate(brLocal, sin, cos);
+            float2 bl = anchorScreenPx + Rotate(blLocal, sin, cos);
+
+            float2 min = math.min(math.min(tl, tr), math.min(br, bl)) - new float2(paddingPx, paddingPx);
+            float2 max = math.max(math.max(tl, tr), math.max(br, bl)) + new float2(paddingPx, paddingPx);
+            return new LabelBox { Min = min, Max = max };
+        }
+
+        // CCW rotation in a y-up frame — the SAME formula BillboardMath.Rotate uses (identity at angle 0), so
+        // the collision box corners coincide with the drawn quad corners.
+        private static float2 Rotate(in float2 p, float sin, float cos)
+            => new float2(cos * p.x - sin * p.y, sin * p.x + cos * p.y);
     }
 }

@@ -60,10 +60,14 @@ namespace MapRenderer.Core.Style.Symbol
             // Stored y-down (as authored); the y-flip happens at placement.
             float2 translatePx = paint.Translate;
 
+            SymbolPlacement placement = layout.SymbolPlacement;
+            bool isLine = placement != SymbolPlacement.Point;
+            MvtGeometryType wantGeometry = isLine ? MvtGeometryType.LineString : MvtGeometryType.Point;
+
             for (int f = 0; f < features.Count; f++)
             {
                 MvtFeature feature = features[f];
-                if (feature.GeometryType != MvtGeometryType.Point) continue;
+                if (feature.GeometryType != wantGeometry) continue; // point layer skips lines and vice-versa
 
                 var adapted = new MvtFeatureAdapter(feature);
                 string text = TextFieldResolver.Resolve(layout.TextField, adapted);
@@ -75,42 +79,90 @@ namespace MapRenderer.Core.Style.Symbol
                 float textSize = layout.TextSize.Evaluate(zoom, adapted);
                 float padding  = layout.TextPadding.Evaluate(zoom, adapted);
                 float sortKey  = layout.SymbolSortKey.Evaluate(zoom, adapted);
+                float spacing  = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, adapted)); // px, >= 1 (spec)
+                float maxAngle = layout.TextMaxAngle.Evaluate(zoom, adapted);                // degrees (#6)
                 LabelPaint labelPaint = EvaluatePaint(paint, zoom, adapted);
-                // Layout options are per-feature (zoom + feature evaluated), constant across the feature's
-                // points — build once here, stamp onto every point label below.
-                TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, adapted);
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
-                for (int p = 0; p < paths.Count; p++)
-                {
-                    List<double2> path = paths[p];
-                    for (int i = 0; i < path.Count; i++)
-                    {
-                        double2 tp = path[i];
-                        double2 lonLat = tileId.ToLonLat(tp.x, tp.y, extent);
-                        double3 anchor = projection.Project(
-                            new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
 
+                if (isLine)
+                {
+                    // One curved label per line string (#5). Orientation comes from the projected line tangent,
+                    // so the point-layout options (anchor/justify/offset) and rotation-alignment don't apply.
+                    for (int p = 0; p < paths.Count; p++)
+                    {
+                        List<double2> path = paths[p];
+                        if (path.Count < 2) continue; // need at least one segment to place along
                         output.Add(new SymbolLabel
                         {
-                            AnchorRender = anchor,
+                            Placement = placement,
+                            PathRender = ProjectPath(path, tileId, extent, projection),
                             Text = text,
                             TextSizePx = textSize,
                             PaddingPx = padding,
                             SortKey = sortKey,
+                            SpacingPx = spacing,
+                            MaxAngleDeg = maxAngle,
+                            KeepUpright = layout.TextKeepUpright,
                             AllowOverlap = layout.TextAllowOverlap,
                             IgnorePlacement = layout.TextIgnorePlacement,
                             FeatureIndex = ordinal++,
                             TileKey = tileKey,
                             Paint = labelPaint,
-                            LayoutOptions = layoutOptions,
                             TranslatePx = translatePx,
                             TranslateAnchor = paint.TranslateAnchor,
-                            RotationAlignment = layout.TextRotationAlignment,
                         });
                     }
                 }
+                else
+                {
+                    // Layout options are per-feature (zoom + feature evaluated), constant across the feature's
+                    // points — build once here, stamp onto every point label below.
+                    TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, adapted);
+                    for (int p = 0; p < paths.Count; p++)
+                    {
+                        List<double2> path = paths[p];
+                        for (int i = 0; i < path.Count; i++)
+                        {
+                            double2 tp = path[i];
+                            double2 lonLat = tileId.ToLonLat(tp.x, tp.y, extent);
+                            double3 anchor = projection.Project(
+                                new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+
+                            output.Add(new SymbolLabel
+                            {
+                                AnchorRender = anchor,
+                                Placement = SymbolPlacement.Point,
+                                Text = text,
+                                TextSizePx = textSize,
+                                PaddingPx = padding,
+                                SortKey = sortKey,
+                                AllowOverlap = layout.TextAllowOverlap,
+                                IgnorePlacement = layout.TextIgnorePlacement,
+                                FeatureIndex = ordinal++,
+                                TileKey = tileKey,
+                                Paint = labelPaint,
+                                LayoutOptions = layoutOptions,
+                                TranslatePx = translatePx,
+                                TranslateAnchor = paint.TranslateAnchor,
+                                RotationAlignment = layout.TextRotationAlignment,
+                            });
+                        }
+                    }
+                }
             }
+        }
+
+        // Project a tile-local line string to render-space (PRE-RTC) vertices.
+        private static double3[] ProjectPath(List<double2> path, TileId tileId, double extent, IProjection projection)
+        {
+            var pts = new double3[path.Count];
+            for (int i = 0; i < path.Count; i++)
+            {
+                double2 lonLat = tileId.ToLonLat(path[i].x, path[i].y, extent);
+                pts[i] = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+            }
+            return pts;
         }
 
         private static LabelPaint EvaluatePaint(PaintProperties paint, double zoom, IFeature feature)

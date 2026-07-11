@@ -24,6 +24,9 @@ namespace MapRenderer.Core.Style.Symbol
         public const string TextPitchAlignment    = "text-pitch-alignment";
         public const string SymbolPlacement    = "symbol-placement";
         public const string SymbolSortKey      = "symbol-sort-key";
+        public const string SymbolSpacing      = "symbol-spacing";
+        public const string TextMaxAngle       = "text-max-angle";
+        public const string TextKeepUpright    = "text-keep-upright";
         public const string TextAllowOverlap   = "text-allow-overlap";
         public const string TextIgnorePlacement = "text-ignore-placement";
         public const string TextPadding        = "text-padding";

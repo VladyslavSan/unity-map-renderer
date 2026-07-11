@@ -65,18 +65,20 @@ namespace MapRenderer.Unity.Text
         private static readonly ProfilerMarker PmAtlasUpload =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.AtlasUpload");
 
-        // Per-(source, tile) built labels + a generation stamp (a released-then-re-entered tile gets a new
-        // generation, so a stale in-flight build discards its result instead of last-writer-wins clobber).
-        private sealed class TileEntry { public int Generation; public List<LabelInstance> Labels; }
-        private readonly Dictionary<(string sourceId, TileId tile), TileEntry> _tiles = new();
-        private int _generationCounter;
+        // Per-(source, tile) built labels, with the active/cached lifecycle that mirrors the tile MESH cache
+        // (Model B) so labels survive a leave-cover → cache-hit → re-enter-cover round trip. Sized to the
+        // prepared mesh cache's count cap so a cached tile's labels always outlive its meshes.
+        private readonly SymbolTileLabelStore _store;
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
 
-        public SymbolLabelSubsystem(MapCamera camera, MapMaterialSet materialSet)
+        /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap (<= 0 == unbounded) —
+        /// bounds how many out-of-cover tiles' labels are kept warm so they never outlive their cached meshes.</param>
+        public SymbolLabelSubsystem(MapCamera camera, MapMaterialSet materialSet, int preparedCacheMaxCount = 0)
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
             _materialSet = materialSet;
+            _store = new SymbolTileLabelStore(preparedCacheMaxCount);
         }
 
         /// <summary>The per-symbol-layer materials indexed by <see cref="LabelInstance.MaterialIndex"/> —
@@ -91,13 +93,20 @@ namespace MapRenderer.Unity.Text
         /// glyphs upload).</summary>
         public GlyphAtlasTexture Atlas => _atlasTexture;
 
+        /// <summary>Active (in-cover) label-tile count — telemetry.</summary>
+        public int ActiveTileCount => _store.ActiveTileCount;
+
+        /// <summary>Cached (out-of-cover, kept-warm) label-tile count — telemetry (the labels held so a
+        /// prepared-cache hit re-shows them without a re-fetch).</summary>
+        public int CachedTileCount => _store.CachedTileCount;
+
         /// <summary>
         /// Rebuild for a new style: group its symbol layers by source and (re)create the shared glyph
         /// pipeline from the style's <c>glyphs</c> URL. Idempotent — safe to call on every restyle.
         /// </summary>
         public void SetStyle(StyleDocument style)
         {
-            _tiles.Clear();
+            _store.Clear();
             _lastUploadedGlyphCount = 0;
             _loggedOverflow = false;
             DisposePipeline();
@@ -180,18 +189,26 @@ namespace MapRenderer.Unity.Text
             BuildTileAsync(sourceId, tile, bytes, layerIndices).Forget();
         }
 
-        /// <summary>TileManager hook (MAIN THREAD): a tile is evicted — drop its labels (and supersede any
-        /// in-flight build via the generation stamp).</summary>
-        public void OnTileReleased(string sourceId, TileId tile)
+        /// <summary>TileManager hook (MAIN THREAD): a tile left cover. <paramref name="transferredToCache"/>
+        /// true ⇒ its meshes went to the prepared cache — keep its labels warm so a later cache HIT can restore
+        /// them (the bug this fixes: a cache hit does NOT re-fetch, so dropped labels would never rebuild);
+        /// false ⇒ a true eviction, drop them.</summary>
+        public void OnTileReleased(string sourceId, TileId tile, bool transferredToCache)
         {
-            _tiles.Remove((sourceId, tile));
+            _store.Release(new SymbolTileLabelStore.Key(sourceId, tile), transferredToCache);
+        }
+
+        /// <summary>TileManager hook (MAIN THREAD): a tile re-entered cover via a prepared-cache HIT (no
+        /// fetch, so no <see cref="OnTileBytesReady"/>) — restore its kept-warm labels to the active set.</summary>
+        public void OnTileRestored(string sourceId, TileId tile)
+        {
+            _store.Restore(new SymbolTileLabelStore.Key(sourceId, tile));
         }
 
         private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes, List<int> layerIndices)
         {
-            var key = (sourceId, tile);
-            int gen = ++_generationCounter;
-            _tiles[key] = new TileEntry { Generation = gen, Labels = null }; // mark in-flight (collected as empty)
+            var key = new SymbolTileLabelStore.Key(sourceId, tile);
+            int gen = _store.BeginBuild(key); // reserve the active slot (collected as empty until committed)
 
             try
             {
@@ -208,9 +225,10 @@ namespace MapRenderer.Unity.Text
                 var labels = new List<LabelInstance>();
                 await _builder.BuildAsync(mvt, tile, layers, zoom, _camera.Projection, labels, layerIndices);
 
-                // Stale guard: released, or superseded by a newer build for the same tile?
-                if (!_tiles.TryGetValue(key, out TileEntry entry) || entry.Generation != gen) return;
-                entry.Labels = labels;
+                // Commit — unless superseded by a newer build OR dropped mid-build. A tile RELEASED-to-cache
+                // mid-build is NOT stale: the store moved its entry to the cached side and CompleteBuild writes
+                // the labels there, so a later cache hit restores them (the released-mid-build variant of the bug).
+                if (!_store.CompleteBuild(key, gen, labels)) return;
 
                 // Re-upload only when new glyphs actually landed in the shared atlas (most tiles after the
                 // first few add none, since names repeat within a script).
@@ -231,13 +249,7 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>Aggregate every loaded tile's labels into <paramref name="output"/> for this frame's
         /// <see cref="LabelPlacementSystem.Tick"/> (which then projects/collides/billboards them).</summary>
-        public void CollectInto(List<LabelInstance> output)
-        {
-            output.Clear();
-            foreach (KeyValuePair<(string, TileId), TileEntry> kv in _tiles)
-                if (kv.Value.Labels != null)
-                    output.AddRange(kv.Value.Labels);
-        }
+        public void CollectInto(List<LabelInstance> output) => _store.CollectInto(output);
 
         private void WarnOnAtlasOverflow()
         {
@@ -249,7 +261,7 @@ namespace MapRenderer.Unity.Text
 
         public void Dispose()
         {
-            _tiles.Clear();
+            _store.Clear();
             DisposePipeline();
         }
 

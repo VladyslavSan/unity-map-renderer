@@ -46,6 +46,34 @@ namespace MapRenderer.Core.Text.Placement
             out float2 screenPx,
             out float depth)
         {
+            if (!TryProjectPoint(renderPos, sceneOriginRender, viewProj, viewportLogicalPx, out screenPx, out depth))
+                return false; // behind the camera
+
+            float viewportX = (float)viewportLogicalPx.x;
+            float viewportY = (float)viewportLogicalPx.y;
+            if (screenPx.x < -ViewportMarginPx || screenPx.x > viewportX + ViewportMarginPx ||
+                screenPx.y < -ViewportMarginPx || screenPx.y > viewportY + ViewportMarginPx)
+            {
+                return false; // fully outside the viewport (+ margin)
+            }
+
+            return true;
+        }
+
+        /// <summary>
+        /// Projects <paramref name="renderPos"/> to a logical screen pixel, culling ONLY behind-camera
+        /// (<c>clip.w &lt;= 0</c>) — no viewport-margin cull. Used by the curved line-text path (#5): a line
+        /// vertex may be far off-screen while the label's visible portion is on-screen, so the margin cull
+        /// (correct for a point anchor) would wrongly drop the whole line.
+        /// </summary>
+        public static bool TryProjectPoint(
+            in double3 renderPos,
+            in double3 sceneOriginRender,
+            in float4x4 viewProj,
+            in double2 viewportLogicalPx,
+            out float2 screenPx,
+            out float depth)
+        {
             // Manual double->float per-component narrowing (not an explicit double3->float3 cast): mirrors
             // FloatingOrigin.TileToSceneRebased, which does the same field-by-field for the same reason —
             // keeps this file compiling identically against the core-tests shim's minimal float2/float4.
@@ -67,13 +95,6 @@ namespace MapRenderer.Core.Text.Placement
 
             screenPx = new float2((ndcX * 0.5f + 0.5f) * viewportX, (ndcY * 0.5f + 0.5f) * viewportY);
             depth = ndcZ;
-
-            if (screenPx.x < -ViewportMarginPx || screenPx.x > viewportX + ViewportMarginPx ||
-                screenPx.y < -ViewportMarginPx || screenPx.y > viewportY + ViewportMarginPx)
-            {
-                return false; // fully outside the viewport (+ margin)
-            }
-
             return true;
         }
     }

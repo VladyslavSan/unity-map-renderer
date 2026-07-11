@@ -120,15 +120,17 @@ Parse: `Style/Symbol/{Layout,Paint}Properties.cs`. Consume: `SymbolFeatureExtrac
 | text-anchor / text-justify / text-max-width | ✅ | threaded to `TextQuadLayout` via `TextLayoutOptionsBuilder` (Slice A) |
 | text-offset | 🟡 | threaded (Slice A); **constant only** — parsed as a raw y-down `float2`, not zoom/data-driven; y-flip reconciled in the builder |
 | text-line-height / text-letter-spacing / text-radial-offset | ✅ | parsed (zoom-capable `StyleProperty<float>`) + threaded (Slice A) |
-| symbol-placement (`line`/`line-center`) | ❌ | parsed but point-only; no along-line/curved text |
+| symbol-placement (`line`/`line-center`) | 🟡 | #5: per-glyph curved along-line text — projected line walked per frame, glyphs rotated to the tangent, keep-upright, per-glyph all-or-nothing collision unified with point labels. `line` repeats at `symbol-spacing`. Tangent is screen-space (correct under bearing/tilt); a maintainer eyeball on look-under-rotation is pending |
 | text-transform (upper/lowercase) | 🟡 | Slice B: case-folds the resolved label before shaping (invariant-culture); **constant only** |
 | text-variable-anchor | ❌ | a placement-loop feature (try candidate anchors), not layout wiring |
 | text-rotation-alignment | 🟡 | #4: `map` rotates the billboard by the bearing (screen-space); point `auto`→viewport = the upright default. Sign is the single `LabelBearing.MapAlignedSign` visual-verify constant |
 | text-pitch-alignment | 🟠 | #4: parsed/recognized, but `map` (ground-flat, tilt-foreshortened text) needs a world-space text path — deferred to its own stage; point resolves auto→viewport (current billboard) |
-| text-keep-upright / text-max-angle / text-writing-mode | ❌ | (writing-mode = vertical CJK) |
+| text-keep-upright / text-max-angle | ✅ | #6: curved line labels — keep-upright flips a right-to-left label; text-max-angle drops a label bending more than the allowed adjacent-glyph angle round a corner |
+| text-writing-mode | ❌ | vertical CJK |
 | text-optional | ❌ | (icon/text co-placement) |
 | text-translate (+anchor) | 🟡 | Slice C: paint-time screen offset at placement (constant); **text-translate-anchor:map** rotates the offset by the bearing (#4) — correct at bearing 0, sign is a visual-verify constant |
-| symbol-spacing / symbol-z-order / symbol-avoid-edges | ❌ | |
+| symbol-spacing | 🟡 | #5 B4: along-line repeat distance in px (default 250), consumed by `symbol-placement:line`; **constant/zoom only** |
+| symbol-z-order / symbol-avoid-edges | ❌ | |
 | collision fade-in / opacity animation | ❌ | placement is instantaneous, no fade |
 
 Rendering behaviors that **do** work: SDF glyphs, halo, grid collision, greedy sort-key placement,
