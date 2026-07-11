@@ -7,6 +7,7 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 
 namespace MapRenderer.Core.Style.Symbol
@@ -55,6 +56,10 @@ namespace MapRenderer.Core.Style.Symbol
             LayoutProperties layout = symbolLayer.Layout;
             PaintProperties paint = symbolLayer.Paint;
 
+            // text-translate is a constant px offset (not feature-dependent) — stamp it onto every label.
+            // Stored y-down (as authored); the y-flip happens at placement.
+            float2 translatePx = paint.Translate;
+
             for (int f = 0; f < features.Count; f++)
             {
                 MvtFeature feature = features[f];
@@ -63,12 +68,17 @@ namespace MapRenderer.Core.Style.Symbol
                 var adapted = new MvtFeatureAdapter(feature);
                 string text = TextFieldResolver.Resolve(layout.TextField, adapted);
                 if (text == null) continue; // absent/empty text-field → no label
+                // text-transform (Slice B): case-fold the resolved label before it is shaped downstream.
+                text = layout.TextTransform.Apply(text);
 
                 // Per-feature evaluated style (zoom + feature — safe for constant/zoom/data-driven).
                 float textSize = layout.TextSize.Evaluate(zoom, adapted);
                 float padding  = layout.TextPadding.Evaluate(zoom, adapted);
                 float sortKey  = layout.SymbolSortKey.Evaluate(zoom, adapted);
                 LabelPaint labelPaint = EvaluatePaint(paint, zoom, adapted);
+                // Layout options are per-feature (zoom + feature evaluated), constant across the feature's
+                // points — build once here, stamp onto every point label below.
+                TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, adapted);
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
                 for (int p = 0; p < paths.Count; p++)
@@ -93,6 +103,10 @@ namespace MapRenderer.Core.Style.Symbol
                             FeatureIndex = ordinal++,
                             TileKey = tileKey,
                             Paint = labelPaint,
+                            LayoutOptions = layoutOptions,
+                            TranslatePx = translatePx,
+                            TranslateAnchor = paint.TranslateAnchor,
+                            RotationAlignment = layout.TextRotationAlignment,
                         });
                     }
                 }

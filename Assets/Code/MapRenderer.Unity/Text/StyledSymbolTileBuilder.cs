@@ -102,7 +102,11 @@ namespace MapRenderer.Unity.Text
                         FontStack = fontStack,
                         Metrics = resolver,
                     });
-                    TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, TextLayoutOptions.Default);
+                    // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
+                    // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default
+                    // — the parsed-inert bug this slice closes. A layer that sets none of them yields options
+                    // equal to Default, so unstyled labels are byte-identical.
+                    TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
 
                     output.Add(new LabelInstance
                     {
@@ -117,6 +121,9 @@ namespace MapRenderer.Unity.Text
                         AllowOverlap = s.AllowOverlap,
                         IgnorePlacement = s.IgnorePlacement,
                         MaterialIndex = materialIndex,
+                        TranslatePx = s.TranslatePx,
+                        TranslateAnchor = s.TranslateAnchor,
+                        RotationAlignment = s.RotationAlignment,
                     });
                 }
             }

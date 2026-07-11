@@ -2,6 +2,9 @@
 
 > The capability target for this renderer — the durable **parity reference** for what MapLibre does that
 > this project aims to match. It is the stable north-star surface, not a task tracker.
+>
+> For **what's actually implemented** against this target (full / partial / parsed-inert / missing, traced
+> through the code), see the companion [`maplibre-support-matrix.md`](maplibre-support-matrix.md).
 
 **North star:** parity with MapLibre's *feature set* (Style Spec sources, the layer types, paint/layout
 properties, expressions/filters, projections, sprites & glyphs, terrain/hillshade) — **clean-room** from

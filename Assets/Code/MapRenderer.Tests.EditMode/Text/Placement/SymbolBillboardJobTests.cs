@@ -18,7 +18,7 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolBillboardJobTests
     {
-        private static PlacedQuad MakeQuad(float2 anchor, float textSize, float depth, float4 color, float2 tlOffset)
+        private static PlacedQuad MakeQuad(float2 anchor, float textSize, float depth, float4 color, float2 tlOffset, float rotation = 0f)
             => new PlacedQuad
             {
                 Quad = new SymbolQuad
@@ -33,6 +33,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = textSize,
                 Depth = depth,
                 Color = color,
+                RotationRadians = rotation,
             };
 
         [Test]
@@ -41,8 +42,8 @@ namespace MapRenderer.Tests.Text.Placement
             var inputs = new[]
             {
                 MakeQuad(new float2(100f, 200f), 24f, 0.1f, new float4(1f, 0f, 0f, 1f), float2.zero),
-                MakeQuad(new float2(400f, 50f), 48f, 0.9f, new float4(0f, 1f, 0f, 0.5f), new float2(3f, -3f)),
-                MakeQuad(new float2(0f, 0f), 12f, 0.5f, new float4(0f, 0f, 1f, 1f), new float2(-1f, 1f)),
+                MakeQuad(new float2(400f, 50f), 48f, 0.9f, new float4(0f, 1f, 0f, 0.5f), new float2(3f, -3f), 0.6f),
+                MakeQuad(new float2(0f, 0f), 12f, 0.5f, new float4(0f, 0f, 1f, 1f), new float2(-1f, 1f), -0.35f),
             };
             int quadCount = inputs.Length;
 
@@ -72,7 +73,7 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int i = 0; i < quadCount; i++)
                 {
                     PlacedQuad q = inputs[i];
-                    BillboardMath.BuildQuad(in q.Quad, in q.AnchorScreenPx, q.TextSizePx, q.Depth, in q.Color,
+                    BillboardMath.BuildQuad(in q.Quad, in q.AnchorScreenPx, q.TextSizePx, q.Depth, in q.Color, q.RotationRadians,
                         out BillboardVertex expectedTopLeft, out BillboardVertex expectedTopRight,
                         out BillboardVertex expectedBottomRight, out BillboardVertex expectedBottomLeft);
 

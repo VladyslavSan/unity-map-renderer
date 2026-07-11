@@ -64,7 +64,7 @@ namespace MapRenderer.Jobs
                 PlacedQuad q = Quads[i];
 
                 BillboardMath.BuildQuad(
-                    in q.Quad, in q.AnchorScreenPx, q.TextSizePx, q.Depth, in q.Color,
+                    in q.Quad, in q.AnchorScreenPx, q.TextSizePx, q.Depth, in q.Color, q.RotationRadians,
                     out BillboardVertex topLeft, out BillboardVertex topRight,
                     out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
 

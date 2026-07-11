@@ -10,6 +10,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
@@ -51,14 +52,14 @@ namespace MapRenderer.Tests.Text.Placement
             return new GlyphManager(TestGlyphSource.FromRanges(ranges));
         }
 
-        private static SymbolStyle.StyleLayer CentroidsLayer()
+        private static SymbolStyle.StyleLayer CentroidsLayer(string extraLayoutJson = "")
             => new SymbolStyle.StyleLayer
             {
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
                 LayoutJson = JsonParser.Parse(
-                    "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]}"),
+                    "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}"),
             };
 
         [Test]
@@ -105,6 +106,75 @@ namespace MapRenderer.Tests.Text.Placement
             // (c) At least two OTHER named labels match (so a single hard-coded label cannot pass).
             AssertNamedLabel(extracted, labels, "Afghanistan", 11);
             AssertNamedLabel(extracted, labels, "Angola", 6);
+        }
+
+        // ── Slice A: the layout-options wiring is LIVE through the builder (guards StyledSymbolTileBuilder's
+        //    TextLayoutOptions.Default -> s.LayoutOptions switch — NOT just the Extract/TextQuadLayout seams,
+        //    which the engine tests already cover and which stay green even if line 105 is reverted). ──
+
+        private static async Task<List<LabelInstance>> BuildLabels(SymbolStyle.StyleLayer layer, GlyphManager manager)
+        {
+            MvtTile tile = MvtDecoder.Decode(LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
+            var builder = new StyledSymbolTileBuilder(manager);
+            var labels = new List<LabelInstance>();
+            await builder.BuildAsync(tile, FixtureTile, new[] { layer }, 0.0, new WebMercatorProjection(), labels);
+            return labels;
+        }
+
+        [Test]
+        public async Task Build_TextOffset_ShiftsEveryQuad_ByEmsTimes24_YDownFlippedToYUp()
+        {
+            using var manager = BuildGlyphManager();
+
+            List<LabelInstance> baseline = await BuildLabels(CentroidsLayer(), manager);
+            // text-offset [1,2] ems in MapLibre's y-DOWN convention.
+            List<LabelInstance> shifted = await BuildLabels(CentroidsLayer(",\"text-offset\":[1,2]"), manager);
+
+            Assert.AreEqual(baseline.Count, shifted.Count, "same label set");
+            Assert.Greater(baseline.Count, 0, "sanity: fixture yields labels");
+
+            // Center anchor in both (default), so the anchor term cancels and the per-quad delta isolates the
+            // offset. ems -> baked px is x24; the y is NEGATED (y-down text-offset -> y-up layout). So every
+            // quad shifts by exactly (1*24, -2*24) = (24, -48). A revert of line 105 to Default makes the
+            // "shifted" build ignore text-offset -> delta 0 -> this fails. It also pins the y-flip sign.
+            var expected = new float2(24f, -48f);
+            IReadOnlyList<SymbolQuad> baseQuads = baseline[0].Layout.Quads;   // Aruba
+            IReadOnlyList<SymbolQuad> shiftQuads = shifted[0].Layout.Quads;
+            Assert.AreEqual(baseQuads.Count, shiftQuads.Count);
+            Assert.Greater(baseQuads.Count, 0, "Aruba must shape to >0 quads");
+            for (int i = 0; i < baseQuads.Count; i++)
+            {
+                Assert.AreEqual(expected.x, shiftQuads[i].TopLeft.x - baseQuads[i].TopLeft.x, 1e-3f, $"quad {i} TopLeft.x");
+                Assert.AreEqual(expected.y, shiftQuads[i].TopLeft.y - baseQuads[i].TopLeft.y, 1e-3f, $"quad {i} TopLeft.y");
+                Assert.AreEqual(expected.x, shiftQuads[i].BottomRight.x - baseQuads[i].BottomRight.x, 1e-3f, $"quad {i} BottomRight.x");
+                Assert.AreEqual(expected.y, shiftQuads[i].BottomRight.y - baseQuads[i].BottomRight.y, 1e-3f, $"quad {i} BottomRight.y");
+            }
+        }
+
+        [Test]
+        public async Task Build_TextAnchor_TranslatesBlock_ThroughTheBuilder()
+        {
+            using var manager = BuildGlyphManager();
+
+            // justify held constant (center) across both so the per-line justify term cancels and the delta
+            // isolates the pure anchor translation. Left anchor (hAlign=0) vs Center (hAlign=0.5) pushes the
+            // block +x by 0.5*blockWidth, with no vertical change (both vAlign=0.5).
+            List<LabelInstance> center = await BuildLabels(CentroidsLayer(",\"text-justify\":\"center\""), manager);
+            List<LabelInstance> left = await BuildLabels(CentroidsLayer(",\"text-anchor\":\"left\",\"text-justify\":\"center\""), manager);
+
+            IReadOnlyList<SymbolQuad> centerQuads = center[0].Layout.Quads;   // Aruba, single line
+            IReadOnlyList<SymbolQuad> leftQuads = left[0].Layout.Quads;
+            Assert.AreEqual(centerQuads.Count, leftQuads.Count);
+            Assert.Greater(centerQuads.Count, 0);
+
+            float dx0 = leftQuads[0].TopLeft.x - centerQuads[0].TopLeft.x;
+            Assert.Greater(dx0, 0f, "a Left anchor must push the block +x vs Center (anchor is threaded, not dropped)");
+            for (int i = 0; i < centerQuads.Count; i++)
+            {
+                // block-wide translation: same dx for every quad, and no vertical move.
+                Assert.AreEqual(dx0, leftQuads[i].TopLeft.x - centerQuads[i].TopLeft.x, 1e-3f, $"quad {i} dx constant");
+                Assert.AreEqual(0f, leftQuads[i].TopLeft.y - centerQuads[i].TopLeft.y, 1e-3f, $"quad {i} no vertical move");
+            }
         }
 
         private static void AssertNamedLabel(List<SymbolStyle.SymbolLabel> extracted, List<LabelInstance> labels,

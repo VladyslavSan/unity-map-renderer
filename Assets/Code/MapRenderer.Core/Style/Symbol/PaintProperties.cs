@@ -1,5 +1,7 @@
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
+using MapRenderer.Core.Text;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Style.Symbol
 {
@@ -31,6 +33,18 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>text-halo-blur: halo blur radius in pixels. Default 0.</summary>
         public StyleProperty<float> HaloBlur { get; }
+
+        /// <summary>text-translate: [x, y] pixel offset applied to the label's placed screen anchor (y-down,
+        /// as authored). Default [0, 0]. A plain constant <see cref="float2"/> (px offsets are small — no
+        /// need for double precision or the zoom/expression machinery; mirrors <c>LayoutProperties.TextOffset</c>).
+        /// Consumed per-frame by <c>LabelPlacementSystem</c> via <see cref="Text.Placement.LabelTranslate"/>.</summary>
+        public float2 Translate { get; }
+
+        /// <summary>text-translate-anchor: the frame of reference for <see cref="Translate"/>. Default
+        /// <see cref="Text.TextTranslateAnchor.Map"/>. Parsed here; the map-vs-viewport divergence (a
+        /// bearing rotation) is consumed with the rotation-alignment work (roadmap #4) — until then both
+        /// resolve to the same screen-space delta (identical at bearing 0).</summary>
+        public TextTranslateAnchor TranslateAnchor { get; }
 
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
         public bool IsInertFallback { get; }
@@ -79,6 +93,25 @@ namespace MapRenderer.Core.Style.Symbol
             HaloBlur = haloBlurJson != null
                 ? new StyleProperty<float>(haloBlurJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
+
+            // text-translate: [x, y] in pixels (constant — the components are scalars, not expressions).
+            // Narrow to float at the JSON boundary (px offsets are small; double is pointless here).
+            JsonValue translateJson = paint?.Get(PropertyNames.TextTranslate);
+            if (translateJson != null) anyPresent = true;
+            float tx = 0f, ty = 0f;
+            if (translateJson != null && translateJson.IsArray && translateJson.Items.Count >= 2)
+            {
+                tx = (float)translateJson.Items[0].AsDouble(0.0);
+                ty = (float)translateJson.Items[1].AsDouble(0.0);
+            }
+            Translate = new float2(tx, ty);
+
+            // text-translate-anchor: "viewport" → Viewport, else map (default/unrecognized).
+            JsonValue translateAnchorJson = paint?.Get(PropertyNames.TextTranslateAnchor);
+            if (translateAnchorJson != null) anyPresent = true;
+            TranslateAnchor = translateAnchorJson?.AsString(null) == PropertyNames.TranslateAnchorViewport
+                ? TextTranslateAnchor.Viewport
+                : TextTranslateAnchor.Map;
 
             IsInertFallback = !anyPresent;
         }

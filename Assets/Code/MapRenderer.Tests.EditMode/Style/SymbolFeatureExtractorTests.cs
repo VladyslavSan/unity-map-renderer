@@ -99,6 +99,36 @@ namespace MapRenderer.Tests
         }
 
         [Test]
+        public void Extract_TextTransform_CaseFoldsResolvedLabel()
+        {
+            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            var projection = new WebMercatorProjection();
+
+            SymbolStyle.StyleLayer Layer(string transform) => new SymbolStyle.StyleLayer
+            {
+                Id = "labels",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "centroids",
+                LayoutJson = JsonParser.Parse(
+                    "{\"text-field\":\"{NAME}\",\"text-transform\":\"" + transform + "\"}"),
+            };
+
+            var upper = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(Layer("uppercase"), tile, FixtureTile, 0.0, projection, upper);
+            Assert.AreEqual("ARUBA", upper[0].Text, "text-transform:uppercase must uppercase the resolved label");
+
+            var lower = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(Layer("lowercase"), tile, FixtureTile, 0.0, projection, lower);
+            Assert.AreEqual("aruba", lower[0].Text, "text-transform:lowercase must lowercase the resolved label");
+
+            // Teeth: default (no transform) leaves the mixed-case source untouched — so the two above are
+            // genuine transforms, not a fixture that happens to be already-cased.
+            var none = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, none);
+            Assert.AreEqual("Aruba", none[0].Text, "no text-transform leaves the source casing as-is");
+        }
+
+        [Test]
         public void Extract_WithFilter_NarrowsToNamedFeature()
         {
             MvtTile tile = MvtDecoder.Decode(LoadFixture());

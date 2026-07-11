@@ -2,6 +2,7 @@
 // Construction convention: object initializer with named members (see docs/conventions.md).
 
 using Unity.Mathematics;
+using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 
 namespace MapRenderer.Core.Style.Symbol
@@ -48,5 +49,24 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>Resolved <c>text-color</c>/<c>text-opacity</c>/<c>text-halo-*</c> paint.</summary>
         public LabelPaint Paint { get; init; }
+
+        /// <summary>Size-independent layout options (anchor/offset/justify/max-width/line-height/letter-spacing/
+        /// radial-offset), assembled per feature by <see cref="TextLayoutOptionsBuilder"/>. The Unity builder
+        /// feeds this straight into <c>TextQuadLayout</c> — the wiring that makes the parsed <c>text-*</c>
+        /// layout keys actually affect the placed quads (Slice A).</summary>
+        public TextLayoutOptions LayoutOptions { get; init; }
+
+        /// <summary>Evaluated <c>text-translate</c> — the paint-time pixel offset (y-down, as authored)
+        /// applied to the placed screen anchor per frame by <c>LabelPlacementSystem</c> (Slice C).</summary>
+        public float2 TranslatePx { get; init; }
+
+        /// <summary><c>text-translate-anchor</c> — whether <see cref="TranslatePx"/> is a screen-space
+        /// (viewport) or map-space (rotates with bearing) offset. Default <see cref="TextTranslateAnchor.Map"/>.</summary>
+        public TextTranslateAnchor TranslateAnchor { get; init; }
+
+        /// <summary><c>text-rotation-alignment</c> — whether the billboard rotates with the map bearing
+        /// (<c>map</c>) or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
+        /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
+        public AlignmentMode RotationAlignment { get; init; }
     }
 }

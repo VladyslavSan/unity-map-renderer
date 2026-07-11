@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Text.Placement
             const float depth = 0.42f;
             var color = new float4(0.1f, 0.2f, 0.3f, 0.4f);
 
-            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, depth, in color,
+            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, depth, in color, 0f,
                 out BillboardVertex topLeft, out BillboardVertex topRight,
                 out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
 
@@ -77,7 +77,7 @@ namespace MapRenderer.Tests.Text.Placement
             var anchor = new float2(0f, 0f);
             float halfSize = TextQuadLayout.OneEm * 0.5f;
 
-            BillboardMath.BuildQuad(in quad, in anchor, halfSize, 0f, in float4.zero,
+            BillboardMath.BuildQuad(in quad, in anchor, halfSize, 0f, in float4.zero, 0f,
                 out BillboardVertex topLeft, out _, out BillboardVertex bottomRight, out _);
 
             Assert.AreEqual(quad.TopLeft.x * 0.5f, topLeft.ScreenPx.x, 1e-5f);
@@ -96,9 +96,9 @@ namespace MapRenderer.Tests.Text.Placement
             var anchorZoomedOut = new float2(50f, 60f);
             var anchorZoomedIn = new float2(730f, 210f); // a totally different screen position
 
-            BillboardMath.BuildQuad(in quad, in anchorZoomedOut, textSizePx, 0f, in float4.zero,
+            BillboardMath.BuildQuad(in quad, in anchorZoomedOut, textSizePx, 0f, in float4.zero, 0f,
                 out BillboardVertex topLeftOut, out _, out BillboardVertex bottomRightOut, out _);
-            BillboardMath.BuildQuad(in quad, in anchorZoomedIn, textSizePx, 0f, in float4.zero,
+            BillboardMath.BuildQuad(in quad, in anchorZoomedIn, textSizePx, 0f, in float4.zero, 0f,
                 out BillboardVertex topLeftIn, out _, out BillboardVertex bottomRightIn, out _);
 
             float widthOut = bottomRightOut.ScreenPx.x - topLeftOut.ScreenPx.x;
@@ -114,15 +114,14 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreNotEqual(topLeftOut.ScreenPx.x, topLeftIn.ScreenPx.x, "test precondition: the two anchors must differ");
         }
 
-        // ── Axis-aligned: no camera rotation is ever applied — top edge stays horizontal, left edge stays
-        //    vertical, for ANY anchor. ──
+        // ── Zero rotation: axis-aligned — top edge stays horizontal, left edge stays vertical, for ANY anchor. ──
         [Test]
-        public void BuildQuad_IsAxisAligned_NoRotationApplied()
+        public void BuildQuad_ZeroRotation_IsAxisAligned()
         {
             SymbolQuad quad = MakeQuad();
             var anchor = new float2(17f, -42f);
 
-            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, 0f, in float4.zero,
+            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, 0f, in float4.zero, 0f,
                 out BillboardVertex topLeft, out BillboardVertex topRight,
                 out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
 
@@ -130,6 +129,37 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(topLeft.ScreenPx.x, bottomLeft.ScreenPx.x, 1e-5f, "left edge must be vertical (axis-aligned, no rotation)");
             Assert.AreEqual(bottomRight.ScreenPx.y, bottomLeft.ScreenPx.y, 1e-5f, "bottom edge must be horizontal");
             Assert.AreEqual(topRight.ScreenPx.x, bottomRight.ScreenPx.x, 1e-5f, "right edge must be vertical");
+        }
+
+        // ── Rotation (#4): a +90° rotation about the anchor maps each anchor-relative corner (x,y) -> (-y,x)
+        //    in the y-up frame. Explicit angle (no bearing/sign ambiguity) — the headless red-proof for the
+        //    rotation capability that along-line text (#5) reuses. ──
+        [Test]
+        public void BuildQuad_NinetyDegrees_RotatesEveryCornerAboutTheAnchor()
+        {
+            SymbolQuad quad = MakeQuad();
+            var anchor = new float2(100f, 200f);
+            float halfPi = math.PI / 2f;
+
+            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, 0f, in float4.zero, halfPi,
+                out BillboardVertex topLeft, out BillboardVertex topRight,
+                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
+
+            // Local corner (x,y) rotated +90° (CCW, y-up) -> (-y, x), then translated to the anchor.
+            AssertRotated90(anchor, quad.TopLeft, topLeft.ScreenPx, "topLeft");
+            AssertRotated90(anchor, new float2(quad.BottomRight.x, quad.TopLeft.y), topRight.ScreenPx, "topRight");
+            AssertRotated90(anchor, quad.BottomRight, bottomRight.ScreenPx, "bottomRight");
+            AssertRotated90(anchor, new float2(quad.TopLeft.x, quad.BottomRight.y), bottomLeft.ScreenPx, "bottomLeft");
+
+            // Teeth: the quad is genuinely rotated — the top edge is no longer horizontal (it's vertical now).
+            Assert.AreNotEqual(topLeft.ScreenPx.y, topRight.ScreenPx.y, "a rotated quad's top edge must not stay horizontal");
+        }
+
+        private static void AssertRotated90(float2 anchor, float2 local, float2 actual, string label)
+        {
+            var expected = new float2(anchor.x - local.y, anchor.y + local.x); // (x,y)->(-y,x) about anchor
+            Assert.AreEqual(expected.x, actual.x, 1e-4f, $"{label} x after +90°");
+            Assert.AreEqual(expected.y, actual.y, 1e-4f, $"{label} y after +90°");
         }
     }
 }

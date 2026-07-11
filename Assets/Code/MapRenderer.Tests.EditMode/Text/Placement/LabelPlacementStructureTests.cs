@@ -79,7 +79,8 @@ namespace MapRenderer.Tests.Text.Placement
         // small local offset. It must be built relative to the frame's SceneOriginRender (a large absolute
         // Mercator coordinate), or TryProjectAnchor's rebase lands it far outside the viewport and every
         // label is silently culled (the bug this comment fixes: LastQuadCount was 0, not 2/1).
-        private static LabelInstance MakeLabel(int featureIndex, double3 sceneOriginRender)
+        private static LabelInstance MakeLabel(int featureIndex, double3 sceneOriginRender, float2 translatePx = default,
+            AlignmentMode rotationAlignment = AlignmentMode.Auto)
         {
             var quads = new List<SymbolQuad>
             {
@@ -107,6 +108,8 @@ namespace MapRenderer.Tests.Text.Placement
                 // anchors' boxes overlap (and one gets culled) is projection-dependent and would make the
                 // quad-count assertion flaky. Collision itself is covered by LabelCollisionTests (T1).
                 AllowOverlap = true,
+                TranslatePx = translatePx,
+                RotationAlignment = rotationAlignment,
             };
         }
 
@@ -146,6 +149,102 @@ namespace MapRenderer.Tests.Text.Placement
                 system.Tick(in frame, twoLabels, atlasTexture);
                 Assert.AreEqual(3, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount);
+            }
+            finally
+            {
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
+        // ── Slice C: text-translate shifts the placed billboard vertices in screen space (guards that
+        //    LabelPlacementSystem.Tick actually applies LabelTranslate — the fast LabelTranslateTests only
+        //    cover the pure delta math; this proves Tick calls it). ──
+        [Test]
+        public void Tick_TextTranslate_ShiftsEveryPlacedVertex_ByScreenDelta()
+        {
+            var camGo = new GameObject("LabelTranslate_TestCamera");
+            var uCam = camGo.AddComponent<Camera>();
+            uCam.targetTexture = new RenderTexture(320, 240, 0);
+            var mapCamera = new MapCamera(uCam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
+            var frame = new SceneFrame(
+                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                float3x3.identity);
+            var atlasTexture = BuildTinyAtlasTexture();
+
+            // MapLibre text-translate [7,3] = right 7, DOWN 3 → screen (y-up) delta (+7, -3), depth unchanged.
+            var translate = new float2(7f, 3f);
+            var baseline = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender) };
+            var moved    = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, translate) };
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            try
+            {
+                system.Tick(in frame, baseline, atlasTexture);
+                Assert.AreEqual(1, system.LastQuadCount, "one label, one quad");
+                Vector3[] v0 = system.Mesh.vertices;
+
+                system.Tick(in frame, moved, atlasTexture);
+                Vector3[] v1 = system.Mesh.vertices;
+
+                Assert.AreEqual(v0.Length, v1.Length, "same vertex count (only the translate changed)");
+                Assert.Greater(v0.Length, 0, "the label placed at least one quad");
+                for (int i = 0; i < v0.Length; i++)
+                {
+                    Assert.AreEqual(translate.x, v1[i].x - v0[i].x, 1e-3f, $"vertex {i}: +tx in screen x");
+                    Assert.AreEqual(-translate.y, v1[i].y - v0[i].y, 1e-3f, $"vertex {i}: -ty in screen y (y-down text-translate → y-up screen)");
+                    Assert.AreEqual(0f, v1[i].z - v0[i].z, 1e-3f, $"vertex {i}: depth unchanged by a screen translate");
+                }
+            }
+            finally
+            {
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
+        // ── #4: text-rotation-alignment:map rotates the billboard with the map bearing (guards that Tick
+        //    threads label.RotationAlignment + the bearing into BillboardMath — the axis-aligned viewport
+        //    billboard becomes a rotated quad under a non-zero heading). ──
+        [Test]
+        public void Tick_RotationAlignmentMap_RotatesBillboard_UnderBearing_ViewportStaysAxisAligned()
+        {
+            var camGo = new GameObject("LabelRotation_TestCamera");
+            var uCam = camGo.AddComponent<Camera>();
+            uCam.targetTexture = new RenderTexture(320, 240, 0);
+            // A non-zero heading (45°) — at bearing 0 map and viewport coincide, so the rotation is only
+            // observable with an active bearing.
+            var mapCamera = new MapCamera(uCam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 45.0, tilt: 0.0));
+            var frame = new SceneFrame(
+                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                float3x3.identity);
+            var atlasTexture = BuildTinyAtlasTexture();
+
+            var viewportLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Viewport) };
+            var mapLabels      = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Map) };
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            try
+            {
+                system.Tick(in frame, viewportLabels, atlasTexture);
+                Vector3[] vp = system.Mesh.vertices; // v[0]=TL, v[1]=TR, v[2]=BR, v[3]=BL
+                Assert.AreEqual(4, vp.Length, "one quad → 4 verts");
+
+                system.Tick(in frame, mapLabels, atlasTexture);
+                Vector3[] mp = system.Mesh.vertices;
+
+                // Viewport: top edge horizontal (axis-aligned billboard) — TL.y == TR.y.
+                Assert.AreEqual(vp[0].y, vp[1].y, 1e-3f, "viewport billboard's top edge stays horizontal");
+                // Map under a 45° bearing: the quad is rotated, so the top edge is NOT horizontal.
+                Assert.That(math.abs(mp[0].y - mp[1].y), Is.GreaterThan(1f),
+                    "rotation-alignment:map must rotate the billboard under a non-zero bearing (top edge no longer horizontal)");
+                // And it genuinely differs from the viewport placement (rotation actually applied).
+                Assert.That(math.abs(mp[1].x - vp[1].x) + math.abs(mp[1].y - vp[1].y), Is.GreaterThan(1f),
+                    "map- and viewport-aligned billboards must differ under a non-zero bearing");
             }
             finally
             {

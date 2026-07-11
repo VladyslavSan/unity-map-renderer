@@ -11,6 +11,12 @@ namespace Unity.Mathematics
     {
         public static double sin(double x)  => System.Math.Sin(x);
         public static double cos(double x)  => System.Math.Cos(x);
+
+        // float overloads + sincos (Unity.Mathematics parity — used by BillboardMath / LabelTranslate rotation).
+        public static float sin(float x) => (float)System.Math.Sin(x);
+        public static float cos(float x) => (float)System.Math.Cos(x);
+        public static void sincos(float x, out float s, out float c) { s = (float)System.Math.Sin(x); c = (float)System.Math.Cos(x); }
+        public static void sincos(double x, out double s, out double c) { s = System.Math.Sin(x); c = System.Math.Cos(x); }
         public static double tan(double x)  => System.Math.Tan(x);
         public static double asin(double x) => System.Math.Asin(x);
         public static double acos(double x) => System.Math.Acos(x);

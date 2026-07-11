@@ -32,6 +32,11 @@ namespace Unity.Mathematics
         // S91-C: SphericalProjection.ScreenToGround/GroundToScreen (globe camera ray-cast).
         public static double  dot(double3 a, double3 b)   => a.x * b.x + a.y * b.y + a.z * b.z;
         public static double  length(double3 a)           => System.Math.Sqrt(dot(a, a));
+
+        // float2 vector helpers (Unity.Mathematics parity).
+        public static float   dot(float2 a, float2 b)      => a.x * b.x + a.y * b.y;
+        public static float   length(float2 a)             => (float)System.Math.Sqrt(a.x * a.x + a.y * a.y);
+        public static float   distance(float2 a, float2 b) => length(a - b);
         public static double3 normalize(double3 a)
         {
             double len = length(a);

@@ -58,5 +58,19 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>`text-ignore-placement` — Slice-2 places this label but never lets it block others.</summary>
         public bool IgnorePlacement { get; init; }
+
+        /// <summary>`text-translate` — the paint-time pixel offset (y-down, as authored) applied to this
+        /// label's projected screen anchor each frame (Slice C, via
+        /// <see cref="LabelTranslate.ApplyTranslate"/>). Default [0, 0].</summary>
+        public float2 TranslatePx { get; init; }
+
+        /// <summary>`text-translate-anchor` — whether <see cref="TranslatePx"/> is a screen-space (viewport)
+        /// or map-space (rotates with bearing) offset. Default <see cref="TextTranslateAnchor.Map"/> (#4).</summary>
+        public TextTranslateAnchor TranslateAnchor { get; init; }
+
+        /// <summary>`text-rotation-alignment` — whether the billboard rotates with the map bearing (<c>map</c>)
+        /// or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
+        /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
+        public AlignmentMode RotationAlignment { get; init; }
     }
 }

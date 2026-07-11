@@ -269,6 +269,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolStyleLayerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/TextFieldResolverTests.cs" />
 
+    <!-- Slice A: text layout-options wiring (LayoutProperties → TextLayoutOptions), engine-free -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextLayoutOptionsBuilder.cs" />
+
     <!-- S105 Slice 2: point-feature extraction (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/SymbolLabel.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/SymbolFeatureExtractor.cs" />
@@ -356,6 +359,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextAnchor.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextJustify.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextTransform.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextTranslateAnchor.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentMode.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutOptions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IGlyphAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutResult.cs" />
@@ -377,6 +383,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardVertex.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PlacedQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTranslate.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBearing.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
 
     <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->

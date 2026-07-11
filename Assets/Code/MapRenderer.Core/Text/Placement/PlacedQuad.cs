@@ -31,5 +31,9 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Per-label vertex color (<see cref="LabelPaint.TextColor"/> × <see cref="LabelPaint.Opacity"/>).</summary>
         public float4 Color;
+
+        /// <summary>Screen-space rotation (radians) applied to the quad about its anchor — 0 for the upright/
+        /// viewport billboard, the map bearing for <c>text-rotation-alignment:map</c> (#4).</summary>
+        public float RotationRadians;
     }
 }

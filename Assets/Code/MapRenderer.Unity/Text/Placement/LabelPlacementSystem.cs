@@ -227,6 +227,11 @@ namespace MapRenderer.Unity.Text.Placement
                         ToFloat4x4(_camera.Camera.worldToCameraMatrix));
                     double3 sceneOriginRender = frame.SceneOriginRender;
 
+                    // Map bearing (heading) — drives text-translate-anchor:map and text-rotation-alignment:map
+                    // (#4). Read once per frame; zero for a north-up map, where map- and viewport-alignment
+                    // coincide. The bearing sign lives in LabelBearing (the single visual-verify constant).
+                    float bearingRadians = (float)_camera.CurrentProperties.Heading.Radians;
+
                     // (1) Project every label's anchor, cull off-screen ones, and build the collision box for
                     //     each survivor of projection. _render[i] (keyed by SOURCE label index) caches the
                     //     projected anchor/depth/color so the sort in step (2) can reorder _boxes freely.
@@ -245,6 +250,11 @@ namespace MapRenderer.Unity.Text.Placement
                             {
                                 continue; // behind camera or far outside the viewport
                             }
+
+                            // text-translate (Slice C): shift the placed anchor in screen space so the whole
+                            // label — collision box AND quads, both built from screenPx below — moves together.
+                            // text-translate-anchor:map rotates the offset by the bearing (#4).
+                            screenPx = LabelTranslate.ApplyTranslate(screenPx, label.TranslatePx, label.TranslateAnchor, bearingRadians);
 
                             // sRGB→linear: the symbol paint's text-color is sRGB (parsed from the style's hex/rgb),
                             // but the project renders in Linear color space and the shader emits this vertex color
@@ -283,15 +293,20 @@ namespace MapRenderer.Unity.Text.Placement
                         if (slot < 0 || slot >= slotCount) slot = 0; // demo path / out-of-range → default slot
                         NativeList<PlacedQuad> bucket           = _slotQuads[slot];
 
+                        // text-rotation-alignment:map (#4) — rotate the whole label's billboard by the bearing.
+                        // Same angle for every quad of the label (rotation is about the shared anchor).
+                        float rotationRadians = LabelBearing.BillboardRotationRadians(label.RotationAlignment, bearingRadians);
+
                         for (int q = 0; q < quads.Count; q++)
                         {
                             bucket.Add(new PlacedQuad
                             {
-                                Quad           = quads[q],
-                                AnchorScreenPx = render.AnchorScreenPx,
-                                TextSizePx     = label.TextSizePx,
-                                Depth          = render.Depth,
-                                Color          = render.Color,
+                                Quad            = quads[q],
+                                AnchorScreenPx  = render.AnchorScreenPx,
+                                TextSizePx      = label.TextSizePx,
+                                Depth           = render.Depth,
+                                Color           = render.Color,
+                                RotationRadians = rotationRadians,
                             });
                             totalQuads++;
                         }

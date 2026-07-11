@@ -2,8 +2,10 @@
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 
 using NUnit.Framework;
+using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
@@ -75,7 +77,79 @@ namespace MapRenderer.Tests
             Assert.AreEqual(0f, sym.Paint.HaloWidth.Evaluate(0.0), 1e-6, "text-halo-width default is 0");
             Assert.AreEqual(new Color(0, 0, 0, 1), sym.Paint.Color.Evaluate(0.0), "text-color default is opaque black");
             Assert.AreEqual(1f, sym.Paint.Opacity.Evaluate(0.0), 1e-6, "text-opacity default is 1");
+            Assert.AreEqual(new float2(0, 0), sym.Paint.Translate, "text-translate default is [0,0]");
+            Assert.AreEqual(TextTranslateAnchor.Map, sym.Paint.TranslateAnchor, "text-translate-anchor default is map");
             Assert.IsTrue(sym.Paint.IsInertFallback, "an empty paint sub-tree is an inert fallback");
+
+            // Slice A layout defaults.
+            Assert.AreEqual(TextAnchor.Center, sym.Layout.TextAnchor, "text-anchor default is center");
+            Assert.AreEqual(TextJustify.Center, sym.Layout.TextJustify,
+                "text-justify default is the spec 'center' — NOT the enum zero-value Auto");
+            Assert.AreEqual(float2.zero, sym.Layout.TextOffset, "text-offset default is [0,0]");
+            Assert.AreEqual(1.2f, sym.Layout.TextLineHeight.Evaluate(0.0), 1e-6, "text-line-height default is 1.2");
+            Assert.AreEqual(0f, sym.Layout.TextLetterSpacing.Evaluate(0.0), 1e-6, "text-letter-spacing default is 0");
+            Assert.AreEqual(0f, sym.Layout.TextRadialOffset.Evaluate(0.0), 1e-6, "text-radial-offset default is 0");
+            Assert.AreEqual(TextTransform.None, sym.Layout.TextTransform, "text-transform default is none");
+            Assert.AreEqual(AlignmentMode.Auto, sym.Layout.TextRotationAlignment, "text-rotation-alignment default is auto");
+            Assert.AreEqual(AlignmentMode.Auto, sym.Layout.TextPitchAlignment, "text-pitch-alignment default is auto");
+        }
+
+        [Test]
+        public void SymbolLayer_Alignment_ParsesMapViewportAndDegradesToAuto()
+        {
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-rotation-alignment':'map','text-pitch-alignment':'viewport' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Map, sym.Layout.TextRotationAlignment);
+            Assert.AreEqual(AlignmentMode.Viewport, sym.Layout.TextPitchAlignment);
+
+            var bad = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-rotation-alignment':'sideways' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Auto, bad.Layout.TextRotationAlignment, "an unrecognized alignment degrades to auto");
+        }
+
+        [Test]
+        public void SymbolLayer_LayoutOptions_ParseEnumsAndScalars()
+        {
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-anchor':'top-left','text-justify':'right',
+                    'text-offset':[1,2],'text-line-height':1.5,'text-letter-spacing':0.1,'text-radial-offset':0.5,
+                    'text-transform':'uppercase' } } ] }").Layers[0];
+
+            Assert.AreEqual(TextAnchor.TopLeft, sym.Layout.TextAnchor, "hyphenated 'top-left' → TopLeft");
+            Assert.AreEqual(TextJustify.Right, sym.Layout.TextJustify);
+            Assert.AreEqual(TextTransform.Uppercase, sym.Layout.TextTransform);
+            // text-offset is retained RAW (y-down, un-flipped) at parse; the y-flip happens in the builder.
+            Assert.AreEqual(new float2(1f, 2f), sym.Layout.TextOffset);
+            Assert.AreEqual(1.5f, sym.Layout.TextLineHeight.Evaluate(0.0), 1e-6);
+            Assert.AreEqual(0.1f, sym.Layout.TextLetterSpacing.Evaluate(0.0), 1e-6);
+            Assert.AreEqual(0.5f, sym.Layout.TextRadialOffset.Evaluate(0.0), 1e-6);
+        }
+
+        [Test]
+        public void SymbolLayer_UnrecognizedAnchorJustify_DegradeToSpecDefault()
+        {
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-anchor':'nonsense','text-justify':'sideways',
+                    'text-transform':'italic' } } ] }").Layers[0];
+
+            Assert.AreEqual(TextAnchor.Center, sym.Layout.TextAnchor, "an unrecognized text-anchor degrades to center");
+            Assert.AreEqual(TextJustify.Center, sym.Layout.TextJustify, "an unrecognized text-justify degrades to center");
+            Assert.AreEqual(TextTransform.None, sym.Layout.TextTransform, "an unrecognized text-transform degrades to none");
+        }
+
+        [Test]
+        public void SymbolLayer_TextTranslate_ParsesPixelsAndAnchor()
+        {
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','paint':{
+                    'text-translate':[4,6],'text-translate-anchor':'viewport' } } ] }").Layers[0];
+
+            Assert.AreEqual(new float2(4, 6), sym.Paint.Translate, "text-translate parses to [x,y] px (raw y-down)");
+            Assert.AreEqual(TextTranslateAnchor.Viewport, sym.Paint.TranslateAnchor);
         }
     }
 }
