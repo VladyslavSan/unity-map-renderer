@@ -132,53 +132,24 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeArray<int>            _vertexCountOut;
         private NativeArray<int>            _indexCountOut;
 
-        // #5 (B3): the UNIFIED collision scratch — plain managed arrays reused across Ticks (grown
-        // geometrically, so steady-state Ticks with a stable label count never reallocate — T4). Every label,
-        // point (1 box) or curved along-line (N glyph boxes), becomes ONE LabelCandidate spanning a
-        // contiguous range of the flat _boxes pool, so a road name and a city name compete in ONE greedy pass
-        // (B-4a: that pass runs as the Burst LabelCollisionJob over native mirrors of these pools; the grid keeps
-        // it ~O(n·k), and the greedy is inherently serial — each placement depends on all prior survivors).
-        //  * _candidates/_emit are keyed by CANDIDATE. _candidates is copied into _nCandidates and reordered
-        //    there by the in-place placement sort (inside the job); _emit is keyed by the candidate's CREATION
-        //    ordinal (carried opaquely in LabelCandidate.LabelIndex, so it survives the sort) and holds where that
-        //    candidate's staged quads live + which material slot they draw in.
-        //  * _boxes is the flat box pool (point + per-glyph boxes); _stagedQuads the flat placed-quad pool.
-        //    Both are addressed by a candidate's [Start, Start+Count) range and grown on append (never sorted).
-        private LabelCandidate[] _candidates  = Array.Empty<LabelCandidate>();
-        private CandidateEmit[]  _emit        = Array.Empty<CandidateEmit>();
-        private LabelBox[]       _boxes       = Array.Empty<LabelBox>();
-        private PlacedQuad[]     _stagedQuads = Array.Empty<PlacedQuad>();
-
-        // ── B-4a: collision runs as a Burst IJob (LabelCollisionJob) over NATIVE mirrors of the staging pools ──
-        // The greedy pass is serial, so it is ONE job (not a fan-out); the grid keeps it ~O(n·k). Staging still
-        // writes the managed _candidates/_boxes (Stage* untouched); a per-frame bulk copy into these native
-        // mirrors feeds the job, which sorts _nCandidates in place and writes _nSurvivors — the emit loop then
-        // reads the sorted native candidates + survivor flags. The uniform grid is PRE-SIZED on the main thread
-        // (LabelCollisionGridSizing) each frame because a Burst job cannot grow a NativeArray. All reused + grown
-        // geometrically → zero per-frame GC (T4). Bit-identical to the managed LabelCollision reference (the
-        // differential test locks it over adversarial inputs).
-        private NativeList<LabelCandidate> _nCandidates;
-        private NativeList<LabelBox>       _nBoxes;
+        // ── B-4a: collision runs as a Burst IJob (LabelCollisionJob) directly over the STAGE job's native output
+        // pools (_sjCandidates/_sjBoxes — see below), with no managed round-trip. Every label, point (1 box) or
+        // curved along-line (N glyph boxes), is ONE LabelCandidate spanning a contiguous range of the flat box
+        // pool, so a road name and a city name compete in ONE greedy pass; the grid keeps it ~O(n·k), and the
+        // greedy is inherently serial (each placement depends on all prior survivors) so it is ONE job. The job
+        // sorts _sjCandidates in place into placement order and writes _nSurvivors; the emit loop reads the sorted
+        // candidates (via LabelCandidate.LabelIndex, stable across the sort) + survivor flags + _sjEmit/_sjQuads.
+        // The uniform grid is PRE-SIZED on the main thread (LabelCollisionGridSizing) each frame because a Burst
+        // job cannot grow a NativeArray. Bit-identical to the managed LabelCollision reference (differential test).
         private NativeList<byte>           _nSurvivors;
         private NativeList<int>            _gridCellHead;
         private NativeList<int>            _gridNodeBox;
         private NativeList<int>            _gridNodeNext;
         private NativeArray<int>           _survivorCountOut;
 
-        // #5: reused scratch for curved along-line placement — the projected screen polyline (grown
-        // geometrically, never shrinks) + a reused arc walker over it, so the per-frame walk is zero-GC (T4).
-        private float2[] _pathScreenScratch = System.Array.Empty<float2>();
-        private readonly PolylineArcWalker _arcWalker = new PolylineArcWalker();
-
-        // HARD CEILING on the along-line repeat loop (#5 B4). A real line has a handful of labels; the ceiling
-        // exists only so a DEGENERATE projection can never spin an unbounded loop: a line vertex at/just in
-        // front of the near plane projects to a near-infinite screen coord, blowing the projected line length
-        // (and thus the fixed-spacing anchor count `length / spacing`) up to millions. NEVER iterate a
-        // data-derived count without a finite bound — a laughably-high one is fine, an unbounded one is a hang.
-        private const int MaxAnchorsPerLine = 256;
-        // A projected line vertex beyond this many logical px is non-physical (near-plane blow-up / NaN); such a
-        // line is skipped rather than fed to the arc walker, keeping the projected length (and anchor loop) sane.
-        private const float MaxProjectedPx = 1e5f;
+        // The batch the managed-list Tick overload (demo / test seam) builds each call from LabelInstances; the
+        // production overload receives a pre-built, version-cached batch from SymbolLabelSubsystem instead.
+        private readonly SymbolLabelBatch _demoBatch = new SymbolLabelBatch();
 
         // B-3: the pre-projection horizon/distance cull radius, in viewport-spans of ground around the look-at.
         // CONSERVATIVE by default — a top-down view's on-screen labels sit within ~one span, so this only trims
@@ -217,7 +188,7 @@ namespace MapRenderer.Unity.Text.Placement
         // vertices — is projected UP FRONT in one pass by the Burst SymbolProjectionJob, and the staging pass reads
         // the precomputed screen positions instead of projecting inline. Generic over what a symbol RENDERS (text
         // today, icon later): a symbol is projected as its anchor/path world points regardless. The flat world
-        // points go in _symbolPoints; _pointOffset[i] is label i's start in it (-1 = null / B-3-culled → skipped);
+        // points go in _symbolPoints; _sjPointOffset[r] is record r's start in it (-1 = B-3-culled → skipped);
         // the fill writes the parallel _symbolScreen/_symbolDepth/_symbolValid. The job is dispatched with .Run()
         // (Burst-compiled, executed inline on the caller — no Schedule/Complete round-trip, no worker hand-off, no
         // count threshold), so the projection is always Burst SIMD with zero managed fallback and zero per-frame GC.
@@ -226,7 +197,31 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<float2>  _symbolScreen;
         private NativeList<float>   _symbolDepth;
         private NativeList<byte>    _symbolValid;
-        private int[] _pointOffset = Array.Empty<int>();
+
+        // ── Lever C step 3b: the Burst LabelStageJob's native buffers ──────────────────────────────────────────
+        // A native MIRROR of the batch's STAGE data (refreshed only when batch.BuildId changes — never per frame),
+        // the per-frame job inputs (gather offsets + resolved incumbency), its pre-sized outputs, and reused
+        // scratch. The job calls the SAME LabelStagingMath the differential test pins; its native outputs
+        // (_sjBoxes/_sjQuads/_sjCandidates/_sjEmit) feed the collision + emit passes DIRECTLY — no managed round-trip.
+        private long _mirrorBuildId = long.MinValue;
+        private NativeList<byte> _mKinds;
+        private NativeList<int>  _mDetail, _mWorldCount, _mPointQuadStart, _mPointQuadCount;
+        private NativeList<int>  _mCurvedGlyphStart, _mCurvedGlyphCount, _mCurvedAnchorStart, _mCurvedAnchorCount, _mCurvedAnchorFadeStart;
+        private NativeList<PointStageInput>  _mPoints;
+        private NativeList<CurvedStageInput> _mCurveds;
+        private NativeList<SymbolQuad>  _mQuads;
+        private NativeList<CurvedGlyph> _mGlyphs;
+        private NativeList<LineAnchor>  _mAnchors;
+        private NativeList<long>        _mFadeIds;
+        private NativeList<int>  _sjPointOffset;                 // gather output (-1 = culled)
+        private NativeList<byte> _sjPointWasPlaced, _sjAnchorWasPlaced; // per-frame A-5 incumbency
+        private NativeList<LabelBox>       _sjBoxes;             // job outputs (pre-sized to batch worst case)
+        private NativeList<PlacedQuad>     _sjQuads;
+        private NativeList<LabelCandidate> _sjCandidates;
+        private NativeList<CandidateEmit>  _sjEmit;
+        private NativeArray<int>           _sjCounts;            // [candidateCount, boxCount, quadCount]
+        private NativeList<float2> _sjPath;                      // arc-walk scratch (>= max path length)
+        private NativeList<float>  _sjCum;
 
         // ── B-1: static-frame skip ─────────────────────────────────────────────────────────────────────────
         // When the COLLECTED label set (labelSetVersion — SymbolTileLabelStore.Version), the committed CAMERA,
@@ -263,15 +258,10 @@ namespace MapRenderer.Unity.Text.Placement
         private struct SlotDraw { public bool NonEmpty; public Material Material; }
         private readonly List<SlotDraw> _cachedSlotDraws = new List<SlotDraw>();
 
-        // Where a surviving candidate's already-built quads live in _stagedQuads + which material slot they
-        // draw in. Keyed by the candidate's creation ordinal (LabelCandidate.LabelIndex) so it is stable
-        // across the in-place candidate sort — emission just copies the [QuadStart, QuadStart+QuadCount) range.
-        private struct CandidateEmit
-        {
-            public int QuadStart;
-            public int QuadCount;
-            public int Slot;
-        }
+        // Where a surviving candidate's already-built quads live in _sjQuads + which material slot they draw
+        // in (Core.Text.Placement.CandidateEmit) — keyed by the candidate's creation ordinal
+        // (LabelCandidate.LabelIndex) so it is stable across the in-place candidate sort; emission just copies the
+        // [QuadStart, QuadStart+QuadCount) range. Filled by LabelStagingMath alongside the candidates.
 
         /// <summary>Number of <see cref="Tick"/> calls so far — T5 structural guard (the vertex buffer is
         /// rebuilt every Tick, not once at tile consume). Test surface.</summary>
@@ -338,13 +328,39 @@ namespace MapRenderer.Unity.Text.Placement
             _symbolDepth  = new NativeList<float>(Allocator.Persistent);
             _symbolValid  = new NativeList<byte>(Allocator.Persistent);
 
-            _nCandidates      = new NativeList<LabelCandidate>(Allocator.Persistent); // B-4a native collision mirrors
-            _nBoxes           = new NativeList<LabelBox>(Allocator.Persistent);
-            _nSurvivors       = new NativeList<byte>(Allocator.Persistent);
+            _nSurvivors       = new NativeList<byte>(Allocator.Persistent); // B-4a collision survivor flags
             _gridCellHead     = new NativeList<int>(Allocator.Persistent);
             _gridNodeBox      = new NativeList<int>(Allocator.Persistent);
             _gridNodeNext     = new NativeList<int>(Allocator.Persistent);
             _survivorCountOut = new NativeArray<int>(1, Allocator.Persistent);
+
+            // Lever C step 3b: the Burst stage job's native buffers.
+            _mKinds = new NativeList<byte>(Allocator.Persistent);
+            _mDetail = new NativeList<int>(Allocator.Persistent);
+            _mWorldCount = new NativeList<int>(Allocator.Persistent);
+            _mPointQuadStart = new NativeList<int>(Allocator.Persistent);
+            _mPointQuadCount = new NativeList<int>(Allocator.Persistent);
+            _mCurvedGlyphStart = new NativeList<int>(Allocator.Persistent);
+            _mCurvedGlyphCount = new NativeList<int>(Allocator.Persistent);
+            _mCurvedAnchorStart = new NativeList<int>(Allocator.Persistent);
+            _mCurvedAnchorCount = new NativeList<int>(Allocator.Persistent);
+            _mCurvedAnchorFadeStart = new NativeList<int>(Allocator.Persistent);
+            _mPoints = new NativeList<PointStageInput>(Allocator.Persistent);
+            _mCurveds = new NativeList<CurvedStageInput>(Allocator.Persistent);
+            _mQuads = new NativeList<SymbolQuad>(Allocator.Persistent);
+            _mGlyphs = new NativeList<CurvedGlyph>(Allocator.Persistent);
+            _mAnchors = new NativeList<LineAnchor>(Allocator.Persistent);
+            _mFadeIds = new NativeList<long>(Allocator.Persistent);
+            _sjPointOffset = new NativeList<int>(Allocator.Persistent);
+            _sjPointWasPlaced = new NativeList<byte>(Allocator.Persistent);
+            _sjAnchorWasPlaced = new NativeList<byte>(Allocator.Persistent);
+            _sjBoxes = new NativeList<LabelBox>(Allocator.Persistent);
+            _sjQuads = new NativeList<PlacedQuad>(Allocator.Persistent);
+            _sjCandidates = new NativeList<LabelCandidate>(Allocator.Persistent);
+            _sjEmit = new NativeList<CandidateEmit>(Allocator.Persistent);
+            _sjCounts = new NativeArray<int>(3, Allocator.Persistent);
+            _sjPath = new NativeList<float2>(Allocator.Persistent);
+            _sjCum = new NativeList<float>(Allocator.Persistent);
 
             if (baseMaterial == null)
             {
@@ -385,8 +401,27 @@ namespace MapRenderer.Unity.Text.Placement
             float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null,
             long labelSetVersion = NeverSkipVersion)
         {
+            // Demo / test seam: convert the managed carriers into the blittable batch (the SAME conversion the
+            // production subsystem does once per collected-set change), then tick it. Rebuilt every call here (the
+            // sentinel path isn't perf-critical); production threads a pre-built, version-cached batch instead.
+            int slotCount = (materials != null && materials.Count > 0) ? materials.Count : 1;
+            SymbolLabelBatchBuilder.Build(_demoBatch, labels, slotCount);
+            Tick(frame, _demoBatch, atlas, deltaTime, materials, labelSetVersion, labels?.Count ?? 0);
+        }
+
+        /// <summary>Production entry: tick a pre-built, version-cached <see cref="SymbolLabelBatch"/> (built off the
+        /// per-frame path by <see cref="SymbolLabelBatchBuilder"/> at the aggregation seam). Same placement as the
+        /// managed-list overload; no per-frame LabelInstance iteration or conversion.</summary>
+        public void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
+            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null,
+            long labelSetVersion = NeverSkipVersion)
+            => Tick(frame, batch, atlas, deltaTime, materials, labelSetVersion, batch?.Count ?? 0);
+
+        private void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
+            float deltaTime, IReadOnlyList<Material> materials, long labelSetVersion, int inputLabelCount)
+        {
             TickCount++;
-            LastInputLabelCount = labels?.Count ?? 0;
+            LastInputLabelCount = inputLabelCount;
 
             using (PmTick.Auto())
             {
@@ -414,11 +449,9 @@ namespace MapRenderer.Unity.Text.Placement
                 int  totalQuads = 0;
                 bool didBuild   = false;
 
-                if (labels != null && labels.Count > 0 && atlas?.Texture != null && _material != null)
+                if (batch != null && batch.Count > 0 && atlas?.Texture != null && _material != null)
                 {
                     didBuild = true;
-                    EnsureCandidateCapacity(labels.Count);
-
                     float4x4 viewProj = math.mul(ToFloat4x4(_camera.Camera.projectionMatrix),
                         ToFloat4x4(_camera.Camera.worldToCameraMatrix));
                     double3 sceneOriginRender = frame.SceneOriginRender;
@@ -434,11 +467,11 @@ namespace MapRenderer.Unity.Text.Placement
                     // coincide. The bearing sign lives in LabelBearing (the single visual-verify constant).
                     float bearingRadians = (float)_camera.CurrentProperties.Heading.Radians;
 
-                    // (1) Project + STAGE every label into the unified pools: one LabelCandidate per label
-                    //     (point = 1 AABB box; curved = N rotated-glyph boxes), its collision boxes in _boxes,
-                    //     its drawn quads in _stagedQuads. Point and curved share the collision pass from here,
-                    //     so a road name and a city name compete for space (#5 B3).
-                    int candidateCount = 0, boxCount = 0, stagedCount = 0;
+                    // (1) Project + STAGE every label into the unified native pools (the Burst LabelStageJob): one
+                    //     LabelCandidate per label (point = 1 AABB box; curved = N rotated-glyph boxes) in _sjBoxes,
+                    //     its drawn quads in _sjQuads. Point and curved share the collision pass from here, so a
+                    //     road name and a city name compete for space (#5 B3).
+                    int candidateCount = 0, boxCount = 0;
                     using (PmProject.Auto())
                     {
                         // B-2: gather every un-culled symbol's world points (anchor / line path) — cheap, no matrix
@@ -447,34 +480,29 @@ namespace MapRenderer.Unity.Text.Placement
                         // screen positions below rather than projecting each anchor/path inline.
                         using (PmProjectFill.Auto())
                         {
-                            GatherSymbolPoints(labels, sceneOriginRender, cullRadius);
+                            GatherSymbolPoints(batch, sceneOriginRender, cullRadius);
                             ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx);
                         }
 
                         using (PmStage.Auto())
                         {
-                            for (int i = 0; i < labels.Count; i++)
-                            {
-                                int off = _pointOffset[i];
-                                if (off < 0) continue; // null label or B-3-distance-culled (not gathered/projected)
-
-                                // Each Stage* returns HOW MANY candidates it staged: point → 0/1; curved → 0/1 for
-                                // line-center, 0..N for symbol-placement:line (one per along-line repeat anchor, B4).
-                                LabelInstance label = labels[i];
-                                candidateCount += label.Placement == SymbolPlacement.Point
-                                    ? StagePointLabel(label, _symbolScreen[off], _symbolDepth[off], _symbolValid[off] != 0,
-                                        bearingRadians, viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount)
-                                    : StageCurvedLabel(label, off, bearingRadians,
-                                        viewportLogicalPx, slotCount, candidateCount, ref boxCount, ref stagedCount);
-                            }
+                            // Stage the whole batch in ONE Burst job (LabelStageJob) — same LabelStagingMath as the
+                            // managed reference, SIMD-compiled. Refresh the native batch mirror only if it was rebuilt;
+                            // resolve this frame's incumbency + pre-size outputs; run; read counts; copy the native
+                            // outputs into the managed pools the unchanged collision/emit passes read.
+                            RefreshBatchMirror(batch);
+                            ResolveIncumbency(batch);
+                            PreSizeStageOutputs(batch);
+                            RunStageJob(batch, bearingRadians, viewportLogicalPx);
+                            candidateCount = _sjCounts[0]; boxCount = _sjCounts[1];
                         }
                     }
 
                     // (2) Unified greedy, sort-key-driven, all-or-nothing collision — GLOBAL across all layers and
-                    //     both placement kinds — run as the Burst LabelCollisionJob over native mirrors of the
-                    //     staged pools (B-4a). Copy the managed staged data in, size the grid, schedule + Complete
-                    //     (synchronous for B-4a; B-4b defers the Complete a frame). _nCandidates is sorted in place
-                    //     by the job; the emit loop below reads the sorted native candidates + survivor flags.
+                    //     both placement kinds — run as the Burst LabelCollisionJob directly over the stage job's
+                    //     native pools (B-4a). Size the grid, schedule + Complete (synchronous for B-4a; B-4b defers
+                    //     the Complete a frame). _sjCandidates is sorted in place by the job; the emit loop below
+                    //     reads the sorted native candidates + survivor flags.
                     LastCandidateCount = candidateCount;
                     using (PmCollide.Auto())
                         LastSurvivorCount = RunCollision(candidateCount, boxCount);
@@ -490,7 +518,7 @@ namespace MapRenderer.Unity.Text.Placement
                         _placedLastFrame.Clear(); // A-5: rebuild this frame's incumbents for next frame's staging
                         for (int s = 0; s < candidateCount; s++)
                         {
-                            LabelCandidate cand = _nCandidates[s]; // sorted in place by the collision job
+                            LabelCandidate cand = _sjCandidates[s]; // sorted in place by the collision job
                             bool survived = _nSurvivors[s] != 0;
                             _seenFade.Add(cand.FadeId);
                             // A-5: incumbency tracks COLLISION survival (not opacity) — a just-born survivor still at
@@ -499,11 +527,11 @@ namespace MapRenderer.Unity.Text.Placement
                             float opacity = EaseFade(cand.FadeId, survived ? 1f : 0f, deltaTime);
                             if (opacity <= FadeEpsilon) continue;
 
-                            CandidateEmit          emit   = _emit[cand.LabelIndex];
+                            CandidateEmit          emit   = _sjEmit[cand.LabelIndex];
                             NativeList<PlacedQuad> bucket = _slotQuads[emit.Slot];
                             for (int k = 0; k < emit.QuadCount; k++)
                             {
-                                PlacedQuad q = _stagedQuads[emit.QuadStart + k];
+                                PlacedQuad q = _sjQuads[emit.QuadStart + k];
                                 q.Color.w *= opacity; // per-vertex alpha the shader emits — the fade, no shader change
                                 bucket.Add(q);
                                 totalQuads++;
@@ -629,62 +657,28 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Reserves the per-CANDIDATE scratch for `count` labels as a warm-up estimate (one candidate each).
-        // symbol-placement:line can stage MANY candidates per label (B4), so EnsureCandidateSlot grows it
-        // further on demand; geometric doubling keeps steady-state Ticks realloc-free (T4).
-        private void EnsureCandidateCapacity(int count)
-        {
-            if (_candidates.Length >= count) return;
-            int cap = _candidates.Length == 0 ? 16 : _candidates.Length;
-            while (cap < count) cap *= 2;
-            Array.Resize(ref _candidates, cap);
-            Array.Resize(ref _emit,       cap);
-        }
-
-        // Grows the per-candidate scratch to admit ordinal `index` (a line label repeated N times overruns the
-        // one-per-label reserve). Geometric — no realloc once the frame's peak candidate count is seen (T4).
-        private void EnsureCandidateSlot(int index)
-        {
-            if (index < _candidates.Length) return;
-            int cap = _candidates.Length == 0 ? 16 : _candidates.Length;
-            while (cap <= index) cap *= 2;
-            Array.Resize(ref _candidates, cap);
-            Array.Resize(ref _emit,       cap);
-        }
-
         // ── B-2: gather + project every symbol's screen geometry ──────────────────────────────────────────────
-        // Flatten every un-culled symbol's world points into _symbolPoints — a point symbol's anchor, a line
-        // symbol's path vertices — recording each label's start in _pointOffset (-1 = null / B-3-culled → skipped
-        // by the staging loop). Cheap: field reads + the B-3 distance cull, no matrix mul. Generic over symbol
-        // kind; the projection (matrix mul) happens once, in ProjectSymbols.
-        private void GatherSymbolPoints(IReadOnlyList<LabelInstance> labels, double3 sceneOriginRender, double cullRadius)
+        // Flatten every un-culled record's world points (from the batch SoA) into _symbolPoints — a point's anchor,
+        // a line's path vertices — recording each record's start in the native _sjPointOffset (-1 = B-3-culled →
+        // skipped by the stage job). Cheap: array reads + the B-3 distance cull, no matrix mul; the projection
+        // (matrix mul) happens once, in ProjectSymbols.
+        private void GatherSymbolPoints(SymbolLabelBatch batch, double3 sceneOriginRender, double cullRadius)
         {
-            EnsurePointOffset(labels.Count);
+            _sjPointOffset.ResizeUninitialized(batch.Count);
             _symbolPoints.Clear();
-            for (int i = 0; i < labels.Count; i++)
+            for (int r = 0; r < batch.Count; r++)
             {
-                LabelInstance label = labels[i];
-                if (label == null) { _pointOffset[i] = -1; continue; }
-
-                // B-3: skip the far horizon pile-up BEFORE projection/collision — culled symbols are not gathered.
-                if (LabelViewDistance.IsCulled(RepresentativeAnchor(label), sceneOriginRender, cullRadius))
+                // B-3: skip the far horizon pile-up BEFORE projection/collision — culled records are not gathered.
+                if (LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius))
                 {
                     LastDistanceCulledCount++;
-                    _pointOffset[i] = -1;
+                    _sjPointOffset[r] = -1;
                     continue;
                 }
 
-                _pointOffset[i] = _symbolPoints.Length;
-                if (label.Placement == SymbolPlacement.Point)
-                {
-                    _symbolPoints.Add(label.AnchorRender);
-                }
-                else
-                {
-                    double3[] path = label.PathRender;
-                    int n = path?.Length ?? 0;
-                    for (int v = 0; v < n; v++) _symbolPoints.Add(path[v]);
-                }
+                _sjPointOffset[r] = _symbolPoints.Length;
+                int ws = batch.WorldStart[r], wc = batch.WorldCount[r];
+                for (int v = 0; v < wc; v++) _symbolPoints.Add(batch.WorldPoints[ws + v]);
             }
         }
 
@@ -716,31 +710,18 @@ namespace MapRenderer.Unity.Text.Placement
             }.Run(total);
         }
 
-        // Grows the per-label offset map geometrically (T4). Indexed by label-list position.
-        private void EnsurePointOffset(int count)
-        {
-            if (_pointOffset.Length >= count) return;
-            int cap = _pointOffset.Length == 0 ? 16 : _pointOffset.Length;
-            while (cap < count) cap *= 2;
-            Array.Resize(ref _pointOffset, cap);
-        }
-
-        // B-4a: run the greedy collision as the Burst LabelCollisionJob over native mirrors of the staged pools.
-        // Copies the managed staged candidates/boxes in, PRE-SIZES the uniform grid on the main thread (a Burst job
-        // cannot grow a NativeArray), then schedules + Completes the job (synchronous — B-4b defers the Complete a
-        // frame). Returns the survivor count; _nCandidates is left sorted in placement order and _nSurvivors holds
-        // the per-sorted-position survivor flags the emit loop reads.
+        // B-4a: run the greedy collision as the Burst LabelCollisionJob directly over the stage job's native output
+        // pools (no managed round-trip — the stage job already wrote them native). PRE-SIZES the uniform grid on the
+        // main thread (a Burst job cannot grow a NativeArray), then schedules + Completes the job (synchronous —
+        // B-4b defers the Complete a frame). Returns the survivor count; _sjCandidates is left sorted in placement
+        // order and _nSurvivors holds the per-sorted-position survivor flags the emit loop reads.
         private int RunCollision(int candidateCount, int boxCount)
         {
             if (candidateCount <= 0) return 0;
 
-            _nCandidates.Resize(candidateCount, NativeArrayOptions.UninitializedMemory);
-            _nBoxes.Resize(boxCount,            NativeArrayOptions.UninitializedMemory);
-            _nSurvivors.Resize(candidateCount,  NativeArrayOptions.UninitializedMemory);
-            NativeArray<LabelCandidate> nc = _nCandidates.AsArray();
-            NativeArray<LabelBox>       nb = _nBoxes.AsArray();
-            for (int i = 0; i < candidateCount; i++) nc[i] = _candidates[i];
-            for (int i = 0; i < boxCount; i++)       nb[i] = _boxes[i];
+            _nSurvivors.Resize(candidateCount, NativeArrayOptions.UninitializedMemory);
+            NativeArray<LabelCandidate> nc = _sjCandidates.AsArray(); // stage job's candidates — sorted IN PLACE here
+            NativeArray<LabelBox>       nb = _sjBoxes.AsArray();       // stage job's boxes (read-only; grid over [0,boxCount))
 
             // Pre-size the uniform grid: CellHead = W*H (filled -1); the node arrays = the exact upper bound (sum
             // of cells each box covers — mirrors the job's cell mapping so no insert is ever dropped).
@@ -766,27 +747,10 @@ namespace MapRenderer.Unity.Text.Placement
             return _survivorCountOut[0];
         }
 
-        // Append one box/quad to the flat pool, growing it geometrically (never shrinks — T4). Returns the
-        // new cursor. Array.Resize preserves prior entries, so a mid-pass grow keeps earlier BoxStart ranges
-        // valid.
-        private int AppendBox(int count, in LabelBox box)
-        {
-            if (_boxes.Length <= count) Array.Resize(ref _boxes, _boxes.Length == 0 ? 32 : _boxes.Length * 2);
-            _boxes[count] = box;
-            return count + 1;
-        }
-
-        private int AppendQuad(int count, in PlacedQuad quad)
-        {
-            if (_stagedQuads.Length <= count) Array.Resize(ref _stagedQuads, _stagedQuads.Length == 0 ? 64 : _stagedQuads.Length * 2);
-            _stagedQuads[count] = quad;
-            return count + 1;
-        }
-
         // The label's text-color, sRGB→linear + folded text-opacity — the vertex color the shader emits
         // directly (mirrors StyledFill/LineTileBuilder's Color.linear; without it a dark #333 uploads as
         // linear ~0.2 and displays washed-out). Alpha is not gamma-encoded — carried straight.
-        private static float4 LinearColor(LabelInstance label)
+        internal static float4 LinearColor(LabelInstance label)
         {
             float4 srgb   = label.Paint.TextColor;
             Color  linear = new Color(srgb.x, srgb.y, srgb.z, 1f).linear;
@@ -794,238 +758,88 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Demo path / out-of-range material index → default slot 0.
-        private static int ClampSlot(int slot, int slotCount) => (slot < 0 || slot >= slotCount) ? 0 : slot;
+        internal static int ClampSlot(int slot, int slotCount) => (slot < 0 || slot >= slotCount) ? 0 : slot;
 
-        // B-3: the render-space point used for the pre-projection distance cull — a point label's anchor, or a
-        // line label's MIDPOINT vertex (a long line spanning near→far is culled only when its middle is past the
-        // horizon radius, so a partly-near line is never wrongly dropped). Falls back to AnchorRender if a line
-        // somehow carries no path (it then reads default(double3) — harmless: at worst it isn't culled).
-        private static double3 RepresentativeAnchor(LabelInstance label)
+        // Refresh the native mirror of the batch's STAGE data — ONLY when the batch was rebuilt (BuildId change),
+        // never per frame. The Burst LabelStageJob reads these NativeArrays instead of the managed batch arrays.
+        private void RefreshBatchMirror(SymbolLabelBatch batch)
         {
-            double3[] path = label.PathRender;
-            if (label.Placement != SymbolPlacement.Point && path != null && path.Length > 0)
-                return path[path.Length / 2];
-            return label.AnchorRender;
+            if (batch.BuildId == _mirrorBuildId) return;
+            _mirrorBuildId = batch.BuildId;
+            int n = batch.Count;
+            MirrorKinds(_mKinds, batch.Kinds, n);
+            Mirror(_mDetail, batch.Detail, n); Mirror(_mWorldCount, batch.WorldCount, n);
+            Mirror(_mPoints, batch.Points, batch.PointCount);
+            Mirror(_mPointQuadStart, batch.PointQuadStart, batch.PointCount);
+            Mirror(_mPointQuadCount, batch.PointQuadCount, batch.PointCount);
+            Mirror(_mCurveds, batch.Curveds, batch.CurvedCount);
+            Mirror(_mCurvedGlyphStart, batch.CurvedGlyphStart, batch.CurvedCount);
+            Mirror(_mCurvedGlyphCount, batch.CurvedGlyphCount, batch.CurvedCount);
+            Mirror(_mCurvedAnchorStart, batch.CurvedAnchorStart, batch.CurvedCount);
+            Mirror(_mCurvedAnchorCount, batch.CurvedAnchorCount, batch.CurvedCount);
+            Mirror(_mCurvedAnchorFadeStart, batch.CurvedAnchorFadeStart, batch.CurvedCount);
+            Mirror(_mQuads, batch.Quads, batch.QuadCount);
+            Mirror(_mGlyphs, batch.Glyphs, batch.GlyphCount);
+            Mirror(_mAnchors, batch.Anchors, batch.AnchorCount);
+            Mirror(_mFadeIds, batch.AnchorFadeIds, batch.AnchorFadeCount);
         }
 
-        /// <summary>
-        /// Projects + stages one POINT label: one axis-aligned collision box (the whole-label AABB, Slice 2 —
-        /// unrotated even under text-rotation-alignment:map, matching the point behaviour) + its glyph quads
-        /// (at the shared anchor, rotated by the #4 bearing). Writes <c>_candidates[ordinal]</c> +
-        /// <c>_emit[ordinal]</c> and returns <c>true</c>, or <c>false</c> if it has no quads or its anchor
-        /// culls off-screen (no pool entries appended on a skip).
-        /// </summary>
-        private int StagePointLabel(LabelInstance label, float2 screenPx, float depth, bool projected,
-            float bearingRadians, double2 viewportLogicalPx, int slotCount, int ordinal,
-            ref int boxCount, ref int stagedCount)
+        private static void Mirror<T>(NativeList<T> dst, T[] src, int count) where T : unmanaged
         {
-            IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
-            if (quads == null || quads.Count == 0) return 0;
-
-            // B-2: the anchor was projected up front (SymbolProjectionJob / serial fill). Apply the point cull here
-            // — behind-camera (projected == false) OR outside the viewport margin (the cheap screen-bounds test the
-            // job omits). Together these equal the old inline TryProjectAnchor (= TryProjectPoint + margin).
-            if (!projected || !LabelScreenProjection.IsWithinViewportMargin(screenPx, viewportLogicalPx))
-                return 0;
-
-            // text-translate (Slice C): shift the placed anchor so the whole label — box AND quads, both built
-            // from screenPx — moves together; text-translate-anchor:map rotates the offset by the bearing (#4).
-            screenPx = LabelTranslate.ApplyTranslate(screenPx, label.TranslatePx, label.TranslateAnchor, bearingRadians);
-            float4 color = LinearColor(label);
-
-            // text-rotation-alignment:map (#4) — one angle for the whole label (rotation is about the anchor).
-            float rotationRadians = LabelBearing.BillboardRotationRadians(label.RotationAlignment, bearingRadians);
-
-            int boxStart = boxCount;
-            boxCount = AppendBox(boxCount, LabelBox.Build(
-                screenPx, label.Layout.BoundsMin, label.Layout.BoundsMax, label.TextSizePx, label.PaddingPx,
-                label.SortKey, label.FeatureIndex, label.TileKey, ordinal, label.AllowOverlap, label.IgnorePlacement));
-
-            int slot      = ClampSlot(label.MaterialIndex, slotCount);
-            int quadStart = stagedCount;
-            for (int q = 0; q < quads.Count; q++)
-                stagedCount = AppendQuad(stagedCount, new PlacedQuad
-                {
-                    Quad = quads[q], AnchorScreenPx = screenPx, TextSizePx = label.TextSizePx,
-                    Depth = depth, Color = color, RotationRadians = rotationRadians,
-                });
-
-            long fadeId = PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text); // A-4 cross-frame identity
-            EnsureCandidateSlot(ordinal);
-            _candidates[ordinal] = new LabelCandidate
-            {
-                BoxStart = boxStart, BoxCount = 1,
-                SortKey = label.SortKey, FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement, LabelIndex = ordinal,
-                FadeId = fadeId,
-                WasPlacedLastFrame = _placedLastFrame.Contains(fadeId), // A-5 sticky-placement incumbency
-            };
-            _emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = quads.Count, Slot = slot };
-            return 1;
+            dst.ResizeUninitialized(count);
+            for (int i = 0; i < count; i++) dst[i] = src[i];
         }
 
-        /// <summary>
-        /// Projects + stages one CURVED along-line label (#5). Projects the render-space path (behind-camera
-        /// cull only — a partly-off-screen line still labels), walks it, and stages one candidate per
-        /// <see cref="LabelInstance.LineAnchors">build-time anchor</see> (A-2: stable tile-space topology, so the
-        /// anchors don't slide/pop on zoom). Each anchor stages N per-glyph quads at their along-line screen
-        /// points rotated to the local TANGENT, with a per-glyph rotated-corner collision box
-        /// (<see cref="LabelBox.BuildRotatedGlyph"/>) — one all-or-nothing candidate per anchor that competes
-        /// with point labels (B3). Returns the NUMBER of anchors staged (0 if the path culls, the projected line
-        /// has zero length, or the label is longer than the whole line).
-        ///
-        /// <para><b>Tangent only, not the #4 bearing path:</b> the tangent comes from projected screen points,
-        /// which already reflect the map bearing — routing through <c>LabelBearing.BillboardRotationRadians</c>
-        /// too (line placement defaults rotation-alignment auto→map) would double-rotate.</para>
-        /// </summary>
-        private int StageCurvedLabel(LabelInstance label, int pathOffset,
-            float bearingRadians, double2 viewportLogicalPx, int slotCount, int ordinal,
-            ref int boxCount, ref int stagedCount)
+        private static void MirrorKinds(NativeList<byte> dst, SymbolLabelBatch.Kind[] src, int count)
         {
-            double3[] path = label.PathRender;
-            IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
-            LineAnchor[] anchors = label.LineAnchors;
-            if (path == null || path.Length < 2 || glyphs == null || glyphs.Count == 0
-                || anchors == null || anchors.Length == 0) return 0;
-
-            if (_pathScreenScratch.Length < path.Length)
-            {
-                int cap = _pathScreenScratch.Length == 0 ? 8 : _pathScreenScratch.Length;
-                while (cap < path.Length) cap *= 2;
-                _pathScreenScratch = new float2[cap];
-            }
-
-            // B-2: the path vertices were projected up front (SymbolProjectionJob / serial fill) at pathOffset —
-            // read the precomputed screen positions instead of projecting inline. Same cull semantics as before:
-            // any vertex behind the camera (_symbolValid == 0) skips the label; a non-physical screen coord
-            // (near-plane blow-up) would explode the line length and the anchor loop, so it also skips the label.
-            float pathDepth = 0f;
-            for (int v = 0; v < path.Length; v++)
-            {
-                int k = pathOffset + v;
-                if (_symbolValid[k] == 0) return 0; // behind the camera
-                float2 sp = _symbolScreen[k];
-                if (!(math.abs(sp.x) < MaxProjectedPx && math.abs(sp.y) < MaxProjectedPx))
-                    return 0; // near-plane / degenerate projection — skip (also rejects NaN via the negated test)
-                _pathScreenScratch[v] = sp;
-                if (v == path.Length / 2) pathDepth = _symbolDepth[k]; // representative depth (labels are overlay anyway)
-            }
-
-            _arcWalker.Init(_pathScreenScratch, path.Length);
-            float total = _arcWalker.TotalLength;
-            if (!(total > 0f)) return 0; // zero-length or non-finite (negated test also rejects NaN)
-
-            float scale            = label.TextSizePx / TextQuadLayout.OneEm;
-            float labelCenterBaked = (glyphs[0].ArcCenter + glyphs[glyphs.Count - 1].ArcCenter) * 0.5f;
-            float labelSpanPx      = (glyphs[glyphs.Count - 1].ArcCenter - glyphs[0].ArcCenter) * scale;
-            float halfSpan         = labelSpanPx * 0.5f;
-            if (labelSpanPx > total) return 0; // label longer than the whole line — never fits
-
-            float4 color = LinearColor(label);
-            int    slot  = ClampSlot(label.MaterialIndex, slotCount);
-
-            // A-2: iterate the BUILD-TIME anchors — stable (segment, t) topology pinned to fixed world points,
-            // so a label's repeats no longer slide or change count as the camera zooms (the old fixed
-            // screen-px-from-start walk did both). Each anchor's per-frame screen arc distance comes from the
-            // projected polyline via ArcDistanceAt; the fit-gate (whole label within the projected line) is the
-            // only per-frame position decision. anchors.Length is already bounded at build; the MaxAnchorsPerLine
-            // clamp is defence-in-depth (never iterate a data-derived count without a finite ceiling).
-            int staged = 0;
-            int anchorCount = math.min(anchors.Length, MaxAnchorsPerLine);
-            for (int a = 0; a < anchorCount; a++)
-            {
-                float centerArc = _arcWalker.ArcDistanceAt(anchors[a].Segment, anchors[a].T);
-                if (centerArc - halfSpan < 0f || centerArc + halfSpan > total) continue; // label spills the ends
-                // Only advance the ordinal when the anchor is actually staged (text-max-angle may drop it). The
-                // fade id keys on the stable anchor INDEX `a` (not the volatile ordinal), so it survives frames.
-                if (StageCurvedAnchor(label, ordinal + staged, a, glyphs, centerArc, labelCenterBaked, scale,
-                        color, slot, pathDepth, bearingRadians, ref boxCount, ref stagedCount))
-                    staged++;
-            }
-            // The line fits one label but no build-time anchor's projected position passed the fit-gate this
-            // frame (a mid-length line at a zoom where only the centre fits) → try a single centred label. The
-            // centre is the projected arc-midpoint — itself a stable world point, so this keeps A-2's no-slide.
-            if (staged == 0 &&
-                StageCurvedAnchor(label, ordinal, -1, glyphs, total * 0.5f, labelCenterBaked, scale,
-                    color, slot, pathDepth, bearingRadians, ref boxCount, ref stagedCount)) // -1: the centred fallback's own id
-                staged = 1;
-
-            return staged;
+            dst.ResizeUninitialized(count);
+            for (int i = 0; i < count; i++) dst[i] = (byte)src[i];
         }
 
-        /// <summary>
-        /// Stages ONE curved-label instance centred at arc distance <paramref name="centerArc"/> along the
-        /// current <see cref="_arcWalker"/>: one all-or-nothing candidate over its N per-glyph boxes + quads.
-        /// Returns <c>false</c> (rolling the box/quad pools back, staging nothing) when the label's along-line
-        /// curvature exceeds <c>text-max-angle</c> at any adjacent glyph pair — the label is dropped at this
-        /// anchor rather than bent illegibly around a corner (#6).
-        ///
-        /// <para>keep-upright (#6, default true) is evaluated at THIS anchor's local tangent (a long line can
-        /// curve back on itself, so each repeat decides its own left-to-right flip independently); with
-        /// <c>text-keep-upright:false</c> the glyphs follow the raw line direction.</para>
-        /// </summary>
-        private bool StageCurvedAnchor(LabelInstance label, int ordinal, int anchorIndex,
-            IReadOnlyList<CurvedGlyph> glyphs, float centerArc, float labelCenterBaked, float scale, float4 color,
-            int slot, float pathDepth, float bearingRadians, ref int boxCount, ref int stagedCount)
+        // A-5 per-frame: resolve each point/anchor fade id against _placedLastFrame into native arrays the job reads
+        // (the one managed, main-thread piece that stays outside the Burst job — it needs the placed-set HashSet).
+        private void ResolveIncumbency(SymbolLabelBatch batch)
         {
-            // keep-upright: a label whose center tangent points leftward would render right-to-left; walk the
-            // arc reversed and flip each glyph +pi so it still reads left-to-right. Disabled by keep-upright:false.
-            _arcWalker.At(centerArc, out _, out float centerTangent);
-            bool  reversed = label.KeepUpright && math.cos(centerTangent) < 0f;
-            float dir      = reversed ? -1f : 1f;
-            float flip     = reversed ? math.PI : 0f;
-
-            // text-max-angle: the label is dropped if the LINE tangent turns by more than this between any two
-            // adjacent characters (the flip is a constant across glyphs, so it cancels in adjacent deltas).
-            float maxAngleRad = math.radians(label.MaxAngleDeg);
-
-            int boxStart  = boxCount;
-            int quadStart = stagedCount;
-            float prevTangent = 0f;
-            for (int g = 0; g < glyphs.Count; g++)
-            {
-                CurvedGlyph cg = glyphs[g];
-                float arc = centerArc + dir * (cg.ArcCenter - labelCenterBaked) * scale;
-                _arcWalker.At(arc, out float2 pt, out float tangent);
-
-                if (g > 0 && math.abs(AngleDelta(tangent, prevTangent)) > maxAngleRad)
-                {
-                    boxCount = boxStart; stagedCount = quadStart; // roll back this anchor's partial appends
-                    return false;                                  // too sharp a bend → drop the label here (#6)
-                }
-                prevTangent = tangent;
-
-                pt = LabelTranslate.ApplyTranslate(pt, label.TranslatePx, label.TranslateAnchor, bearingRadians);
-                float rotation = tangent + flip; // tangent ONLY — not LabelBearing (would double-rotate)
-
-                boxCount = AppendBox(boxCount,
-                    LabelBox.BuildRotatedGlyph(pt, cg.Cell, label.TextSizePx, rotation, label.PaddingPx));
-                stagedCount = AppendQuad(stagedCount, new PlacedQuad
-                {
-                    Quad = cg.Cell, AnchorScreenPx = pt, TextSizePx = label.TextSizePx,
-                    Depth = pathDepth, Color = color, RotationRadians = rotation,
-                });
-            }
-
-            long fadeId = LineFadeId(label.TileKey, label.FeatureIndex, anchorIndex); // A-4 within-tile identity
-            EnsureCandidateSlot(ordinal);
-            _candidates[ordinal] = new LabelCandidate
-            {
-                BoxStart = boxStart, BoxCount = glyphs.Count,
-                SortKey = label.SortKey, FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement, LabelIndex = ordinal,
-                FadeId = fadeId,
-                WasPlacedLastFrame = _placedLastFrame.Contains(fadeId), // A-5 sticky-placement incumbency
-            };
-            _emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = glyphs.Count, Slot = slot };
-            return true;
+            _sjPointWasPlaced.ResizeUninitialized(batch.PointCount);
+            for (int i = 0; i < batch.PointCount; i++)
+                _sjPointWasPlaced[i] = (byte)(_placedLastFrame.Contains(batch.Points[i].FadeId) ? 1 : 0);
+            _sjAnchorWasPlaced.ResizeUninitialized(batch.AnchorFadeCount);
+            for (int i = 0; i < batch.AnchorFadeCount; i++)
+                _sjAnchorWasPlaced[i] = (byte)(_placedLastFrame.Contains(batch.AnchorFadeIds[i]) ? 1 : 0);
         }
 
-        // Smallest signed angle a - b, wrapped to (-pi, pi] (via atan2 so it's bounded, no while-loop drift).
-        private static float AngleDelta(float a, float b)
+        // Pre-size the job's output pools to the batch worst case (Burst cannot grow) + the arc-walk scratch to at
+        // least the longest path (the total gathered-point count is a safe upper bound for any single path).
+        private void PreSizeStageOutputs(SymbolLabelBatch batch)
         {
-            float d = a - b;
-            return math.atan2(math.sin(d), math.cos(d));
+            _sjBoxes.ResizeUninitialized(math.max(1, batch.MaxBoxes));
+            _sjQuads.ResizeUninitialized(math.max(1, batch.MaxQuads));
+            _sjCandidates.ResizeUninitialized(math.max(1, batch.MaxCandidates));
+            _sjEmit.ResizeUninitialized(math.max(1, batch.MaxCandidates));
+            int scratch = math.max(1, _symbolPoints.Length);
+            _sjPath.ResizeUninitialized(scratch);
+            _sjCum.ResizeUninitialized(scratch);
+        }
+
+        private void RunStageJob(SymbolLabelBatch batch, float bearingRadians, double2 viewportLogicalPx)
+        {
+            new LabelStageJob
+            {
+                Kinds = _mKinds.AsArray(), Detail = _mDetail.AsArray(), WorldCount = _mWorldCount.AsArray(), Count = batch.Count,
+                Points = _mPoints.AsArray(), PointQuadStart = _mPointQuadStart.AsArray(), PointQuadCount = _mPointQuadCount.AsArray(),
+                Curveds = _mCurveds.AsArray(),
+                CurvedGlyphStart = _mCurvedGlyphStart.AsArray(), CurvedGlyphCount = _mCurvedGlyphCount.AsArray(),
+                CurvedAnchorStart = _mCurvedAnchorStart.AsArray(), CurvedAnchorCount = _mCurvedAnchorCount.AsArray(),
+                CurvedAnchorFadeStart = _mCurvedAnchorFadeStart.AsArray(),
+                Quads = _mQuads.AsArray(), Glyphs = _mGlyphs.AsArray(), Anchors = _mAnchors.AsArray(), AnchorFadeIds = _mFadeIds.AsArray(),
+                PointOffset = _sjPointOffset.AsArray(),
+                Screen = _symbolScreen.AsArray(), Depth = _symbolDepth.AsArray(), Valid = _symbolValid.AsArray(),
+                PointWasPlaced = _sjPointWasPlaced.AsArray(), AnchorWasPlaced = _sjAnchorWasPlaced.AsArray(),
+                Bearing = bearingRadians, Viewport = viewportLogicalPx,
+                PathScratch = _sjPath.AsArray(), CumScratch = _sjCum.AsArray(),
+                Boxes = _sjBoxes.AsArray(), StagedQuads = _sjQuads.AsArray(),
+                Candidates = _sjCandidates.AsArray(), Emit = _sjEmit.AsArray(), OutCounts = _sjCounts,
+            }.Run();
         }
 
         // ── A-4 fade helpers ──────────────────────────────────────────────────────────────────────────────
@@ -1067,21 +881,6 @@ namespace MapRenderer.Unity.Text.Placement
         /// stable-across-zoom + within-grid-collapse behaviour directly.</summary>
         internal static long PointFadeId(in double3 anchorRender, int layerId, string text)
             => Hash64(CrossTileLabelKey.For(anchorRender, layerId, text, FadeGridMeters));
-
-        // A-4 LINE fade identity: within-tile (tile, feature, anchor-index) — stable across frames while the tile
-        // is loaded (line labels are excluded from A-3 cross-tile identity in v1, so this does NOT persist a tile
-        // swap; a line label crossfades on a swap rather than a true no-op).
-        private static long LineFadeId(long tileKey, int featureIndex, int anchorIndex)
-        {
-            unchecked
-            {
-                ulong h = 1469598103934665603UL; // FNV-1a 64
-                h = (h ^ (ulong)tileKey) * 1099511628211UL;
-                h = (h ^ (ulong)(uint)featureIndex) * 1099511628211UL;
-                h = (h ^ (ulong)(uint)anchorIndex) * 1099511628211UL;
-                return (long)h;
-            }
-        }
 
         private static long Hash64(in CrossTileLabelKey k)
         {
@@ -1208,13 +1007,21 @@ namespace MapRenderer.Unity.Text.Placement
             _symbolDepth.Dispose();
             _symbolValid.Dispose();
 
-            _nCandidates.Dispose(); // B-4a native collision mirrors
-            _nBoxes.Dispose();
-            _nSurvivors.Dispose();
+            _nSurvivors.Dispose(); // B-4a collision survivor flags
             _gridCellHead.Dispose();
             _gridNodeBox.Dispose();
             _gridNodeNext.Dispose();
             _survivorCountOut.Dispose();
+
+            _mKinds.Dispose(); _mDetail.Dispose(); _mWorldCount.Dispose();          // Lever C step 3b native buffers
+            _mPointQuadStart.Dispose(); _mPointQuadCount.Dispose();
+            _mCurvedGlyphStart.Dispose(); _mCurvedGlyphCount.Dispose();
+            _mCurvedAnchorStart.Dispose(); _mCurvedAnchorCount.Dispose(); _mCurvedAnchorFadeStart.Dispose();
+            _mPoints.Dispose(); _mCurveds.Dispose();
+            _mQuads.Dispose(); _mGlyphs.Dispose(); _mAnchors.Dispose(); _mFadeIds.Dispose();
+            _sjPointOffset.Dispose(); _sjPointWasPlaced.Dispose(); _sjAnchorWasPlaced.Dispose();
+            _sjBoxes.Dispose(); _sjQuads.Dispose(); _sjCandidates.Dispose(); _sjEmit.Dispose();
+            _sjCounts.Dispose(); _sjPath.Dispose(); _sjCum.Dispose();
         }
     }
 }

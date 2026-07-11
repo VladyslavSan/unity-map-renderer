@@ -12,6 +12,7 @@ using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
@@ -389,6 +390,32 @@ namespace MapRenderer.Unity.Text
         /// zoom transition collapses to one, and the grid tracks zoom (a fixed grid cannot serve all zooms).</summary>
         public void CollectInto(List<LabelInstance> output)
             => _store.CollectInto(output, WebMercator.GroundResolution(_camera.CurrentProperties.Zoom));
+
+        // Lever C step 2: the version-cached blittable label batch — the per-frame placement source of truth.
+        private readonly SymbolLabelBatch      _batch        = new SymbolLabelBatch();
+        private readonly List<LabelInstance>   _batchCollect = new List<LabelInstance>();
+        private long   _batchVersion  = long.MinValue;   // last store version the batch was built at
+        private double _batchQuantize = double.NaN;       // last A-3 dedup grid (zoom-dependent → re-dedup on zoom)
+        private int    _batchSlotCount = -1;              // last material-slot count (baked into each record's Slot)
+
+        /// <summary>The blittable <see cref="SymbolLabelBatch"/> for this frame, rebuilt ONLY when the collected set
+        /// changes: on a new <see cref="SymbolTileLabelStore.Version"/>, a zoom change (the A-3 dedup grid is
+        /// zoom-dependent), or a material-slot count change. On a steady pan (all three stable) it returns the cached
+        /// batch untouched — so neither the cross-tile dedup nor the LabelInstance→SoA conversion runs per frame.</summary>
+        public SymbolLabelBatch CurrentBatch()
+        {
+            double quantize  = WebMercator.GroundResolution(_camera.CurrentProperties.Zoom);
+            int    slotCount = _layerMaterials.Length > 0 ? _layerMaterials.Length : 1;
+            if (_store.Version != _batchVersion || quantize != _batchQuantize || slotCount != _batchSlotCount)
+            {
+                _store.CollectInto(_batchCollect, quantize);
+                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount);
+                _batchVersion   = _store.Version;
+                _batchQuantize  = quantize;
+                _batchSlotCount = slotCount;
+            }
+            return _batch;
+        }
 
         private void WarnOnAtlasOverflow()
         {

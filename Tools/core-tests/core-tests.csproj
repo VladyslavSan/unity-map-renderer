@@ -388,11 +388,15 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelInstance.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardVertex.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PlacedQuad.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CandidateEmit.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStageInputs.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStagingMath.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTranslate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBearing.cs" />
 
     <!-- #5 B1: curved along-line text — Core helpers (engine-free) + their tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcMath.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcWalker.cs" />
     <!-- A-2: stable tile-space line anchors (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchor.cs" />
@@ -407,6 +411,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />

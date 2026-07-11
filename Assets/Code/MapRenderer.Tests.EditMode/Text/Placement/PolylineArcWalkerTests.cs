@@ -82,5 +82,47 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(5f, p.x, Tol); Assert.AreEqual(5f, p.y, Tol);
             Assert.AreEqual(math.PI / 4f, tan, Tol);
         }
+
+        // Three-segment staircase: seg0 →x [0,10], seg1 ↑y [10,20], seg2 →x [20,30]. Distinct segments so a
+        // stale cursor would land on the wrong one. Exercises the Lever A resumable cursor.
+        private static PolylineArcWalker Staircase() =>
+            Walk(new float2(0, 0), new float2(10, 0), new float2(10, 10), new float2(20, 10));
+
+        private static void AssertAt(PolylineArcWalker w, float arc, float2 expectPt, float expectTan)
+        {
+            w.At(arc, out float2 p, out float tan);
+            Assert.AreEqual(expectPt.x, p.x, Tol); Assert.AreEqual(expectPt.y, p.y, Tol);
+            Assert.AreEqual(expectTan, tan, Tol);
+        }
+
+        [Test]
+        public void Cursor_OutOfOrderQueries_EachResolvesToTheContainingSegment()
+        {
+            // A forward jump (25), a big backward jump (5), then a mid jump (15): the resumable cursor must
+            // land on the right segment every time, not on wherever the previous query left it.
+            PolylineArcWalker w = Staircase();
+            Assert.AreEqual(30f, w.TotalLength, Tol);
+            AssertAt(w, 25f, new float2(15, 10), 0f);            // seg2 (→x)
+            AssertAt(w, 5f,  new float2(5, 0),   0f);            // seg0 (→x), cursor jumps back 2 segments
+            AssertAt(w, 15f, new float2(10, 5),  math.PI / 2f);  // seg1 (↑y)
+            AssertAt(w, 25f, new float2(15, 10), 0f);            // seg2 again, forward jump
+        }
+
+        [Test]
+        public void Cursor_ReverseMonotonicSweep_MatchesForwardSweep()
+        {
+            // A reversed (keep-upright) label queries arcs in DECREASING order — the backward cursor walk must
+            // give the same points as a fresh walker queried forward.
+            PolylineArcWalker reverse = Staircase();
+            PolylineArcWalker forward = Staircase();
+            float[] arcs = { 3f, 8f, 12f, 18f, 22f, 27f };
+            for (int i = arcs.Length - 1; i >= 0; i--)
+            {
+                reverse.At(arcs[i], out float2 rp, out float rt);
+                forward.At(arcs[i], out float2 fp, out float ft); // independent walker, single lookup
+                Assert.AreEqual(fp.x, rp.x, Tol); Assert.AreEqual(fp.y, rp.y, Tol);
+                Assert.AreEqual(ft, rt, Tol);
+            }
+        }
     }
 }

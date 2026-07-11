@@ -21,6 +21,7 @@ namespace MapRenderer.Core.Text.Placement
         private float2[] _points;      // referenced, not owned
         private int _count;
         private float[] _cumulative = System.Array.Empty<float>(); // cumulative arc length at each vertex; reused
+        private int _cursor;           // Lever A: resumable segment cursor (see At) — reset each Init.
 
         /// <summary>Total arc length of the last <see cref="Init"/>'d polyline (0 for &lt; 2 points).</summary>
         public float TotalLength { get; private set; }
@@ -37,6 +38,7 @@ namespace MapRenderer.Core.Text.Placement
         {
             _points = points;
             _count = count < 0 ? 0 : count;
+            _cursor = 0;
 
             if (_cumulative.Length < _count)
             {
@@ -45,11 +47,7 @@ namespace MapRenderer.Core.Text.Placement
                 _cumulative = new float[cap];
             }
 
-            if (_count == 0) { TotalLength = 0f; return; }
-            _cumulative[0] = 0f;
-            for (int i = 1; i < _count; i++)
-                _cumulative[i] = _cumulative[i - 1] + math.length(points[i] - points[i - 1]);
-            TotalLength = _cumulative[_count - 1];
+            TotalLength = PolylineArcMath.BuildCumulative(_points, _count, _cumulative);
         }
 
         /// <summary>
@@ -59,13 +57,7 @@ namespace MapRenderer.Core.Text.Placement
         /// anchor. <paramref name="segment"/> is clamped to a valid segment; <paramref name="t"/> to [0,1].
         /// </summary>
         public float ArcDistanceAt(int segment, float t)
-        {
-            if (_count < 2) return 0f;
-            int seg = math.clamp(segment, 0, _count - 2);
-            float ct = math.saturate(t);
-            float segStart = _cumulative[seg];
-            return segStart + ct * (_cumulative[seg + 1] - segStart);
-        }
+            => PolylineArcMath.ArcDistanceAt(_cumulative, _count, segment, t);
 
         /// <summary>
         /// The point and tangent angle (radians, atan2 of the segment direction) at arc distance
@@ -73,52 +65,6 @@ namespace MapRenderer.Core.Text.Placement
         /// returns that point (or origin) with tangent 0.
         /// </summary>
         public void At(float arc, out float2 point, out float tangentRadians)
-        {
-            if (_count == 0) { point = float2.zero; tangentRadians = 0f; return; }
-            if (_count == 1) { point = _points[0]; tangentRadians = 0f; return; }
-
-            if (arc <= 0f)
-            {
-                point = _points[0];
-                tangentRadians = SegmentTangent(0);
-                return;
-            }
-            if (arc >= TotalLength)
-            {
-                point = _points[_count - 1];
-                tangentRadians = SegmentTangent(_count - 2);
-                return;
-            }
-
-            // Find the segment [i, i+1] whose cumulative range contains `arc`.
-            int seg = 0;
-            for (int i = 1; i < _count; i++)
-            {
-                if (_cumulative[i] >= arc) { seg = i - 1; break; }
-            }
-
-            float segStart = _cumulative[seg];
-            float segLen = _cumulative[seg + 1] - segStart;
-            float t = segLen > 0f ? (arc - segStart) / segLen : 0f;
-            point = math.lerp(_points[seg], _points[seg + 1], t);
-            tangentRadians = SegmentTangent(seg);
-        }
-
-        // Tangent of segment [i, i+1]; skips forward/backward over zero-length (coincident) vertices so a
-        // degenerate segment doesn't collapse the tangent to atan2(0,0).
-        private float SegmentTangent(int i)
-        {
-            for (int j = i; j < _count - 1; j++)
-            {
-                float2 d = _points[j + 1] - _points[j];
-                if (math.lengthsq(d) > 1e-12f) return (float)math.atan2(d.y, d.x);
-            }
-            for (int j = i - 1; j >= 0; j--)
-            {
-                float2 d = _points[j + 1] - _points[j];
-                if (math.lengthsq(d) > 1e-12f) return (float)math.atan2(d.y, d.x);
-            }
-            return 0f;
-        }
+            => PolylineArcMath.At(_points, _cumulative, _count, TotalLength, arc, ref _cursor, out point, out tangentRadians);
     }
 }

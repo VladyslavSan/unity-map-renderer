@@ -22,6 +22,10 @@ namespace Unity.Mathematics
         public static double acos(double x) => System.Math.Acos(x);
         public static double atan(double x) => System.Math.Atan(x);
         public static double atan2(double y, double x) => System.Math.Atan2(y, x);
+
+        // Degrees→radians (Unity.Mathematics parity — used by LabelStagingMath's text-max-angle).
+        public static float  radians(float x)  => x * 0.0174532925199432957692f;
+        public static double radians(double x) => x * 0.017453292519943295769236907684886;
         public static double sinh(double x) => System.Math.Sinh(x);
         public static double cosh(double x) => System.Math.Cosh(x);
         public static double exp(double x)  => System.Math.Exp(x);

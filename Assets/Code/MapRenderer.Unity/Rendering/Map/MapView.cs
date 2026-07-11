@@ -137,7 +137,6 @@ namespace MapRenderer.Unity.Rendering.Map
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
         // LabelInstances/LabelAtlas seam below is used only when the style has NO symbol layers.
         private readonly SymbolLabelSubsystem _symbols;
-        private readonly List<LabelInstance> _labelBuffer = new List<LabelInstance>();
         // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
         private readonly List<Tile.LoadedTileKey> _symbolLoadedScratch = new List<Tile.LoadedTileKey>();
 
@@ -321,13 +320,13 @@ namespace MapRenderer.Unity.Rendering.Map
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     _symbols.PumpBuilds();
-                    _symbols.CollectInto(_labelBuffer);
                 }
-                // B-1: thread the collected-set version so a static frame (unchanged set + camera + fades) skips
-                // the re-projection and re-submits the cached meshes. The demo path (else branch) passes no version
-                // → the sentinel → never skips (byte-parity). Reconcile/CollectInto above still run every frame.
-                Labels.Tick(sceneFrame, _labelBuffer, _symbols.Atlas, Time.deltaTime, _symbols.LayerMaterials,
-                    _symbols.Version);
+                // Lever C: the version-cached blittable label batch — rebuilt (collect + dedup + LabelInstance→SoA)
+                // ONLY when the set/zoom/slot-count changed, so a steady pan does none of that per frame. B-1: thread
+                // the collected-set version so a fully-static frame also skips re-projection and re-submits the cached
+                // meshes. The demo path (else branch) passes the sentinel → never skips (byte-parity).
+                Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
+                    _symbols.LayerMaterials, _symbols.Version);
             }
             else
             {
