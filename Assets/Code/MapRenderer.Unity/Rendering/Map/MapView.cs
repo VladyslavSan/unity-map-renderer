@@ -325,11 +325,10 @@ namespace MapRenderer.Unity.Rendering.Map
                     _symbols.PumpBuilds();
                 }
                 // Lever C: the version-cached blittable label batch — rebuilt (collect + dedup + LabelInstance→SoA)
-                // ONLY when the set/zoom/slot-count changed, so a steady pan does none of that per frame. B-1: thread
-                // the collected-set version so a fully-static frame also skips re-projection and re-submits the cached
-                // meshes. The demo path (else branch) passes the sentinel → never skips (byte-parity).
+                // ONLY when the set/zoom/slot-count changed, so a steady pan does none of that per frame. The label
+                // placement itself (project/collide/build) runs every frame — there is no idle-frame skip.
                 Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
-                    _symbols.LayerMaterials, _symbols.Version);
+                    _symbols.LayerMaterials);
             }
             else
             {

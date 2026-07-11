@@ -153,11 +153,6 @@ namespace MapRenderer.Unity.Text
         /// glyphs upload).</summary>
         public GlyphAtlasTexture Atlas => _atlasTexture;
 
-        /// <summary>B-1: the collected label set's monotonic version (<see cref="SymbolTileLabelStore.Version"/>),
-        /// threaded into <see cref="LabelPlacementSystem.Tick"/> so a static frame (unchanged set + camera + fades)
-        /// re-submits the cached meshes instead of re-projecting. Bumped by every set-changing store mutation.</summary>
-        public long Version => _store.Version;
-
         /// <summary>Active (in-cover) label-tile count — telemetry.</summary>
         public int ActiveTileCount => _store.ActiveTileCount;
 

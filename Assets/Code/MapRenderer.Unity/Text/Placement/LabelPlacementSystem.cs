@@ -21,10 +21,6 @@ using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
-// Alias (not a namespace import): `CameraProperties` is ambiguous between our Core camera state and
-// UnityEngine.Rendering.CameraProperties (pulled in above for RenderParams/ShadowCastingMode). B-1 keys its
-// static-frame skip on the committed Core CameraProperties, so bind the bare name to that one.
-using CameraProperties = MapRenderer.Core.View.Camera.CameraProperties;
 
 namespace MapRenderer.Unity.Text.Placement
 {
@@ -194,9 +190,7 @@ namespace MapRenderer.Unity.Text.Placement
         // FadeIds that SURVIVED last frame's collision. Staging looks each candidate up here to set
         // LabelCandidate.WasPlacedLastFrame, which biases the greedy sort so an incumbent keeps its slot over a
         // near-tied newcomer (killing the tile-churn/reprojection tiebreak flip that reads as flicker). Rebuilt
-        // from the survivors AFTER each real collision — NOT on the B-1 skip path (which returns before collision),
-        // so a skipped static frame leaves the kept-set frozen (correct: its survivor set is unchanged). Reused
-        // across frames → zero per-frame GC (T4).
+        // from the survivors AFTER each real collision. Reused across frames → zero per-frame GC (T4).
         private readonly HashSet<long> _placedLastFrame = new HashSet<long>();
 
         // ── B-2: parallel symbol projection ─────────────────────────────────────────────────────────────────
@@ -239,41 +233,6 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<float2> _sjPath;                      // arc-walk scratch (>= max path length)
         private NativeList<float>  _sjCum;
 
-        // ── B-1: static-frame skip ─────────────────────────────────────────────────────────────────────────
-        // When the COLLECTED label set (labelSetVersion — SymbolTileLabelStore.Version), the committed CAMERA,
-        // and the FADE state are ALL unchanged since the last real build, a re-projection would produce a
-        // byte-identical mesh. So Tick RE-SUBMITS the cached per-slot meshes (Graphics.RenderMesh is immediate-
-        // mode — issued every frame regardless) and skips project/collide/build/upload. This removes the idle
-        // Project/Collide cost AND the per-frame rebuild that is the root of the idle blink.
-        //   * Camera-unchanged is keyed on the SAME committed CameraProperties fields TileManager keys its cover
-        //     on (lon/lat/alt/zoom/heading/tilt/fov + viewport) — NOT the derived viewProj float4x4, which carries
-        //     per-frame FP jitter on an idle camera so it would never compare equal (the skip would be silent dead
-        //     code). CameraProperties is the SOURCE the matrices, the scene origin (origin ≡ look-at, S52) and the
-        //     viewport all derive from, so equal properties ⇒ byte-identical build. This assumes MapView passes a
-        //     SceneFrame consistent with the committed camera (it does: the frame's origin is the look-at).
-        //   * GOVERNING RULE: OVER-invalidate. A missed skip costs a few ms; a wrong skip freezes labels. So the
-        //     skip is illegal until the first real build (_haveCachedFrame), any frame that does NOT build (no
-        //     atlas yet / no labels) drops the cache, and the demo/test path opts out via the sentinel version.
-        //   * SCOPE: inside Tick only. CollectInto/reconcile upstream still run every frame (cheap vs projection);
-        //     folding the skip up into MapView to skip collection too is a follow-up.
-        private const long NeverSkipVersion = long.MinValue; // demo/test callers pass no version → never skip
-        private bool   _haveCachedFrame;                     // a real build has completed at least once
-        private long   _cachedVersion = NeverSkipVersion;
-        private bool   _cachedCameraValid;
-        private CameraProperties _cachedCamera;
-        private double2 _cachedViewportLogicalPx;
-        // The SceneFrame is the one build input NOT derived from _camera inside Tick — MapView passes it in. It is
-        // a deterministic function of the committed look-at today (origin = Project(lookAt), rebase =
-        // TangentBasisAt(lookAt)), so the camera key already covers it transitively; keying on it DIRECTLY makes
-        // the skip robust to a future BuildSceneFrame that accumulates rebased state (over-invalidate) — and it is
-        // what the projection actually consumes, so it is the honest guard.
-        private double3  _cachedSceneOrigin;
-        private float3x3 _cachedSceneRebase;
-        // Per-slot record of the LAST real build so a skip re-submits exactly the slots that drew (with the same
-        // material). The persistent _slotMeshes still hold that frame's buffers — a skip never rewrites them.
-        private struct SlotDraw { public bool NonEmpty; public Material Material; }
-        private readonly List<SlotDraw> _cachedSlotDraws = new List<SlotDraw>();
-
         // Where a surviving candidate's already-built quads live in _sjQuads + which material slot they draw
         // in (Core.Text.Placement.CandidateEmit) — keyed by the candidate's creation ordinal
         // (LabelCandidate.LabelIndex) so it is stable across the in-place candidate sort; emission just copies the
@@ -305,11 +264,6 @@ namespace MapRenderer.Unity.Text.Placement
         /// mirrors <see cref="LastDistanceCulledCount"/>; a proxy for how much of the horizon tile pile-up was
         /// dropped whole.</summary>
         internal int LastTileCoverageCulledCount { get; private set; }
-
-        /// <summary>B-1: <c>true</c> iff the last <see cref="Tick"/> took the static-frame skip (re-submitted the
-        /// cached meshes without re-projecting). The skip is invisible in output (byte-identical to a rebuild), so
-        /// a test MUST assert on this to prove the skip actually fired — an un-fired skip is silent dead code.</summary>
-        internal bool LastTickSkipped { get; private set; }
 
         /// <summary>The persistent billboard mesh <see cref="Tick"/> rebuilds every call. Test surface: headless
         /// EditMode has no player loop, so a <see cref="Graphics.RenderMesh"/> submission never appears under a
@@ -414,33 +368,26 @@ namespace MapRenderer.Unity.Text.Placement
         /// <see cref="float.PositiveInfinity"/> SNAPS every fade to its target (no animation), so a single-Tick
         /// test renders fully-placed labels exactly as before A-4 (byte-parity); production passes
         /// <c>Time.deltaTime</c>.</param>
-        /// <param name="labelSetVersion">B-1: the collected label set's version (<c>SymbolTileLabelStore.Version</c>).
-        /// When it — together with the committed camera and the fade state — is unchanged since the last real
-        /// build, <see cref="Tick"/> re-submits the cached meshes and skips project/collide/build. The default
-        /// sentinel (<see cref="NeverSkipVersion"/>) opts OUT: the demo / single-material / test path always
-        /// rebuilds (byte-parity), so only a caller that threads a real version can be skipped.</param>
         public void Tick(in SceneFrame frame, IReadOnlyList<LabelInstance> labels, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null,
-            long labelSetVersion = NeverSkipVersion)
+            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null)
         {
             // Demo / test seam: convert the managed carriers into the blittable batch (the SAME conversion the
-            // production subsystem does once per collected-set change), then tick it. Rebuilt every call here (the
-            // sentinel path isn't perf-critical); production threads a pre-built, version-cached batch instead.
+            // production subsystem does once per collected-set change), then tick it. Rebuilt every call here;
+            // production threads a pre-built, version-cached batch instead.
             int slotCount = (materials != null && materials.Count > 0) ? materials.Count : 1;
             SymbolLabelBatchBuilder.Build(_demoBatch, labels, slotCount, _camera.Projection);
-            Tick(frame, _demoBatch, atlas, deltaTime, materials, labelSetVersion, labels?.Count ?? 0);
+            Tick(frame, _demoBatch, atlas, deltaTime, materials, labels?.Count ?? 0);
         }
 
         /// <summary>Production entry: tick a pre-built, version-cached <see cref="SymbolLabelBatch"/> (built off the
         /// per-frame path by <see cref="SymbolLabelBatchBuilder"/> at the aggregation seam). Same placement as the
         /// managed-list overload; no per-frame LabelInstance iteration or conversion.</summary>
         public void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null,
-            long labelSetVersion = NeverSkipVersion)
-            => Tick(frame, batch, atlas, deltaTime, materials, labelSetVersion, batch?.Count ?? 0);
+            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null)
+            => Tick(frame, batch, atlas, deltaTime, materials, batch?.Count ?? 0);
 
         private void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime, IReadOnlyList<Material> materials, long labelSetVersion, int inputLabelCount)
+            float deltaTime, IReadOnlyList<Material> materials, int inputLabelCount)
         {
             TickCount++;
             LastInputLabelCount = inputLabelCount;
@@ -448,17 +395,6 @@ namespace MapRenderer.Unity.Text.Placement
             using (PmTick.Auto())
             {
                 double2 viewportLogicalPx = _camera.ViewportPx / _camera.DevicePixelRatio;
-                CameraProperties cam = _camera.CurrentProperties;
-
-                // B-1: static-frame skip — re-submit the cached meshes when nothing that affects the built
-                // geometry changed since the last real build (label set + camera + scene frame + fades all stable).
-                if (CanSkipFrame(labelSetVersion, cam, viewportLogicalPx, frame))
-                {
-                    LastTickSkipped = true;
-                    ResubmitCachedFrame();
-                    return;
-                }
-                LastTickSkipped = false;
 
                 LastCandidateCount = 0;
                 LastSurvivorCount = 0;
@@ -567,16 +503,10 @@ namespace MapRenderer.Unity.Text.Placement
                     }
                 }
 
-                // B-1: capture (or invalidate) the skip cache. Only a real build produces a cacheable static
-                // frame; any frame that could NOT build (no atlas / no labels / no material) drops the cache so
-                // the next frame rebuilds once its inputs are ready — never skip into a stale or never-drawn state.
-                if (didBuild)
-                    RecordFrameCache(labelSetVersion, cam, viewportLogicalPx, frame, slotCount, materials);
-                else
-                {
-                    _haveCachedFrame = false;
-                    _placedLastFrame.Clear(); // A-5: nothing placed this frame → no incumbents to carry forward
-                }
+                // A-5: a frame that produced no placement (no atlas / no labels / no material) carries no
+                // incumbents forward — clear the placed-set so next frame's staging starts clean.
+                if (!didBuild)
+                    _placedLastFrame.Clear();
 
                 LastQuadCount = totalQuads;
                 if (totalQuads == 0) return; // nothing visible this frame — no draw call submitted
@@ -590,85 +520,9 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // ── B-1 helpers ─────────────────────────────────────────────────────────────────────────────────────
         // The per-layer material a slot draws with: the supplied per-symbol-layer material, else the default.
         private Material ResolveSlotMaterial(int slot, IReadOnlyList<Material> materials)
             => (materials != null && slot < materials.Count && materials[slot] != null) ? materials[slot] : _material;
-
-        // True iff a re-projection would produce a byte-identical build (so Tick can re-submit the cached meshes).
-        // OVER-invalidate: any doubt returns false. The demo/test sentinel version forces a rebuild every frame.
-        private bool CanSkipFrame(long labelSetVersion, in CameraProperties cam, double2 viewportLogicalPx,
-            in SceneFrame frame)
-        {
-            if (!_haveCachedFrame) return false;                 // no real build yet — nothing to re-submit
-            if (labelSetVersion == NeverSkipVersion) return false; // demo/test path opts out of the skip
-            if (labelSetVersion != _cachedVersion) return false; // the collected label set changed
-            if (!_cachedCameraValid || !CameraUnchanged(cam, viewportLogicalPx)) return false; // camera moved
-            if (!SceneFrameUnchanged(frame)) return false;       // the floating-origin frame shifted
-            if (AnyFadeInProgress()) return false;               // a fade is still animating — mesh not static yet
-            return true;
-        }
-
-        // Compare the committed camera field-by-field against the cache (the CameraProperties + viewport that fully
-        // determine the build). Exact equality, not an epsilon: identical committed properties re-derive identical
-        // matrices/origin, so the skipped rebuild would be byte-identical (that is B-1's whole invariant).
-        private bool CameraUnchanged(in CameraProperties cam, double2 viewportLogicalPx)
-            => cam.LookAt.Longitude == _cachedCamera.LookAt.Longitude
-            && cam.LookAt.Latitude  == _cachedCamera.LookAt.Latitude
-            && cam.LookAt.Altitude  == _cachedCamera.LookAt.Altitude
-            && cam.Zoom             == _cachedCamera.Zoom
-            && cam.Heading.Degrees  == _cachedCamera.Heading.Degrees
-            && cam.Tilt.Degrees     == _cachedCamera.Tilt.Degrees
-            && cam.VerticalFovDeg   == _cachedCamera.VerticalFovDeg
-            && viewportLogicalPx.x  == _cachedViewportLogicalPx.x
-            && viewportLogicalPx.y  == _cachedViewportLogicalPx.y;
-
-        // The floating-origin frame every anchor projects through must be bit-identical too (origin + rebase basis).
-        private bool SceneFrameUnchanged(in SceneFrame frame)
-            => frame.SceneOriginRender.Equals(_cachedSceneOrigin)
-            && frame.Rebase.Equals(_cachedSceneRebase);
-
-        // A fade record strictly between invisible and fully-placed means the mesh alpha is still changing frame
-        // to frame → the geometry is NOT static, so the skip stays illegal until every fade settles (then re-skips).
-        // Settled survivors sit at exactly 1f (EaseFade clamps to target); fade-outs are dropped once <= eps.
-        private bool AnyFadeInProgress()
-        {
-            foreach (float v in _fadeOpacity.Values)
-                if (v > FadeEpsilon && v < 1f) return true;
-            return false;
-        }
-
-        // Snapshot the just-built frame so a following static frame can be skipped. Even the sentinel version is
-        // recorded (harmless — CanSkipFrame rejects the sentinel outright), so the demo/test path stays consistent.
-        private void RecordFrameCache(long version, in CameraProperties cam, double2 viewportLogicalPx,
-            in SceneFrame frame, int slotCount, IReadOnlyList<Material> materials)
-        {
-            _cachedVersion           = version;
-            _cachedCamera            = cam;
-            _cachedCameraValid       = true;
-            _cachedViewportLogicalPx = viewportLogicalPx;
-            _cachedSceneOrigin       = frame.SceneOriginRender;
-            _cachedSceneRebase       = frame.Rebase;
-            _cachedSlotDraws.Clear();
-            for (int g = 0; g < slotCount; g++)
-                _cachedSlotDraws.Add(new SlotDraw
-                {
-                    NonEmpty = _slotQuads[g].Length > 0,
-                    Material = ResolveSlotMaterial(g, materials),
-                });
-            _haveCachedFrame = true;
-        }
-
-        // Re-issue the cached per-slot draws over the persistent meshes (which still hold the last build's buffers).
-        private void ResubmitCachedFrame()
-        {
-            for (int g = 0; g < _cachedSlotDraws.Count; g++)
-            {
-                SlotDraw d = _cachedSlotDraws[g];
-                if (!d.NonEmpty || d.Material == null || g >= _slotMeshes.Count) continue;
-                SubmitDraw(_slotMeshes[g], d.Material);
-            }
-        }
 
         // Ensures slotCount (mesh, quad-buffer) slots exist. Grows only when a style adds symbol layers —
         // amortized, warm-up only; steady-state Ticks reuse the slots (T4 no-per-frame-GC).
@@ -996,12 +850,10 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // The single Graphics.RenderMesh submit — shared by a fresh build (BuildAndSubmit) and the B-1 cached
-        // re-submit (ResubmitCachedFrame). Pin the draw to THIS map camera: a null camera submits for EVERY
-        // camera, which would draw this camera's screen-space vertices into the SceneView/other cameras (at wrong
-        // positions, since the verts are projected for this camera only). _camera.Camera confines it to the one
-        // we projected for. The material's atlas texture + screen params persist from its last build (unchanged on
-        // a skip — the viewport is part of the skip key), so the cached re-submit needs no per-frame material set.
+        // The single Graphics.RenderMesh submit (called by BuildAndSubmit). Pin the draw to THIS map camera: a
+        // null camera submits for EVERY camera, which would draw this camera's screen-space vertices into the
+        // SceneView/other cameras (at wrong positions, since the verts are projected for this camera only).
+        // _camera.Camera confines it to the one we projected for.
         private void SubmitDraw(Mesh mesh, Material material)
         {
             var rp = new RenderParams(material)
