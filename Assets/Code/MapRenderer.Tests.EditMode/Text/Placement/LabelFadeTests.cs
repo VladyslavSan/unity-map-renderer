@@ -6,6 +6,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
@@ -171,6 +172,47 @@ namespace MapRenderer.Tests.Text.Placement
             h.System.Tick(in h.Frame, new List<LabelInstance> { near, far }, h.Atlas);
             Assert.AreEqual(1, h.System.LastDistanceCulledCount, "the far label is skipped pre-projection");
             Assert.AreEqual(1, h.System.LastQuadCount, "only the near label places");
+        }
+
+        // ── A label whose TILE gets coverage-culled while the label itself is still on screen must FADE OUT in
+        //    place, not pop. The pre-cull produces no geometry, so before the soft-cull fix the fade record decayed
+        //    silently and the label vanished for a frame. Now the gather cull keeps staging a still-visible label
+        //    (forcing its fade to 0) until it has faded, then finally skips it. ──
+        [Test]
+        public void Tick_TileCoverageCulled_FadesOut_InsteadOfPopping()
+        {
+            using var h = new Harness();
+            // A high-zoom tile at the look-at: tiny on screen (well under any coverage threshold) yet in front of
+            // the camera, so the tile-coverage cull fires while the label's own anchor is still centre-screen.
+            long tileKey = SymbolFeatureExtractor.PackTileKey(new TileId { Z = 14, X = 8647, Y = 7735 });
+            var labels = new List<LabelInstance>
+            {
+                new LabelInstance
+                {
+                    AnchorRender = h.Origin, Placement = SymbolPlacement.Point, Layout = OneQuad(),
+                    Paint = LabelPaint.Default, TextSizePx = 24f, PaddingPx = 2f, SortKey = 0f, Text = "A",
+                    FeatureIndex = 0, TileKey = tileKey,
+                },
+            };
+
+            // 1) Cull disabled → the label places and snaps to full opacity.
+            h.System.MinTileScreenCoverage = 0.0;
+            h.System.Tick(in h.Frame, labels, h.Atlas); // default dt → snap to full
+            Assert.AreEqual(1, h.System.LastQuadCount, "the label places with the cull disabled");
+            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…at full opacity");
+
+            // 2) Enable the cull → the tiny tile is culled, but the on-screen label must FADE (still drawn, dimmer),
+            //    not disappear for a frame.
+            h.System.MinTileScreenCoverage = 0.05;
+            h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "a culled-but-visible label keeps drawing (fading, not popping)");
+            float dim = MaxAlpha(h.System.Mesh);
+            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
+            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
+
+            // 3) After enough steps it finishes fading and is finally dropped (the cull's perf win applies once invisible).
+            for (int i = 0; i < 10; i++) h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the culled label is fully skipped");
         }
 
         // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres (a cross-tile

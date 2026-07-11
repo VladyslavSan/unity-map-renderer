@@ -186,6 +186,14 @@ namespace MapRenderer.Unity.Text.Placement
         private readonly HashSet<long> _seenFade = new HashSet<long>();
         private readonly List<long> _fadeScratchKeys = new List<long>(); // reused decay-sweep buffer (no per-frame GC)
 
+        // FadeIds of records the gather cull (tile-coverage / B-3 distance) hit THIS frame but whose fade is still
+        // alive: instead of a hard skip (which would pop the label — a pre-cull produces no geometry, so nothing
+        // draws its fade), gather keeps STAGING them and records their FadeIds here; the emit loop then eases them
+        // toward 0 (a fade-OUT in place at their live position) regardless of collision survival. Once a record's
+        // fade settles to <= epsilon the gather cull hard-skips it (the perf win returns in steady state). Cleared
+        // + repopulated each frame in gather → zero per-frame GC.
+        private readonly HashSet<long> _forceFadeOut = new HashSet<long>();
+
         // ── A-5: sticky-placement hysteresis ────────────────────────────────────────────────────────────────
         // FadeIds that SURVIVED last frame's collision. Staging looks each candidate up here to set
         // LabelCandidate.WasPlacedLastFrame, which biases the greedy sort so an incumbent keeps its slot over a
@@ -481,7 +489,10 @@ namespace MapRenderer.Unity.Text.Placement
                         for (int s = 0; s < candidateCount; s++)
                         {
                             LabelCandidate cand = _sjCandidates[s]; // sorted in place by the collision job
-                            bool survived = _nSurvivors[s] != 0;
+                            // A record the gather cull kept alive is being staged ONLY to fade out — force its
+                            // target to 0 and drop it from incumbency, regardless of whether it won collision.
+                            bool fadeOut  = _forceFadeOut.Contains(cand.FadeId);
+                            bool survived = !fadeOut && _nSurvivors[s] != 0;
                             _seenFade.Add(cand.FadeId);
                             // A-5: incumbency tracks COLLISION survival (not opacity) — a just-born survivor still at
                             // ~0 alpha is placed, so it must stay sticky. Keyed by FadeId (line labels: per-anchor).
@@ -565,30 +576,69 @@ namespace MapRenderer.Unity.Text.Placement
         {
             _sjPointOffset.ResizeUninitialized(batch.Count);
             _symbolPoints.Clear();
+            _forceFadeOut.Clear();
             for (int r = 0; r < batch.Count; r++)
             {
-                // Tile-coverage pre-cull: drop a record whose tile is too small on screen this frame (its flag was
-                // set by ComputeTileCoverageCull) — before the per-label B-3 distance test.
-                int tile = batch.RecordTile[r];
-                if (tile >= 0 && _tileCulled[tile] != 0)
-                {
-                    LastTileCoverageCulledCount++;
-                    _sjPointOffset[r] = -1;
-                    continue;
-                }
+                // Two pre-projection culls, cheapest first: the tile-coverage cull (whole tile too small on screen
+                // this frame — flag set by ComputeTileCoverageCull) and the B-3 distance cull (this label past the
+                // horizon radius).
+                bool tileCulled = batch.RecordTile[r] >= 0 && _tileCulled[batch.RecordTile[r]] != 0;
+                bool distCulled = !tileCulled &&
+                    LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius);
 
-                // B-3: skip the far horizon pile-up BEFORE projection/collision — culled records are not gathered.
-                if (LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius))
+                if (tileCulled || distCulled)
                 {
-                    LastDistanceCulledCount++;
-                    _sjPointOffset[r] = -1;
-                    continue;
+                    // Don't pop a label that was on screen last frame: if its fade is still alive, KEEP staging it
+                    // (so it eases out in place at its live position) and force its fade-out in emit. Only once it
+                    // has fully faded do we actually skip it — that is where the cull's perf win lands.
+                    if (MarkFadeOutIfAlive(batch, r))
+                    {
+                        // fall through: gather it like a normal record; the emit loop drives its opacity to 0
+                    }
+                    else
+                    {
+                        if (tileCulled) LastTileCoverageCulledCount++; else LastDistanceCulledCount++;
+                        _sjPointOffset[r] = -1;
+                        continue;
+                    }
                 }
 
                 _sjPointOffset[r] = _symbolPoints.Length;
                 int ws = batch.WorldStart[r], wc = batch.WorldCount[r];
                 for (int v = 0; v < wc; v++) _symbolPoints.Add(batch.WorldPoints[ws + v]);
             }
+        }
+
+        // If record r's fade is still visible (any of its FadeIds has opacity > epsilon), record those FadeIds in
+        // _forceFadeOut so the emit loop eases them toward 0, and return true (the gather cull then keeps staging
+        // it for the fade-out). Returns false when the record has no live fade — never shown, or already faded —
+        // so the caller hard-skips it (no pop; nothing was on screen to pop).
+        private bool MarkFadeOutIfAlive(SymbolLabelBatch batch, int r)
+        {
+            int detail = batch.Detail[r];
+            if (batch.Kinds[r] == SymbolLabelBatch.Kind.Point)
+                return TryForceFadeOut(batch.Points[detail].FadeId);
+
+            // Curved: one candidate per anchor plus the centred-fallback slot. Force-fade EVERY anchor — not just
+            // the ones already visible — so a previously-invisible anchor can't fade IN on a tile we are culling;
+            // keep the record staged if ANY anchor is still visible.
+            bool alive = false;
+            int fadeStart = batch.CurvedAnchorFadeStart[detail];
+            int fadeCount = batch.CurvedAnchorCount[detail] + 1; // + trailing centred-fallback fade id
+            for (int i = 0; i < fadeCount; i++)
+            {
+                long fadeId = batch.AnchorFadeIds[fadeStart + i];
+                _forceFadeOut.Add(fadeId);
+                if (_fadeOpacity.TryGetValue(fadeId, out float opacity) && opacity > FadeEpsilon) alive = true;
+            }
+            return alive;
+        }
+
+        private bool TryForceFadeOut(long fadeId)
+        {
+            if (!(_fadeOpacity.TryGetValue(fadeId, out float opacity) && opacity > FadeEpsilon)) return false;
+            _forceFadeOut.Add(fadeId);
+            return true;
         }
 
         // Project the gathered _symbolPoints to screen/depth/valid. Parallel Burst job at/above the threshold, else
