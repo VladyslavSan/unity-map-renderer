@@ -119,13 +119,17 @@ Tick(sceneFrame, batch, atlas, dt, materials, version)
                                         (one draw per non-empty material slot)
 ```
 
-Two culls happen **before** any projection/staging/collision, in `GatherSymbolPoints`, cheapest-first:
+Three fade-out triggers happen **before** any projection/staging/collision, in `GatherSymbolPoints`:
 
-1. **Tile-coverage pre-cull** (this work): drop a whole tile's records when the tile is a screen sliver.
-2. **B-3 distance cull** (`LabelViewDistance`): drop an individual label beyond a horizon radius.
+1. **Departing** (`RecordDeparting`): the record's tile is leaving cover — flagged by the batch builder from
+   `CollectInto`'s active/departing split (see §6). Fades out unconditionally.
+2. **Tile-coverage pre-cull**: drop a whole tile's records when the tile is a screen sliver.
+3. **B-3 distance cull** (`LabelViewDistance`): drop an individual label beyond a horizon radius.
 
-Both just set the record's gather offset to `-1`, which the Burst stage job already treats as "skip". No job
-changed to add either cull.
+A triggered record is **not** hard-dropped if its fade is still alive: gather keeps STAGING it (re-projected to
+its live position) and forces its opacity toward 0 in emit — so it eases OUT in place instead of popping. Only
+once it has fully faded does gather set its offset to `-1` (the Burst stage job's "skip"). This soft-cull is the
+single mechanism behind all three; no job changed to add any of them.
 
 ---
 
@@ -165,3 +169,38 @@ foreshortened slivers a radius keeps.
 
 Deferred (see `docs/label-tile-precull-design.md`): the green/red survived-vs-culled debug overlay,
 tilt-scaling the threshold, and explicit hysteresis (the A-4 fade already softens boundary flicker for v1).
+
+---
+
+## 6. Retain-as-departing — fading a tile out when it leaves cover
+
+The coverage/distance culls (§4–5) fade a record that is still *in* the batch. A normal **tile unload** is
+different: the tile leaves cover, its labels leave the collected set, the batch rebuilds without them, and they
+would pop (their fade record decays with nothing drawn). The fix keeps them in the batch for a grace window.
+
+When a tile leaves cover, `SymbolTileLabelStore` releases it to the **warm cached side** (kept for a cache-hit
+re-entry) and, if a grace window is set, stamps it **departing** (`key → wall-clock expiry`). While departing:
+
+- `CollectInto` still emits its labels — appended **after** the active ones — and reports the split via
+  `out activeCount`. A departing point label whose cross-tile identity is already claimed by an active label is
+  skipped (the active copy shows → seamless tile-to-tile transfer, no fade).
+- `SymbolLabelBatchBuilder.Build(…, activeCount)` flags every record at index ≥ `activeCount` as
+  `RecordDeparting`, which gather (§4) treats as an unconditional fade-out trigger.
+- The store **purges** the stamp once `now ≥ expiry`. The grace
+  (`SymbolLabelSubsystem.DepartingGraceSeconds`, derived from `FadeDurationSeconds`) exceeds the fade, so a purge
+  only ever drops an already-invisible label. Re-entry within grace clears the stamp (via `RemoveCached`, the
+  single "leaves cached" chokepoint that keeps the invariant *departing ⊆ cached*) → the label fades back in.
+
+Because a departing label is a **real batch record**, it re-projects to its live position every frame — so it
+eases out correctly even while the camera pans (the whole reason not to cache frozen quads). The wall-clock is
+threaded from `MapView.LateUpdate` (`Time.timeAsDouble`). Telemetry: `LastDepartingCulledCount`,
+`SymbolLabelSubsystem.DepartingTileCount`.
+
+**Known limitation (accepted for now):** the fade-out **borrows the cache's warm copy** of the labels, so it is
+gated on the prepared mesh cache being enabled — cache off ⇒ `Release` drops the labels immediately (and the
+subsystem sets grace 0), so an unloaded tile still pops. The cache is on by default, so production and the demo
+get the fade; cache-off is a debug / low-memory toggle where revisits re-fetch anyway. **Decouple path if this
+matters later:** the fade only needs the labels for the grace window (~0.5 s), independent of the cache-hit
+retention (minutes), so `_departing` could *own* the released entry for the grace window when the cache is off
+(a second, short-lived retention path in the store) instead of borrowing the cached FIFO — making "labels never
+pop" hold in every config. Small change (+ a test); not done.
