@@ -73,7 +73,12 @@ Status: **IN PROGRESS** (hand-driven). Author: cleanup epic, 2026-07-01.
   (post-write the handle is layer-type-agnostic). Leak guard retargeted to a MeshDataArray alloc/dispose
   counter (unapplied arrays are native leaks Unity tracks); holding-pen + teardown dispose every unapplied
   array. Perf-parity flags preserved (`DontValidateIndices|DontRecalculateBounds` + worker-computed bounds).
-- Stages C, D1, D2 — pending (see §4).
+- Stages C, D1, D2 — pending (see §4). *(Historical note — all landed above; see the dated DONE entries.)*
+- **Stage E — symbols as an immediate render layer — DESIGNED (planned, 2026-07-12).** Brings symbols into the
+  render-layer model **for DRAW only** (order + presence), superseding the §3.1 "out of scope" note for draw.
+  A `DrawPersistence` (Persistent/Immediate) property + a unified global draw-order `renderQueue` + a single
+  `beginCameraRendering` re-submit orchestrator. Fixes the interleaving fidelity gap **and** the Editor-only
+  label "blink" in one refactor. Gated on an ordering-determinism prototype. Full design in **§7**.
 
 This is the "make it right" plan for the styled-layer / mesh build pipeline. It replaces the
 fills-vs-lines split (which drifted away from `ARCHITECTURE.md`'s "ordered list of layers") with a
@@ -138,9 +143,12 @@ one registry entry** — no edits to the layer set, the backends, or the consume
 `index == draw order == material index`. One ordering. `_fills`/`_lines`, `FillCount + li`, and the
 "fills first" comments are gone.
 
-Symbols/text are explicitly **out of scope** — per `ARCHITECTURE.md` §"Two geometry classes" they are a
-separate, placed-every-frame path. `IRenderLayer` covers the **static-geometry** class (fill, line,
-fill-extrusion).
+Symbols/text are out of scope **for the BUILD path** — per `ARCHITECTURE.md` §"Two geometry classes" they
+are a separate, placed-every-frame path, and `IRenderLayer`'s Burst mesh build (§3.2) covers the
+**static-geometry** class (fill, line, fill-extrusion) only. But their **DRAW** — painter's-order position
+and per-render presence — *is* a concern they share with fill/line, and today it is unhandled (symbols draw
+outside the `renderQueue` chain, as one z-group on top). That gap, and the design that folds symbols into
+the render-layer model **for draw only** (a `DrawPersistence` property + a per-layer queue), is **§7**.
 
 ### 3.2 The managed ⇄ Burst boundary (the crux)
 
@@ -294,3 +302,97 @@ Two viable shapes:
 
 Recommendation: **(ii)**. Same destination; the risky lifecycle rewrite doesn't block the win the user
 actually wants, and D1's correctness is proven standalone before D2 touches the tile loop.
+
+---
+
+## 7. Symbols as an immediate render layer — draw order + presence (planned)
+
+Discovered 2026-07-12 while chasing an Editor-only label "blink". Two findings converge on **one** extension
+of the render-layer model, and it **supersedes the "symbols out of scope" note in §3.1 for DRAW** (that
+exclusion is about the BUILD/lifetime path; draw *order* and *presence* are a different concern that symbols
+share with fill/line). This does **not** fold symbol *build* into the Burst mesh pipeline — the per-frame
+collision path stays.
+
+### 7.1 The two gaps (same root)
+
+1. **Draw order.** `RenderLayerSet` numbers only fill/line (`renderQueue = TransparentQueue + drawIndex`);
+   symbol layers "take no slot" and their per-layer `SymbolText` materials carry no queue. Every symbol layer
+   renders at the base transparent queue via a **separate `Graphics.RenderMesh` path** — one z-group pinned on
+   top of all tiles. Correct only when the style lists all symbol layers last (the common case); **wrong** when
+   a style interleaves a fill/line **above** a symbol layer, and **undefined** among symbol layers. Violates
+   `ARCHITECTURE.md`'s "ordered list of layers, composited in order."
+2. **Presence (the "blink").** Symbols draw via immediate-mode `Graphics.RenderMesh`, submitted once per
+   `LateUpdate`. In the **Editor** the Game View repaints on mouse/UI **without running the player loop**, so
+   the label draw isn't re-issued for those repaints → labels wink out (tiles stay — they're persistent).
+   Confirmed **Editor-only** (a Development build does not blink; the shipped product was never affected). It is
+   nonetheless the same root: an immediate-draw layer that nobody re-issues per render.
+
+Both reduce to one missing concept: symbols are a render layer whose DRAW must be (a) **ordered** in the
+global painter's chain and (b) **re-issued** every camera render.
+
+### 7.2 Decision — `DrawPersistence` on `IRenderLayer`
+
+Add a draw-persistence kind to `IRenderLayer`:
+- **Persistent** — a backend redraws it every render on its own (fill/line: BRG / entities / mesh renderers).
+  The orchestrator does nothing per-render.
+- **Immediate** — the orchestrator must re-issue it every camera render (symbols: `Graphics.RenderMesh`),
+  registered into `RenderPipelineManager.beginCameraRendering`.
+
+It is **orthogonal to draw ORDER**; both live on the interface, and symbols need both:
+
+| Concern | Mechanism | Fixes |
+|---|---|---|
+| **Presence** — re-issued each render? | `DrawPersistence` (Persistent/Immediate); immediate layers re-submitted in `beginCameraRendering` | the Editor blink |
+| **Order** — painter's position | `renderQueue = TransparentQueue + global drawIndex` across ALL layers | the interleaving gap |
+
+### 7.3 Locked design points
+
+- **Keep the build/lifetime two-class split; unify only DRAW (order + presence).** `IRenderLayer` already
+  abstracts the render object; symbols join it *for draw*, while their BUILD stays the per-frame collision
+  path. `ARCHITECTURE.md` "two geometry classes" stands — it is about *lifetime*, not draw.
+- **Decouple collision order from draw order.** MapLibre does **global** symbol collision (all symbol layers
+  compete — already correct here) but **draws** each symbol layer at its own style position. Keep the single
+  global collision pass; give each symbol layer's material its **own** `renderQueue`.
+- **One global draw-order index over ALL painted layers** (fill/line/symbol), replacing the fill/line-only
+  numbering — so symbol positions leave the right gaps in the fill/line offsets.
+- **Symbols share ONE collision but may occupy MULTIPLE draw slots.** A style `symbolA … fill … symbolB` gives
+  A and B different queues but one collision pass. The existing per-material-slot emit already maps 1 slot ↔ 1
+  symbol layer ↔ 1 material, so each slot becomes its own immediate draw at its own queue; collision stays a
+  single cross-slot pass. **No slot restructure.**
+- **One orchestrator owns the single `beginCameraRendering` subscription** — iterates the immediate layers in
+  queue order, gated to the map camera (not SceneView/other), unsubscribed on dispose. Not per-layer
+  subscriptions (reentrancy + teardown hazards).
+- **Move the label submit out of `LateUpdate` into the per-render callback.** LateUpdate (or a data-change)
+  BUILDS the label meshes; the callback SUBMITS them each render — correct in Editor AND build, retiring the
+  standalone in-`LateUpdate` `RenderMesh`.
+
+### 7.4 Open question to lock BEFORE code — ordering determinism ⚠
+
+URP sorts the transparent queue by `renderQueue` **and** camera distance. Immediate billboards (`RenderMesh`,
+clustered depth) interleaving with BRG world-depth meshes via `renderQueue` alone **may not be deterministic**
+within a queue. Two options:
+- **(a) Trust `RenderMesh` + `renderQueue`** — verify with an interleaved style + a snapshot; cheapest if it
+  holds.
+- **(b) Route immediate draws through a `CommandBuffer` / `ScriptableRenderPass`** at explicit points so order
+  is exact regardless of the distance sort — more work, bulletproof.
+
+Prototype **(a)** first (one interleaved-style snapshot answers it); fall back to **(b)** if the sort
+reorders. **This decision gates implementation.**
+
+### 7.5 Acceptance teeth
+
+- An **interleaved** style (`fill` above a `symbol` layer) composites correctly — a snapshot with a symbol
+  layer beneath a later fill shows the fill occluding the labels (today it does not). Mirror the existing
+  `LayerOrderSnapshotTests` fill/line net.
+- Two symbol layers on the same feature draw in **style order** (icon under text).
+- **No Editor blink**: labels are re-issued every camera render (manual Editor verify — it is an Editor-only
+  artifact, so not headless-testable; the build never blinked).
+- **Global symbol collision is unchanged** — the cross-layer competition still holds (a differential/count
+  check that the survivor set is identical to today).
+
+### 7.6 Sequencing
+
+A follow-up slice — **"Stage E — symbols as an immediate render layer"** — independent of the (done) fill/line
+A–D2 work. It rides on the existing per-symbol-layer material slots, so the scope is: the `DrawPersistence`
+property + a unified global draw-order index + per-layer symbol `renderQueue` + the single re-submit
+orchestrator. **Gate on §7.4 first** (the ordering-determinism prototype), then implement.
