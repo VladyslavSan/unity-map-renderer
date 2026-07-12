@@ -24,7 +24,7 @@ UI-like, the documented exception"), not a silent shortcut. This file records wh
    (Line) GBuffer — capability passes for a lit, potentially-opaque, potentially-shadow-casting surface.
    None of that applies to unlit screen-space text; `Symbol.shader` has exactly one pass.
 
-## Graphics.RenderMesh screen-space technique (S20 plan Risk #1)
+## Screen-space billboard technique (S20 plan Risk #1)
 
 Because the vertex shader treats `POSITION.xy` as **logical screen pixels** and manually builds clip
 space, two platform-specific correctness points are load-bearing and are exercised by a headless test,
@@ -36,12 +36,13 @@ not left to a hopeful guess:
   vs OpenGL), so the vertex shader applies the SAME correction URP's own manually-constructed clip
   position helper does (`Core.hlsl`'s full-screen-triangle helper): flip Y when
   `UNITY_UV_STARTS_AT_TOP`. See `Symbol_ForwardPass.hlsl`'s `SymbolPassVertex`.
-- **CPU frustum culling must not reject the draw.** `Graphics.RenderMesh`'s `RenderParams.worldBounds` is
-  evaluated in the NORMAL sense (as if `POSITION` were a real object-space position transformed by the
+- **CPU frustum culling must not reject the draw.** A `MeshRenderer`'s cull is evaluated against
+  `Mesh.bounds` in the NORMAL sense (as if `POSITION` were a real object-space position transformed by the
   object-to-world matrix) — but our vertex data holds screen-pixel values, not real-world coordinates, so
   a tight/default bounds would make Unity's CPU-side cull reject the draw long before the GPU ever runs
-  the vertex shader. `LabelPlacementSystem` passes an enormous `worldBounds` (effectively "never cull") to
-  sidestep this.
+  the vertex shader. `LabelPlacementSystem` sets an enormous `mesh.bounds` (effectively "never cull") to
+  sidestep this — the hidden presenter GameObject's own identity transform is otherwise inert (the vertex
+  shader never reads object-to-world).
 
 Both points are verified against the REAL shader + REAL uploaded SDF atlas by
 `Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolAtlasOrientationSnapshotTests.cs` (off-screen
@@ -79,5 +80,8 @@ checks and why an upside-down or CPU-culled render would fail it.
 
 Straight alpha blend, `ZWrite Off`, **`ZTest Always`** (unlit, UI-like text renders on top of the map
 unconditionally — MapLibre point labels are not depth-occluded by ground geometry in this project's
-current scope), `Cull Off` (billboard triangle winding is incidental — see `BillboardMath`'s doc comment),
-`Queue = Transparent+50` (after fills/lines, painter's-algorithm-safe).
+current scope, and this stays true when fill-extrusion lands — see `docs/render-layer-unification.md` §7
+risk 5), `Cull Off` (billboard triangle winding is incidental — see `BillboardMath`'s doc comment). Queue:
+the shader tag declares `Overlay` (4000), the demo/no-style fallback only — a production symbol layer's
+material has its `renderQueue` overridden at runtime to `TransparentQueue + DrawIndex`, interleaved with
+every other painted layer in declared order (E2, `docs/render-layer-unification.md` §3.5).

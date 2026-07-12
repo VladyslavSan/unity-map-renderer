@@ -8,6 +8,7 @@ using NUnit.Framework;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using Background = MapRenderer.Core.Style.Background;
 
 namespace MapRenderer.Tests
 {
@@ -90,6 +91,8 @@ namespace MapRenderer.Tests
             // Layers: declared order preserved; every layer recognized (none Unknown).
             Assert.IsTrue(doc.Layers.Count >= 8, "real style has its layers");
             Assert.AreEqual(StyleLayerType.Background, doc.Layers[0].LayerType, "first declared layer");
+            Assert.IsInstanceOf<Background.StyleLayer>(doc.Layers[0],
+                "background dispatches to its typed subclass (E3), like fill/line/symbol.");
             foreach (var l in doc.Layers)
                 Assert.AreNotEqual(StyleLayerType.Unknown, l.LayerType,
                     $"every layer type in the real style is recognized (offender id={l.Id})");

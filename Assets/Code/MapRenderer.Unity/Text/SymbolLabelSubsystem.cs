@@ -14,7 +14,6 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
-using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Common;
@@ -44,22 +43,17 @@ namespace MapRenderer.Unity.Text
         private const int AtlasDimension = 4096;
 
         private readonly MapCamera _camera;
-        private readonly MapMaterialSet _materialSet;
 
         private GlyphManager _glyphManager;
         private GlyphAtlasTexture _atlasTexture;
         private StyledSymbolTileBuilder _builder;
 
-        // Flat symbol-layer list (index == LabelInstance.MaterialIndex), one per-layer material each (a
-        // SymbolText clone with this layer's text-halo-* bound), and a source id → its layers' GLOBAL
-        // indices map (only sources with symbol layers are observed).
+        // Flat symbol-layer list (index == LabelInstance.MaterialIndex) and a source id → its layers'
+        // GLOBAL indices map (only sources with symbol layers are observed). D11/E2: per-layer MATERIALS
+        // moved to SymbolRenderLayer (RenderLayerSet.Build owns cloning + halo bind) — this class only
+        // needs the layer COUNT (CurrentBatch's slot count) and the layers' Source/id for build routing.
         private readonly List<SymbolStyle.StyleLayer> _allSymbolLayers = new();
-        private Material[] _layerMaterials = Array.Empty<Material>();
         private Dictionary<string, List<int>> _layersBySource;
-
-        private static readonly int HaloColorId = Shader.PropertyToID("_HaloColor");
-        private static readonly int HaloWidthId = Shader.PropertyToID("_HaloWidthPx");
-        private static readonly int HaloBlurId = Shader.PropertyToID("_HaloBlurPx");
 
         // Per-tile build markers (Profiler window → "MapRenderer.Symbol"). Only the SYNCHRONOUS main-thread
         // stages are marked — the shaping BuildAsync is awaited (its wall-clock includes glyph-fetch
@@ -132,18 +126,12 @@ namespace MapRenderer.Unity.Text
         /// out-of-cover tiles' labels are kept warm (clamped to a finite hard cap inside the store even when
         /// this is 0/unbounded).</param>
         /// <param name="cacheEnabled">The prepared mesh cache's master toggle — see <see cref="_cacheEnabled"/>.</param>
-        public SymbolLabelSubsystem(MapCamera camera, MapMaterialSet materialSet,
-            int preparedCacheMaxCount = 0, bool cacheEnabled = true)
+        public SymbolLabelSubsystem(MapCamera camera, int preparedCacheMaxCount = 0, bool cacheEnabled = true)
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
-            _materialSet = materialSet;
             _cacheEnabled = cacheEnabled;
             _store = new SymbolTileLabelStore(preparedCacheMaxCount);
         }
-
-        /// <summary>The per-symbol-layer materials indexed by <see cref="LabelInstance.MaterialIndex"/> —
-        /// handed to <c>LabelPlacementSystem.Tick</c> so each layer's survivors draw with their own halo.</summary>
-        public IReadOnlyList<Material> LayerMaterials => _layerMaterials;
 
         /// <summary>True once <see cref="SetStyle"/> found at least one symbol layer — MapView prefers this
         /// subsystem over the demo <c>LabelInstances</c> seam only when true.</summary>
@@ -171,8 +159,14 @@ namespace MapRenderer.Unity.Text
         /// <summary>
         /// Rebuild for a new style: group its symbol layers by source and (re)create the shared glyph
         /// pipeline from the style's <c>glyphs</c> URL. Idempotent — safe to call on every restyle.
+        ///
+        /// <para>D10: <paramref name="symbolLayers"/> is the caller-derived list of symbol layers, already
+        /// built by <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerSet"/> in declared order (the
+        /// single registry — <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerFactory"/>) — this
+        /// method no longer re-walks <paramref name="style"/>'s layers with its own type-check. <paramref
+        /// name="style"/> stays a parameter for <c>style.Glyphs</c> (the glyph source factory).</para>
         /// </summary>
-        public void SetStyle(StyleDocument style)
+        public void SetStyle(StyleDocument style, IReadOnlyList<SymbolStyle.StyleLayer> symbolLayers)
         {
             _store.Clear();
             _lastUploadedGlyphCount = 0;
@@ -187,11 +181,12 @@ namespace MapRenderer.Unity.Text
 
             _allSymbolLayers.Clear();
             _layersBySource = new Dictionary<string, List<int>>();
-            if (style?.Layers != null)
+            if (symbolLayers != null)
             {
-                foreach (StyleLayer layer in style.Layers)
+                for (int i = 0; i < symbolLayers.Count; i++)
                 {
-                    if (!(layer is SymbolStyle.StyleLayer symbol) || symbol.Source == null) continue;
+                    SymbolStyle.StyleLayer symbol = symbolLayers[i];
+                    if (symbol?.Source == null) continue; // defensive — RenderLayerFactory's guard makes this unreachable
                     int index = _allSymbolLayers.Count; // == this layer's MaterialIndex
                     _allSymbolLayers.Add(symbol);
                     if (!_layersBySource.TryGetValue(symbol.Source, out List<int> indices))
@@ -201,23 +196,10 @@ namespace MapRenderer.Unity.Text
             }
             if (_layersBySource.Count == 0) return; // no symbol layers — stay idle (demo seam still works)
 
-            // Per-layer materials: one SymbolText clone each, with this layer's text-halo-* bound by name
-            // (F1). text-color/opacity still bake per-vertex (LabelPaint). Halo is evaluated at the current
-            // zoom — constant halo is exact; a zoom-expression halo won't track zoom (a first-cut limit).
-            // Built INDEPENDENTLY of the glyph pipeline so a style without a glyphs URL still wires cleanly.
-            Material baseMat = _materialSet != null ? _materialSet.SymbolText : null;
-            if (baseMat == null)
-                Debug.LogWarning("[SymbolLabelSubsystem] MapMaterialSet.SymbolText unassigned — labels will not render.");
-            _layerMaterials = new Material[_allSymbolLayers.Count];
-            double zoom = _camera.CurrentProperties.Zoom;
-            for (int i = 0; i < _allSymbolLayers.Count; i++)
-            {
-                if (baseMat == null) { _layerMaterials[i] = null; continue; }
-                Material m = baseMat.CloneWithParent();
-                m.name = $"MapSymbolText_Layer{i}";
-                BindHalo(m, _allSymbolLayers[i].Paint, zoom);
-                _layerMaterials[i] = m;
-            }
+            // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) are no longer built here —
+            // they live on each SymbolRenderLayer, built by RenderLayerSet.Build from this SAME symbolLayers
+            // list (in the same declared order, so the ordinal mapping stays 1:1). This class only needs the
+            // glyph pipeline below.
 
             // The glyph pipeline needs the style's glyphs URL. Without it there are no glyphs to shape, so
             // leave _builder null (OnTileBytesReady no-ops) rather than throw — the labels just don't render.
@@ -231,28 +213,6 @@ namespace MapRenderer.Unity.Text
             _glyphManager = new GlyphManager(glyphSource, new GlyphAtlas(dim, dim));
             _atlasTexture = new GlyphAtlasTexture();
             _builder = new StyledSymbolTileBuilder(_glyphManager);
-        }
-
-        private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom)
-        {
-            // Constant/zoom halo only (the locked first-cut scope). A data-driven (Feature/Composite) halo
-            // would throw from Evaluate(zoom) — leave the material's inherited base halo rather than fault
-            // the whole style load (data-driven halo is a documented follow-up).
-            try
-            {
-                var haloColor = paint.HaloColor.Evaluate(zoom); // MapRenderer.Core.Expressions.Color (sRGB)
-                // sRGB→linear (project is Linear color space; the shader consumes _HaloColor directly, and
-                // SetColor uploads raw floats with no gamma conversion) — mirrors the vertex text-color bake
-                // in LabelPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
-                material.SetColor(HaloColorId,
-                    new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A).linear);
-                material.SetFloat(HaloWidthId, paint.HaloWidth.Evaluate(zoom));
-                material.SetFloat(HaloBlurId, paint.HaloBlur.Evaluate(zoom));
-            }
-            catch (System.ArgumentException)
-            {
-                // data-driven halo not supported yet — keep the base material's halo.
-            }
         }
 
         /// <summary>TileManager hook (MAIN THREAD): a tile's MVT bytes are ready — ENQUEUE a deferred build for
@@ -414,7 +374,7 @@ namespace MapRenderer.Unity.Text
         public SymbolLabelBatch CurrentBatch()
         {
             double quantize  = WebMercator.GroundResolution(_camera.CurrentProperties.Zoom);
-            int    slotCount = _layerMaterials.Length > 0 ? _layerMaterials.Length : 1;
+            int    slotCount = _allSymbolLayers.Count > 0 ? _allSymbolLayers.Count : 1;
             // CollectInto appends DEPARTING labels (tiles leaving cover, kept warm for a fade-out) after the active
             // ones and reports the split; the builder flags the departing records so the placement gather fades them
             // out instead of popping. Pass the projection so the batch stores each tile's render-space corners for
@@ -443,10 +403,6 @@ namespace MapRenderer.Unity.Text
 
         private void DisposePipeline()
         {
-            for (int i = 0; i < _layerMaterials.Length; i++)
-                _layerMaterials[i].DestroySafely();
-            _layerMaterials = Array.Empty<Material>();
-
             _atlasTexture?.Dispose();
             _atlasTexture = null;
             _glyphManager?.Dispose();

@@ -109,10 +109,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Constructs the BRG and registers each layer material from <paramref name="layerMaterials"/> — the
-        /// one ordered, per-layer material list in declared order (<c>index == materialIndex ==
-        /// AddTileLayer index</c>). Materials are referenced (not owned) — the <see cref="Style.RenderLayerSet"/>
-        /// disposes them. Draw order is decided per-item by <c>material.renderQueue</c> in <see cref="Rebuild"/>,
-        /// independent of this registration order.
+        /// one ordered, FULL-WIDTH per-layer material list in declared order (<c>index == materialIndex ==
+        /// AddTileLayer index</c> == <see cref="Style.IRenderLayer.DrawIndex"/>). Materials are referenced
+        /// (not owned) — the <see cref="Style.RenderLayerSet"/> disposes them. Draw order is decided
+        /// per-item by <c>material.renderQueue</c> in <see cref="Rebuild"/>, independent of this
+        /// registration order. E1: a <c>null</c> entry (a symbol/background slot whose draw path has not
+        /// migrated yet, §3.3) is stored as a placeholder — NOT registered with BRG — so the list stays
+        /// full-width aligned; <see cref="AddTileLayer"/> is never called for that index (the tile produce
+        /// path filters to <c>ITileMeshRenderLayer</c> slots), so no further guard is needed.
         /// </summary>
         public TileRenderer(System.Collections.Generic.IReadOnlyList<Material> layerMaterials)
         {
@@ -120,7 +124,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
             for (int i = 0; i < layerMaterials.Count; i++)
             {
-                var mat   = layerMaterials[i];
+                var mat = layerMaterials[i];
+                if (mat == null) { _layerMaterials.Add((default, null)); continue; } // placeholder — keeps the list full-width aligned
                 var brgId = _brg.RegisterMaterial(mat);
                 _layerMaterials.Add((brgId, mat));
             }
@@ -263,10 +268,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> indexes into the material list built at construction
-        /// (fills in declared order, then lines in declared order). <paramref name="tileId"/> is part of
-        /// the shared <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile
-        /// hierarchy; BRG draws a flat instance buffer and does not use it.
+        /// <paramref name="materialIndex"/> is the layer's global draw slot (<see cref="Style.IRenderLayer.DrawIndex"/>),
+        /// indexing the full-width material list built at construction; non-tile-mesh slots are null and
+        /// never receive an AddTileLayer call. <paramref name="tileId"/> is part of the shared
+        /// <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile hierarchy; BRG
+        /// draws a flat instance buffer and does not use it.
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {

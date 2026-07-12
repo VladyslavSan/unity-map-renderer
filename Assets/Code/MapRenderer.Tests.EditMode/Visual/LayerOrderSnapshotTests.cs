@@ -122,6 +122,16 @@ namespace MapRenderer.Tests.Visual
                     return;
                 }
 
+                // ── Non-vacuous guard (§7.11): the TOP layer (red fill, queue 3002) must win the composite. ──
+                // Before the winding fix the fill quads rendered NOTHING (front-facing under _Cull:1), so only
+                // the blue line drew — this region read BLUE and the variance tooth below passed vacuously.
+                // Requiring red-dominance proves all three layers render AND that painter order (fill-on-top-
+                // of-line, the keystone case) actually puts the top fill on top.
+                Assert.That(mean[0], Is.GreaterThan(mean[1]).And.GreaterThan(mean[2]),
+                    $"Top layer (red fill) must dominate the composite (meanRGB=" +
+                    $"({mean[0]:F3},{mean[1]:F3},{mean[2]:F3})). A blue/green-dominant region means the fill " +
+                    "quads did not render (the §7.11 winding bug) or painter order is wrong.");
+
                 // ── No-z-fighting tooth: a clean composite has low colour variance. ──
                 // A coplanar ZWrite-On approach would speckle between the saturated layer colours
                 // and inflate this far past the threshold.
@@ -167,7 +177,11 @@ namespace MapRenderer.Tests.Visual
             };
             mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
             mesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
-            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
+            // CCW winding — MapFill.mat sets _Cull:1 (Cull Front), so the front-facing {0,2,1,0,3,2} order
+            // renders INVISIBLE from above (the §7.11 bug: these quads drew nothing, and the composite tooth
+            // passed vacuously on the lone blue line). {0,1,2,0,2,3} matches earcut's outer-ring CCW-on-screen
+            // convention (Earcut.cs:17) so the real cull state renders them — same fix as BackgroundRenderLayer.
+            mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
             mesh.RecalculateBounds();
 
             var go = new GameObject("FillQuad");

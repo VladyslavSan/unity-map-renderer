@@ -16,10 +16,10 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
-using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests; // TestGlyphSource
+using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Text
 {
@@ -51,7 +51,6 @@ namespace MapRenderer.Tests.Text
 
         private GameObject _camGo;
         private RenderTexture _rt;
-        private MapMaterialSet _materialSet;
         private SymbolLabelSubsystem _subsystem;
         private byte[] _tileBytes;
         private byte[] _latinGlyphs;
@@ -67,10 +66,10 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            _materialSet = ScriptableObject.CreateInstance<MapMaterialSet>();
-            _materialSet.SymbolText = new Material(Shader.Find("Map/Symbol/Text"));
-
-            _subsystem = new SymbolLabelSubsystem(mapCamera, _materialSet);
+            // D11/E2: the subsystem no longer owns a MapMaterialSet (per-layer materials moved to
+            // SymbolRenderLayer) — this suite tests build/pump/atlas behaviour only, none of which touches
+            // materials.
+            _subsystem = new SymbolLabelSubsystem(mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
             _latinGlyphs = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
         }
@@ -86,9 +85,6 @@ namespace MapRenderer.Tests.Text
                 var cam = _camGo.GetComponent<Camera>();
                 if (cam != null) cam.targetTexture = null;
             }
-            if (_materialSet != null && _materialSet.SymbolText != null)
-                UnityEngine.Object.DestroyImmediate(_materialSet.SymbolText);
-            if (_materialSet != null) UnityEngine.Object.DestroyImmediate(_materialSet);
             if (_rt != null) UnityEngine.Object.DestroyImmediate(_rt);
             if (_camGo != null) UnityEngine.Object.DestroyImmediate(_camGo);
         }
@@ -99,10 +95,22 @@ namespace MapRenderer.Tests.Text
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
-            _subsystem.SetStyle(StyleParser.Parse(StyleJson));
+            StyleDocument style = StyleParser.Parse(StyleJson);
+            _subsystem.SetStyle(style, ExtractSymbolLayers(style));
         }
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
+
+        // E1 D10: production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
+        // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
+        // extraction — kept local to the test assembly (outside the D10 grep tooth's scope).
+        private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
+        {
+            var result = new List<Symbol.StyleLayer>();
+            foreach (StyleLayer layer in style.Layers)
+                if (layer is Symbol.StyleLayer symbol) result.Add(symbol);
+            return result;
+        }
 
         // ── Tooth 1: bounded starts — 5 bytes-ready pushes, one pump starts exactly ONE build ──
         [Test]
@@ -242,7 +250,8 @@ namespace MapRenderer.Tests.Text
             // A GATED glyph source: the first fetch suspends on this UTCS until the test releases it.
             var gate = new UniTaskCompletionSource<GlyphRangeResponse>();
             _subsystem.GlyphSourceFactoryOverride = _ => new TestGlyphSource((fontStack, rangeStart, ct) => gate.Task);
-            _subsystem.SetStyle(StyleParser.Parse(StyleJson));
+            StyleDocument style = StyleParser.Parse(StyleJson);
+            _subsystem.SetStyle(style, ExtractSymbolLayers(style));
 
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey> { Key(tile) });
@@ -254,7 +263,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch).");
 
             // Restyle mid-build: cancels the in-flight build's token, clears the store, disposes the pipeline.
-            _subsystem.SetStyle(StyleParser.Parse(StyleJson));
+            StyleDocument restyle = StyleParser.Parse(StyleJson);
+            _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
             // Release the gate as CANCELLED — the suspended fetch throws OperationCanceledException, which
             // unwinds the build BEFORE it touches the (now disposed) glyph manager / atlas / store.
             gate.TrySetCanceled();

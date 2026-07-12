@@ -29,9 +29,12 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     ///
     /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c> directly on
     /// the Material) plus per-feature (vertex colours baked into the mesh), so <see cref="Rebuild"/> does no
-    /// material work — same as the instanced backends. <paramref name="layerMaterials"/> is the flattened
-    /// layer-material list (fills in declared order, then lines), so <c>materialIndex</c> matches
-    /// <see cref="BRG.TileRenderer.AddTileLayer"/> / <see cref="Entities.TileRenderer.AddTileLayer"/>.
+    /// material work — same as the instanced backends. <paramref name="layerMaterials"/> is the FULL-WIDTH,
+    /// global-draw-slot-aligned material list (fill/line/symbol/background in one declared order, §3.3), so
+    /// <c>materialIndex</c> matches <see cref="BRG.TileRenderer.AddTileLayer"/> /
+    /// <see cref="Entities.TileRenderer.AddTileLayer"/>. E1 audit: this ctor only STORES the list (no
+    /// registration, no index-0 seed), so a null entry at a symbol/background slot needs no guard here —
+    /// verified safe (design risk 3).
     ///
     /// Mesh lifetime: this backend creates and destroys only GameObjects. The Mesh assets are owned by
     /// <c>TileManager</c> (its S51 leak guard) and must NOT be destroyed here — <see cref="RemoveItem"/> and
@@ -182,8 +185,9 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
 
         /// <summary>
         /// Registers a tile-layer mesh as a child GameObject under its tile's container (created on demand).
-        /// Returns a handle for later removal. <paramref name="materialIndex"/> indexes the flattened
-        /// layer-material list (fills then lines), matching the instanced backends.
+        /// Returns a handle for later removal. <paramref name="materialIndex"/> is the layer's global draw
+        /// slot, indexing the full-width material list, matching the instanced backends; non-tile-mesh
+        /// slots are null and never receive this call.
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {

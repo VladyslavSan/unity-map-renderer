@@ -11,12 +11,13 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Line <see cref="IRenderLayer"/>: a MapLibre <c>line</c> layer as a runtime render object. Wraps the
-    /// managed <see cref="Meshing.StyledLineTileBuilder"/> (unchanged). Line width in pixel mode is resolved
-    /// in screen space by the shader (S104); the per-frame work here is a zoom-dependent dasharray
-    /// re-evaluated in <see cref="ApplyZoom"/>.
+    /// Line <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>line</c> layer as a runtime render object.
+    /// Wraps the managed <see cref="Meshing.StyledLineTileBuilder"/> (unchanged). Line width in pixel mode
+    /// is resolved in screen space by the shader (S104); the per-frame work here is a zoom-dependent
+    /// dasharray re-evaluated in <see cref="ApplyZoom"/>.
+    /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
-    internal sealed class LineRenderLayer : IRenderLayer
+    internal sealed class LineRenderLayer : ITileMeshRenderLayer
     {
         // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + per-line
         // dash re-eval). LineDash isolates the per-line zoom-step dasharray re-evaluation. Preserved verbatim
@@ -30,18 +31,22 @@ namespace MapRenderer.Unity.Rendering.Style
         private readonly Line.LayoutProperties _layout;
         private readonly ZoomStyleApplier      _applier;
 
-        public MapRenderer.Core.Style.StyleLayer StyleLayer { get; }
-        public Material                          Material   { get; }
+        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; }
+        public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
+        public DrawPersistence                   Persistence => DrawPersistence.Persistent;
+        public int                               DrawIndex   { get; }
+        public Material                          Material    { get; }
 
         private LineRenderLayer(
             Line.StyleLayer layer, Material material, Line.PaintProperties paint,
-            Line.LayoutProperties layout, ZoomStyleApplier applier)
+            Line.LayoutProperties layout, ZoomStyleApplier applier, int drawIndex)
         {
             StyleLayer = layer;
             Material   = material;
             _paint     = paint;
             _layout    = layout;
             _applier   = applier;
+            DrawIndex  = drawIndex;
         }
 
         /// <summary>
@@ -51,7 +56,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// the layer, exactly as the old <c>StyledLayerSet.Build</c> did.
         /// </summary>
         public static LineRenderLayer TryCreate(
-            Line.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom)
+            Line.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
         {
             Material mat = Materials.MaterialFactory.CreateLineMaterial(settings);
             if (mat == null) return null;
@@ -61,7 +66,7 @@ namespace MapRenderer.Unity.Rendering.Style
             var applier = new ZoomStyleApplier(mat);
             Materials.MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
             applier.ApplyZoom(initialZoom);
-            return new LineRenderLayer(layer, mat, paint, layout, applier);
+            return new LineRenderLayer(layer, mat, paint, layout, applier, drawIndex);
         }
 
         public void ApplyZoom(double zoom)

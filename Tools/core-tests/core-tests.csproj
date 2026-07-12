@@ -254,10 +254,15 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LayoutProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/StyleLayer.cs" />
 
     <!-- S13/S14: Engine-free paint tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillPaintTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/LinePaintTests.cs" />
+    <!-- E3: background paint tests (shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/BackgroundPaintTests.cs" />
 
     <!-- S105 Slice 1: Symbol style layer + text-field resolver (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/PropertyNames.cs" />

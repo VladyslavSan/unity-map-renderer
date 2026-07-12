@@ -6,19 +6,23 @@
 // entirely (screen-space billboards, built already-projected in C#). See Shaders/Map/Symbol/Text/README.md
 // for the full rationale; this is a deliberate, affirmed exception, not a silent shortcut.
 //
-// Submission: Graphics.RenderMesh/RenderParams (LabelPlacementSystem), ONE draw call per frame for every
-// visible label — never BatchRendererGroup, never a per-tile static mesh (T5: this shader/material is
-// never bound by AddTileLayer).
+// Submission (E2): persistent per-slot MeshRenderers, one per symbol layer, owned by SymbolRenderLayer
+// (LabelSlotPresenter) — Unity redraws them every camera render on its own, no orchestrator. The demo/
+// no-style path (no SymbolRenderLayer list) draws through LabelPlacementSystem's own fallback presenters,
+// the same mechanism. Graphics.RenderMesh is gone (retired E2) — never BatchRendererGroup, never a
+// per-tile static mesh (T5: this shader/material is never bound by AddTileLayer).
 //
 // Render state: parameterized as material-UI knobs (S58 pattern — see the "(C) Render state" Properties
 // block) so blend/depth/cull are tweakable in the inspector without editing the shader. Defaults reproduce
 // the original hardcode: straight alpha blend, ZWrite off, ZTest Always (unlit UI-like text always renders
 // on top — MapLibre point labels are not occluded by ground geometry), Cull off (billboard winding is
-// irrelevant — see BillboardMath's doc comment). Queue = Overlay (4000): the styled map layers get
-// renderQueue = LayerDrawOrder.TransparentQueue (3000) + layerIndex at runtime (RenderLayerSet), so a
-// 100+-layer style (liberty) reaches well past Transparent+50 (3050) and would overdraw labels — Overlay
-// sits above the whole 3000+N band (ceiling 5000) for realistic layer counts. (S105 will place symbol
-// layers at their real per-style draw position; this is the demo's "labels on top of everything" default.)
+// irrelevant — see BillboardMath's doc comment). Queue = Overlay (4000) is the DEMO/NO-STYLE FALLBACK
+// default only (this shader tag is never overridden for it, so it stays as the "labels on top of
+// everything" default a style-less material renders with). A production symbol layer's material gets its
+// renderQueue OVERRIDDEN at runtime by RenderLayerSet.Build — renderQueue = LayerDrawOrder.TransparentQueue
+// (3000) + the layer's global draw index (D7), interleaved with every other painted layer in declared
+// order (E2, design docs/render-layer-unification.md §3.5) — so a fill declared above a symbol layer
+// composites over its labels, exactly as MapLibre's painter's algorithm requires.
 Shader "Map/Symbol/Text"
 {
     Properties

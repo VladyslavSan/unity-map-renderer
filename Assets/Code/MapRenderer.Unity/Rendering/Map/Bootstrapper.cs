@@ -39,8 +39,8 @@ namespace MapRenderer.Unity.Rendering.Map
     ///   <see cref="InitialLongitude"/>  — initial map center longitude.
     ///   <see cref="InitialZoom"/>       — initial zoom level.
     ///
-    /// Rendered layer types: fill, line (with casing), and background. Symbol (labels/icons), raster,
-    /// and fill-extrusion layers present in a style are silently skipped until those features land.
+    /// Rendered layer types: fill, line (with casing), symbol (text), and background. Raster and
+    /// fill-extrusion layers present in a style are silently skipped until those features land.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -147,6 +147,10 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // Sky background on the main camera directly, so it applies with OR without an input Controller
             // (the stress scene omits the Controller). Camera.main is the same camera Wire framed.
+            // E3: this clear is the camera background ABOVE THE HORIZON under tilt (a style's tile cover
+            // never reaches past the far plane there) and the no-style default; a style's declared
+            // `background` layer now paints the GROUND via BackgroundRenderLayer (a real quad, §3.6) —
+            // this hardcoded colour does not compete with it and is unchanged byte-for-byte.
             var mainCam = Camera.main;
             if (mainCam != null && mainCam.backgroundColor == default)
                 mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky

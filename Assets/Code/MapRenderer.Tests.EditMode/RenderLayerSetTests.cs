@@ -1,10 +1,15 @@
 // Unity EditMode only — uses RenderLayerSet, RenderLayerFactory, MaterialFactory (per-layer Materials).
 // NOT included in Tools/core-tests.
 //
-// S89 Stage A acceptance: the fill-vs-line split is gone. Fill and line are two IRenderLayer
-// implementations in ONE ordered list where index == draw order == material index, dispatched by the
-// single RenderLayerFactory registry. These teeth fail if the old type-bucketing (fills then lines) or a
-// second ordering (materialIndex = FillCount + li) creeps back, or if a non-renderable layer takes a slot.
+// E1 (design docs/render-layer-unification.md §8, tooth §6.6): D7 global numbering supersedes Stage A's
+// "non-renderable takes no slot" contract — background/symbol now take slots too. These teeth fail if the
+// old type-bucketing (fills then lines) or a second ordering creeps back, if a genuinely unpainted type
+// (raster/unknown) takes a slot, or if a symbol/background slot's queue math desyncs the tile-mesh layers
+// shifted above it.
+//
+// E3 flip: background is now material-bearing too (a real quad + fill-base clone) — the LAST
+// null-material slot from E1/E2 is gone. Build_Materials_* and Build_QueueShift assert slot 0 like every
+// other slot; Factory_* now Dispose() the whole layer (background owns a GO + Mesh besides its material).
 
 using NUnit.Framework;
 using UnityEngine;
@@ -14,29 +19,48 @@ using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Tests.Visual;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
+using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S89 Stage A — the render-layer unification's structural teeth: one ordered <see cref="RenderLayerSet"/>,
-    /// fill/line interleaved by declared order (not bucketed by type), a single monotonic draw ordering, and
-    /// <see cref="RenderLayerFactory"/> as the sole dispatch point (non-renderable types take no slot).
+    /// E1 — the render-layer unification round-2 structural teeth: one ordered <see cref="RenderLayerSet"/>
+    /// over EVERY painted layer kind (D7), fill/line/symbol/background interleaved by declared order,
+    /// <c>index == DrawIndex == draw order == material index</c>, and <see cref="RenderLayerFactory"/> as
+    /// the sole dispatch point (only genuinely unpainted types take no slot).
     /// </summary>
     [TestFixture]
     public class RenderLayerSetTests
     {
-        // background (not renderable) + fill + line + fill: an interleaved style with a non-render layer.
-        // If the old type-bucketing survived, the line would sort after both fills (wrong). The background
-        // must take NO slot.
+        // background + fill + symbol + line + fill: one style exercising all four painted kinds, in an
+        // order that decisively separates "declared order" from "type-bucketed order" for BOTH the
+        // tile-mesh pair (fill, then symbol in between, then line, then fill again) and the queue shift
+        // (each tile-mesh layer's queue must shift by the count of non-tile-mesh layers preceding it).
         private const string InterleavedStyleJson = @"{
     ""version"": 8,
     ""name"": ""Interleaved"",
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
     ""layers"": [
-        { ""id"": ""bg"",     ""type"": ""background"", ""paint"": { ""background-color"": [""rgba"",10,10,10,1] } },
-        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
-        { ""id"": ""line-b"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""b"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1] } },
-        { ""id"": ""fill-c"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",0,0,255,1] } }
+        { ""id"": ""bg"",      ""type"": ""background"", ""paint"": { ""background-color"": [""rgba"",10,10,10,1] } },
+        { ""id"": ""fill-a"",  ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""symbol-b"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""b"", ""layout"": { ""text-field"": ""{NAME}"" } },
+        { ""id"": ""line-c"",  ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""c"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1] } },
+        { ""id"": ""fill-d"",  ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",0,0,255,1] } }
+    ]
+}";
+
+        // A second, minimal style for the factory dispatch test only — a raster layer alongside one fill,
+        // kept separate from InterleavedStyleJson so the Build_* teeth's index math stays exactly 5-wide.
+        private const string RasterAndFillStyleJson = @"{
+    ""version"": 8,
+    ""name"": ""RasterAndFill"",
+    ""sources"": {
+        ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] },
+        ""r"": { ""type"": ""raster"", ""tiles"": [""https://x/{z}/{x}/{y}.png""] }
+    },
+    ""layers"": [
+        { ""id"": ""raster-r"", ""type"": ""raster"", ""source"": ""r"" },
+        { ""id"": ""fill-a"",   ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } }
     ]
 }";
 
@@ -48,71 +72,162 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void Build_OneOrderedList_FillAndLineInterleavedByDeclaredOrder_BackgroundTakesNoSlot()
+        public void Build_AllFourKinds_TakeSlotsInDeclaredOrder()
         {
             using var set = Build(InterleavedStyleJson);
 
-            // Background is not a render layer → no slot. Three renderable layers remain, in declared order.
-            Assert.AreEqual(3, set.Count, "background must take no slot; fill+line+fill remain.");
+            // D7: EVERY painted layer takes a slot now — background and symbol included. Five declared
+            // layers → five slots, in declared order (not bucketed by type).
+            Assert.AreEqual(5, set.Count, "background/symbol/fill/line all take slots under D7 global numbering.");
 
-            // DECISIVE: the list is interleaved by DECLARED order (fill, line, fill) — NOT bucketed by type
-            // (which would be fill, fill, line). One list, two IRenderLayer kinds, no _fills/_lines split.
-            Assert.IsInstanceOf<Fill.StyleLayer>(set[0].StyleLayer, "index 0 = declared fill-a");
-            Assert.IsInstanceOf<Line.StyleLayer>(set[1].StyleLayer, "index 1 = declared line-b (BETWEEN the fills)");
-            Assert.IsInstanceOf<Fill.StyleLayer>(set[2].StyleLayer, "index 2 = declared fill-c");
-            Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
-            Assert.AreEqual("line-b", set[1].StyleLayer.Id);
-            Assert.AreEqual("fill-c", set[2].StyleLayer.Id);
-        }
+            Assert.IsInstanceOf<BackgroundRenderLayer>(set[0], "index 0 = declared background");
+            Assert.IsInstanceOf<Fill.StyleLayer>(set[1].StyleLayer, "index 1 = declared fill-a");
+            Assert.IsInstanceOf<SymbolRenderLayer>(set[2], "index 2 = declared symbol-b (BETWEEN fill and line)");
+            Assert.IsInstanceOf<Line.StyleLayer>(set[3].StyleLayer, "index 3 = declared line-c");
+            Assert.IsInstanceOf<Fill.StyleLayer>(set[4].StyleLayer, "index 4 = declared fill-d");
 
-        [Test]
-        public void Build_OneOrdering_RenderQueueStrictlyIncreasesWithDeclaredIndex()
-        {
-            using var set = Build(InterleavedStyleJson);
-
-            // index == draw order: renderQueue is a single monotonic sequence across ALL layer kinds.
-            int q0 = set[0].Material.renderQueue;
-            int q1 = set[1].Material.renderQueue;
-            int q2 = set[2].Material.renderQueue;
-
-            Assert.Less(q0, q1, "declared-earlier fill must draw under the interleaved line.");
-            Assert.Less(q1, q2, "the interleaved line must draw under the later fill (painter's order).");
-            Assert.GreaterOrEqual(q0, LayerDrawOrder.TransparentBandStart, "all layers share the transparent band.");
-        }
-
-        [Test]
-        public void Build_EachLayer_HasItsOwnDistinctMaterialInstance()
-        {
-            using var set = Build(InterleavedStyleJson);
             for (int i = 0; i < set.Count; i++)
-                for (int j = i + 1; j < set.Count; j++)
-                    Assert.AreNotSame(set[i].Material, set[j].Material,
-                        $"layer {i} and {j} must own distinct Material instances (never shared).");
+                Assert.AreEqual(i, set[i].DrawIndex, $"slot {i}'s DrawIndex must equal its declared-order index.");
         }
 
         [Test]
-        public void Factory_IsTheSoleDispatchPoint_NonRenderableTypeYieldsNoRenderLayer()
+        public void Build_Axes_MatchTheDesignsPinning()
         {
-            // Extensibility contract: RenderLayerFactory maps a StyleLayer subtype → IRenderLayer. Adding a
-            // static layer type is one arm here + one IRenderLayer class — the set/backends/consume loop are
-            // untouched. A non-renderable type (background) maps to null (no slot), which is why Build above
-            // yields 3, not 4.
+            using var set = Build(InterleavedStyleJson);
+
+            Assert.AreEqual(RenderLayerBuild.ViewGeometry, set[0].Build, "background is ViewGeometry.");
+            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[1].Build, "fill is TileMesh.");
+            Assert.AreEqual(RenderLayerBuild.FramePlaced,  set[2].Build, "symbol is FramePlaced.");
+            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[3].Build, "line is TileMesh.");
+            Assert.AreEqual(RenderLayerBuild.TileMesh,     set[4].Build, "fill is TileMesh.");
+
+            // Only the TileMesh layers implement the mesh-build capability — the tile produce loop's filter
+            // (TileManager.ComputeDenseLayerIds) relies on exactly this.
+            Assert.IsNotInstanceOf<ITileMeshRenderLayer>(set[0], "background is not a tile-mesh layer.");
+            Assert.IsInstanceOf<ITileMeshRenderLayer>(set[1], "fill IS a tile-mesh layer.");
+            Assert.IsNotInstanceOf<ITileMeshRenderLayer>(set[2], "symbol is not a tile-mesh layer.");
+            Assert.IsInstanceOf<ITileMeshRenderLayer>(set[3], "line IS a tile-mesh layer.");
+            Assert.IsInstanceOf<ITileMeshRenderLayer>(set[4], "fill IS a tile-mesh layer.");
+        }
+
+        [Test]
+        public void Build_QueueShift_TileMeshLayersShiftByPrecedingNonTileMeshCount()
+        {
+            using var set = Build(InterleavedStyleJson);
+
+            // D7: renderQueue = TransparentQueue + DrawIndex, and DrawIndex == the slot's own declared-order
+            // index — uniformly for EVERY slot, material-bearing or not (RenderLayerSet.Build increments
+            // drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that slot's own base
+            // material is unconfigured). E3 made background material-bearing too, so slot 0 (bg) now carries
+            // its own queue same as every other slot — the last E1/E2 null-material slot is gone.
+            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 0, set[0].Material.renderQueue,
+                "bg — slot 0, material-bearing as of E3 so it gets a queue like every other slot.");
+            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 1, set[1].Material.renderQueue, "fill-a — slot 1.");
+            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 2, set[2].Material.renderQueue,
+                "symbol-b — slot 2, material-bearing (E2, D11) so it gets a queue like every other slot.");
+            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 3, set[3].Material.renderQueue, "line-c — slot 3.");
+            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 4, set[4].Material.renderQueue, "fill-d — slot 4.");
+
+            // Monotonic over EVERY material-bearing slot (background, fill, symbol, line, fill), in declared order.
+            Assert.Less(set[0].Material.renderQueue, set[1].Material.renderQueue);
+            Assert.Less(set[1].Material.renderQueue, set[2].Material.renderQueue);
+            Assert.Less(set[2].Material.renderQueue, set[3].Material.renderQueue);
+            Assert.Less(set[3].Material.renderQueue, set[4].Material.renderQueue);
+        }
+
+        [Test]
+        public void Build_Materials_EverySlotMaterialBearing_AllDistinct()
+        {
+            using var set = Build(InterleavedStyleJson);
+
+            // E3: background is now material-bearing too (a fill-base clone, MaterialFactory
+            // .CreateBackgroundMaterial) — no slot is null when the material set is configured.
+            Assert.IsNotNull(set[0].Material, "bg now owns a material (E3) — BackgroundRenderLayer.Create clones MapMaterialSet.FillMaterial.");
+            Assert.IsNotNull(set[1].Material);
+            Assert.IsNotNull(set[2].Material, "symbol-b now owns a material (E2, D11) — SymbolRenderLayer.Create clones MapMaterialSet.SymbolText.");
+            Assert.IsNotNull(set[3].Material);
+            Assert.IsNotNull(set[4].Material);
+            Assert.AreNotSame(set[0].Material, set[1].Material, "bg and fill-a must be distinct instances.");
+            Assert.AreNotSame(set[0].Material, set[2].Material, "bg and symbol-b must be distinct instances.");
+            Assert.AreNotSame(set[0].Material, set[4].Material, "bg and fill-d must be distinct instances (both fill-base clones).");
+            Assert.AreNotSame(set[1].Material, set[2].Material, "fill-a and symbol-b must be distinct instances.");
+            Assert.AreNotSame(set[1].Material, set[3].Material, "fill-a and line-c must be distinct instances.");
+            Assert.AreNotSame(set[1].Material, set[4].Material, "fill-a and fill-d must be distinct instances.");
+            Assert.AreNotSame(set[2].Material, set[3].Material, "symbol-b and line-c must be distinct instances.");
+            Assert.AreNotSame(set[3].Material, set[4].Material, "line-c and fill-d must be distinct instances.");
+        }
+
+        [Test]
+        public void Build_LayerGameObjects_ParentedUnderVisibleRoot()
+        {
+            using var set = Build(InterleavedStyleJson);
+
+            // The shared "Map Render Layers" root exists and is a visible-but-not-serialised runtime
+            // artifact (DontSave carries no HideInHierarchy bit, unlike the old HideAndDontSave).
+            Assert.IsNotNull(set.Root, "RenderLayerSet exposes a shared root after Build.");
+            Assert.AreEqual(HideFlags.DontSave, set.Root.gameObject.hideFlags,
+                "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
+
+            // The background layer (index 0) builds its quad GameObject eagerly — it must be parented under
+            // the shared root, named by its style layer id with NO prefix ("bg"), and itself visible (not
+            // HideAndDontSave). Symbol presenters take the identical parenting/naming path via
+            // LabelSlotPresenter, but their GameObjects are created lazily on first Present, so this asserts
+            // the eager background case as the mechanism's regression guard.
+            Transform bgChild = set.Root.Find("bg"); // exact style layer id — locks the no-prefix naming
+            Assert.IsNotNull(bgChild, "the background GameObject is parented under the shared root and named by its layer id.");
+            Assert.AreEqual(HideFlags.DontSave, bgChild.gameObject.hideFlags,
+                "the background GameObject is visible in the Hierarchy (DontSave, not HideAndDontSave).");
+        }
+
+        [Test]
+        public void Factory_IsTheSoleDispatchPoint_UnpaintedTypesYieldNoRenderLayer()
+        {
+            // Extensibility contract: RenderLayerFactory maps a StyleLayer subtype → IRenderLayer. Genuinely
+            // unpainted/unsupported-for-now types (raster) map to null (no slot); background/symbol now DO
+            // produce a render layer (D7) — the axis-bearing placeholders this stage adds.
+            StyleDocument style = StyleParser.Parse(RasterAndFillStyleJson);
+            var settings = MapMaterialSetTestUtil.Load();
+
+            int drawIndex = 0;
+            foreach (var sl in style.Layers)
+            {
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex);
+                if (sl.LayerType == StyleLayerType.Raster)
+                {
+                    Assert.IsNull(layer, $"'{sl.Id}' (raster) is genuinely unpainted — no slot.");
+                    continue;
+                }
+
+                Assert.IsNotNull(layer, $"'{sl.Id}' is a renderable type and must produce an IRenderLayer.");
+                Assert.AreSame(sl, layer.StyleLayer, "the render layer must reference its source StyleLayer.");
+                Assert.AreEqual(drawIndex, layer.DrawIndex, "the factory must set DrawIndex from its parameter.");
+                layer.Dispose(); // no set owns it here — free it (correct for every kind; background also owns a GO+Mesh, E3)
+                drawIndex++;
+            }
+        }
+
+        [Test]
+        public void Factory_Create_ReturnsTheAxisBearingPlaceholders_ForSymbolAndBackground()
+        {
             StyleDocument style = StyleParser.Parse(InterleavedStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 
+            int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0);
-                if (sl is Fill.StyleLayer || sl is Line.StyleLayer)
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex);
+                switch (sl)
                 {
-                    Assert.IsNotNull(layer, $"'{sl.Id}' is a renderable type and must produce an IRenderLayer.");
-                    Assert.AreSame(sl, layer.StyleLayer, "the render layer must reference its source StyleLayer.");
-                    RenderLayerSet.DestroyMaterialInstance(layer.Material); // no set owns it here — free it
+                    case Symbol.StyleLayer:
+                        Assert.IsInstanceOf<SymbolRenderLayer>(layer, $"'{sl.Id}' must dispatch to SymbolRenderLayer.");
+                        break;
+                    default:
+                        if (sl.LayerType == StyleLayerType.Background)
+                            Assert.IsInstanceOf<BackgroundRenderLayer>(layer, $"'{sl.Id}' must dispatch to BackgroundRenderLayer.");
+                        break;
                 }
-                else
-                {
-                    Assert.IsNull(layer, $"'{sl.Id}' ({sl.GetType().Name}) is not a static render layer — no slot.");
-                }
+                layer?.Dispose(); // no set owns it here — free it (background also owns a GO+Mesh, E3)
+                drawIndex++;
             }
         }
     }

@@ -148,7 +148,10 @@ namespace MapRenderer.Unity.Editor
             // Raw low-level render state (the S58 knobs — what URP's Surface Type/Blend presets hide).
             EnumPopup<DepthWrite>(ShaderProperties.PropertyNames.ZWrite, "Depth Write");
             EnumPopup<CompareFunction>(ShaderProperties.PropertyNames.ZTest, "Depth Test");
-            EnumPopup<CullMode>(ShaderProperties.PropertyNames.CullMode, "Render Face (Cull)");
+            // Label matches the ShaderLab `Cull` directive: the enum names the face that is CULLED
+            // (Off/Front/Back), NOT the face rendered. "Render Face" would invert it (Cull Front → the
+            // BACK face renders), so this popup is labelled by what it literally sets.
+            EnumPopup<CullMode>(ShaderProperties.PropertyNames.CullMode, "Cull");
             EnumPopup<BlendMode>(ShaderProperties.PropertyNames.SrcBlend,      "Src Blend");
             EnumPopup<BlendMode>(ShaderProperties.PropertyNames.DstBlend,      "Dst Blend");
             EnumPopup<BlendMode>(ShaderProperties.PropertyNames.SrcBlendAlpha, "Src Blend Alpha");

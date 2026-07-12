@@ -75,7 +75,11 @@ namespace MapRenderer.Tests
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
             var layers = mv.Layers.Layers;
-            for (int i = 0; i < layers.Count; i++) AddSpec(layers[i].StyleLayer?.Source);
+            // E1 D10 mirror: skip ViewGeometry (background) layers — no tile data, so no source to fetch
+            // (live as of E3: a background style now builds a real ViewGeometry layer; this skip keeps it
+            // out of the source specs, same as MapView.SetStyle's own source-fetch derivation).
+            for (int i = 0; i < layers.Count; i++)
+                if (layers[i].Build != RenderLayerBuild.ViewGeometry) AddSpec(layers[i].StyleLayer?.Source);
             mv.TileManager.SetSources(specs, view.Config.Backend);
 
             void AddSpec(string sid)

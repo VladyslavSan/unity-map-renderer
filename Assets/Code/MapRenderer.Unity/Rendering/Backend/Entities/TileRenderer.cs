@@ -36,8 +36,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c>) plus
     /// per-feature (vertex colours baked into the mesh), so no per-instance material-property override
     /// components are needed — Entities Graphics reads the live material. <paramref name="layerMaterials"/>
-    /// is the flattened layer-material list (fills in declared order, then lines), so
-    /// <c>materialIndex</c> matches <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>.
+    /// is the FULL-WIDTH, global-draw-slot-aligned material list (§3.3), so <c>materialIndex</c> matches
+    /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>.
     ///
     /// World lifecycle: this owns a <see cref="World"/> created on construction (automatic bootstrap is
     /// disabled project-wide via <c>UNITY_DISABLE_AUTOMATIC_SYSTEM_BOOTSTRAP</c>, so this is the only
@@ -171,14 +171,19 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// Instantiates this — instances share the prototype's archetype AND its single (inert, ID-overridden)
         /// RenderMeshArray, so no per-entity array or structural migration is created. The placeholder mesh is
         /// empty and never drawn (Prefab); it exists only because AddComponents requires a RenderMeshArray.
+        /// E1: seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
+        /// symbol/background layer (null Material, §3.3) that AddTileLayer is never called for.
         /// </summary>
         private void BuildLayerPrototype()
         {
-            if (_layerMaterials.Count == 0) return; // no layers → AddTileLayer never called; no prototype needed
+            int seedIndex = -1;
+            for (int i = 0; i < _layerMaterials.Count; i++)
+                if (_layerMaterials[i] != null) { seedIndex = i; break; }
+            if (seedIndex < 0) return; // no tile-mesh layers → AddTileLayer never called; no prototype needed
 
             _prototypeMesh = new Mesh { name = "MapLayerPrototype(inert)" };
             var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
-            var rma  = new RenderMeshArray(new Material[] { _layerMaterials[0] }, new Mesh[] { _prototypeMesh });
+            var rma  = new RenderMeshArray(new Material[] { _layerMaterials[seedIndex] }, new Mesh[] { _prototypeMesh });
 
             _layerPrototype = _em.CreateEntity();
             RenderMeshUtility.AddComponents(
@@ -341,8 +346,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <summary>
         /// Registers a tile-layer mesh as an Entities-Graphics entity, parented under its tile's root
         /// entity (created on demand). Returns a handle for later removal. <paramref name="materialIndex"/>
-        /// indexes the flattened layer-material list (fills then lines), matching
-        /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>.
+        /// is the layer's global draw slot, indexing the full-width material list, matching
+        /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>; non-tile-mesh slots are null and never
+        /// receive this call.
         /// </summary>
         public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
         {

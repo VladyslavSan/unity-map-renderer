@@ -1,398 +1,533 @@
-# Render-layer unification + Burst mesh build — design
+# Render-layer unification — design (every layer kind first-class)
 
-Status: **IN PROGRESS** (hand-driven). Author: cleanup epic, 2026-07-01.
+Status: **IN PROGRESS** (hand-driven). Author: cleanup epic, 2026-07-01; **extended 2026-07-12** into the
+full all-kinds redesign (this revision). Round 1 (fill/line + Burst mesh build, stages A–D2) is **shipped**;
+round 2 (symbols / background / raster as first-class render layers, stages E0–E3) is **designed here**.
 
-## Progress log
-- **Stage A — DONE (`92e2e0b`, 2026-07-01).** `IRenderLayer`/`RenderLayerSet` + `RenderLayerFactory`;
-  fill/line unified into one ordered `List<IRenderLayer>` (index == draw order == material index);
-  `MeshBuildResult` two lanes → one `IRenderLayerPayload[]` (reference-type handle so `Dispose`
-  mutates the NativeArray struct in place); all 3 backends index the one declared-order material list;
-  `FillCount+li` flatten + "fills first" comments gone. Pure indirection over the UNCHANGED managed
-  builders — behaviour-preserving (906 EditMode green). Decision-5c sparse fill KEPT (dies in C). New
-  `RenderLayerSetTests` locks: one ordered list, fill/line interleaved not type-bucketed, monotonic queue,
-  non-renderable background takes no slot, factory is sole dispatch.
-- **Stage B — DONE (2026-07-01, 907 EditMode green).** `Mesh.MeshData` replaced the bespoke `LayerMeshData`
-  + `UploadMesh`/`BuildMesh` + the `SetVertexBufferData` copy. `WriteMeshData` builds straight into a
-  caller-allocated writable `MeshData` off the worker; one shared `MeshDataPayload` handle (a
-  count-1 `MeshDataArray`) replaced Stage A's per-type handles. TileManager allocates per this-source layer
-  at kick, worker writes, consume `ApplyAndDisposeWritableMeshData` per-layer (S87 budget); fault-safe
-  wrapping disposes every array. Leak guard → `MeshDataPayload.DebugLiveAllocCount`. Perf-parity flags
-  (`DontValidateIndices|DontRecalculateBounds` + worker AABB) preserved. Coupled tests reworked onto the new
-  API (SyntheticLineMesh, MapViewAsyncMesh build, S51/S55 leak guards, LinePaintS14 bake, FillSceneHelper,
-  MapViewLiveLoop) + shared `TestTileMeshBuilder`.
-- **Stage D1 (line kernel) — DONE (2026-07-02, 915 EditMode green).** `LineRibbonJob` rewritten from
-  a 2-point `float3` smoke stub into a faithful `[BurstCompile]` transliteration of the managed
-  `LineTessellator.Triangulate` (all join types — miter/bevel/round; all caps — butt/square/round; dedup,
-  miter→bevel fallback, worst-case `MaxVertexCount`/`MaxIndexCount` sizing). Emits `NativeArray<LineVertex>`
-  (double-precision) so it is **bit-comparable** to the oracle. `LineRibbonJobTests` reworked into the
-  differential oracle: **strict bit-exact** parity on the arithmetic-only paths (miter/bevel + butt/square +
-  the fixture `geolines` layer — only +,−,*,/,sqrt, IEEE-exact between Burst and Mono) and **tight-tolerance
-  (1e-9)** parity on the transcendental round join/cap (atan2/cos/sin may differ a ULP; triangle topology
-  still exact). Isolated/test-only — touches NO live code. **Fill kernels** (`MvtDecodeJob`/`RingAssemblyJob`/
-  `EarcutJob`/`ProjectTileJob` via `TileMeshPipeline`) were already oracle-validated
-  strict by `JobifiedPipelineTests` — so the geometry-Burst port (D1) is now complete. Remaining: **C** (per-
-  `(tile,layer)` produce) + **D2** (wire the D1 jobs into the live lifecycle; `UniTask→JobHandle` + drain pen).
-- **Stage C (dense per-source produce) — DONE (2026-07-02, 915 EditMode green).** Killed the S83b
-  decision-5c full-width sparse union. `MeshBuildResult.Payloads` is now **dense per-`(tile, source)`**
-  (one slot per this-source layer in draw order, no null other-source slots); each payload
-  (`MeshDataPayload`) **carries its own `MaterialIndex`**. Consume uses `payload.MaterialIndex`
-  (not `cursor == materialIndex`) with a restyle-shrink guard (`(uint)materialIndex >= _layers.Count` →
-  free, no backend throw); `ConsumeCursor` is now a dense resume index. Kick allocates/produces only dense
-  slots. Behaviour-preserving (Visual snapshots unchanged). Acceptance tooth #2 (“no decision-5c sparse
-  union anywhere”) met.
-- **Stage D2 (fills → live Burst geometry) — DONE (2026-07-02, 917 EditMode green).** The live fill path now
-  builds via **Burst geometry in the running pipeline** (the jobs were test-only before). Key
-  reconception (vs the doc's async-JobHandle D2): the GC win is entirely in **Phase-1 geometry**
-  (decode/assemble/earcut/project → `List`/array garbage); the managed stream-write is already alloc-free.
-  So run the existing Burst kernels **synchronously on the current `UniTask` worker via `.Run()`** — no
-  lifecycle rewire (kick/consume/S48/S84/S87 unchanged). Spike-proven off-main
-  (`BurstJobRunOffMainSpikeTests`: `ProjectJob.Run()` + `EarcutJob.Run()` correct on a `RunOnThreadPool`
-  worker; kernels use caller-provided Persistent scratch, no internal `Allocator.Temp`). `TileMeshPipeline`
-  switched `.Schedule()→.Run()` (output bit-identical, `JobifiedPipelineTests` still holds) + emits a
-  per-vertex `VertexFeatureIdx` so the stream-write assigns per-feature color. `StyledFillTileBuilder`
-  Phase-1 (managed `MvtGeometry.Decode`/`PolygonAssembler`/`Earcut`/`ProjectVerticesManaged` + `FeatureMeshData`)
-  deleted → drives the pipeline; managed mesh build garbage gone. Lines still managed (next slice).
-- **Stage D2 (lines → live Burst mesh build) — DONE (2026-07-02, 918 EditMode green).** Same
-  `.Run()`-on-worker pattern: `StyledLineTileBuilder` swaps the per-ring managed `LineTessellator.Triangulate`
-  for the D1 `LineRibbonJob.Run()` (now USED in the live path). Decode + `ProjectLineRing` stay managed
-  (double2 feeds the double-precision job → strict parity on the miter/butt path; round join/cap within
-  snapshot tolerance). Guarded by an added `BurstJobRunOffMainSpikeTests` case — `LineRibbonJob` uses
-  `Allocator.Temp` INTERNALLY (unlike the fill kernels' caller scratch), proven safe off a `RunOnThreadPool`
-  worker. **S89 complete: managed Core geometry (`Earcut`/`PolygonAssembler`/`LineTessellator`) is retired
-  from the live production path — differential oracle only.** (Line decode+projection remain managed — a
-  later throughput follow-up, not a correctness gap.)
-- **Stage B (historical note) —** `Mesh.MeshData` replaces the bespoke `LayerMeshData` + hand-rolled 4-stream
-  consume. **Spike-verified threading rules (`MeshDataThreadWriteSpikeTests`):**
-  `SetVertexBufferParams`/`GetVertexData`/`SetIndexBufferParams`/`GetIndexData`/`SetSubMesh` **DO** run on a
-  raw `UniTask.RunOnThreadPool` worker (a known vertex round-trips through `ApplyAndDisposeWritableMeshData`);
-  `AllocateWritableMeshData` and `ApplyAndDisposeWritableMeshData` are **main-thread only**
-  ("CreateNewMeshDatas can only be called from the main thread"). **Choreography (locked):** allocate one
-  `MeshDataArray(1)` per this-source layer at KICK (main); write on the WORKER; `ApplyAndDispose` per-layer
-  at CONSUME (main), budget-gated (S87 — per-`(tile,layer)` array so a rich tile still spreads across
-  frames). Per-layer allocation → the two Stage-A payload handles collapse into ONE `MeshDataPayload`
-  (post-write the handle is layer-type-agnostic). Leak guard retargeted to a MeshDataArray alloc/dispose
-  counter (unapplied arrays are native leaks Unity tracks); holding-pen + teardown dispose every unapplied
-  array. Perf-parity flags preserved (`DontValidateIndices|DontRecalculateBounds` + worker-computed bounds).
-- Stages C, D1, D2 — pending (see §4). *(Historical note — all landed above; see the dated DONE entries.)*
-- **Stage E — symbols as an immediate render layer — DESIGNED (planned, 2026-07-12).** Brings symbols into the
-  render-layer model **for DRAW only** (order + presence), superseding the §3.1 "out of scope" note for draw.
-  A `DrawPersistence` (Persistent/Immediate) property + a unified global draw-order `renderQueue` + a single
-  `beginCameraRendering` re-submit orchestrator. Fixes the interleaving fidelity gap **and** the Editor-only
-  label "blink" in one refactor. Gated on an ordering-determinism prototype. Full design in **§7**.
-
-This is the "make it right" plan for the styled-layer / mesh build pipeline. It replaces the
-fills-vs-lines split (which drifted away from `ARCHITECTURE.md`'s "ordered list of layers") with a
-single, extensible render-layer abstraction, moves mesh build onto Burst jobs over
-`Unity.Collections` data, and collapses the bespoke mesh-result plumbing onto `Mesh.MeshData`.
+The goal, restated: `ARCHITECTURE.md` §"Layer ordering" — *"the style is an ordered list of layers,
+composited in order."* Round 1 made that true for fill and line. Round 2 makes it true for **everything the
+style can paint**: every painted layer gets a uniform place in ONE model along three orthogonal axes —
+**build/lifetime** (how its geometry comes to exist), **draw order** (its slot in the global painter's
+chain), and **presence** (whether a backend redraws it by itself or an orchestrator must re-issue it every
+camera render). The axes are named and kept separate; the model does NOT pretend symbols build like fills.
 
 ---
 
-## 1. Why (the current mess)
+## 0. Shipped so far (round 1 — progress log, preserved record)
 
-1. **`StyledLayerSet` splits into `_fills` / `_lines`.** Contradicts `ARCHITECTURE.md` §"Layer ordering":
-   *"the style is an ordered list of layers, composited in order."* The declared interleaving is thrown
-   away in storage and rebuilt via `renderQueue`.
-2. **`materialIndex` is a second ordering.** Backends index a *fills-then-lines* flattened material list
-   (`FillCount + li`), an implicit cross-component contract hand-rolled in `TileManager` **and** all three
-   backends, with comments ("fills first, then lines") that read as false draw-order claims.
-3. **`MeshBuildResult` carries two typed arrays** (`LayerData` fills / `LineLayerData` lines); the
-   consume cursor walks fills-then-lines.
-4. **Per-`(tile, source)` mesh build produces a FULL-WIDTH sparse result** (decision 5c): a slot for
-   every layer, empty for other sources' layers, unioned at consume — dead slots carried per source.
-5. **Mesh build is managed** (`UniTask.RunOnThreadPool`) producing bespoke `LayerMeshData` structs of
-   `NativeArray`s, then a **hand-rolled main-thread consume** copies four vertex streams into
-   `UnityEngine.Mesh` — reinventing what `Mesh.MeshData` models natively.
-6. **The geometry stack is managed, engine-free Core** (`PolygonAssembler.Assemble(List<List<double2>>)`,
-   `Earcut`, `LineTessellator` — all `List<>`/alloc based). Not Burst-compatible.
+- **Stage A — DONE (`92e2e0b`, 2026-07-01).** `IRenderLayer`/`RenderLayerSet` + `RenderLayerFactory`;
+  fill/line unified into one ordered `List<IRenderLayer>` (index == draw order == material index);
+  `MeshBuildResult` two lanes → one `IRenderLayerPayload[]`; all 3 backends index the one declared-order
+  material list; `FillCount+li` flatten + "fills first" comments gone (from code — see §2.8 for the stragglers
+  in doc comments). Behaviour-preserving (906 EditMode green). `RenderLayerSetTests` locks: one ordered list,
+  interleaved not type-bucketed, monotonic queue, non-renderable takes no slot, factory is sole dispatch.
+- **Stage B — DONE (2026-07-01, 907 green).** `Mesh.MeshData` replaced bespoke `LayerMeshData` + the
+  hand-rolled 4-stream consume; one `MeshDataPayload` handle per `(tile, layer)`. Spike-verified threading
+  rules (`MeshDataThreadWriteSpikeTests`): write on worker OK; `AllocateWritableMeshData` /
+  `ApplyAndDisposeWritableMeshData` main-thread only. Choreography locked: allocate at KICK (main), write on
+  WORKER, apply per-layer at CONSUME (main, S87-budgeted). Leak guard → `MeshDataPayload.DebugLiveAllocCount`.
+- **Stage D1 (line kernel) — DONE (2026-07-02, 915 green).** `LineRibbonJob` = faithful `[BurstCompile]`
+  transliteration of managed `LineTessellator.Triangulate` (all joins/caps), bit-comparable to the oracle;
+  `LineRibbonJobTests` differential oracle (strict on arithmetic paths, 1e-9 on transcendental round).
+  Fill kernels were already oracle-validated strict by `JobifiedPipelineTests`.
+- **Stage C (dense per-source produce) — DONE (2026-07-02, 915 green).** Killed the decision-5c full-width
+  sparse union. `MeshBuildResult.Payloads` is dense per-`(tile, source)`; each `MeshDataPayload` **carries its
+  own `MaterialIndex`**; consume uses `payload.MaterialIndex` with a restyle-shrink guard; `ConsumeCursor` is
+  a dense resume index. Snapshots unchanged.
+- **Stage D2 (fills, then lines → live Burst) — DONE (2026-07-02, 917/918 green).** Key **reconception vs
+  the original §3.4 JobHandle plan**: the GC win is entirely in Phase-1 geometry, so the Burst kernels run
+  **synchronously on the existing `UniTask` worker via `.Run()`** — no lifecycle rewire (kick/consume/
+  S48/S84/S87 unchanged), spike-proven off-main (`BurstJobRunOffMainSpikeTests`). `StyledFillTileBuilder`
+  managed Phase-1 deleted; `StyledLineTileBuilder` swaps per-ring managed tessellation for `LineRibbonJob.Run()`.
+  **S89 complete: managed Core geometry (`Earcut`/`PolygonAssembler`/`LineTessellator`) is retired from the
+  live path — differential oracle only.** The original §3.4 "UniTask→JobHandle + drain pen" design is
+  **superseded** by this reconception; it is NOT pending work.
+- **Scope decision (2026-07-01, locked, for the record):** one epic A→B→C→D1→D2, Burst included ("all-in,
+  D now"); the A+B-only alternative was considered and rejected with the full cost visible.
+- **Round-1 "Why" (resolved, kept for the record):** `StyledLayerSet` split `_fills`/`_lines` against the
+  declared order; `materialIndex` was a second fills-then-lines ordering hand-rolled in TileManager + all 3
+  backends; `MeshBuildResult` carried two typed arrays; per-source produce was full-width sparse (5c); mesh
+  build was managed with a hand-rolled 4-stream consume; the geometry stack was managed-only. All six were
+  one root — fill and line modeled as two parallel typed lanes — and all six are fixed above.
+- **Round-1 locked decisions (still binding):**
+  - **D1** — `IRenderLayer` (Unity runtime render object) / `StyleLayer` (Core parsed data) split.
+  - **D2** — one epic, internally sequenced, `Visual/` snapshot parity + EditMode green throughout.
+  - **D3** — full Burst Job System for static mesh build (shipped as `.Run()`-on-worker, see D2 note).
+  - **D4** — the layer owns its `VertexAttributeDescriptor[]` (the byte-for-byte job↔MeshData↔shader contract).
+  - **D5** — `Unity.Collections` throughout the blittable path.
 
-All of 1–4 are the same root: **fill and line are modeled as two parallel typed lanes end-to-end.**
+The shipped fill/line build pipeline (managed decode/select → blittable inputs → Burst kernels `.Run()` on
+the worker → `Mesh.MeshData` → budgeted main-thread apply → `AddTileLayer`) is **sound, green reality**.
+Round 2 builds ON it and does not reopen it.
 
-## 2. Locked decisions
+---
 
-- **D1 — `IRenderLayer` + `StyleLayer` split.** `StyleLayer` (Core, engine-free) = parsed paint/layout
-  *expressions*, filter, source, source-layer. `IRenderLayer` (Unity, managed) = the runtime render object:
-  owns its `Material`, layer type, **vertex layout**, `ZoomStyleApplier`/per-frame apply, and the scheduler
-  for its Burst mesh build job. It *references* a `StyleLayer`.
-- **D2 — One big epic now** (internally sequenced), with **`Visual/` snapshot parity** (identical pixels) +
-  898 EditMode green as the safety net throughout. Add snapshot coverage for any touched path that lacks it
-  *before* refactoring it.
-- **D3 — Full Burst Job System** for mesh build (not a function-pointer half-measure). Managed decode/
-  filter → blittable bucket → Burst `IJob` → `Mesh.MeshData`.
-- **D4 — `IRenderLayer` owns its `VertexAttributeDescriptor[]`** — the layout is the byte-for-byte contract
-  binding the Burst job's writes ↔ `MeshData` params ↔ the shader's vertex input. One owner.
-- **D5 — `Unity.Collections` types throughout** the blittable/job path (`NativeArray`, `NativeList`,
-  `NativeHashMap`, …).
+## 1. Why, round 2 (the current mess: everything that isn't fill/line is a bolt-on)
+
+Verified against source 2026-07-12. The render-layer model covers exactly two of the style's painted kinds;
+each other kind is handled ad-hoc, outside the model, with its own private answer (or no answer) to draw
+order, presence, and lifecycle:
+
+1. ~~**Symbol layers take no draw slot.**~~ **FIXED (E1/E2).** `RenderLayerFactory.Create` returns `null` for anything but
+   `Fill.StyleLayer`/`Line.StyleLayer` (`Rendering/Style/RenderLayerFactory.cs`), and `RenderLayerSet.Build`
+   skips null — so symbol layers are invisible to the one ordered list and the `renderQueue = TransparentQueue
+   + drawIndex` numbering (`RenderLayerSet.Build`, line ~65). Their per-layer materials are cloned by
+   `SymbolLabelSubsystem.SetStyle` (halo bound via `BindHalo`; **no `renderQueue` write anywhere in `Text/`**).
+   *(Preserved record of the pre-E1 state — E1 gave symbols a slot (D7), E2 made them material-bearing (D11)
+   and wrote their queue like every other layer.)*
+2. ~~**All symbols pin to Overlay 4000, one z-group on top.**~~ **FIXED (E2).** `Shaders/Map/Symbol/Text/SymbolText.shader`
+   declares `"Queue" = "Overlay"` (4000) + ZTest Always, and its own header admits the debt: *"(S105 will
+   place symbol layers at their real per-style draw position; this is the demo's 'labels on top of
+   everything' default.)"* Consequences: a fill/line declared ABOVE a symbol layer can never occlude its
+   labels (wrong vs the spec's painter order), and order AMONG symbol layers is undefined (equal queue,
+   URP's remaining tiebreak is camera distance — near-equal for screen-space billboards).
+   *(Preserved record — E2's `RenderLayerSet.Build` now overrides `renderQueue` per production symbol
+   material to `TransparentQueue + DrawIndex`; the Overlay tag survives only as the demo/no-style default,
+   see §3.5. Tooth §6.1/§6.2 lock this via `SymbolLayerOrderSnapshotTests`.)*
+3. ~~**Presence gap — the Editor "blink."**~~ **FIXED (E2).** Labels draw via immediate-mode `Graphics.RenderMesh`, submitted
+   once per frame from `LabelPlacementSystem.Tick` → `BuildAndSubmit` → `SubmitDraw`, driven by
+   `MapView.LateUpdate` step 3. In the Editor the Game View repaints on mouse/UI **without running the player
+   loop**, so those repaints get no re-submission → labels wink out while tiles (persistent backends) stay.
+   Confirmed Editor-only (a build never blinked). No production code subscribes
+   `RenderPipelineManager.beginCameraRendering` (grep: the only hit is a test-comment).
+   *(Preserved record — E2 retired `Graphics.RenderMesh`/`SubmitDraw` entirely; labels now draw through
+   persistent per-slot `MeshRenderer`s (`LabelSlotPresenter`, option (c), §5) Unity redraws on its own, so
+   there is nothing left to "not re-submit." Manual Editor verify still owed — tooth §6.4.)*
+4. ~~**Background is a hardcoded camera hack.**~~ **FIXED (E3).** A style's `background` layer parsed to the
+   base `StyleLayer` (`StyleLayerType.Background`) and its `paint` was **never read** (no `background-color`
+   consumer existed in production). Instead `Bootstrapper.Wire` set `mainCam.backgroundColor` to a hardcoded
+   light-blue "sky" (`Rendering/Map/Bootstrapper.cs` ~line 148). The style's declared background color was
+   ignored; a mid-stack background (legal per spec) was unrepresentable.
+   *(Preserved record — E3 parses `background-color`/`background-opacity` into a typed
+   `Background.PaintProperties` (Core, the Fill pattern) and gives `BackgroundRenderLayer` a real material
+   (a fill-base clone) + a static world-cap ground quad on a persistent `MeshRenderer`, so a style's declared
+   background renders at its declared draw slot — mid-stack included. The `Bootstrapper` sky survives only
+   as the above-horizon clear / no-style default, §3.6. Tooth §6.5 locks this via `BackgroundSnapshotTests`.)*
+5. **Raster has no path at all.** `StyleParser` recognizes raster sources (`SourceType.Raster`) and
+   `StyleLayerType.Raster` parses, but no layer, no fetch, no draw — `Bootstrapper`'s header: *"silently
+   skipped."*
+6. **Layer-kind dispatch is scattered across three parallel type-switches** over the same declared list:
+   `RenderLayerFactory.Create` (fill/line), `MapView.BuildSourceSpecs` (`is Fill.StyleLayer || is
+   Line.StyleLayer || is Symbol.StyleLayer` — hand-tested to decide which sources to fetch), and
+   `SymbolLabelSubsystem.SetStyle` (re-walks `style.Layers` for `Symbol.StyleLayer`). Adding a kind means
+   finding all three — the exact "one registry" extensibility tooth the factory was built to protect.
+7. ~~**Two label-material owners outside the model.**~~ **FIXED (E2, D11).** `SymbolLabelSubsystem` owns the per-symbol-layer clones
+   (`_layerMaterials`); `LabelPlacementSystem` owns a separate default clone (`_material`). Neither is the
+   render-layer model, which is supposed to be where per-layer materials live (Stage A's own rule:
+   "layers own their materials").
+   *(Preserved record — the per-layer clone + halo bind moved into `SymbolRenderLayer` (D11); the subsystem
+   owns nothing material-related now. `LabelPlacementSystem._material` SURVIVES as the demo/no-style-seam
+   default — that one is a deliberate non-goal, §4 — not a second production owner.)*
+8. **Stale round-1 lies survive in doc comments.** `ITileRenderBackend.AddTileLayer`'s doc still says
+   *"materialIndex indexes the flattened layer-material list (fills in declared order, then lines)"*
+   (`Rendering/Backend/ITileRenderBackend.cs` ~line 23); `Backend.BRG.TileRenderer.AddTileLayer` and the
+   GameObjects backend header repeat it. The flatten died in Stage A; the comments didn't.
+
+All of 1–7 are the same root as round 1, one level up: **draw order, presence, and lifecycle registration
+are answered per-kind, ad-hoc, instead of once by the model.**
+
+## 2. Locked decisions (round 2 — D6 onward; D1–D5 in §0 still bind)
+
+- **D6 — Three orthogonal axes on `IRenderLayer`, never collapsed.** Every painted layer declares
+  (a) its **build kind** — `TileMesh` (built once per tile, Burst pipeline, backend-registered) /
+  `FramePlaced` (rebuilt every frame from screen-space placement) / `ViewGeometry` (synthesized from the
+  view, no tile data); (b) its **draw persistence** — `Persistent` (a backend redraws it every render on its
+  own) / `Immediate` (an orchestrator must re-issue it every camera render); (c) its **global draw index**.
+  These are independent: the table in §3.1 pins each concrete kind on each axis. `ARCHITECTURE.md`'s "two
+  geometry classes" stands — it is the build/lifetime axis, and it stays real (symbol build is per-frame
+  collision, NOT the Burst mesh pipeline; that is not changing).
+- **D7 — One global draw-order index over ALL painted layers.** `RenderLayerSet.Build` walks `style.Layers`
+  once and numbers every painted layer — fill, line, symbol, background, (raster, fill-extrusion when they
+  land) — `renderQueue = LayerDrawOrder.TransparentQueue + drawIndex`. Symbol/background/raster positions
+  therefore leave the right gaps in the fill/line offsets. Only genuinely unpainted kinds (unknown,
+  unsupported-for-now) and unconfigured-material layers take no slot.
+- **D8 — Global symbol collision, per-layer symbol draw** (MapLibre semantics). Collision stays ONE
+  cross-layer pass (`LabelCollisionJob` over all candidates); each symbol layer draws its own survivors at
+  its own queue via its existing per-slot mesh/material. The per-material-slot emit already maps
+  1 slot ↔ 1 symbol layer ↔ 1 material — **no slot restructure**.
+- **D9 — One orchestrator owns the single `beginCameraRendering` subscription.** It re-issues all Immediate
+  layers in draw-index order, gated to the map camera (never SceneView/other), unsubscribed on teardown.
+  Not per-layer subscriptions (reentrancy + teardown hazards). Building (placement, collision, mesh write)
+  stays in `LateUpdate`; only the SUBMIT moves per-render.
+- **D10 — Layer-kind dispatch has exactly one registry.** `RenderLayerFactory` becomes the only
+  type-switch; `MapView.BuildSourceSpecs` and `SymbolLabelSubsystem` derive "which sources to fetch" /
+  "which layers are mine" from the built `RenderLayerSet`, not from re-walking `style.Layers` with their own
+  `is` checks (kills §1.6).
+- **D11 — Per-layer materials live on the layer object, one owner.** `SymbolRenderLayer` owns its material
+  clone (halo bind moves into it); `SymbolLabelSubsystem` consumes the layer set's materials instead of
+  cloning its own (kills §1.7). Fill/line already work this way (Stage A).
+- **D12 — The draw-mechanism decision (§5) gates all Immediate-draw wiring.** No E2+ code before the E0
+  prototype answers whether `Graphics.RenderMesh` + `renderQueue` from the per-render callback is
+  deterministic and viable, or whether Immediate draws must route through a
+  `CommandBuffer`/`ScriptableRenderPass`.
 
 ## 3. Target architecture
 
-### 3.1 Data vs render object
+### 3.1 The three axes, pinned per kind
+
+| Layer kind | Build (lifetime) | Presence | Draw slot | Today (verified) |
+|---|---|---|---|---|
+| **Fill** | `TileMesh` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData` | `Persistent` — backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index | shipped; slot among fill/line only |
+| **Line** | `TileMesh` (same) | `Persistent` | global index | shipped; same |
+| **Fill-extrusion** *(future)* | `TileMesh` (+ ZWrite on — depth-slice note, §7) | `Persistent` | global index | factory returns null |
+| **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — per E0's chosen option (c, §5): a persistent per-slot MeshRenderer swaps its mesh each `Tick`, so the backend redraws it with no orchestrator (this flips the pre-E0 `Immediate` cell above; §5 superseded it) | global index **per symbol layer** | **✅ E2 shipped:** `SymbolRenderLayer` owns its material (D11) + a persistent `LabelSlotPresenter`; `renderQueue = TransparentQueue + DrawIndex` like any other layer; `Graphics.RenderMesh`/Overlay-4000 pin retired (demo/no-style fallback only) |
+| **Background** | `ViewGeometry` — one synthesized ground-covering quad, no tile data | `Persistent` — **✅ E3 shipped:** a single persistent `MeshRenderer` on a static world-cap quad (D9 collapsed, no orchestrator — flips this row's pre-E0 `Immediate` cell, §3.6 decision 3) | global index | **✅ E3 shipped:** `BackgroundRenderLayer` owns a fill-base material clone + the quad; `renderQueue = TransparentQueue + DrawIndex` like any other layer; Mercator-only (globe hides it, §7.6) |
+| **Raster** *(future)* | `TileMesh` — per-tile textured quad | `Persistent` | global index | nothing |
+
+The build kinds genuinely differ and the model **names** the difference instead of hiding it: `TileMesh`
+layers participate in the tile produce/consume loop and the `ITileRenderBackend`; `FramePlaced` layers
+participate in the per-frame placement loop; `ViewGeometry` layers own a self-built mesh refreshed on
+view/style change. What is UNIFORM across all of them is registration (one factory), draw order (one
+index), presence (one enum + one orchestrator), material ownership, and `ApplyZoom`.
+
+### 3.2 Interface shape
+
+`IRenderLayer` splits into a base (the uniform axes) plus per-build-kind capability interfaces. The hoist of
+`WriteInto` out of the base is mechanical — Fill/Line implementations and their callers keep their shipped
+bodies verbatim:
+
+```csharp
+internal enum RenderLayerBuild { TileMesh, FramePlaced, ViewGeometry }
+internal enum DrawPersistence  { Persistent, Immediate }
+
+internal interface IRenderLayer : IDisposable
+{
+    StyleLayer       StyleLayer  { get; }
+    RenderLayerBuild Build       { get; }   // lifetime class — which loop feeds it
+    DrawPersistence  Persistence { get; }   // who re-draws it each render
+    int              DrawIndex   { get; }   // set once by RenderLayerSet.Build; renderQueue = TransparentQueue + DrawIndex
+    Material         Material    { get; }   // owned by the layer (Stage A rule), queue encodes DrawIndex
+    void ApplyZoom(double zoom);
+}
+
+// TileMesh capability — today's WriteInto, hoisted verbatim (fill, line; later fill-extrusion, raster).
+internal interface ITileMeshRenderLayer : IRenderLayer
+{
+    void WriteInto(Mesh.MeshData md, IReadOnlyList<MvtFeature> features, double zoom, double extent,
+        TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds);
+}
+
+// Immediate capability — called by the orchestrator inside beginCameraRendering (map camera only).
+internal interface IImmediateRenderLayer : IRenderLayer
+{
+    void SubmitDraw(Camera camera);   // exact signature depends on the §5 mechanism decision
+}
+```
+
+Concrete: `FillRenderLayer`, `LineRenderLayer` (`TileMesh`+`Persistent`, unchanged mechanics);
+`SymbolRenderLayer` (`FramePlaced`+`Immediate`, §3.5); `BackgroundRenderLayer` (`ViewGeometry`+`Persistent`,
+§3.6); later `RasterRenderLayer`, `FillExtrusionRenderLayer` (`TileMesh`+`Persistent`).
+**Adding a kind = one class + one `RenderLayerFactory` arm** — no edits to the layer set, the backends, the
+tile consume loop, or the orchestrator (they all operate on the axes, not the concrete types).
+
+### 3.3 One global draw order (the numbering change, precisely)
+
+Today (`RenderLayerSet.Build`): only fill/line increment `drawIndex`; everything else `continue`s. Example,
+a liberty-like interleave — declared `background, fill(land), line(road), symbol(road-label),
+fill(building), symbol(place-label)`:
 
 ```
-StyleLayer  (Core, managed, engine-free)   — parsed paint/layout expressions, filter, source, source-layer
-IRenderLayer(Unity, managed)               — Material, LayerType, VertexAttributeDescriptor[] layout,
-                                             ZoomStyleApplier + ApplyZoom(zoom, metersPerPixel),
-                                             ScheduleMesh build(bucket, meshData, deps) -> JobHandle,
-                                             ref StyleLayer
+today:   land=3000  road=3001  building=3002        road-label=4000  place-label=4000  background=camera hack
+                                                     └── both Overlay-pinned above everything, mutual order undefined
+target:  background=3000  land=3001  road=3002  road-label=3003  building=3004  place-label=3005
+                                                     └── building fill occludes road labels; place labels on top — as declared
 ```
 
-Concrete: `FillRenderLayer`, `LineRenderLayer` now; `FillExtrusionRenderLayer`, … later. A type registry
-maps a `StyleLayer` subtype → `IRenderLayer` factory. **Adding a layer type = one `IRenderLayer` class +
-one registry entry** — no edits to the layer set, the backends, or the consume loop.
+Mechanics:
+- `RenderLayerSet.Build` numbers **every** layer the factory returns (D7); the tile-mesh layers' queues
+  shift up by the count of preceding non-tile layers. `LayerDrawOrder`'s monotonic-queue + 5000-ceiling
+  contract is unchanged (a >2000-painted-layer style still throws rather than saturating).
+- `index == draw order == material index` **still holds** — the list simply contains all painted layers
+  now. `TileManager`'s produce loop filters `layer is ITileMeshRenderLayer` when snapshotting layers for a
+  kick; Stage C's `payload.MaterialIndex` (the payload carries its own global index) already makes consume
+  indifferent to gaps, and the existing `(uint)materialIndex >= _layers.Count` restyle-shrink guard stays.
+- **Backends get the full-width material list aligned to the global index, with null at non-tile slots**
+  (those slots never receive `AddTileLayer` — the tile produce path never emits payloads for them). Two
+  concrete backend touches this forces (verified against source):
+  - `Backend.BRG.TileRenderer`'s ctor calls `_brg.RegisterMaterial(mat)` for every list entry — it must
+    skip nulls (register lazily or keep an invalid id at null slots; `AddTileLayer` already range-checks).
+  - `Backend.Entities.TileRenderer.BuildLayerPrototype` seeds its prototype's `RenderMeshArray` with
+    `_layerMaterials[0]` — it must seed with the **first non-null** entry (slot 0 may be a background layer).
+- The stale "fills then lines" doc comments (§1.8) die in the same commit that changes the meaning of
+  `materialIndex` — `AddTileLayer(mesh, origin, layerIndex, tileId)`'s `layerIndex` is documented as **the
+  global draw slot**.
 
-`RenderLayerSet` (replaces `StyledLayerSet`): a managed `List<IRenderLayer>` **in declared order**.
-`index == draw order == material index`. One ordering. `_fills`/`_lines`, `FillCount + li`, and the
-"fills first" comments are gone.
+### 3.4 Presence: `DrawPersistence` + the single orchestrator
 
-Symbols/text are out of scope **for the BUILD path** — per `ARCHITECTURE.md` §"Two geometry classes" they
-are a separate, placed-every-frame path, and `IRenderLayer`'s Burst mesh build (§3.2) covers the
-**static-geometry** class (fill, line, fill-extrusion) only. But their **DRAW** — painter's-order position
-and per-render presence — *is* a concern they share with fill/line, and today it is unhandled (symbols draw
-outside the `renderQueue` chain, as one z-group on top). That gap, and the design that folds symbols into
-the render-layer model **for draw only** (a `DrawPersistence` property + a per-layer queue), is **§7**.
+- **Persistent** — the backend re-draws every render with no per-render help: BRG's `OnPerformCulling`
+  emits draw commands each cull; Entities Graphics renders its entities; GameObject `MeshRenderer`s render
+  themselves. All three tile backends are Persistent (verified). The orchestrator ignores these layers.
+- **Immediate** — someone must re-issue the draw for every camera render. Today's symbol submit
+  (`Graphics.RenderMesh` once per `LateUpdate`) is an Immediate draw with nobody re-issuing it — hence the
+  Editor blink (§1.3).
 
-### 3.2 The managed ⇄ Burst boundary (the crux)
+**`ImmediateDrawOrchestrator`** (new, owned by `MapView`; constructed with the `RenderLayerSet` + the
+`MapCamera`):
 
-Three phases per tile, with one hard boundary:
+- Subscribes `RenderPipelineManager.beginCameraRendering` **once** at construction; unsubscribes in
+  `Dispose` (called from `MapView.Teardown`).
+- Callback: `if (camera != _mapCamera.Camera) return;` then iterate the set's `Immediate` layers in
+  ascending `DrawIndex` and call `SubmitDraw(camera)`. Alloc-free (a cached filtered list, rebuilt on
+  `RenderLayerSet.Build`).
+- **The label submit moves out of `LabelPlacementSystem`'s `LateUpdate` call stack** — specifically out of
+  `BuildAndSubmit`/`SubmitDraw` — into this callback. `Tick` keeps doing everything up to and including the
+  per-slot mesh write (project → collide → fade/emit → `SymbolBillboardJob` → mesh upload); the built slot
+  meshes are then submitted per render, correct in Editor AND build. One build, N submits.
+- This fixes presence for **every** Immediate layer uniformly — symbols and background ride the same hook.
 
-```
-Phase 1  MANAGED (thread pool, per (tile, source))
-         MvtDecoder.Decode(bytes) -> MvtTile           (protobuf + string props: cannot be Burst)
-         FeatureSelector.SelectFeatures(styleLayer,…)  (filter expressions over string keys: managed)
-         → emit a BLITTABLE GeometryBucket per (tile, renderLayer):
-             NativeArray<double2> points, NativeArray<int> ring/part offsets,
-             NativeArray<FeatureMeta> (data-driven width/color, evaluated managed-side)
-         ─────────────────────────── BOUNDARY: everything below is Unity.Collections only ───────────────
-Phase 2  BURST IJob (per (tile, renderLayer))
-         renderLayer's concrete [BurstCompile] job reads the bucket, builds
-         (earcut fill / centerline expansion line) and writes directly into Mesh.MeshData
-         (SetVertexBufferParams(layout) + SetIndexBufferParams, then fills the streams).
-Phase 3  MAIN THREAD
-         poll JobHandle.IsCompleted across frames; on done Complete() +
-         Mesh.ApplyAndDisposeWritableMeshData -> Mesh -> backend.AddTileLayer(mesh, origin, layerIndex, id)
-```
+### 3.5 Symbols: global collision, per-layer draw (D8)
 
-- **Decode stays managed.** MVT is protobuf with `string→Value` property dicts; the filter evaluates
-  expressions over string keys. Neither is Burst-able. `ARCHITECTURE.md`'s "Burst for decode" is
-  aspirational; **mesh build** is the realistic Burst target.
-- **`GeometryBucket` is the handoff type** — the single place the pipeline crosses from managed to
-  Unity.Collections. One bucket = one `(tile, renderLayer)`. No full-width arrays, no sparse union (5c dies).
-- **`MeshBuildResult` is deleted.** Each bucket → job → `MeshData` → mesh flows independently.
+- **Collision is untouched.** One `SymbolLabelBatch` per frame, one `LabelStageJob`, one global
+  `LabelCollisionJob` across every symbol layer's candidates — a road name and a city name keep competing
+  in one greedy pass. The survivor set must be bit-identical before/after (tooth §6.3).
+- **Draw slots already exist.** `LabelPlacementSystem` partitions survivor quads by
+  `LabelInstance.MaterialIndex` into per-slot meshes (`_slotMeshes[g]`) drawn with per-layer materials —
+  slot `g` IS the g-th declared symbol layer (both `SymbolLabelSubsystem.SetStyle` and `RenderLayerSet.Build`
+  walk `style.Layers` in declared order, so the symbol-local ordinal maps 1:1 to a `SymbolRenderLayer`).
+  `SymbolRenderLayer` g exposes slot g's mesh handoff as its `Present(mesh, visible)` (E2 — a persistent
+  `LabelSlotPresenter`, not a per-frame submit call).
+- **Per-layer queue replaces the Overlay pin.** Each `SymbolRenderLayer`'s material gets
+  `renderQueue = TransparentQueue + DrawIndex` like every other layer; the shader's `"Queue" = "Overlay"`
+  default remains only as the demo/no-style fallback. Two symbol layers on one feature (icon-under-text
+  later, halo-variant today) now draw in style order because their queues differ.
+- **✅ Ownership migration (D11) — shipped E2.** `SymbolRenderLayer.Create` owns the material clone
+  (`RenderLayerFactory`'s Symbol arm calls it); `BindHalo` moved from `SymbolLabelSubsystem.SetStyle` into
+  it verbatim; `ApplyZoom` is the natural future home for zoom-expression halo, today still a no-op.
+  `SymbolLabelSubsystem` dropped `_layerMaterials`/`LayerMaterials` entirely — it needs only the layer
+  COUNT (`CurrentBatch`'s slot count) and each layer's `Source`/id for build routing, not the materials
+  themselves; `MapView` derives the `SymbolRenderLayer` list from the built `RenderLayerSet` (the same D10
+  walk that derives the subsystem's `SymbolStyle.StyleLayer` list) and hands it to `Labels.Tick` directly.
+  `LabelPlacementSystem`'s default `_material` stays for the demo/no-style seam (§4 non-goal). Restyle
+  order: `MapView.SetStyle` calls `Layers.Build(...)` (disposing the OLD symbol layers' presenters +
+  materials) before `_symbols.SetStyle(...)` and refilling `_symbolRenderLayers` — all synchronous, before
+  any await, so the next `Labels.Tick` only ever sees live layers (no use-after-destroy).
+- **Not changing:** the per-frame placement math, fades, hysteresis, culls, batch SoA, the screen-space
+  vertex format, `ZTest Always` (labels are unoccluded by ground geometry per MapLibre point-label
+  semantics; with all flat layers ZWrite-off, painter order alone decides occlusion — see §7 for the
+  fill-extrusion caveat).
 
-### 3.3 Assembly placement + the core-tests tension  ⚠ biggest structural risk
+### 3.6 Background: a real layer, not a camera hack — ✅ SHIPPED (E3)
 
-The geometry kernels (`Earcut`, `PolygonAssembler`, `LineTessellator`) are **managed, engine-free Core**
-today and run in the **fast `Tools/core-tests` (`dotnet test`, ~0.1s, no Unity)** via a 2-field
-`Unity.Mathematics.double2` shim. Burst needs `Unity.Collections`, which is a full UPM package, **not** a
-2-field shim — so a `NativeArray`-based earcut **cannot** stay in engine-free Core without breaking the fast
-core-tests (or forcing them to pull the Collections package).
+`BackgroundRenderLayer` — `ViewGeometry` + `Persistent`:
 
-Resolution:
-- **The Burst mesh build kernels live in `MapRenderer.Jobs`** (the existing "Burst + Collections jobs"
-  assembly), not Core. This is where `ARCHITECTURE.md` already puts Burst work.
-- **Port `Earcut` / `PolygonAssembler` / line-expansion to `NativeArray`/`NativeList`, allocation-free,
-  `[BurstCompile]`** as jobs/static kernels in `MapRenderer.Jobs`.
-- **Core's managed geometry**: options — (a) keep it as the reference impl + oracle for a differential test
-  (Burst kernel output must match managed output on the fixture), then retire once trusted; or (b) delete
-  after parity. Recommend **(a)** — the managed version becomes the test oracle, which is a *strength* (it
-  makes the Burst port falsifiable), then decide on retirement in a follow-up.
-- Fast core-tests keep testing the managed Core geometry; the Burst kernels are covered by EditMode
-  (Unity) tests + the differential oracle.
+- Parses `background-color` / `background-opacity` into a typed `Background.PaintProperties` in Core (the
+  Fill pattern); owns a material — a clone of the FILL base (`MaterialFactory.CreateBackgroundMaterial`;
+  reusing the fill shader's flat lit path keeps the ground look consistent with fills by construction, and
+  avoids a new `MapMaterialSet` asset field that would default null in the committed asset) — at its global
+  queue. Colour binds as a uniform (`_BaseColor`/`_Opacity`) over white vertex colours — the LINE-colour
+  pattern, not the fill per-vertex bake (background has no features to bake per-vertex from).
+- Geometry: ONE static world-cap ground quad (half-extent `2 · WebMercator.WorldExtent`, coplanar y=0 with
+  fills/lines — ZWrite-off + `renderQueue` alone composites, the proven mechanism; do NOT epsilon-lift it),
+  built ONCE and never rebuilt — the camera-relative render origin already tracks the look-at every frame,
+  so a quad centred on the identity transform is always centred under the camera for free. Drawn by a single
+  persistent `MeshRenderer` that Unity redraws every camera render with **no orchestrator** (D9 stayed
+  collapsed — the pre-E0 `Immediate` cell in §3.1 is superseded; §5's `IImmediateRenderLayer` has no
+  implementor yet, kept as the model's vocabulary for a future `CommandBuffer` fallback).
+- The `Bootstrapper` hardcoded sky stays only as the above-horizon clear / no-style default; a style WITH a
+  background layer wins at the ground (tooth §6.5, `BackgroundSnapshotTests`). Optional later fast-path:
+  bottom-slot opaque background → camera clear color (an optimization, not the model — not built).
+- Globe: a flat quad is wrong on the sphere (it would slice through the globe) — `MapView.SetStyle` gates
+  `BackgroundRenderLayer.SetVisible` on `Camera.Projection.TryGetHorizonOccluder`, hiding the quad entirely
+  under a curved (globe) projection. The real projection-aware globe background is still out of scope for
+  E3 (Mercator only); noted in §7.6.
 
-### 3.4 Job lifecycle (replaces the UniTask mesh build machinery)
+### 3.7 Raster + fill-extrusion: reserved seats (unscheduled)
 
-- Mesh build tasks become **`JobHandle`s**, not `UniTask`s. `TileManager` polls `JobHandle.IsCompleted`
-  across frames (same shape as today's `.IsCompleted` polling), then `Complete()` + apply on the main thread.
-- **Input `NativeArray` buckets must outlive the job** and be disposed only after the job finishes. The S48
-  "mid-flight discard holding pen" is **kept, not removed**: a released tile's in-flight job goes into a
-  deferred-drain pen that **polls `JobHandle.IsCompleted`** each tick and disposes the bucket + `MeshData`
-  when done. Do **not** `Complete()`-and-discard on release — `Complete()` blocks the main thread, and earcut
-  on a dense tile is not "short"; that would reintroduce the exact stall S87 killed. `Complete()` is forced
-  only at teardown (bounded spin, as today). Burst jobs are not cancellable mid-run, so a released job runs
-  out and its output is discarded — but off the main thread.
-- **Fetch** stays managed `UniTask` network I/O; **S84 fetch-cancellation is unchanged** (only the
-  *mesh build* half moves to jobs).
-- **S87 per-mesh consume** is preserved: one `MeshDataArray` per `(tile, layer)` keeps per-mesh apply
-  granularity so upload stays budgeted (no per-tile stall).
+- **Raster** = `TileMesh` + `Persistent`: a quad per tile, textured from a raster source, registered via
+  `AddTileLayer` at its global slot. The model change is zero — the OPEN problem is per-tile texture binding
+  under the per-layer-material invariant (per-layer materials are shared across tiles; a raster tile needs
+  its own texture → texture-array / BRG per-instance texture id / per-tile material — decide in the raster
+  stage, §7). Raster source fetch reuses the tile pipeline with a non-MVT decode arm.
+- **Fill-extrusion** = `TileMesh` + `Persistent` + ZWrite on. Enters as one `ITileMeshRenderLayer` class +
+  one factory arm; the depth-vs-transparent-band interaction (ARCHITECTURE §"3D layers": depth
+  range/slice) is its stage's design problem, not this model's.
 
-### 3.5 Backends
+## 4. What does NOT change (explicit non-goals)
 
-`AddTileLayer(mesh, origin, layerIndex, tileId)` — `layerIndex` is the single declared-order index (==
-material index). Each backend builds its material registry from the one ordered `List<IRenderLayer>`; the
-fills-then-lines flatten (`FlattenLayerMaterials`/`FlattenLayerNames`) is deleted.
+- The shipped fill/line build pipeline (§0) — kick/produce/consume, S87 budget, S48 pen, S84 cancellation,
+  `.Run()`-on-worker Burst kernels, `MeshDataPayload`. Untouched.
+- Symbol BUILD stays per-frame placement — no folding into the Burst tile-mesh pipeline, ever (D6).
+- The three tile backends stay Persistent tile-mesh engines; they learn nothing about symbols or
+  backgrounds (null slots aside, §3.3).
+- The demo seams (`MapView.LabelInstances`/`LabelAtlas`, `LabelPlacementSystem`'s default material).
 
-## 4. Sequencing (internal stages of the one epic)
+## 5. The gate: Immediate-draw mechanism + ordering determinism (E0 — RESOLVED 2026-07-12)
 
-Each stage is independently green (898 + snapshot parity) before the next. The `UniTask→JobHandle` +
-Burst-port is deliberately **last and isolated** — it is the highest-risk change.
+Two coupled unknowns gated E2+. **E0 ran and the ordering half is now settled empirically; the mechanism
+decision follows from it: prefer option (c).**
 
-| Stage | Scope | Kills | Risk |
-|---|---|---|---|
-| **A. Render-layer object** | `IRenderLayer` + `StyleLayer` split; `StyledLayerSet` → one ordered `List<IRenderLayer>`; fill/line impls wrap the *existing* managed builders; backends index by list order | `_fills`/`_lines`, `FillCount+li` flatten, lying comments | Med |
-| **B. `MeshData` result** | replace bespoke `LayerMeshData` + hand-rolled 4-stream consume with `Mesh.MeshData` (still written on the managed thread pool); one `MeshData` per `(tile,layer)` | two-array `MeshBuildResult`, manual consume copy | Med |
-| **C. Per-`(tile,layer)` produce** | fan out mesh build per render-layer; remove the 5c full-width sparse union; progressive tile fill | decision 5c, tile-atomic produce | High |
-| **D1. Burst kernels** | port `Earcut`/`PolygonAssembler`/line-expansion to `Unity.Collections` `[BurstCompile]` jobs in `MapRenderer.Jobs`, validated **purely against the managed Core oracle** — **zero lifecycle change**, does not touch live mesh build | (nothing yet — parity harness only) | Med (isolated) |
-| **D2. Burst lifecycle** | introduce the `GeometryBucket` boundary; swap the managed builders for the D1 jobs; rewire mesh build lifecycle `UniTask→JobHandle` + deferred-drain pen | managed mesh build, Core geometry in the hot path | **Highest** |
+1. **Is cross-layer order deterministic via `renderQueue` alone?** — **RESOLVED: YES on the culled/BRG path.**
+   `RenderQueueVsDistanceSnapshotTests` (run from a working tree at the time, NOT committed — see risk 7;
+   E2's `SymbolLayerOrderSnapshotTests` tooth 1/2 now re-prove this through the real symbol path and ARE the
+   committed permanent regression net) is an ADVERSARIAL probe: two overlapping wide line
+   ribbons at different camera depths with `renderQueue` and camera-distance order made to DISAGREE.
+   Result (headless EditMode, PASSED): the higher-`renderQueue` ribbon composites on top in BOTH configs —
+   Config A `(0.220,1.000,0.220)` = GREEN, the *farther* ribbon winning (impossible under a distance sort);
+   Config B (queues swapped) `(1.000,0.220,0.220)` = RED, the winner following the queue. So URP's
+   `CommonTransparent = SortingLayer | RenderQueue | BackToFront | …` ranks `renderQueue` ABOVE the distance
+   tiebreak, as documented — MeshRenderers (and BRG draw commands, same sorted `DrawRenderers` pass) get
+   strict per-layer order from distinct queues. D7's per-layer `renderQueue` is therefore sound.
+   *(Scope: this validates the PERSISTENT/culled path. It does NOT test `Graphics.RenderMesh`, which does not
+   enter that sorted pass and renders 0 px headless anyway — see unknown 2.)*
+2. **Does `Graphics.RenderMesh` from inside `beginCameraRendering` draw for that camera?** — **UNTESTABLE
+   headless, and MOOT under option (c).** `SymbolAtlasOrientationSnapshotTests`' header records RenderMesh
+   from a `beginCameraRendering` callback rendering **0 px in headless EditMode** (a harness limit — a plain
+   URP-Unlit quad does too), so it is a Play-mode-only question. Option (c) sidesteps it entirely by not
+   using RenderMesh.
 
-**D is split deliberately:** D1 answers "is the Burst earcut correct?" against the oracle with no risk to
-the running pipeline (it can even start early — it touches no live code). D2 answers "does the new lifecycle
-work?" Bundling them would conflate two independent failure modes. C and D2 both rewire the mesh build
-lifecycle and may land together.
+Options (now decided):
+- **(c) Symbols as PERSISTENT per-slot MeshRenderers — RECOMMENDED (E0 validates it).** Each `SymbolRenderLayer`
+  keeps a persistent `MeshFilter`/`MeshRenderer` GameObject; `Tick` swaps its `mesh` each frame (the built
+  slot mesh). `DrawPersistence.Persistent` — Unity redraws it every camera render automatically, so:
+  (i) **the Editor blink dies with NO `beginCameraRendering` orchestrator and NO RenderMesh** (D9 collapses);
+  (ii) it inherits the just-proven deterministic `renderQueue` ordering against BRG tiles; (iii) it is the
+  **proven-headless path**, so teeth 1/2/4 become real snapshot tests instead of manual Editor verifies.
+  Cost vs today's immediate mode: a few persistent GameObjects + a per-frame `MeshFilter.mesh` assignment.
+- **(a) `RenderMesh` + per-layer `renderQueue` from the orchestrator callback.** Keeps today's submission API
+  but rests on unknown 2 (untestable headless, Editor-repaint-fragile) — **superseded by (c).**
+- **(b) `CommandBuffer` / URP `ScriptableRenderPass`.** Exact order + presence by construction; the fallback
+  if (c) ever hits a wall (e.g. a symbol needing draw state a MeshRenderer can't express). Not needed now.
 
-**Scope note — what postdates the "full Burst" decision.** A + B deliver the goal actually stated
-("extensible, not a mess"): the single ordered `IRenderLayer` list, the collapsed result, no fills-then-lines
-drift. **C + D are performance + a tile-lifecycle rewrite** — and D's true cost (porting the entire managed
-Core geometry stack to Burst/Collections, plus the core-tests tension in §3.3) was only discovered *after*
-the decision. D2 rewires the S48/S84 machinery, historically the source of multi-hour failures. So A+B vs
-C+D2 is a legitimate "now vs follow-up" call to make with that cost visible — see §6.
+**Decision:** option **(c)**. E0 proved the only load-bearing unknown (ordering) in its favour, and (c) turns
+the blink fix and the order teeth into headless-testable, orchestrator-free mechanics. E2 builds on (c).
+This **reshapes D9** (no single `beginCameraRendering` orchestrator; presence comes free from persistent
+MeshRenderers) and simplifies `IImmediateRenderLayer` (§3.2) — the "Immediate" capability becomes a
+per-frame mesh-swap on a persistent renderer, not a per-render submit callback.
 
-### Acceptance teeth
-- **A / B / C** are behaviour-preserving: all 898 EditMode green; `Visual/` snapshots **identical**
-  (existing tolerance). Interleaving is already pinned by `LayerOrderSnapshotTests` (line-then-fill AND
-  fill-then-line) + `LitLine_CoplanarFillAndLine_NoZFighting` — that's the ordering safety net.
-- **D1** adds a **differential oracle test**: Burst kernel output ≡ managed Core geometry output over the
-  committed fixture. This holds **only if the port is a faithful double-precision transliteration** — so D1
-  explicitly *excludes* float/SIMD reformulation (that's a separate, tolerance-gated change later). A
-  shallow/wrong port cannot pass.
-- **D2** is gated by the oracle (D1) **plus** snapshots-within-tolerance (a lifecycle/scheduling change may
-  perturb sub-pixel timing but not geometry).
-- **Snapshot-coverage gate (stage 0):** before touching a path, confirm a snapshot exercises it; the audit
-  above shows fill, line, interleaving, and all three backends are covered — fill any gap found (e.g.
-  zoom-dependent line, data-driven fill under BRG) as the first commit, not a footnote.
-- No new `_field` + separate-getter pairs; no `IsInitialised`-style lifecycle flags; no fills-then-lines
-  index arithmetic outside a single owner.
+## 6. Acceptance teeth (with teeth — a shallow/wrong impl cannot pass)
 
-## 5. Risks / open questions
+1. **✅ Interleaved composite — SHIPPED (E2).** A style declaring a fill ABOVE a symbol layer: snapshot shows the fill
+   occluding the labels in the overlap region (mirrors the `LayerOrderSnapshotTests` /
+   `BrgBackendSnapshotTests` tooth-2 net; label pixels via the now-real persistent-MeshRenderer path —
+   `SymbolLayerOrderSnapshotTests.FillAboveSymbolLayer_OccludesLabels_FillBelow_LabelWins`).
+   *Falsifier:* today's Overlay-4000 pin draws labels over the fill — fails.
+2. **✅ Symbol-vs-symbol order — SHIPPED (E2).** Two symbol layers placing at the same anchor draw in
+   declared order — sampled overlap pixels match the LATER layer, and swapping `renderQueue` flips the
+   winner (`SymbolLayerOrderSnapshotTests.TwoSymbolLayers_SameAnchor_LaterDrawIndexWins_SwapFlipsWinner`).
+   *Falsifier:* equal-queue undefined order.
+3. **✅ Collision parity — SHIPPED (E2).** Same frame/labels: the survivor set (candidate/survivor/quad
+   counts) is identical between the demo (no layers) and production (real `SymbolRenderLayer`) paths — a
+   differential EditMode test (`SymbolLayerOrderSnapshotTests.CollisionCounts_AreIdentical_...`).
+   *Falsifier:* any accidental per-layer collision split changes survivors.
+4. **No Editor blink — headless proxy SHIPPED (E2), literal check still MANUAL.** Labels persist across
+   Game-View repaints without the player loop — the MECHANISM (a persistent scene renderer redraws without
+   a new Tick) is now headless-testable and tested
+   (`SymbolLayerOrderSnapshotTests.Presenter_ShowsAcrossRepeatedRenders_HidesWhenTickIsEmpty`); the literal
+   Editor-repaint eyeball remains a **manual Editor verify** (Editor-only artifact — see §5 evidence; the
+   build never blinked).
+5. **✅ Background is the style's — SHIPPED (E3).** A style with `background-color: X` renders X (snapshot
+   corner sample), not the Bootstrapper sky; a mid-stack background occludes layers below it and not above
+   (snapshot) — `Visual/BackgroundSnapshotTests.BackgroundColor_StyleHonoured_NotCameraClear` +
+   `.Background_MidStack_OccludesBelow_IsOccludedByAbove`.
+   *Falsifier:* the camera-clear hack ignores X and cannot be mid-stack — fails against pre-E3 code by
+   construction.
+6. **Global numbering.** `RenderLayerSetTests` extended: symbol/background layers take slots; queues are
+   monotonic over ALL painted layers; tile-mesh layers' queues shift by the count of preceding non-tile
+   layers (assert exact values for a mixed fixture style).
+7. **One registry.** Structural test: no `is Fill.StyleLayer`-style type-switches outside
+   `RenderLayerFactory` (grep-tooth over `MapView`/`SymbolLabelSubsystem`, same pattern as
+   `LabelPlacementStructureTests`' AddTileLayer grep). *Falsifier:* §1.6's three scattered switches.
+8. **✅ Extensibility — SHIPPED (E3).** Adding a NEW layer kind = one class + one factory arm; E3 landed the
+   background layer with no edits to `RenderLayerSet` (code), any backend, `TileManager`'s consume loop, or
+   an orchestrator (there is none — D9 stayed collapsed); the allowed footprint outside the new Core types +
+   the layer class itself was one `RenderLayerFactory` arm, one `StyleParser` case, one `MaterialFactory`
+   pair, and one contained `MapView` projection gate (review-checked on the E3 diff).
+9. **E1 is behaviour-preserving.** All existing `Visual/` snapshots byte-identical after E1 (symbols still
+   draw via the legacy path until E2; only the numbering + interfaces move).
 
-1. **Earcut in Burst is non-trivial.** It's a linked-list algorithm; a `NativeArray`-index port + no
-   allocations is real work. The managed oracle (3.3a) de-risks correctness.
-2. **`Mesh.AllocateWritableMeshData` is main-thread**; writing is off-thread/in-job; apply is main-thread.
-   The schedule/complete choreography must interleave with the existing per-frame pump and S87 budget.
-3. **Decode→build handoff** chains two async primitives (`UniTask` decode → `JobHandle` build)
-   per record. Needs a clean state machine in `TileManager` (the current one is UniTask-only).
-4. **Core geometry disposition** — keep as oracle vs delete. Recommend keep-as-oracle, decide later.
-5. **Data-driven paint** (per-feature width/color) is evaluated managed-side into `FeatureMeta` in the
-   bucket, then consumed in-job — confirm all data-driven inputs can be reduced to blittable per-feature
-   values at the boundary (they should: they end up as vertex attributes anyway).
+## 7. Risks / open questions
 
-## 6. Scope decision — LOCKED: all-in, D now
+1. **The §5 mechanism gate** — biggest unknown; that is why it is E0 and why (b) is fully sketched.
+2. **Immediate draws are headless-invisible** (harness limitation, evidence in §5): every Immediate-draw
+   tooth must assert through the MeshRenderer-attach pattern or live Editor verification. Budget for this in
+   E2/E3 test design; do not burn time "fixing" 0-pixel headless RenderMesh.
+3. **Null slots in backends** (§3.3): BRG ctor `RegisterMaterial` and the Entities prototype's
+   `_layerMaterials[0]` are the two verified touch points; audit the GameObject backend's ctor loop too.
+   A missed one is a hard NRE on the first background-bearing style — covered by tooth 6's fixture style
+   running through all three backends (the existing backend snapshot nets).
+4. **Symbol material ownership migration** (D11): the subsystem/layer-set restyle ordering and disposal
+   (who destroys the clones when) must keep the existing restyle tests green; watch for a
+   use-after-destroy on the frame a restyle lands while labels are mid-fade.
+5. **`ZTest Always` on symbol text vs future depth-writing layers.** Fine today (all flat layers ZWrite
+   off — painter order alone composites). When fill-extrusion lands (ZWrite on), "labels unoccluded by 3D"
+   is MapLibre's point-label default, so `ZTest Always` likely SURVIVES — but line-following labels behind
+   buildings deserve a look in that stage.
+6. **Background geometry**: far-plane-cap quad precision under tilt at the horizon; globe projection needs
+   its own geometry (out of E3 scope — Mercator only; the globe background is a follow-up).
+7. **Raster per-tile texture vs per-layer material** (§3.7) — unresolved by design; decide in the raster
+   stage (texture array vs per-instance id vs per-tile material clone). The model reserves the seat either
+   way.
+8. **Queue ceiling**: `LayerDrawOrder.ComputeQueues` throws past 5000; adding symbol/background slots grows
+   N but realistic styles (liberty ~120 painted layers) stay far below 2000 — no change needed, noted for
+   completeness.
+9. **`SymbolRenderLayer.ApplyZoom`**: moving halo binding into the layer makes zoom-expression halos
+   (documented first-cut limit in `BindHalo`) cheap to fix — do NOT fix them in E2 (scope creep); leave the
+   try/catch behaviour identical and note the follow-up.
+10. **KNOWN FOLLOW-UP (post-E2, filed at commit — Opus review of E2):** one `LabelPlacementSystem` is shared
+    across the demo↔production tick paths (`MapView.LateUpdate` `:349`/`:354`), and flipping between them
+    leaks per-path state. Two symptoms, one root cause. **(1a, pre-existing since E1)** `RefreshBatchMirror`
+    keys its stage-mirror skip on `batch.BuildId` alone with no batch-identity guard, so a demo→symbol flip
+    reads one frame of stale placement (self-heals next frame). **(1b, introduced by E2)** production
+    `PresentSlot` never hides the *fallback* presenter, so a demo label shown before the flip stays enabled
+    and double-blends with the layer presenter. **Reachability:** narrow — needs the demo
+    `LabelInstances`/`SyntheticLabelSource` seam active with real labels *then* a symbol style load; NOT the
+    shipped OpenFreeMap/liberty path (symbols from frame 0, demo `else` branch never runs with real labels).
+    **✅ FIXED (2026-07-12, Sonnet dev + Opus review, this branch).** 1a: `RefreshBatchMirror` now guards on
+    `ReferenceEquals(batch, _lastBatch) && batch.BuildId == _mirrorBuildId` (new `_lastBatch` field) — a
+    different batch instance forces a refresh regardless of BuildId. 1b: `PresentSlot` hides the inactive
+    path's presenter every Tick, both directions (production also hides `_fallbackPresenters[slot]`; demo also
+    hides the previous Tick's layer presenters via `_lastSymbolLayers`). Regression tests
+    `LabelPlacementDemoProductionFlipTests` (RED-verified against the reverted logic, then green).
+    **Two review notes on the fix (not defects — for the merge step):**
+    - The *demo-branch* half of the 1b hide is defensive dead code in the real `MapView` flow: a restyle's
+      `RenderLayerSet.Build` → `ClearLayers()` disposes the old `SymbolRenderLayer` presenters (they self-hide)
+      and empties the reused `_symbolRenderLayers` List that `_lastSymbolLayers` aliases, all synchronously
+      before any demo Tick — so `_lastSymbolLayers.Count == 0` by then. Harmless, guarded, zero-alloc; kept
+      because the asymmetry is correct (the *production*-branch hide of the persistent `_fallbackPresenters`
+      IS load-bearing — those survive restyle; layer presenters don't). Consequence:
+      `ProductionThenDemo_Flip_HidesLayerPresenter` pins a valid unit invariant but is NOT a live-production
+      regression guard (MapView cannot produce a direct flip without a `ClearLayers` between).
+    - The fix's correctness leans on the `SetStyle` teardown order (`ClearLayers`-before-flip; same ordering
+      the E2 commit flags as "Layers before Labels, load-bearing").
+11. **FOLLOW-UP (pre-existing, surfaced by E3's Opus review — not an E3 blocker):** `LayerOrderSnapshotTests`
+    builds its hand-made fill quads with the front-facing winding `{0,2,1,0,3,2}`, which under `MapFill.mat`'s
+    `_Cull: 1` (Cull Front) is the **invisible-from-above** winding (E3 empirically proved the reverse
+    `{0,1,2,0,2,3}` is the visible one). So that test's two fill quads render nothing; only its
+    `SyntheticLineMesh` ribbon draws, and its low-variance/clean-composite assertion passes **vacuously** — the
+    "fill-on-top-of-line" keystone case it claims to exercise is never actually exercised.
+    **✅ FIXED (2026-07-12):** flipped the quad winding to `{0,1,2,0,2,3}` so the fills render, and added a
+    **top-layer-dominance** assertion (the composite must be red — the top fill — dominant) so the tooth can
+    no longer pass vacuously: a blue/green-dominant region now fails, catching both the winding bug and any
+    painter-order regression. The variance/no-z-fight assertion stays, now over three genuinely-visible layers.
 
-**Decided (2026-07-01): one epic, A → B → C → D1 → D2 — Burst included now** (option (i)). D1 (the
-oracle-validated kernel port) still runs as an isolated step and may start early, but D2 (the lifecycle
-rewire) lands in this epic, not as a follow-up. The end state is the full Burst target. The rationale below
-is kept for the record.
+## 8. Sequencing (round-2 stages of the one epic)
 
----
+Each stage independently green: full EditMode suite + `Visual/` snapshot parity (identical where
+behaviour-preserving, new snapshots where behaviour intentionally changes). Lowest-risk first; the
+mechanism prototype gates all Immediate wiring (D12).
 
-Everything is designed; one call remains — **does D (Burst) ride in this epic, or land as a fast follow-up?**
+| Stage | Scope | Kills | Gate/teeth | Risk |
+|---|---|---|---|---|
+| **E0. Mechanism probe — ✅ DONE (2026-07-12)** | `RenderQueueVsDistanceSnapshotTests` (adversarial renderQueue-vs-distance; run but NOT committed, see §7 risk 7 — E2's `SymbolLayerOrderSnapshotTests` is the committed regression net instead). **Result: renderQueue dominates distance on the culled/BRG path → option (c) chosen** (§5) | the (a)/(b)/(c) uncertainty | decision recorded + a permanent regression test; no prod code | Low (done) |
+| **E1. Model axes + global numbering — ✅ DONE (2026-07-12)** | `Build`/`Persistence`/`DrawIndex` on `IRenderLayer`; hoist `WriteInto` → `ITileMeshRenderLayer`; factory arms for Symbol/Background returning axis-bearing layers; `RenderLayerSet` numbers ALL painted layers; backends tolerate null slots; TileManager filters `ITileMeshRenderLayer`; D10 single-registry rewire of `BuildSourceSpecs`/subsystem; fix §1.8 stale comments | scattered type-switches (§1.6), stale flatten comments (§1.8) | teeth 6, 7, 9 (byte-identical snapshots — symbols still draw legacy) | Med (done) |
+| **E2. Symbols draw at their slot (option (c)) — ✅ DONE (2026-07-12)** | `SymbolRenderLayer` owns material+queue (D11) + a PERSISTENT per-slot `MeshFilter`/`MeshRenderer` (`LabelSlotPresenter`); `Tick` rewrites its mesh in place each frame and hides it when nothing was built; retired `LabelPlacementSystem.BuildAndSubmit`/`SubmitDraw`'s `Graphics.RenderMesh` and the Overlay pin (shader tag stays as the demo/no-style fallback default only). No orchestrator (D9 collapsed) | Overlay z-group (§1.1–1.2), the blink (§1.3), dual material owners (§1.7), the `RenderMesh` submit | teeth 1, 2, 3, 4 — real headless snapshot tests (`SymbolLayerOrderSnapshotTests`) via the persistent renderer | Med (done) |
+| **E3. Background layer — ✅ DONE (2026-07-12)** | `Background.PaintProperties` parse (Core, the Fill pattern); `BackgroundRenderLayer` (`ViewGeometry`+`Persistent`, flipped from the pre-E0 `Immediate` cell) owns a fill-base material clone + a static world-cap quad on a persistent `MeshRenderer`; Mercator-only gate (`MapView.SetStyle`); Bootstrapper sky demoted (comments only) to the above-horizon clear / no-style default | the camera hack (§1.4) | teeth 5, 8 — `BackgroundSnapshotTests` (2 tests), `BackgroundPaintTests`, `RenderLayerSetTests` flips | Low-Med (done) |
+| **F. Raster** *(OUT OF SCOPE — Epic A payload)* | a raster-source processor; resolve risk 7 | §1.5 | its own stage | — |
+| **G. Fill-extrusion** *(OUT OF SCOPE — Epic A payload)* | a `TileMesh` processor + ZWrite | — | its own stage | — |
 
-- **A + B + C** achieve the stated goal — an extensible, single-ordering render-layer pipeline that isn't a
-  mess and cleanly admits new layer types. All behaviour-preserving, snapshot-gated. This is the "make it
-  right" the user asked for.
-- **D1 + D2** are the performance upgrade (real Burst mesh build) — and carry the costs only surfaced
-  *after* the "full Burst" call: porting the whole managed Core geometry stack to `Unity.Collections`, the
-  core-tests-vs-Collections tension (§3.3), and rewiring the S48/S84 mesh build lifecycle (§3.4).
+E1 is deliberately behaviour-preserving and mostly mechanical — it banks the model with zero visual risk.
+E2 changes the live label draw path but is de-risked by E0's chosen option (c): a persistent per-slot
+MeshRenderer is the proven-headless path, so its teeth are real snapshot tests and its presence/ordering are
+mechanical rather than an orchestrator experiment (E2 downgraded High→Med). E3 proves the extensibility
+claim on a genuinely new kind.
 
-Two viable shapes:
-- **(i) One epic, A→B→C→D1→D2.** Everything lands together; D1 can begin early (oracle-only). Longest, most
-  risk concentrated, but the end state is the full target.
-- **(ii) A→B→C now; D1 in parallel/early as an isolated oracle-validated port; D2 as a separate follow-up
-  once D1 is proven.** Gets the architecture-correctness win banked and de-risked; defers only the
-  lifecycle rewire. **Recommended** — it keeps the highest-risk change (D2) off the critical path without
-  losing the Burst end state.
-
-Recommendation: **(ii)**. Same destination; the risky lifecycle rewrite doesn't block the win the user
-actually wants, and D1's correctness is proven standalone before D2 touches the tile loop.
-
----
-
-## 7. Symbols as an immediate render layer — draw order + presence (planned)
-
-Discovered 2026-07-12 while chasing an Editor-only label "blink". Two findings converge on **one** extension
-of the render-layer model, and it **supersedes the "symbols out of scope" note in §3.1 for DRAW** (that
-exclusion is about the BUILD/lifetime path; draw *order* and *presence* are a different concern that symbols
-share with fill/line). This does **not** fold symbol *build* into the Burst mesh pipeline — the per-frame
-collision path stays.
-
-### 7.1 The two gaps (same root)
-
-1. **Draw order.** `RenderLayerSet` numbers only fill/line (`renderQueue = TransparentQueue + drawIndex`);
-   symbol layers "take no slot" and their per-layer `SymbolText` materials carry no queue. Every symbol layer
-   renders at the base transparent queue via a **separate `Graphics.RenderMesh` path** — one z-group pinned on
-   top of all tiles. Correct only when the style lists all symbol layers last (the common case); **wrong** when
-   a style interleaves a fill/line **above** a symbol layer, and **undefined** among symbol layers. Violates
-   `ARCHITECTURE.md`'s "ordered list of layers, composited in order."
-2. **Presence (the "blink").** Symbols draw via immediate-mode `Graphics.RenderMesh`, submitted once per
-   `LateUpdate`. In the **Editor** the Game View repaints on mouse/UI **without running the player loop**, so
-   the label draw isn't re-issued for those repaints → labels wink out (tiles stay — they're persistent).
-   Confirmed **Editor-only** (a Development build does not blink; the shipped product was never affected). It is
-   nonetheless the same root: an immediate-draw layer that nobody re-issues per render.
-
-Both reduce to one missing concept: symbols are a render layer whose DRAW must be (a) **ordered** in the
-global painter's chain and (b) **re-issued** every camera render.
-
-### 7.2 Decision — `DrawPersistence` on `IRenderLayer`
-
-Add a draw-persistence kind to `IRenderLayer`:
-- **Persistent** — a backend redraws it every render on its own (fill/line: BRG / entities / mesh renderers).
-  The orchestrator does nothing per-render.
-- **Immediate** — the orchestrator must re-issue it every camera render (symbols: `Graphics.RenderMesh`),
-  registered into `RenderPipelineManager.beginCameraRendering`.
-
-It is **orthogonal to draw ORDER**; both live on the interface, and symbols need both:
-
-| Concern | Mechanism | Fixes |
-|---|---|---|
-| **Presence** — re-issued each render? | `DrawPersistence` (Persistent/Immediate); immediate layers re-submitted in `beginCameraRendering` | the Editor blink |
-| **Order** — painter's position | `renderQueue = TransparentQueue + global drawIndex` across ALL layers | the interleaving gap |
-
-### 7.3 Locked design points
-
-- **Keep the build/lifetime two-class split; unify only DRAW (order + presence).** `IRenderLayer` already
-  abstracts the render object; symbols join it *for draw*, while their BUILD stays the per-frame collision
-  path. `ARCHITECTURE.md` "two geometry classes" stands — it is about *lifetime*, not draw.
-- **Decouple collision order from draw order.** MapLibre does **global** symbol collision (all symbol layers
-  compete — already correct here) but **draws** each symbol layer at its own style position. Keep the single
-  global collision pass; give each symbol layer's material its **own** `renderQueue`.
-- **One global draw-order index over ALL painted layers** (fill/line/symbol), replacing the fill/line-only
-  numbering — so symbol positions leave the right gaps in the fill/line offsets.
-- **Symbols share ONE collision but may occupy MULTIPLE draw slots.** A style `symbolA … fill … symbolB` gives
-  A and B different queues but one collision pass. The existing per-material-slot emit already maps 1 slot ↔ 1
-  symbol layer ↔ 1 material, so each slot becomes its own immediate draw at its own queue; collision stays a
-  single cross-slot pass. **No slot restructure.**
-- **One orchestrator owns the single `beginCameraRendering` subscription** — iterates the immediate layers in
-  queue order, gated to the map camera (not SceneView/other), unsubscribed on dispose. Not per-layer
-  subscriptions (reentrancy + teardown hazards).
-- **Move the label submit out of `LateUpdate` into the per-render callback.** LateUpdate (or a data-change)
-  BUILDS the label meshes; the callback SUBMITS them each render — correct in Editor AND build, retiring the
-  standalone in-`LateUpdate` `RenderMesh`.
-
-### 7.4 Open question to lock BEFORE code — ordering determinism ⚠
-
-URP sorts the transparent queue by `renderQueue` **and** camera distance. Immediate billboards (`RenderMesh`,
-clustered depth) interleaving with BRG world-depth meshes via `renderQueue` alone **may not be deterministic**
-within a queue. Two options:
-- **(a) Trust `RenderMesh` + `renderQueue`** — verify with an interleaved style + a snapshot; cheapest if it
-  holds.
-- **(b) Route immediate draws through a `CommandBuffer` / `ScriptableRenderPass`** at explicit points so order
-  is exact regardless of the distance sort — more work, bulletproof.
-
-Prototype **(a)** first (one interleaved-style snapshot answers it); fall back to **(b)** if the sort
-reorders. **This decision gates implementation.**
-
-### 7.5 Acceptance teeth
-
-- An **interleaved** style (`fill` above a `symbol` layer) composites correctly — a snapshot with a symbol
-  layer beneath a later fill shows the fill occluding the labels (today it does not). Mirror the existing
-  `LayerOrderSnapshotTests` fill/line net.
-- Two symbol layers on the same feature draw in **style order** (icon under text).
-- **No Editor blink**: labels are re-issued every camera render (manual Editor verify — it is an Editor-only
-  artifact, so not headless-testable; the build never blinked).
-- **Global symbol collision is unchanged** — the cross-layer competition still holds (a differential/count
-  check that the survivor set is identical to today).
-
-### 7.6 Sequencing
-
-A follow-up slice — **"Stage E — symbols as an immediate render layer"** — independent of the (done) fill/line
-A–D2 work. It rides on the existing per-symbol-layer material slots, so the scope is: the `DrawPersistence`
-property + a unified global draw-order index + per-layer symbol `renderQueue` + the single re-submit
-orchestrator. **Gate on §7.4 first** (the ordering-determinism prototype), then implement.
+**Branch scope (decided 2026-07-12).** This branch (`feat/render-layer-unification-r2`) ships **E1–E3**: the
+shipped vector style's painted kinds — fill, line (round 1) + symbol (E2) + background (E3) — are now all
+first-class in the one ordered model. **F (raster) and G (fill-extrusion) are deferred out of this branch** —
+neither is used by the current style, and — decided 2026-07-12 — they are **not standalone epics but payload
+of "Epic A" (the tile-pipeline unification)**: once per-layer tile processing + a generic data source land,
+raster is a raster-source processor and fill-extrusion is a `TileMesh` processor + ZWrite (raster's
+per-tile-texture fork, risk 7, is resolved there). E3's background world-quad is likewise **interim** —
+Epic A replaces it with a source-less per-tile processor (projection-correct on the globe). See
+`docs/per-layer-tile-processing-design.md` (Epic A) and `docs/projection-globe-track-design.md` (Track B, the
+symbol far-side-occlusion + `GroundResolution` globe gaps that do NOT fall out of Epic A).

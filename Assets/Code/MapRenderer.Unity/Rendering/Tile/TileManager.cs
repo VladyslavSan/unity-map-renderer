@@ -315,8 +315,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             // closure and must stay a real copy). SnapshotLayers()/ToArray() would heap-allocate a fresh
             // array on EVERY probe/release — exactly the per-Tick allocation the S95 zero-alloc contract
             // (MapView_SteadyStateTick_DoesNotAllocateGCMemory) forbids.
+            // E1: only ITileMeshRenderLayer slots feed the tile produce/consume loop — symbol/background
+            // slots (FramePlaced/ViewGeometry) never go through this path at all, and their null Material
+            // means there is nothing for a backend to AddTileLayer. Filtering HERE (the one shared helper)
+            // keeps the kick, the ReleaseTile cache transfer, and the Tick completeness probe in agreement.
             for (int li = 0; li < _layers.Count; li++)
-                if (SourceIdOf(_layers[li].StyleLayer) == sourceId) into.Add(li);
+                if (_layers[li] is Style.ITileMeshRenderLayer && SourceIdOf(_layers[li].StyleLayer) == sourceId)
+                    into.Add(li);
         }
 
         // ── Tile render backend (Entities, BRG, or GameObject) — constructed in SetSources ────
@@ -566,8 +571,15 @@ namespace MapRenderer.Unity.Rendering.Tile
             };
         }
 
-        /// <summary>The per-layer materials in declared order — the single list every backend indexes by
-        /// <c>materialIndex</c> (<c>index == draw order == material index</c>; no fills-then-lines flatten).</summary>
+        /// <summary>The per-layer materials in declared order — the single, FULL-WIDTH list every backend
+        /// indexes by <c>materialIndex</c> (<c>index == draw order == material index</c>; no
+        /// fills-then-lines flatten). No slot is null when the material set is configured (E2 made symbol
+        /// material-bearing, D11; E3 made background material-bearing) — a null entry per-slot is still
+        /// possible when that slot's own base material is unassigned, and backends must tolerate it (§3.3).
+        /// The tile produce path never emits an <c>AddTileLayer</c> for a non-tile-mesh slot (symbol or
+        /// background) either way, since <see cref="ComputeDenseLayerIds"/> filters to
+        /// <see cref="Style.ITileMeshRenderLayer"/> slots only — a symbol/background slot's material reaches
+        /// a backend's material REGISTRATION here, never its draw path.</summary>
         private static List<Material> LayerMaterials(Style.RenderLayerSet layers)
         {
             var mats = new List<Material>(layers.Count);
@@ -1296,7 +1308,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                     for (int d = 0; d < dense; d++)
                     {
                         int li    = materialIndices[d];
-                        var layer = layersSnapshot[li];
+                        // ComputeDenseLayerIds already filtered to ITileMeshRenderLayer slots — safe cast.
+                        var layer = (Style.ITileMeshRenderLayer)layersSnapshot[li];
 
                         int    verts  = 0;
                         Bounds bounds = default;

@@ -14,6 +14,7 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
+using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -124,12 +125,13 @@ namespace MapRenderer.Unity.Rendering.Map
             // S20: one label system per view, owning this view's camera (constructed here, after Camera is
             // set — a field initializer would see a null Camera).
             Labels      = new LabelPlacementSystem(Camera, _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null);
-            // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders. It
-            // clones the per-symbol-layer materials (per-layer text-halo-*) from the same MapMaterialSet.SymbolText
-            // base. A-1: DATA arrives via the bytes-ready push (shared already-fetched bytes); the tile LIFECYCLE
-            // is PULLED — each frame we hand it TileManager's loaded set and it reconciles (no release/restore
-            // callbacks). cacheEnabled drives keep-warm-on-release so it matches the prepared mesh cache.
-            _symbols    = new SymbolLabelSubsystem(Camera, _config.MaterialSet,
+            // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
+            // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) now live on each
+            // SymbolRenderLayer (Layers.Build), not here. A-1: DATA arrives via the bytes-ready push (shared
+            // already-fetched bytes); the tile LIFECYCLE is PULLED — each frame we hand it TileManager's
+            // loaded set and it reconciles (no release/restore callbacks). cacheEnabled drives
+            // keep-warm-on-release so it matches the prepared mesh cache.
+            _symbols    = new SymbolLabelSubsystem(Camera,
                 _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
             TileManager.SymbolTileBytesReady = _symbols.OnTileBytesReady;
         }
@@ -137,6 +139,13 @@ namespace MapRenderer.Unity.Rendering.Map
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
         // LabelInstances/LabelAtlas seam below is used only when the style has NO symbol layers.
         private readonly SymbolLabelSubsystem _symbols;
+
+        // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
+        // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
+        private readonly List<Symbol.StyleLayer> _symbolLayerScratch = new List<Symbol.StyleLayer>();
+        // D11/E2: the SymbolRenderLayer objects themselves (same walk as _symbolLayerScratch, same order) —
+        // handed to Labels.Tick each frame so each layer's survivors draw with its own material/presenter.
+        private readonly List<Style.SymbolRenderLayer> _symbolRenderLayers = new List<Style.SymbolRenderLayer>();
         // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
         private readonly List<Tile.LoadedTileKey> _symbolLoadedScratch = new List<Tile.LoadedTileKey>();
 
@@ -182,7 +191,19 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
-            _symbols.SetStyle(_style); // S105: group symbol layers + (re)build the shared glyph pipeline
+            // D10: derive the symbol layers from the just-built set (RenderLayerFactory is the sole
+            // registry) instead of re-walking style.Layers with an is-check (kills §1.6). One walk, two
+            // lists (D11/E2): the typed StyleLayer for the subsystem, the owning SymbolRenderLayer (its
+            // material + presenter) for Labels.Tick — same order, so the ordinal mapping stays 1:1.
+            // E3: the same walk also gates any BackgroundRenderLayer to Mercator-only — a flat world quad
+            // is wrong on a curved (globe) projection (§7.6 follow-up covers the real globe background).
+            bool curvedGround = Camera.Projection.TryGetHorizonOccluder(out _, out _);
+            _symbolLayerScratch.Clear();
+            _symbolRenderLayers.Clear();
+            foreach (var layer in Layers.Layers)
+                if (layer is Style.SymbolRenderLayer s) { _symbolLayerScratch.Add(s.SymbolLayer); _symbolRenderLayers.Add(s); }
+                else if (layer is Style.BackgroundRenderLayer b) b.SetVisible(!curvedGround);
+            _symbols.SetStyle(_style, _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             var specs = await BuildSourceSpecs(style, ct);
             TileManager.SetSources(specs, _config.Backend);
@@ -200,16 +221,17 @@ namespace MapRenderer.Unity.Rendering.Map
             var loader  = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
             var factory = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
 
-            // Distinct rendered (fill/line) source-ids in declared order.
+            // D10: distinct rendered source-ids in declared order, derived from the ALREADY-BUILT layer set
+            // (Layers.Build ran above, in SetStyle) instead of re-walking style.Layers with an is-check —
+            // RenderLayerFactory is the one registry. ViewGeometry layers (background) have no tile data, so
+            // no source to fetch; that is the principled exclusion, not a special case (fill/line/symbol
+            // still fetch, same as before).
             var seen    = new HashSet<string>();
             var ordered = new List<string>();
-            foreach (var sl in style.Layers)
+            foreach (var layer in Layers.Layers)
             {
-                bool rendered = sl is MapRenderer.Core.Style.Fill.StyleLayer
-                             || sl is MapRenderer.Core.Style.Line.StyleLayer
-                             || sl is MapRenderer.Core.Style.Symbol.StyleLayer; // S105: fetch symbol sources too
-                if (!rendered) continue;
-                string sid = sl.Source ?? string.Empty;
+                if (layer.Build == Style.RenderLayerBuild.ViewGeometry) continue;
+                string sid = layer.StyleLayer.Source ?? string.Empty;
                 if (seen.Add(sid)) ordered.Add(sid);
             }
 
@@ -326,9 +348,10 @@ namespace MapRenderer.Unity.Rendering.Map
                     _symbols.PumpBuilds();
                 }
                 // Lever C: the blittable label batch — collect (+ cross-tile dedup) + LabelInstance→SoA, rebuilt every
-                // frame (allocation-free; the version cache was removed). Then project/collide/build the placement.
+                // frame (allocation-free; the version cache was removed). Then project/collide/build the placement,
+                // presenting each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
                 Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
-                    _symbols.LayerMaterials);
+                    _symbolRenderLayers);
             }
             else
             {
@@ -431,9 +454,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
         /// RenderLayerSet's materials, then the label placement system's mesh/material/native buffers.
-        /// Order matters: tiles first — their renderers reference layer materials.
-        /// <see cref="Labels"/> is independent of both, so its position isn't load-bearing, but it is
-        /// NOT responsible for <see cref="LabelAtlas"/> — that texture is demo/S105-owned, disposed by
+        /// Order matters TWICE: tiles first — their renderers reference layer materials — and (E2)
+        /// <see cref="Layers"/> before <see cref="Labels"/> — a <see cref="Style.SymbolRenderLayer"/>'s
+        /// presenter (destroyed by <c>Layers.Dispose()</c>) references a slot <see cref="Mesh"/> owned by
+        /// <see cref="Labels"/>; a MeshRenderer must not outlive the mesh it points at. <see cref="Labels"/>
+        /// is NOT responsible for <see cref="LabelAtlas"/> — that texture is demo/S105-owned, disposed by
         /// its own owner, never here. Idempotent (every dispose here is). The MonoBehaviour host calls
         /// this from OnDestroy.
         /// </summary>

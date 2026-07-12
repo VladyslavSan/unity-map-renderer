@@ -20,8 +20,10 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// Registers a tile-layer mesh as a draw item. <paramref name="tileOriginRender"/> is the tile's
         /// SW-corner projected render origin (S91-C, <c>double3</c>: Mercator <c>(mercX, 0, mercZ)</c>, globe
         /// ECEF) — the Level-2 <see cref="Rebuild"/> places the item relative to the frame's scene origin.
-        /// <paramref name="materialIndex"/> indexes the flattened layer-material list (fills in declared order,
-        /// then lines). <paramref name="tileId"/> identifies the owning tile — the <see cref="Entities.TileRenderer"/>
+        /// <paramref name="materialIndex"/> is the layer's global draw slot (its
+        /// <c>Style.IRenderLayer.DrawIndex</c>), indexing the full-width layer-material list; non-tile-mesh
+        /// slots (symbol/background) are null and never receive this call. <paramref name="tileId"/> identifies
+        /// the owning tile — the <see cref="Entities.TileRenderer"/>
         /// and <see cref="GameObjects.TileRenderer"/> use it to group a tile's layers under one named parent
         /// (entity / GameObject) for the per-tile debug affordance; <see cref="BRG.TileRenderer"/> has no
         /// per-item hierarchy and ignores it. Returns a handle for <see cref="RemoveItem"/>.

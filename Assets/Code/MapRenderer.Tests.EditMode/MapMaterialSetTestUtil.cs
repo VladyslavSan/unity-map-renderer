@@ -18,6 +18,7 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(set, $"MapMaterialSet asset missing at '{AssetPath}'.");
             Assert.IsNotNull(set.FillMaterial, "MapMaterialSet.FillMaterial must be assigned for tests.");
             Assert.IsNotNull(set.LineMaterial, "MapMaterialSet.LineMaterial must be assigned for tests.");
+            Assert.IsNotNull(set.SymbolText, "MapMaterialSet.SymbolText must be assigned for tests.");
             return set;
         }
     }

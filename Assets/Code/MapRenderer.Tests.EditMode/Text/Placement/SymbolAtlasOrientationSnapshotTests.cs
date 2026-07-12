@@ -21,24 +21,16 @@
 // check. Absolute VERTICAL position is therefore NOT asserted here -- it's a verified-live eyeball item;
 // only the flip-invariant horizontal axis (1) and the un-mirrored orientation (2) are machine-checked.
 //
-// SUBMISSION PATH (why this test does NOT call snap.Render() straight after system.Tick()): headless
-// EditMode has no running player loop. Graphics.RenderMesh is an immediate-mode, per-frame submission —
-// same bucket as the Entities-Graphics gotcha already on file (docs/lessons-learned.md, "An
-// Entities-Graphics entity renders NOTHING in a headless EditMode test until you tick its system groups
-// manually"): a manually-invoked Camera.Render() alone does not pick it up, REGARDLESS of call-site
-// (tried: default RenderParams.camera, an explicit RenderParams.camera, and submitting from inside a
-// RenderPipelineManager.beginCameraRendering callback — all empirically 0 pixels, even a hardcoded
-// solid-fill fragment). This is a harness limitation, not a shader/pipeline bug (confirmed with a MINIMAL
-// repro: a plain quad + the built-in URP Unlit shader submitted the same way also renders nothing headless).
-// system.Tick() still runs for real (LabelScreenProjection, SymbolBillboardJob, the vertex-buffer upload —
-// the very layout whose byte-order bug this test already caught once) and builds the REAL Mesh/Material
-// (LabelPlacementSystem.Mesh/Material, test surfaces) with the atlas texture and _ScreenParamsLogical
-// already bound; this test attaches THOSE to a temporary MeshFilter/MeshRenderer (identity transform) and
-// renders THAT — the proven-headless path every other snapshot test in this codebase already uses. The
-// Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip via
-// _ScreenParamsLogical), so rendering through a MeshRenderer instead of Graphics.RenderMesh exercises
-// IDENTICAL shader behavior — the only thing this test cannot verify headless is the literal
-// Graphics.RenderMesh call itself, which is a Play-mode-only eyeball item (see the S20 report).
+// SUBMISSION PATH (E2, docs/render-layer-unification.md §5 option (c)): system.Tick() renders through a
+// REAL persistent scene MeshRenderer now -- LabelPlacementSystem's demo-path fallback LabelSlotPresenter
+// creates a hidden GameObject with a MeshFilter/MeshRenderer bound to the built Mesh/Material as PART OF
+// Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. This replaces the
+// pre-E2 Graphics.RenderMesh submission, which rendered 0 px in headless EditMode (a harness limitation --
+// same bucket as the Entities-Graphics gotcha, docs/lessons-learned.md -- confirmed with a minimal repro: a
+// plain quad + the built-in URP Unlit shader submitted the same immediate-mode way also rendered nothing
+// headless); a persistent MeshRenderer has no such limitation -- Unity redraws it like any scene object.
+// The Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip
+// via _ScreenParamsLogical), so the hidden presenter's identity transform is inert.
 
 using System.IO;
 using NUnit.Framework;
@@ -136,7 +128,6 @@ namespace MapRenderer.Tests.Text.Placement
 
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
             var snap = new SnapshotRenderer(Size, Size);
-            GameObject meshGo = null;
             try
             {
                 system.Tick(in frame, new[] { label }, atlasTexture);
@@ -145,14 +136,9 @@ namespace MapRenderer.Tests.Text.Placement
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +
                     "bug, not a rendering bug.");
 
-                // Render the REAL mesh/material Tick just built via a temporary MeshFilter/MeshRenderer —
-                // NOT system's own Graphics.RenderMesh call, which does not appear under a manually-invoked
-                // Camera.Render() in headless EditMode (see this file's header comment). Identity transform:
-                // the vertex shader converts screen-px -> clip directly and ignores object-to-world/VP.
-                meshGo = new GameObject("SymbolOrientation_MeshRenderer");
-                meshGo.AddComponent<MeshFilter>().sharedMesh = system.Mesh;
-                meshGo.AddComponent<MeshRenderer>().sharedMaterial = system.Material;
-
+                // E2: Tick() already bound the built Mesh/Material to a real persistent scene MeshRenderer
+                // (the demo fallback LabelSlotPresenter) — render straight away, no manual attach (see the
+                // file header's SUBMISSION PATH paragraph; a double-attach would double-blend the SDF ink).
                 snap.Render(uCam);
 
                 byte[] px = snap.RawPixels; // RGBA32, row-major, TOP-LEFT origin (SnapshotRenderer's doc'd convention)
@@ -198,8 +184,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally
             {
                 snap.Dispose();
-                if (meshGo != null) Object.DestroyImmediate(meshGo); // before system.Dispose() destroys the Mesh/Material it references
-                system.Dispose();
+                system.Dispose(); // destroys the fallback presenter BEFORE its mesh (LabelPlacementSystem's own ordering)
                 atlasTexture.Dispose();
                 Object.DestroyImmediate(camGo);
             }

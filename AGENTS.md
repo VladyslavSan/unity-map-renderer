@@ -92,6 +92,32 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 The code-style rules (math types, `System.Math` ban, `in` params, data carriers, builder naming,
 test-code-bloat) live in **Coding conventions** below — don't restate them here.
 
+### Multi-agent stage workflow (plan → develop ⇄ review)
+A larger change lands one **stage** at a time via a three-role chain, each role a separate agent (models
+chosen for the job — a strong reasoning model plans, a fast capable model develops, a strong model reviews).
+Each role is a **tool-scoped subagent**: the planner reads and plans but writes no production code; the
+developer implements and runs the gate; the reviewer reads the diff and re-runs the gate but edits nothing.
+This is a lightweight, human-in-the-loop chain — there is **no board, no stage files, no autonomous
+supervisor**; the design docs below are the only tracking.
+1. **Plan.** A planner writes a **file-level implementation plan** (`docs/<epic>-<stage>-plan.md`) grounded
+   in the epic's SSOT design doc. It is an *ordered edit list* citing `file:symbol` (re-verified against
+   source), with the stated **invariant** (e.g. "behaviour-preserving ⇒ byte-identical snapshots"),
+   **acceptance teeth** (falsifiable — a shallow impl can't pass), and an **explicit "deferred" scope fence**
+   so the developer can't over-reach. No production code.
+2. **Develop.** A developer executes the plan in order, honoring its compile checkpoints, and iterates
+   `./Tools/run-tests.sh` to green (Editor **closed**; verify NEW test names appear in the results XML — the
+   batch-Burst stale-XML hazard; **never re-bake a snapshot to go green** — a diff means behaviour changed).
+   Regression tests for a fixed bug are **RED-verified** (confirm they fail against the un-fixed code, then
+   pass). Does **not** commit.
+3. **Review.** A reviewer reads the working-tree diff, **independently re-runs the gate** (doesn't trust the
+   dev's word), and returns APPROVE or ranked actionable findings — stating an explicit verdict on each
+   judgment call the change hinges on. Non-blocking findings are **recorded** (in the design doc, for the
+   merge step), not necessarily fixed in-stage.
+Then **commit one stage per revertible commit** on the feature branch (never fold stages; the merge step
+decides what to squash). The design doc is the running SSOT — decisions, the stage sequence, and open
+findings live there. The orchestrator (main session) hands each role its brief, relays results, and gates
+the commit; it does not do the role work itself.
+
 ### Commit conventions — read `docs/commit-conventions.md`
 `type(scope): subject` ([Conventional Commits](https://www.conventionalcommits.org)). **The scope is a
 code-area tag, never a stage id** — `feat(meshing): …`, not `feat(S89 D2): …` (a scope must be

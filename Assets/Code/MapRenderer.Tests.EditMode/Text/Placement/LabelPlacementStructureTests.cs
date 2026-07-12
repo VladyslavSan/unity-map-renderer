@@ -54,6 +54,33 @@ namespace MapRenderer.Tests.Text.Placement
                 string.Join("\n", offenders));
         }
 
+        // ── E2: Graphics.RenderMesh is retired — labels draw via persistent per-slot MeshRenderers now
+        //    (LabelSlotPresenter), never an immediate-mode per-frame submission (design §5 option (c)). ──
+        [Test]
+        public void SourceTree_NeverReferencesGraphicsRenderMesh()
+        {
+            string dir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            Assert.IsTrue(Directory.Exists(dir), $"expected the MapRenderer.Unity source directory to exist at {dir}");
+
+            // Match the CALL form "Graphics.RenderMesh(" (no space before the paren) so prose discussing the
+            // retired mechanism (doc comments, shader README) is not itself flagged -- only an actual call is.
+            var offenders = new List<string>();
+            foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
+            {
+                string text = File.ReadAllText(file);
+                if (text.Contains("Graphics.RenderMesh("))
+                {
+                    offenders.Add(file);
+                }
+            }
+
+            Assert.IsEmpty(offenders,
+                "Graphics.RenderMesh was retired in E2 (design docs/render-layer-unification.md §5 option (c)) " +
+                "-- symbol labels draw via persistent per-slot MeshRenderers (LabelSlotPresenter), redrawn by " +
+                "Unity on its own, never re-issued from an immediate-mode call. Offending files:\n" +
+                string.Join("\n", offenders));
+        }
+
         // ── (b) Behavioral: rebuilt every Tick, never cached/accumulated ─────────────────────────
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()

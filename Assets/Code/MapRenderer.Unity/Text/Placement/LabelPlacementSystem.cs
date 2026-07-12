@@ -21,6 +21,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Text.Placement
 {
@@ -28,25 +29,33 @@ namespace MapRenderer.Unity.Text.Placement
     /// S20 Slice 1: the dedicated PER-FRAME label renderer (F1, stage doc §6) — a plain class (NOT a
     /// MonoBehaviour), owned by <see cref="MapView"/>, ticked as the last step of <c>MapView.LateUpdate</c>
     /// AFTER <see cref="MapCamera.SyncToCamera"/> (the committed-camera seam). Every <see cref="Tick"/>
-    /// re-projects every label's anchor, rebuilds the ENTIRE screen-space billboard vertex buffer from
-    /// scratch, and submits ONE <see cref="Graphics.RenderMesh(in RenderParams, Mesh, int, Matrix4x4)"/>
-    /// draw call over a single persistent <see cref="Mesh"/> — this is the "placed every frame" path
-    /// (<c>ARCHITECTURE.md</c> §"Two geometry classes"), structurally distinct from the static
-    /// per-<c>(tile,layer)</c> <see cref="Backend.ITileRenderBackend"/> meshes (T5: this type never calls
-    /// <c>AddTileLayer</c> — grep-checked by <c>LabelPlacementStructureTests</c>).
+    /// re-projects every label's anchor, rebuilds the ENTIRE screen-space billboard vertex/index buffer per
+    /// slot from scratch, and hands each slot's finished <see cref="Mesh"/> to its
+    /// <see cref="LabelSlotPresenter"/> — a persistent per-slot <c>MeshFilter</c>/<c>MeshRenderer</c> Unity
+    /// redraws every camera render BY ITSELF (E2, design §5 option (c) — no orchestrator, no
+    /// <c>Graphics.RenderMesh</c>). This is the "placed every frame" path (<c>ARCHITECTURE.md</c> §"Two
+    /// geometry classes"), structurally distinct from the static per-<c>(tile,layer)</c>
+    /// <see cref="Backend.ITileRenderBackend"/> meshes (T5: this type never calls <c>AddTileLayer</c> —
+    /// grep-checked by <c>LabelPlacementStructureTests</c>).
     ///
     /// <para><b>Collision (Slice 2).</b> Every on-screen label's screen-space AABB (<see cref="LabelBox"/>,
     /// <c>text-padding</c> applied) is run through <see cref="LabelCollision.SelectSurvivors"/> — greedy,
     /// sort-key-driven, permutation-invariant survivor selection (stage doc §4 T1) — BEFORE the billboard
     /// build, so only survivors emit quads. The projection/collision/build pass runs over reused arrays
-    /// (no per-frame managed allocation — T4).</para>
+    /// (no per-frame managed allocation — T4). Collision is GLOBAL across every symbol layer (D8, unchanged
+    /// by E2) — only the DRAW is partitioned by material slot.</para>
     ///
     /// <para><b>Screen-space submission (S20 plan Risk #1).</b> Billboard vertices are LOGICAL SCREEN
     /// PIXELS (not object/world positions) — <c>Map/Symbol</c>'s vertex shader converts px→clip directly
-    /// via <c>_ScreenParamsLogical</c>, bypassing the normal transform. <see cref="Graphics.RenderMesh"/>'s
-    /// CPU-side frustum cull is defeated with an enormous <see cref="RenderParams.worldBounds"/> (that
-    /// cull is evaluated as if the vertex data were real object-space positions, which it is not — see
-    /// <c>Shaders/Map/Symbol/Text/README.md</c>).</para>
+    /// via <c>_ScreenParamsLogical</c>, bypassing the normal transform (the hidden presenter GameObject's
+    /// identity transform is inert). Since a <see cref="MeshRenderer"/>'s CPU-side frustum cull is
+    /// evaluated against <see cref="Mesh.bounds"/> as if the vertex data were a real object-space position
+    /// (which it is not), <see cref="BuildSlotMesh"/> sets an enormous <c>HugeBounds</c> — see
+    /// <c>Shaders/Map/Symbol/Text/README.md</c>.</para>
+    /// <para><b>Presence (E2, design §5).</b> A slot that produces no quads this Tick (no atlas, empty
+    /// batch, everything culled/suppressed) is HIDDEN, not left drawing stale content — the mirror image
+    /// of the pre-E2 Editor blink. <see cref="Style.SymbolRenderLayer"/> owns the production presenters;
+    /// this class owns a small fallback set for the demo/no-style seam (no layer list passed).</para>
     /// <para><c>internal</c> (not <c>public</c>): mirrors <c>Tile.TileManager</c>'s own visibility — this
     /// is an implementation detail <see cref="MapView"/> owns, not a public API surface. Its members stay
     /// declared <c>public</c> regardless (matching <c>TileManager</c>'s convention), which also keeps
@@ -104,7 +113,7 @@ namespace MapRenderer.Unity.Text.Placement
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // Graphics.RenderMesh's CPU cull is evaluated against this AS IF it were a real object-space
+        // A MeshRenderer's CPU frustum cull is evaluated against this AS IF it were a real object-space
         // bound — our vertex data is screen pixels, so "never cull" is the only correct choice (Risk #1).
         private static readonly Bounds HugeBounds = new Bounds(Vector3.zero, new Vector3(1e9f, 1e9f, 1e9f));
 
@@ -113,11 +122,26 @@ namespace MapRenderer.Unity.Text.Placement
 
         // S105 F1: one (mesh, quad-buffer) per MATERIAL SLOT. Collision is GLOBAL across all labels; only
         // the billboard build + draw is partitioned by LabelInstance.MaterialIndex so each symbol layer's
-        // survivors draw with their own material (per-layer text-halo-*). Graphics.RenderMesh is deferred,
-        // so each slot needs its OWN persistent mesh (one shared mesh would be overwritten before the
-        // deferred draw reads it). The demo / single-material path is just slot 0.
+        // survivors draw with their own material (per-layer text-halo-*). Each slot needs its OWN
+        // persistent mesh — E2: it is rewritten in place every Tick and stays bound to its slot's
+        // LabelSlotPresenter (production: SymbolRenderLayer's; demo: _fallbackPresenters' below), which
+        // Unity redraws every camera render on its own. The demo / single-material path is just slot 0.
         private readonly List<Mesh>                   _slotMeshes = new List<Mesh>();
         private readonly List<NativeList<PlacedQuad>> _slotQuads  = new List<NativeList<PlacedQuad>>();
+
+        // E2: the demo/no-style path's presenters (no per-layer SymbolRenderLayer list passed) — grown
+        // 1:1 with _slotMeshes in EnsureSlots. Production frames pass symbolLayers and use THOSE layers'
+        // own presenters instead; this list stays un-created (lazy — List<T> allocates nothing until Add)
+        // on production styles.
+        private readonly List<LabelSlotPresenter> _fallbackPresenters = new List<LabelSlotPresenter>();
+
+        // §7.10 1b: the symbolLayers list PresentSlot showed on the PREVIOUS Tick — the production branch can
+        // hide its own _fallbackPresenters directly (it owns that list), but the demo/fallback branch has no
+        // reference to a layer's presenter unless it remembers one from a prior production Tick. Set at the
+        // end of Tick (in SymbolLabelBatch/production Tick, after the present loop) so PresentSlot still sees
+        // last frame's value while presenting THIS frame. Null once a demo Tick has consumed it (nothing left
+        // to hide).
+        private IReadOnlyList<SymbolRenderLayer> _lastSymbolLayers;
 
         // The default material — a clone of MapMaterialSet.SymbolText — used for the demo path (no per-layer
         // materials passed) and as the fallback for any slot without a supplied material.
@@ -225,6 +249,13 @@ namespace MapRenderer.Unity.Text.Placement
         // scratch. The job calls the SAME LabelStagingMath the differential test pins; its native outputs
         // (_sjBoxes/_sjQuads/_sjCandidates/_sjEmit) feed the collision + emit passes DIRECTLY — no managed round-trip.
         private long _mirrorBuildId = long.MinValue;
+        // §7.10 finding 1a: this ONE system is ticked by BOTH the demo (_demoBatch) and production (per-frame
+        // subsystem batch) paths, and their BuildId counters are independent — a demo Tick can leave
+        // _mirrorBuildId at the same value a DIFFERENT production batch's first build also reaches, so BuildId
+        // alone can't tell "this exact batch already mirrored" from "some other batch happens to share the
+        // number". The instance identity closes that: only skip the refresh when it is the SAME batch object
+        // AND its BuildId hasn't moved since.
+        private SymbolLabelBatch _lastBatch;
         private NativeList<byte> _mKinds;
         private NativeList<int>  _mDetail, _mWorldCount, _mPointQuadStart, _mPointQuadCount;
         private NativeList<int>  _mCurvedGlyphStart, _mCurvedGlyphCount, _mCurvedAnchorStart, _mCurvedAnchorCount, _mCurvedAnchorFadeStart;
@@ -281,16 +312,20 @@ namespace MapRenderer.Unity.Text.Placement
         /// many tile-unload fade-outs completed this frame.</summary>
         internal int LastDepartingCulledCount { get; private set; }
 
-        /// <summary>The persistent billboard mesh <see cref="Tick"/> rebuilds every call. Test surface: headless
-        /// EditMode has no player loop, so a <see cref="Graphics.RenderMesh"/> submission never appears under a
-        /// manually-invoked <see cref="Camera.Render()"/> (see <c>docs/lessons-learned.md</c>) — a snapshot test
-        /// verifies the real mesh/material this class built by attaching them to a temporary MeshFilter/MeshRenderer
-        /// instead (the proven-headless path every other snapshot test already uses). The actual
-        /// <see cref="Graphics.RenderMesh"/> call is a Play-mode-only eyeball item.</summary>
+        /// <summary>The persistent billboard mesh <see cref="Tick"/> rebuilds every call. Test surface — E2:
+        /// this mesh is ALSO the one the slot's <see cref="LabelSlotPresenter"/> renders from, a real scene
+        /// <see cref="MeshRenderer"/> that Unity redraws headless without a manual attach (see
+        /// <c>SymbolAtlasOrientationSnapshotTests</c>'s header — the pre-E2 "RenderMesh invisible headless,
+        /// attach a temporary MeshRenderer instead" workaround is gone).</summary>
         internal Mesh Mesh => _slotMeshes.Count > 0 ? _slotMeshes[0] : null;
 
         /// <summary>The default material <see cref="Tick"/> refreshes every call (atlas texture + screen params). Test surface — see <see cref="Mesh"/>.</summary>
         internal Material Material => _material;
+
+        /// <summary>Whether slot 0's fallback (demo-path) presenter is currently drawing. Test surface —
+        /// §7.10's demo/production flip regression pins that this and the corresponding
+        /// <c>SymbolRenderLayer.PresenterVisible</c> are never both true for the same slot.</summary>
+        internal bool FallbackPresenterVisible => _fallbackPresenters.Count > 0 && _fallbackPresenters[0].Enabled;
 
         // The map view this system renders labels for — injected at construction (S20: one
         // LabelPlacementSystem per MapView). Read AFTER MapCamera.SyncToCamera has committed the frame's
@@ -303,7 +338,8 @@ namespace MapRenderer.Unity.Text.Placement
         /// no <c>Shader.Find</c>) — used for the demo / single-material path and as the fallback for any slot
         /// without a supplied per-layer material. Cloned (not the base asset itself) because <see cref="Tick"/>
         /// mutates it every frame (atlas texture + screen params). Per-symbol-layer materials (per-layer
-        /// <c>text-halo-*</c>) are supplied to <see cref="Tick"/> by the symbol subsystem.
+        /// <c>text-halo-*</c>) are owned by each <see cref="Style.SymbolRenderLayer"/> (D11/E2) and supplied
+        /// to <see cref="Tick"/> as the <c>symbolLayers</c> list.
         /// </summary>
         /// <param name="baseMaterial">The <c>MapMaterialSet.SymbolText</c> base; null → labels won't render (logged once).</param>
         public LabelPlacementSystem(MapCamera camera, Material baseMaterial)
@@ -369,41 +405,43 @@ namespace MapRenderer.Unity.Text.Placement
 
         /// <summary>
         /// One frame of the per-label placement loop: project every label's anchor (culling behind-camera
-        /// / far-outside-viewport anchors), rebuild the billboard vertex/index buffers from every
-        /// surviving label's quads, and submit ONE <see cref="Graphics.RenderMesh"/> draw call. A no-op
-        /// submission (no draw, but <see cref="TickCount"/> still advances) when there is nothing to draw
-        /// (empty <paramref name="labels"/>, no atlas texture yet, or every anchor culled).
+        /// / far-outside-viewport anchors), rebuild slot 0's billboard vertex/index buffer from every
+        /// surviving label's quads, and hand it to the demo fallback presenter — which HIDES when there is
+        /// nothing to draw (empty <paramref name="labels"/>, no atlas texture yet, or every anchor culled;
+        /// <see cref="TickCount"/> still advances either way). Demo/test seam — no per-layer materials; see
+        /// the <see cref="SymbolLabelBatch"/> overload for the production entry.
         /// </summary>
         /// <param name="frame">This frame's floating-origin scene frame (<see cref="SceneFrame.SceneOriginRender"/> — the T2 rebase).</param>
         /// <param name="labels">Every candidate label this frame (collision selects the survivors).</param>
         /// <param name="atlas">The uploaded R8 SDF glyph atlas texture backing every label's <see cref="SymbolQuad"/> UVs.</param>
-        /// <param name="materials">Per-symbol-layer materials indexed by <see cref="LabelInstance.MaterialIndex"/>
-        /// (production, per-layer <c>text-halo-*</c>). Null / empty → the demo path: every label draws with the
-        /// single default material. Collision is GLOBAL regardless; only the draw is partitioned by material.</param>
         /// <param name="deltaTime">Seconds since the last <see cref="Tick"/> — drives the A-4 fade ease. Default
         /// <see cref="float.PositiveInfinity"/> SNAPS every fade to its target (no animation), so a single-Tick
         /// test renders fully-placed labels exactly as before A-4 (byte-parity); production passes
         /// <c>Time.deltaTime</c>.</param>
         public void Tick(in SceneFrame frame, IReadOnlyList<LabelInstance> labels, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null)
+            float deltaTime = float.PositiveInfinity)
         {
             // Demo / test seam: convert the managed carriers into the blittable batch (the SAME conversion the
             // production subsystem does once per collected-set change), then tick it. Rebuilt every call here;
-            // production threads a pre-built, version-cached batch instead.
-            int slotCount = (materials != null && materials.Count > 0) ? materials.Count : 1;
-            SymbolLabelBatchBuilder.Build(_demoBatch, labels, slotCount, _camera.Projection);
-            Tick(frame, _demoBatch, atlas, deltaTime, materials, labels?.Count ?? 0);
+            // production threads a pre-built, version-cached batch instead. No layer list — every label draws
+            // through the single default material/presenter (slot 0).
+            SymbolLabelBatchBuilder.Build(_demoBatch, labels, 1, _camera.Projection);
+            Tick(frame, _demoBatch, atlas, deltaTime, null, labels?.Count ?? 0);
         }
 
         /// <summary>Production entry: tick a pre-built, version-cached <see cref="SymbolLabelBatch"/> (built off the
         /// per-frame path by <see cref="SymbolLabelBatchBuilder"/> at the aggregation seam). Same placement as the
         /// managed-list overload; no per-frame LabelInstance iteration or conversion.</summary>
+        /// <param name="symbolLayers">Per-symbol-layer render layers, index == <see cref="LabelInstance.MaterialIndex"/>
+        /// (production, each owning its own material + persistent presenter — D11/E2). Null / empty → the demo
+        /// path: every label draws through the single default material/presenter. Collision is GLOBAL
+        /// regardless; only the draw is partitioned by layer.</param>
         public void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity, IReadOnlyList<Material> materials = null)
-            => Tick(frame, batch, atlas, deltaTime, materials, batch?.Count ?? 0);
+            float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null)
+            => Tick(frame, batch, atlas, deltaTime, symbolLayers, batch?.Count ?? 0);
 
         private void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime, IReadOnlyList<Material> materials, int inputLabelCount)
+            float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputLabelCount)
         {
             TickCount++;
             LastInputLabelCount = inputLabelCount;
@@ -418,7 +456,7 @@ namespace MapRenderer.Unity.Text.Placement
                 LastTileCoverageCulledCount = 0;
                 LastDepartingCulledCount = 0;
 
-                int slotCount = (materials != null && materials.Count > 0) ? materials.Count : 1;
+                int slotCount = (symbolLayers != null && symbolLayers.Count > 0) ? symbolLayers.Count : 1;
                 EnsureSlots(slotCount);
                 for (int g = 0; g < slotCount; g++) _slotQuads[g].Clear();
 
@@ -529,23 +567,57 @@ namespace MapRenderer.Unity.Text.Placement
                     _placedLastFrame.Clear();
 
                 LastQuadCount = totalQuads;
-                if (totalQuads == 0) return; // nothing visible this frame — no draw call submitted
 
-                // Submit one draw per non-empty slot, each with its own per-layer material (or the default).
+                // Present EVERY slot, not just non-empty ones: a frame that produced less than last frame
+                // (or nothing at all — no atlas / no labels / no material) must HIDE the rest, not leave a
+                // persistent presenter drawing stale content (E2 risk #1 — the mirror image of the pre-E2
+                // Editor blink). BuildSlotMesh's own writtenVerts==0 guard (an all-culled slot) folds into
+                // the same `built` flag the presenter reads.
                 for (int g = 0; g < slotCount; g++)
                 {
-                    if (_slotQuads[g].Length == 0) continue;
-                    BuildAndSubmit(_slotQuads[g], _slotMeshes[g], ResolveSlotMaterial(g, materials), viewportLogicalPx, atlas);
+                    bool built = _slotQuads[g].Length > 0
+                        && BuildSlotMesh(_slotQuads[g], _slotMeshes[g], ResolveSlotMaterial(g, symbolLayers), viewportLogicalPx, atlas);
+                    PresentSlot(g, symbolLayers, built);
                 }
+                // §7.10 1b: remember what THIS Tick presented through so a flip to the OTHER path next Tick
+                // can hide it (PresentSlot's else-branch reads this — see _lastSymbolLayers's header comment).
+                _lastSymbolLayers = symbolLayers;
             }
         }
 
-        // The per-layer material a slot draws with: the supplied per-symbol-layer material, else the default.
-        private Material ResolveSlotMaterial(int slot, IReadOnlyList<Material> materials)
-            => (materials != null && slot < materials.Count && materials[slot] != null) ? materials[slot] : _material;
+        // The per-layer material a slot draws with: the supplied layer's own material, else the default.
+        private Material ResolveSlotMaterial(int slot, IReadOnlyList<SymbolRenderLayer> symbolLayers)
+            => (symbolLayers != null && slot < symbolLayers.Count && symbolLayers[slot]?.Material != null)
+                ? symbolLayers[slot].Material : _material;
 
-        // Ensures slotCount (mesh, quad-buffer) slots exist. Grows only when a style adds symbol layers —
-        // amortized, warm-up only; steady-state Ticks reuse the slots (T4 no-per-frame-GC).
+        // Hands slot g's just-built mesh (or a hide) to its presenter: the layer's OWN LabelSlotPresenter in
+        // production (D11/E2 — SymbolRenderLayer.Present forwards to it), or this system's fallback presenter
+        // on the demo/no-style path (no layer list passed). `built` false hides unconditionally.
+        //
+        // §7.10 1b: a slot's mesh is drawn by exactly ONE presenter at a time — whichever path is active this
+        // Tick must also hide the OTHER path's presenter for this slot, or a presenter left enabled by a prior
+        // Tick on the other path keeps drawing the (now-rewritten) mesh alongside the active one and
+        // double-blends. Production hides its own _fallbackPresenters (it owns that list, always sized to
+        // slotCount by EnsureSlots); the demo/fallback path hides the layer presenter it remembers from the
+        // last production Tick (_lastSymbolLayers — it doesn't own any SymbolRenderLayer to look this up any
+        // other way).
+        private void PresentSlot(int slot, IReadOnlyList<SymbolRenderLayer> symbolLayers, bool built)
+        {
+            if (symbolLayers != null && slot < symbolLayers.Count)
+            {
+                symbolLayers[slot].Present(_slotMeshes[slot], built);
+                _fallbackPresenters[slot].Present(null, null, false);
+            }
+            else
+            {
+                _fallbackPresenters[slot].Present(_slotMeshes[slot], _material, built);
+                if (_lastSymbolLayers != null && slot < _lastSymbolLayers.Count)
+                    _lastSymbolLayers[slot].Present(null, false);
+            }
+        }
+
+        // Ensures slotCount (mesh, quad-buffer, fallback presenter) slots exist. Grows only when a style
+        // adds symbol layers — amortized, warm-up only; steady-state Ticks reuse the slots (T4 no-per-frame-GC).
         private void EnsureSlots(int slotCount)
         {
             while (_slotMeshes.Count < slotCount)
@@ -554,6 +626,7 @@ namespace MapRenderer.Unity.Text.Placement
                 mesh.MarkDynamic();
                 _slotMeshes.Add(mesh);
                 _slotQuads.Add(new NativeList<PlacedQuad>(Allocator.Persistent));
+                _fallbackPresenters.Add(new LabelSlotPresenter($"LabelPlacementSystem_FallbackPresenter{_slotMeshes.Count - 1}"));
             }
         }
 
@@ -738,7 +811,9 @@ namespace MapRenderer.Unity.Text.Placement
         // never per frame. The Burst LabelStageJob reads these NativeArrays instead of the managed batch arrays.
         private void RefreshBatchMirror(SymbolLabelBatch batch)
         {
-            if (batch.BuildId == _mirrorBuildId) return;
+            // §7.10 1a: identity AND BuildId — see _lastBatch's header comment.
+            if (ReferenceEquals(batch, _lastBatch) && batch.BuildId == _mirrorBuildId) return;
+            _lastBatch = batch;
             _mirrorBuildId = batch.BuildId;
             int n = batch.Count;
             MirrorKinds(_mKinds, batch.Kinds, n);
@@ -869,7 +944,10 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        private void BuildAndSubmit(NativeList<PlacedQuad> quads,             Mesh              mesh, Material material,
+        // Rebuilds slot mesh's vertex/index buffers from quads and refreshes material's per-frame uniforms
+        // (atlas + screen params). Returns false (mesh left untouched) when the billboard job wrote nothing —
+        // the caller then hides the slot's presenter instead of presenting a stale/empty mesh.
+        private bool BuildSlotMesh(NativeList<PlacedQuad> quads,             Mesh              mesh, Material material,
             double2                                        viewportLogicalPx, GlyphAtlasTexture atlas)
         {
             using (PmBuildSubmit.Auto())
@@ -893,7 +971,7 @@ namespace MapRenderer.Unity.Text.Placement
 
                 int writtenVerts   = _vertexCountOut[0];
                 int writtenIndices = _indexCountOut[0];
-                if (writtenVerts == 0 || writtenIndices == 0) return;
+                if (writtenVerts == 0 || writtenIndices == 0) return false;
 
                 // Rebuilt every Tick, never once — T5's behavioral half (the structural half is the grep for
                 // AddTileLayer in LabelPlacementStructureTests). One mesh per material slot (the CPU vertex/index
@@ -905,30 +983,16 @@ namespace MapRenderer.Unity.Text.Placement
                 mesh.SetIndexBufferData(_indexScratch.AsArray(), 0, 0, writtenIndices, NoValidate);
                 mesh.subMeshCount = 1;
                 mesh.SetSubMesh(0, new SubMeshDescriptor(0, writtenIndices, MeshTopology.Triangles), NoValidate);
+                // HugeBounds survives E2: a MeshRenderer is frustum-culled against Mesh.bounds exactly like
+                // RenderMesh's worldBounds was — screen-space verts ⇒ "never cull" stays correct (Risk #1).
                 mesh.bounds = HugeBounds;
 
                 material.SetTexture(AtlasPropId, atlas.Texture);
                 material.SetVector(ScreenParamsLogicalPropId,
                     new Vector4((float)viewportLogicalPx.x, (float)viewportLogicalPx.y, 0f, 0f));
 
-                SubmitDraw(mesh, material);
+                return true;
             }
-        }
-
-        // The single Graphics.RenderMesh submit (called by BuildAndSubmit). Pin the draw to THIS map camera: a
-        // null camera submits for EVERY camera, which would draw this camera's screen-space vertices into the
-        // SceneView/other cameras (at wrong positions, since the verts are projected for this camera only).
-        // _camera.Camera confines it to the one we projected for.
-        private void SubmitDraw(Mesh mesh, Material material)
-        {
-            var rp = new RenderParams(material)
-            {
-                camera            = _camera.Camera,
-                worldBounds       = HugeBounds,
-                receiveShadows    = false,
-                shadowCastingMode = ShadowCastingMode.Off,
-            };
-            Graphics.RenderMesh(in rp, mesh, 0, Matrix4x4.identity);
         }
 
         /// <summary>
@@ -952,11 +1016,16 @@ namespace MapRenderer.Unity.Text.Placement
                 new float4(c3.x, c3.y, c3.z, c3.w));
         }
 
-        /// <summary>Destroys the mesh/material (main-thread only — play → <c>Destroy</c>, edit →
-        /// <c>DestroyImmediate</c>, mirroring <c>GlyphAtlasTexture</c>/<c>MaterialFactory</c>) and disposes
-        /// the native scratch buffers. Idempotent.</summary>
+        /// <summary>Destroys the fallback presenters, mesh/material (main-thread only — play → <c>Destroy</c>,
+        /// edit → <c>DestroyImmediate</c>, mirroring <c>GlyphAtlasTexture</c>/<c>MaterialFactory</c>) and
+        /// disposes the native scratch buffers. Idempotent. Presenters are destroyed BEFORE the meshes they
+        /// reference (a MeshRenderer whose sharedMesh was destroyed first logs/renders pink in edit mode).</summary>
         protected override void DoDispose()
         {
+            for (int g = 0; g < _fallbackPresenters.Count; g++)
+                _fallbackPresenters[g].Dispose();
+            _fallbackPresenters.Clear();
+
             for (int g = 0; g < _slotMeshes.Count; g++)
             {
                 _slotMeshes[g].DestroySafely();

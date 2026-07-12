@@ -160,3 +160,80 @@ Direction endorsed (converges on the proven MapLibre WorkerTile/Bucket model, ki
 makes symbol a first-class layer). **Not scheduled** — it is structural-debt paydown through the riskiest
 seam for a non-perf payoff. Execute when the tile-build seam is being touched for another reason, or if decode
 ever surfaces in a trace. Until then this doc is the record of intent and the staged plan.
+
+---
+
+## Round-2 update (2026-07-12) — this is now the foundation epic ("Epic A")
+
+**Status change:** the "Not scheduled" decision above is superseded. The trigger it named ("execute when the
+seam is touched for another reason") has arrived. The render-layer round-2 work (E1–E3, shipped on
+`feat/render-layer-unification-r2`) unified the *layering model* but left the non-tile kinds **projection- and
+pipeline-incomplete**, and three separate needs — projection-agnostic **background**, **raster**, **GeoJSON**
+— all converge on *exactly this seam*. This is now the next foundational epic. **Most other pending items are
+its payload, not peers.** (SKETCH — turn into a file-level plan before implementing.)
+
+### Extension 1 — the source-driven axis (folds in background + null sources)
+
+The uniform-processor model above is vector/MVT-centric. Generalize the layer→data relationship:
+
+- A layer **declares its source** (`StyleLayer.Source`) — or **null**.
+- The per-tile coordinator gathers the sources its layers need, **fetches/decodes each once** (shared across
+  all layers of that source — the decode-once rule), then triggers each layer's prepare with **its source's
+  decoded data**.
+- **Null-source layers (background) prepare immediately** with null data — a full-tile-extent quad per covered
+  tile, no fetch/decode.
+
+This is the clean resolution of the background problem: background stops being a bespoke `ViewGeometry`
+world-quad and becomes a **source-less `TileMesh` processor**. E3's world-quad is the *interim* Mercator
+implementation; Epic A replaces it. (Consequence: `RenderLayerBuild.ViewGeometry` loses its only user and the
+build axis collapses to `TileMesh` vs `FramePlaced`.)
+
+### Extension 2 — generic data source (MVT is one impl; GeoJSON-ready)
+
+Abstract the source so MVT / GeoJSON / raster are peers. Current state (verified 2026-07-12):
+
+| Seam | Today | Generic already? |
+|---|---|---|
+| Fetch | `IDataSource.FetchAsync(TileId) → {bytes, TileEncoding}` | ✅ yes (`Core/Data/IDataSource.cs`) |
+| Feature evaluation (filters/expr/paint) | `IFeature` + `MvtFeatureAdapter` | ✅ yes (`Core/Expressions/IFeature.cs`) |
+| **Decode** | `MvtDecoder.Decode → MvtTile`, hardcoded (`TileManager.cs:1306`, `SymbolLabelSubsystem.cs:324`) | ❌ MVT-coupled |
+| **Geometry consumption** | `WriteInto(IReadOnlyList<MvtFeature>)` | ❌ MVT-typed |
+
+So "abstract from MVT" is only the bottom two: move decode **behind the source** (encoding-driven → a neutral
+`DecodedTile`) and neutralize the geometry representation so `WriteInto` consumes a source-agnostic tile-feature
+(MVT and GeoJSON both produce it; `IFeature` is already its evaluation face).
+
+**Raise the source interface to the decoded-tile level.** Today's `IDataSource` is a per-tile *byte* fetcher
+(HTTP tile pyramids). **GeoJSON is not tiled bytes** — it is a whole dataset loaded once and sliced
+client-side (geojson-vt). So the target seam is `ITileFeatureSource.GetTile(TileId) → DecodedTile`:
+MVT = fetch-bytes + decode-protobuf; GeoJSON = load-once + slice; raster = fetch-bytes + a **texture** artifact
+(source output is polymorphic by kind: vector→features, raster→texture). Byte-fetch becomes an MVT/raster
+implementation detail.
+
+### Extension 3 — projection-correctness + backend-consistency, both for free
+
+Because each layer's per-tile prepare projects through the same `IProjection` as fill/line:
+- **Background is projection-correct** (flat on Mercator, curved on the sphere) — deletes E3's Mercator-only
+  gate and the flat-earth `y=0` assumption. (Symbol far-side occlusion is NOT fixed here — that is Track B,
+  `docs/projection-globe-track-design.md`.)
+- Background/raster go through the **active `ITileRenderBackend`** (Entities/BRG/GameObjects), not bespoke
+  GameObjects — resolving the "why always GameObjects?" inconsistency. Only **symbols** stay
+  GameObject/`FramePlaced` (genuinely screen-space; defensible as the one non-tile kind).
+
+### What falls out — Epic A's payload (NOT separate epics)
+
+| Previously framed as | Becomes, under Epic A |
+|---|---|
+| "redo background per-tile" | a null-source `TileMesh` processor (replaces E3's world-quad) |
+| **Raster (F)** (scoped out of round-2) | a raster-source processor (non-MVT source, texture artifact) |
+| GeoJSON support | a second `ITileFeatureSource` impl behind the decoded-tile seam |
+| **Fill-extrusion (G)** (scoped out) | a `TileMesh` processor + ZWrite — one class + one arm |
+| symbol double-decode | symbol fed by the shared decode (stages 3–5 above) |
+
+### Sequencing note
+
+The staged migration (stages 1–5 above) is still the spine. It gains: a **decode-generalization** stage
+(encoding→decoder→`DecodedTile`; neutralize `MvtTile`/`MvtFeature`), a **source-interface-raise** stage
+(`IDataSource`→`ITileFeatureSource`, GeoJSON-ready), and the **null-source/background processor** as an early,
+low-risk proof (simplest processor — no fetch, immediate prepare). Still the riskiest seam in the codebase
+(the mesh build/consume/disposal path) — do it design-first, stage-by-stage, each independently green.

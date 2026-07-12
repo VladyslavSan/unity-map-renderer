@@ -3,14 +3,15 @@ using UnityEngine;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Fill = MapRenderer.Core.Style.Fill;
+using Background = MapRenderer.Core.Style.Background;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Rendering.Materials
 {
     /// <summary>
-    /// Builds the per-style-layer base <see cref="Material"/> instances for fills and lines and binds their
-    /// constant/zoom paint properties to a <see cref="ZoomStyleApplier"/>. Pure and engine-only — no tile,
-    /// scheduler, or floating-origin state.
+    /// Builds the per-style-layer base <see cref="Material"/> instances for fills, lines, and background
+    /// and binds their constant/zoom paint properties to a <see cref="ZoomStyleApplier"/>. Pure and
+    /// engine-only — no tile, scheduler, or floating-origin state.
     ///
     /// <para>Step 1 of the MapView decomposition (extracted verbatim from MapView's private statics). In the
     /// eventual ECS shape this is the "bake style layer → GPU material" system; isolating it here makes it
@@ -74,6 +75,44 @@ namespace MapRenderer.Unity.Rendering.Materials
             // fill-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
                 applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
+        }
+
+        /// <summary>Background material: a clone of the FILL base (§3.6 — the fill shader's flat lit path IS
+        /// the ground look; no separate base asset). Null (warn) when unconfigured, mirroring CreateFillMaterial.</summary>
+        public static Material CreateBackgroundMaterial(MapMaterialSet settings)
+        {
+            Material baseMat = settings != null ? settings.FillMaterial : null;
+            if (baseMat == null)
+            {
+                Debug.LogWarning("[MaterialFactory] No fill base material configured (MapMaterialSet.FillMaterial " +
+                                 "is null) — the style's background layer will not render.");
+                return null;
+            }
+
+            var mat = baseMat.CloneWithParent();
+            mat.name = "MapView_Background";
+            FillTweaker.ApplyPainterContract(mat);
+            return mat;
+        }
+
+        /// <summary>
+        /// Binds constant/zoom background paint properties from <paramref name="paint"/> to the material.
+        /// A UNIFORM colour over WHITE vertex colours — the line-color pattern
+        /// (<see cref="BindLinePaintToApplier"/>), NOT the fill per-vertex bake (the quad's verts are white
+        /// by construction — see <see cref="Style.BackgroundRenderLayer"/>). <c>DependsOnFeature</c> is a
+        /// malformed-style guard: background has no features, so a data-driven expression is spec-invalid —
+        /// fall to the material's inherited default rather than bind it.
+        /// </summary>
+        public static void BindBackgroundPaintToApplier(Background.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        {
+            if (!paint.Color.DependsOnFeature)
+                applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
+            if (!paint.Opacity.DependsOnFeature)
+                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+
+            // Defensive identity — the clone inherits the base .mat's _FillTranslate; assert the spec's
+            // "no translate" (background has no fill-translate equivalent).
+            mat.SetVector(ShaderProperties.Fill.PropertyId.FillTranslate, Vector4.zero);
         }
 
         /// <summary>
