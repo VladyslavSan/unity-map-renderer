@@ -151,8 +151,17 @@ namespace MapRenderer.Unity.Rendering.Map
                 Vector2 mousePos = mouse.position.ReadValue();
                 double2 cursor   = new double2(mousePos.x, mousePos.y) / dpr; // logical px (S92 D3 seam)
 
+                // Gate camera input to the Game View. The new Input System reads the OS-level mouse even when the
+                // pointer is over another Editor panel (or another app), so scrolling the Inspector would zoom the
+                // map and stray/momentum trackpad scroll would micro-zoom EVERY frame (macOS: scroll.y is
+                // continuous fractional). Act only when the app is focused AND the cursor is within the viewport.
+                // Ongoing drags are exempt (see the leftButton block) so a drag that starts in-view can continue
+                // past the edge; keyboard zoom needs focus but not the pointer.
+                bool pointerInViewport = cursor.x >= 0.0 && cursor.y >= 0.0 && cursor.x < vp.x && cursor.y < vp.y;
+                bool acceptPointerInput = Application.isFocused && pointerInViewport;
+
                 float scroll = mouse.scroll.ReadValue().y;
-                if (scroll != 0f)
+                if (scroll != 0f && acceptPointerInput)
                 {
                     // Normalize: divide raw scroll by WheelNotchUnits so one wheel notch ≈ 1.0.
                     float normalizedScroll = scroll / WheelNotchUnits;
@@ -174,7 +183,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 // Sign convention (pinned by CameraPropertiesTests.D6_TiltYSign_*):
                 //   Tilt:    -delta.y  (drag-UP → pitch decreases, toward overhead)
                 //   Heading: +delta.x  (drag-right → bearing increases)
-                if (mouse.leftButton.isPressed)
+                // Start a drag only when the press lands in-view; once dragging, keep going even off the edge.
+                if (mouse.leftButton.isPressed && (_dragging || acceptPointerInput))
                 {
                     bool shift = kb != null && (kb.leftShiftKey.isPressed || kb.rightShiftKey.isPressed);
                     bool ctrl  = kb != null && (kb.leftCtrlKey.isPressed  || kb.rightCtrlKey.isPressed);
@@ -238,7 +248,8 @@ namespace MapRenderer.Unity.Rendering.Map
             // ── Keyboard zoom (+/= / Q → zoom in; − / E → zoom out) ─────────────────────────────
             // Null-guarded separately from Mouse.current (each device can be absent independently).
             // ZoomAtAnchor at the viewport centre → exact centre-zoom feel (unchanged from S42).
-            if (kb != null)
+            // Gated on focus (not pointer) so keyboard zoom doesn't fire while another app/panel has focus.
+            if (kb != null && Application.isFocused)
             {
                 float kbStep  = KeyboardZoomStep * Time.deltaTime;
                 bool  zoomIn  = kb.equalsKey.isPressed || kb.numpadPlusKey.isPressed  || kb.qKey.isPressed;
