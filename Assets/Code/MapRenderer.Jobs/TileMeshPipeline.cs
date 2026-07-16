@@ -11,8 +11,8 @@ namespace MapRenderer.Jobs
     /// <summary>
     /// Coordinates the Burst decode → ring assembly → earcut → projection job chain for one tile — the
     /// <b>fill</b> mesh pipeline (Decode → Assemble → Triangulate → Project; the globe Subdivide + the
-    /// mesh write happen in <c>StyledFillTileBuilder</c>). See <c>docs/mesh-pipeline.md</c> for the full
-    /// per-kind stage orderings (fills Triangulate before Project; lines the opposite).
+    /// mesh write happen in <c>StyledFillTileBuilder</c>). Per-kind stage orderings differ:
+    /// fills Triangulate before Project; lines the opposite.
     ///
     /// <b>Pipeline output layout:</b>
     /// The managed <c>Earcut.Triangulate</c> returns a polygon-local flat vertex array (outer +

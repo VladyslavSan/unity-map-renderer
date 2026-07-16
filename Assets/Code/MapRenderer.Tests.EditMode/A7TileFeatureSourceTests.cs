@@ -1,4 +1,4 @@
-// Epic A / A7 acceptance — docs/per-layer-tile-processing-a7-plan.md §F: the raised source interface
+// Epic A / A7 acceptance: the raised source interface
 // (ITileFeatureSource.GetTile -> IDecodedTileHandle). F-2 proves a BYTELESS source (no IDataSource, no
 // bytes, no FetchAsync) flows through the UNCHANGED per-layer fan-out — the raise is real, not a rename.
 // F-4 proves the lazy-handle decision (§B): GetTile mints a handle without decoding; a malformed-MVT fetch

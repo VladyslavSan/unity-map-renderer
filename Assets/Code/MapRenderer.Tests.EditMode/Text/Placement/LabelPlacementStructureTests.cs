@@ -75,7 +75,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
 
             Assert.IsEmpty(offenders,
-                "Graphics.RenderMesh was retired in E2 (design docs/render-layer-unification.md §5 option (c)) " +
+                "Graphics.RenderMesh was retired in E2 (the render-layer model) " +
                 "-- symbol labels draw via persistent per-slot MeshRenderers (LabelSlotPresenter), redrawn by " +
                 "Unity on its own, never re-issued from an immediate-mode call. Offending files:\n" +
                 string.Join("\n", offenders));

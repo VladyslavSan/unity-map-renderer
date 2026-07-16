@@ -21,7 +21,7 @@
 // everything" default a style-less material renders with). A production symbol layer's material gets its
 // renderQueue OVERRIDDEN at runtime by RenderLayerSet.Build — renderQueue = LayerDrawOrder.TransparentQueue
 // (3000) + the layer's global draw index (D7), interleaved with every other painted layer in declared
-// order (E2, design docs/render-layer-unification.md §3.5) — so a fill declared above a symbol layer
+// order (E2, the render-layer model) — so a fill declared above a symbol layer
 // composites over its labels, exactly as MapLibre's painter's algorithm requires.
 Shader "Map/Symbol/Text"
 {

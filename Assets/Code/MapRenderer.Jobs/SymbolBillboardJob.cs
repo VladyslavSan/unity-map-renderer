@@ -10,7 +10,7 @@ namespace MapRenderer.Jobs
     /// <see cref="BillboardMath.BuildQuad"/>, mirroring <c>LineRibbonJob</c>'s shape (worst-case-sized
     /// output <c>NativeArray</c>s + an <c>OutVertexCount</c>/<c>OutIndexCount</c> pair, scratch kept as
     /// job FIELDS only for the INPUT/OUTPUT containers — see the "job field vs. Execute-local scratch"
-    /// lesson in docs/lessons-learned.md; this job needs no internal scratch at all, so nothing else applies).
+    /// lesson; this job needs no internal scratch at all, so nothing else applies).
     ///
     /// <para>4 vertices + 6 indices per <see cref="PlacedQuad"/>, emitted in input order (Slice 1 has no
     /// collision/sort yet — every quad in <see cref="Quads"/> is placed).</para>

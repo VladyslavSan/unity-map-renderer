@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members (see docs/conventions.md).
+// Construction convention: object initializer with named members.
 
 using Unity.Mathematics;
 

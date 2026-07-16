@@ -1,8 +1,8 @@
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Who re-draws an <see cref="IRenderLayer"/> each camera render (design
-    /// <c>docs/render-layer-unification.md</c> §3.4). Orthogonal to <see cref="RenderLayerBuild"/>.
+    /// Who re-draws an <see cref="IRenderLayer"/> each camera render (the
+    /// render-layer model). Orthogonal to <see cref="RenderLayerBuild"/>.
     /// </summary>
     internal enum DrawPersistence
     {

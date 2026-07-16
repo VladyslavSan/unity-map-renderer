@@ -11,7 +11,7 @@ namespace MapRenderer.Core.Geometry
     /// <para>Winding is correct BY CONSTRUCTION: <see cref="Across"/> is derived as
     /// <c>normalize(cross(along, up))</c> from the SAME <c>up</c> the centerline was projected with (one frame),
     /// so the ribbon front-faces outward for every projection (planar or curved, either handedness). See
-    /// <c>docs/coordinates-and-projections.md §7.1</c> and <c>GlobeLineWindingTests</c>.</para>
+    /// <c>GlobeLineWindingTests</c>.</para>
     ///
     /// Maps onto the existing 4-stream line mesh layout (see <c>StyledLineTileBuilder</c>):
     ///   stream 0 = Position + <see cref="Up"/> (Normal) · stream 1 = <see cref="Across"/> (TexCoord0) ·

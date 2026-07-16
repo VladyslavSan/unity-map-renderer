@@ -5,8 +5,7 @@ namespace MapRenderer.Core.Geo
 {
     /// <summary>
     /// Web Mercator (EPSG:3857). SPHERICAL projection (radius R = WGS84 semi-major axis) applied to
-    /// WGS84 geodetic lon/lat — eccentricity is intentionally ignored (see
-    /// docs/coordinates-and-projections.md §2). Units: meters.
+    /// WGS84 geodetic lon/lat — eccentricity is intentionally ignored. Units: meters.
     ///
     /// <para><b>Single source of the Mercator forward formula.</b> The literal
     /// <c>math.log(math.tan(π/4 + lat/2))</c> appears ONLY in <see cref="Forward(GeoCoordinate3D)"/>

@@ -1,7 +1,7 @@
 // Unity EditMode only — needs UnityEngine.TestTools.Constraints (GC.Alloc profiler recorder) + a real
 // Camera/Mesh/Material. NOT registered in core-tests.csproj.
 //
-// Per docs/lessons-learned.md: only UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() is
+// Only UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() is
 // trustworthy for this measurement (GC.GetTotalMemory / GetAllocatedBytesForCurrentThread both lie on
 // this Unity Mono runtime). First-frame warmup (NativeList growth, first Mesh/Material creation) may
 // allocate; the tooth is the STEADY (post-warmup) path.

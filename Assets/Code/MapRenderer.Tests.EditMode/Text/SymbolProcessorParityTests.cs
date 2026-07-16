@@ -27,7 +27,7 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// Epic A / A3 acceptance tooth #3 (docs/per-layer-tile-processing-a3-plan.md §F — the PRIMARY semantic
+    /// Epic A / A3 acceptance tooth #3 (the PRIMARY semantic
     /// tooth): the differential — production <see cref="SymbolLabelSubsystem"/> output, driven through the
     /// A3 processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/>
     /// ORACLE fed the same bytes/style/camera-zoom/projection over a SECOND, independent builder/glyph

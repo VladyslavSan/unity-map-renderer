@@ -18,8 +18,8 @@ namespace MapRenderer.Core.Tiles
         /// is **MVT's** MoveTo/LineTo/ClosePath wire encoding — not a format-neutral shape. Other vector
         /// formats (GeoJSON, MLT) would have to transcode their own geometry INTO this command stream to
         /// implement <see cref="ITileFeature"/> today; they do not emit it natively. The planned
-        /// neutralization (a format-neutral geometry buffer replacing this <c>uint[]</c>) is tracked in
-        /// <c>docs/per-layer-tile-processing-design.md</c> §"Round-5 update" (canonical-IR direction).</summary>
+        /// neutralization (a format-neutral geometry buffer replacing this <c>uint[]</c>) is the
+        /// canonical-IR direction.</summary>
         uint[] Geometry { get; }
     }
 

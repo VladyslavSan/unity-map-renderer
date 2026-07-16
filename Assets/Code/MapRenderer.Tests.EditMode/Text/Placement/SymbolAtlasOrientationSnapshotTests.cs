@@ -21,12 +21,12 @@
 // check. Absolute VERTICAL position is therefore NOT asserted here -- it's a verified-live eyeball item;
 // only the flip-invariant horizontal axis (1) and the un-mirrored orientation (2) are machine-checked.
 //
-// SUBMISSION PATH (E2, docs/render-layer-unification.md §5 option (c)): system.Tick() renders through a
+// SUBMISSION PATH (E2, the render-layer model): system.Tick() renders through a
 // REAL persistent scene MeshRenderer now -- LabelPlacementSystem's demo-path fallback LabelSlotPresenter
 // creates a hidden GameObject with a MeshFilter/MeshRenderer bound to the built Mesh/Material as PART OF
 // Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. This replaces the
 // pre-E2 Graphics.RenderMesh submission, which rendered 0 px in headless EditMode (a harness limitation --
-// same bucket as the Entities-Graphics gotcha, docs/lessons-learned.md -- confirmed with a minimal repro: a
+// same bucket as the Entities-Graphics gotcha -- confirmed with a minimal repro: a
 // plain quad + the built-in URP Unlit shader submitted the same immediate-mode way also rendered nothing
 // headless); a persistent MeshRenderer has no such limitation -- Unity redraws it like any scene object.
 // The Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip

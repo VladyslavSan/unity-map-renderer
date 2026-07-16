@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members (see docs/conventions.md).
+// Construction convention: object initializer with named members.
 // BLITTABLE: this struct crosses into the S19/S20 Burst jobs as a NativeArray<GlyphAtlasEntry> element
 // at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
 // pattern LineRibbonVertex/GeoCoordinate already use) — keep it to blittable fields only: no byte[],

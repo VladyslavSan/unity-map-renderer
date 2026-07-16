@@ -14,8 +14,8 @@ namespace MapRenderer.Unity.Rendering.Style
     ///
     /// <para>ARCHITECTURE §"Layer ordering": the style is an ordered list of layers composited in declared
     /// order. This holds exactly that — ONE <see cref="List{IRenderLayer}"/> containing ALL painted layers
-    /// (fill, line, symbol, background — D7 global numbering, design <c>docs/render-layer-unification.md</c>
-    /// §2), in declared order, where <c>index == DrawIndex == draw order == material index</c>. The old
+    /// (fill, line, symbol, background — D7 global numbering, the render-layer model), in declared order,
+    /// where <c>index == DrawIndex == draw order == material index</c>. The old
     /// fill/line split (<c>_fills</c>/<c>_lines</c>, the fills-then-lines <c>materialIndex = FillCount + li</c>
     /// flatten, and the "fills first" comments) is gone: every kind is just an <see cref="IRenderLayer"/>
     /// implementation in one list, and a new layer type drops in via <see cref="RenderLayerFactory"/> with no

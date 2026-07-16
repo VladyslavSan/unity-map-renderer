@@ -1,7 +1,7 @@
 // Unity EditMode only — uses RenderLayerSet, RenderLayerFactory, MaterialFactory (per-layer Materials).
 // NOT included in Tools/core-tests.
 //
-// E1 (design docs/render-layer-unification.md §8, tooth §6.6): D7 global numbering supersedes Stage A's
+// E1 (the render-layer model): D7 global numbering supersedes Stage A's
 // "non-renderable takes no slot" contract — background/symbol now take slots too. These teeth fail if the
 // old type-bucketing (fills then lines) or a second ordering creeps back, if a genuinely unpainted type
 // (raster/unknown) takes a slot, or if a symbol/background slot's queue math desyncs the tile-mesh layers

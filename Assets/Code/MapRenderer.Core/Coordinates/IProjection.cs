@@ -7,7 +7,7 @@ using MapRenderer.Core.View.Camera;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// The single projection abstraction (docs/coordinates-and-projections.md §6). Implemented by a
+    /// The single projection abstraction. Implemented by a
     /// STATELESS <b>struct</b> per projection (<see cref="WebMercatorProjection"/> : planar;
     /// <see cref="SphericalProjection"/> : globe) so one type serves BOTH sides with no parallel surface:
     /// <list type="bullet">

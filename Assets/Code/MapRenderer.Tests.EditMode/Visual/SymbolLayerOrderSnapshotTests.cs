@@ -1,7 +1,7 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj.
 //
-// E2 acceptance teeth (design docs/render-layer-unification.md §6.1, §6.2, §6.4) — now real snapshot tests
+// E2 acceptance teeth (the render-layer model) — now real snapshot tests
 // because option (c)'s persistent per-slot MeshRenderer is the PROVEN-HEADLESS path (§5): unlike the retired
 // Graphics.RenderMesh submit (0 px headless — SymbolAtlasOrientationSnapshotTests' header), a scene
 // MeshRenderer Unity redraws on its own renders normally under a manually-invoked Camera.Render().

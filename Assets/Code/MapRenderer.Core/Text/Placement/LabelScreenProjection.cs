@@ -2,7 +2,7 @@
 // this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float4x4` would bind
 // to a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234) since the
 // leading `Unity` segment resolves against the CURRENT namespace first. See the S19/S20 namespace-
-// collision trap in docs/lessons-learned.md / GlyphAtlasTexture.cs.
+// collision trap in GlyphAtlasTexture.cs.
 
 using Unity.Mathematics;
 

@@ -15,7 +15,7 @@ namespace MapRenderer.Jobs
     /// (symbols, markers). A future terrain step would elevate these surface points into
     /// <see cref="GeoCoordinate3D"/> (a more-complex path than the surface case) before projection.</para>
     ///
-    /// Formula (docs/coordinates-and-projections.md §4):
+    /// Formula:
     ///   u = (tileX + px / extent) / 2^z ;  v = (tileY + py / extent) / 2^z
     ///   lon = u·360 − 180 ;  lat = atan(sinh(π·(1 − 2v)))·180/π
     /// </summary>

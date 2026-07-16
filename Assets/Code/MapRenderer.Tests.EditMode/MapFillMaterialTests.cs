@@ -117,7 +117,7 @@ namespace MapRenderer.Tests
         public void MapLineMat_ResolvesToTransparentQueue()
         {
             // S37 regression guard, updated for S58. The line is transparent
-            // (docs/lit-rendering-design.md §"Line specifics" — Queue=Transparent>=2501 drives the
+            // (lit rendering — Queue=Transparent>=2501 drives the
             // painter's-algorithm coplanar fill/line ordering; ZWrite Off). Since S58 retired URP's
             // BaseShaderGUI, the queue is NO LONGER auto-resolved from _Surface/_QueueControl on import
             // (our raw-ShaderGUI ValidateMaterial only syncs keywords — it never touches renderQueue).
@@ -132,7 +132,7 @@ namespace MapRenderer.Tests
                 $"batch import, got {mat.renderQueue}. Since S58 the queue comes from the material's "   +
                 "serialized custom render queue (3000) + the Line SubShader Queue=Transparent tag — "    +
                 "the raw-ShaderGUI no longer recomputes it. A value of 2000 means the custom queue was " +
-                "lost. See docs/lit-rendering-design.md.");
+                "lost.");
         }
 #else
         [Test]

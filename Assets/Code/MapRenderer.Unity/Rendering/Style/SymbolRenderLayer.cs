@@ -6,8 +6,8 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Symbol <see cref="IRenderLayer"/>: a MapLibre <c>symbol</c> layer as a runtime render object (design
-    /// <c>docs/render-layer-unification.md</c> §3.5). Axes: <see cref="RenderLayerBuild.FramePlaced"/> —
+    /// Symbol <see cref="IRenderLayer"/>: a MapLibre <c>symbol</c> layer as a runtime render object (the
+    /// render-layer model). Axes: <see cref="RenderLayerBuild.FramePlaced"/> —
     /// rebuilt every frame from screen-space label placement, NOT the Burst tile-mesh pipeline — /
     /// <see cref="DrawPersistence.Persistent"/> — per E0 option (c), a persistent per-slot
     /// <see cref="LabelSlotPresenter"/> owned by this layer, rewritten in place and redrawn by Unity every

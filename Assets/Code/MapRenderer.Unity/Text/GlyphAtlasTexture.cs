@@ -24,8 +24,7 @@ namespace MapRenderer.Unity.Text
     ///
     /// Main-thread only (like every <c>Texture2D</c> mutation) — <see cref="Upload"/> must be called from
     /// the main thread, after any off-thread fetch/decode work has resumed there (mirrors every other
-    /// GPU-resource boundary in this codebase — see the mesh/backend disposal contract in
-    /// <c>docs/async-architecture.md</c>).
+    /// GPU-resource boundary in this codebase — the mesh/backend disposal contract).
     /// </summary>
     public sealed class GlyphAtlasTexture : IDisposable
     {

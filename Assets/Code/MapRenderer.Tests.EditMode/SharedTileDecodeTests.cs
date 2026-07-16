@@ -18,7 +18,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Epic A / A4 acceptance teeth (docs/per-layer-tile-processing-a4-plan.md §F): proves
+    /// Epic A / A4 acceptance teeth: proves
     /// <see cref="SharedTileDecode"/> decodes ONCE and shares the same <see cref="IDecodedTile"/> reference
     /// across both cadences regardless of arrival order (F-1), caches a decode fault and rethrows the SAME
     /// exception instance to every caller (F-4), and survives a bounded two-thread <c>GetOrDecode</c> race

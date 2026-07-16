@@ -31,9 +31,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// same <c>up</c> the centerline was projected with (one frame), so there is no per-projection winding flip,
     /// no separate tangent-basis second frame, and no curvature/handedness branch. The managed
     /// <see cref="LineTessellator"/> is the planar differential oracle for <see cref="LineRibbonJob"/>
-    /// (<c>LineRibbonJobTests</c>). See <c>docs/mesh-pipeline.md</c> for how this line ordering
-    /// (Subdivide → Project → Triangulate) mirrors the fill one, <c>docs/coordinates-and-projections.md §7.1</c>,
-    /// and <c>GlobeLineWindingTests</c>.</para>
+    /// (<c>LineRibbonJobTests</c>). This line ordering (Subdivide → Project → Triangulate) mirrors the
+    /// fill one; see <c>GlobeLineWindingTests</c>.</para>
     ///
     /// S89 Stage B — <see cref="WriteMeshData"/> builds AND writes directly into a caller-allocated
     /// <see cref="Mesh.MeshData"/>, off the main thread (see <see cref="StyledFillTileBuilder"/> for the

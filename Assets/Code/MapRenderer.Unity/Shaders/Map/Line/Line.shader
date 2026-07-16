@@ -20,7 +20,6 @@
 //
 // Shader name: Map/Line (replaces Hidden/Map/Line_S05_Deprecated in Materials/).
 //
-// See docs/lit-rendering-design.md §"Line specifics (S33)" for full design rationale.
 // See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
 // Authored for URP 17.5 / Unity 6000.x. Clean-room URP integration (not MapLibre source).
 Shader "Map/Line"

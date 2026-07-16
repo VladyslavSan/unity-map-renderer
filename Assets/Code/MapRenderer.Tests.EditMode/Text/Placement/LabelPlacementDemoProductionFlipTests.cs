@@ -1,7 +1,7 @@
 // Unity EditMode only — needs a real Camera/Mesh/GameObject (LabelSlotPresenter creates one). NOT
 // registered in core-tests.csproj.
 //
-// §7.10 regression pin (design docs/render-layer-unification.md §7.10, Opus review of E2, filed at
+// Regression pin (the render-layer model; from the E2 review, filed at
 // commit 491bbf6e): ONE LabelPlacementSystem instance is shared between the demo (_demoBatch, fallback
 // presenters) and production (SymbolLabelSubsystem's batch, SymbolRenderLayer presenters) tick paths —
 // MapView.LateUpdate flips between them at runtime. Flipping leaked per-path state, one root cause, two

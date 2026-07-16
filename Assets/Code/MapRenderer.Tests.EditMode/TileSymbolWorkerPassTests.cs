@@ -17,7 +17,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Epic A / A3 acceptance tooth #5 (docs/per-layer-tile-processing-a3-plan.md §F): proves
+    /// Epic A / A3 acceptance tooth #5: proves
     /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> decodes the fetched bytes exactly once,
     /// shares that same <see cref="IDecodedTile"/> reference across every processor in dense order, runs NO
     /// tail (the tail is the caller's main-thread step), rejects a <see cref="LayerPhase.WorkerOnly"/>

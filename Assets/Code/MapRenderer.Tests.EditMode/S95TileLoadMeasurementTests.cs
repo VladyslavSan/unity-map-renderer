@@ -4,7 +4,7 @@
 // UNCONDITIONAL guards (decision 2): they must hold on ANY build, fixed or not.
 //
 // Unity-only (UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() — the ONLY trustworthy
-// allocation meter on Unity Mono per docs/lessons-learned.md:112-131). Excluded from core-tests.csproj.
+// allocation meter on Unity Mono). Excluded from core-tests.csproj.
 //
 // Tooth (a): TileScheduler.Request is alloc-free on the cache-hit / in-flight-share fast paths.
 // Tooth (b): MapView.LateUpdate's cover-recompute (select descent + request/release diff) is alloc-free at

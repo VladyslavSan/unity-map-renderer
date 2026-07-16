@@ -1,7 +1,7 @@
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A (docs/per-layer-tile-processing-design.md): which cadence(s) a
+    /// Epic A: which cadence(s) a
     /// <see cref="ITileLayerProcessor"/> runs on. A1/A2 implement only <see cref="WorkerOnly"/> — the
     /// fill/line/background fan-out is entirely a worker-thread write into a main-thread-allocated mesh
     /// array, so <see cref="TileLayerProcessorRunner.RunWorkerPass"/> and

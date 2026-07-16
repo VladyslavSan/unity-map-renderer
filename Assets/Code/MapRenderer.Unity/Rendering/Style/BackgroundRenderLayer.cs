@@ -6,7 +6,7 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Background <see cref="IRenderLayer"/>: a style's <c>background</c> layer as a runtime render object
-    /// (design <c>docs/render-layer-unification.md</c> §3.6). Epic A / A2: background is now a source-less
+    /// (the render-layer model). Epic A / A2: background is now a source-less
     /// per-covered-tile <see cref="RenderLayerBuild.TileMesh"/> layer — <see cref="Tile.Processing.TileBackgroundLayerProcessor"/>
     /// synthesizes one full-tile-extent quad per tile in the camera cover, projected through the same
     /// <see cref="MapRenderer.Core.Geo.IProjection"/> fill/line use, and registered with the active

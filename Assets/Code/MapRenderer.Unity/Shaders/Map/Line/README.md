@@ -61,14 +61,13 @@ hole is a hard cut at `|side| < innerFrac`. Thin lines stay visible via the **mi
 `_Blur` is a real spec paint property, not AA; `0` ⇒ hard edge. It was once *also* the AA knob, which
 collided with the `line-blur` style term (`line-X → _X`) and silently zeroed AA — the internal AA width later
 became `_AaEdgeWidth` (now removed with the AA model). The naming lesson still stands: never name an internal
-render param after a `line-*`/`fill-*` term (see `docs/lessons-learned.md` § Shaders & HLSL), and keep the
+render param after a `line-*`/`fill-*` term, and keep the
 two prop groups labeled-separate in `Line_LitInput.hlsl` / `Line.shader`.
 
 **Why removed, and what a correct AA looks like:** per-line transparent-fade AA cannot composite a crisp
 **cased** line (two stacked transparent draws — the fill's fade skirt bleeds the casing), and neither a wider
-fade nor MSAA fixes it. The full reasoning + the single-pass-cased-line path forward live in
-**`docs/line-antialiasing.md`** (the SSOT). Stages `S70` / `S77` (the removed opaque-core buffer + its
-sub-pixel over-thicken artifact) are superseded by that note.
+fade nor MSAA fixes it. Stages `S70` / `S77` (the removed opaque-core buffer + its
+sub-pixel over-thicken artifact) are superseded.
 
 ## Render-state design
 

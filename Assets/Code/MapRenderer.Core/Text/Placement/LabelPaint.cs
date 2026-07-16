@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members (see docs/conventions.md).
+// Construction convention: object initializer with named members.
 // C# LangVersion 9 (Unity): NO parameterless struct ctor override (that needs C# 10) — prefer
 // `Default` for construction (mirrors TextLayoutOptions.Default's documented mitigation).
 

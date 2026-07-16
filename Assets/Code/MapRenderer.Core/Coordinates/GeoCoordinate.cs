@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency.
 // Blittable (double-only backing fields) — usable as NativeArray<T> element type and Burst job struct field.
 // Construction convention: object initializer with named members — `new GeoCoordinate { Latitude = …,
-// Longitude = … }` — NOT a positional ctor (self-documenting, order-proof). See docs/conventions.md.
+// Longitude = … }` — NOT a positional ctor (self-documenting, order-proof).
 
 using System;
 

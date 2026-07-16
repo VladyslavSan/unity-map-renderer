@@ -2,7 +2,7 @@
 // placement, BEFORE any backend wiring. These are the falsifiable checks the visible PNG cannot give:
 // a mirrored globe of green blobs reads the same to the eye, but east-lands-left fails an assertion here.
 //
-// The scheme (docs render-layer-unification / S91-C): the scene is rebased into the look-at's local ENU
+// The scheme (S91-C): the scene is rebased into the look-at's local ENU
 // frame so ONE camera orbit (CameraPoseMath.ComputePose, look-at at the render origin, up=+Y) serves plane
 // AND globe. A tile places at rotation = rebase, position = FloatingOrigin.TileToSceneRebased(...), where
 // rebase = transpose(projection.TangentBasisAt(lookAt)).

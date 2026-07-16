@@ -1,5 +1,5 @@
 // Unity-only (UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() — the ONLY trustworthy
-// allocation meter on Unity Mono per docs/lessons-learned.md's "Measuring per-frame GC allocation" note).
+// allocation meter on Unity Mono).
 // Excluded from core-tests.csproj.
 //
 // T4 (S18 §4, Slice 5): appending an already-decoded glyph to the atlas, and shaping a cached run into a

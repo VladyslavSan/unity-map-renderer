@@ -1,8 +1,8 @@
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// The lifetime class of an <see cref="IRenderLayer"/>'s geometry — which loop feeds it (design
-    /// <c>docs/render-layer-unification.md</c> §2 D6). Orthogonal to <see cref="DrawPersistence"/> (who
+    /// The lifetime class of an <see cref="IRenderLayer"/>'s geometry — which loop feeds it (the
+    /// render-layer model). Orthogonal to <see cref="DrawPersistence"/> (who
     /// re-draws it) and <see cref="IRenderLayer.DrawIndex"/> (its slot in the global draw order).
     ///
     /// Epic A / A2: the former view-synthesized-geometry member (background's pre-A2 self-owned world-cap

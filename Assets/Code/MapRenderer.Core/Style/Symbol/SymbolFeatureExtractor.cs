@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency. Mirrors StyledLineTileBuilder's select -> decode -> project
-// pattern (docs/mesh-pipeline.md), but emits pre-shaping SymbolLabels instead of a Mesh.
+// pattern, but emits pre-shaping SymbolLabels instead of a Mesh.
 
 using System.Collections.Generic;
 using Unity.Mathematics;

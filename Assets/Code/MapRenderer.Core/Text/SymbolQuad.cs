@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members (see docs/conventions.md).
+// Construction convention: object initializer with named members.
 // BLITTABLE (T8b): this struct crosses into the S20 Jobs boundary as a NativeArray<SymbolQuad> element
 // (the same Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/
 // GlyphAtlasEntry/PositionedGlyph already use) — keep it to blittable fields only.

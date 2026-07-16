@@ -8,7 +8,7 @@ using UnityEngine;
 namespace MapRenderer.Tests.Structure
 {
     /// <summary>
-    /// E1 D10 (design <c>docs/render-layer-unification.md</c> §2, tooth §6.7): <c>RenderLayerFactory</c> is
+    /// E1 D10 (the render-layer model): <c>RenderLayerFactory</c> is
     /// the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/> subtype to its runtime
     /// render layer. This is a grep guard, modeled on
     /// <see cref="MapRenderer.Tests.Text.Placement.LabelPlacementStructureTests"/>'s <c>AddTileLayer</c>

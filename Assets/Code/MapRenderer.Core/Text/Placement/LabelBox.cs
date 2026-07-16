@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 —
 // this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to
 // a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the
-// namespace-collision trap in docs/lessons-learned.md / GlyphAtlasTexture.cs.
+// namespace-collision trap in GlyphAtlasTexture.cs.
 // BLITTABLE: kept to blittable fields only so a future Burst collision job (F3) can take it as a
 // NativeArray<LabelBox> element without change (mirrors PlacedQuad / LineRibbonVertex). The Slice-2 first
 // cut runs the greedy pass managed over a reused LabelBox[] (still zero per-frame GC — T4), so no job yet.

@@ -506,7 +506,7 @@ namespace MapRenderer.Tests
                 Is.Not.AllocatingGCMemory(),
                 "CaptureTelemetry (TileCoverStats' scratch reuse + the Pending/ConsumeBacklog pass) must not " +
                 "allocate across a RUN of Ticks — a single call can read clean while a loop of N trips the " +
-                "recorder (docs/lessons-learned.md). A LINQ-based impl, or one that news a List/HashSet per " +
+                "recorder. A LINQ-based impl, or one that news a List/HashSet per " +
                 "capture, fails this.");
             }
             finally

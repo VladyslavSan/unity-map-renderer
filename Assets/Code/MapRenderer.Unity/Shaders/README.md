@@ -147,4 +147,4 @@ Intra-folder includes are bare (`#include "Fill_LitInput.hlsl"`). There are no c
 
 Lit shaders carry `#pragma multi_compile_instancing` and `UNITY_DOTS_INSTANCED_PROP` property sets so
 they render under the BatchRendererGroup backend (S49). The CBUFFER, the `UNITY_DOTS_INSTANCING`
-block, and any BRG SoA packing must stay byte-aligned — see `docs/lessons-learned.md`.
+block, and any BRG SoA packing must stay byte-aligned.

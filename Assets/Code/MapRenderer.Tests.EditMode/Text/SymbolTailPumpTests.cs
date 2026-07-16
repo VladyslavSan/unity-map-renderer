@@ -25,8 +25,7 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// Epic A / A5a-A5b (docs/per-layer-tile-processing-a5-plan.md §F,
-    /// docs/per-layer-tile-processing-a5b-plan.md §F-7): the acceptance teeth for the worker-phase / tail
+    /// Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail
     /// split — the worker phase (<see cref="SymbolLabelSubsystem.TryBeginBuild"/>'s returned pass) stops
     /// after the pool-side extract and hands a ready tail (via the A5b pool→main handoff) to
     /// <see cref="SymbolLabelSubsystem.PumpBuilds"/>' budgeted tail-start loop (<c>RunTailAsync</c>), rather

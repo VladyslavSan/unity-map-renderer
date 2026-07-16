@@ -17,7 +17,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Epic A / A1 acceptance tooth #2 (docs/per-layer-tile-processing-a1-plan.md): proves
+    /// Epic A / A1 acceptance tooth #2: proves
     /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> decodes the fetched bytes exactly once and
     /// shares that same <see cref="IDecodedTile"/> reference across every processor in dense order, and that
     /// the pre-A1 fault policy (abort-on-first-fault, wrap-every-allocation) survives the move unchanged.

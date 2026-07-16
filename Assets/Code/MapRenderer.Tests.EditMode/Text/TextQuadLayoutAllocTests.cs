@@ -1,5 +1,5 @@
 // Unity-only (UnityEngine.TestTools.Constraints.Is.Not.AllocatingGCMemory() — the ONLY trustworthy
-// allocation meter on Unity Mono per docs/lessons-learned.md's "Measuring per-frame GC allocation" note).
+// allocation meter on Unity Mono).
 // Excluded from core-tests.csproj.
 //
 // S19 Slice 4: the layout hot path (steady, single-line, no-wrap) must allocate ZERO managed garbage

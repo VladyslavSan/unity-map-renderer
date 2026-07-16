@@ -45,7 +45,7 @@ TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, 
 ## What works today (the milestone)
 
 - **Point labels** (`symbol-placement: point`) and **curved along-line labels** (`line` / `line-center`)
-  — per-glyph text that follows the line tangent. See `docs/labels-and-symbols-design.md` §3.
+  — per-glyph text that follows the line tangent.
 - **Collision** — one global greedy all-or-nothing pass over a uniform grid; point and line labels
   compete for the same space. Runs as the Burst `LabelCollisionJob`.
 - **Fade** (A-4) — labels ease in/out instead of popping; **cross-tile identity** (A-3) keeps a label's
@@ -82,7 +82,7 @@ labels are **~21.8 ms** — labels *are* the frame cost right now.
 
 3. **Stateless rebuild every frame** → pop/blink/slide and cost. `Tick` clears and rebuilds from scratch
    with no cross-frame memory. The static-skip (B-1) hides this for a truly idle camera, but any motion
-   pays full price. Full analysis: `docs/labels-and-symbols-design.md` §2.
+   pays full price.
 
 4. **`LabelCollisionJob` is `Schedule().Complete()` with no interleaved work.** A single `IJob` scheduled
    onto a worker and immediately blocked on — worker hand-off + fence for zero parallelism. `.Run()`
@@ -137,7 +137,4 @@ Profile in a **Development Build** for real magnitudes — the Editor's job-safe
 
 ## Related docs
 
-- `docs/labels-and-symbols-design.md` — the label/symbol SSOT: pipeline flow (§1), smoothness &
-  robustness (§2, the pull/reconcile rearchitecture + pop/blink/slide/cost analysis), curved along-line
-  text (§3), and projection/globe support (§4).
 - `../../../../AGENTS.md` — repo conventions (math types, off-main principle, test workflow).

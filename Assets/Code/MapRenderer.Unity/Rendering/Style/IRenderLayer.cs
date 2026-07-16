@@ -7,7 +7,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// One runtime render object per declared, renderable style layer — the uniform base over EVERY
     /// painted layer kind (fill, line, symbol, background, and later fill-extrusion/raster), not just the
-    /// static-geometry ones (design <c>docs/render-layer-unification.md</c> §3.2 D6). Every layer declares
+    /// static-geometry ones (the render-layer model). Every layer declares
     /// its lifetime class (<see cref="Build"/>), who re-draws it each render (<see cref="Persistence"/>),
     /// and its global slot in the painter's chain (<see cref="DrawIndex"/>) — three orthogonal axes, never
     /// collapsed. The static-geometry contract (mesh-from-features build) now lives on the capability

@@ -6,7 +6,7 @@
 // (one draw call per frame, SRP-Batcher-compatible CBUFFER), never BatchRendererGroup — there is nothing
 // to instance.
 //
-// Two deliberately-separate property groups (the `_Blur`/line-blur lesson — docs/lessons-learned.md):
+// Two deliberately-separate property groups (the `_Blur`/line-blur lesson):
 //   (A) STYLE-BOUND — genuine `text-halo-*` spec terms; production S105 binds these by name.
 //   (B) INTERNAL    — engine plumbing (SDF threshold, AA, per-frame screen size). Names avoid every
 //                     `text-*`/`symbol-*` style-spec term so a future style binding can never collide.

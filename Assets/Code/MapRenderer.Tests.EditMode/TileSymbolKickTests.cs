@@ -1,4 +1,4 @@
-// Epic A / A5b acceptance teeth (docs/per-layer-tile-processing-a5b-plan.md §F, F-1..F-6): the feed swap —
+// Epic A / A5b acceptance teeth (F-1..F-6): the feed swap —
 // TileManager's per-tile kick drives the symbol worker pass (ISymbolTileWorkerFactory/ISymbolTileWorkerPass),
 // retiring the parallel SymbolTileBytesReady push. A spy factory/pass pair is installed directly on
 // TileManager.SymbolWorkerFactory, bypassing the real SymbolLabelSubsystem/glyph pipeline entirely — these

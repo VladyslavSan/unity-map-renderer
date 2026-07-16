@@ -60,8 +60,7 @@ checks and why an upside-down or CPU-culled render would fail it.
   `StyledLineTileBuilder`), so there is nothing for those two spec terms to collide with.
 - **(B) Internal** — `_ScreenParamsLogical`, `_SdfEdge`, `_SdfSoftness`, `_SdfDistancePerPixel` are engine
   plumbing with names that do not resemble any `text-*`/`symbol-*` style-spec term, so a future style
-  binding can never silently clobber them (the `_Blur`/`line-blur` regression this rule exists to prevent
-  — see `docs/lessons-learned.md`).
+  binding can never silently clobber them (the `_Blur`/`line-blur` regression this rule exists to prevent).
 
 ## SDF threshold + halo
 
@@ -80,8 +79,8 @@ checks and why an upside-down or CPU-culled render would fail it.
 
 Straight alpha blend, `ZWrite Off`, **`ZTest Always`** (unlit, UI-like text renders on top of the map
 unconditionally — MapLibre point labels are not depth-occluded by ground geometry in this project's
-current scope, and this stays true when fill-extrusion lands — see `docs/render-layer-unification.md` §7
-risk 5), `Cull Off` (billboard triangle winding is incidental — see `BillboardMath`'s doc comment). Queue:
+current scope, and this stays true when fill-extrusion lands), `Cull Off` (billboard triangle winding is
+incidental — see `BillboardMath`'s doc comment). Queue:
 the shader tag declares `Overlay` (4000), the demo/no-style fallback only — a production symbol layer's
 material has its `renderQueue` overridden at runtime to `TransparentQueue + DrawIndex`, interleaved with
-every other painted layer in declared order (E2, `docs/render-layer-unification.md` §3.5).
+every other painted layer in declared order (E2, the render-layer model).

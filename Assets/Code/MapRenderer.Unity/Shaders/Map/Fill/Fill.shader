@@ -21,7 +21,6 @@
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
 // Authored for URP 17.5 / Unity 6000.x.
 //
-// See docs/lit-rendering-design.md for the full design rationale.
 // See THIRD-PARTY-NOTICES.txt for Unity Companion License attribution.
 Shader "Map/Fill"
 {

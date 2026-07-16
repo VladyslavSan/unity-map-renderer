@@ -9,7 +9,7 @@ using UnityEngine;
 namespace MapRenderer.Tests.Structure
 {
     /// <summary>
-    /// Epic A / A1 (docs/per-layer-tile-processing-a1-plan.md "A1's falsifiable acceptance tooth", #1): a
+    /// Epic A / A1 (falsifiable acceptance tooth #1): a
     /// RED-verifiable structural pair proving <c>TileManager.KickMeshBuild</c> no longer decodes/dispatches
     /// directly — the shared decode + fan-out now lives ONLY in
     /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileLayerProcessorRunner"/>.
@@ -319,7 +319,7 @@ namespace MapRenderer.Tests.Structure
                 "own read of the shared decode.");
         }
 
-        /// <summary>Epic A / A7 (docs/per-layer-tile-processing-a7-plan.md §F tooth 1 — the primary
+        /// <summary>Epic A / A7 (tooth 1 — the primary
         /// structural tooth): <c>TileManager</c> must be byte-agnostic — it names none of the five
         /// byte-centric tokens the pre-raise coordinator used (<c>TileResponse</c>/<c>IDataSource</c>/
         /// <c>TileScheduler</c>/<c>SharedTileDecode</c>/standalone <c>TileCache</c>), and DOES name the raised

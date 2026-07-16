@@ -61,7 +61,7 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 //       names here for genuine spec properties only.
 //   (B) INTERNAL render params — engine plumbing the styler never writes. MUST NOT be named after any
 //       `line-*`/`fill-*` term (the AA width was once `_Blur` = `line-blur`, which zeroed AA on every
-//       backend — see docs/lessons-learned.md).
+//       backend).
 // The per-layer line color is the standard URP _BaseColor (declared above): rgb→albedo, a→alpha
 // (S58 retired the redundant _MapColor).
 

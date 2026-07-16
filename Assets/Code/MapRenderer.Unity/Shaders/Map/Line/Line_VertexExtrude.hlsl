@@ -11,7 +11,6 @@
 // Line_LitInput.hlsl must be included BEFORE this file (reads CBUFFER props:
 //   _Width, _WidthIsPixels, _GapWidth, _LineOffset, _LineTranslate).
 //
-// See docs/lit-rendering-design.md §"Line specifics (S33)" for the extrusion rationale.
 // Authored for URP 17.5 / Unity 6000.x. Clean-room map logic, not MapLibre or Unity source.
 
 #ifndef MAP_LINE_VERTEX_EXTRUDE_INCLUDED
