@@ -520,7 +520,7 @@ occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrig
   closes the last Mercator-coupled subsystem. Independent of the geometry-IR epic
   (`docs/tile-geometry-ir-design.md`); both share the two-waist principle (tile-local frames for placement math,
   projection at a defined seam).
-- **Camera-driven property re-evaluation** (`docs/camera-property-reevaluation-design.md`) is where a label's
+- **Camera-driven property re-evaluation** (`docs/smooth-transitions-design.md` §2) is where a label's
   zoom-dependent paint would smoothly re-evaluate — orthogonal to §4 (which is *where* an anchor projects, not
   *when* its style re-evaluates).
 - The build-time half (decode → per-layer extract) rides the per-layer tile pipeline

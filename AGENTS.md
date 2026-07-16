@@ -1,9 +1,9 @@
 # unity-map-renderer — working notes for AI agents
 
 Unity-native (DOTS/ECS, C#) MapLibre-style vector map renderer. Read `ARCHITECTURE.md` for the design
-and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/mesh-pipeline.md`
-for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop),
-`docs/conventions.md` for
+and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/meshing-design.md`
+§1 for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop;
+line AA, lit shading, and the render-layer model are the later sections), `docs/conventions.md` for
 generic coding conventions, `docs/step-0.md` for the current milestone, and
 **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
 workflow) — check it before debugging a shader/material/test-harness surprise.

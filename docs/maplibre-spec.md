@@ -1,28 +1,60 @@
-# MapLibre style-spec support matrix
+# MapLibre spec — parity target & support matrix
 
-> **What this is:** a codebase-traced snapshot of what the renderer *currently implements* against the
-> MapLibre GL Style Spec, and to what extent. The companion to
-> [`maplibre-parity-spec.md`](maplibre-parity-spec.md) — that doc is the **target** (the north-star
-> surface to reach); this one is the **actual coverage** against it.
->
-> Snapshot date: **2026-07-10**. Method: each layer type, expression, source, and root property was
-> traced parse → consume → rendered-output through the code (not read off the spec). When the code and a
-> claim disagree, the code wins — re-trace before trusting a row.
+Two halves of one reference: **what MapLibre does that this renderer aims to match** (the durable north-star
+surface), and **what is actually implemented** against it (traced through the code). Clean-room throughout —
+built from public MapLibre specs/docs only. **NEVER read MapLibre source.**
+
+1. **[Parity target](#1-parity-target-north-star)** — the capability surface to reach.
+2. **[Support matrix](#2-support-matrix)** — codebase-traced coverage against that surface.
+
+---
+
+# 1. Parity target (north star)
+
+The stable capability target: parity with MapLibre's *feature set* — Style Spec sources, the layer types,
+paint/layout properties, expressions/filters, projections, sprites & glyphs, terrain/hillshade. Not a task
+tracker; parity is tracked as *capabilities and ordering*, not exhaustive per-property detail — paint/layout
+properties are filled in as their layer stages land. The milestone order in `ARCHITECTURE.md` §3 (Step 0–5)
+refines this into small stages.
+
+## Spec surface to reach parity with (from public docs)
+
+- **Source types:** vector, raster, raster-dem (mapbox/terrarium/custom encodings), geojson, image, video.
+- **Layer types (10):** background, fill, line, symbol, circle, heatmap, fill-extrusion, raster, hillshade,
+  color-relief.
+- **Expression categories:** variable binding (`let`/`var`), types (`literal`/`typeof`/`to-color`…),
+  lookup (`get`/`has`/`at`/`in`/`length`), decision (`case`/`match`/`coalesce`/comparisons/`all`/`any`),
+  ramps/scales/curves (`step`/`interpolate`/`interpolate-hcl`/`interpolate-lab`), math, color
+  (`rgb`/`rgba`/`to-rgba`), feature data (`properties`/`feature-state`/`geometry-type`/`id`), `zoom`,
+  `heatmap-density`, string ops.
+- **Filters:** legacy filter syntax + expression-based filters.
+- **Root style props:** version, sources, layers, sprite, glyphs, light, sky, projection, terrain, transition,
+  plus view (center/zoom/bearing/pitch/roll).
+- **Projections:** Web Mercator (default), globe.
+
+---
+
+# 2. Support matrix
+
+A codebase-traced snapshot of what the renderer *currently implements* against the MapLibre GL Style Spec, and
+to what extent. **Snapshot date: 2026-07-10.** Method: each layer type, expression, source, and root property
+was traced parse → consume → rendered-output through the code (not read off the spec). **When the code and a
+claim disagree, the code wins — re-trace before trusting a row.**
 
 ## Legend
 
 | Mark | Meaning |
 |:---:|---|
 | ✅ | **Full** — parsed and consumed end-to-end into rendered output, matching spec semantics |
-| 🟡 | **Partial** — works, but with a caveat (constant/zoom only — no data-driven; approximated; capped; edge cases missing) |
+| 🟡 | **Partial** — works, with a caveat (constant/zoom only — no data-driven; approximated; capped; edge cases missing) |
 | 🟠 | **Parsed-inert** — parsed from JSON but has **no effect** on output. A trap: looks supported, isn't. Cheap to finish (the plumbing to the value exists). |
 | ❌ | **Missing** — not implemented at all |
 
 ## At a glance
 
 Only the **vector → MVT → fill / line / symbol-text** path is real end-to-end. Everything else is enum-
-recognized (so an unknown `type`/`source` doesn't throw) but falls to an untyped `StyleLayer` and renders
-to nothing.
+recognized (so an unknown `type`/`source` doesn't throw) but falls to an untyped `StyleLayer` and renders to
+nothing.
 
 | Layer type | Status | Notes |
 |---|:---:|---|
@@ -40,8 +72,8 @@ to nothing.
 
 **Engine strengths that punch above the layer coverage:** the expression/filter engine is near-complete
 (including `interpolate-lab`/`-hcl`, `let`/`var`, `match`/`case`, both filter dialects), the SDF glyph/text
-stack is real, and the **globe projection is fully built** (geometry + interaction + label occlusion) —
-just not yet selectable from a style.
+stack is real, and the **globe projection is fully built** (geometry + interaction + label occlusion) — just
+not yet selectable from a style.
 
 ---
 
@@ -62,8 +94,8 @@ just not yet selectable from a style.
 ## Layer properties
 
 ### background
-`background-color`, `background-pattern`, `background-opacity` — **all ❌**. No typed layer, no paint parse,
-no background quad in the render path.
+`background-color`, `background-pattern`, `background-opacity` — **all ❌**. No typed layer, no paint parse, no
+background quad in the render path.
 
 ### fill
 Parse: `Style/Fill/PaintProperties.cs`. Consume: `StyledFillTileBuilder`, `MaterialFactory.BindFillPaintToApplier`, `Shaders/Map/Fill/`.
@@ -117,30 +149,30 @@ Parse: `Style/Symbol/{Layout,Paint}Properties.cs`. Consume: `SymbolFeatureExtrac
 | symbol-sort-key | ✅ | greedy placement order |
 | text-padding | ✅ | collision-box growth |
 | text-allow-overlap / text-ignore-placement | ✅ | collision flags |
-| text-anchor / text-justify / text-max-width | ✅ | threaded to `TextQuadLayout` via `TextLayoutOptionsBuilder` (Slice A) |
-| text-offset | 🟡 | threaded (Slice A); **constant only** — parsed as a raw y-down `float2`, not zoom/data-driven; y-flip reconciled in the builder |
-| text-line-height / text-letter-spacing / text-radial-offset | ✅ | parsed (zoom-capable `StyleProperty<float>`) + threaded (Slice A) |
-| symbol-placement (`line`/`line-center`) | 🟡 | #5: per-glyph curved along-line text — projected line walked per frame, glyphs rotated to the tangent, keep-upright, per-glyph all-or-nothing collision unified with point labels. `line` repeats at `symbol-spacing`. Tangent is screen-space (correct under bearing/tilt); a maintainer eyeball on look-under-rotation is pending |
-| text-transform (upper/lowercase) | 🟡 | Slice B: case-folds the resolved label before shaping (invariant-culture); **constant only** |
+| text-anchor / text-justify / text-max-width | ✅ | threaded to `TextQuadLayout` via `TextLayoutOptionsBuilder` |
+| text-offset | 🟡 | threaded; **constant only** — parsed as a raw y-down `float2`, not zoom/data-driven; y-flip reconciled in the builder |
+| text-line-height / text-letter-spacing / text-radial-offset | ✅ | parsed (zoom-capable `StyleProperty<float>`) + threaded |
+| symbol-placement (`line`/`line-center`) | 🟡 | per-glyph curved along-line text — projected line walked per frame, glyphs rotated to the tangent, keep-upright, per-glyph all-or-nothing collision unified with point labels. `line` repeats at `symbol-spacing`. Tangent screen-space (correct under bearing/tilt); a look-under-rotation eyeball is pending. See `docs/labels-and-symbols-design.md` §3 |
+| text-transform (upper/lowercase) | 🟡 | case-folds the resolved label before shaping (invariant-culture); **constant only** |
 | text-variable-anchor | ❌ | a placement-loop feature (try candidate anchors), not layout wiring |
-| text-rotation-alignment | 🟡 | #4: `map` rotates the billboard by the bearing (screen-space); point `auto`→viewport = the upright default. Sign is the single `LabelBearing.MapAlignedSign` visual-verify constant |
-| text-pitch-alignment | 🟠 | #4: parsed/recognized, but `map` (ground-flat, tilt-foreshortened text) needs a world-space text path — deferred to its own stage; point resolves auto→viewport (current billboard) |
-| text-keep-upright / text-max-angle | ✅ | #6: curved line labels — keep-upright flips a right-to-left label; text-max-angle drops a label bending more than the allowed adjacent-glyph angle round a corner |
+| text-rotation-alignment | 🟡 | `map` rotates the billboard by the bearing (screen-space); point `auto`→viewport = the upright default. Sign is the single `LabelBearing.MapAlignedSign` visual-verify constant |
+| text-pitch-alignment | 🟠 | parsed/recognized, but `map` (ground-flat, tilt-foreshortened text) needs a world-space text path — deferred to its own stage; point resolves auto→viewport (current billboard) |
+| text-keep-upright / text-max-angle | ✅ | curved line labels — keep-upright flips a right-to-left label; text-max-angle drops a label bending more than the allowed adjacent-glyph angle round a corner |
 | text-writing-mode | ❌ | vertical CJK |
 | text-optional | ❌ | (icon/text co-placement) |
-| text-translate (+anchor) | 🟡 | Slice C: paint-time screen offset at placement (constant); **text-translate-anchor:map** rotates the offset by the bearing (#4) — correct at bearing 0, sign is a visual-verify constant |
-| symbol-spacing | 🟡 | #5 B4: along-line repeat distance in px (default 250), consumed by `symbol-placement:line`; **constant/zoom only** |
+| text-translate (+anchor) | 🟡 | paint-time screen offset at placement (constant); **text-translate-anchor:map** rotates the offset by the bearing — correct at bearing 0, sign is a visual-verify constant |
+| symbol-spacing | 🟡 | along-line repeat distance in px (default 250), consumed by `symbol-placement:line`; **constant/zoom only** |
 | symbol-z-order / symbol-avoid-edges | ❌ | |
 | collision fade-in / opacity animation | ❌ | placement is instantaneous, no fade |
 
-Rendering behaviors that **do** work: SDF glyphs, halo, grid collision, greedy sort-key placement,
-multi-line wrap, BiDi/RTL (single-run), Arabic joining/shaping.
+Rendering behaviors that **do** work: SDF glyphs, halo, grid collision, greedy sort-key placement, multi-line
+wrap, BiDi/RTL (single-run), Arabic joining/shaping.
 
 ### symbol — icon
-**Entirely ❌.** No `icon-*` key is parsed (image, size, rotate, anchor, offset, allow-overlap,
-ignore-placement, optional, padding, keep-upright, pitch/rotation-alignment, text-fit, color, halo-*,
-opacity, translate). **Sprite loading is absent** — the `sprite` root URL is captured as a string but
-there is no sheet/JSON/PNG loader, so icons *and* fill-/line-pattern have nothing to resolve against.
+**Entirely ❌.** No `icon-*` key is parsed (image, size, rotate, anchor, offset, allow-overlap, ignore-placement,
+optional, padding, keep-upright, pitch/rotation-alignment, text-fit, color, halo-*, opacity, translate).
+**Sprite loading is absent** — the `sprite` root URL is captured as a string but there is no sheet/JSON/PNG
+loader, so icons *and* fill-/line-pattern have nothing to resolve against.
 
 ### fill-extrusion / raster / hillshade / heatmap / color-relief
 **All ❌** beyond the `StyleLayerType` enum name. No typed paint/layout model, no property constants, no
@@ -153,8 +185,8 @@ elevation does not exist.)
 
 Registry: `Expressions/ExpressionParser.cs:Dispatch` (anything not listed throws "Unknown operator" — so it
 defines "missing" precisely). Near-complete; no partial implementations found (present ops cover full
-arity/semantics). Minor spec gaps: the optional `collator` arg on comparisons, and array-assert element
-types beyond boolean/number/string.
+arity/semantics). Minor spec gaps: the optional `collator` arg on comparisons, and array-assert element types
+beyond boolean/number/string.
 
 | Category | ✅ Implemented | ❌ Missing |
 |---|---|---|
@@ -209,10 +241,10 @@ types beyond boolean/number/string.
 
 These parse today and just need to be threaded/consumed — the value already reaches the code:
 
-1. ~~**Symbol layout options** — text-anchor / -offset / -justify / -max-width (+ add-parse for line-height /
-   letter-spacing / radial-offset).~~ ✅ **Done (Slice A)** — threaded via `TextLayoutOptionsBuilder`. (text-offset
-   remains constant-only — data-driven offset still inert.)
-2. **line-miter-limit / line-round-limit** — parsed, dropped before the ribbon job (hardcoded 2.0 / 4 seg).
-3. **Per-layer minzoom/maxzoom + layout `visibility`** — parsed/omitted but never gate the render.
-4. **fill-outline-color / fill-antialias, *-translate-anchor, fill-pattern/line-pattern flags** — bound to
+1. **line-miter-limit / line-round-limit** — parsed, dropped before the ribbon job (hardcoded 2.0 / 4 seg).
+2. **Per-layer minzoom/maxzoom + layout `visibility`** — parsed/omitted but never gate the render.
+3. **fill-outline-color / fill-antialias, *-translate-anchor, fill-pattern/line-pattern flags** — bound to
    uniforms no pass reads (some need a whole feature: outline pass, sprite loader).
+
+(Symbol layout options — text-anchor/-offset/-justify/-max-width + line-height/letter-spacing/radial-offset —
+were the original first trap; **done** via `TextLayoutOptionsBuilder`. text-offset remains constant-only.)

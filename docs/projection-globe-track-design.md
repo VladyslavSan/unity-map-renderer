@@ -1,7 +1,7 @@
 # Projection / globe track — design SKETCH (Track B)
 
 **Status: SKETCH, not scheduled.** Companion to the render-layer + tile-pipeline work
-(`docs/render-layer-unification.md`, `docs/per-layer-tile-processing-design.md`). Captures the flat-earth /
+(`docs/meshing-design.md` §4, `docs/per-layer-tile-processing-design.md`). Captures the flat-earth /
 Mercator couplings that keep the map from being correct under the **spherical projection**, and which of them
 are Track B's own vs. which fall out of Epic A.
 
@@ -71,5 +71,5 @@ Not fatal to positioning (it is only a dedup tolerance), but it is a flat-earth 
 - **Horizon-crossing fade** — a label crossing the horizon under globe rotation should **fade, not pop**. Does
   it hook the existing A-4 fade state machine, or is that a separate polish item?
 - **Line-following (curved) labels behind the sphere** — point labels are the first cut; curved text on the
-  far side is a later concern (mirrors `render-layer-unification.md` §7.5's "line-following labels behind
-  buildings" note for fill-extrusion).
+  far side is a later concern (mirrors `meshing-design.md` §4's "line-following labels behind buildings" note
+  for fill-extrusion).

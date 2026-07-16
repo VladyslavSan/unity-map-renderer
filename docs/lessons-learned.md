@@ -35,7 +35,7 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `PaintProperties.cs`; reserve style-derived names for real bindings, and give internal params clearly
   non-style names (cf. `_WidthIsPixels`, `_MetersPerPixel`). Keep the two kinds in **separate, labeled
   groups** in the CBUFFER / Properties block so the boundary is visible. *(Update 2026-07-06: line edge AA and
-  `_AaEdgeWidth` were later removed — lines render a hard edge now, `docs/line-antialiasing.md`. The naming
+  `_AaEdgeWidth` were later removed — lines render a hard edge now, `docs/meshing-design.md` §2. The naming
   rule above is unaffected and still binding.)*
 
 - **Per-line transparent-fade AA cannot render a crisp *cased* line — it's a compositing problem, not a
@@ -47,7 +47,7 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   hard trilemma for any shader fade: {solid core, unchanged apparent width, antialiased} — pick two. After a
   long exploration this is why edge AA was removed entirely (hard edge + min-width floor kept); the real fix
   is architectural — a **single-pass cased line** (one draw, colour-by-signed-distance, AA only the outer
-  silhouette). Full write-up + the parked outset-AA stash: **`docs/line-antialiasing.md`**.
+  silhouette). Full write-up + the parked outset-AA stash: **`docs/meshing-design.md` §2 (line antialiasing)**.
 
 ## Rendering loop & camera
 

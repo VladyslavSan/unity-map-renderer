@@ -151,8 +151,8 @@ N per-layer graphs and is impractical for extrusion + fwidth AA). Each layer is 
 `Shaders/Map/<Layer>/` — its `.shader`, `<Layer>_LitInput.hlsl` (the `UnityPerMaterial` CBUFFER +
 DOTS bridge), and its pass bodies. `MapVertexModify` is a per-layer vertex hook; Fill defines its body
 in `Fill_VertexModify.hlsl`, included by the `.shader` before any pass that calls it.
-See `Shaders/README.md` for the layout and include-order rules; `docs/lit-rendering-design.md` for the
-full design rationale.
+See `Shaders/README.md` for the layout and include-order rules; `docs/meshing-design.md` §3 (lit rendering)
+for the full design rationale.
 
 Per-layer styling: **per-layer Material instances** (never `MaterialPropertyBlock` — it silently
 disables the SRP Batcher). Style properties (`_Color`, `_Width`, `_Opacity`, …) live in the shared

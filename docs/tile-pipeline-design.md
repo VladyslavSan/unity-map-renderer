@@ -1,32 +1,68 @@
-# Tile-pipeline design — decomposition + stall elimination
+# Tile-pipeline design — TileManager decomposition + stall elimination
 
-**Status:** design, 2026-07-11 (branch `perf/label-instrumentation`). Companion to
-[`tile-pipeline-architectural-review.md`](tile-pipeline-architectural-review.md) — that review's findings
-(verified file:line) are taken as established here; this document turns them into buildable seams,
-signatures, test teeth, and an ordered migration plan. All paths relative to
+**Status:** design + live plan. Steps 1–5 (the scheduling/backend stall fixes) are **implemented**; steps 6–10
+(the measure-first profiling, the decomposition, the two-phase kick, off-thread symbol shaping) are **pending**.
+The per-layer processor unification that reshaped `KickMeshBuild` is a **separate, complete** epic —
+`docs/per-layer-tile-processing-design.md`; read it alongside this. All paths relative to
 `Assets/Code/MapRenderer.Unity/` unless noted.
 
-Hard constraints honoured throughout (see `docs/async-architecture.md`): Core stays engine-free; UniTask
-only; `UnityEngine.Object` create/destroy and `Mesh.AllocateWritableMeshData`/`ApplyAndDisposeWritableMeshData`
+Hard constraints throughout (see `docs/async-architecture.md`): Core stays engine-free; UniTask only;
+`UnityEngine.Object` create/destroy and `Mesh.AllocateWritableMeshData`/`ApplyAndDisposeWritableMeshData`
 main-thread only; single-owner Mesh with null-on-transfer; steady-state zero-GC
 (`MapView_SteadyStateTick_DoesNotAllocateGCMemory`); load-path allocations flagged where introduced.
 
 ---
 
-## 0. Decision summary
+## 0. The two problems this addresses
+
+Two maintainer-raised problems, findings verified against source:
+
+1. **`TileManager` is a ~2067-line god-object** by responsibility count (seven distinct jobs). The raw line
+   count overstates it — ~920 lines are code, ~695 comments, ~175 blank — and ~40% of the file is comment
+   archaeology (S47/S51/S55/S82/S83b/S84/S87/S89 stage tags restating superseded semantics; the S55-vs-S87 budget
+   story is told at least three times). Of the code, ~300 lines are extraction-worthy accident, ~180 are
+   test/telemetry that shouldn't be here (the repo's own convention), and the rest is irreducible lifecycle. The
+   per-(tile,source) `LoadedTile` state machine with its four async exit paths is genuine essential complexity
+   and stays in one place; the source registry, the kick/consume engine, and the prepared-cache bridge are
+   cleanly separable (§1).
+2. **Residual intermittent main-thread stalls** despite hard rate-limiting (kick cap, dual consume budget of
+   mesh-count AND vertex-count, resumable per-mesh consume). The budgets correctly bound the *consume* path — but
+   three whole categories of main-thread work are **unbudgeted**: the synchronous symbol-label build burst
+   (§2), the release/eviction path (§5), and per-layer ECS structural cost inside the budgeted consume (§6). Plus
+   the one genuine mesher fix (§4) and two measurement-first items. These are structural, fixable problems, not
+   tuning problems.
+
+### Ranked stall sources (verified file:line)
+
+| # | Source | What stalls / when | Fix | Section |
+|---|---|---|---|---|
+| 1 | **Synchronous symbol-label build burst (unbudgeted)** | `SymbolTileBytesReady` fires inside `PumpPending` for **every** fetch completing this frame; `BuildTileAsync` runs synchronously on main — a second `MvtDecoder.Decode`, extract, and (once glyph ranges are cached) all shaping + layout inline, plus a full 4096² R8 = 16 MB atlas upload per tile that added a glyph. The known 600 ms-class stall. | Queue + ≤1 build/frame + coalesced upload; decode+extract off-thread; shaping off-thread against an immutable snapshot | §2 |
+| 2 | **Unbudgeted release/eviction storm** | Zoom-out/fast pan releases N tiles × L layers in one frame: N·L entity destroys, N·L cache Puts, plus a `DestroyMesh` burst on byte-budget overflow. Consume is budgeted; release is not — a mirror-image spike (15 tiles × 30 layers = 450 structural changes/frame on Entities). | Deferred-release queue with a per-frame budget; batch `DestroyEntity` on Entities | §5 |
+| 3 | **Entities `AddTileLayer`: per-layer `RenderMeshArray` + structural changes** | Every consumed mesh creates a fresh one-element `RenderMeshArray` shared component → EG batch registration per entity, plus `CreateEntity` + a `ComponentTypeSet` migration (own comment: "PRIME SUSPECT"). | `RegisterMesh`/`RegisterMaterial` IDs + ID-based `MaterialMeshInfo` + prototype `Instantiate` + unregister-on-remove | §6 |
+| 4 | **One-mesh overshoot** (the only mesher fix) | Budget checked *before* each layer, so a single 100k+-vert water/landcover fill uploads whole — the vertex budget cannot cap it. Worst on exactly the tiles users look at (oceans at low zoom). | Cap verts per payload (~32k, split at feature boundaries); requires the two-phase kick | §4 |
+| 5 | **`KickMeshBuild` main-thread allocate loop** | One native MeshData alloc per this-source layer per kick — dozens/kick, most ending 0-vertex (allocated, carried, disposed unused). | Subsumed by the two-phase kick (#4). Measure-first via `PmMeshDataAllocate` | §4 |
+| 6 | **Cover recompute every frame while anything pends** | Static camera + pending tiles → full `SelectVisibleTiles` descent + `_coverSet` rebuild + cover×pipeline probes every frame **for zero effect** (~0.5–2 ms/frame during exactly the frames already under consume load). | Gate the recompute on `_coverDirty` alone | §3 |
+| 7 | **GC collections from off-thread load work** | Per-tile `byte[]`, `MvtDecoder.Decode` object graphs on the pool, payload/closure allocs per kick — Mono GC stops the main thread regardless of which thread allocated. Hypothesis, not measured. | Profile with GC markers during a pan storm; enable incremental GC if confirmed; pool decode buffers | measure-first |
+| 8 | **BRG `Rebuild` full per-frame repack** (opt-in path) | Per frame: sort all items, repack 76 floats × N, 33 material-property reads × N, full `SetData`. Steady cost, not a spike. | Dirty-flag material props; repack transforms only on frame change; partial `SetData` | only if BRG becomes default |
+| 9 | **Restyle hitch** | Full teardown + Entities `World` rebuild + every cached mesh destroyed, one frame. Big but rare, user-initiated. | Accept; documented tradeoff | — |
+
+Classification: #1, #2, #6 are **scheduling-only**; #3, #8 are **backend-only**; #4 (+#5) needs the **meshers**;
+#7 is measurement-first.
+
+### Decision summary
 
 | # | Topic | Decision |
 |---|---|---|
 | D1 | Decomposition order | `SourcePipelineRegistry` → `PreparedTileBridge` → `TileMeshBuildEngine`; test surface exits to the test assembly in the engine step |
 | D2 | Dense layer-id cache | Lives on `SourcePipeline` (computed once in `ApplySpecs`), **not** in the bridge — the kick, the probe, and the transfer all read the same `int[]`, so the three-consumer agreement invariant becomes structural |
-| D3 | Symbol budgeting | Queue in `SymbolLabelSubsystem` + explicit `PumpBuilds()` called from `MapView.LateUpdate`; ≤1 build start/frame (configurable); atlas upload decision moves out of `BuildTileAsync` into the pump (≤1 upload/frame by construction) |
-| D4 | Symbol threading | Stage 1: decode+extract on the pool. Stage 2: shape+layout on the pool against an immutable per-tile snapshot (`IGlyphMetricsProvider` + `IGlyphAtlasView`) built on main **after** pass-1 appends complete. Atlas/cache **writes never leave the main thread**; no lock |
-| D5 | Two-phase kick | Measure task (worker, geometry into interim `TileMeshBuffers`) → main-thread exact-count `AllocateWritableMeshData(1)` per **non-empty chunk** → write task (worker). One `MeshDataArray` per chunk is kept (a whole-array alloc conflicts with per-mesh resumable consume — review #5's catch) |
+| D3 | Symbol budgeting | Queue in `SymbolLabelSubsystem` + explicit `PumpBuilds()` from `MapView.LateUpdate`; ≤1 build start/frame (configurable); atlas upload moves out of `BuildTileAsync` into the pump (≤1 upload/frame by construction) |
+| D4 | Symbol threading | Stage 1: decode+extract on the pool. Stage 2: shape+layout on the pool against an immutable per-tile snapshot (`IGlyphMetricsProvider` + `IGlyphAtlasView`) built on main **after** pass-1 appends. Atlas/cache **writes never leave the main thread**; no lock |
+| D5 | Two-phase kick | Measure task (worker, geometry into interim `TileMeshBuffers`) → main-thread exact-count `AllocateWritableMeshData(1)` per **non-empty chunk** → write task (worker). One `MeshDataArray` per chunk (a whole-array alloc conflicts with per-mesh resumable consume) |
 | D6 | Mesher chunking | New `ILayerGeometry` seam (measure/write-chunk) replaces `IRenderLayer.WriteInto`; split at feature boundaries, target 32 768 verts/chunk; a single over-budget feature ships as one oversized chunk (no re-triangulation) |
 | D7 | PreparedTileCache value | `Mesh` → `Mesh[]` per (style, tile, layerId) so a chunked layer round-trips the cache without the Put-collision destroying earlier chunks; `null` empty-layer marker unchanged |
 | D8 | Release budgeting | Deferred-release queue drained ≤`MaxReleasesPerTick` records/frame; re-validated against the live cover at dequeue (a tile that came back is un-queued, not destroyed) |
 | D9 | Batched removal | New `ITileRenderBackend.RemoveItems(ReadOnlySpan<int>)`; Entities implements it as **one** `EntityManager.DestroyEntity(NativeArray<Entity>)` per call (layers + emptied roots together) |
-| D10 | Entities vs BRG | **Fix Entities, keep it the ship default.** Prototype-entity + `Instantiate` + `RegisterMesh`/`RegisterMaterial` + `MaterialMeshInfo.FromMeshIDAndMaterialID`, with unregister-on-remove. BRG stays the zero-alloc opt-in. (RESOLVED — maintainer accepted, §8) |
+| D10 | Entities vs BRG | **Fix Entities, keep it the ship default.** Prototype-entity + `Instantiate` + `RegisterMesh`/`RegisterMaterial` + ID-based `MaterialMeshInfo`, with unregister-on-remove. BRG stays the zero-alloc opt-in. (maintainer-accepted, §8) |
 | D11 | Cover gate | Recompute gated on `_coverDirty` alone; release-queue drain moves above the gate so it runs every frame |
 | D12 | Budget-zero asymmetry | Unify: `MaxConsumesPerTick == 0` becomes **uncapped** like the other caps; tests get an explicit `internal bool BlockConsumeForTests` seam on the engine |
 
@@ -34,27 +70,34 @@ main-thread only; single-owner Mesh with null-on-transfer; steady-state zero-GC
 
 ## 1. Decomposition
 
+> *Anchor note (predates Epic A):* this is a still-live pending plan — its goals stand, but its target *signatures*
+> were sketched before the per-layer tile-processing epic landed. Re-verify them against current source at
+> implementation time; the one concretely-drifted anchor is §1.4's `Kick(…)` (now byte-agnostic — see there).
+
+Target structure: three separable classes come out of `TileManager`; the `LoadedTile` state machine and its exit
+paths (the single-owner mesh-lifetime contract) stay — smearing it across classes is how double-frees happen.
+Cover-key/dirty tracking stays (cohesive with `Tick`). Holding pens move *with* their producers (mesh pen →
+engine, fetch pen → stays), not into a generic "DisposalService".
+
 ### 1.1 Shared moves (prerequisite, mechanical)
 
-`LoadedKey` and `LoadedTile` leave `TileManager`'s private nesting and become namespace-level `internal`
-structs in `Rendering/Tile/LoadedTile.cs` — the engine takes `ref LoadedTile` and cannot see a private
-nested type. No field changes in this step. `SourceKey`/`SourceSpec` similarly become namespace-level
-`internal` types (they are already `internal`; `MapView.BuildSourceSpecs` changes
-`Tile.TileManager.SourceSpec` → `Tile.SourceSpec`).
+`LoadedKey` and `LoadedTile` leave `TileManager`'s private nesting and become namespace-level `internal` structs
+in `Rendering/Tile/LoadedTile.cs` — the engine takes `ref LoadedTile` and cannot see a private nested type. No
+field changes. `SourceKey`/`SourceSpec` similarly become namespace-level `internal` types (they are already
+`internal`; `MapView.BuildSourceSpecs` changes `Tile.TileManager.SourceSpec` → `Tile.SourceSpec`).
 
 ### 1.2 `SourcePipelineRegistry` — `Rendering/Tile/SourcePipelineRegistry.cs`
 
-Moves out of `TileManager`: `SourcePipeline` (class), `SourceKey`, `SourceSpec`, the diff/keep/teardown
-body of `SetSources` step 2 (L480–518), `FindPipeline`, `DisposePipelines`, `SourceIdOf`, the
-`InFlightCount` aggregate. **Plus (D2):** the dense layer-id computation (`ComputeDenseLayerIds` +
-`_denseLayerIdsScratch`) is retired in favour of a per-source cached array:
+Moves out of `TileManager`: `SourcePipeline` (class), `SourceKey`, `SourceSpec`, the diff/keep/teardown body of
+`SetSources` step 2, `FindPipeline`, `DisposePipelines`, `SourceIdOf`, `InFlightCount`. **Plus (D2):** the dense
+layer-id computation (`ComputeDenseLayerIds` + scratch) is retired in favour of a per-source cached array.
 
 ```csharp
 namespace MapRenderer.Unity.Rendering.Tile
 {
-    /// <summary>One data pipeline per rendered source-id (S83b), plus the source's cached dense
-    /// layer-id set — the single array the kick, the cache probe, and the release transfer all read,
-    /// so the three can never disagree on what "this tile's complete prepared set" means.</summary>
+    /// <summary>One data pipeline per rendered source-id, plus the source's cached dense layer-id set —
+    /// the single array the kick, the cache probe, and the release transfer all read, so the three can
+    /// never disagree on what "this tile's complete prepared set" means.</summary>
     internal sealed class SourcePipeline
     {
         public string        SourceId;
@@ -67,8 +110,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         public int           MaxZoom;
         public SourceKey     DefKey;
         /// <summary>Declared-order global material indices whose style layer draws from this source.
-        /// Computed once per ApplySpecs (the only time RenderLayerSet reindexes); immutable between
-        /// restyles — safe to capture into a background closure WITHOUT a defensive copy.</summary>
+        /// Computed once per ApplySpecs; immutable between restyles — safe to capture into a background
+        /// closure WITHOUT a defensive copy.</summary>
         public int[]         DenseLayerIds;
     }
 
@@ -77,33 +120,27 @@ namespace MapRenderer.Unity.Rendering.Tile
         public int Count { get; }
         public SourcePipeline this[int slot] { get; }
 
-        /// <summary>Diffs specs against existing pipelines by (SourceId, SourceKey): kept pipelines
-        /// survive with warm caches, new specs build fresh ones, unmatched pipelines are torn down.
-        /// Recomputes every kept+new pipeline's DenseLayerIds from <paramref name="layers"/> (the
-        /// caller rebuilt the RenderLayerSet before calling — MapView.SetStyle ordering).</summary>
+        /// <summary>Diffs specs against existing pipelines by (SourceId, SourceKey): kept pipelines survive
+        /// with warm caches, new specs build fresh ones, unmatched pipelines are torn down. Recomputes every
+        /// kept+new pipeline's DenseLayerIds from <paramref name="layers"/>.</summary>
         public void ApplySpecs(IReadOnlyList<SourceSpec> specs, Style.RenderLayerSet layers);
 
-        /// <summary>Summed in-flight fetches across pipelines (telemetry).</summary>
-        public int InFlightCount { get; }
-
-        /// <summary>Disposes every pipeline (scheduler always; source only when owned). Idempotent.</summary>
-        public void Dispose();
+        public int InFlightCount { get; }        // summed in-flight fetches (telemetry)
+        public void Dispose();                    // disposes every pipeline (scheduler always; source only when owned). Idempotent.
     }
 }
 ```
 
-Removing the per-probe/per-release O(layerCount) scan (review §4) also removes the shared-scratch-list
-"never capture across a thread boundary" trap and `KickMeshBuild`'s per-kick `int[]` copy — the cached
-array is immutable between restyles, so the closure captures it directly. **Zero-GC note:** `ApplySpecs`
-allocates (restyle path, allowed); the steady-state Tick now does zero list work for the probe.
-
-`TileManager.SetSources` shrinks to: teardown `_loaded` records → `_bridge.Clear()` →
-`_registry.ApplySpecs(specs, _layers)` → `BuildBackend(backend)` → re-arm cover.
+Removing the per-probe/per-release O(layerCount) scan also removes the shared-scratch-list "never capture across
+a thread boundary" trap and `KickMeshBuild`'s per-kick `int[]` copy — the cached array is immutable between
+restyles, so the closure captures it directly. **Zero-GC note:** `ApplySpecs` allocates (restyle path, allowed);
+the steady-state Tick does zero list work for the probe. `TileManager.SetSources` shrinks to: teardown `_loaded`
+records → `_bridge.Clear()` → `_registry.ApplySpecs(specs, _layers)` → `BuildBackend(backend)` → re-arm cover.
 
 ### 1.3 `PreparedTileBridge` — `Rendering/Tile/PreparedTileBridge.cs`
 
-Moves: ownership of `PreparedTileCache` + `_cacheEnabled` + `CurrentStyle`, the Tick probe block
-(L853–894's cache branch), `TransferBuiltMeshesToCache`, `BuildTileFromCache`.
+Moves: ownership of `PreparedTileCache` + `_cacheEnabled` + `CurrentStyle`, the Tick probe block's cache branch,
+`TransferBuiltMeshesToCache`, `BuildTileFromCache`.
 
 ```csharp
 internal sealed class PreparedTileBridge : System.IDisposable
@@ -112,23 +149,19 @@ internal sealed class PreparedTileBridge : System.IDisposable
 
     public bool       Enabled      { get; }
     public StyleToken CurrentStyle { get; set; }   // MapView sets in SetStyle (via TileManager forward)
+    // Telemetry forwards: Hits, Misses, Count, MaxCount, BytesHeld, ByteBudget, Evictions.
 
-    // Telemetry forwards (CaptureTelemetry reads these): Hits, Misses, Count, MaxCount,
-    // BytesHeld, ByteBudget, Evictions.
-
-    /// <summary>Tick probe: true iff EVERY dense layerId is present (mesh or empty-marker).
-    /// Counts one whole-tile Hit or Miss. Disabled ⇒ always false (counts a Miss) — pre-S82 parity.</summary>
+    /// <summary>Tick probe: true iff EVERY dense layerId is present (mesh or empty-marker). Counts one
+    /// whole-tile Hit or Miss. Disabled ⇒ always false (counts a Miss).</summary>
     public bool ProbeFullHit(TileId id, int[] denseLayerIds);
 
     /// <summary>Cache-hit path: TryTake each layer's meshes (ownership back out — Model B), register
-    /// non-null ones via <paramref name="backend"/>.AddTileLayer, return the fully-Built record.
-    /// Main-thread only.</summary>
-    public LoadedTile TakeAsLoadedTile(Backend.ITileRenderBackend backend, TileId id,
-        double3 origin, int[] denseLayerIds);
+    /// non-null ones via backend.AddTileLayer, return the fully-Built record. Main-thread only.</summary>
+    public LoadedTile TakeAsLoadedTile(Backend.ITileRenderBackend backend, TileId id, double3 origin, int[] denseLayerIds);
 
     /// <summary>Release path: transfer a Built record's tracked meshes in (nulls lt.Meshes /
     /// lt.MaterialIndices — the double-free guard), inserting empty-markers for uncovered dense ids.
-    /// No-op (returns false) when disabled or the record has no tracked meshes.</summary>
+    /// No-op when disabled or the record has no tracked meshes.</summary>
     public bool TransferOnRelease(TileId id, int[] denseLayerIds, ref LoadedTile lt);
 
     public void Clear();     // restyle purge (destroys held meshes; cache stays usable)
@@ -136,198 +169,148 @@ internal sealed class PreparedTileBridge : System.IDisposable
 }
 ```
 
-The dead "structural parity" lock inside `PreparedTileCache` (review §4) is deleted in this step — the
-class is documented main-thread-only and the bridge preserves that; the lock removal is
-behaviour-preserving and covered by the existing cache tests.
+The dead "structural parity" lock inside `PreparedTileCache` is deleted here — the class is documented
+main-thread-only and the bridge preserves that; the removal is behaviour-preserving and covered by the existing
+cache tests.
 
 ### 1.4 `TileMeshBuildEngine` — `Rendering/Tile/TileMeshBuildEngine.cs`
 
-Moves: `MeshBuildResult`, `KickMeshBuild`, `ConsumeMeshBuild`, `FinishConsume`, `AppendMeshes`,
-`AppendInts`, `DisposeWholeResult`, `_consumeScratch*`, `_pendingDisposal` + `DrainPendingDisposal` + the
-blocking drain from `DoDispose` (L1691–1718). This is where the two-phase kick (§4) lands later — the
-signatures below already show the final two-phase form; the extraction step ships them with `KickMeasure`
-absent and today's single-phase `Kick` body (extraction is behaviour-preserving; §4 then changes only this
-class + the meshers).
+Moves: `MeshBuildResult`, `KickMeshBuild`, `ConsumeMeshBuild`, `FinishConsume`, `AppendMeshes`, `AppendInts`,
+`DisposeWholeResult`, `_consumeScratch*`, `_pendingDisposal` + `DrainPendingDisposal` + the blocking drain from
+`DoDispose`. This is where every future consume-path fix (two-phase kick, mesher split) lands without touching
+the lifecycle class again — the main payoff of the split. The signatures below already show the final two-phase
+form; the extraction step ships them with `KickMeasure` absent and today's single-phase `Kick` body (extraction
+is behaviour-preserving; §4 then changes only this class + the meshers). *(Post-A7: the live
+`TileManager.KickMeshBuild(ref LoadedTile, TileId, IDecodedTileHandle decode, string sourceId, …)` is
+byte-agnostic — it takes an `IDecodedTileHandle`, not `byte[]`; the signatures below reflect that, and the
+source pipeline exposes `ITileFeatureSource FeatureSource` rather than a raw byte source.)*
 
 ```csharp
 internal sealed class TileMeshBuildEngine : System.IDisposable
 {
     public TileMeshBuildEngine(Style.RenderLayerSet layers);
 
-    /// <summary>Test seam (D12): true blocks Consume entirely — replaces the old
-    /// "MaxConsumesPerTick == 0 blocks" trick, so 0 can mean uncapped like every other budget.</summary>
+    /// <summary>Test seam (D12): true blocks Consume entirely — replaces the old "MaxConsumesPerTick == 0
+    /// blocks" trick, so 0 can mean uncapped like every other budget.</summary>
     internal bool BlockConsumeForTests { get; set; }
 
     // ── Extraction step ships this (today's KickMeshBuild body, denseLayerIds from the registry) ──
-    public UniTask<MeshBuildResult> Kick(TileId id, byte[] mvtBytes, int[] denseLayerIds,
-        double3 tileOriginRender, IProjection projection);
+    public UniTask<MeshBuildResult> Kick(TileId id, IDecodedTileHandle decode, int[] denseLayerIds, double3 tileOriginRender, IProjection projection);
 
     // ── §4 (two-phase) replaces Kick with the pair: ──
-    public UniTask<MeasuredGeometry> KickMeasure(TileId id, byte[] mvtBytes, int[] denseLayerIds,
-        double3 tileOriginRender, IProjection projection);
-    /// <summary>MAIN THREAD: allocates one exact-size writable MeshDataArray per non-empty chunk
-    /// (PmMeshDataAllocate), then schedules the worker write. Takes ownership of measured.</summary>
+    public UniTask<MeasuredGeometry> KickMeasure(TileId id, IDecodedTileHandle decode, int[] denseLayerIds, double3 tileOriginRender, IProjection projection);
+    /// <summary>MAIN THREAD: allocates one exact-size writable MeshDataArray per non-empty chunk, then
+    /// schedules the worker write. Takes ownership of measured.</summary>
     public UniTask<MeshBuildResult> KickWrite(MeasuredGeometry measured);
 
-    /// <summary>Resumable per-mesh consume under the dual budget. Registers each uploaded mesh with
-    /// <paramref name="backend"/> (passed per call — the backend is rebuilt on restyle, so the engine
-    /// never holds a potentially-stale reference). Main-thread only.</summary>
-    public bool Consume(Backend.ITileRenderBackend backend, TileId id, ref LoadedTile lt,
-        int meshBudget, int vertBudget, out int meshesConsumed, out int vertsConsumed);
+    /// <summary>Resumable per-mesh consume under the dual budget. Registers each uploaded mesh with the
+    /// passed backend (rebuilt on restyle, so the engine never holds a stale reference). Main-thread only.</summary>
+    public bool Consume(Backend.ITileRenderBackend backend, TileId id, ref LoadedTile lt, int meshBudget, int vertBudget, out int meshesConsumed, out int vertsConsumed);
 
-    /// <summary>Mid-flight-release holding pens (mesh-build task / measured-geometry task).</summary>
-    public void StashDiscard(UniTask<MeshBuildResult> task);
+    public void StashDiscard(UniTask<MeshBuildResult> task);          // mid-flight-release holding pens
     public void StashDiscardMeasure(UniTask<MeasuredGeometry> task);
-    /// <summary>Non-blocking per-Tick poll of both pens.</summary>
-    public void DrainDiscards();
-    /// <summary>Teardown: spin every stashed task to completion (bounded, same ~10 s cap as today)
-    /// and dispose payloads. Dispose() == DrainAllBlocking().</summary>
-    public void DrainAllBlocking();
-    public void Dispose();
+    public void DrainDiscards();                                       // non-blocking per-Tick poll of both pens
+    public void DrainAllBlocking();                                    // teardown: spin every stashed task (bounded ~10 s cap)
+    public void Dispose();                                             // == DrainAllBlocking()
 }
 ```
 
 `DoDispose` in `TileManager` changes its in-flight-build handling to: for each `_loaded` record with
-`HasMeshBuild`/`HasMeasure` → `_engine.StashDiscard*(...)`; then `_engine.DrainAllBlocking()`. Same
-spin-cap semantics, one owner for the spin code.
+`HasMeshBuild`/`HasMeasure` → `_engine.StashDiscard*(...)`; then `_engine.DrainAllBlocking()`. Same spin-cap
+semantics, one owner for the spin code.
 
-### 1.5 Slimmed `TileManager` — what stays, ownership, teardown order
+### 1.5 Slimmed `TileManager` — what stays, ownership, teardown
 
-Stays (~450 code lines): `_loaded` (`Dictionary<LoadedKey, LoadedTile>`), `Tick` (cover key/dirty
-tracking, request/release transition), `PumpPending` (state machine driver calling
-`_engine.Kick*/Consume`), `ReleaseTile`, `RenderTeardownRecord`, `_pendingFetchDisposal` + drain,
-`ObserveFetchOutcome`/`LogFetchErrorThrottled`, `SymbolTileBytesReady`, `BuildBackend` + backend
-accessors + `InstancedRebuild`, `CaptureTelemetry` (production caller: debug readout), `DoDispose`
-orchestration.
+Stays (~450 code lines): `_loaded` (`Dictionary<LoadedKey, LoadedTile>`), `Tick` (cover key/dirty tracking,
+request/release transition), `PumpPending` (state machine driver calling `_engine.Kick*/Consume`), `ReleaseTile`,
+`RenderTeardownRecord`, `_pendingFetchDisposal` + drain, `ObserveFetchOutcome`/`LogFetchErrorThrottled`,
+`SymbolTileBytesReady`, `BuildBackend` + backend accessors + `InstancedRebuild`, `CaptureTelemetry` (production
+caller: debug readout), `DoDispose` orchestration.
 
-Construction (TileManager ctor): `_registry = new SourcePipelineRegistry()`,
-`_engine = new TileMeshBuildEngine(layers)`, `_bridge = new PreparedTileBridge(cacheConfig)`.
-All three are `internal readonly` fields (test extensions reach them via `InternalsVisibleTo`).
+Construction: `_registry`, `_engine = new TileMeshBuildEngine(layers)`, `_bridge = new PreparedTileBridge(cacheConfig)`
+— all `internal readonly` (test extensions reach them via `InternalsVisibleTo`).
 
-`DoDispose` order (preserves today's "destroy meshes → dispose backend" contract exactly):
-
-1. Stash every `_loaded` in-flight build into the engine pens; `_engine.DrainAllBlocking()` (frees
-   NativeArrays / MeshDataArrays).
-2. Cancel + spin + observe in-flight fetches; drain `_pendingFetchDisposal` (unchanged, stays here).
-3. `DestroyTrackedMeshes` over `_loaded`; clear.
-4. `_bridge.Dispose()` (destroys cached meshes — still **before** the backend).
-5. `_instanced?.Dispose()`.
-6. `_registry.Dispose()` (schedulers + owned sources — after the backend, as today).
+`DoDispose` order (preserves "destroy meshes → dispose backend" exactly): (1) stash every `_loaded` in-flight
+build into the engine pens; `DrainAllBlocking()`; (2) cancel + spin + observe in-flight fetches; drain
+`_pendingFetchDisposal`; (3) `DestroyTrackedMeshes` over `_loaded`; clear; (4) `_bridge.Dispose()` (cached meshes
+— still **before** the backend); (5) `_instanced?.Dispose()`; (6) `_registry.Dispose()` (schedulers + owned
+sources — after the backend).
 
 ### 1.6 Test-surface extraction
 
-Per the repo's test-bloat rule: `TryGetBuiltTile`, `GetTileMeshes`, `AllTilesSettled`,
-`ComputeSceneBounds`, `DrainMeshBuilds` move to `TileManagerTestExtensions` in
-`MapRenderer.Tests.EditMode` (extension methods over the now-`internal` `_loaded`/`_registry`/`_engine`/
-`_instanced`; `InternalsVisibleTo` already exists). `DrainMeshBuilds` re-expresses itself as: spin fetch →
-`_engine.Kick` inline → spin task → `_engine.Consume(backend, …, int.MaxValue, int.MaxValue, …)`. The
-`*LastTick` counters **stay** (they are read by `CaptureTelemetry`/the debug panel — production callers);
-`ReleasedMidFlightCount`/`ReleasedMidFetchCount` stay for the same reason. Comment archaeology
-(the triple-told S55-vs-S87 story etc.) is pruned during the moves — keep the *why*, drop the diffs
-git history holds.
+Per the repo's test-bloat rule: `TryGetBuiltTile`, `GetTileMeshes`, `AllTilesSettled`, `ComputeSceneBounds`,
+`DrainMeshBuilds` move to `TileManagerTestExtensions` in `MapRenderer.Tests.EditMode` (extension methods over the
+now-`internal` `_loaded`/`_registry`/`_engine`/`_instanced`). `DrainMeshBuilds` re-expresses itself as: spin
+fetch → `_engine.Kick` inline → spin task → `_engine.Consume(backend, …, int.MaxValue, int.MaxValue, …)`. The
+`*LastTick` counters **stay** (read by `CaptureTelemetry`/the debug panel — production callers). Comment
+archaeology is pruned during the moves — keep the *why*, drop the diffs git history holds.
 
 **Migration steps** (each independently shippable, gate = `./Tools/run-tests.sh` green):
 
-1. **M1** — `LoadedTile.cs`/`SourceSpec` de-nesting (mechanical; MapView reference updates).
-2. **M2** — `SourcePipelineRegistry` + `DenseLayerIds` on `SourcePipeline`; `TileManager` consumers
-   switch to `_registry[slot].DenseLayerIds`; delete `ComputeDenseLayerIds` + scratch.
-   *Tooth:* existing multi-source + restyle suites; plus a new assertion that a restyle recomputes
-   the dense set (change a layer's source between styles ⇒ probe/kick both see the new set — a stale
-   cache serves the OLD set and fails the prepared-cache completeness tests).
-3. **M3** — `PreparedTileBridge` (+ cache lock removal). *Tooth:* existing S82 cache suite
-   (`MeshBuildsKickedLastTick` untouched on a hit) passes unchanged; `CountMeshObjects` leak baseline
-   unchanged across load→release→revisit.
-4. **M4** — `TileMeshBuildEngine` + test-surface extraction + D12 budget-zero unification
-   (`MaxConsumesPerTick == 0` → uncapped; tests that built backlogs with 0 switch to
-   `BlockConsumeForTests`). *Tooth:* full EditMode suite; the S87 resumable-consume tests and the S48/S51
-   leak-guard tests exercise every moved path; a dedicated test flips `BlockConsumeForTests` and asserts
-   a backlog builds (the seam the old `0` semantics served).
+- **M1** — `LoadedTile.cs`/`SourceSpec` de-nesting (mechanical; MapView reference updates).
+- **M2** — `SourcePipelineRegistry` + `DenseLayerIds`; consumers switch to `_registry[slot].DenseLayerIds`;
+  delete `ComputeDenseLayerIds` + scratch. *Tooth:* existing multi-source + restyle suites; plus a new assertion
+  that a restyle recomputes the dense set (a stale cache serves the OLD set and fails the completeness tests).
+- **M3** — `PreparedTileBridge` (+ cache lock removal). *Tooth:* existing S82 cache suite passes unchanged;
+  `CountMeshObjects` leak baseline unchanged across load→release→revisit.
+- **M4** — `TileMeshBuildEngine` + test-surface extraction + D12 budget-zero unification. *Tooth:* full EditMode
+  suite; the S87 resumable-consume and S48/S51 leak-guard tests exercise every moved path; a dedicated test flips
+  `BlockConsumeForTests` and asserts a backlog builds.
 
 ---
 
-## 2. Symbol-path budgeting + off-thread staging (stall #1)
+## 2. Symbol-path budgeting + off-thread staging (stall #1) — Stages A, B goals met (mechanism superseded by Epic A); C pending
 
-### 2.1 Stage A — scheduling only (queue + build cap + upload coalescing + cancellation)
+> **⚠ Superseded mechanism (Epic A).** Stages A & B achieved their **goals** — symbol builds are budgeted and
+> decode/extract run off the main thread — but the specific **mechanism** the code below documents (a
+> `SymbolLabelSubsystem.OnTileBytesReady` → `_buildQueue` push feed, and a second `MvtDecoder.Decode` inside
+> `BuildTileAsync`) was **removed** by the per-layer tile-processing epic. The live path is kick-driven:
+> `TileManager.KickMeshBuild` → `ISymbolTileWorkerPass.RunWorkerAndHandoff` over a shared `IDecodedTileHandle`
+> (no push queue, no per-symbol decode) — `TileSymbolKickTests` now asserts `OnTileBytesReady` / `_buildQueue` /
+> `SymbolTileBytesReady` are zero-occurrence. For the current design see `docs/per-layer-tile-processing-design.md`
+> §A3/A4/A5b. The §2.1/§2.2 snippets are retained as the stall-#1 problem framing and the budgeting / coalescing /
+> cancellation goals they still describe accurately — not as a map of current code.
 
-All inside `SymbolLabelSubsystem`; `TileManager`/`MapView` wiring gains one call.
+### 2.1 Stage A — scheduling only — ✅ goal met, mechanism retired (see banner)
+
+Queue + build cap + upload coalescing + cancellation, all inside `SymbolLabelSubsystem`; `MapView` gains one
+`PumpBuilds()` call.
 
 ```csharp
-internal sealed class SymbolLabelSubsystem : IDisposable
-{
-    private readonly struct PendingSymbolBuild
-    {
-        public string    SourceId  { get; init; }
-        public TileId    Tile      { get; init; }
-        public byte[]    Bytes     { get; init; }
-        public List<int> LayerIndices { get; init; }   // the _layersBySource list (not copied)
-    }
+private readonly Queue<PendingSymbolBuild> _buildQueue = new(32);
+private CancellationTokenSource _buildCts;   // recreated in SetStyle; cancelled in SetStyle/Dispose
 
-    private readonly Queue<PendingSymbolBuild> _buildQueue = new(32);
-    private readonly HashSet<SymbolTileLabelStore.Key> _loadedNow = new(); // refreshed by ReconcileLoadedTiles
-    private CancellationTokenSource _buildCts;   // recreated in SetStyle; cancelled in SetStyle/Dispose
+/// <summary>Max symbol-tile builds STARTED per frame (≤). Default 1.</summary>
+public int MaxBuildsPerFrame { get; set; } = 1;
 
-    /// <summary>Max symbol-tile builds STARTED per frame (≤). Serialized via MapViewConfig; default 1.</summary>
-    public int MaxBuildsPerFrame { get; set; } = 1;
+// OnTileBytesReady: was BuildTileAsync(...).Forget() — now ONLY enqueues.
+public void OnTileBytesReady(string sourceId, TileId tile, byte[] bytes);
 
-    // OnTileBytesReady: was BuildTileAsync(...).Forget() — now ONLY enqueues (bytes are GC-owned,
-    // retention is bounded by the cover size; a released tile's entry is dropped at dequeue).
-    public void OnTileBytesReady(string sourceId, TileId tile, byte[] bytes);
-
-    /// <summary>MAIN THREAD, once per frame from MapView.LateUpdate (after TileManager.Tick, before
-    /// ReconcileLoadedTiles): starts ≤MaxBuildsPerFrame queued builds, skipping tiles that left the
-    /// loaded set; then performs AT MOST ONE atlas GPU upload if the glyph count grew since the last
-    /// upload (coalesces every commit/glyph-fetch that landed since last frame). Bounded: the dequeue
-    /// loop runs at most Queue.Count iterations (skips are dequeues).</summary>
-    public void PumpBuilds();
-
-    // Per-frame observability (pattern: TileManager's *LastTick counters)
-    internal int BuildsStartedLastPump  { get; private set; }
-    internal int AtlasUploadsLastPump   { get; private set; }
-    internal int QueuedBuildCount       => _buildQueue.Count;
-    internal int CancelledBuildCount    { get; private set; }
-}
+/// <summary>MAIN THREAD, once per frame from MapView.LateUpdate (after TileManager.Tick, after
+/// ReconcileLoadedTiles): starts ≤MaxBuildsPerFrame queued builds, skipping tiles that left the loaded set;
+/// then performs AT MOST ONE atlas GPU upload if the glyph count grew since the last upload. Bounded.</summary>
+public void PumpBuilds();
 ```
 
-`BuildTileAsync` changes:
-- Signature gains the token: `private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile,
-  byte[] bytes, List<int> layerIndices, CancellationToken ct)`; the token is threaded into
-  `_builder.BuildAsync(..., ct)` (parameter already exists and flows into
-  `GlyphManager.EnsureFontStackRangeAsync` → `IGlyphSource.FetchAsync`) and checked
-  (`ct.ThrowIfCancellationRequested()`) after every await before touching `_glyphManager`/
-  `_atlasTexture`/`_store`. `catch (OperationCanceledException) { CancelledBuildCount++; return; }`
-  ahead of the generic catch — a restyle/teardown mid-build is silent, never a warning, and never
-  touches disposed state. This closes both latent risks from review §4 (restyle-vs-in-flight-build,
-  missing token).
-- The atlas-upload block (`glyphCount > _lastUploadedGlyphCount` → `Upload`) **moves out** of
-  `BuildTileAsync` into `PumpBuilds` — commits and late glyph-range arrivals mark nothing; the pump's
-  single check per frame coalesces N tiles' worth of new glyphs into one ≤16 MB `LoadRawTextureData`
-  +`Apply`.
+`BuildTileAsync` gains the token (threaded into `_builder.BuildAsync(..., ct)` → `GlyphManager.EnsureFontStackRangeAsync`
+→ `IGlyphSource.FetchAsync`), checked after every await before touching `_glyphManager`/`_atlasTexture`/`_store`;
+`catch (OperationCanceledException) { CancelledBuildCount++; return; }` ahead of the generic catch — a
+restyle/teardown mid-build is silent, never a warning, and never touches disposed state. The atlas-upload block
+**moves out** of `BuildTileAsync` into `PumpBuilds` — the pump's single check per frame coalesces N tiles' worth
+of new glyphs into one ≤16 MB `LoadRawTextureData`+`Apply`. `SetStyle` cancels + recreates the CTS and clears the
+queue; `Dispose` cancels + disposes.
 
-`SetStyle`: `_buildCts?.Cancel(); _buildCts?.Dispose(); _buildCts = new CancellationTokenSource();`
-before `DisposePipeline()`, and `_buildQueue.Clear()`. `Dispose`: cancel + dispose the CTS.
+**Cost/latency:** labels for a burst of N fetched tiles complete over N frames instead of one — off-screen-
+invisible (labels arrive seconds after tiles due to network). **Teeth:** budget (5 callbacks in one frame ⇒
+1 started, 4 queued; all built after 5 pumps), coalescing (`AtlasUploadsLastPump ≤ 1`), cancellation (gate a fake
+`IGlyphSource`, `SetStyle` mid-await ⇒ `CancelledBuildCount == 1`, no warning, no `ObjectDisposedException`),
+stale-drop (reconcile the tile out then pump ⇒ 0 started).
 
-`MapView.LateUpdate` (inside the `_symbols.HasSymbolLayers` branch, before the reconcile):
-`_symbols.PumpBuilds();`.
+*Landed note:* `PumpBuilds()` runs AFTER `ReconcileLoadedTiles` (the stale-drop needs `_loadedNow` to reflect
+this frame's loaded set), and an `internal GlyphSourceFactoryOverride` seam injects a fixture glyph source for
+the teeth.
 
-**Cost/latency:** labels for a burst of N fetched tiles now complete over N frames instead of one
-frame — off-screen-invisible (labels already arrive seconds after tiles due to network). Queue holds
-`byte[]` references a few frames longer (bounded by cover size × tile bytes; same order as
-`ReadyBytes` retention that already exists).
-
-**Teeth (Stage A):**
-- *Budget:* push 5 bytes-ready callbacks in one frame (fake source) ⇒ `BuildsStartedLastPump == 1`,
-  `QueuedBuildCount == 4`; after 5 pumps all built (store `ActiveTileCount == 5`). A shallow
-  implementation that still builds inline fails the first assertion.
-- *Coalescing:* a build whose glyph fetches complete across 3 frames ⇒ `AtlasUploadsLastPump ≤ 1`
-  every frame, and total uploads over the build ≤ frames-with-new-glyphs (vs today's per-commit upload).
-- *Cancellation:* gate a fake `IGlyphSource` on a `UniTaskCompletionSource`; call `SetStyle` mid-await;
-  release the gate ⇒ `CancelledBuildCount == 1`, no `LogWarning`, store empty, no
-  `ObjectDisposedException`. Today's code fails this (the catch logs a warning after touching
-  disposed state).
-- *Stale-drop:* enqueue, then reconcile the tile out of the loaded set, then pump ⇒
-  `BuildsStartedLastPump == 0`, queue empty.
-
-### 2.2 Stage B — decode + extract off the main thread
+### 2.2 Stage B — decode + extract off the main thread — ✅ goal met, mechanism retired (see banner)
 
 `BuildTileAsync` restructures around explicit switch points (UniTask only):
 
@@ -336,67 +319,55 @@ await UniTask.SwitchToThreadPool();
 MvtTile mvt = MvtDecoder.Decode(bytes);                          // Core, engine-free
 var extractedPerLayer = ExtractAllLayers(mvt, tile, layers, zoom, projection); // SymbolFeatureExtractor
 await UniTask.SwitchToMainThread(ct);                            // honours cancellation on resume
-// pass 1 (glyph ensure) + everything after stays on main — unchanged in this stage
+// pass 1 (glyph ensure) + everything after stays on main
 ```
 
-`SymbolFeatureExtractor.Extract`, the parsed `Symbol.StyleLayer` list (immutable after parse), and
-`IProjection` (stateless math) are worker-safe; neither touches the glyph cache, the atlas, nor any
-`UnityEngine.Object`. `StyledSymbolTileBuilder.BuildAsync` splits its per-layer extract out into a
-worker-safe pre-pass (`Extract` results passed in) so the builder no longer decodes-then-extracts on
-main. The doubled `MvtDecoder.Decode` (mesh worker decodes the same bytes) remains — review option (d)
-rejected: sharing the decoded `MvtTile` couples symbol timing to mesh-kick timing for no main-thread win
-once decode is off-main.
+`SymbolFeatureExtractor.Extract`, the parsed `Symbol.StyleLayer` list, and `IProjection` (stateless math) are
+worker-safe; none touch the glyph cache, atlas, or any `UnityEngine.Object`. `StyledSymbolTileBuilder` split into
+worker-safe `ExtractLayers` + main-thread `ShapeAsync` (`BuildAsync` a byte-parity wrapper).
 
-**Main-thread boundary after Stage B** (the append-on-main discipline, explicit):
+**Main-thread boundary after Stage B:**
 
 | Work | Thread |
 |---|---|
 | MVT decode, symbol feature extract | pool |
-| Glyph fetch await/resume, PBF decode, `GlyphCache.Store`, `GlyphAtlas.Append` (SDF blit) | **main** (unchanged — `GlyphManager`'s documented contract) |
-| Shape + TextQuadLayout/CurvedTextLayout | main (moves in Stage C) |
+| Glyph fetch await/resume, PBF decode, `GlyphCache.Store`, `GlyphAtlas.Append` (SDF blit) | **main** (`GlyphManager`'s documented contract) |
+| Shape + TextQuadLayout/CurvedTextLayout | main (moves off in Stage C) |
 | `SymbolTileLabelStore` mutations, `GlyphAtlasTexture.Upload` | **main** |
 
-**Teeth (Stage B):** thread attribution via the existing recorder pattern
-(`MeshDataThreadWriteSpikeTests` precedent): a `ProfilerRecorder` on `MapRenderer.Symbol.TileDecode`
-created with `CollectOnlyOnCurrentThread` on the main thread records **zero** samples across a full
-build, while the cross-thread recorder records ≥1. Plus byte-parity: built `LabelInstance` lists equal
-the pre-change baseline for the fixture tile (order included — `FeatureIndex` tiebreak preserved).
+**Test-harness note:** `SwitchToMainThread` posts to the PlayerLoop `Update` queue, which a synchronous `[Test]`
+never pumps — so the completion-dependent symbol teeth became **`[UnityTest]` coroutines that `yield return null`**
+(each yield ticks the editor PlayerLoop → drains UniTask's main-thread continuations). Do NOT use
+`.GetAwaiter().GetResult()` on a main-thread-hopping build in a `[Test]` — it deadlocks. **Teeth:** thread
+attribution via a `ProfilerRecorder` on `MapRenderer.Symbol.TileDecode` (`CollectOnlyOnCurrentThread` on main
+records zero; the cross-thread recorder ≥1), plus byte-parity of the built `LabelInstance` lists.
 
-> **Implemented 2026-07-11 (gate green 1335/1335).** `StyledSymbolTileBuilder` split into worker-safe
-> `ExtractLayers` + main-thread `ShapeAsync` (`BuildAsync` is now a byte-parity wrapper). `BuildTileAsync`
-> is exactly the linear async above: `SwitchToThreadPool` → decode+extract → `SwitchToMainThread(ct)` →
-> shape. **Test-harness note (important):** `SwitchToMainThread` posts to the PlayerLoop `Update` queue,
-> which a synchronous `[Test]` never pumps — so the two completion-dependent symbol teeth (coalesced-upload,
-> restyle-cancellation) plus the new off-main attribution tooth had to become **`[UnityTest]` coroutines
-> that `yield return null`** (each yield ticks the editor PlayerLoop → drains UniTask's main-thread
-> continuations). Production is unaffected (Play mode pumps every frame); this is purely how the async build
-> is driven to completion in EditMode. Do NOT use `.GetAwaiter().GetResult()` on a main-thread-hopping build
-> in a `[Test]` — it deadlocks (main blocked, can't pump).
+### 2.3 Stage C — shaping + layout off the main thread (the shared-atlas hazard) — PENDING
 
-### 2.3 Stage C — shaping + layout off the main thread (the shared-atlas hazard)
+> *Anchor note (predates Epic A):* the goal, the shared-atlas hazard analysis, and the `GlyphResolutionSnapshot`
+> design below still hold (that class is genuinely unbuilt — zero repo hits). Only the `BuildTileAsync`
+> switch-point sketch predates A5a's `RunWorkerAndHandoff` / tail-pump worker structure; re-derive the entry-point
+> against current source when implementing.
 
-The hazard: pass 2 reads `GlyphCache` (via `FontStackResolver : IGlyphMetricsProvider`) and
-`GlyphAtlas` (via `IGlyphAtlasView.TryGetEntry/Size`) while the main thread may concurrently run
-*another* tile's pass 1 (`GlyphCache.Store` + `GlyphAtlas.Append` — Dictionary mutation ⇒ torn reads).
+The hazard: pass 2 reads `GlyphCache` (via `FontStackResolver : IGlyphMetricsProvider`) and `GlyphAtlas` (via
+`IGlyphAtlasView`) while the main thread may concurrently run *another* tile's pass 1 (`GlyphCache.Store` +
+`GlyphAtlas.Append` — Dictionary mutation ⇒ torn reads).
 
-**Design: immutable per-tile snapshot, no lock.** After this tile's pass 1 completes on main, every
-glyph this tile needs is cached and appended; the atlas is FIXED-size so `Size` is a constant. Snapshot
-exactly the read surface the shaper + layouts consume — both are small existing interfaces:
+**Design: immutable per-tile snapshot, no lock.** After this tile's pass 1 completes on main, every glyph it
+needs is cached and appended; the atlas is FIXED-size so `Size` is a constant. Snapshot exactly the read surface
+the shaper + layouts consume (both small existing interfaces):
 
 ```csharp
 namespace MapRenderer.Core.Text
 {
-    /// <summary>An immutable, per-tile snapshot of the glyph read surface — built ON THE MAIN THREAD
-    /// after the tile's pass-1 appends, then handed to a worker for shape/layout. Copies only the
-    /// entries the tile's texts reference (bounded by total text length), so concurrent main-thread
-    /// Append/Store for OTHER tiles can never tear a worker read. Engine-free (Core).</summary>
+    /// <summary>An immutable, per-tile snapshot of the glyph read surface — built ON THE MAIN THREAD after
+    /// the tile's pass-1 appends, then handed to a worker for shape/layout. Copies only the entries the
+    /// tile's texts reference, so concurrent main-thread Append/Store for OTHER tiles can never tear a
+    /// worker read. Engine-free (Core).</summary>
     public sealed class GlyphResolutionSnapshot : IGlyphMetricsProvider, IGlyphAtlasView
     {
-        /// <summary>Resolve + copy every codepoint of <paramref name="texts"/> against the live
-        /// cache/atlas. MAIN THREAD (reads the mutable structures).</summary>
-        public static GlyphResolutionSnapshot Capture(
-            FontStack fontStack, GlyphCache cache, GlyphAtlas atlas, IReadOnlyList<string> texts);
-
+        /// <summary>Resolve + copy every codepoint of texts against the live cache/atlas. MAIN THREAD.</summary>
+        public static GlyphResolutionSnapshot Capture(FontStack fontStack, GlyphCache cache, GlyphAtlas atlas, IReadOnlyList<string> texts);
         public int2 Size { get; }                                        // fixed atlas size
         public bool TryGetEntry(uint codepoint, out GlyphAtlasEntry entry);
         // IGlyphMetricsProvider — same members FontStackResolver provides, served from the copy.
@@ -404,32 +375,22 @@ namespace MapRenderer.Core.Text
 }
 ```
 
-`BuildTileAsync` Stage C flow: main (pass 1 ensure) → main `Capture` → `SwitchToThreadPool` →
-`Shape`/`TextQuadLayout.Layout(run, snapshot, …)`/`CurvedTextLayout.Layout(run, snapshot)` (they already
-take `IGlyphAtlasView`; the shaper already takes `IGlyphMetricsProvider` — no layout/shaper changes) →
-`SwitchToMainThread(ct)` → `_store.CompleteBuild`. `GlyphAtlas.Append` never leaves the main thread;
-no lock is added anywhere. Load-path allocation: one snapshot per tile build (dictionary sized to the
-tile's distinct codepoints) — load path, allowed; called out.
-
-**Teeth (Stage C):** (1) same thread-attribution recorder on a new
-`MapRenderer.Symbol.ShapeLayout` marker (zero main-thread samples); (2) *torn-read regression*: two
-tiles built concurrently through a gated fake glyph source, tile B's pass 1 appending new glyphs while
-tile A shapes ⇒ tile A's label UVs byte-equal a serial-build baseline (a shallow implementation that
-passes the live atlas to the worker can fail this only probabilistically — the snapshot makes it
-structural, and the test asserts the worker path type-cannot see the live atlas by API: the worker
-lambda captures only the snapshot).
-
-**I could not verify** `IGlyphMetricsProvider`'s full member list in this pass (only its consumers);
-`Capture` must mirror whatever `FontStackResolver` serves the shaper — confirm at implementation time.
+Flow: main (pass 1 ensure) → main `Capture` → `SwitchToThreadPool` → `Shape`/`TextQuadLayout.Layout`/
+`CurvedTextLayout.Layout` (they already take `IGlyphAtlasView`; the shaper takes `IGlyphMetricsProvider` — no
+layout/shaper changes) → `SwitchToMainThread(ct)` → `_store.CompleteBuild`. `GlyphAtlas.Append` never leaves the
+main thread; no lock added. Load-path allocation: one snapshot per tile build. **Teeth:** thread-attribution on a
+`MapRenderer.Symbol.ShapeLayout` marker; a torn-read regression (two tiles built concurrently through a gated
+fake glyph source, tile B's pass 1 appending while tile A shapes ⇒ tile A's label UVs byte-equal a serial-build
+baseline; the worker lambda captures only the snapshot, so it type-cannot see the live atlas). **Unverified:**
+`IGlyphMetricsProvider`'s full member list — `Capture` must mirror whatever `FontStackResolver` serves the
+shaper; confirm at implementation time.
 
 ---
 
-## 3. Cover-recompute gate (stall #6)
+## 3. Cover-recompute gate (stall #6) — ✅ DONE
 
-`Tick` control flow today: `PumpPending` → `if (!_coverDirty && pending == 0) return;` → full recompute.
-`pending > 0` therefore forces the descent every frame of the whole load window for zero effect.
-
-Change (with §5's release queue already in mind):
+`Tick` today: `PumpPending` → `if (!_coverDirty && pending == 0) return;` → full recompute. `pending > 0` forces
+the descent every frame for zero effect. Change (with §5's release queue in mind):
 
 ```csharp
 DrainPendingDisposal();            // (engine.DrainDiscards() post-decomposition)
@@ -441,38 +402,33 @@ CoverRecomputesLastTick = 1;
 // ... descent + request/release-enqueue + cover-key commit (unchanged)
 ```
 
-`pending` is dropped from the gate entirely — its only historical job was to keep Tick from early-outing
-*before* `PumpPending`, and the pump now runs unconditionally above the gate. Verified no hidden
-dependency: the request loop keys off `!_loaded.ContainsKey` (no-op on unchanged cover) and the release
-loop keys off cover membership (finds nothing on unchanged cover); neither has a side effect the pump
-needs. The review flagged the same conclusion with the same caveat — the cover/consume suites are the
-final arbiter.
-
-**Tooth** (the review's, made concrete): style a map, hold the camera still, set
-`BlockConsumeForTests = true` (D12) so a backlog pends; run 10 Ticks ⇒
-`Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pending > 0` throughout (assert via
-`CaptureTelemetry().PendingTileCount`). Control: nudge zoom by 0.01 ⇒ next Tick's counter == 1.
-Today's code fails the first assertion (counter == 1 every tick).
+`pending` drops from the gate entirely — its only job was to keep Tick from early-outing *before* `PumpPending`,
+and the pump now runs unconditionally above the gate. Verified no hidden dependency: the request loop keys off
+`!_loaded.ContainsKey` (no-op on unchanged cover); the release loop keys off cover membership (finds nothing on
+unchanged cover). **Tooth:** style a map, hold the camera still, `BlockConsumeForTests = true` so a backlog
+pends; 10 Ticks ⇒ `Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pending > 0`. Control: nudge zoom by 0.01
+⇒ next Tick's counter == 1.
 
 ---
 
-## 4. Two-phase kick + mesher vertex cap (stalls #4/#5)
+## 4. Two-phase kick + mesher vertex cap (stalls #4/#5) — PENDING
 
-Prerequisite (review #5): capture `PmMeshDataAllocate` numbers from a liberty-style pan session first —
-this stage's alloc-loop half is measure-first. The overshoot half (#4) is structurally certain regardless.
+> *Anchor note (predates Epic A):* still a live pending plan. It partially anticipated the epic — §4.2's
+> `Measure(IReadOnlyList<ITileFeature> features, …)` already assumes the A6 neutral-feature surface — so re-verify
+> signatures at implementation time but don't assume this section is stale wholesale; only §1.4's top-level `Kick`
+> anchor actually drifted.
+
+Prerequisite: capture `PmMeshDataAllocate` numbers from a liberty-style pan session first — this stage's
+alloc-loop half is measure-first. The overshoot half (#4) is structurally certain regardless.
 
 ### 4.1 New `LoadedTile` state
 
 ```csharp
-internal struct LoadedTile
-{
-    // ... existing fields unchanged ...
-    /// <summary>Two-phase kick, phase A: the worker measure task (decode + geometry + chunk plan into
-    /// interim native buffers). Set by PumpPending's kick branch; cleared when KickWrite consumes it.
-    /// "Measured, awaiting allocation" ⇔ HasMeasure && MeasureTask.IsCompleted && !HasMeshBuild.</summary>
-    public UniTask<MeasuredGeometry> MeasureTask;
-    public bool HasMeasure;
-}
+/// <summary>Two-phase kick, phase A: the worker measure task (decode + geometry + chunk plan into interim
+/// native buffers). Set by PumpPending's kick branch; cleared when KickWrite consumes it.
+/// "Measured, awaiting allocation" ⇔ HasMeasure && MeasureTask.IsCompleted && !HasMeshBuild.</summary>
+public UniTask<MeasuredGeometry> MeasureTask;
+public bool HasMeasure;
 ```
 
 Pump state machine gains one branch, ordered before the existing consume branch:
@@ -484,137 +440,98 @@ HasMeasure && task running    → pending++
 HasMeshBuild && completed     → Consume under dual budget                  [unchanged]
 ```
 
-`KickWrite` is charged against `MaxMeshBuildsPerTick` — it is the step that does main-thread
-`AllocateWritableMeshData` work, which is exactly what that cap exists to bound. **Latency cost, stated
-plainly: every tile gains +1 frame** (measure completes frame N; alloc+write kicks frame N+1 at the
-earliest) — invisible next to network fetch, and the review's #4 accepts it explicitly.
-
-Mid-flight release: `RenderTeardownRecord` stashes a live/completed `MeasureTask` via
-`engine.StashDiscardMeasure` (the pen disposes `MeasuredGeometry`'s native buffers). `MeasuredGeometry`
-gets a `DebugLiveCount` mirroring `MeshDataPayload.LiveAllocCount` (leak tooth).
+`KickWrite` is charged against `MaxMeshBuildsPerTick` — it does the main-thread `AllocateWritableMeshData` work
+that cap exists to bound. **Latency cost: every tile gains +1 frame** (measure completes frame N; alloc+write
+kicks frame N+1) — invisible next to network fetch. Mid-flight release: `RenderTeardownRecord` stashes a
+live/completed `MeasureTask` via `engine.StashDiscardMeasure` (the pen disposes `MeasuredGeometry`'s native
+buffers). `MeasuredGeometry` gets a `DebugLiveCount` (leak tooth).
 
 ### 4.2 Mesher seam — `ILayerGeometry` replaces `IRenderLayer.WriteInto`
 
 ```csharp
 namespace MapRenderer.Unity.Rendering.Style
 {
-    /// <summary>Phase-A product of one layer's mesh build: the projected geometry in interim native
-    /// buffers plus a chunk plan (feature-boundary splits, ≤ maxVerticesPerChunk target). Value-type
-    /// data per the mesh-lifetime contract: disposed deterministically by KickWrite (after writing) or
-    /// the measure holding pen (discard).</summary>
+    /// <summary>Phase-A product of one layer's mesh build: projected geometry in interim native buffers plus
+    /// a chunk plan (feature-boundary splits, ≤ maxVerticesPerChunk target). Value-type data per the
+    /// mesh-lifetime contract: disposed deterministically by KickWrite (after writing) or the measure pen.</summary>
     internal interface ILayerGeometry : System.IDisposable
     {
-        int ChunkCount { get; }                    // 0 = empty layer (no geometry)
+        int ChunkCount { get; }                    // 0 = empty layer
         int ChunkVertexCount(int chunk);
-        /// <summary>WORKER: write one chunk into a caller-allocated MeshData (exact-size — the caller
-        /// allocated from ChunkVertexCount/index counts). Chunk-local indices are rebased from the
-        /// interim buffers' global indices (per-feature triangles never cross features, so a
-        /// feature-boundary chunk is self-contained).</summary>
+        /// <summary>WORKER: write one chunk into a caller-allocated MeshData (exact-size). Chunk-local
+        /// indices rebased from the interim buffers' global indices (per-feature triangles never cross
+        /// features, so a feature-boundary chunk is self-contained).</summary>
         void WriteChunk(int chunk, Mesh.MeshData md, out int vertexCount, out Bounds bounds);
     }
 
     internal interface IRenderLayer : System.IDisposable
     {
         // StyleLayer, Material, ApplyZoom unchanged.
-        /// <summary>WORKER: decode-to-geometry + chunk plan. Replaces WriteInto (which fused measure
-        /// and write and therefore forced the main thread to pre-allocate blind).</summary>
-        ILayerGeometry Measure(IReadOnlyList<MvtFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, int maxVerticesPerChunk);
+        /// <summary>WORKER: decode-to-geometry + chunk plan. Replaces WriteInto (which fused measure and
+        /// write and therefore forced the main thread to pre-allocate blind).</summary>
+        ILayerGeometry Measure(IReadOnlyList<ITileFeature> features, double zoom, double extent, TileId id,
+            double3 tileOriginRender, IProjection projection, int maxVerticesPerChunk);
     }
 }
 ```
 
-`StyledFillTileBuilder`/`StyledLineTileBuilder` split accordingly: the existing
-decode→assemble→earcut→project front half (through `TileMeshBuffers` / the globe-subdivided
-`NativeList`s) becomes the `Measure` body — the buffers are **retained** in the returned geometry object
-instead of disposed in a `finally`; the stream-write back half becomes `WriteChunk` (same code,
-parameterised by a `[vertexStart, vertexCount)` / `[indexStart, indexCount)` window, indices written as
-`global − chunkVertexStart`). Chunk planning walks `VertexFeatureIdx` (per-feature vertex runs are
-contiguous — features are appended sequentially) accumulating features until the next feature would
-cross `maxVerticesPerChunk` (32 768 target, D6). **A single feature larger than the target ships as one
-oversized chunk** — splitting inside a feature means re-triangulation; the overshoot bound becomes
-"one *feature*" instead of "one *layer*", which is the practical win (a low-zoom ocean *layer* is many
-polygons; a single monster polygon remains a known residual, called out honestly).
-
-`MeasuredGeometry` (engine-level) = the per-tile aggregate: `ILayerGeometry[]` (dense order) + the
-capture set (`TileId`, `denseLayerIds`, origin) + the chunk→(layer, chunkIndex) flat plan.
+`StyledFillTileBuilder`/`StyledLineTileBuilder` split: the decode→assemble→earcut→project front half becomes the
+`Measure` body — the interim buffers are **retained** in the returned geometry object instead of disposed in a
+`finally`; the stream-write back half becomes `WriteChunk` (same code, parameterised by a vertex/index window,
+indices written as `global − chunkVertexStart`). Chunk planning walks `VertexFeatureIdx` (per-feature vertex runs
+are contiguous) accumulating features until the next would cross `maxVerticesPerChunk` (32 768 target, D6). **A
+single feature larger than the target ships as one oversized chunk** — splitting inside a feature means
+re-triangulation; the overshoot bound becomes "one *feature*" instead of "one *layer*" (a low-zoom ocean *layer*
+is many polygons; a single monster polygon remains a known residual). `MeasuredGeometry` = the per-tile
+aggregate: `ILayerGeometry[]` (dense order) + the capture set + the chunk→(layer, chunkIndex) flat plan.
 
 ### 4.3 Allocation + consume + cache
 
-`KickWrite` (main): for each **non-empty** chunk, `MeshDataPayload.AllocateTracked(1)` under
-`PmMeshDataAllocate` — exact counts are known, so the "dozens of 0-vertex arrays allocated, carried,
-disposed unused" loop (#5) is gone: allocations == non-empty chunk count. Per-chunk single-element
-arrays are kept deliberately — `ApplyAndDisposeWritableMeshData` applies a whole array at once, and the
-S87 resumable per-mesh consume requires applying one mesh at a time (the review's "interim single
-`AllocateWritableMeshData(dense)`" trap).
+`KickWrite` (main): for each **non-empty** chunk, `MeshDataPayload.AllocateTracked(1)` under `PmMeshDataAllocate`
+— exact counts are known, so the "dozens of 0-vertex arrays allocated, carried, disposed unused" loop (#5) is
+gone. Per-chunk single-element arrays are kept deliberately (`ApplyAndDisposeWritableMeshData` applies a whole
+array at once, and the resumable per-mesh consume requires applying one mesh at a time).
 
-Consume/backends: **verified no changes needed.** Payloads already carry `MaterialIndex`
-(`IRenderLayerPayload.MaterialIndex`); `ConsumeMeshBuild` walks a dense payload array of arbitrary
-length via `ConsumeCursor` and appends to the parallel `Meshes`/`DrawHandles`/`MaterialIndices` arrays;
-`AddTileLayer(mesh, origin, materialIndex, tileId)` has no per-(tile, layer) uniqueness assumption in any
-backend (Entities: entity per call; BRG: `DrawItem` per call; GameObjects: GO per call). Two payloads
-sharing a `MaterialIndex` simply produce two draw items with the same material — correct draw order is
-preserved because chunks are emitted in dense/draw order and the backends order by material
-renderQueue, not item insertion.
+Consume/backends: **no changes needed.** Payloads carry `MaterialIndex`; `ConsumeMeshBuild` walks a dense payload
+array of arbitrary length via `ConsumeCursor`; `AddTileLayer` has no per-(tile, layer) uniqueness assumption in
+any backend (Entities: entity per call; BRG: `DrawItem` per call; GameObjects: GO per call). Two payloads sharing
+a `MaterialIndex` produce two draw items with the same material — correct order preserved because chunks emit in
+dense/draw order and backends order by material renderQueue.
 
-**One real ripple the review missed:** `PreparedTileCache.Put` destroys the previous entry on key
-collision — with K chunks per (style, tile, layerId), the release-path transfer would destroy chunks
-1..K−1 and a cache-hit revisit would silently drop most of a layer's geometry. **D7:** the cache value
-becomes `Mesh[]` (`null` array stays the empty-layer marker; byte estimate sums the chunks);
-`TransferOnRelease` groups the record's tracked meshes by `MaterialIndices[i]` before `Put`;
-`TakeAsLoadedTile` registers each chunk of a taken array. Key/probe/completeness semantics are
-unchanged. Load-path allocation (the grouping): fine, flagged.
+**One real cache ripple:** `PreparedTileCache.Put` destroys the previous entry on key collision — with K chunks
+per (style, tile, layerId), the release-path transfer would destroy chunks 1..K−1. **D7:** the cache value
+becomes `Mesh[]` (`null` array stays the empty-layer marker); `TransferOnRelease` groups the record's tracked
+meshes by `MaterialIndices[i]` before `Put`; `TakeAsLoadedTile` registers each chunk of a taken array.
 
-**Teeth:**
-- *Overshoot bound:* fixture layer with ≥100k verts across ≥4 features; `MaxVerticesPerTick = 40 000` ⇒
-  per-tick `VerticesConsumedLastTick ≤ 40 000 + 32 768`, and the layer produces ≥3 meshes
-  (`GetTileMeshes(id).Length ≥ 3` for that layer's material index). Today's code consumes all 100k in
-  one tick — fails the bound.
-- *Allocation exactness:* new engine counter `internal int MeshDataArraysAllocatedLastKick`; a style
-  with D dense layers of which E produce geometry ⇒ counter == Σ non-empty chunks ≤ would-be D; with the
-  liberty fixture (many empty layers per tile) assert counter < D. Today's code allocates exactly D —
-  fails.
-- *Leak:* release a tile in the measured-awaiting-alloc state ⇒ `MeasuredGeometry.DebugLiveCount`
-  returns to 0 after the pen drain; `MeshDataPayload.DebugLiveAllocCount` net-zero across the cycle
-  (existing guard extends).
-- *Cache round-trip:* build a chunked tile → release (transfer) → revisit (hit) ⇒ vertex-count sum of
-  re-registered meshes equals the original build's; a shallow `Mesh`-valued cache fails (loses chunks).
-- *Parity:* full GPU-snapshot suite unchanged (chunking must not alter rendered output).
+**Teeth:** overshoot bound (≥100k-vert fixture across ≥4 features, `MaxVerticesPerTick = 40 000` ⇒ per-tick
+`VerticesConsumedLastTick ≤ 40 000 + 32 768` and the layer produces ≥3 meshes); allocation exactness (a new
+`MeshDataArraysAllocatedLastKick` counter < D dense layers on the liberty fixture); leak (release in the
+measured-awaiting-alloc state ⇒ `DebugLiveCount` back to 0); cache round-trip (build→release→revisit vertex sum
+equals the original; a `Mesh`-valued cache loses chunks); parity (full GPU-snapshot suite unchanged).
 
 ---
 
-## 5. Release-path budgeting (stall #2)
+## 5. Release-path budgeting (stall #2) — ✅ DONE
 
 ### 5.1 Deferred-release queue in `TileManager`
 
 ```csharp
-// TileSelectionConfig gains:
-/// <summary>Per-frame budget of (tile, source) RECORDS fully released (backend removal + mesh
-/// destroy/transfer + scheduler release) per Tick. 0 = uncapped (D12-consistent). Default 4.</summary>
+/// <summary>Per-frame budget of (tile, source) RECORDS fully released per Tick. 0 = uncapped. Default 4.</summary>
 public int MaxReleasesPerTick;
 
-// TileManager fields:
 private readonly Queue<LoadedKey>   _releaseQueue  = new Queue<LoadedKey>(64);
 private readonly HashSet<LoadedKey> _releaseQueued = new HashSet<LoadedKey>();  // dedup across recomputes
-internal int TilesReleasedLastTick { get; private set; }
-internal int ReleaseQueueDepth     => _releaseQueue.Count;
 ```
 
 - Tick's release loop enqueues instead of releasing: `if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);`.
-- `DrainReleaseQueue(int budget)` runs **every frame above the cover gate** (§3): dequeue up to
-  `budget` keys; for each — remove from `_releaseQueued`; **re-validate**: if `_coverSet.Contains(key.Tile)`
-  (the tile came back during the 1–3 frame linger) or `!_loaded.ContainsKey(key)` (restyle cleared it),
-  skip; else `ReleaseTile(key)` (unchanged body). Re-validation converts fast pan-out-pan-back from
-  destroy+refetch churn into a free no-op — a behaviour improvement, tested below.
-- Records queued for release are still in `_loaded` and still pumped for 1–3 frames; the only guard
-  added is the kick branch skipping `_releaseQueued.Contains(key)` records (don't start a build for a
-  tile already condemned). In-flight work proceeds to the existing pens.
-- `SetSources` clears both structures (records are torn down wholesale there anyway).
-- Zero-GC: both containers pre-sized; `Queue<LoadedKey>`/`HashSet<LoadedKey>` of the zero-boxing struct
-  key are steady-state alloc-free after warm-up, and the steady state (no cover churn) never touches them.
-
-Tradeoff: released tiles linger 1–3 frames — off-screen by definition; `ReadyBytes`/task memory
-retention extends by the same bound.
+- `DrainReleaseQueue(int budget)` runs **every frame above the cover gate** (§3): dequeue up to `budget` keys;
+  for each — remove from `_releaseQueued`; **re-validate**: if `_coverSet.Contains(key.Tile)` (the tile came back
+  during the 1–3 frame linger) or `!_loaded.ContainsKey(key)` (restyle cleared it), skip; else `ReleaseTile(key)`
+  (unchanged body). Re-validation converts fast pan-out-pan-back from destroy+refetch churn into a free no-op.
+- Records queued for release stay in `_loaded` and are still pumped for 1–3 frames; the kick branch skips
+  `_releaseQueued.Contains(key)` records (don't start a build for a condemned tile). In-flight work proceeds to
+  the existing pens. `SetSources` clears both structures. Zero-GC: both containers pre-sized; the steady state
+  never touches them.
 
 ### 5.2 Batched removal — backend seam
 
@@ -623,105 +540,66 @@ internal interface ITileRenderBackend : IDisposable
 {
     int  AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId);
     void RemoveItem(int handle);
-    /// <summary>Removes many draw items in ONE backend operation where the backend supports it —
-    /// the Entities backend destroys all layer entities (plus any tile roots emptied by the batch)
-    /// via a single EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;) structural change instead of
-    /// one per layer. BRG/GameObjects default to a RemoveItem loop. Idempotent for unknown handles.</summary>
+    /// <summary>Removes many draw items in ONE backend operation where supported — Entities destroys all
+    /// layer entities (plus any tile roots emptied by the batch) via a single
+    /// EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;) structural change. BRG/GameObjects default to a
+    /// RemoveItem loop. Idempotent for unknown handles.</summary>
     void RemoveItems(ReadOnlySpan<int> handles);
     void Rebuild(in SceneFrame frame);
     Bounds ComputeSceneBounds(float tileSizeWorld);
 }
 ```
 
-`RenderTeardownRecord` switches its unregister loop to
-`_instanced.RemoveItems(lt.DrawHandles)`. Entities implementation: reuse a persistent
-`NativeList<Entity> _destroyScratch` member; append each handle's entity, run the existing root
-bookkeeping (decrement `ChildCount`, append emptied roots to the same list), then one
-`_em.DestroyEntity(_destroyScratch.AsArray())`; `_destroyScratch.Clear()`. One structural change per
-released record (≤ `MaxReleasesPerTick` per frame) instead of L+1 per record. BRG/GameObjects: trivial
-loop over `RemoveItem` (BRG's remove is a dict remove; GameObjects is Inspector-debug only).
-
-With budget R=4 and L=30 layers: worst frame goes from 450 structural changes (review's example) to ≤4.
-
-**Teeth:**
-- *Budget:* load 8 tiles (single source), zoom far out so all leave cover; `MaxReleasesPerTick = 2` ⇒
-  Tick 1: `TilesReleasedLastTick == 2`, `ReleaseQueueDepth == 6`; after 4 ticks queue empty,
-  `LoadedTileCount == 0` (or the new cover's count), `CountMeshObjects` back to baseline (no leak
-  through the deferral). Today's code releases all 8 in one Tick — fails the first assertion.
-- *Batching:* new internal counter on `Entities.TileRenderer`: `DestroyEntityBatchesLastRemove`
-  (incremented once per `RemoveItems` call that destroyed ≥1 entity) + `EntitiesDestroyedLastRemove`.
-  Release a 10-layer tile ⇒ batches == 1, destroyed == 11 (10 layers + root). A shallow
-  `RemoveItems`-loops-over-`RemoveItem` implementation on Entities yields batches == 0 (counter never
-  incremented) — fails.
-- *Pan-return:* tile leaves cover, camera returns before its dequeue ⇒ record survives:
-  `MeshBuildsKickedLastTick == 0` and `PreparedCacheMisses` unchanged across the round trip (today the
-  tile is destroyed and re-fetched or cache-probed — either observable moves).
+`RenderTeardownRecord` switches its unregister loop to `_instanced.RemoveItems(lt.DrawHandles)`. Entities: reuse
+a persistent `NativeList<Entity> _destroyScratch`; append each handle's entity, run the root bookkeeping
+(decrement `ChildCount`, append emptied roots), then one `_em.DestroyEntity(_destroyScratch.AsArray())`. One
+structural change per released record (≤`MaxReleasesPerTick` per frame) instead of L+1 per record. With R=4 and
+L=30, the worst frame goes from 450 structural changes to ≤4. **Teeth:** budget (8 tiles leave cover,
+`MaxReleasesPerTick = 2` ⇒ Tick 1 releases 2, queue depth 6; queue empties in 4 ticks, `CountMeshObjects` back to
+baseline); batching (`DestroyEntityBatchesLastRemove` == 1 for a 10-layer tile, `EntitiesDestroyedLastRemove` ==
+11; a `RemoveItems`-loops-`RemoveItem` impl yields batches == 0); pan-return (tile returns before dequeue ⇒
+record survives, `MeshBuildsKickedLastTick == 0`).
 
 ---
 
-## 6. Entities `AddTileLayer` redesign (stall #3)
+## 6. Entities `AddTileLayer` redesign (stall #3) — ✅ DONE
 
-**Decision (D10): fix Entities and keep it the ship default; BRG stays the opt-in.** Reasoning: the fix
-is small and uses EG's own intended fast path (ID-based `MaterialMeshInfo` exists precisely to bypass
-per-entity `RenderMeshArray` registration), it preserves the Entities-Hierarchy debuggability that is the
-backend's documented reason to exist, and shipping BRG as default would first require fixing BRG's own
-steady-state per-frame repack (review #8: 33 material reads × N + full `SetData` every frame) — a second
-work package. **RESOLVED (2026-07-11):** the maintainer accepted fix-Entities-keep-default; BRG-as-default
-(with #8's dirty-flagging prerequisite) is not pursued now. The maintainer's notes lean BRG long-term, so
-revisit if the per-frame repack is ever fixed independently.
-
-Implementation (in `Backend/Entities/TileRenderer.cs`):
+**Decision (D10): fix Entities and keep it the ship default; BRG stays the opt-in.** The fix is small and uses
+EG's own intended fast path (ID-based `MaterialMeshInfo` exists precisely to bypass per-entity `RenderMeshArray`
+registration), preserves the Entities-Hierarchy debuggability that is the backend's documented reason to exist,
+and shipping BRG as default would first require fixing BRG's own steady-state per-frame repack (#8). Maintainer
+accepted; BRG-as-default is not pursued now (maintainer notes lean BRG long-term — revisit if #8 is fixed).
 
 ```csharp
-// Construction (after world init):
-private EntitiesGraphicsSystem _eg;               // _world.GetExistingSystemManaged<EntitiesGraphicsSystem>()
+private EntitiesGraphicsSystem _eg;               // GetExistingSystemManaged<EntitiesGraphicsSystem>()
 private BatchMaterialID[]      _materialIds;      // RegisterMaterial per layer material, once
 private Entity                 _layerPrototype;   // built ONCE via RenderMeshUtility.AddComponents with a
-                                                  // placeholder RenderMeshArray + Parent/LocalTransform added,
+                                                  // placeholder RenderMeshArray + Parent/LocalTransform,
                                                   // Prefab-tagged so it never renders itself
-
 // ItemRec gains:  public BatchMeshID MeshId;     // for unregister-on-remove
 
 public int AddTileLayer(Mesh mesh, double3 tileOriginRender, int materialIndex, TileId tileId)
 {
-    // per call: ONE structural op (Instantiate preserves the prototype archetype incl. shared
-    // components), then pure SetComponentData:
-    Entity e = _em.Instantiate(_layerPrototype);
+    Entity e = _em.Instantiate(_layerPrototype);   // ONE structural op (preserves the prototype archetype)
     BatchMeshID meshId = _eg.RegisterMesh(mesh);
-    _em.SetComponentData(e, MaterialMeshInfo.FromMeshIDAndMaterialID(meshId, _materialIds[materialIndex]));
+    _em.SetComponentData(e, new MaterialMeshInfo(_materialIds[materialIndex], meshId)); // ctor (materialID, meshID) — the FromMeshIDAndMaterialID factory isn't in this EG version
     _em.SetComponentData(e, new Parent { Value = GetOrCreateRoot(tileId, tileOriginRender) });
     // LocalTransform.Identity, LocalToWorld, RenderBounds sets as today (sets, not migrations).
 }
 ```
 
-- `RemoveItems`/`RemoveItem` gain `_eg.UnregisterMesh(item.MeshId)` per destroyed item (the explicit
-  unregister the ID route requires — without it EG's mesh registry grows unboundedly and holds destroyed
-  meshes' IDs). Materials are unregistered in `DoDispose` only if the world is still alive at that point
-  (world disposal tears down EG's registries wholesale; the unregister is for symmetry, not correctness —
-  note in code).
-- Structural cost per consumed mesh: today 2 structural changes + a fresh one-element `RenderMeshArray`
-  shared-component (EG batch registration per entity); after: 1 `Instantiate` + `RegisterMesh` (a
-  registry add, not an archetype change). At `MaxConsumesPerTick = 4`: ≤4 instantiates/frame.
-- Root creation path unchanged (roots are rare — one per tile).
+- `RemoveItems`/`RemoveItem` gain `_eg.UnregisterMesh(item.MeshId)` per destroyed item (without it EG's mesh
+  registry grows unboundedly and holds destroyed meshes' IDs). Materials unregister in `DoDispose` only if the
+  world is still alive (world disposal tears down EG's registries wholesale — for symmetry, not correctness).
+- Structural cost per consumed mesh: today 2 structural changes + a fresh one-element `RenderMeshArray`; after: 1
+  `Instantiate` + `RegisterMesh` (a registry add, not an archetype change). At `MaxConsumesPerTick = 4`: ≤4
+  instantiates/frame. Root creation path unchanged (roots are rare — one per tile).
 
-**Risk / unverified:** the exact component set `RenderMeshUtility.AddComponents` stamps varies by
-Entities Graphics version; the prototype+`Instantiate` pattern is EG's documented runtime-creation
-recipe, but the placeholder-`RenderMeshArray`-on-prototype detail must be validated in-project (a
-zero-length `RenderMeshArray` shared component on instances is expected to be inert under ID-based
-`MaterialMeshInfo` — verify with the render-parity suite; fall back to registering one shared dummy
-array if EG asserts).
-
-**Teeth:**
-- *No per-entity array:* internal counter `RenderMeshArraysCreated` — after N `AddTileLayer` calls it
-  is ≤1 (the prototype's). Today's code creates N — fails.
-- *Registry balance:* `_eg`-registered mesh count is not directly readable; track our own
-  `internal int RegisteredMeshCount` (inc on RegisterMesh, dec on UnregisterMesh). After a full
-  load→release cycle: `RegisteredMeshCount == 0` — catches a missing unregister (the ID route's known
-  trap, review #3 tradeoff).
-- *Parity:* GPU-snapshot suite on the Entities backend byte-identical; Entities Hierarchy probes
-  (`RootChildBufferCount`, `IsParentedToTileRoot`, entity names) unchanged.
-- *Spike:* `MapRenderer.Tile.AddLayer.Register` marker remains for before/after Profiler comparison
-  (manual evidence, not a test gate).
+**Risk / unverified:** the exact component set `RenderMeshUtility.AddComponents` stamps varies by EG version; the
+placeholder-`RenderMeshArray`-on-prototype inertness under ID-based `MaterialMeshInfo` must be validated in-project
+(fall back to a shared dummy array if EG asserts). **Teeth:** no per-entity array (`RenderMeshArraysCreated` ≤1
+after N calls); registry balance (`RegisteredMeshCount == 0` after a full load→release cycle — catches a missing
+unregister); parity (GPU-snapshot byte-identical + Entities Hierarchy probes unchanged).
 
 ---
 
@@ -729,64 +607,40 @@ array if EG asserts).
 
 | Step | Content | Section | Depends on | Risk |
 |---|---|---|---|---|
-| 1 ✅ DONE | Symbol Stage A: queue + ≤1 build/frame + upload coalescing + CTS/CancellationToken | §2.1 | — | low (scheduling only; attacks the worst stall) |
+| 1 ✅ DONE | Symbol Stage A: queue + ≤1 build/frame + upload coalescing + CTS | §2.1 | — | low (scheduling; attacks the worst stall) |
 | 2 ✅ DONE | Symbol Stage B: decode+extract to pool | §2.2 | 1 | low |
 | 3 ✅ DONE | Cover gate on `_coverDirty` alone + tooth | §3 | — | low (one line; suites arbitrate) |
-| 4 ✅ DONE | Release queue + `MaxReleasesPerTick` + `RemoveItems` seam + Entities batched destroy | §5 | 3 (drain placement) | medium (lifecycle-adjacent; pens unchanged) |
+| 4 ✅ DONE | Release queue + `MaxReleasesPerTick` + `RemoveItems` seam + Entities batched destroy | §5 | 3 | medium |
 | 5 ✅ DONE | Entities `AddTileLayer` prototype/ID redesign + unregister-on-remove | §6 | — | medium (EG version detail) |
-| 6 | **Measure**: GC pan-storm profile (review #7) + `PmMeshDataAllocate` capture — Editor session, no code | — | — | none (gates 9's alloc-half and any pooling work; do nothing on #7 until confirmed) |
+| 6 | **Measure**: GC pan-storm profile (#7) + `PmMeshDataAllocate` capture — Editor session, no code | — | — | none (gates 9's alloc-half; do nothing on #7 until confirmed) |
 | 7 | Decompose M1+M2 (`LoadedTile` de-nest; `SourcePipelineRegistry` + dense-id cache) | §1.1–1.2 | — | low |
 | 8 | Decompose M3+M4 (`PreparedTileBridge`; `TileMeshBuildEngine` + test-surface exit + D12 + comment prune) | §1.3–1.6 | 7 | medium (large mechanical move; leak suites are the net) |
-| 9 | Two-phase kick + `ILayerGeometry` chunking + `Mesh[]` cache values | §4 | 8 (lands in the engine), 6 (numbers) | high (mesher change; parity suite is the net) |
+| 9 | Two-phase kick + `ILayerGeometry` chunking + `Mesh[]` cache values | §4 | 8, 6 (numbers) | high (mesher change; parity suite is the net) |
 | 10 | Symbol Stage C: snapshot + shaping off-thread | §2.3 | 2 | medium (the documented atlas hazard — snapshot defuses it structurally) |
 
-Steps 1–5 are independent of the decomposition and deliberately front-loaded (review §5 sequence);
-7–8 must precede 9 so the two-phase kick lands in `TileMeshBuildEngine`, not in another 200 lines of
-the god-object. Step 10 can run any time after 2.
+Steps 1–5 are independent of the decomposition and deliberately front-loaded; 7–8 must precede 9 so the two-phase
+kick lands in `TileMeshBuildEngine`, not in another 200 lines of the god-object. Step 10 can run any time after 2.
 
-### Step 1 — implemented 2026-07-11 (EditMode gate green: 1328/1328)
+## 8. Resolved decisions (maintainer)
 
-Landed in `SymbolLabelSubsystem.cs` + `MapView.cs`, with 4 teeth in
-`MapRenderer.Tests.EditMode/Text/SymbolLabelSubsystemPumpTests.cs` (bounded-starts, coalesced-upload,
-stale-drop, restyle-cancellation). Two deviations from §2.1 as written, both deliberate:
-- **`PumpBuilds()` runs AFTER `ReconcileLoadedTiles`, not before.** §2.1 said "before", but the
-  stale-drop needs `_loadedNow` to reflect this frame's loaded set (and §2.1's own stale-drop tooth
-  requires reconcile-then-pump). Placed after reconcile, before `CollectInto`.
-- **Added an `internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride` seam** so the teeth
-  can inject a fixture/gated `TestGlyphSource` (mirrors the existing `IDataSource` dependency-inversion);
-  null ⇒ production `GlyphSourceFactory.Create`. `MaxBuildsPerFrame` kept as a plain property (default 1);
-  MapViewConfig serialization deferred as noted. Not committed (working tree).
-
----
-
-## 8. RESOLVED DECISIONS (maintainer, 2026-07-11)
-
-All five recommended defaults accepted by the maintainer. This section is now decision-complete.
-
-1. **Entities-fixed-as-default** ✅ — fix Entities, keep it the ship default (§6, D10). BRG stays the
-   zero-alloc opt-in; BRG-as-default (with review #8 repack dirty-flagging) is NOT pursued now.
-2. **Budget defaults** ✅ — `MaxReleasesPerTick` = 4 (mirrors `MaxConsumesPerTick`); symbol
-   `MaxBuildsPerFrame` = 1. Both Inspector-serialized; tune in-editor if needed.
-3. **Chunk vertex target** ✅ — 32 768. Serialized constant (not Inspector). Revisit only if the step-6
-   `PmMeshDataAllocate` numbers argue for a different balance.
-4. **PreparedTileCache byte budget** ✅ — keep the S82 placeholder for now (unchanged by this design;
-   D7 only changes the value shape). Maintainer's in-editor VRAM profiling remains a later tuning pass.
-5. **GC-stall hypothesis (review #7)** ✅ — measure first (step 6); enable incremental GC only if the
-   trace confirms collections landing in the load window; no decode-buffer pooling otherwise.
+All accepted, decision-complete: (1) **fix Entities, keep it default** (§6, D10) — BRG stays the zero-alloc
+opt-in; (2) **budget defaults** — `MaxReleasesPerTick` = 4, symbol `MaxBuildsPerFrame` = 1, both Inspector-
+serialized; (3) **chunk vertex target** = 32 768 (serialized constant); (4) **PreparedTileCache byte budget** —
+keep the S82 placeholder (D7 only changes the value shape; VRAM profiling is a later tuning pass); (5) **GC-stall
+hypothesis (#7)** — measure first (step 6); enable incremental GC only if the trace confirms collections landing
+in the load window; no decode-buffer pooling otherwise.
 
 ## 9. Honest costs, risks, and what was not verified
 
-- **Latency:** +1 frame per tile from the two-phase kick (§4.1); labels a few frames later (§2.1);
-  released tiles linger 1–3 frames (§5.1). All judged invisible; all stated.
-- **More, smaller meshes** after chunking: more draw items for monster layers (bounded by geometry
-  size / 32k); BRG per-frame repack cost scales with item count — another nudge toward D10's
-  keep-Entities-default.
-- **Not verified in this pass:** `IGlyphMetricsProvider`'s full member list (§2.3); the exact EG
-  component set / placeholder-`RenderMeshArray` inertness for the prototype pattern (§6); whether any
-  test currently depends on `MaxConsumesPerTick == 0`-blocks semantics beyond backlog-building (D12
-  migration must sweep those call sites); the cover gate's no-hidden-dependency claim is argued from
-  code reading — the cover/consume suites are the arbiter (§3).
-- **Load-path allocations introduced** (allowed, listed): symbol build queue entries + per-tile glyph
-  snapshot (§2), `MeasuredGeometry`/chunk plans (§4), cache-transfer `Mesh[]` grouping (§4.3),
-  release-queue warm-up (§5.1). Steady-state zero-GC surface is untouched by design in every section;
-  the existing `MapView_SteadyStateTick_DoesNotAllocateGCMemory` tooth gates all of them.
+- **Latency:** +1 frame per tile from the two-phase kick (§4.1); labels a few frames later (§2.1); released tiles
+  linger 1–3 frames (§5.1). All judged invisible; all stated.
+- **More, smaller meshes** after chunking: more draw items for monster layers (bounded by size / 32k); BRG
+  per-frame repack cost scales with item count — another nudge toward keep-Entities-default.
+- **Not verified:** `IGlyphMetricsProvider`'s full member list (§2.3); the exact EG component set / placeholder-
+  `RenderMeshArray` inertness for the prototype pattern (§6); whether any test depends on `MaxConsumesPerTick == 0`-
+  blocks semantics beyond backlog-building (D12 migration must sweep those); the cover gate's no-hidden-dependency
+  claim is argued from code reading — the cover/consume suites are the arbiter (§3).
+- **Load-path allocations introduced** (allowed, listed): symbol build queue entries + per-tile glyph snapshot
+  (§2), `MeasuredGeometry`/chunk plans (§4), cache-transfer `Mesh[]` grouping (§4.3), release-queue warm-up
+  (§5.1). Steady-state zero-GC is untouched by design; `MapView_SteadyStateTick_DoesNotAllocateGCMemory` gates
+  all of them.
