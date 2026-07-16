@@ -99,11 +99,11 @@ Each role is a **tool-scoped subagent**: the planner reads and plans but writes 
 developer implements and runs the gate; the reviewer reads the diff and re-runs the gate but edits nothing.
 This is a lightweight, human-in-the-loop chain — there is **no board, no stage files, no autonomous
 supervisor**; the design docs below are the only tracking.
-1. **Plan.** A planner writes a **file-level implementation plan** (`docs/<epic>-<stage>-plan.md`) grounded
-   in the epic's SSOT design doc. It is an *ordered edit list* citing `file:symbol` (re-verified against
-   source), with the stated **invariant** (e.g. "behaviour-preserving ⇒ byte-identical snapshots"),
-   **acceptance teeth** (falsifiable — a shallow impl can't pass), and an **explicit "deferred" scope fence**
-   so the developer can't over-reach. No production code.
+1. **Plan.** A planner writes a **file-level implementation plan** grounded in the epic's SSOT design doc —
+   an *ordered edit list* citing `file:symbol` (re-verified against source), with the stated **invariant**
+   (e.g. "behaviour-preserving ⇒ byte-identical snapshots"), **acceptance teeth** (falsifiable — a shallow
+   impl can't pass), and an **explicit "deferred" scope fence** so the developer can't over-reach. The plan
+   is transient build scaffolding, not a repo doc — `docs/` holds only durable design. No production code.
 2. **Develop.** A developer executes the plan in order, honoring its compile checkpoints, and iterates
    `./Tools/run-tests.sh` to green (Editor **closed**; verify NEW test names appear in the results XML — the
    batch-Burst stale-XML hazard; **never re-bake a snapshot to go green** — a diff means behaviour changed).
