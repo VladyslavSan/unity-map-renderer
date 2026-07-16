@@ -185,7 +185,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// <c>SymbolLabelSubsystem.MaxBuildsPerFrame</c>) so it can be eyeballed live: raise to cull more
         /// aggressively, <b>set &lt;= 0 to disable the cull entirely</b>. Default 0.05 (5% of the screen) — a
         /// CONSERVATIVE start. The A-4 fade softens a tile popping in/out around the threshold; explicit hysteresis
-        /// and the green/red debug overlay are follow-ups (docs/label-tile-precull-design.md).
+        /// and the green/red debug overlay are follow-ups (docs/labels-and-symbols-design.md §1.5).
         /// </summary>
         public double MinTileScreenCoverage { get; set; } = 0.05;
 

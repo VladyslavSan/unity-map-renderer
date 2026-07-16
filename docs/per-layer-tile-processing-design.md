@@ -6,7 +6,7 @@ landed record: each stage carries its "landed" note + review results. It capture
 forked fill/line vs symbol at the raw bytes, why that was unsatisfying, and the "decode once, fan out per layer"
 rework that resolved it. The geometry-IR follow-on epic lives in `docs/tile-geometry-ir-design.md`. Read after
 `docs/mesh-pipeline.md`
-(fill/line build), `docs/label-pipeline-flow.md` (the symbol path), `docs/render-layer-unification.md`
+(fill/line build), `docs/labels-and-symbols-design.md` (the symbol path), `docs/render-layer-unification.md`
 (the `IRenderLayer`/`RenderLayerSet` model this builds on) and `docs/tile-pipeline-design.md`.
 
 ## The itch
@@ -854,7 +854,7 @@ passes bake at the tile's INTEGER zoom (S82 Decision 2), while the symbol pass e
 pass to use the tile's integer zoom** — aligning it with the mesh and making a tile's labels deterministic,
 cacheable, and independent of the camera zoom at build time. Scope: only the style-expression zoom at
 `:279`/`:290` — NOT the `WebMercator.GroundResolution(_camera…Zoom)` cross-tile quantization at `:467`/`:484`
-(that belongs to `docs/symbol-projection-support-design.md`). It IS a visual behaviour change —
+(that belongs to `docs/labels-and-symbols-design.md` §4). It IS a visual behaviour change —
 `SymbolProcessorParityTests` + label `Visual/` snapshots will shift and must be **intentionally re-baked** (not
 a refactor). "For now" flags that quantized-to-integer-zoom text sizing diverges from continuous-zoom
 interpolation and may be revisited. Not built in Epic A.

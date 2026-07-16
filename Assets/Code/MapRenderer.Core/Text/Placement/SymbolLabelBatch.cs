@@ -52,7 +52,7 @@ namespace MapRenderer.Core.Text.Placement
         // ONCE per rebuild; the per-frame pass (LabelTileCoverage) projects them to screen and flags tiles below
         // the coverage threshold, and gather drops every record whose RecordTile is flagged. Keeping the coverage
         // metric out of the build (only the fixed corners live here) is what preserves the version cache — see
-        // docs/label-tile-precull-design.md.
+        // docs/labels-and-symbols-design.md §1.5.
         public TileQuad[] TileCorners = Array.Empty<TileQuad>();
         public int        TileCount;
 

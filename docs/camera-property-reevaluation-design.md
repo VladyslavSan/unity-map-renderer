@@ -67,5 +67,5 @@ alloc-free hot path evaluating only the Zoom-kind bindings):
   mechanism. Design them together.
 - **A4 zoom follow-up** (`docs/per-layer-tile-processing-design.md`) — "symbols bake at tile zoom" is an
   interim determinism fix; this topic's end state (continuous symbol re-eval) eventually **supersedes** it.
-- **Symbol projection support** (`docs/symbol-projection-support-design.md`) — orthogonal (that's *where* a
+- **Symbol projection support** (`docs/labels-and-symbols-design.md` §4) — orthogonal (that's *where* a
   label projects; this is *what value* its properties take), but both touch the symbol build/apply lifecycle.
