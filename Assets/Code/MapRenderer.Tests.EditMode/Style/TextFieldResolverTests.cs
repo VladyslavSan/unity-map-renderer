@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
@@ -25,7 +25,7 @@ namespace MapRenderer.Tests
         {
             var dict = new Dictionary<string, Value>();
             foreach (var (key, val) in props) dict[key] = Value.String(val);
-            return new DictionaryFeature(dict, MvtGeometryType.Point);
+            return new DictionaryFeature(dict, TileGeometryType.Point);
         }
 
         private static readonly IFeature Aruba = Feature(("NAME", "Aruba"));

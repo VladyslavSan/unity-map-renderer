@@ -1,23 +1,34 @@
 using System.Collections.Generic;
+using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
-using UnityEngine.Rendering;
+using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
-using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Tile;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
-    /// E3 — tooth §6.5: a style's <c>background</c> layer renders at its declared draw slot (the style's
-    /// colour, not the camera clear) and composites mid-stack (occludes a layer declared below it, is
-    /// occluded by one declared above it). Setup (camera, quality level, ambient, GPU-context guard) copied
-    /// VERBATIM from <see cref="LayerOrderSnapshotTests"/> — the proven headless-Lit-material recipe.
-    ///
-    /// Layers come from a real <see cref="RenderLayerSet.Build"/> over a parsed style — the production path
-    /// end-to-end (<see cref="RenderLayerFactory"/> → <see cref="BackgroundRenderLayer.Create"/> → the quad
-    /// GameObject lands in the scene → <c>renderQueue</c> written by <see cref="RenderLayerSet.Build"/>),
-    /// not a hand-rolled substitute.
+    /// Epic A / A2 — tooth §F.4: a style's <c>background</c> layer renders at its declared draw slot (the
+    /// style's colour, not the camera clear) and composites mid-stack (occludes a layer declared below it,
+    /// is occluded by one declared above it). MIGRATED from E3's bare-<c>RenderLayerSet</c> harness (plan §E
+    /// step 10, §G risk 1): A2 moves background's geometry from a self-owned world-cap
+    /// <see cref="MeshRenderer"/> (visible on a bare-set render) to per-covered-tile meshes owned by the
+    /// backend (visible only through <see cref="MapRenderer.Unity.Rendering.Tile.TileManager"/>'s
+    /// cover→build→consume loop) — so this harness now drives a real <see cref="MapView"/> over a small
+    /// deterministic cover (<see cref="MapRenderer.Tests.MapViewTestExtensions.LoadTestStyle"/>) and frames
+    /// the render camera on ONE specific loaded tile's own container position (read from the GameObject
+    /// backend's live Transform hierarchy — a frustum-selected cover is not guaranteed to be a solid square
+    /// block, so framing on the whole cover's bounding-box centre can land in an uncovered gap), instead of a bare
+    /// <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerSet"/> render. The ASSERTIONS are unchanged
+    /// (green/red-dominant centre sample; mid-stack occlude-below / occluded-by-above) — only the geometry
+    /// SOURCE moved (plan §G risk 1: "Mercator background visually preserved", not "byte-identical pixels
+    /// through an unchanged harness").
     ///
     /// GPU-context guard: if renders come back all-black (no GPU context in batch EditMode), the test goes
     /// Inconclusive (not a failure).
@@ -25,22 +36,87 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class BackgroundSnapshotTests
     {
-        private const int   SnapW   = 512;
-        private const int   SnapH   = 512;
-        private const float OrthoSz = 70f;
-        private const float CamY    = 200f;
+        private const int   SnapW = 512;
+        private const int   SnapH = 512;
+        private const float CamY  = 200f;
 
-        private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f); // camera clear — must NOT be what a declared background samples as
-
-        // Central sample sub-rect (pixels) — well inside the world-cap quad's projection, away from edges.
+        // Central sample sub-rect (pixels), well inside the framed footprint, away from its edges.
         private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
 
-        // A small fill quad's footprint (world meters) and its centred/corner sample rects for the
-        // mid-stack tooth — the fill quad is far smaller than the background's world-cap, so a corner
-        // sample sits outside it while staying inside the camera frustum.
-        private const float FillHalfExtent = 15f;
-        private const int   FillCenterX0 = 236, FillCenterY0 = 236, FillCenterX1 = 276, FillCenterY1 = 276;
-        private const int   CornerX0 = 20, CornerY0 = 20, CornerX1 = 60, CornerY1 = 60;
+        // The mid-stack tooth's small hand-built fill quad's footprint (a FRACTION of the framed footprint,
+        // §B below) and its centred/corner sample rects — the fill quad sits centred in the frame, so a
+        // corner sample lands outside it while staying inside the camera frustum (and inside the covered
+        // background's real per-tile extent — see FrameFraction/FillFraction below).
+        private const int FillCenterX0 = 236, FillCenterY0 = 236, FillCenterX1 = 276, FillCenterY1 = 276;
+        private const int CornerX0 = 20, CornerY0 = 20, CornerX1 = 60, CornerY1 = 60;
+
+        // Deterministic single-source cover: an INTERIOR look-at (never a Mercator tile-grid corner — lon=0/
+        // lat=0 sits exactly on a 4-tile seam at every integer zoom ≥1, which would put the sample regions on
+        // a sub-pixel gap between adjacent per-tile background quads) at a fixed zoom, mirroring
+        // S82PreparedCacheTests' TrackedTile pattern.
+        private const int Zoom = 4;
+        private static readonly CameraProperties LookAt =
+            new CameraProperties(new GeoCoordinate3D { Longitude = 10, Latitude = 10, Altitude = 0 }, Zoom, 0, 0);
+
+        // The camera frustum stays well inside the covered background's real per-tile footprint (never
+        // samples past its true edge into the camera clear) — see the design note on RenderCameraOrthoSize.
+        private const float FrameFraction = 0.2f;
+        // The hand-built fill quad's half-extent, as a fraction of the frustum half-size — small enough that
+        // the corner sample (§ above) sits clearly outside it, large enough that the centre sample sits
+        // clearly inside it.
+        private const float FillFraction = 0.15f;
+
+        private static (GameObject go, MapView view) NewView()
+        {
+            var go   = new GameObject("BackgroundSnapshotMapView");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = Zoom;
+            view.Config.TileSelection.MaxZoom = Zoom;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            // GameObject backend: a frustum-selected cover is not guaranteed to be a solid square block (it
+            // can be sparse/diamond-shaped near the horizon), so framing on the WHOLE cover's bounding-box
+            // CENTER (the naive ComputeSceneBounds idiom) can land in an uncovered gap. Framing on ONE
+            // specific loaded tile's own container position (below) is robust regardless of cover shape —
+            // and requires reading the live Transform hierarchy (GameObjectTileRendererTests' pattern).
+            view.Config.Backend = RenderBackend.GameObject;
+            return (go, view);
+        }
+
+        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        {
+            for (int f = 0; f < maxFrames; f++)
+            {
+                view.LateUpdate();
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
+                Thread.Sleep(1);
+            }
+        }
+
+        /// <summary>The world-space bounds of ONE specific loaded (background) tile — its container's own
+        /// SW-corner position (read from the live GameObject backend hierarchy) expanded to the tile's own
+        /// physical size. Framing on a SINGLE real tile (rather than the whole cover's bounding box) is
+        /// robust regardless of the frustum-selected cover's shape (§NewView).</summary>
+        private static Bounds LoadedBounds(MapView view)
+        {
+            float tileSize = (float)(WebMercator.WorldExtent * 2.0 / math.pow(2.0, Zoom));
+
+            var keys = new List<LoadedTileKey>();
+            view.TileManager.CollectLoadedTileKeys(keys);
+            Assert.Greater(keys.Count, 0, "at least one background tile must be loaded.");
+
+            var gor = view.GameObjectRenderer();
+            Assert.IsNotNull(gor, "the GameObject backend must be selected for this deterministic-framing harness.");
+            Transform container = gor.Container(keys[0].Tile);
+            Assert.IsNotNull(container, $"a container must exist for the loaded tile {keys[0].Tile}.");
+
+            // Container position is the tile's SW-corner render origin (ComputeSceneBounds' own convention) —
+            // the bounds CENTER is half a tile further in +X/+Z.
+            Vector3 sw = container.position;
+            Vector3 center = new Vector3(sw.x + tileSize * 0.5f, 0f, sw.z + tileSize * 0.5f);
+            return new Bounds(center, new Vector3(tileSize, 1f, tileSize));
+        }
 
         [Test]
         public void BackgroundColor_StyleHonoured_NotCameraClear()
@@ -49,7 +125,7 @@ namespace MapRenderer.Tests.Visual
             QualitySettings.SetQualityLevel(0, false);
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
-            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
 
             var (cameraGo, camera) = BuildCamera();
@@ -63,9 +139,9 @@ namespace MapRenderer.Tests.Visual
                 Assert.Greater(greenMean[1], greenMean[0], "A green background-color must sample green-dominant, not the slate clear.");
                 Assert.Greater(greenMean[1], greenMean[2], "A green background-color must sample green-dominant, not the slate clear.");
 
-                // Falsifier: a DIFFERENT style background must sample DIFFERENTLY. Under pre-E3 code (the
-                // camera-clear hack) both renders would sample the same slate clear colour regardless of
-                // the style — this fails by construction against that implementation.
+                // Falsifier: a DIFFERENT style background must sample DIFFERENTLY. Under the camera-clear
+                // hack both renders would sample the same slate clear colour regardless of the style — this
+                // fails by construction against that implementation.
                 double[] redMean = RenderBackgroundOnlyStyle(camera, "#ff0000", "red-background.png");
                 if (redMean == null) return; // Inconclusive — no GPU context
 
@@ -90,7 +166,7 @@ namespace MapRenderer.Tests.Visual
             QualitySettings.SetQualityLevel(0, false);
             var prevAmbientMode  = RenderSettings.ambientMode;
             var prevAmbientLight = RenderSettings.ambientLight;
-            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
             RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
 
             var (cameraGo, camera) = BuildCamera();
@@ -145,52 +221,67 @@ namespace MapRenderer.Tests.Visual
 
         // ─── Helpers ───────────────────────────────────────────────────────────────
 
-        /// <summary>Builds a background-only style, renders it, and returns the centre-region mean colour
-        /// (or null on the GPU-context guard). Disposes the set (and with it the background's owned
-        /// GameObject/Mesh/Material) before returning.</summary>
+        /// <summary>Drives a background-only style through a real <see cref="MapView"/> cover, renders, and
+        /// returns the centre-region mean colour (or null on the GPU-context guard). Tears the view down
+        /// before returning.</summary>
         private static double[] RenderBackgroundOnlyStyle(Camera camera, string colorHex, string pngName)
         {
             string json = $@"{{ ""version"": 8, ""layers"": [
                 {{ ""id"": ""bg"", ""type"": ""background"", ""paint"": {{ ""background-color"": ""{colorHex}"" }} }}
             ] }}";
 
-            using var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(json), 0.0, MapMaterialSetTestUtil.Load());
+            var (go, view) = NewView();
+            try
+            {
+                view.LoadTestStyle(null, LookAt, StyleParser.Parse(json)); // background is source-less — the injected source is never consulted
+                PumpUntilSettled(view);
 
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            snap.Render(camera);
-            snap.WritePng(pngName);
+                Bounds b = LoadedBounds(view);
+                Assert.Greater(b.size.magnitude, 0f, "background must produce non-degenerate render-space bounds");
+                FrameCamera(camera, b);
 
-            if (GpuContextInconclusive(snap)) return null;
+                using var snap = new SnapshotRenderer(SnapW, SnapH);
+                snap.Render(camera);
+                snap.WritePng(pngName);
 
-            return SnapshotCoverage.SampleRegionMeanColor(snap.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
+                if (GpuContextInconclusive(snap)) return null;
+
+                return SnapshotCoverage.SampleRegionMeanColor(snap.RawPixels, SnapW, SnapH, SX0, SY0, SX1, SY1);
+            }
+            finally { view.Teardown(); Object.DestroyImmediate(go); }
         }
 
-        /// <summary>Builds the given two-layer (fill + background) style, hand-builds a small quad for the
-        /// fill (it has no tile geometry in this headless test) using the SET's own fill material — its
-        /// <c>renderQueue</c> is already written by <see cref="RenderLayerSet.Build"/> — renders, and
-        /// returns the centre-region mean colour (<paramref name="corner"/> gets the corner-region mean).
-        /// Null (and <paramref name="corner"/> null) on the GPU-context guard.</summary>
+        /// <summary>Drives the given two-layer (fill + background) style through a real <see cref="MapView"/>
+        /// cover (background is per-tile, produced by the real pipeline; the fill layer declares no
+        /// <c>source</c> — same as the pre-A2 harness — so it never fetches and is hand-quaded here, using
+        /// the SET's own fill material, exactly as before), renders, and returns the centre-region mean
+        /// colour (<paramref name="corner"/> gets the corner-region mean). Null (and <paramref name="corner"/>
+        /// null) on the GPU-context guard.</summary>
         private static double[] RenderMidStackStyle(
             Camera camera, string styleJson, int fillIndex, string pngName, out double[] corner)
         {
             corner = null;
 
-            using var set = new RenderLayerSet();
-            set.Build(StyleParser.Parse(styleJson), 0.0, MapMaterialSetTestUtil.Load());
-
-            var disposables = new List<Object>();
+            var (go, view) = NewView();
             GameObject fillGo = null;
+            Mesh fillMesh = null;
             try
             {
-                Material fillMat = set[fillIndex].Material;
+                view.LoadTestStyle(null, LookAt, StyleParser.Parse(styleJson));
+                PumpUntilSettled(view);
+
+                Bounds b = LoadedBounds(view);
+                Assert.Greater(b.size.magnitude, 0f, "background must produce non-degenerate render-space bounds");
+                float halfFrame = FrameCamera(camera, b);
+
+                Material fillMat = view.Layers[fillIndex].Material;
                 fillMat.SetColor("_BaseColor", new Color(1f, 0f, 0f, 1f)); // give the fill quad visible pixels, distinct from green
 
-                var mesh = BuildFillQuadMesh(FillHalfExtent);
+                fillMesh = BuildFillQuadMesh(halfFrame * FillFraction);
                 fillGo = new GameObject("MidStackFillQuad");
-                fillGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+                fillGo.transform.position = b.center;
+                fillGo.AddComponent<MeshFilter>().sharedMesh = fillMesh;
                 fillGo.AddComponent<MeshRenderer>().sharedMaterial = fillMat;
-                disposables.Add(mesh);
 
                 using var snap = new SnapshotRenderer(SnapW, SnapH);
                 snap.Render(camera);
@@ -204,15 +295,32 @@ namespace MapRenderer.Tests.Visual
             }
             finally
             {
-                foreach (var d in disposables) if (d != null) Object.DestroyImmediate(d);
+                if (fillMesh != null) Object.DestroyImmediate(fillMesh);
                 if (fillGo != null) Object.DestroyImmediate(fillGo);
+                view.Teardown();
+                Object.DestroyImmediate(go);
             }
         }
 
+        /// <summary>Frames <paramref name="camera"/> (top-down orthographic) on <paramref name="bounds"/>'
+        /// centre, with a frustum comfortably (<see cref="FrameFraction"/>) inside the covered background's
+        /// real per-tile footprint — so no sample ever crosses the true tile-cover edge into the camera
+        /// clear. Returns the resulting orthographic HALF-size (world units) for the caller's own
+        /// footprint-relative placement (e.g. the mid-stack fill quad).</summary>
+        private static float FrameCamera(Camera camera, in Bounds bounds)
+        {
+            float half = Mathf.Min(bounds.size.x, bounds.size.z) * 0.5f * FrameFraction;
+            camera.transform.position = new Vector3(bounds.center.x, bounds.center.y + CamY, bounds.center.z);
+            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            camera.orthographicSize   = half;
+            return half;
+        }
+
         /// <summary>The <c>LayerOrderSnapshotTests.BuildFillQuad</c> vertex-attribute recipe, with the
-        /// triangle winding REVERSED to match the real fill material's <c>_Cull=1</c> (Front) render
-        /// state — see <see cref="BackgroundRenderLayer.BuildQuadAndPresenter"/>'s doc for why. This quad
-        /// is drawn with <c>set[fillIndex].Material</c> (the SAME cull state), so it needs the same fix.</summary>
+        /// triangle winding REVERSED to match the real fill material's <c>_Cull=1</c> (Front) render state —
+        /// production fill meshes (earcut-derived) come out wound so that convention keeps them; a hand-built
+        /// quad wound the "naive" way is front-facing under Unity's standard convention and gets exactly the
+        /// triangles <c>_Cull=1</c> discards.</summary>
         private static Mesh BuildFillQuadMesh(float half)
         {
             var mesh = new Mesh { name = "MidStackFillQuad" };
@@ -263,13 +371,10 @@ namespace MapRenderer.Tests.Visual
         {
             var go     = new GameObject("BackgroundSnapshotCamera");
             var camera = go.AddComponent<Camera>();
-            camera.transform.position = new Vector3(0f, CamY, 0f);
-            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
             camera.orthographic       = true;
-            camera.orthographicSize   = OrthoSz;
-            camera.farClipPlane       = 1000f;
+            camera.farClipPlane       = 1e9f;
             camera.clearFlags         = CameraClearFlags.SolidColor;
-            camera.backgroundColor    = BgColor;
+            camera.backgroundColor    = new Color(0.10f, 0.11f, 0.15f, 1f); // camera clear — must NOT be what a declared background samples as
             camera.enabled            = false;
             return (go, camera);
         }

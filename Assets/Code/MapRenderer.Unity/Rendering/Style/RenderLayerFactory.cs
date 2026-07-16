@@ -37,11 +37,35 @@ namespace MapRenderer.Unity.Rendering.Style
                 // The Source != null guard mirrors SymbolLabelSubsystem.SetStyle's skip so the slot-taking
                 // symbol layers stay exactly the set the subsystem manages — the 1:1 slot↔subsystem-ordinal
                 // mapping E2 relies on. Create never returns null (unlike TryCreate) — see its own doc.
-                // Only the GameObject-bearing kinds (symbol presenter, background quad) receive the Hierarchy
-                // parent; fill/line have no scene object and ignore it.
+                // Only the GameObject-bearing symbol presenter receives the Hierarchy parent; fill/line/
+                // background have no scene object and take no parent (A2: background's quads are backend-owned).
                 Symbol.StyleLayer s when s.Source != null   => SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex, parent),
-                Background.StyleLayer b                     => BackgroundRenderLayer.Create(b, settings, initialZoom, drawIndex, parent),
+                Background.StyleLayer b                     => BackgroundRenderLayer.Create(b, settings, initialZoom, drawIndex),
                 _                                            => null,
             };
+
+        /// <summary>
+        /// Epic A / A2 (design §E step 5, HIGH c): the ONE registry of "which style layers fetch MVT tiles" —
+        /// <see cref="Map.MapView.BuildSourceSpecs"/> derives its source-ids from this predicate instead of
+        /// re-walking <c>style.Layers</c> with an ad-hoc <c>is</c>-check. <see langword="true"/> iff
+        /// <paramref name="layer"/> is an MVT-fetching kind (fill, line, symbol) AND declares a non-empty
+        /// <c>source</c> — background is source-less by design (excluded here, not just by having no
+        /// <c>Source</c>), and raster/circle/hillshade/unknown are unsupported-for-now (excluded so no
+        /// non-MVT bytes are ever pushed through the MVT decode). Uses <see cref="StyleLayer.LayerType"/>
+        /// (never <c>.Type</c> — no such member). A pure predicate: never touches the active
+        /// <see cref="RenderLayerSet"/> or any material state.
+        /// </summary>
+        internal static bool TryGetFetchSource(StyleLayer layer, out string sourceId)
+        {
+            if (layer != null
+                && layer.LayerType is StyleLayerType.Fill or StyleLayerType.Line or StyleLayerType.Symbol
+                && !string.IsNullOrEmpty(layer.Source))
+            {
+                sourceId = layer.Source;
+                return true;
+            }
+            sourceId = null;
+            return false;
+        }
     }
 }

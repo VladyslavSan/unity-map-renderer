@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Expressions.Ops
 {
@@ -47,13 +47,13 @@ namespace MapRenderer.Core.Expressions.Ops
         }
 
         // Spec geometry-type strings.
-        public static string GeometryTypeName(MvtGeometryType t)
+        public static string GeometryTypeName(TileGeometryType t)
         {
             switch (t)
             {
-                case MvtGeometryType.Point: return "Point";
-                case MvtGeometryType.LineString: return "LineString";
-                case MvtGeometryType.Polygon: return "Polygon";
+                case TileGeometryType.Point: return "Point";
+                case TileGeometryType.LineString: return "LineString";
+                case TileGeometryType.Polygon: return "Polygon";
                 default: return "Unknown";
             }
         }

@@ -37,6 +37,12 @@
     <Compile Include="SphericalProjectionTests.cs" />
 
     <!-- Real Core sources (single source of truth) -->
+    <!-- Epic A / A6: the neutral tile-decode surface (referenced by MvtModels.cs's interface impls below). -->
+    <!-- Epic A / A6.1: the geometry-type enum, renamed out of Core.Mvt into its own file here. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileGeometryType.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/DecodedTile.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/ITileDecoder.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileDecodersTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/ProtobufReader.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/MvtModels.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/MvtDecoder.cs" />
@@ -216,7 +222,6 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/FilterDialect.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/LegacyFilterTranslator.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/CompiledFilter.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/MvtFeatureAdapter.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/FeatureSelector.cs" />
 
     <!-- S11: type assertions + paint evaluator tests (shared verbatim) -->
@@ -233,6 +238,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FeatureSelectorTests.cs" />
+    <!-- Epic A / A6: MvtFeatureAdapter fold-verbatim byte-parity guard (F-5) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/A6AdapterFoldTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GlobeTileSelectorTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->

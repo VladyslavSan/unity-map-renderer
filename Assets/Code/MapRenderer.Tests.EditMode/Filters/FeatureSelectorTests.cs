@@ -5,6 +5,7 @@
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using NUnit.Framework;
 
@@ -25,16 +26,16 @@ namespace MapRenderer.Tests.Filters
 
             // Layer "roads": 2 LineString features, 1 Point feature
             var roads = new MvtLayer { Name = "roads", Extent = 4096, Version = 2 };
-            roads.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.LineString, Geometry = new uint[0] });
-            roads.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.LineString, Geometry = new uint[0] });
-            roads.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.Point, Geometry = new uint[0] });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString, Geometry = new uint[0] });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString, Geometry = new uint[0] });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Point, Geometry = new uint[0] });
             tile.Layers.Add(roads);
 
             // Layer "landuse": 3 Polygon features
             var landuse = new MvtLayer { Name = "landuse", Extent = 4096, Version = 2 };
-            landuse.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.Polygon, Geometry = new uint[0] });
-            landuse.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.Polygon, Geometry = new uint[0] });
-            landuse.Features.Add(new MvtFeature { GeometryType = MvtGeometryType.Polygon, Geometry = new uint[0] });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
             tile.Layers.Add(landuse);
 
             return tile;
@@ -107,7 +108,7 @@ namespace MapRenderer.Tests.Filters
             var result = FeatureSelector.SelectFeatures(layer, tile);
             Assert.That(result.Count, Is.EqualTo(2), "roads layer has 2 LineString features");
             foreach (var f in result)
-                Assert.That(f.GeometryType, Is.EqualTo(MvtGeometryType.LineString));
+                Assert.That(f.GeometryType, Is.EqualTo(TileGeometryType.LineString));
         }
 
         [Test]
@@ -117,7 +118,7 @@ namespace MapRenderer.Tests.Filters
             var layer = MakeLayer("roads", "[\"==\",\"$type\",\"Point\"]");
             var result = FeatureSelector.SelectFeatures(layer, tile);
             Assert.That(result.Count, Is.EqualTo(1), "roads layer has 1 Point feature");
-            Assert.That(result[0].GeometryType, Is.EqualTo(MvtGeometryType.Point));
+            Assert.That(result[0].GeometryType, Is.EqualTo(TileGeometryType.Point));
         }
 
         [Test]
@@ -165,7 +166,7 @@ namespace MapRenderer.Tests.Filters
             var layer = MakeLayer("roads", "[\"none\",[\"==\",\"$type\",\"LineString\"]]");
             var result = FeatureSelector.SelectFeatures(layer, tile);
             Assert.That(result.Count, Is.EqualTo(1), "Only 1 non-LineString feature (Point) in roads");
-            Assert.That(result[0].GeometryType, Is.EqualTo(MvtGeometryType.Point));
+            Assert.That(result[0].GeometryType, Is.EqualTo(TileGeometryType.Point));
         }
 
         // ── all filter ────────────────────────────────────────────────────────────────────────────

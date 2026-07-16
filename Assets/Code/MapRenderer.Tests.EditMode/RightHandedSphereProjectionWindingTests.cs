@@ -20,6 +20,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.View.Camera;
@@ -97,9 +98,9 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
             MvtTile tile = MvtDecoder.Decode(File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
-            MvtLayer mvtLayer = SourceLayerResolver.ResolveMvtLayer(layer, tile);
+            ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             double extent = mvtLayer?.Extent ?? 4096.0;
-            IReadOnlyList<MvtFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
+            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
             Assert.Greater(features.Count, 0, "expected boundary_3 line features in this tile");
 
             Mesh flat  = TestTileMeshBuilder.BuildLine(features, layer.Paint, layer.Layout, z, extent, id, new WebMercatorProjection());

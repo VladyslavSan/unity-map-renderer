@@ -3,7 +3,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Expressions;
 using Line = MapRenderer.Core.Style.Line;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
@@ -85,7 +85,7 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<MvtFeature> features, double zoom, double extent,
+            Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
             TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds)
             => Meshing.StyledLineTileBuilder.WriteMeshData(
                 md, features, _paint, _layout, zoom, extent, id, tileOriginRender, out vertexCount, out bounds, projection);

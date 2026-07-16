@@ -9,6 +9,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests
@@ -68,7 +69,7 @@ namespace MapRenderer.Tests
             int pointFeaturesWithName = 0;
             foreach (MvtFeature feat in centroids.Features)
             {
-                if (feat.GeometryType != MvtGeometryType.Point) continue;
+                if (feat.GeometryType != TileGeometryType.Point) continue;
                 if (feat.Properties.TryGetValue("NAME", out MapRenderer.Core.Expressions.Value name)
                     && !string.IsNullOrWhiteSpace(name.ToDisplayString()))
                     pointFeaturesWithName++;

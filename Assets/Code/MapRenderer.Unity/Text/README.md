@@ -13,8 +13,10 @@ works today (the milestone), and the known problems with an analysis of how to f
 ## The pipeline (data flow across assemblies)
 
 ```
-tile bytes ──▶ SymbolLabelSubsystem.BuildTileAsync         (Unity/Text)      [OFF-MAIN worker + main]
-                 │  decode + extract features  ── off the main thread (thread pool)
+TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, prologue)
+                 │  + RunWorkerAndHandoff (pool, inside the SAME kick task as the mesh pass)  (Unity/Text)
+                 │  decode + extract features — off the main thread (thread pool), sharing the mesh
+                 │  pass's decode (A4/A5b: one decode-once entry, no parallel push feed)
                  │  shape glyphs (HarfBuzz-free CodepointTextShaper, bidi, Arabic joining)  (Core/Text)
                  ▼
               List<LabelInstance>  ──▶  SymbolTileLabelStore                 (Unity/Text)
@@ -53,7 +55,8 @@ tile bytes ──▶ SymbolLabelSubsystem.BuildTileAsync         (Unity/Text)   
 - **Shaping** — a clean-room codepoint shaper with bidi reordering + Arabic joining, SDF glyphs from
   glyph-PBF ranges, multi-font stacks.
 - **Off-main tile build** — decode + feature-extract run on the thread pool; only glyph shaping and the
-  atlas upload touch the main thread (see `SymbolLabelSubsystem.BuildTileAsync`).
+  atlas upload touch the main thread (see `SymbolLabelSubsystem.TryBeginBuild`/`RunWorkerAndHandoff`,
+  driven by `TileManager`'s per-tile kick, A5b).
 
 For the exact MapLibre `text-*` property coverage (wired vs. parsed-but-dead vs. missing), see the
 feature-gap notes tracked with the symbol-text-parity work.

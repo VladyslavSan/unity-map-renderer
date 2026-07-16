@@ -4,7 +4,7 @@
 
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Expressions
 {
@@ -29,7 +29,7 @@ namespace MapRenderer.Tests.Expressions
 
         public static DictionaryFeature Feature(
             Dictionary<string, Value> props = null,
-            MvtGeometryType geom = MvtGeometryType.Unknown,
+            TileGeometryType geom = TileGeometryType.Unknown,
             bool hasId = false,
             Value id = default)
             => new DictionaryFeature(props, geom, hasId, id);

@@ -8,6 +8,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests
 {
@@ -50,11 +51,11 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(layer, "boundary_3 not found in liberty.json");
 
             MvtTile tile = MvtDecoder.Decode(File.ReadAllBytes(Path.Combine(root, "Assets", "Fixtures", fixture)));
-            MvtLayer mvtLayer = SourceLayerResolver.ResolveMvtLayer(layer, tile);
+            ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             double extent = mvtLayer?.Extent ?? 4096.0;
             var id = new TileId { Z = z, X = x, Y = y };
             var proj = new WebMercatorProjection();
-            IReadOnlyList<MvtFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
+            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
             Assert.Greater(features.Count, 0, "expected boundary_3 features in this tile");
 
             const double miterLimit = 2.0;

@@ -14,9 +14,11 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests; // TestGlyphSource
 using Symbol = MapRenderer.Core.Style.Symbol;
@@ -25,11 +27,13 @@ namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// Stall-#1 fix (Stage A): the symbol subsystem no longer builds every fetched tile inline on the main
-    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. Instead
-    /// <see cref="SymbolLabelSubsystem.OnTileBytesReady"/> ENQUEUES and <see cref="SymbolLabelSubsystem.PumpBuilds"/>
-    /// starts at most <c>MaxBuildsPerFrame</c> builds/frame + performs at most ONE coalesced atlas upload.
-    /// These teeth fail a shallow implementation that still builds inline / uploads per tile, and prove the
-    /// stale-drop and cancellation paths.
+    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. A5b: the worker phase is
+    /// now driven by <see cref="SymbolLabelSubsystem.TryBeginBuild"/> (kick-time) + the returned pass's
+    /// <c>RunWorkerAndHandoff</c> (pool), and <see cref="SymbolLabelSubsystem.PumpBuilds"/> starts at most
+    /// <c>MaxBuildsPerFrame</c> ready TAILS/frame + performs at most ONE coalesced atlas upload (the
+    /// build-start throttle + stale-drop teeth moved to TileManager's kick — see TileSymbolKickTests). These
+    /// teeth fail a shallow implementation that still builds inline / uploads per tile, and prove the
+    /// cancellation path.
     /// </summary>
     [TestFixture]
     public class SymbolLabelSubsystemPumpTests
@@ -101,6 +105,17 @@ namespace MapRenderer.Tests.Text
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
 
+        /// <summary>A5b drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
+        /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool (so
+        /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> still observes the decode/extract marker off
+        /// main). Replaces the retired <c>OnTileBytesReady</c> push.</summary>
+        private void DriveTileBytesReady(TileId tile)
+        {
+            ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
+            if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
+            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+        }
+
         // E1 D10: production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
         // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
         // extraction — kept local to the test assembly (outside the D10 grep tooth's scope).
@@ -112,30 +127,9 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        // ── Tooth 1: bounded starts — 5 bytes-ready pushes, one pump starts exactly ONE build ──
-        [Test]
-        public void PumpBuilds_StartsAtMostMaxBuildsPerFrame_QueuesTheRest()
-        {
-            UseImmediateGlyphs();
-            var tiles = new List<TileId>();
-            for (int i = 0; i < 5; i++) tiles.Add(new TileId { Z = 3, X = i, Y = 0 });
-
-            foreach (TileId t in tiles) _subsystem.OnTileBytesReady(SourceId, t, _tileBytes);
-            var loaded = tiles.ConvertAll(Key);
-            _subsystem.ReconcileLoadedTiles(loaded);
-
-            Assert.AreEqual(1, _subsystem.MaxBuildsPerFrame, "locked default cap is 1");
-            _subsystem.PumpBuilds();
-
-            Assert.AreEqual(1, _subsystem.BuildsStartedLastPump, "exactly one build STARTED (was: all 5 inline)");
-            Assert.AreEqual(4, _subsystem.QueuedBuildCount, "the other four remain queued");
-            Assert.AreEqual(1, _subsystem.ActiveTileCount, "one tile committed labels");
-
-            // Drain over subsequent frames — all five eventually build, none dropped.
-            for (int f = 0; f < 4; f++) { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); }
-            Assert.AreEqual(0, _subsystem.QueuedBuildCount, "queue drained over 5 pumps");
-            Assert.AreEqual(5, _subsystem.ActiveTileCount, "all five tiles built");
-        }
+        // ── Tooth 1 (bounded worker-phase starts) RETIRED at A5b: the build-start throttle + QueuedBuildCount
+        //    moved to TileManager's kick cap (MaxMeshBuildsPerTick) — see TileSymbolKickTests' F-2/kick-cap
+        //    coverage. This subsystem no longer owns a build-start queue to bound.
 
         // ── Tooth 2: coalesced atlas upload — A's glyphs upload exactly once; a same-glyph B uploads zero ──
         // Stage B makes builds genuinely async (decode+extract on a worker, shape back on main via
@@ -152,7 +146,7 @@ namespace MapRenderer.Tests.Text
 
             // Build A — its glyphs land in the atlas exactly once; PumpBuilds coalesces the upload, so the TOTAL
             // uploads across the whole build must be exactly 1 (the old per-tile path uploaded per commit).
-            _subsystem.OnTileBytesReady(SourceId, a, _tileBytes);
+            DriveTileBytesReady(a);
             int uploadsA = 0;
             for (int f = 0; f < 200; f++)
             {
@@ -165,7 +159,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, uploadsA, "A's new glyphs upload exactly ONCE across the whole build (coalesced), not per tile.");
 
             // Build B (same bytes → same glyphs, already cached) — ZERO new atlas uploads.
-            _subsystem.OnTileBytesReady(SourceId, b, _tileBytes);
+            DriveTileBytesReady(b);
             int uploadsB = 0;
             for (int f = 0; f < 200; f++)
             {
@@ -201,7 +195,7 @@ namespace MapRenderer.Tests.Text
             using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode",
                 64, ProfilerRecorderOptions.SumAllSamplesInFrame);
 
-            _subsystem.OnTileBytesReady(SourceId, tile, _tileBytes);
+            DriveTileBytesReady(tile);
             for (int f = 0; f < 200; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
@@ -221,24 +215,10 @@ namespace MapRenderer.Tests.Text
                 "extract on the thread pool. A regression that drops SwitchToThreadPool fails this.");
         }
 
-        // ── Tooth 3: stale-drop — a queued tile that left the loaded set is dropped, never built ──
-        [Test]
-        public void PumpBuilds_DropsBuildForTileThatLeftLoadedSet()
-        {
-            UseImmediateGlyphs();
-            var tile = new TileId { Z = 3, X = 7, Y = 2 };
-
-            _subsystem.OnTileBytesReady(SourceId, tile, _tileBytes);
-            Assert.AreEqual(1, _subsystem.QueuedBuildCount, "enqueued");
-
-            // Reconcile an EMPTY loaded set — the tile is gone before we pump.
-            _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>());
-            _subsystem.PumpBuilds();
-
-            Assert.AreEqual(0, _subsystem.BuildsStartedLastPump, "departed tile is not built");
-            Assert.AreEqual(0, _subsystem.QueuedBuildCount, "and it is dropped from the queue");
-            Assert.AreEqual(0, _subsystem.ActiveTileCount, "no labels committed");
-        }
+        // ── Tooth 3 (stale-drop before build start) RETIRED at A5b: a queued-but-departed tile can no longer
+        //    occur here — the kick itself never fires for a condemned/departed tile (TileManager's
+        //    _releaseQueued check, ahead of TryBeginBuild). Replaced by TileSymbolKickTests' F-6
+        //    (departed-before-kick tile: no TryBeginBuild).
 
         // ── Tooth 4: cancellation — a build suspended in glyph-fetch is cancelled by a restyle, silently ──
         // Stage B: the build now hops to the pool (decode+extract) then back to main (SwitchToMainThread)
@@ -255,7 +235,7 @@ namespace MapRenderer.Tests.Text
 
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey> { Key(tile) });
-            _subsystem.OnTileBytesReady(SourceId, tile, _tileBytes);
+            DriveTileBytesReady(tile);
 
             // Pump frames so the build starts, hops the pool (decode+extract), returns to main, and parks on the
             // gated glyph fetch inside ShapeAsync.
@@ -287,7 +267,7 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
             // Build the tile active — pump frames until its (async) build commits label records into the batch.
-            _subsystem.OnTileBytesReady(SourceId, tile, _tileBytes);
+            DriveTileBytesReady(tile);
             SymbolLabelBatch active = null;
             for (int f = 0; f < 200; f++)
             {

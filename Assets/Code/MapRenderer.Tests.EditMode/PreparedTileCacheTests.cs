@@ -55,7 +55,7 @@ namespace MapRenderer.Tests
             var fillLayer = style.Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
             var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, zoom);
-            var mvtLayer  = SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+            var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer.");
             Assert.Greater(features.Count, 0, "Fixture must produce >=1 feature (non-vacuous).");
             Mesh mesh = TestTileMeshBuilder.BuildFill(features, paint, zoom, mvtLayer.Extent, id);

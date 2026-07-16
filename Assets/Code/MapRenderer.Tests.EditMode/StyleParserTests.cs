@@ -105,7 +105,7 @@ namespace MapRenderer.Tests
                 if (l.Id == "coastline") { coastline = l; break; }
             Assert.IsNotNull(coastline, "expected 'coastline' layer in the real style");
             Assert.AreEqual("countries", coastline.SourceLayer);
-            var mvt = SourceLayerResolver.ResolveMvtLayer(coastline, tile);
+            var mvt = SourceLayerResolver.ResolveTileLayer(coastline, tile);
             Assert.IsNotNull(mvt, "real style layer resolves to the MVT source-layer");
             Assert.AreEqual(239, mvt.Features.Count,
                 "real style's source-layer string selects the real 239 country features");
@@ -350,22 +350,22 @@ namespace MapRenderer.Tests
             var missing = doc.Layers[3];
 
             // fill layer with source-layer "countries" → the 239-feature MVT layer.
-            var landMvt = SourceLayerResolver.ResolveMvtLayer(land, tile);
+            var landMvt = SourceLayerResolver.ResolveTileLayer(land, tile);
             Assert.IsNotNull(landMvt, "countries source-layer resolves");
             Assert.AreEqual("countries", landMvt.Name);
             Assert.AreEqual(239, landMvt.Features.Count, "fill layer selects the real 239 country features");
 
             // line layer with source-layer "geolines" → the 6-feature MVT layer.
-            var graticuleMvt = SourceLayerResolver.ResolveMvtLayer(graticule, tile);
+            var graticuleMvt = SourceLayerResolver.ResolveTileLayer(graticule, tile);
             Assert.IsNotNull(graticuleMvt, "geolines source-layer resolves");
             Assert.AreEqual(6, graticuleMvt.Features.Count, "line layer selects the real 6 geoline features");
 
             // background layer with no source-layer → null, no throw.
-            Assert.IsNull(SourceLayerResolver.ResolveMvtLayer(bg, tile),
+            Assert.IsNull(SourceLayerResolver.ResolveTileLayer(bg, tile),
                 "background (no source-layer) resolves to null without throwing");
 
             // a source-layer that is absent from the tile → null, no throw.
-            Assert.IsNull(SourceLayerResolver.ResolveMvtLayer(missing, tile),
+            Assert.IsNull(SourceLayerResolver.ResolveTileLayer(missing, tile),
                 "unknown source-layer resolves to null without throwing");
 
             // The layer's source id resolves to a Vector source (discriminator exercised).

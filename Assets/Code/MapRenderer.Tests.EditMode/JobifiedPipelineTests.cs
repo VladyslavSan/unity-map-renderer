@@ -13,6 +13,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 namespace MapRenderer.Tests
 {
@@ -47,7 +48,7 @@ namespace MapRenderer.Tests
 
             var polyGeoms = new List<uint[]>();
             foreach (var f in layer.Features)
-                if (f.GeometryType == MvtGeometryType.Polygon && f.Geometry != null)
+                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
             Assert.Greater(polyGeoms.Count, 0, "Expected polygon features");
@@ -139,7 +140,7 @@ namespace MapRenderer.Tests
             var polyGeoms        = new List<uint[]>();
             foreach (var f in layer.Features)
             {
-                if (f.GeometryType != MvtGeometryType.Polygon || f.Geometry == null) continue;
+                if (f.GeometryType != TileGeometryType.Polygon || f.Geometry == null) continue;
                 polyGeoms.Add(f.Geometry);
                 var rings = MvtGeometry.Decode(f.Geometry);
                 var polys = PolygonAssembler.Assemble(rings);
@@ -243,7 +244,7 @@ namespace MapRenderer.Tests
             // ── Jobified path.
             var polyGeoms = new List<uint[]>();
             foreach (var f in layer.Features)
-                if (f.GeometryType == MvtGeometryType.Polygon && f.Geometry != null)
+                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
             var pipelineInput = new TileMeshPipeline.LayerInput
@@ -299,7 +300,7 @@ namespace MapRenderer.Tests
             double extent = layer.Extent;
             var polyGeoms = new List<uint[]>();
             foreach (var f in layer.Features)
-                if (f.GeometryType == MvtGeometryType.Polygon && f.Geometry != null)
+                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
@@ -379,7 +380,7 @@ namespace MapRenderer.Tests
 
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon) continue;
+                if (feature.GeometryType != TileGeometryType.Polygon) continue;
                 var rings    = MvtGeometry.Decode(feature.Geometry);
                 var polygons = PolygonAssembler.Assemble(rings);
 

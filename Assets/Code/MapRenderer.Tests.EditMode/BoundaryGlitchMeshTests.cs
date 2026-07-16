@@ -5,6 +5,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Filters;
 using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
@@ -42,9 +43,9 @@ namespace MapRenderer.Tests
 
             byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
             MvtTile tile = MvtDecoder.Decode(bytes);
-            MvtLayer mvtLayer = SourceLayerResolver.ResolveMvtLayer(layer, tile);
+            ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             double extent = mvtLayer?.Extent ?? 4096.0;
-            IReadOnlyList<MvtFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
+            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
 
             // Production path: real projection + real Burst LineRibbonJob + Mercator bake.
             Mesh mesh = TestTileMeshBuilder.BuildLine(

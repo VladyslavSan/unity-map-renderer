@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using NUnit.Framework;
 
 namespace MapRenderer.Tests.Filters
@@ -27,30 +27,30 @@ namespace MapRenderer.Tests.Filters
             {
                 ["area"] = Value.Number(100),
                 ["name"] = Value.String("road"),
-            }, MvtGeometryType.Polygon),
+            }, TileGeometryType.Polygon),
             // 1: Polygon, area=50, name="water"
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["area"] = Value.Number(50),
                 ["name"] = Value.String("water"),
-            }, MvtGeometryType.Polygon),
+            }, TileGeometryType.Polygon),
             // 2: LineString, name="highway"
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["name"] = Value.String("highway"),
-            }, MvtGeometryType.LineString),
+            }, TileGeometryType.LineString),
             // 3: Point, name="poi"
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["name"] = Value.String("poi"),
-            }, MvtGeometryType.Point),
+            }, TileGeometryType.Point),
             // 4: Polygon, area=200, no name, hasId=true id=42
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["area"] = Value.Number(200),
-            }, MvtGeometryType.Polygon, hasId: true, id: Value.Number(42)),
+            }, TileGeometryType.Polygon, hasId: true, id: Value.Number(42)),
             // 5: no properties
-            new DictionaryFeature(null, MvtGeometryType.Unknown),
+            new DictionaryFeature(null, TileGeometryType.Unknown),
         };
 
         private static List<int> Select(string filterJson)

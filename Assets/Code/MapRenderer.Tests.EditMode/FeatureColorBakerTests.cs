@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 
@@ -59,7 +58,7 @@ namespace MapRenderer.Tests
         {
             var features = new List<IFeature>(layer.Features.Count);
             foreach (var f in layer.Features)
-                features.Add(new MvtFeatureAdapter(f));
+                features.Add(f); // A6: MvtFeature implements IFeature directly — no adapter
             return features;
         }
 

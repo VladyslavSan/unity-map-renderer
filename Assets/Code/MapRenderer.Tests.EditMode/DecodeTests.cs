@@ -3,6 +3,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests
@@ -40,7 +41,7 @@ namespace MapRenderer.Tests
             var tile = MvtDecoder.Decode(LoadFixture());
             foreach (var f in tile.GetLayer("countries").Features)
             {
-                Assert.AreEqual(MvtGeometryType.Polygon, f.GeometryType);
+                Assert.AreEqual(TileGeometryType.Polygon, f.GeometryType);
                 Assert.IsNotNull(f.Geometry);
                 Assert.Greater(f.Geometry.Length, 0);
             }

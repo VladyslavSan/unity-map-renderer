@@ -6,9 +6,9 @@ using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
 
@@ -106,16 +106,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// (assigned to <c>Mesh.bounds</c> after apply, avoiding a main-thread RecalculateBounds scan).</para>
         /// </summary>
         public static void WriteMeshData(
-            Mesh.MeshData             md,
-            IReadOnlyList<MvtFeature> selectedFeatures,
-            Fill.PaintProperties      paint,
-            double                    zoom,
-            double                    extent,
-            TileId                    id,
-            double3                   tileOriginRender,
-            out int                   vertexCount,
-            out Bounds                bounds,
-            IProjection               projection = null) // null ⇒ WebMercator (launch-time config threads this in)
+            Mesh.MeshData               md,
+            IReadOnlyList<ITileFeature> selectedFeatures,
+            Fill.PaintProperties        paint,
+            double                      zoom,
+            double                      extent,
+            TileId                      id,
+            double3                     tileOriginRender,
+            out int                     vertexCount,
+            out Bounds                  bounds,
+            IProjection                 projection = null) // null ⇒ WebMercator (launch-time config threads this in)
         {
             vertexCount = 0;
             bounds      = default;
@@ -135,12 +135,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
             var featureColors = new List<Vector4>(selectedFeatures.Count); // linearized sRGB, parallel to geoms
             foreach (var feature in selectedFeatures)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon || feature.Geometry == null)
+                if (feature.GeometryType != TileGeometryType.Polygon || feature.Geometry == null)
                     continue;
 
                 Color featureColor = Color.white;
-                var   adapter      = new MvtFeatureAdapter(feature);
-                if (paint.Color.TryEvaluate(zoom, adapter, out var color))
+                if (paint.Color.TryEvaluate(zoom, feature, out var color))
                     featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
                 // S13 D2 gamma fix (off main thread): sRGB→linear here. white.linear == white.

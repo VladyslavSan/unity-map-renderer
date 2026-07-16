@@ -171,14 +171,16 @@ are answered per-kind, ad-hoc, instead of once by the model.**
 | **Line** | `TileMesh` (same) | `Persistent` | global index | shipped; same |
 | **Fill-extrusion** *(future)* | `TileMesh` (+ ZWrite on — depth-slice note, §7) | `Persistent` | global index | factory returns null |
 | **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — per E0's chosen option (c, §5): a persistent per-slot MeshRenderer swaps its mesh each `Tick`, so the backend redraws it with no orchestrator (this flips the pre-E0 `Immediate` cell above; §5 superseded it) | global index **per symbol layer** | **✅ E2 shipped:** `SymbolRenderLayer` owns its material (D11) + a persistent `LabelSlotPresenter`; `renderQueue = TransparentQueue + DrawIndex` like any other layer; `Graphics.RenderMesh`/Overlay-4000 pin retired (demo/no-style fallback only) |
-| **Background** | `ViewGeometry` — one synthesized ground-covering quad, no tile data | `Persistent` — **✅ E3 shipped:** a single persistent `MeshRenderer` on a static world-cap quad (D9 collapsed, no orchestrator — flips this row's pre-E0 `Immediate` cell, §3.6 decision 3) | global index | **✅ E3 shipped:** `BackgroundRenderLayer` owns a fill-base material clone + the quad; `renderQueue = TransparentQueue + DrawIndex` like any other layer; Mercator-only (globe hides it, §7.6) |
+| **Background** | ~~`ViewGeometry`~~ — **SUPERSEDED by Epic A / A2 (2026-07-13):** `TileMesh`, per-covered-tile, via `TileBackgroundLayerProcessor` (source-less) | `Persistent` — E3's single world-cap `MeshRenderer` is retired; the backend now redraws one quad per covered tile, same as fill/line | global index | **A2 shipped:** `BackgroundRenderLayer` owns only the material; per-tile geometry is produced by the source-less processor and registered with the active `ITileRenderBackend`; the Mercator-only gate is DELETED (globe renders a correctly curved background across the covered tile pyramid, §7.6 polar-cap gap still open) — see the E3 row directly below (§3.6) for the preserved historical record of what E3 originally shipped |
 | **Raster** *(future)* | `TileMesh` — per-tile textured quad | `Persistent` | global index | nothing |
 
 The build kinds genuinely differ and the model **names** the difference instead of hiding it: `TileMesh`
 layers participate in the tile produce/consume loop and the `ITileRenderBackend`; `FramePlaced` layers
-participate in the per-frame placement loop; `ViewGeometry` layers own a self-built mesh refreshed on
-view/style change. What is UNIFORM across all of them is registration (one factory), draw order (one
-index), presence (one enum + one orchestrator), material ownership, and `ApplyZoom`.
+participate in the per-frame placement loop. (The former `ViewGeometry` kind — a self-built mesh refreshed
+on view/style change, background's only user — is REMOVED as of Epic A / A2: background is `TileMesh` now,
+so the axis collapses to `{ TileMesh, FramePlaced }`.) What is UNIFORM across all of them is registration
+(one factory), draw order (one index), presence (one enum + one orchestrator), material ownership, and
+`ApplyZoom`.
 
 ### 3.2 Interface shape
 
@@ -187,6 +189,8 @@ index), presence (one enum + one orchestrator), material ownership, and `ApplyZo
 bodies verbatim:
 
 ```csharp
+// Historical (E1–E3) snippet, preserved as designed. Epic A / A2 (2026-07-13) REMOVED ViewGeometry —
+// RenderLayerBuild is now { TileMesh, FramePlaced } (background collapsed into TileMesh; see §3.6).
 internal enum RenderLayerBuild { TileMesh, FramePlaced, ViewGeometry }
 internal enum DrawPersistence  { Persistent, Immediate }
 
@@ -306,9 +310,22 @@ Mechanics:
   semantics; with all flat layers ZWrite-off, painter order alone decides occlusion — see §7 for the
   fill-extrusion caveat).
 
-### 3.6 Background: a real layer, not a camera hack — ✅ SHIPPED (E3)
+### 3.6 Background: a real layer, not a camera hack — ✅ SHIPPED (E3); geometry model SUPERSEDED (Epic A / A2)
 
-`BackgroundRenderLayer` — `ViewGeometry` + `Persistent`:
+**Epic A / A2 (2026-07-13) update — read this before the E3 record below.** The world-cap-quad geometry
+model this section describes is RETIRED. Background is now a source-less **per-covered-tile** `TileMesh`
+layer: `TileBackgroundLayerProcessor` synthesizes one full-tile-extent quad per tile in the camera cover
+(reusing `StyledFillTileBuilder.WriteMeshData` — earcut-correct winding + globe subdivision for free) and
+registers each with the active `ITileRenderBackend`, exactly like fill/line. `BackgroundRenderLayer` now
+owns ONLY the material (no `Mesh`/`GameObject`); the Mercator-only `SetVisible` gate described below is
+DELETED — the globe now renders a correctly curved background across the covered (Mercator-pyramid) tile
+band (the ±85.05°–90° polar caps still have no surface — a pre-existing globe/tile-cover limitation shared
+by fill/line, deferred to the globe track, §7.6). See `docs/per-layer-tile-processing-a2-plan.md` and
+`docs/per-layer-tile-processing-design.md`'s "A2 landed" note for the full account. The rest of this
+section is the **preserved E3 historical record** — what shipped in E3, before A2 replaced the geometry
+mechanism (the material-ownership / draw-slot / colour-binding model below is UNCHANGED by A2).
+
+`BackgroundRenderLayer` — `ViewGeometry` + `Persistent` *(E3, as originally shipped — see the A2 update above)*:
 
 - Parses `background-color` / `background-opacity` into a typed `Background.PaintProperties` in Core (the
   Fill pattern); owns a material — a clone of the FILL base (`MaterialFactory.CreateBackgroundMaterial`;

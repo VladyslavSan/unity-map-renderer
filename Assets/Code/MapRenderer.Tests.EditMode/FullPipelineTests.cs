@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 
 namespace MapRenderer.Tests
@@ -75,7 +76,7 @@ namespace MapRenderer.Tests
 
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon) continue;
+                if (feature.GeometryType != TileGeometryType.Polygon) continue;
 
                 var rings = MvtGeometry.Decode(feature.Geometry);
                 Assert.IsNotNull(rings);
@@ -253,7 +254,7 @@ namespace MapRenderer.Tests
 
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon) continue;
+                if (feature.GeometryType != TileGeometryType.Polygon) continue;
 
                 var rings    = MvtGeometry.Decode(feature.Geometry);
                 var polygons = PolygonAssembler.Assemble(rings);

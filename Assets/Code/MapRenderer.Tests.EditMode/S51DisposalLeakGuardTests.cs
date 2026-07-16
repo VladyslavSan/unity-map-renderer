@@ -293,7 +293,7 @@ namespace MapRenderer.Tests
             var fillLayer   = style.Layers[0];
             var paint       = new Fill.PaintProperties(fillLayer);
             var features    = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer    = SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+            var mvtLayer    = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer");
             Assert.Greater(features.Count, 0, "Fixture must produce at least one feature");

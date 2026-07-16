@@ -3,7 +3,7 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Expressions
 {
@@ -16,7 +16,7 @@ namespace MapRenderer.Tests.Expressions
                 ("name", Value.String("Berlin")),
                 ("pop", Value.Number(3500000)),
                 ("capital", Value.Bool(true))),
-                MvtGeometryType.Point);
+                TileGeometryType.Point);
 
         [Test]
         public void Get_Present()

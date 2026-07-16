@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Mvt
 {
@@ -189,7 +190,7 @@ namespace MapRenderer.Core.Mvt
                         break;
                     }
                     case FeatureType when wt == 0:
-                        f.GeometryType = (MvtGeometryType)r.ReadUInt32();
+                        f.GeometryType = (TileGeometryType)r.ReadUInt32();
                         break;
                     case FeatureGeometry when wt == 2:
                     {

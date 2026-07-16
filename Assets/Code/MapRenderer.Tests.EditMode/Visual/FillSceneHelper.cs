@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Visual
             var fillStyleLayer = style.Layers[0];
             var paint = new Fill.PaintProperties(fillStyleLayer);
 
-            var mvtLayer = SourceLayerResolver.ResolveMvtLayer(fillStyleLayer, mvtTile);
+            var mvtLayer = SourceLayerResolver.ResolveTileLayer(fillStyleLayer, mvtTile);
             if (mvtLayer == null)
             {
                 // Layer not found — return a GO with no mesh so tests can check for null.

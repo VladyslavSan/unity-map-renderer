@@ -6,10 +6,10 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using Line = MapRenderer.Core.Style.Line;
 using CoreColor = MapRenderer.Core.Expressions.Color;
@@ -123,17 +123,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// pre-S55 RecalculateBounds, which also ignored shader width extrusion).
         /// </summary>
         public static void WriteMeshData(
-            Mesh.MeshData             md,
-            IReadOnlyList<MvtFeature> selectedFeatures,
-            Line.PaintProperties      paint,
-            Line.LayoutProperties     layout,
-            double                    zoom,
-            double                    extent,
-            TileId                    id,
-            double3                   tileOriginRender,
-            out int                   vertexCount,
-            out Bounds                bounds,
-            IProjection               projection = null) // null ⇒ WebMercator (launch-time config threads this in)
+            Mesh.MeshData               md,
+            IReadOnlyList<ITileFeature> selectedFeatures,
+            Line.PaintProperties        paint,
+            Line.LayoutProperties       layout,
+            double                      zoom,
+            double                      extent,
+            TileId                      id,
+            double3                     tileOriginRender,
+            out int                     vertexCount,
+            out Bounds                  bounds,
+            IProjection                 projection = null) // null ⇒ WebMercator (launch-time config threads this in)
         {
             vertexCount = 0;
             bounds      = default;
@@ -178,14 +178,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             {
             foreach (var feature in selectedFeatures)
             {
-                if (feature.GeometryType != MvtGeometryType.LineString)
+                if (feature.GeometryType != TileGeometryType.LineString)
                     continue;
 
                 // Bake per-feature vertex color from the data-driven paint expression (sRGB→linear here,
                 // off-main-thread). _BaseColor=white on the material → identity multiply.
                 Vector4 featureColor = WhiteColor;
-                var     adapter      = new MvtFeatureAdapter(feature);
-                if (paint.Color.TryEvaluate(zoom, adapter, out CoreColor c))
+                if (paint.Color.TryEvaluate(zoom, feature, out CoreColor c))
                 {
                     var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
                     var linear     = unityColor.linear;
@@ -196,7 +195,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 // on the feature (else BindLinePaintToApplier already bound _Opacity and baking double-applies).
                 if (paint.Opacity.DependsOnFeature)
                 {
-                    if (paint.Opacity.TryEvaluate(zoom, adapter, out float opacityVal))
+                    if (paint.Opacity.TryEvaluate(zoom, feature, out float opacityVal))
                         featureColor.w *= opacityVal;
                 }
 
@@ -206,7 +205,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 float featureWidthScale = 1f;
                 if (paint.Width.DependsOnFeature)
                 {
-                    if (paint.Width.TryEvaluate(zoom, adapter, out float widthVal))
+                    if (paint.Width.TryEvaluate(zoom, feature, out float widthVal))
                         featureWidthScale = math.max(0f, widthVal);
                 }
 

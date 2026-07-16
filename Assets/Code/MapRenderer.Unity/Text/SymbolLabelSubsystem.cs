@@ -2,20 +2,23 @@
 // It uses NO Unity.Mathematics types, so there is no float2/double3 trap to avoid here.
 
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Unity.Profiling;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Jobs;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Common;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
@@ -25,8 +28,10 @@ namespace MapRenderer.Unity.Text
     /// S105 — the DECOUPLED production symbol-label subsystem: it owns the shared production
     /// <see cref="GlyphManager"/> + fixed-size <see cref="GlyphAtlasTexture"/> +
     /// <see cref="StyledSymbolTileBuilder"/>. A-1 split of concerns: label DATA arrives via the
-    /// <see cref="Tile.TileManager"/> <c>SymbolTileBytesReady</c> push (already-fetched MVT bytes — no double
-    /// download, never touching the mesh/disposal pipeline), while the tile LIFECYCLE is PULLED — each frame
+    /// <see cref="Tile.TileManager"/>'s per-tile KICK (A5b: this class implements
+    /// <see cref="ISymbolTileWorkerFactory"/> — TileManager's kick drives
+    /// <see cref="TryBeginBuild"/> alongside the mesh pass, sharing the A4 shared-decode entry, no separate
+    /// push/queue), while the tile LIFECYCLE is PULLED — each frame
     /// <see cref="ReconcileLoadedTiles"/> takes TileManager's current loaded set and reconciles which labels are
     /// active/kept-warm (retiring the fragile release/restore push-callbacks). Labels are the placed-every-frame
     /// class, so this feeds <see cref="LabelPlacementSystem"/> via <see cref="CollectInto"/>, never the static
@@ -36,8 +41,20 @@ namespace MapRenderer.Unity.Text
     /// clamped to the GPU max) so its <c>Size</c> never changes as tiles append glyphs — a growing atlas
     /// would invalidate earlier tiles' baked UVs (glyph-atlas-uv-growth-staleness lesson). Overflow (a
     /// glyph set larger than the fixed atlas) degrades gracefully and is logged, never silent.</para>
+    ///
+    /// <para><b>A5a: worker phase / tail split.</b> A build no longer runs start-to-commit as one
+    /// coroutine — the worker phase (<see cref="TryBeginBuild"/>'s returned <c>SymbolTileWorkerPass</c>)
+    /// stops after the pool-side extract and hands a <see cref="ReadySymbolTail"/> to <see cref="PumpBuilds"/>'
+    /// budgeted tail-start loop (<see cref="RunTailAsync"/>), which does the glyph-fetching per-layer
+    /// shape + store commit.</para>
+    ///
+    /// <para><b>A5b: budget split.</b> Worker-phase starts now ride TileManager's kick cadence
+    /// (<c>MaxMeshBuildsPerTick</c>) — <see cref="MaxBuildsPerFrame"/> gates ONLY tail starts, its real
+    /// stall-#1 role, since shaping (not extraction) is the main-thread burst. Under burst, tail starts
+    /// trickle at that budget — an accepted, bounded label-appearance-latency tradeoff, never a
+    /// label-content change.</para>
     /// </summary>
-    internal sealed class SymbolLabelSubsystem : IDisposable
+    internal sealed class SymbolLabelSubsystem : ISymbolTileWorkerFactory, IDisposable
     {
         /// <summary>Target atlas edge in px, clamped to the GPU's max texture size. R8, so 4096² ≈ 16 MB.</summary>
         private const int AtlasDimension = 4096;
@@ -58,6 +75,9 @@ namespace MapRenderer.Unity.Text
         // Per-tile build markers (Profiler window → "MapRenderer.Symbol"). Only the SYNCHRONOUS main-thread
         // stages are marked — the shaping BuildAsync is awaited (its wall-clock includes glyph-fetch
         // suspension, not CPU), so it is deliberately left unmarked to avoid polluting the timeline.
+        // A4: brackets the RunSymbolWorkerPass call, which now reads the SHARED decode (get-or-decode) —
+        // ~0 cost on the common "mesh decoded first, symbol reuses" order; the true symbol-cadence cost is
+        // whatever's left after that (feature extract), not the decode itself.
         private static readonly ProfilerMarker PmTileDecode =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode");
         private static readonly ProfilerMarker PmAtlasUpload =
@@ -77,37 +97,46 @@ namespace MapRenderer.Unity.Text
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
 
-        // ── Stall #1 fix (Stage A): bounded symbol-build queue + coalesced atlas upload ──────────────
-        /// <summary>A queued deferred symbol build: the source's already-fetched MVT bytes and its layer
-        /// indices (the live <see cref="_layersBySource"/> list, NOT copied — <see cref="SetStyle"/> clears
-        /// the queue before rebuilding that map, so a queued entry never references a stale list). Readonly
-        /// fields + ctor (not <c>init</c>): MapRenderer.Unity has no IsExternalInit polyfill, and this mirrors
-        /// the local carrier idiom (<c>TileManager.LoadedKey</c>/<c>SourceKey</c>).</summary>
-        private readonly struct PendingSymbolBuild
+        // ── Stall #1 fix (Stage A) / A5b feed swap: coalesced atlas upload + budgeted tail pump ────────
+        /// <summary>A5a: a worker-phase-complete symbol build awaiting its budgeted main-thread tail
+        /// (<see cref="RunTailAsync"/>) — the per-layer shape + commit. Readonly fields + ctor: MapRenderer.Unity
+        /// has no IsExternalInit polyfill, and this mirrors the local carrier idiom
+        /// (<c>TileManager.LoadedKey</c>/<c>SourceKey</c>).</summary>
+        private readonly struct ReadySymbolTail
         {
-            public readonly string    SourceId;
-            public readonly TileId    Tile;
-            public readonly byte[]    Bytes;
-            public readonly List<int> LayerIndices;
-            public PendingSymbolBuild(string sourceId, TileId tile, byte[] bytes, List<int> layerIndices)
+            public readonly SymbolTileLabelStore.Key   Key;
+            public readonly int                        Generation;   // BeginBuild's gen — commit guard
+            public readonly TileSymbolLayerProcessor[] Processors;   // extraction held inside each
+            public readonly List<LabelInstance>        Labels;       // the build's shared output list
+            public readonly CancellationToken          Ct;           // the build's style-scoped token
+            public readonly string                     SourceId;     // for the failure log line
+            public readonly TileId                     Tile;
+            public ReadySymbolTail(SymbolTileLabelStore.Key key, int generation, TileSymbolLayerProcessor[] processors,
+                List<LabelInstance> labels, CancellationToken ct, string sourceId, TileId tile)
             {
-                SourceId = sourceId; Tile = tile; Bytes = bytes; LayerIndices = layerIndices;
+                Key = key; Generation = generation; Processors = processors; Labels = labels;
+                Ct = ct; SourceId = sourceId; Tile = tile;
             }
         }
 
-        // Bytes-ready pushes land here (OnTileBytesReady ENQUEUES, never builds inline); PumpBuilds starts at
-        // most MaxBuildsPerFrame of them per frame. byte[] retention is bounded by the cover size.
-        private readonly Queue<PendingSymbolBuild> _buildQueue = new();
-        // The current loaded (source, tile) set, refreshed each frame by ReconcileLoadedTiles — PumpBuilds
-        // drops a queued build whose tile has since left the loaded set (a later re-entry is a fresh push).
-        private readonly HashSet<SymbolTileLabelStore.Key> _loadedNow = new();
+        // A5b: the worker→main thread-safe handoff — TileManager's kick task (POOL thread) enqueues here
+        // (SymbolTileWorkerPass.RunWorkerAndHandoff, below); PumpBuilds (MAIN thread) drains it into
+        // _readyTails as its first step, every frame. A ConcurrentQueue is the carrier + ordering +
+        // safe-publication barrier in one — no volatile flag, no manual pending-list scan (design §Q2).
+        private readonly ConcurrentQueue<ReadySymbolTail> _handoffQueue = new();
+
+        // Worker-phase-complete builds awaiting their budgeted tail (main-thread only). PumpBuilds' tail-start
+        // loop drains this FIFO at most MaxBuildsPerFrame per frame (§D4/§D6).
+        private readonly List<ReadySymbolTail> _readyTails = new();
         // Cancels in-flight builds on restyle/teardown so a resumed build never touches disposed glyph/atlas
         // state (closes the missing-token + restyle-vs-in-flight-build risks from the review). Recreated per
         // SetStyle so each style has its own cancellation scope.
         private CancellationTokenSource _buildCts = new();
 
-        /// <summary>Max symbol-tile builds STARTED per frame in <see cref="PumpBuilds"/> — the responsiveness
-        /// knob for stall #1. Default 1 (locked design default); MapView may serialize it later.</summary>
+        /// <summary>Max symbol-tile TAILS started per frame in <see cref="PumpBuilds"/> — the responsiveness
+        /// knob for stall #1 (shaping, the main-thread burst). Default 1 (locked design default); MapView may
+        /// serialize it later. A5b: worker-phase starts no longer ride this knob — they ride TileManager's
+        /// kick cadence (<c>MaxMeshBuildsPerTick</c>) instead (§Q4).</summary>
         public int MaxBuildsPerFrame { get; set; } = 1;
 
         /// <summary>Test seam (dependency-inversion, mirroring <c>IDataSource</c>): the glyph-source factory
@@ -117,10 +146,12 @@ namespace MapRenderer.Unity.Text
         internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride { get; set; }
 
         // Per-frame observability (mirrors TileManager's *LastTick counters) — read by tests, never the live path.
-        internal int BuildsStartedLastPump { get; private set; }
+        internal int TailsStartedLastPump  { get; private set; }
         internal int AtlasUploadsLastPump  { get; private set; }
         internal int CancelledBuildCount   { get; private set; }
-        internal int QueuedBuildCount => _buildQueue.Count;
+        // A5b: total not-yet-tailed builds — queued in the pool→main handoff (not yet drained) PLUS drained
+        // but not-yet-started tails. The migrated F-7 budget tooth asserts against this total (§Q2/E-2).
+        internal int ReadyTailCount => _readyTails.Count + _handoffQueue.Count;
 
         /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap — bounds how many
         /// out-of-cover tiles' labels are kept warm (clamped to a finite hard cap inside the store even when
@@ -172,11 +203,17 @@ namespace MapRenderer.Unity.Text
             _lastUploadedGlyphCount = 0;
             _loggedOverflow = false;
             // Cancel any in-flight builds from the previous style and open a fresh cancellation scope, then
-            // drop queued builds (their layer-index lists belong to the old _layersBySource rebuilt below).
+            // drop everything mid-flight (their layer-index lists belong to the old _layersBySource rebuilt
+            // below): A5b's pool→main handoff queue (a kick task still running on the pool enqueues into the
+            // FRESH queue below only if it re-reads _handoffQueue after this point — the drain-side ct-drop
+            // in PumpBuilds is what actually closes that race, §Q2) and A5a's ready-but-untailed builds —
+            // their reserved store slot dies with the _store.Clear() below anyway (the same fate as an
+            // in-flight build cancelled mid-build).
             _buildCts.Cancel();
             _buildCts.Dispose();
             _buildCts = new CancellationTokenSource();
-            _buildQueue.Clear();
+            while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
+            _readyTails.Clear();
             DisposePipeline();
 
             _allSymbolLayers.Clear();
@@ -202,7 +239,8 @@ namespace MapRenderer.Unity.Text
             // glyph pipeline below.
 
             // The glyph pipeline needs the style's glyphs URL. Without it there are no glyphs to shape, so
-            // leave _builder null (OnTileBytesReady no-ops) rather than throw — the labels just don't render.
+            // leave _builder null (TryBeginBuild no-ops, returning null — no symbol participation) rather
+            // than throw — the labels just don't render.
             if (string.IsNullOrEmpty(style.Glyphs))
             {
                 Debug.LogWarning("[SymbolLabelSubsystem] style has no 'glyphs' URL — symbol labels will not render.");
@@ -215,44 +253,139 @@ namespace MapRenderer.Unity.Text
             _builder = new StyledSymbolTileBuilder(_glyphManager);
         }
 
-        /// <summary>TileManager hook (MAIN THREAD): a tile's MVT bytes are ready — ENQUEUE a deferred build for
-        /// its source's symbol layers, if any. Never throws (TileManager also isolates, belt and braces).
+        /// <summary>Epic A / A5b <see cref="Processing.ISymbolTileWorkerFactory"/> entry — MAIN THREAD, called
+        /// from <see cref="Tile.TileManager"/>'s per-tile kick (<c>PumpPending</c>): begin a symbol build for
+        /// this <paramref name="sourceId"/>/<paramref name="tile"/> if this source has symbol layers and the
+        /// glyph pipeline is live. Returns null for no participation (a mesh-only source, or no glyph
+        /// pipeline) — TileManager treats null as "the kick runs the mesh pass alone".
         ///
-        /// <para>Stall #1: this used to run the WHOLE build (decode + shape + atlas upload) synchronously on the
-        /// main thread for EVERY fetch completing this frame — an unbounded burst. It now only enqueues; the
-        /// per-frame <see cref="PumpBuilds"/> starts at most <see cref="MaxBuildsPerFrame"/> of them.</para></summary>
-        public void OnTileBytesReady(string sourceId, TileId tile, byte[] bytes)
+        /// <para>This is the moved main-thread prologue that pre-A5b's <c>BuildTileAsync</c> ran at build
+        /// start (BeginBuild + camera zoom/projection capture + one processor per layer): the zoom-capture
+        /// MOMENT moves from the tail-pump call to the kick call (§Q3 — behaviour-preserving: camera
+        /// properties are fixed for the whole frame, so the value is identical for any build kicked and
+        /// pumped in the same frame; only the SAMPLE FRAME shifts, an accepted timing delta).</para></summary>
+        public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
         {
-            if (_builder == null || bytes == null) return;
-            if (!_layersBySource.TryGetValue(sourceId, out List<int> layerIndices)) return;
-            _buildQueue.Enqueue(new PendingSymbolBuild(sourceId, tile, bytes, layerIndices));
+            if (_builder == null) return null;
+            if (!_layersBySource.TryGetValue(sourceId, out List<int> layerIndices)) return null;
+
+            var key = new SymbolTileLabelStore.Key(sourceId, tile);
+            int gen = _store.BeginBuild(key); // reserve the active slot (collected as empty until committed)
+
+            // Capture the main-thread inputs BEFORE the pool-side worker step (Unity APIs are main-thread
+            // only): this build's own builder, the camera zoom + projection, and one processor per style
+            // layer, all sharing the same output list.
+            StyledSymbolTileBuilder builder    = _builder;
+            double                  zoom       = _camera.CurrentProperties.Zoom;
+            var                     projection = _camera.Projection;
+
+            var labels = new List<LabelInstance>();
+            var processors = new TileSymbolLayerProcessor[layerIndices.Count];
+            for (int k = 0; k < layerIndices.Count; k++)
+            {
+                int globalIndex = layerIndices[k];
+                processors[k] = new TileSymbolLayerProcessor(builder, _allSymbolLayers[globalIndex], globalIndex, labels);
+            }
+
+            var context = new TileLayerProcessContext
+            {
+                Tile             = tile,
+                Zoom             = zoom,
+                TileOriginRender = TileMeshPipeline.ProjectTileCornerOrigin(tile, projection),
+                Projection       = projection,
+            };
+
+            return new SymbolTileWorkerPass(key, gen, processors, labels, context, _buildCts.Token, sourceId, tile, _handoffQueue);
+        }
+
+        /// <summary>Epic A / A5b <see cref="Processing.ISymbolTileWorkerPass"/> implementor — the captured
+        /// build state carried from <see cref="TryBeginBuild"/> (main) to <see cref="RunWorkerAndHandoff"/>
+        /// (pool, inside TileManager's kick task). Infallible from the caller's view: owns its own
+        /// try/catch, never rethrows (TileManager's kick lambda wraps the call too — belt-and-braces, §Q5).</summary>
+        private sealed class SymbolTileWorkerPass : ISymbolTileWorkerPass
+        {
+            private readonly SymbolTileLabelStore.Key         _key;
+            private readonly int                              _generation;
+            private readonly TileSymbolLayerProcessor[]       _processors;
+            private readonly List<LabelInstance>              _labels;
+            private readonly TileLayerProcessContext           _context;
+            private readonly CancellationToken                _ct;
+            private readonly string                           _sourceId;
+            private readonly TileId                            _tile;
+            private readonly ConcurrentQueue<ReadySymbolTail>  _handoffQueue;
+
+            public SymbolTileWorkerPass(SymbolTileLabelStore.Key key, int generation, TileSymbolLayerProcessor[] processors,
+                List<LabelInstance> labels, TileLayerProcessContext context, CancellationToken ct, string sourceId, TileId tile,
+                ConcurrentQueue<ReadySymbolTail> handoffQueue)
+            {
+                _key = key; _generation = generation; _processors = processors; _labels = labels;
+                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile; _handoffQueue = handoffQueue;
+            }
+
+            /// <summary>POOL THREAD (inside TileManager's mesh kick task, after the mesh pass): run this
+            /// build's symbol worker pass over the SAME shared decode, then enqueue the completed worker
+            /// phase for <see cref="PumpBuilds"/>' main-thread drain. A cancelled token (restyle/teardown
+            /// raced ahead of this pool task) is a cheap early-out — never enqueued, so a stale build never
+            /// reaches the tail (mirrors the drain-side ct-drop, §Q2 belt-and-braces).</summary>
+            public void RunWorkerAndHandoff(IDecodedTileHandle decode)
+            {
+                try
+                {
+                    if (_ct.IsCancellationRequested) return;
+                    using (PmTileDecode.Auto())
+                        TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in _context, _processors);
+                    _handoffQueue.Enqueue(new ReadySymbolTail(_key, _generation, _processors, _labels, _ct, _sourceId, _tile));
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {_tile} (source '{_sourceId}'): {ex.Message}");
+                }
+            }
         }
 
         /// <summary>
-        /// MAIN THREAD, once per frame from <see cref="Map.MapView"/> AFTER <see cref="ReconcileLoadedTiles"/>
-        /// (so <see cref="_loadedNow"/> reflects this frame's loaded set): start at most
-        /// <see cref="MaxBuildsPerFrame"/> queued builds — dropping any whose tile has since left the loaded
-        /// set — then perform AT MOST ONE atlas GPU upload if the shared atlas grew since the last upload
-        /// (coalescing every commit + glyph-range arrival that landed since last frame into one ≤16 MB blit).
+        /// MAIN THREAD, once per frame from <see cref="Map.MapView"/>: first drain
+        /// <see cref="_handoffQueue"/> (worker phases TileManager's kick completed on the pool since the
+        /// last pump) into <see cref="_readyTails"/> — dropping any entry whose <c>ct</c> is already
+        /// cancelled (a restyle/teardown raced ahead of the enqueue, §Q2; counted, never started) — then
+        /// (A5a) start at most <see cref="MaxBuildsPerFrame"/> ready TAILS, then perform AT MOST ONE atlas
+        /// GPU upload if the shared atlas grew since the last upload (coalescing every commit + glyph-range
+        /// arrival that landed since last frame into one ≤16 MB blit).
         ///
-        /// <para>Fixes stall #1: the old path built every fetch-completing tile inline and re-uploaded the
-        /// 16 MB atlas per glyph-adding tile; both are now bounded per frame. The dequeue loop runs at most
-        /// <c>_buildQueue.Count</c> iterations (a dropped stale entry is still a dequeue).</para>
+        /// <para>A5b: worker-phase starts no longer happen here — they ride TileManager's per-tile kick
+        /// (<see cref="TryBeginBuild"/>), paced by its own kick cadence. <see cref="MaxBuildsPerFrame"/> now
+        /// gates ONLY tail starts — the knob's real stall-#1 role (§D4: shaping, not extraction, is the
+        /// main-thread burst). Under a burst of K tiles becoming tail-ready around the same frame, the Kth
+        /// tile's shaping starts ~K / <see cref="MaxBuildsPerFrame"/> pumps later — an ACCEPTED, bounded
+        /// label-appearance-latency tradeoff (§D6/N1), never a label-content change.</para>
         /// </summary>
         public void PumpBuilds()
         {
-            BuildsStartedLastPump = 0;
+            TailsStartedLastPump  = 0;
             AtlasUploadsLastPump  = 0;
             if (_builder == null) return; // no glyph pipeline (style has no 'glyphs' URL) — nothing to do
 
-            // Start ≤ MaxBuildsPerFrame builds; drop queued entries whose tile left the loaded set.
-            while (_buildQueue.Count > 0 && BuildsStartedLastPump < MaxBuildsPerFrame)
+            // A5b: drain the pool→main handoff FIRST — every worker phase TileManager's kick completed on
+            // the pool since the last pump lands in _readyTails here (or is dropped, if its build was
+            // cancelled mid-flight — a restyle/teardown that raced ahead of the pool-side enqueue, §Q2).
+            while (_handoffQueue.TryDequeue(out ReadySymbolTail ready))
             {
-                PendingSymbolBuild item = _buildQueue.Dequeue();
-                var key = new SymbolTileLabelStore.Key(item.SourceId, item.Tile);
-                if (!_loadedNow.Contains(key)) continue; // left cover before we reached it — drop the build
-                BuildTileAsync(item.SourceId, item.Tile, item.Bytes, item.LayerIndices, _buildCts.Token).Forget();
-                BuildsStartedLastPump++;
+                if (ready.Ct.IsCancellationRequested) { CancelledBuildCount++; continue; } // never starts (F-4)
+                _readyTails.Add(ready);
+            }
+
+            // A5a: start ≤ MaxBuildsPerFrame tails whose worker phase has already landed (FIFO — index 0;
+            // the backlog is single-digit deep in practice, no deque needed). Deliberately NO stale/loaded
+            // re-check here — a tail runs unconditionally once its worker phase lands; the store's
+            // generation/superseded guard is the sole commit arbiter, so a released-to-cache tile's labels
+            // must still commit to the warm side (RunTailAsync's commit comment). Adding a drop here would
+            // CHANGE that behaviour, not preserve it.
+            while (_readyTails.Count > 0 && TailsStartedLastPump < MaxBuildsPerFrame)
+            {
+                ReadySymbolTail tail = _readyTails[0];
+                _readyTails.RemoveAt(0);
+                RunTailAsync(tail).Forget();
+                TailsStartedLastPump++;
             }
 
             // ONE coalesced atlas upload per frame — any glyphs appended by builds that committed since the
@@ -281,16 +414,11 @@ namespace MapRenderer.Unity.Text
         {
             if (_layersBySource == null) return; // no style set yet
             _reconcileKeys.Clear();
-            _loadedNow.Clear(); // rebuilt here each frame; PumpBuilds reads it to drop builds for departed tiles
             for (int i = 0; i < loaded.Count; i++)
             {
                 LoadedTileKey k = loaded[i];
                 if (_layersBySource.ContainsKey(k.SourceId))
-                {
-                    var storeKey = new SymbolTileLabelStore.Key(k.SourceId, k.Tile);
-                    _reconcileKeys.Add(storeKey);
-                    _loadedNow.Add(storeKey);
-                }
+                    _reconcileKeys.Add(new SymbolTileLabelStore.Key(k.SourceId, k.Tile));
             }
             // Pass the wall-clock (from MapView) + the departing grace window so a tile that leaves cover keeps its
             // labels COLLECTED (as departing) for the fade-out instead of popping. Grace applies only when the mesh
@@ -299,54 +427,34 @@ namespace MapRenderer.Unity.Text
             _store.ReconcileActiveSet(_reconcileKeys, _cacheEnabled, nowSeconds, grace);
         }
 
-        private async UniTaskVoid BuildTileAsync(string sourceId, TileId tile, byte[] bytes,
-            List<int> layerIndices, CancellationToken ct)
+        /// <summary>A5a: the budgeted main-thread TAIL, started by <see cref="PumpBuilds"/>' tail-start loop
+        /// once <see cref="TryBeginBuild"/>'s returned <c>SymbolTileWorkerPass</c> has landed a
+        /// <see cref="ReadySymbolTail"/> (via the A5b pool→main handoff, drained at the top of
+        /// <see cref="PumpBuilds"/>). Every layer's <c>CompleteOnMainAsync</c> runs sequentially behind this
+        /// ONE hop-in, and the commit is gated behind the WHOLE loop clearing its cancellation check FIRST —
+        /// partial labels never reach <see cref="SymbolTileLabelStore.CompleteBuild"/> (the commit guard, §C).</summary>
+        private async UniTaskVoid RunTailAsync(ReadySymbolTail tail)
         {
-            var key = new SymbolTileLabelStore.Key(sourceId, tile);
-            int gen = _store.BeginBuild(key); // reserve the active slot (collected as empty until committed)
-
-            // Capture the main-thread inputs BEFORE hopping to the pool (Unity APIs are main-thread only):
-            // this build's own builder, the camera zoom + projection, and its layer list.
-            StyledSymbolTileBuilder builder     = _builder;
-            double                  zoom        = _camera.CurrentProperties.Zoom;
-            var                     projection  = _camera.Projection;
-            var layers = new List<SymbolStyle.StyleLayer>(layerIndices.Count);
-            for (int k = 0; k < layerIndices.Count; k++) layers.Add(_allSymbolLayers[layerIndices[k]]);
-
             try
             {
-                // Stage B: decode + feature-extract on the THREAD POOL — engine-free, touches no glyph cache /
-                // atlas / UnityEngine object, so it is worker-safe (this was the ~600ms main-thread burst).
-                await UniTask.SwitchToThreadPool();
-                List<StyledSymbolTileBuilder.ExtractedLayer> extracted;
-                using (PmTileDecode.Auto())
-                {
-                    MvtTile mvt = MvtDecoder.Decode(bytes);
-                    extracted = builder.ExtractLayers(mvt, tile, layers, zoom, projection, layerIndices);
-                }
-
-                // Back to MAIN for glyph ensure + shape (they read the shared atlas). A restyle/teardown that
-                // cancelled while we were on the pool throws here — before touching the store/glyphs/atlas.
-                await UniTask.SwitchToMainThread(ct);
-
-                var labels = new List<LabelInstance>();
-                await builder.ShapeAsync(extracted, labels, ct);
-                ct.ThrowIfCancellationRequested();
+                for (int p = 0; p < tail.Processors.Length; p++)
+                    await tail.Processors[p].CompleteOnMainAsync(tail.Ct);
+                tail.Ct.ThrowIfCancellationRequested();
 
                 // Commit — unless superseded by a newer build OR dropped mid-build (released-to-cache is NOT
                 // stale: the store writes the labels to the cached side so a later hit restores them). The
                 // atlas GPU upload is coalesced into the next PumpBuilds — no atlas touch here.
-                _store.CompleteBuild(key, gen, labels);
+                _store.CompleteBuild(tail.Key, tail.Generation, tail.Labels);
             }
             catch (OperationCanceledException)
             {
-                // Restyle/teardown mid-build — silent, never touches disposed state (closes the review's two
+                // Restyle/teardown mid-tail — silent, never touches disposed state (closes the review's two
                 // latent lifetime risks). The reserved slot is dropped when SetStyle/Dispose Clears the store.
                 CancelledBuildCount++;
             }
             catch (Exception ex)
             {
-                Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {tile} (source '{sourceId}'): {ex.Message}");
+                Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {tail.Tile} (source '{tail.SourceId}'): {ex.Message}");
             }
         }
 
@@ -396,7 +504,8 @@ namespace MapRenderer.Unity.Text
         {
             _buildCts.Cancel();   // stop any in-flight build before its glyph/atlas state is disposed below
             _buildCts.Dispose();
-            _buildQueue.Clear();
+            while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
+            _readyTails.Clear(); // A5a: ready-but-untailed builds die with the store slot cleared below
             _store.Clear();
             DisposePipeline();
         }

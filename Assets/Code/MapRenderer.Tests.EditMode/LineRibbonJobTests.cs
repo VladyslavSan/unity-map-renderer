@@ -7,6 +7,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 
 namespace MapRenderer.Tests
@@ -199,7 +200,7 @@ namespace MapRenderer.Tests
             int pathsChecked = 0;
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.LineString || feature.Geometry == null)
+                if (feature.GeometryType != TileGeometryType.LineString || feature.Geometry == null)
                     continue;
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);

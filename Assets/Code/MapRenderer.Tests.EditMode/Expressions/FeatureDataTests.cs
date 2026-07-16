@@ -3,7 +3,7 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Expressions
 {
@@ -15,11 +15,11 @@ namespace MapRenderer.Tests.Expressions
     [TestFixture]
     public class FeatureDataTests
     {
-        [TestCase(MvtGeometryType.Point, "Point")]
-        [TestCase(MvtGeometryType.LineString, "LineString")]
-        [TestCase(MvtGeometryType.Polygon, "Polygon")]
-        [TestCase(MvtGeometryType.Unknown, "Unknown")]
-        public void GeometryType(MvtGeometryType geom, string expected)
+        [TestCase(TileGeometryType.Point, "Point")]
+        [TestCase(TileGeometryType.LineString, "LineString")]
+        [TestCase(TileGeometryType.Polygon, "Polygon")]
+        [TestCase(TileGeometryType.Unknown, "Unknown")]
+        public void GeometryType(TileGeometryType geom, string expected)
         {
             var f = Expr.Feature(geom: geom);
             Assert.AreEqual(expected, Expr.Eval("[\"geometry-type\"]", f).AsString());
@@ -60,7 +60,7 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void GeometryType_DrivesMatch()
         {
-            var f = Expr.Feature(geom: MvtGeometryType.Polygon);
+            var f = Expr.Feature(geom: TileGeometryType.Polygon);
             string e = "[\"match\", [\"geometry-type\"], \"Polygon\", \"fill\", \"Point\", \"point\", \"other\"]";
             Assert.AreEqual("fill", Expr.Eval(e, f).AsString());
         }

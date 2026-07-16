@@ -222,7 +222,7 @@ namespace MapRenderer.Tests
             var fillLayer = style.Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
             var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer, "Fixture must contain 'countries' MVT layer");
             Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
@@ -415,7 +415,7 @@ namespace MapRenderer.Tests
                 var fillLayer = style.Layers[0];
                 var paint     = new Fill.PaintProperties(fillLayer);
                 var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);
 
                 Mesh syncMesh = TestTileMeshBuilder.BuildFill(
@@ -638,7 +638,7 @@ namespace MapRenderer.Tests
             var fillLayer = style.Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
             var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer);
             Assert.Greater(features.Count, 0);

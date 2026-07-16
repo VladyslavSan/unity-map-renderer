@@ -16,6 +16,20 @@ fill/line. So **background and all tile geometry become curved on the sphere aut
 quad, and E3's Mercator-only background gate is deleted. That geometry-projection correctness is a *byproduct*
 of Epic A; Track B does not own it.
 
+**A2 landed this (2026-07-13), confirming the above.** `TileBackgroundLayerProcessor` projects the
+background quad through the same `IProjection` fill/line use (curved on `SphericalProjection`, flat on
+`WebMercatorProjection`); `MapView.SetStyle`'s Mercator-only `BackgroundRenderLayer.SetVisible` gate is
+DELETED. See `docs/per-layer-tile-processing-a2-plan.md` / `docs/per-layer-tile-processing-design.md`.
+
+### B3 — Full-sphere / polar-cap background surface (new, filed by A2)
+A2 makes the *covered* band (the Mercator tile pyramid, ±85.051°) curve correctly, but coverage is still the
+tile cover — a synthetic background quad lives in the Web-Mercator domain like every other tile, so the
+**85.05°–90° polar caps get no surface** (camera-clear near a pole on the globe). This is **not
+background-specific**: fill and line have the identical gap already, because the tile cover *is* the
+Mercator pyramid at every zoom (z0 included). Full-sphere polar coverage needs geometry **outside** the tile
+pyramid (a projected polar-cap surface / a dedicated globe-only background), which belongs here, not in a
+per-layer-tile-processing stage. Not scheduled.
+
 ## What Track B owns (does NOT fall out of Epic A)
 
 ### B1 — Symbol far-side occlusion (the big one)

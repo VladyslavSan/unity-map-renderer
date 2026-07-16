@@ -8,7 +8,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -24,7 +24,7 @@ namespace MapRenderer.Tests
         /// <summary>Synchronous fill-layer mesh build. Returns null when the layer produces no geometry.
         /// Pass <paramref name="projection"/> to build with a non-default projection (e.g. the globe).</summary>
         public static Mesh BuildFill(
-            IReadOnlyList<MvtFeature> features, Fill.PaintProperties paint,
+            IReadOnlyList<ITileFeature> features, Fill.PaintProperties paint,
             double zoom, double extent, TileId id, IProjection projection = null)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
@@ -39,7 +39,7 @@ namespace MapRenderer.Tests
 
         /// <summary>Synchronous line-layer mesh build. Returns null when the layer produces no geometry.</summary>
         public static Mesh BuildLine(
-            IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
+            IReadOnlyList<ITileFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, double2 origin)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
@@ -52,7 +52,7 @@ namespace MapRenderer.Tests
         /// through <paramref name="projection"/> (the SAME origin the vertices use), so a globe fixture lays
         /// its lines on the sphere. Mirrors the projection-aware <see cref="BuildFill"/>.</summary>
         public static Mesh BuildLine(
-            IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
+            IReadOnlyList<ITileFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, IProjection projection)
         {
             double3 renderOrigin = TileMeshPipeline.ProjectTileCornerOrigin(id, projection);
@@ -65,7 +65,7 @@ namespace MapRenderer.Tests
         /// <summary>Build a line layer's mesh and return only the written vertex count (0 = no geometry). Used
         /// by the S14 data-driven-bake teeth that only need "did the bake produce geometry?".</summary>
         public static int LineVertexCount(
-            IReadOnlyList<MvtFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
+            IReadOnlyList<ITileFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, double2 origin)
         {
             var mda = Mesh.AllocateWritableMeshData(1);

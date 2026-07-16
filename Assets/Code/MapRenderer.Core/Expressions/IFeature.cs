@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Expressions
 {
@@ -7,13 +7,14 @@ namespace MapRenderer.Core.Expressions
     /// The feature-data surface an expression can query: properties (<c>get</c>/<c>has</c>/<c>properties</c>),
     /// geometry type (<c>geometry-type</c>), and feature id (<c>id</c>). This is an abstraction so the
     /// expression engine and filter layer can be tested against synthetic features (see
-    /// <see cref="DictionaryFeature"/>) as well as real decoded MVT features (see
-    /// <c>MvtFeatureAdapter</c> in <c>MapRenderer.Core.Filters</c>).
+    /// <see cref="DictionaryFeature"/>) as well as real decoded MVT features (<c>MvtFeature</c> in
+    /// <c>MapRenderer.Core.Mvt</c> implements this directly — Epic A / A6 folded the retired
+    /// <c>MvtFeatureAdapter</c> into it).
     /// </summary>
     public interface IFeature
     {
         /// <summary>The feature's geometry type. Maps to the spec strings Point/LineString/Polygon.</summary>
-        MvtGeometryType GeometryType { get; }
+        TileGeometryType GeometryType { get; }
 
         /// <summary>True when the feature has an id (the <c>id</c> expression is an error otherwise — spec).</summary>
         bool HasId { get; }
@@ -36,13 +37,13 @@ namespace MapRenderer.Core.Expressions
     {
         private readonly Dictionary<string, Value> _properties;
 
-        public MvtGeometryType GeometryType { get; }
+        public TileGeometryType GeometryType { get; }
         public bool HasId { get; }
         public Value Id { get; }
 
         public DictionaryFeature(
             IReadOnlyDictionary<string, Value> properties = null,
-            MvtGeometryType geometryType = MvtGeometryType.Unknown,
+            TileGeometryType geometryType = TileGeometryType.Unknown,
             bool hasId = false,
             Value id = default)
         {

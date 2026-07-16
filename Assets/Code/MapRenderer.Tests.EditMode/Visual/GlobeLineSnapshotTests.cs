@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Visual
             var paint  = new Line.PaintProperties(styleLayer);
             var layout = new Line.LayoutProperties(styleLayer);
 
-            var mvtLayer = SourceLayerResolver.ResolveMvtLayer(styleLayer, mvtTile);
+            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must contain the geolines layer");
             var features = FeatureSelector.SelectFeatures(styleLayer, mvtTile, 0.0);
             Assert.IsNotEmpty(features, "geolines must select features");

@@ -127,13 +127,13 @@ namespace MapRenderer.Unity.Rendering.Map
             Labels      = new LabelPlacementSystem(Camera, _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null);
             // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
             // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) now live on each
-            // SymbolRenderLayer (Layers.Build), not here. A-1: DATA arrives via the bytes-ready push (shared
-            // already-fetched bytes); the tile LIFECYCLE is PULLED — each frame we hand it TileManager's
-            // loaded set and it reconciles (no release/restore callbacks). cacheEnabled drives
-            // keep-warm-on-release so it matches the prepared mesh cache.
+            // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
+            // (_symbols implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
+            // hand it TileManager's loaded set and it reconciles (no release/restore callbacks). cacheEnabled
+            // drives keep-warm-on-release so it matches the prepared mesh cache.
             _symbols    = new SymbolLabelSubsystem(Camera,
                 _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
-            TileManager.SymbolTileBytesReady = _symbols.OnTileBytesReady;
+            TileManager.SymbolWorkerFactory = _symbols;
         }
 
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
@@ -184,28 +184,44 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public async UniTask SetStyle(StyleDocument style, string styleId, CancellationToken ct = default)
         {
-            _style   = style;
+            // Epic A / A2 (design §E step 3, MED 4 / HIGH b — transactional restyle, option (i) bounded):
+            // the ONE await runs FIRST, before any layer/identity mutation, so the OLD style's layers/
+            // materials/backend/identity stay fully live through the resolution window — a delayed or
+            // cancelled restyle leaves the previous map rendering (no blank background, no destroyed-
+            // material window, no new-cache-token probe under old visuals). BuildSourceSpecs now derives its
+            // source-ids from style.Layers directly (RenderLayerFactory.TryGetFetchSource), NOT from the
+            // not-yet-built Layers.Layers.
+            var specs = await BuildSourceSpecs(style, ct);
+            ct.ThrowIfCancellationRequested(); // last safe abort — nothing mutated yet (old style stays intact)
+
+            // Round-4 TOCTOU fix: MapMaterialSet fields (and _config.MaterialSet itself) are live-mutable, so
+            // capture ONCE here and validate that SAME captured reference — a concurrent mutation between
+            // this check and its use (Layers.Build below) cannot slip a null base past validation (no await
+            // between validate and use). Fail-loud: an unconfigured base is a developer configuration error.
+            var materialSet = _config.MaterialSet;
+            materialSet.Validate();
+
+            // Identity commits HERE (not before the await, HIGH b) — a delayed restyle must not run the OLD
+            // layers/pipelines under the NEW cache token, and a cancel above must not report the new identity.
+            _style  = style;
             StyleId = styleId;
             // S82: the PreparedTileCache's opaque cache-key token — constant default until S83 supplies a
             // real per-style id (Risk 2); set before SetSources so a hit/miss probe this Tick already sees it.
             TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
-            Layers.Build(_style, Camera.CurrentProperties.Zoom, _config.MaterialSet);
+            Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
             // D10: derive the symbol layers from the just-built set (RenderLayerFactory is the sole
             // registry) instead of re-walking style.Layers with an is-check (kills §1.6). One walk, two
             // lists (D11/E2): the typed StyleLayer for the subsystem, the owning SymbolRenderLayer (its
             // material + presenter) for Labels.Tick — same order, so the ordinal mapping stays 1:1.
-            // E3: the same walk also gates any BackgroundRenderLayer to Mercator-only — a flat world quad
-            // is wrong on a curved (globe) projection (§7.6 follow-up covers the real globe background).
-            bool curvedGround = Camera.Projection.TryGetHorizonOccluder(out _, out _);
+            // A2: the Mercator-only background gate is gone — background is now a per-covered-tile TileMesh
+            // layer projected through the same IProjection fill/line use, so the globe renders it correctly.
             _symbolLayerScratch.Clear();
             _symbolRenderLayers.Clear();
             foreach (var layer in Layers.Layers)
                 if (layer is Style.SymbolRenderLayer s) { _symbolLayerScratch.Add(s.SymbolLayer); _symbolRenderLayers.Add(s); }
-                else if (layer is Style.BackgroundRenderLayer b) b.SetVisible(!curvedGround);
             _symbols.SetStyle(_style, _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
 
-            var specs = await BuildSourceSpecs(style, ct);
             TileManager.SetSources(specs, _config.Backend);
         }
 
@@ -214,6 +230,13 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
         /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via S83a. Failure
         /// isolation: an offline/404/malformed TileJSON logs a warning and skips THAT source.
+        ///
+        /// Epic A / A2 (HIGH b/c): runs BEFORE <see cref="Style.RenderLayerSet.Build"/> now (the transactional
+        /// restyle reorder — see <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>), so it can no
+        /// longer walk the built <see cref="Layers"/> set. Walks <paramref name="style"/>'s raw layers through
+        /// <see cref="Style.RenderLayerFactory.TryGetFetchSource"/> instead — the ONE registry of which style
+        /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
+        /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
         /// </summary>
         private async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
@@ -221,17 +244,12 @@ namespace MapRenderer.Unity.Rendering.Map
             var loader  = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
             var factory = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
 
-            // D10: distinct rendered source-ids in declared order, derived from the ALREADY-BUILT layer set
-            // (Layers.Build ran above, in SetStyle) instead of re-walking style.Layers with an is-check —
-            // RenderLayerFactory is the one registry. ViewGeometry layers (background) have no tile data, so
-            // no source to fetch; that is the principled exclusion, not a special case (fill/line/symbol
-            // still fetch, same as before).
+            // Distinct rendered source-ids in declared order.
             var seen    = new HashSet<string>();
             var ordered = new List<string>();
-            foreach (var layer in Layers.Layers)
+            foreach (var sl in style.Layers)
             {
-                if (layer.Build == Style.RenderLayerBuild.ViewGeometry) continue;
-                string sid = layer.StyleLayer.Source ?? string.Empty;
+                if (!Style.RenderLayerFactory.TryGetFetchSource(sl, out string sid)) continue;
                 if (seen.Add(sid)) ordered.Add(sid);
             }
 
@@ -270,8 +288,10 @@ namespace MapRenderer.Unity.Rendering.Map
 
                 string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
                 var key = Tile.TileManager.SourceKey.From(def);
+                // Epic A / A7: the ONE production site that wraps the byte fetcher into the raised
+                // ITileFeatureSource seam — TileManager never names the byte-level type (F-1).
                 specs.Add(new Tile.TileManager.SourceSpec(
-                    sid, key, def.MinZoom, def.MaxZoom, () => factory(template)));
+                    sid, key, def.MinZoom, def.MaxZoom, () => new Tile.Processing.MvtTileFeatureSource(factory(template))));
             }
             return specs;
         }

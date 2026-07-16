@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
@@ -58,7 +57,7 @@ namespace MapRenderer.Tests
         {
             var features = new List<IFeature>(layer.Features.Count);
             foreach (var f in layer.Features)
-                features.Add(new MvtFeatureAdapter(f));
+                features.Add(f); // A6: MvtFeature implements IFeature directly — no adapter
             return features;
         }
 
@@ -336,9 +335,9 @@ namespace MapRenderer.Tests
                 SourceLayer = "countries",
             };
 
-            var mvtLayer = SourceLayerResolver.ResolveMvtLayer(styleLayer, tile);
+            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
             Assert.IsNotNull(mvtLayer,
-                "SourceLayerResolver.ResolveMvtLayer must return the MVT layer for SourceLayer='countries'.");
+                "SourceLayerResolver.ResolveTileLayer must return the MVT layer for SourceLayer='countries'.");
             Assert.AreEqual("countries", mvtLayer.Name,
                 "Resolved MVT layer name must match SourceLayer.");
         }
@@ -355,7 +354,7 @@ namespace MapRenderer.Tests
                 SourceLayer = "__nonexistent_layer__",
             };
 
-            var mvtLayer = SourceLayerResolver.ResolveMvtLayer(styleLayer, tile);
+            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
             Assert.IsNull(mvtLayer,
                 "SourceLayerResolver must return null for a layer name not present in the tile.");
         }
@@ -372,7 +371,7 @@ namespace MapRenderer.Tests
                 SourceLayer = null,
             };
 
-            var mvtLayer = SourceLayerResolver.ResolveMvtLayer(styleLayer, tile);
+            var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, tile);
             Assert.IsNull(mvtLayer,
                 "SourceLayerResolver must return null when SourceLayer is null (background layers).");
         }

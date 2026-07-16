@@ -1,10 +1,10 @@
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Style
 {
     /// <summary>
     /// The layer→source resolution seam: maps a parsed <see cref="StyleLayer"/> onto features in a
-    /// decoded <see cref="MvtTile"/> via the layer's <c>source-layer</c> string. This is the plumbing
+    /// decoded <see cref="IDecodedTile"/> via the layer's <c>source-layer</c> string. This is the plumbing
     /// that connects the style model to the data pipeline; per-layer rendering stages (S13 fill, S14
     /// line, …) extend behavior off this seam rather than re-implementing the lookup.
     ///
@@ -14,11 +14,10 @@ namespace MapRenderer.Core.Style
     public static class SourceLayerResolver
     {
         /// <summary>
-        /// Resolves the MVT layer a style layer selects features from. Returns null (no throw) when the
-        /// style layer declares no <c>source-layer</c>, or when no MVT layer of that name exists in the
-        /// tile.
+        /// Resolves the tile layer a style layer selects features from. Returns null (no throw) when the
+        /// style layer declares no <c>source-layer</c>, or when no layer of that name exists in the tile.
         /// </summary>
-        public static MvtLayer ResolveMvtLayer(StyleLayer layer, MvtTile tile)
+        public static ITileLayer ResolveTileLayer(StyleLayer layer, IDecodedTile tile)
         {
             if (layer == null || tile == null) return null;
             if (string.IsNullOrEmpty(layer.SourceLayer)) return null;
@@ -38,14 +37,14 @@ namespace MapRenderer.Core.Style
 
         /// <summary>
         /// True when this style layer renders vector features from a vector source for which a matching
-        /// MVT source-layer exists in the tile (i.e. it has a resolvable feature set). Background and
+        /// source-layer exists in the tile (i.e. it has a resolvable feature set). Background and
         /// non-vector layers return false.
         /// </summary>
-        public static bool HasResolvableFeatures(StyleLayer layer, StyleDocument document, MvtTile tile)
+        public static bool HasResolvableFeatures(StyleLayer layer, StyleDocument document, IDecodedTile tile)
         {
             var source = ResolveSource(layer, document);
             if (source == null || source.Type != SourceType.Vector) return false;
-            return ResolveMvtLayer(layer, tile) != null;
+            return ResolveTileLayer(layer, tile) != null;
         }
     }
 }

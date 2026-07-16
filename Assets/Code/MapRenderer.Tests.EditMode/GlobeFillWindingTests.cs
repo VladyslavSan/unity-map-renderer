@@ -17,6 +17,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 
@@ -38,13 +39,13 @@ namespace MapRenderer.Tests
                 ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        private static (IReadOnlyList<MvtFeature> features, Fill.PaintProperties paint, double extent) Setup()
+        private static (IReadOnlyList<ITileFeature> features, Fill.PaintProperties paint, double extent) Setup()
         {
             var mvtTile   = MvtDecoder.Decode(FixtureBytes());
             var fillLayer = MinimalStyle().Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
             var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer  = SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+            var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must have the 'countries' layer");
             Assert.Greater(features.Count, 0);
             return (features, paint, mvtLayer.Extent);

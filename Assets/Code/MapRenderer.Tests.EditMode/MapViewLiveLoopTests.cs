@@ -170,7 +170,7 @@ namespace MapRenderer.Tests
                 var paint     = new Fill.PaintProperties(fillLayer);
                 var features  = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
                     fillLayer, mvtTile, 0.0);
-                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveMvtLayer(fillLayer, mvtTile);
+                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
                 Assert.IsNotNull(mvtLayer, "The fixture must contain the 'countries' MVT layer");
                 Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");

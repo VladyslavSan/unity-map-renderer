@@ -5,6 +5,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Geometry;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests
 {
@@ -93,7 +94,7 @@ namespace MapRenderer.Tests
             double worstRel = 0;
             foreach (var f in layer.Features)
             {
-                if (f.GeometryType != MvtGeometryType.Polygon) continue;
+                if (f.GeometryType != TileGeometryType.Polygon) continue;
                 foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)))
                 {
                     if (poly.Holes == null || poly.Holes.Count == 0) continue;

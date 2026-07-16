@@ -24,7 +24,13 @@ TileManager.Tick(cameraProperties, selectionConfig)          // once per frame, 
 
 `SymbolLabelSubsystem.OnTileBytesReady` does **not** build inline — it **enqueues** the MVT bytes. The actual
 decode → feature-extract (off the main thread) → glyph-shape → atlas-append is drained a bounded number per
-frame by `PumpBuilds` (stall-#1 fix). The finished per-tile labels land in `SymbolTileLabelStore`, which:
+frame by `PumpBuilds` (stall-#1 fix). Epic A / A3: decode + per-layer extract now run through
+`Rendering.Tile.Processing.TileLayerProcessorRunner.RunSymbolWorkerPass` (the symbol cadence's own
+decode-once worker-pass entry — still symbol's own bytes push, not the mesh pass's decode) over one
+`TileSymbolLayerProcessor` per symbol style layer, each writing into the build's shared label list; the
+main-thread shape/atlas-append tail runs as `SymbolLabelSubsystem.BuildTileAsync`'s per-layer
+`CompleteOnMainAsync` loop after one batched `SwitchToMainThread` hop — the queue/pump/budget/atlas/store
+flow below is otherwise unchanged from pre-A3. The finished per-tile labels land in `SymbolTileLabelStore`, which:
 
 - keeps an **active** set (in cover) and a **cached** set (out of cover, kept warm for cache-hit re-entry);
 - bumps a monotonic **`Version`** on every set-changing mutation — this is the key the fast clock uses to

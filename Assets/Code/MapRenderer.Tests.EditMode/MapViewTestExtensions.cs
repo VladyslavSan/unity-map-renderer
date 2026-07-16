@@ -12,6 +12,7 @@ using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.T
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
@@ -69,24 +70,27 @@ namespace MapRenderer.Tests
             mv.Camera.SyncToCamera(); // production commits in LateUpdate; tests drive it explicitly at the seed
             mv.Layers.Build(style, mv.Camera.CurrentProperties.Zoom, view.Config.MaterialSet);
 
-            // One SourceSpec per distinct rendered (fill/line) source-id, each creating the injected source.
-            // Zoom range left wide-open (cover is already zoom-clamped by the selector). Key is irrelevant —
-            // tests wire once, never restyle-diff.
+            // One SourceSpec per distinct rendered (fill/line/symbol) source-id, each creating the injected
+            // source. Zoom range left wide-open (cover is already zoom-clamped by the selector). Key is
+            // irrelevant — tests wire once, never restyle-diff.
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
             var layers = mv.Layers.Layers;
-            // E1 D10 mirror: skip ViewGeometry (background) layers — no tile data, so no source to fetch
-            // (live as of E3: a background style now builds a real ViewGeometry layer; this skip keeps it
-            // out of the source specs, same as MapView.SetStyle's own source-fetch derivation).
+            // Epic A / A2: mirrors the production skip (MapView.BuildSourceSpecs, post-A2) — only a layer
+            // with a non-empty StyleLayer.Source fetches; background is source-less by design (no Build-kind
+            // check any more — ViewGeometry is REMOVED).
             for (int i = 0; i < layers.Count; i++)
-                if (layers[i].Build != RenderLayerBuild.ViewGeometry) AddSpec(layers[i].StyleLayer?.Source);
+                if (!string.IsNullOrEmpty(layers[i].StyleLayer?.Source)) AddSpec(layers[i].StyleLayer.Source);
             mv.TileManager.SetSources(specs, view.Config.Backend);
 
             void AddSpec(string sid)
             {
                 sid ??= string.Empty;
+                // Epic A / A7: the raised seam — wrap the injected byte source into the MVT feature source,
+                // mirroring MapView.BuildSourceSpecs' production wrap.
                 if (seen.Add(sid))
-                    specs.Add(new TileManager.SourceSpec(sid, default, 0, int.MaxValue, () => source));
+                    specs.Add(new TileManager.SourceSpec(
+                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source)));
             }
         }
 

@@ -9,6 +9,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Unity.Mathematics;
@@ -67,7 +68,7 @@ namespace MapRenderer.Tests
             int vi = 0;
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.LineString) continue;
+                if (feature.GeometryType != TileGeometryType.LineString) continue;
 
                 // Inject the discriminating property (overwrite if already present).
                 string value = vi < propValues.Length ? propValues[vi] : propValues[propValues.Length - 1];
@@ -99,7 +100,7 @@ namespace MapRenderer.Tests
 
             // Verify the features are actually LineStrings (guard against fixture change).
             foreach (var f in features)
-                Assert.AreEqual(MvtGeometryType.LineString, f.GeometryType,
+                Assert.AreEqual(TileGeometryType.LineString, f.GeometryType,
                     "Each geolines feature must be a LineString.");
 
             // Match expression: A → reddish, B → bluish, default → gray.

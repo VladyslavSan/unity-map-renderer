@@ -52,5 +52,43 @@ namespace MapRenderer.Tests.Structure
                 "(RenderLayerFactory is the sole registry, D10). Offending text: " +
                 (offenders.Count > 0 ? offenders[0].Value : string.Empty));
         }
+
+        /// <summary>Epic A / A2 (plan §F tooth 5): <c>RenderLayerBuild.ViewGeometry</c> is REMOVED, not left
+        /// dead. Compile-enforced (the enum member no longer exists, so any surviving reference is a compile
+        /// error) — this grep is a redundant, documentation-grade guard over the production assembly.</summary>
+        [Test]
+        public void RenderLayerBuild_ViewGeometry_HasNoProductionReferences()
+        {
+            string root = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            foreach (string file in Directory.GetFiles(root, "*.cs", SearchOption.AllDirectories))
+            {
+                string text = File.ReadAllText(file);
+                Assert.IsFalse(text.Contains("RenderLayerBuild.ViewGeometry"),
+                    $"'{file}' references the REMOVED RenderLayerBuild.ViewGeometry member (Epic A / A2 — " +
+                    "background's build kind collapsed to TileMesh).");
+            }
+        }
+
+        /// <summary>Epic A / A2 (plan §F tooth 6): the Mercator-only background gate — a <c>SetVisible</c>
+        /// method on <c>BackgroundRenderLayer</c> that <c>MapView</c> toggled via
+        /// <c>b.SetVisible(!curvedGround)</c> — is DELETED; background is now a per-covered-tile TileMesh
+        /// layer projected through the same IProjection fill/line use, so the globe renders a correctly
+        /// curved background instead of hiding it entirely.
+        ///
+        /// <para>Scoped to <c>BackgroundRenderLayer.cs</c> (the gate's own file), not a grep of
+        /// <c>MapView.cs</c> for ANY <c>SetVisible(</c>: the method being gone is compile-backed (a MapView
+        /// call could not resolve without it), and this narrow scope can't be falsely tripped by an unrelated
+        /// future <c>SetVisible</c> call elsewhere in <c>MapView</c> (the A2 merge-step follow-up).</para></summary>
+        [Test]
+        public void BackgroundRenderLayer_HasNoMercatorVisibilityGate()
+        {
+            string file = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Style", "BackgroundRenderLayer.cs");
+            Assert.IsTrue(File.Exists(file), $"expected source file to exist at {file}");
+            string text = File.ReadAllText(file);
+            Assert.IsFalse(text.Contains("SetVisible("),
+                "BackgroundRenderLayer.cs must contain ZERO 'SetVisible(' — the Mercator-only background " +
+                "gate method is deleted (Epic A / A2); background is a backend-owned per-tile TileMesh layer now.");
+        }
     }
 }

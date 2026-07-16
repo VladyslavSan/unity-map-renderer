@@ -8,10 +8,10 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Unity.Text
 {
@@ -74,7 +74,7 @@ namespace MapRenderer.Unity.Text
         /// may run it on the thread pool. Returns the shaping inputs <see cref="ShapeAsync"/> consumes on main.
         /// </summary>
         public List<ExtractedLayer> ExtractLayers(
-            MvtTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
+            IDecodedTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
             double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null)
         {
             var result = new List<ExtractedLayer>(symbolLayers?.Count ?? 0);
@@ -95,7 +95,7 @@ namespace MapRenderer.Unity.Text
         /// <summary>Convenience (tests + the demo path): extract then shape in one call. The subsystem's live
         /// path instead runs <see cref="ExtractLayers"/> on a worker and <see cref="ShapeAsync"/> on main.</summary>
         public UniTask BuildAsync(
-            MvtTile tile,
+            IDecodedTile tile,
             TileId tileId,
             IReadOnlyList<StyleLayer> symbolLayers,
             double zoom,

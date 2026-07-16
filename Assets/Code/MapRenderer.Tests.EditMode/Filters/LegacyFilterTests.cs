@@ -5,7 +5,7 @@
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using NUnit.Framework;
 
 namespace MapRenderer.Tests.Filters
@@ -33,31 +33,31 @@ namespace MapRenderer.Tests.Filters
             {
                 ["area"] = Value.Number(50),
                 ["name"] = Value.String("alpha"),
-            }, MvtGeometryType.Polygon),
+            }, TileGeometryType.Polygon),
             // 1
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["area"] = Value.Number(100),
                 ["name"] = Value.String("beta"),
-            }, MvtGeometryType.Polygon, hasId: true, id: Value.Number(1)),
+            }, TileGeometryType.Polygon, hasId: true, id: Value.Number(1)),
             // 2
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["area"] = Value.Number(200),
                 ["name"] = Value.String("gamma"),
-            }, MvtGeometryType.Polygon, hasId: true, id: Value.Number(2)),
+            }, TileGeometryType.Polygon, hasId: true, id: Value.Number(2)),
             // 3
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["name"] = Value.String("delta"),
-            }, MvtGeometryType.LineString, hasId: true, id: Value.Number(10)),
+            }, TileGeometryType.LineString, hasId: true, id: Value.Number(10)),
             // 4
             new DictionaryFeature(new Dictionary<string, Value>
             {
                 ["name"] = Value.String("epsilon"),
-            }, MvtGeometryType.Point),
+            }, TileGeometryType.Point),
             // 5 — no properties
-            new DictionaryFeature(null, MvtGeometryType.Unknown),
+            new DictionaryFeature(null, TileGeometryType.Unknown),
         };
 
         private static List<int> Select(string filterJson)

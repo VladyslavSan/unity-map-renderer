@@ -20,6 +20,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Source;
 
@@ -118,7 +119,7 @@ namespace MapRenderer.Tests
 
             foreach (var feature in layer.Features)
             {
-                if (feature.GeometryType != MvtGeometryType.Polygon) continue;
+                if (feature.GeometryType != TileGeometryType.Polygon) continue;
 
                 List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
                 if (rings == null || rings.Count == 0) continue;

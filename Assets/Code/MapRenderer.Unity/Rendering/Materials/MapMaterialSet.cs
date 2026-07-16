@@ -26,5 +26,33 @@ namespace MapRenderer.Unity.Rendering.Materials
         
         [Tooltip("Base material for symbol text render items. Cloned per style layer.")]
         [SerializeField] public Material SymbolText;
+
+        /// <summary>
+        /// Epic A / A2 (DECISION 2): fail LOUD when any base material is unassigned, rather than letting a
+        /// null base silently reach the pipeline (a null-material fill/line/background/symbol slot would
+        /// otherwise crash a backend's <c>AddTileLayer</c> — see <c>BackendNullSlotTests</c>' doc). A partial
+        /// material set is a developer CONFIGURATION error (an unassigned <see cref="ScriptableObject"/>
+        /// field), not a runtime/data condition.
+        ///
+        /// <para>Round-4: the fields above are live-mutable, so call this on a CAPTURED reference at COMMIT
+        /// time (immediately before the synchronous <c>SetStyle</c> commit, after the one
+        /// <c>await BuildSourceSpecs</c>) — never at construction/entry alone, which a concurrent mutation
+        /// during the await could invalidate (TOCTOU). See <c>MapView.SetStyle</c>.</para>
+        /// </summary>
+        public void Validate()
+        {
+            if (FillMaterial == null)
+                throw new System.InvalidOperationException(
+                    "MapMaterialSet.FillMaterial is unassigned — every map base material (FillMaterial, " +
+                    "LineMaterial, SymbolText) must be set.");
+            if (LineMaterial == null)
+                throw new System.InvalidOperationException(
+                    "MapMaterialSet.LineMaterial is unassigned — every map base material (FillMaterial, " +
+                    "LineMaterial, SymbolText) must be set.");
+            if (SymbolText == null)
+                throw new System.InvalidOperationException(
+                    "MapMaterialSet.SymbolText is unassigned — every map base material (FillMaterial, " +
+                    "LineMaterial, SymbolText) must be set.");
+        }
     }
 }

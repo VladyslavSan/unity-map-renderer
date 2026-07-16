@@ -9,6 +9,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Style.Symbol
 {
@@ -29,14 +30,14 @@ namespace MapRenderer.Core.Style.Symbol
         /// mirroring the tile-accumulation lifecycle in F5).
         /// </summary>
         /// <param name="layer">The symbol style layer (a non-symbol layer is a no-op).</param>
-        /// <param name="tile">The decoded MVT tile.</param>
+        /// <param name="tile">The decoded tile.</param>
         /// <param name="tileId">The tile's slippy address (drives tile→geo + the <c>TileKey</c> tiebreak).</param>
         /// <param name="zoom">Current zoom, for evaluating zoom-dependent text-size/sort-key/paint.</param>
         /// <param name="projection">Geo → render-space projection.</param>
         /// <param name="output">Caller-owned list the extracted labels are appended to.</param>
         public static void Extract(
             MapRenderer.Core.Style.StyleLayer layer,
-            MvtTile tile,
+            IDecodedTile tile,
             TileId tileId,
             double zoom,
             IProjection projection,
@@ -45,11 +46,11 @@ namespace MapRenderer.Core.Style.Symbol
             if (!(layer is StyleLayer symbolLayer) || tile == null || projection == null || output == null)
                 return;
 
-            MvtLayer mvtLayer = SourceLayerResolver.ResolveMvtLayer(layer, tile);
-            if (mvtLayer == null) return;
-            double extent = mvtLayer.Extent;
+            ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
+            if (tileLayer == null) return;
+            double extent = tileLayer.Extent;
 
-            IReadOnlyList<MvtFeature> features = FeatureSelector.SelectFeatures(layer, tile, zoom);
+            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, zoom);
             long tileKey = PackTileKey(tileId);
             int ordinal = 0;
 
@@ -62,26 +63,26 @@ namespace MapRenderer.Core.Style.Symbol
 
             SymbolPlacement placement = layout.SymbolPlacement;
             bool isLine = placement != SymbolPlacement.Point;
-            MvtGeometryType wantGeometry = isLine ? MvtGeometryType.LineString : MvtGeometryType.Point;
+            TileGeometryType wantGeometry = isLine ? TileGeometryType.LineString : TileGeometryType.Point;
 
             for (int f = 0; f < features.Count; f++)
             {
-                MvtFeature feature = features[f];
+                ITileFeature feature = features[f];
                 if (feature.GeometryType != wantGeometry) continue; // point layer skips lines and vice-versa
 
-                var adapted = new MvtFeatureAdapter(feature);
-                string text = TextFieldResolver.Resolve(layout.TextField, adapted);
+                // A6: the feature IS an IFeature (the neutral carrier implements it directly) — no adapter alloc.
+                string text = TextFieldResolver.Resolve(layout.TextField, feature);
                 if (text == null) continue; // absent/empty text-field → no label
                 // text-transform (Slice B): case-fold the resolved label before it is shaped downstream.
                 text = layout.TextTransform.Apply(text);
 
                 // Per-feature evaluated style (zoom + feature — safe for constant/zoom/data-driven).
-                float textSize = layout.TextSize.Evaluate(zoom, adapted);
-                float padding  = layout.TextPadding.Evaluate(zoom, adapted);
-                float sortKey  = layout.SymbolSortKey.Evaluate(zoom, adapted);
-                float spacing  = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, adapted)); // px, >= 1 (spec)
-                float maxAngle = layout.TextMaxAngle.Evaluate(zoom, adapted);                // degrees (#6)
-                LabelPaint labelPaint = EvaluatePaint(paint, zoom, adapted);
+                float textSize = layout.TextSize.Evaluate(zoom, feature);
+                float padding  = layout.TextPadding.Evaluate(zoom, feature);
+                float sortKey  = layout.SymbolSortKey.Evaluate(zoom, feature);
+                float spacing  = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, feature)); // px, >= 1 (spec)
+                float maxAngle = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees (#6)
+                LabelPaint labelPaint = EvaluatePaint(paint, zoom, feature);
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
 
@@ -124,7 +125,7 @@ namespace MapRenderer.Core.Style.Symbol
                 {
                     // Layout options are per-feature (zoom + feature evaluated), constant across the feature's
                     // points — build once here, stamp onto every point label below.
-                    TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, adapted);
+                    TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, feature);
                     for (int p = 0; p < paths.Count; p++)
                     {
                         List<double2> path = paths[p];

@@ -95,7 +95,9 @@ namespace MapRenderer.Tests
         {
             using var set = Build(InterleavedStyleJson);
 
-            Assert.AreEqual(RenderLayerBuild.ViewGeometry, set[0].Build, "background is ViewGeometry.");
+            // Epic A / A2: background is now a source-less per-covered-tile TileMesh layer — ViewGeometry
+            // is REMOVED (design §B "The RenderLayerBuild.ViewGeometry enum decision").
+            Assert.AreEqual(RenderLayerBuild.TileMesh, set[0].Build, "background is TileMesh (A2).");
             Assert.AreEqual(RenderLayerBuild.TileMesh,     set[1].Build, "fill is TileMesh.");
             Assert.AreEqual(RenderLayerBuild.FramePlaced,  set[2].Build, "symbol is FramePlaced.");
             Assert.AreEqual(RenderLayerBuild.TileMesh,     set[3].Build, "line is TileMesh.");
@@ -168,15 +170,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(HideFlags.DontSave, set.Root.gameObject.hideFlags,
                 "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
 
-            // The background layer (index 0) builds its quad GameObject eagerly — it must be parented under
-            // the shared root, named by its style layer id with NO prefix ("bg"), and itself visible (not
-            // HideAndDontSave). Symbol presenters take the identical parenting/naming path via
-            // LabelSlotPresenter, but their GameObjects are created lazily on first Present, so this asserts
-            // the eager background case as the mechanism's regression guard.
-            Transform bgChild = set.Root.Find("bg"); // exact style layer id — locks the no-prefix naming
-            Assert.IsNotNull(bgChild, "the background GameObject is parented under the shared root and named by its layer id.");
-            Assert.AreEqual(HideFlags.DontSave, bgChild.gameObject.hideFlags,
-                "the background GameObject is visible in the Hierarchy (DontSave, not HideAndDontSave).");
+            // Epic A / A2: background no longer owns a scene GameObject (its geometry is per-tile, produced
+            // by TileBackgroundLayerProcessor and owned by the backend) — only symbol presenters still take
+            // the shared-root parenting path (lazily, on first Present), so there is nothing eager left to
+            // assert here for background; this test now only pins the shared root's own visibility contract.
         }
 
         [Test]
