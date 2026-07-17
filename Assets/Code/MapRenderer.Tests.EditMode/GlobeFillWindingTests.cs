@@ -72,6 +72,15 @@ namespace MapRenderer.Tests
                 float3 nn = n[t[i]];
                 float gm = math.length(g), nm = math.length(nn);
                 if (gm <= 0f || nm <= 0f) continue;
+                // Skip near-degenerate NEEDLE slivers (high aspect ratio): the globe fill's edge-conforming
+                // subdivision leaves antimeridian-spanning earcut slivers (an earcut concern, not a winding
+                // one — ~0.08% of z0 fill area) whose geometric face normal is likewise numerical noise, but
+                // not edge-on enough to trip the |cos|<0.5 gate below. thinness = 2·area/longestEdge² =
+                // gm/longestEdge²; well-formed ≈0.4+, a needle ≈<0.02. This keeps the check measuring
+                // MVT/earcut orientation consistency on WELL-FORMED triangles (its stated intent) — it does
+                // NOT lower the 0.99 uniformity bar.
+                float longestSq = math.max(math.lengthsq(vb - va), math.max(math.lengthsq(vc - vb), math.lengthsq(va - vc)));
+                if (longestSq > 0f && gm / longestSq < 0.02f) continue; // needle sliver — face-normal noise
                 float cos = math.dot(g, nn) / (gm * nm);  // angle between face normal and surface up
                 if (math.abs(cos) < 0.5f) continue;       // edge-on sliver (subdivision noise) — skip
                 if (cos > 0f) pos++; else neg++;

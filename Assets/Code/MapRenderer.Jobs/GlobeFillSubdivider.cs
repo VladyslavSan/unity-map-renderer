@@ -25,16 +25,33 @@ namespace MapRenderer.Jobs
     /// <summary>
     /// S91-C (C-3): adaptive curvature subdivision for globe fills, as a Burst job. Earcut triangulates in flat
     /// tile space; on a curved projection the straight triangle edges chord THROUGH the sphere (fills sink /
-    /// facet at low zoom). This refines each earcut triangle — splitting 1→4 at edge midpoints (in tile space,
-    /// re-projected onto the sphere) — until every edge subtends less than <c>acos(CosThresh)</c>, bounded by
-    /// <c>MaxDepth</c> and a per-tile <c>Budget</c> so a whole-globe z0 tile can't explode. A flat projection
-    /// (constant up) never splits — it passes straight through.
+    /// facet at low zoom). This refines each earcut triangle by PER-EDGE marking — an edge is marked iff it
+    /// subtends more than <c>acos(CosThresh)</c> — and one of 3 conforming templates keyed by the triangle's
+    /// mark count (0 emit / 1 bisect / 2 the "1→3" split / 3 the "1→4" split, at edge midpoints in tile space,
+    /// re-projected onto the sphere): a mark is a function of an edge's two endpoints alone, so two triangles
+    /// sharing an edge compute the identical mark — conforming without connectivity, no T-junctions at any
+    /// depth (mesh-triangulation-robustness-design.md §6.2, fix candidate A). Bounded by <c>MaxDepth</c> and a
+    /// per-tile <c>Budget</c> so a whole-globe z0 tile can't explode. A flat projection (constant up) never
+    /// splits — it passes straight through.
     ///
     /// <para><b>Burst.</b> The projection is the generic struct <typeparamref name="TProj"/> (the
     /// <see cref="ProjectPointsJob{TProj}"/> pattern) so Burst devirtualises + inlines <c>ProjectPoint</c> /
     /// <c>TangentBasisAt</c> — no managed call. The recursion is an EXPLICIT stack (Burst does not reliably
     /// support real recursion); the stack is DFS-bounded (~<c>3·MaxDepth</c> entries), a Temp allocation freed
     /// at job end. Managed dispatch by projection type lives in <see cref="GlobeFillSubdivideDispatch"/>.</para>
+    ///
+    /// <para><b>Residuals (known, not hit by the corpus/z2-quad teeth — both are depth-1 or uniformly-curved,
+    /// so every triangle reaches its stop test in lockstep).</b> A per-triangle FORCED stop — either the
+    /// <see cref="MaxDepth"/> cap or the <see cref="Budget"/> cutoff — makes that ONE triangle emit flat
+    /// regardless of its own marks, INCLUDING a still-marked edge it shares with a neighbour that has not
+    /// (yet) been forced to stop: on a tile with genuinely NON-uniform curvature (real-world geometry, unlike
+    /// the z2-quad's single flat square), the two triangles sharing that edge can reach depth 5 at different
+    /// times — one side keeps splitting the marked edge, the other is capped and leaves it whole — a
+    /// T-junction. Measured on the z0 "countries" fixture (unrelated to this stage's teeth):
+    /// <c>maxDepthReached=5, budgetFired=false, tJunctions=22, maxGap≈0.12% of tile</c> — i.e. the CAP alone
+    /// (not just the budget) reproduces this. Same class of gap as before this fix, at a different (smaller)
+    /// magnitude; scope-fenced here (see the plan's Scope fence — sliver-optimal cap handling is a follow-up,
+    /// not this stage).</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct GlobeFillSubdivideJob<TProj> : IJob where TProj : struct, IProjection
@@ -69,19 +86,78 @@ namespace MapRenderer.Jobs
                     Tri w = stack[stack.Length - 1];
                     stack.RemoveAtSwapBack(stack.Length - 1); // LIFO pop (order-independent)
 
-                    bool flat = w.Depth >= MaxDepth
-                        || (math.dot(w.A.Up, w.B.Up) >= CosThresh
-                         && math.dot(w.B.Up, w.C.Up) >= CosThresh
-                         && math.dot(w.C.Up, w.A.Up) >= CosThresh);
-                    if (flat || OutVerts.Length >= Budget) { Emit(w.A, w.Feat); Emit(w.B, w.Feat); Emit(w.C, w.Feat); continue; }
+                    // Per-EDGE marking (candidate A, mesh-triangulation-robustness-design.md §6.2): a mark is
+                    // a function of an edge's two endpoints ALONE, so two triangles sharing an edge compute
+                    // the identical mark — conforming without connectivity. Force 0 marks at the depth cap or
+                    // once the budget is exhausted (emit flat, same as the old per-triangle stop test).
+                    // MUST match SubdivisionCoverageValidator.RunMirror byte-for-byte (parity tooth).
+                    bool overBudget = OutVerts.Length >= Budget;
+                    bool canSplit = w.Depth < MaxDepth && !overBudget;
+                    bool markAB = canSplit && math.dot(w.A.Up, w.B.Up) < CosThresh;
+                    bool markBC = canSplit && math.dot(w.B.Up, w.C.Up) < CosThresh;
+                    bool markCA = canSplit && math.dot(w.C.Up, w.A.Up) < CosThresh;
+                    int markCount = (markAB ? 1 : 0) + (markBC ? 1 : 0) + (markCA ? 1 : 0);
 
-                    V ab = Project(Mid(w.A.Tile, w.B.Tile));
-                    V bc = Project(Mid(w.B.Tile, w.C.Tile));
-                    V ca = Project(Mid(w.C.Tile, w.A.Tile));
-                    stack.Add(new Tri { A = w.A, B = ab,   C = ca,   Depth = w.Depth + 1, Feat = w.Feat });
-                    stack.Add(new Tri { A = ab,  B = w.B,  C = bc,   Depth = w.Depth + 1, Feat = w.Feat });
-                    stack.Add(new Tri { A = ca,  B = bc,   C = w.C,  Depth = w.Depth + 1, Feat = w.Feat });
-                    stack.Add(new Tri { A = ab,  B = bc,   C = ca,   Depth = w.Depth + 1, Feat = w.Feat }); // centre
+                    if (markCount == 0) { Emit(w.A, w.Feat); Emit(w.B, w.Feat); Emit(w.C, w.Feat); continue; }
+
+                    V mAB = markAB ? Project(Mid(w.A.Tile, w.B.Tile)) : default;
+                    V mBC = markBC ? Project(Mid(w.B.Tile, w.C.Tile)) : default;
+                    V mCA = markCA ? Project(Mid(w.C.Tile, w.A.Tile)) : default;
+                    int childDepth = w.Depth + 1;
+
+                    if (markCount == 3)
+                    {
+                        // 1→4 (unchanged). Push order = corner-A, corner-B, corner-C, centre — LIFO pop
+                        // resolves centre's subtree first.
+                        stack.Add(new Tri { A = w.A, B = mAB,  C = mCA,  Depth = childDepth, Feat = w.Feat });
+                        stack.Add(new Tri { A = mAB, B = w.B,  C = mBC,  Depth = childDepth, Feat = w.Feat });
+                        stack.Add(new Tri { A = mCA, B = mBC,  C = w.C,  Depth = childDepth, Feat = w.Feat });
+                        stack.Add(new Tri { A = mAB, B = mBC,  C = mCA,  Depth = childDepth, Feat = w.Feat }); // centre
+                    }
+                    else if (markCount == 1)
+                    {
+                        // Bisect the one marked edge; the interior edge (midpoint–far vertex) is parent-
+                        // private. Cyclic relabeling A→B→C→A of the AB-marked template.
+                        if (markAB)
+                        {
+                            stack.Add(new Tri { A = w.A, B = mAB, C = w.C, Depth = childDepth, Feat = w.Feat });
+                            stack.Add(new Tri { A = mAB, B = w.B, C = w.C, Depth = childDepth, Feat = w.Feat });
+                        }
+                        else if (markBC)
+                        {
+                            stack.Add(new Tri { A = w.B, B = mBC, C = w.A, Depth = childDepth, Feat = w.Feat });
+                            stack.Add(new Tri { A = mBC, B = w.C, C = w.A, Depth = childDepth, Feat = w.Feat });
+                        }
+                        else // markCA
+                        {
+                            stack.Add(new Tri { A = w.C, B = mCA, C = w.B, Depth = childDepth, Feat = w.Feat });
+                            stack.Add(new Tri { A = mCA, B = w.A, C = w.B, Depth = childDepth, Feat = w.Feat });
+                        }
+                    }
+                    else // markCount == 2 — locked rotation (plan's "2-mark template" section): apex = the
+                         // vertex opposite the UNMARKED edge (shared by both marked edges); a0 = predecessor
+                         // of apex, c0 = successor of apex in the A→B→C→A cycle.
+                    {
+                        V apex, a0, c0, mVA0, mVC0;
+                        if (!markAB)      { apex = w.C; a0 = w.B; c0 = w.A; mVA0 = mBC; mVC0 = mCA; } // unmarked=AB
+                        else if (!markBC) { apex = w.A; a0 = w.C; c0 = w.B; mVA0 = mCA; mVC0 = mAB; } // unmarked=BC
+                        else              { apex = w.B; a0 = w.A; c0 = w.C; mVA0 = mAB; mVC0 = mBC; } // unmarked=CA
+
+                        stack.Add(new Tri { A = apex, B = mVC0, C = mVA0, Depth = childDepth, Feat = w.Feat }); // corner at apex
+                        // Quad a0-mVA0-mVC0-c0 → SHORTER interior diagonal (deterministic tile-space choice →
+                        // identical in mirror & job, parity-safe): keeps cap sub-triangles better-shaped
+                        // (less anisotropic) than the fixed long diagonal. Both choices preserve winding.
+                        if (math.distancesq(a0.Tile, mVC0.Tile) <= math.distancesq(mVA0.Tile, c0.Tile))
+                        {
+                            stack.Add(new Tri { A = a0, B = mVA0, C = mVC0, Depth = childDepth, Feat = w.Feat });
+                            stack.Add(new Tri { A = a0, B = mVC0, C = c0,   Depth = childDepth, Feat = w.Feat });
+                        }
+                        else
+                        {
+                            stack.Add(new Tri { A = a0,   B = mVA0, C = c0, Depth = childDepth, Feat = w.Feat });
+                            stack.Add(new Tri { A = mVA0, B = mVC0, C = c0, Depth = childDepth, Feat = w.Feat });
+                        }
+                    }
                 }
             }
             stack.Dispose();

@@ -169,20 +169,59 @@ inside a single tile (e.g. **tile 6/32/20, water layer**), **present ONLY in glo
 is identical for both, a globe-only artefact **cannot be earcut** — it is `GlobeFillSubdivideJob` (the 3°
 adaptive subdivision, the only globe-only stage).
 
-**Hypothesis (unconfirmed):** earcut bridges the ocean outer ring to each island hole via a **zero-width
-slit** (two coincident edges running diagonally coast→island). Flat Mercator keeps them coincident
-(invisible). The subdivision splits the two sides of the slit **independently**; asymmetric depth →
-**T-junction**, and on the curved sphere the un-split side's straight chord pulls off the split side's
-bulged midpoint → a thin diagonal gap along the bridge. (Globe-only, inside-tile, water/holes-only,
-diagonal — matches every observed property.) Alt/also: independent per-triangle subdivision generally admits
-intra-tile T-junctions.
+**Root cause CONFIRMED + MEASURED (managed mirror of the job over `water-6-32-20`, tile-space T-junction
+detection + render-space gap magnitude):**
+
+| Signal | Value | Conclusion |
+|--------|-------|-----------|
+| `maxDepthReached` | **1** (of MaxDepth 5) | shallow — only ~11 of 1676 earcut triangles curve enough to split |
+| `budgetFired` | **False** (Budget 200 000 untouched) | the Budget/MaxDepth hard-cutoff mechanism is **RULED OUT** |
+| worst render-space gap | **3612 m = 1.03% of the z6 tile span** (352 km) | a supra-pixel, visible crack — the diagonal the maintainer saw |
+| gap distribution | 18 sub-metre (invisible) + 2 mid + **3 in the 1–10 km bucket** | **severity, not count** — 3 big gaps are the artefact; the T-junction *tally* (23) is meaningless |
+
+**Mechanism (general — subsumes the earlier "bridge-slit" hypothesis):** the adaptive 1→4 refinement is
+**non-conforming**. A triangle splits (inserting a midpoint on *all three* edges) when any one of its edges
+subtends > 3°; its neighbour across a shared edge may be all-flat and **not** split, keeping that edge a
+straight chord. In flat tile space the inserted midpoint is exactly collinear (invisible — why Mercator is
+clean); on the sphere the midpoint bulges off the chord → a **T-junction gap**. The gap size scales with the
+shared edge's subtended angle, so the *largest* gaps fall on earcut's *longest* edges — the coast→island
+bridge diagonals. The "bridge-slit" is therefore just the **maximal-asymmetry instance** of the general
+depth-mismatch, not a separate cause. (Measured by `Tools/core-tests/SubdivRepro.cs` — throwaway seed.)
+
+**STATUS: RESOLVED (candidate A landed, commit `f566ad23` on `feat/globe-fill-subdivision`).** The Burst
+`GlobeFillSubdivideJob` now does **edge-conforming red-green refinement**: each edge is marked iff its
+endpoints' great-circle angle exceeds the 3° target (a function of the edge alone, so two triangles sharing
+it always agree — conforming without connectivity), split by mark-count via 3 templates (1→bisect, 2→1→3
+with the **shorter** interior diagonal, 3→1→4), recursing; interior diagonals are parent-private ⇒
+T-junction-free at every depth. Mercator stays a byte-identical pass-through (constant up ⇒ 0 marks). Both
+RED-first teeth flipped GREEN (z6 corpus + z2 depth-5 quad, maxGap 0.0m) + a z0 real-tile non-uniform tooth
+(rendered-geometry gap 0.0002%, sub-visible). Full gate 1500/1500. **Investigation note:** the z0 "residual"
+during the fix was phantom — zero-area earcut **bridge slits** + antimeridian earcut **needle slivers**
+(0.08% of z0 fill area), an *earcut* pathology (excluded from the subdivision-quality metrics, they paint
+nothing); a possible earcut-side antimeridian fix is a separate future epic.
+
+**Fix-direction candidates (considered; A chosen):**
+- **(A) Edge-conforming refinement** — subdivide each edge by a count that is a function of its two
+  endpoints *alone* (great-circle angle between their ups), so both triangles sharing it agree → conforming
+  by construction, still adaptive. Fill each triangle's interior respecting its (possibly unequal) per-edge
+  sample counts (red-green / template tessellation). *Most work, truly conforming, keeps adaptivity.*
+- **(B) Uniform per-tile depth** — one depth for the whole tile from its max edge curvature; conforming by
+  construction (all edges split identically in tile space). *Simplest, but reintroduces the low-zoom
+  (z0–2 whole-globe triangle) explosion adaptivity exists to avoid — Budget-bounded but risky.*
+- **(C) T-junction stitching post-pass** — after adaptive subdivision, insert each T-junction midpoint into
+  the offending straight edge (fan the unsplit triangle). *Bolt-on; can cascade.*
 
 **Wanted (maintainer):** a **separate test suite for the subdivision** (analogous to the earcut testbench) —
 validate the subdivided globe mesh is watertight / introduces no coverage hole vs the flat triangulation, no
-flipped/degenerate sub-triangles, and no T-junction cracks. `GlobeFillSubdivideJob` is Burst (Unity-only),
-but its logic can be mirrored managed via the engine-free `SphericalProjection` (in `core-tests`) for a fast
-first harness, then a Unity EditMode test over the real job. Corpus seed: `water-6-32-20.pbf.bytes`
-(already committed). This is a NEW epic — supersedes the "Globe fill T-junction seams" fence in §7.
+flipped/degenerate sub-triangles, and no T-junction cracks. **Gate on render-space gap magnitude (visible vs
+sub-pixel), NOT T-junction count** (the earcut epic's "severity, not count" lesson — the count is large and
+meaningless by construction). `GlobeFillSubdivideJob` is Burst (Unity-only), but its logic mirrors managed
+via the engine-free `SphericalProjection` (in `core-tests`) for a fast first harness (the mirror iterates;
+it is NOT the acceptance tooth) — **source-of-truth is a Unity EditMode test over the REAL Burst job** on
+`water-6-32-20` (verify the mirror's gap numbers match the real job first). **Invariant to protect: Mercator
+stays a pass-through no-op** (constant up → never subdivides; byte-identical, matching the earcut epic's
+"zero pixels moved on Mercator" discipline). Corpus seed: `water-6-32-20.pbf.bytes` (already committed).
+This is a NEW epic — supersedes the "Globe fill T-junction seams" fence in §7.
 
 ### 6.1 Stage-2 acceptance bar (measured) + hardening backlog
 

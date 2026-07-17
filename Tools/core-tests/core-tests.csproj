@@ -35,6 +35,8 @@
     <Compile Include="CorePipelineTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/MeshCoverageValidator.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/WaterTriangulationTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/SubdivisionCoverageValidator.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/GlobeSubdivisionTests.cs" />
     <Compile Include="LineMiterHairpinTests.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
 
