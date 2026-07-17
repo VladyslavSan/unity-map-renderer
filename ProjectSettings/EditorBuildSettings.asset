@@ -5,8 +5,11 @@ EditorBuildSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 2
   m_Scenes:
-  - enabled: 1
+  - enabled: 0
     path: Assets/Scenes/Demo/MapDemo/MapDemo.unity
     guid: aa67c586ca2c84373956af1f22d710fb
+  - enabled: 1
+    path: Assets/Scenes/Demo/MapDemo/OpenStreetMapLiberty.unity
+    guid: 959216cb6260143ba9ab3b4b18ad1eb7
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
