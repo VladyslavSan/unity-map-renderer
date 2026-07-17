@@ -4,6 +4,8 @@
       "WebSearch",
       "WebFetch",
       "Bash(./Tools/run-tests.sh:*)",
+      "Bash(./Tools/build.sh:*)",
+      "Bash(./Tools/package.sh:*)",
       "Bash(git diff:*)",
       "Bash(git status:*)",
       "Bash(git log:*)",
