@@ -4,7 +4,9 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
+using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
@@ -81,6 +83,7 @@ namespace MapRenderer.Tests.Text.Placement
             // (a) one LabelInstance per extracted label, in the same order (FeatureIndex tiebreak preserved).
             Assert.AreEqual(extracted.Count, labels.Count, "one shaped LabelInstance per extracted point label");
             Assert.AreEqual(248, labels.Count, "fixture pin: 248 centroids resolve a non-empty NAME");
+            Assert.AreEqual(0, builder.SkippedLabelCount, "a clean all-LTR build skips nothing (happy-path no-op)");
 
             for (int i = 0; i < labels.Count; i++)
             {
@@ -175,6 +178,82 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(dx0, leftQuads[i].TopLeft.x - centerQuads[i].TopLeft.x, 1e-3f, $"quad {i} dx constant");
                 Assert.AreEqual(0f, leftQuads[i].TopLeft.y - centerQuads[i].TopLeft.y, 1e-3f, $"quad {i} no vertical move");
             }
+        }
+
+        // ── Per-label build isolation: one label whose build throws (e.g. S18's deferred mixed-direction
+        //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
+
+        private static SymbolStyle.SymbolLabel PointLabel(string text) => new SymbolStyle.SymbolLabel
+        {
+            Text = text,
+            Placement = SymbolPlacement.Point,
+            LayoutOptions = TextLayoutOptions.Default,
+            TextSizePx = 16f,
+        };
+
+        [Test]
+        public async Task Shape_MixedDirectionLabel_IsSkipped_OtherLabelsSurvive()
+        {
+            using var manager = BuildGlyphManager();
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            // Two plain-LTR labels straddling one MIXED strong-direction label: Latin 'A' (U+0041, strong LTR)
+            // + Arabic beh (U+0628, strong RTL) — which CodepointTextShaper rejects (single-run bidi, decision 8).
+            // The Arabic range is absent from the Latin fixture ⇒ cached empty in Pass 1 (no throw); the throw
+            // lands in Pass 2's shaper exactly as in production.
+            var labels = new List<SymbolStyle.SymbolLabel>
+            {
+                PointLabel("Aruba"),
+                PointLabel("Aب"),
+                PointLabel("Angola"),
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, labels);
+
+            var output = new List<LabelInstance>();
+            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            // The whole tile is NOT aborted: the two LTR labels build; only the mixed one is skipped.
+            Assert.AreEqual(2, output.Count, "the two LTR labels survive; the mixed label is skipped");
+            Assert.AreEqual("Aruba", output[0].Text);
+            Assert.AreEqual("Angola", output[1].Text);
+            Assert.AreEqual(1, builder.SkippedLabelCount, "exactly one label skipped");
+            Assert.IsNotNull(builder.LastSkipReason, "skip reason recorded for the throttled diagnostic");
+            StringAssert.Contains("NotSupportedException", builder.LastSkipReason);
+        }
+
+        [Test]
+        public void Shape_CancelledGlyphFetch_PropagatesCancellation_CommitsNothing()
+        {
+            // A glyph source that OBSERVES the token (FromRanges discards it), so Pass 1's await surfaces the
+            // cancel. Pins that a cancelled build propagates an OperationCanceledException and commits no labels.
+            // NOTE: the cancel throws in Pass 1 (unguarded), so this exercises cancel PROPAGATION, not the
+            // Pass-2 catch's OCE exclusion filter (the Pass-2 body observes no ct — that exclusion is
+            // inspection-verified, not pinned here).
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return UniTask.FromResult(GlyphRangeResponse.Absent());
+            });
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var labels = new List<SymbolStyle.SymbolLabel> { PointLabel("Aruba") };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, labels);
+
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            var output = new List<LabelInstance>();
+            // CatchAsync (not ThrowsAsync) so the assertion accepts any OperationCanceledException SUBTYPE: the
+            // Unity/Mono UniTask path surfaces cancellation as TaskCanceledException (an OCE subclass), the
+            // dotnet path as a plain OperationCanceledException. The production filter uses `ex is OCE`, so it
+            // correctly excludes both from the per-label skip — the test must be equally subtype-tolerant.
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output, cts.Token));
+            Assert.AreEqual(0, output.Count, "a cancelled build commits no labels");
+            Assert.AreEqual(0, builder.SkippedLabelCount, "cancellation is not a per-label skip");
         }
 
         private static void AssertNamedLabel(List<SymbolStyle.SymbolLabel> extracted, List<LabelInstance> labels,

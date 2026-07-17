@@ -35,6 +35,15 @@ namespace MapRenderer.Unity.Text
         private readonly GlyphManager _glyphManager;
         private readonly CodepointTextShaper _shaper = new CodepointTextShaper();
 
+        /// <summary>Monotonic count of labels skipped because their build threw a non-cancellation exception
+        /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolLabelSubsystem telemetry. Main-thread
+        /// only (ShapeAsync is the main tail) — no synchronization.</summary>
+        internal int SkippedLabelCount { get; private set; }
+
+        /// <summary>Type+message of the most recent skip, for the subsystem's throttled diagnostic log
+        /// (which cannot see the swallowed exception). Null until the first skip.</summary>
+        internal string LastSkipReason { get; private set; }
+
         /// <param name="glyphManager">The shared production glyph manager (one atlas across all symbol layers).</param>
         public StyledSymbolTileBuilder(GlyphManager glyphManager)
         {
@@ -140,64 +149,76 @@ namespace MapRenderer.Unity.Text
                 FontStackResolver resolver = _glyphManager.CreateResolver(fontStack);
                 for (int i = 0; i < extracted.Count; i++)
                 {
-                    SymbolLabel s = extracted[i];
-                    ShapedRun run = _shaper.Shape(new ShapingRequest
+                    try
                     {
-                        Text = s.Text,
-                        FontStack = fontStack,
-                        Metrics = resolver,
-                    });
-                    if (s.Placement == SymbolPlacement.Point)
-                    {
-                        // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
-                        // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
-                        TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
-                        output.Add(new LabelInstance
+                        SymbolLabel s = extracted[i];
+                        ShapedRun run = _shaper.Shape(new ShapingRequest
                         {
-                            AnchorRender = s.AnchorRender,
-                            Placement = SymbolPlacement.Point,
-                            Layout = layout,
-                            Text = s.Text, // A-3: cross-tile identity
-                            Paint = s.Paint,
-                            TextSizePx = s.TextSizePx,
-                            PaddingPx = s.PaddingPx,
-                            SortKey = s.SortKey,
-                            FeatureIndex = s.FeatureIndex,
-                            TileKey = s.TileKey,
-                            AllowOverlap = s.AllowOverlap,
-                            IgnorePlacement = s.IgnorePlacement,
-                            MaterialIndex = materialIndex,
-                            TranslatePx = s.TranslatePx,
-                            TranslateAnchor = s.TranslateAnchor,
-                            RotationAlignment = s.RotationAlignment,
+                            Text = s.Text,
+                            FontStack = fontStack,
+                            Metrics = resolver,
                         });
+                        if (s.Placement == SymbolPlacement.Point)
+                        {
+                            // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
+                            // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
+                            TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
+                            output.Add(new LabelInstance
+                            {
+                                AnchorRender = s.AnchorRender,
+                                Placement = SymbolPlacement.Point,
+                                Layout = layout,
+                                Text = s.Text, // A-3: cross-tile identity
+                                Paint = s.Paint,
+                                TextSizePx = s.TextSizePx,
+                                PaddingPx = s.PaddingPx,
+                                SortKey = s.SortKey,
+                                FeatureIndex = s.FeatureIndex,
+                                TileKey = s.TileKey,
+                                AllowOverlap = s.AllowOverlap,
+                                IgnorePlacement = s.IgnorePlacement,
+                                MaterialIndex = materialIndex,
+                                TranslatePx = s.TranslatePx,
+                                TranslateAnchor = s.TranslateAnchor,
+                                RotationAlignment = s.RotationAlignment,
+                            });
+                        }
+                        else
+                        {
+                            // #5: curved along-line label — per-glyph layout placed on the projected line each
+                            // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
+                            var curvedGlyphs = CurvedTextLayout.Layout(run, _glyphManager.Atlas);
+                            output.Add(new LabelInstance
+                            {
+                                Placement = s.Placement,
+                                PathRender = s.PathRender,
+                                LineAnchors = s.LineAnchors, // A-2: carry the build-time zoom-invariant anchors
+                                CurvedGlyphs = curvedGlyphs,
+                                Text = s.Text, // A-3: carried for parity (line labels are excluded from dedup in v1)
+                                Paint = s.Paint,
+                                TextSizePx = s.TextSizePx,
+                                PaddingPx = s.PaddingPx,
+                                SortKey = s.SortKey,
+                                MaxAngleDeg = s.MaxAngleDeg,
+                                KeepUpright = s.KeepUpright,
+                                FeatureIndex = s.FeatureIndex,
+                                TileKey = s.TileKey,
+                                AllowOverlap = s.AllowOverlap,
+                                IgnorePlacement = s.IgnorePlacement,
+                                MaterialIndex = materialIndex,
+                                TranslatePx = s.TranslatePx,
+                                TranslateAnchor = s.TranslateAnchor,
+                            });
+                        }
                     }
-                    else
+                    catch (System.Exception ex) when (!(ex is System.OperationCanceledException) && !ct.IsCancellationRequested)
                     {
-                        // #5: curved along-line label — per-glyph layout placed on the projected line each
-                        // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
-                        var curvedGlyphs = CurvedTextLayout.Layout(run, _glyphManager.Atlas);
-                        output.Add(new LabelInstance
-                        {
-                            Placement = s.Placement,
-                            PathRender = s.PathRender,
-                            LineAnchors = s.LineAnchors, // A-2: carry the build-time zoom-invariant anchors
-                            CurvedGlyphs = curvedGlyphs,
-                            Text = s.Text, // A-3: carried for parity (line labels are excluded from dedup in v1)
-                            Paint = s.Paint,
-                            TextSizePx = s.TextSizePx,
-                            PaddingPx = s.PaddingPx,
-                            SortKey = s.SortKey,
-                            MaxAngleDeg = s.MaxAngleDeg,
-                            KeepUpright = s.KeepUpright,
-                            FeatureIndex = s.FeatureIndex,
-                            TileKey = s.TileKey,
-                            AllowOverlap = s.AllowOverlap,
-                            IgnorePlacement = s.IgnorePlacement,
-                            MaterialIndex = materialIndex,
-                            TranslatePx = s.TranslatePx,
-                            TranslateAnchor = s.TranslateAnchor,
-                        });
+                        // Layer 1 robustness: one label's build failure (e.g. S18's deferred mixed-direction bidi
+                        // NotSupportedException) must never blank the whole tile. Skip THIS label; the rest still
+                        // build and commit. output.Add is the last statement of the guarded body, so no partial
+                        // label was added.
+                        SkippedLabelCount++;
+                        LastSkipReason = ex.GetType().Name + ": " + ex.Message;
                     }
                 }
             }

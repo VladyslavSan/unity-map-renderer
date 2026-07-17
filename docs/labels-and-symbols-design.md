@@ -44,6 +44,21 @@ shared label list; the main-thread shape/atlas-append tail runs as `RunTailAsync
 - bumps a monotonic **`Version`** on every set-changing mutation — the key the fast clock uses to know whether
   anything actually changed.
 
+**Per-label build isolation.** One label whose build throws must NOT blank the whole tile's symbols. The Pass-2
+per-label body in `StyledSymbolTileBuilder.ShapeAsync` (shape → layout → `output.Add`) is wrapped in a
+`catch … when (!(ex is OperationCanceledException) && !ct.IsCancellationRequested)` that skips + counts the one
+label (`SkippedLabelCount` telemetry, throttled once-per-session warn) and lets the rest build + commit. The
+trigger this fixes is the deferred single-run bidi: `CodepointTextShaper` throws on mixed strong-direction text
+(RTL+LTR), which the liberty `["concat", name:latin, " ", name:nonlatin]` place field produces for every
+Arabic/Hebrew-region place — without isolation every low-zoom world tile (which spans an RTL region) rendered
+**zero** symbols. **Known gaps (conscious, not fixed):** (1) **Pass 1** (glyph fetch/`GlyphPbfDecoder.Decode`) is
+still unguarded — a corrupt glyph-PBF for one label would blank a tile via the same mechanism; out of this
+stage's Pass-2/bidi scope. (2) A **pre-cancelled `ct`** reaching a Pass-2 label that throws a *genuine* (non-OCE)
+bug propagates (whole-build drop) rather than skips — nil observable impact (a cancelled build's results are
+discarded by `RunTailAsync`'s post-loop `ct` gate anyway), untested. (3) The Pass-2 `when` OCE-exclusion is
+inspection-verified, not test-pinned (the cancel-safety tooth throws in unguarded Pass 1). Full UAX #9 bidi
+(actually *rendering* mixed-direction labels) remains a separate deferred feature.
+
 So a `LabelInstance` exists per `(tile, feature)` once its tile's bytes are decoded and shaped. It carries
 `AnchorRender` (point) or `PathRender` + `LineAnchors` (curved), its `TileKey` (packed z/x/y), text, paint, and
 style-evaluated sizes. Nothing here depends on the camera.

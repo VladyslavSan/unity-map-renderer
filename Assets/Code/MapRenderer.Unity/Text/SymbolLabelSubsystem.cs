@@ -97,6 +97,7 @@ namespace MapRenderer.Unity.Text
         private readonly List<SymbolTileLabelStore.Key> _reconcileKeys = new();
         private int _lastUploadedGlyphCount;
         private bool _loggedOverflow;
+        private bool _loggedSkip;
 
         // ── Stall #1 fix (Stage A) / A5b feed swap: coalesced atlas upload + budgeted tail pump ────────
         /// <summary>A5a: a worker-phase-complete symbol build awaiting its budgeted main-thread tail
@@ -150,6 +151,8 @@ namespace MapRenderer.Unity.Text
         internal int TailsStartedLastPump  { get; private set; }
         internal int AtlasUploadsLastPump  { get; private set; }
         internal int CancelledBuildCount   { get; private set; }
+        // Forwarded from the shared builder (null-safe — no glyph pipeline ⇒ nothing to skip).
+        internal int SkippedLabelCount => _builder?.SkippedLabelCount ?? 0;
         // A5b: total not-yet-tailed builds — queued in the pool→main handoff (not yet drained) PLUS drained
         // but not-yet-started tails. The migrated F-7 budget tooth asserts against this total (§Q2/E-2).
         internal int ReadyTailCount => _readyTails.Count + _handoffQueue.Count;
@@ -203,6 +206,7 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
             _lastUploadedGlyphCount = 0;
             _loggedOverflow = false;
+            _loggedSkip = false;
             // Cancel any in-flight builds from the previous style and open a fresh cancellation scope, then
             // drop everything mid-flight (their layer-index lists belong to the old _layersBySource rebuilt
             // below): A5b's pool→main handoff queue (a kick task still running on the pool enqueues into the
@@ -400,6 +404,7 @@ namespace MapRenderer.Unity.Text
                 AtlasUploadsLastPump = 1;
             }
             WarnOnAtlasOverflow();
+            WarnOnSkippedLabels();
         }
 
         /// <summary>
@@ -499,6 +504,15 @@ namespace MapRenderer.Unity.Text
             _loggedOverflow = true;
             Debug.LogWarning($"[SymbolLabelSubsystem] glyph atlas full ({_glyphManager.Atlas.OverflowCount} glyph(s) " +
                              $"dropped) — increase AtlasDimension beyond {Math.Min(SystemInfo.maxTextureSize, AtlasDimension)}px.");
+        }
+
+        private void WarnOnSkippedLabels()
+        {
+            if (_loggedSkip || _builder == null || _builder.SkippedLabelCount == 0) return;
+            _loggedSkip = true;
+            Debug.LogWarning($"[SymbolLabelSubsystem] skipped {_builder.SkippedLabelCount} label(s) whose build " +
+                             $"failed (first: {_builder.LastSkipReason}). Further skips suppressed; running total in " +
+                             $"SkippedLabelCount telemetry.");
         }
 
         public void Dispose()
