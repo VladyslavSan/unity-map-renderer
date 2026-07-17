@@ -92,8 +92,8 @@ namespace MapRenderer.Core.View.Camera
         ///
         /// <para><b>Logical px in.</b> Feed the DPI-normalized viewport (<c>physicalPx / DevicePixelRatio</c>),
         /// the same basis the DPI-normalized camera (D1) and the tile selector frame in — so the floor scales
-        /// with the viewport and with DPR. Projection-agnostic: the globe reuses this Mercator fit (Phase 1;
-        /// the disc ≈ the world extent at that scale).</para>
+        /// with the viewport and with DPR. Cyclic (globe) worlds use this fit; the finite Mercator sheet uses
+        /// <see cref="MinZoomToFill(double,double,double,double)"/> instead — see <see cref="MinZoomFloor"/>.</para>
         /// </summary>
         /// <param name="viewportWidthLogical">Viewport width in logical (DPR-normalized) pixels.</param>
         /// <param name="viewportHeightLogical">Viewport height in logical (DPR-normalized) pixels.</param>
@@ -116,6 +116,54 @@ namespace MapRenderer.Core.View.Camera
         /// </summary>
         public static double MinZoomToFit(double viewportWidthLogical, double viewportHeightLogical, double margin)
             => MinZoomToFit(viewportWidthLogical, viewportHeightLogical, TilePixelSize, margin);
+
+        /// <summary>
+        /// The most-zoomed-out fractional zoom at which the finite Web-Mercator world square exactly FILLS the
+        /// viewport (no off-world margin on either axis) — the floor for the finite planar sheet. Identical to
+        /// <see cref="MinZoomToFit(double,double,double,double)"/> but fits the world square to the LARGER
+        /// viewport side (<c>math.max</c>, not <c>math.min</c>): on a landscape viewport the world then fills
+        /// the width, and the (shorter) height crops rather than showing an empty margin. Default
+        /// <paramref name="margin"/> is 0 — a positive margin would reintroduce the off-world gap this exists
+        /// to remove.
+        /// </summary>
+        /// <param name="viewportWidthLogical">Viewport width in logical (DPR-normalized) pixels.</param>
+        /// <param name="viewportHeightLogical">Viewport height in logical (DPR-normalized) pixels.</param>
+        /// <param name="tilePixelSize">Tile edge in px (the zoom→scale convention; <see cref="WebMercator.TilePixelSize"/>).</param>
+        /// <param name="margin">Breathing-room margin in zoom levels. Default 0 (exact fill).</param>
+        /// <returns>The minimum-zoom floor (fractional) at which the world fills the viewport.</returns>
+        public static double MinZoomToFill(double viewportWidthLogical, double viewportHeightLogical,
+                                           double tilePixelSize, double margin = 0.0)
+        {
+            double maxSide = math.max(viewportWidthLogical, viewportHeightLogical);
+            double zoomFit = math.log2(maxSide / tilePixelSize);
+            return zoomFit - margin;
+        }
+
+        /// <summary>
+        /// <see cref="MinZoomToFill(double,double,double,double)"/> over the standard tile size
+        /// (<see cref="WebMercator.TilePixelSize"/>) — mirrors the <see cref="MinZoomToFit(double,double,double)"/>
+        /// convenience overload so callers stay free of <c>WebMercator.*</c>.
+        /// </summary>
+        public static double MinZoomToFill(double viewportWidthLogical, double viewportHeightLogical, double margin)
+            => MinZoomToFill(viewportWidthLogical, viewportHeightLogical, TilePixelSize, margin);
+
+        /// <summary>
+        /// The projection-keyed min-zoom floor selector (D1): branches once on
+        /// <see cref="IProjection.IsFinitePlanarWorld"/> so neither <c>Controller</c> nor <c>TouchController</c>
+        /// duplicates the finite/cyclic decision. Finite (Mercator) → <see cref="MinZoomToFill(double,double,double)"/>
+        /// (fills the viewport, no margin — a positive margin would reopen the off-world gap). Cyclic (globe) →
+        /// <see cref="MinZoomToFit(double,double,double)"/> (fits with breathing-room margin).
+        /// </summary>
+        /// <param name="projection">The active projection — determines finite-fill vs cyclic-fit.</param>
+        /// <param name="viewportWidthLogical">Viewport width in logical (DPR-normalized) pixels.</param>
+        /// <param name="viewportHeightLogical">Viewport height in logical (DPR-normalized) pixels.</param>
+        /// <param name="margin">Breathing-room margin in zoom levels — applies to the cyclic branch only.</param>
+        /// <returns>The minimum-zoom floor (fractional).</returns>
+        public static double MinZoomFloor(IProjection projection, double viewportWidthLogical,
+                                          double viewportHeightLogical, double margin)
+            => projection.IsFinitePlanarWorld
+                ? MinZoomToFill(viewportWidthLogical, viewportHeightLogical, 0.0)
+                : MinZoomToFit(viewportWidthLogical, viewportHeightLogical, margin);
 
         /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
         public static double NearClip(double altitude) => math.max(0.1, altitude * 0.01);

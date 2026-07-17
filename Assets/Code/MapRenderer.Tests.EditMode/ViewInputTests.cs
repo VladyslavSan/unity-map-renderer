@@ -136,6 +136,72 @@ namespace MapRenderer.Tests
                 "latitude must clamp to the Mercator limit");
         }
 
+        // ── Stage A — Mercator finite-sheet camera (pan/zoom look-at clamp) ────────────────────────
+
+        [Test]
+        public void ApplyPan_NearEastEdge_ClampsInsteadOfWrapping()
+        {
+            // A2-PANCLAMP: Mercator is a finite sheet. A pan that drives the look-at toward/past the world
+            // edge must CLAMP EXACTLY to the boundary (viewport stays inside the world square), not WRAP the
+            // longitude around to the opposite edge (the old WrapLon behaviour).
+            const double zoom = 5.0; // world square meaningfully larger than the viewport — real clamp room
+            double mpp = WebMercator.GroundResolution(zoom);
+            double halfSpanX = Vp.x * 0.5 * mpp;
+            double hiX = WebMercator.WorldExtent - halfSpanX; // east edge of the clamp range on this axis
+
+            // Look-at inside the clamp range, one half-span short of the east edge (room to drag further east).
+            double2 startMerc = new double2(hiX - halfSpanX, 0.0);
+            double2 startLl   = WebMercator.ToLonLat(startMerc.x, startMerc.y);
+            var v = Cam(startLl.x, startLl.y, zoom);
+
+            GeoCoordinate3D grabbed = Proj.ScreenToGround(Centre, Vp, v);
+            // Huge LEFT drag (cursor moves far -x): per ApplyPan_DragRight_MovesCenterWest, dragging left
+            // pushes the center EAST — well past the world edge, forcing the clamp to bind.
+            double2 cursorNow = Centre - new double2(10000.0, 0.0);
+
+            var p = ViewInput.ApplyPan(Proj, v, grabbed, cursorNow, Vp);
+
+            double2 resultMerc = WebMercator.FromLonLat(new GeoCoordinate3D
+            {
+                Longitude = p.Longitude.Value, Latitude = p.Latitude.Value
+            });
+            Assert.AreEqual(hiX, resultMerc.x, halfSpanX * 1e-6,
+                "an overshoot past the east edge clamps EXACTLY to the boundary, not a wrapped value on the far side");
+        }
+
+        [Test]
+        public void ApplyPan_AtFillFloor_LocksBindingAxisToWorldCentre()
+        {
+            // A2-MINZOOM-LOCK: at the fill floor the world square exactly matches the viewport's larger
+            // (binding) side, so the clamp range on that axis collapses to a single point (world-centre) —
+            // no pan can move it off-centre.
+            double floorZoom = CameraPoseMath.MinZoomToFill(Vp.x, Vp.y, 0.0); // Vp is 1920x1080 — X is binding
+            var v = Cam(0.0, 0.0, floorZoom);
+
+            GeoCoordinate3D grabbed = Proj.ScreenToGround(Centre, Vp, v);
+            double2 cursorNow = Centre + new double2(500.0, 0.0); // large horizontal drag
+
+            var p = ViewInput.ApplyPan(Proj, v, grabbed, cursorNow, Vp);
+            Assert.AreEqual(0.0, p.Longitude.Value, 1e-6,
+                "at the fill floor the binding-axis clamp range is [0,0] — longitude stays locked to world-centre");
+        }
+
+        [Test]
+        public void ClampLookAtToWorld_Globe_IsIdentity()
+        {
+            // A2-GLOBE-IDENTITY: the cyclic globe has no edges to clamp — ClampLookAtToWorld must return the
+            // look-at UNCHANGED (well away from the antimeridian, where WrapLon-vs-atan2 bit differences
+            // are the documented, harmless exception).
+            var globe = new SphericalProjection();
+            var cam = new CameraProperties(
+                new GeoCoordinate3D { Longitude = 42.0, Latitude = 17.0, Altitude = 0.0 }, 5.0, 0, 0);
+            double2 vp = new double2(1920.0, 1080.0);
+
+            GeoCoordinate3D result = globe.ClampLookAtToWorld(vp, in cam);
+            Assert.AreEqual(cam.LookAt.Longitude, result.Longitude, 1e-12, "globe clamp is the identity (longitude)");
+            Assert.AreEqual(cam.LookAt.Latitude,  result.Latitude,  1e-12, "globe clamp is the identity (latitude)");
+        }
+
         // ── Apply dispatch — split helpers (S73) ─────────────────────────────────────────────────
         //
         // All tests below drive the public seam ViewInput.Apply(intent, view) — not the private

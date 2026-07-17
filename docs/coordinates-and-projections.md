@@ -96,10 +96,26 @@ interface IProjection {
     GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in CameraProperties cam);
     double2         GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in CameraProperties cam);
     double          ClampValidLatitude(double latitudeDegrees);
+    bool            IsFinitePlanarWorld { get; }                                    // Mercator=true, globe=false
+    GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in CameraProperties cam); // finite: viewport ⊆ sheet; cyclic: identity
 }
 // readonly struct WebMercatorProjection : IProjection   // planar
 // readonly struct SphericalProjection  : IProjection   // globe
 ```
+
+**Finite sheet vs cyclic world (the camera constraint).** `IsFinitePlanarWorld` distinguishes a bounded planar
+atlas (Web Mercator — hard edges) from a cyclic/closed world (the globe — wraps). The camera asks the projection,
+carrying **zero** projection constants itself: `ViewInput` calls `ClampLookAtToWorld` (instead of a longitude
+wrap) so the finite Mercator sheet cannot be panned off the viewport, and `CameraPoseMath.MinZoomFloor` picks
+`MinZoomToFill` (world fills the viewport, no off-world margin — the shorter axis crops) for a finite world vs
+`MinZoomToFit` (fits with margin) for the globe. The globe returns `ClampLookAtToWorld => cam.LookAt` (identity)
+and keeps its `MinZoomToFit` floor, so its behaviour is unchanged. This is distinct from `TryGetHorizonOccluder`
+(self-occlusion) and `MaxRefineAngleRad` (subdivision) — finiteness is its own fact. *Known follow-ups (deferred):*
+(1) the clamp is heading/tilt-conservative (axis-aligned half-span, exact at tilt=0); a rotated/pitched view can
+still show a corner sliver off-world. (2) nothing proactively re-clamps `camera.Zoom` upward when the floor
+*rises* (a globe→Mercator swap or a viewport shrink) — safely masked today by the "world smaller than viewport →
+lock to centre" guard in `ClampLookAtToWorld`, but if it ever reads as "camera briefly locked to centre after a
+switch," raise the zoom to the new floor at the swap.
 
 **The struct type IS the discriminator — no enum, no separate Burst copy.** Burst cannot hold a managed class
 or do virtual dispatch, but a *struct* implementing an interface is a blittable value type. So the projection

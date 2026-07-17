@@ -258,5 +258,12 @@ namespace MapRenderer.Core.Geo
 
         /// <inheritdoc/>
         public double ClampValidLatitude(double latitudeDegrees) => math.clamp(latitudeDegrees, -90.0, 90.0);
+
+        /// <inheritdoc/>
+        public bool IsFinitePlanarWorld => false; // cyclic — the globe wraps, no edges to clamp
+
+        /// <inheritdoc/>
+        public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in CameraProperties camera)
+            => camera.LookAt; // identity — nothing to clamp on a closed world
     }
 }

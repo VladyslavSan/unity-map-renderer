@@ -66,6 +66,10 @@ namespace MapRenderer.Unity.Rendering.Map
         public float MinZoom  = 0f;
         public float MaxZoom  = 22f;
 
+        [Tooltip("Breathing-room margin (zoom levels) for the cyclic-globe min-zoom floor; ignored on the " +
+                 "finite Mercator sheet, which fills the viewport at margin 0. Mirrors Controller.MinZoomMargin.")]
+        public float MinZoomMargin = 0.5f;
+
         // ── Disambiguation thresholds (LOGICAL px — constant physical size, S92 touch-DPI closure) ────
         [Header("Disambiguation thresholds (logical px)")]
         [Tooltip("Inter-finger distance change (logical px) needed to classify as a pinch.")]
@@ -81,6 +85,11 @@ namespace MapRenderer.Unity.Rendering.Map
         private TouchGestureRecognizer   _recognizer;
         private readonly List<TouchSample>    _samples = new List<TouchSample>();
         private readonly List<GestureIntent>  _intents = new List<GestureIntent>();
+
+        // The MinZoom floor last baked into _recognizer (touch pinch-floor parity with Controller): NaN
+        // forces the first-frame build. Rebuilding TouchGestureRecognizer allocates, so Update only rebuilds
+        // when the floor actually moves (viewport resize / projection swap), not every frame.
+        private double _recognizerMinZoomFloor = double.NaN;
 
         // ── Lifecycle ─────────────────────────────────────────────────────────────────────────────
 
@@ -132,6 +141,17 @@ namespace MapRenderer.Unity.Rendering.Map
             double2 vp = new double2(
                 camera != null ? camera.pixelWidth  : Screen.width,
                 camera != null ? camera.pixelHeight : Screen.height) / dpr;
+
+            // Touch pinch-floor parity with the desktop Controller: the floor must track the live
+            // viewport/projection, else touch pinch still floors at the stale OnEnable-baked value.
+            // Rebuilding the recognizer allocates, so only do it when the floor actually changed.
+            double floor = CameraPoseMath.MinZoomFloor(Map.Camera.Projection, vp.x, vp.y, MinZoomMargin);
+            if (floor != _recognizerMinZoomFloor)
+            {
+                _recognizerMinZoomFloor = floor;
+                MinZoom = (float)floor;
+                RebuildRecognizer();
+            }
 
             var view = new ViewContext
             {

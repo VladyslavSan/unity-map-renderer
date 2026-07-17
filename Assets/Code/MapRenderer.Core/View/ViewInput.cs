@@ -112,11 +112,19 @@ namespace MapRenderer.Core.View
             GeoCoordinate3D lookAtAfter = projection.ScreenToGround(
                 viewportPx * 0.5 + (Pq - cursorPx), viewportPx, in camTrial);
 
+            // Bound the look-at to the finite world sheet (identity on a cyclic/globe projection) instead of
+            // wrapping longitude — the world is a finite atlas sheet, not an endlessly repeating strip.
+            CameraProperties camClamp = new CameraProperties(
+                lookAtAfter, zNew, current.Heading.Degrees, current.Tilt.Degrees, current.VerticalFovDeg);
+            GeoCoordinate3D bounded = projection.ClampLookAtToWorld(viewportPx, in camClamp);
+
             return new CameraPropertiesUpdate
             {
                 Zoom      = zNew,
-                Longitude = WrapLon(lookAtAfter.Longitude),
-                Latitude  = projection.ClampValidLatitude(lookAtAfter.Latitude)
+                Longitude = bounded.Longitude,
+                // ClampValidLatitude stays the outer pole guard: redundant on the finite sheet (already
+                // bounded above), load-bearing on the cyclic globe (ClampLookAtToWorld is the identity there).
+                Latitude  = projection.ClampValidLatitude(bounded.Latitude)
             };
         }
 
@@ -137,19 +145,17 @@ namespace MapRenderer.Core.View
             GeoCoordinate3D lookAtAfter = projection.ScreenToGround(
                 viewportPx * 0.5 + (Pq - cursorPx), viewportPx, in current);
 
+            // Bound the look-at to the finite world sheet (identity on a cyclic/globe projection) instead of
+            // wrapping longitude — the world is a finite atlas sheet, not an endlessly repeating strip.
+            CameraProperties camClamp = new CameraProperties(
+                lookAtAfter, current.Zoom, current.Heading.Degrees, current.Tilt.Degrees, current.VerticalFovDeg);
+            GeoCoordinate3D bounded = projection.ClampLookAtToWorld(viewportPx, in camClamp);
+
             return new CameraPropertiesUpdate
             {
-                Longitude = WrapLon(lookAtAfter.Longitude),
-                Latitude  = projection.ClampValidLatitude(lookAtAfter.Latitude)
+                Longitude = bounded.Longitude,
+                Latitude  = projection.ClampValidLatitude(bounded.Latitude)
             };
-        }
-
-        private static double WrapLon(double lon)
-        {
-            // Wrap into [-180, 180).
-            lon = (lon + 180.0) % 360.0;
-            if (lon < 0) lon += 360.0;
-            return lon - 180.0;
         }
     }
 }

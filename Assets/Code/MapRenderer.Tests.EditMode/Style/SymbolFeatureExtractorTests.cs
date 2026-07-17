@@ -301,6 +301,92 @@ namespace MapRenderer.Tests
                 "the anchor must resolve to (approximately) the true midpoint on the finer render curve");
         }
 
+        // ── Stage B: single-world clip — point anchors outside [0, extent) are source world-copies ──────
+
+        /// <summary>Hand-encodes a MultiPoint MVT geometry command stream: a single MoveTo(count=N) followed
+        /// by N zigzag-encoded cumulative deltas from a cursor starting at (0,0) — mirrors
+        /// <see cref="MvtGeometry.Decode"/>'s MoveTo-repeat semantics, where each repeat starts its own
+        /// 1-point path (i.e. a MultiPoint feature decodes to N separate 1-point paths).</summary>
+        private static uint[] MultiPointGeometry(params double2[] tilePoints)
+        {
+            var stream = new List<uint> { 1u | ((uint)tilePoints.Length << 3) }; // MoveTo, count=N
+            long cursorX = 0, cursorY = 0;
+            foreach (double2 p in tilePoints)
+            {
+                long x = (long)p.x, y = (long)p.y;
+                stream.Add(ZigZagEncode(x - cursorX));
+                stream.Add(ZigZagEncode(y - cursorY));
+                cursorX = x;
+                cursorY = y;
+            }
+            return stream.ToArray();
+        }
+
+        [Test]
+        public void Extract_PointPlacement_ClipsOutOfBoundsAnchorsToTile()
+        {
+            const uint extent = 4096;
+            // In-bounds (kept): an interior point, another interior point, the min edge (inclusive), and the
+            // max edge (extent - 1, inclusive). Out-of-bounds (dropped): the plan's own examples
+            // (extent*1.5, -extent*0.5, extent+1) plus the half-open upper-bound edges x==extent/y==extent
+            // (a shared-edge anchor belongs to the NEXT tile, not this one).
+            double2 inA = new double2(100, 200);
+            double2 outXHigh = new double2(extent * 1.5, 200);
+            double2 inB = new double2(300, 300);
+            double2 outXNeg = new double2(-(double)extent * 0.5, 200);
+            double2 outYHigh = new double2(250, extent + 1);
+            double2 inMinEdge = new double2(0, 0);
+            double2 inMaxEdge = new double2(extent - 1, extent - 1);
+            double2 outXEdge = new double2(extent, 50);
+            double2 outYEdge = new double2(50, extent);
+
+            var feature = new InMemoryTileFeature
+            {
+                GeometryType = MapRenderer.Core.Tiles.TileGeometryType.Point,
+                Geometry = MultiPointGeometry(
+                    inA, outXHigh, inB, outXNeg, outYHigh, inMinEdge, inMaxEdge, outXEdge, outYEdge),
+            };
+            var layer = new FixtureTileLayer
+            {
+                Name = "points",
+                Extent = extent,
+                Features = new List<ITileFeature> { feature },
+            };
+            var tile = new FixtureDecodedTile(layer);
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var projection = new WebMercatorProjection();
+
+            var pointLayer = new SymbolStyle.StyleLayer
+            {
+                Id = "points",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "points",
+                // Literal text-field (no {} interpolation) so resolution doesn't depend on feature properties
+                // — InMemoryTileFeature.TryGetProperty always returns false (mirrors the LineLayer literal-
+                // text pattern used elsewhere in this file).
+                LayoutJson = JsonParser.Parse("{\"text-field\":\"L\"}"),
+            };
+
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, labels);
+
+            Assert.AreEqual(4, labels.Count,
+                "only the 4 in-bounds anchors are emitted; the 5 out-of-bounds/edge points are clipped");
+
+            double2[] expectedTilePoints = { inA, inB, inMinEdge, inMaxEdge };
+            for (int i = 0; i < expectedTilePoints.Length; i++)
+            {
+                double2 lonLat = tileId.ToLonLat(expectedTilePoints[i].x, expectedTilePoints[i].y, extent);
+                double3 expectedAnchor = projection.Project(
+                    new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                Assert.AreEqual(expectedAnchor.x, labels[i].AnchorRender.x, 1e-6, $"label[{i}].anchor.x");
+                Assert.AreEqual(expectedAnchor.y, labels[i].AnchorRender.y, 1e-6, $"label[{i}].anchor.y");
+                Assert.AreEqual(expectedAnchor.z, labels[i].AnchorRender.z, 1e-6, $"label[{i}].anchor.z");
+                Assert.AreEqual(i, labels[i].FeatureIndex,
+                    "ordinal stays contiguous across skipped out-of-bounds points (no gaps from the clip)");
+            }
+        }
+
         [Test]
         public void Extract_WithFilter_NarrowsToNamedFeature()
         {

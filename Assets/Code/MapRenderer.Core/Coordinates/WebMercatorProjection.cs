@@ -131,5 +131,36 @@ namespace MapRenderer.Core.Geo
         /// <inheritdoc/>
         public double ClampValidLatitude(double latitudeDegrees)
             => math.clamp(latitudeDegrees, -WebMercator.MaxLatitude, WebMercator.MaxLatitude);
+
+        /// <inheritdoc/>
+        public bool IsFinitePlanarWorld => true;
+
+        /// <inheritdoc/>
+        public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in CameraProperties camera)
+        {
+            // Clamp the look-at latitude before projecting, same pole guard as ScreenToGround/GroundToScreen.
+            GeoCoordinate3D clampedLookAt = new GeoCoordinate3D
+            {
+                Longitude = camera.LookAt.Longitude,
+                Latitude  = ClampValidLatitude(camera.LookAt.Latitude),
+                Altitude  = 0.0
+            };
+            double2 centreMerc = WebMercator.FromLonLat(clampedLookAt);
+            double  mpp        = WebMercator.GroundResolution(camera.Zoom);
+
+            double halfX = viewportPx.x * 0.5 * mpp;
+            double halfY = viewportPx.y * 0.5 * mpp;
+            double ext   = WebMercator.WorldExtent; // ±ext square world (X and Y)
+
+            double loX = -ext + halfX, hiX = ext - halfX;
+            double loY = -ext + halfY, hiY = ext - halfY;
+            // If the world is smaller than the viewport on an axis (at/past the fill floor), the range
+            // collapses — lock that axis to world-centre rather than clamp against an inverted [lo,hi].
+            double cx = loX <= hiX ? math.clamp(centreMerc.x, loX, hiX) : 0.0;
+            double cy = loY <= hiY ? math.clamp(centreMerc.y, loY, hiY) : 0.0;
+
+            double2 ll = WebMercator.ToLonLat(cx, cy); // cx∈[-ext,ext] ⇒ lon∈[-180,180] intrinsically
+            return new GeoCoordinate3D { Longitude = ll.x, Latitude = ll.y, Altitude = 0.0 };
+        }
     }
 }

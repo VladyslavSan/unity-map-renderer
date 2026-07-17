@@ -161,6 +161,12 @@ namespace MapRenderer.Core.Style.Symbol
                         for (int i = 0; i < path.Count; i++)
                         {
                             double2 tp = path[i];
+                            // Single-world clip: a point anchor outside this tile's [0, extent) bounds is a
+                            // source world-copy / buffer duplicate (low-zoom tiles carry ±360° label copies).
+                            // Drop it — the tile that owns the anchor emits it exactly once. (The mesh path
+                            // is clipped by the source; symbols were not, which is why labels repeated ±360°
+                            // while fill/line stayed single.)
+                            if (tp.x < 0.0 || tp.x >= extent || tp.y < 0.0 || tp.y >= extent) continue;
                             double2 lonLat = tileId.ToLonLat(tp.x, tp.y, extent);
                             double3 anchor = projection.Project(
                                 new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });

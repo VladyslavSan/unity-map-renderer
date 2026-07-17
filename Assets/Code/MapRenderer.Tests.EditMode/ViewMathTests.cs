@@ -932,6 +932,52 @@ namespace MapRenderer.Tests
                             "logical-px basis ⇒ the floor scales with DPR");
         }
 
+        // ── Stage A — Mercator finite-sheet camera (min-zoom floor) ───────────────────────────────
+
+        [Test]
+        public void MinZoomToFill_FillsTheLargerSide_NoGap()
+        {
+            // A1-FILL: the finite-sheet floor fits the world square to the LARGER viewport side (not the
+            // shorter side MinZoomToFit uses), so on a landscape viewport there's no off-world margin.
+            // Falsifiable: MinZoomToFit (min side) gives world-px == 1080 < 1920 on this viewport.
+            const double tile = WebMercator.TilePixelSize;
+            double2 vp = new double2(1920.0, 1080.0);
+
+            double floor   = CameraPoseMath.MinZoomToFill(vp.x, vp.y, tile, 0.0);
+            double worldPx = tile * math.pow(2.0, floor);
+            double maxSide = math.max(vp.x, vp.y);
+
+            Assert.AreEqual(maxSide, worldPx, maxSide * 1e-9,
+                "at margin 0 the world square exactly fills the LARGER viewport side");
+            Assert.GreaterOrEqual(worldPx, maxSide - 1e-6,
+                "world square must be at least as large as the larger viewport side (no off-world margin)");
+        }
+
+        [Test]
+        public void MinZoomFloor_SelectsByProjection_FiniteFillsCyclicFits()
+        {
+            // A1-SELECTOR: the projection-keyed floor branches once on IsFinitePlanarWorld — Mercator fills
+            // (margin 0), the globe fits (with margin) — and the two diverge on a non-square viewport,
+            // proving the branch is load-bearing (not dead code that happens to agree).
+            var mercator = new WebMercatorProjection();
+            var globe    = new SphericalProjection();
+            Assert.IsTrue(mercator.IsFinitePlanarWorld, "Mercator is the finite planar sheet");
+            Assert.IsFalse(globe.IsFinitePlanarWorld, "the globe is cyclic");
+
+            double2 vp = new double2(1920.0, 1080.0);
+            const double margin = 0.5;
+
+            double mercFloor  = CameraPoseMath.MinZoomFloor(mercator, vp.x, vp.y, margin);
+            double globeFloor = CameraPoseMath.MinZoomFloor(globe, vp.x, vp.y, margin);
+
+            Assert.AreEqual(CameraPoseMath.MinZoomToFill(vp.x, vp.y, 0.0), mercFloor, 1e-12,
+                "finite Mercator floor == MinZoomToFill(margin 0)");
+            Assert.AreEqual(CameraPoseMath.MinZoomToFit(vp.x, vp.y, margin), globeFloor, 1e-12,
+                "cyclic globe floor == MinZoomToFit(margin)");
+            Assert.AreNotEqual(mercFloor, globeFloor,
+                "on a non-square viewport the two floors must diverge (the branch is load-bearing)");
+        }
+
         // ── S93 — pixel unification Phase 2 (512 zoom renumbering; camera zoom == tile zoom) ──────
 
         [Test]

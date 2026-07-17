@@ -77,5 +77,19 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>Clamps a latitude to the valid geodetic range for this projection.</summary>
         double ClampValidLatitude(double latitudeDegrees);
+
+        /// <summary>True if the projection maps the world onto a FINITE planar sheet with hard edges (Web
+        /// Mercator): the camera then clamps pan/zoom so the viewport never leaves the sheet, and the
+        /// min-zoom floor FILLS the viewport. False for a cyclic/closed world (the globe wraps — no edges
+        /// to clamp, min-zoom FITS with margin). Distinct from <see cref="TryGetHorizonOccluder"/>
+        /// (self-occlusion) and <see cref="MaxRefineAngleRad"/> (subdivision).</summary>
+        bool IsFinitePlanarWorld { get; }
+
+        /// <summary>Clamps <c>camera.LookAt</c> so the visible viewport stays within the finite world
+        /// sheet. Cyclic projections return <c>camera.LookAt</c> unchanged. v1 is heading/tilt-conservative:
+        /// it clamps by the axis-aligned viewport half-span (<c>vp·0.5·metresPerPixel(zoom)</c>); on the axis
+        /// where the world exactly fills the viewport (min-zoom floor) the range collapses and the look-at
+        /// locks to world-centre.</summary>
+        GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in CameraProperties camera);
     }
 }

@@ -126,7 +126,8 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // Device-derived MIN-zoom floor from the (now logical) viewport (S92 D2): the most-zoomed-out level
             // frames the whole world with breathing room instead of shrinking to a useless world-square grape.
-            MinZoom = (float)CameraPoseMath.MinZoomToFit(vp.x, vp.y, MinZoomMargin);
+            // Projection-keyed (finite Mercator sheet FILLS the viewport; cyclic globe FITS with margin — D1).
+            MinZoom = (float)CameraPoseMath.MinZoomFloor(projection, vp.x, vp.y, MinZoomMargin);
 
             // Build the per-frame view context (camera + live interaction viewport + projection).
             // The live viewport is used here so cursor positions and viewport are in the same pixel

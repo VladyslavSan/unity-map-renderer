@@ -59,6 +59,22 @@ discarded by `RunTailAsync`'s post-loop `ct` gate anyway), untested. (3) The Pas
 inspection-verified, not test-pinned (the cancel-safety tooth throws in unguarded Pass 1). Full UAX #9 bidi
 (actually *rendering* mixed-direction labels) remains a separate deferred feature.
 
+**Single-world anchor clip (point labels).** `SymbolFeatureExtractor` now drops POINT features whose tile-local
+anchor falls outside the tile's half-open `[0, extent)` bounds (per-axis). Low-zoom source tiles carry ±360°
+world-copies / buffer duplicates of place-label anchors in the point layer (`TileId.ToLonLat` does no wrapping,
+so an out-of-range `px` projects to a render position exactly one world-width off); the mesh path is clipped to
+the tile server-side, but symbols were not — so on Mercator every label rendered as three copies one world-width
+apart while the base map stayed single (measured: 108 records = 36 labels × 3). Half-open so a shared-edge anchor
+is owned by exactly one tile (`x==extent` in tile T is `x==0` in T+1). **Known gaps (deferred, recorded at merge
+from the Stage-B dual review):** (1) the **LINE/curved** branch has the same unguarded `ToLonLat` (extractor
+LineString loop + `ProjectPath`) and is *not* clipped — if the source ever ships an out-of-bounds LineString
+point the identical ±360° duplicate fires for curved text; the finite-sheet camera (Mercator bounded pan/zoom)
+keeps off-world space off-screen so it is not *drawn*, but a duplicate would still exist in the label/collision/
+sort system (budget + tiebreak), so this is a data fix still owed. (2) the regression test
+(`Extract_PointPlacement_ClipsOutOfBoundsAnchorsToTile`) is **synthetic** (hand-encoded MultiPoint), pinning the
+`[0,extent)` boundary logic but not the real OpenFreeMap z0 place layer's actual coordinates — a real-tile smoke
+check is worth adding to the epic.
+
 So a `LabelInstance` exists per `(tile, feature)` once its tile's bytes are decoded and shaped. It carries
 `AnchorRender` (point) or `PathRender` + `LineAnchors` (curved), its `TileKey` (packed z/x/y), text, paint, and
 style-evaluated sizes. Nothing here depends on the camera.
