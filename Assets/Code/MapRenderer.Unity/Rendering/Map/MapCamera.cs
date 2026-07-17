@@ -63,6 +63,13 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public double DevicePixelRatio;
 
+        /// <summary>
+        /// The camera's position relative to the floating origin (== <see cref="CameraPoseMath.ComputeRelativePose"/>'s
+        /// <c>pos</c>, computed each <see cref="SyncToCamera"/>). The single owner of this value —
+        /// <c>MapView.BuildSceneFrame</c> folds it into <c>SceneFrame</c>, never a <c>transform.position</c>
+        /// round-trip.
+        /// </summary>
+        public double3 CameraRelativePosition { get; private set; }
 
         public MapCamera(UnityEngine.Camera camera,
                          CameraProperties initial,
@@ -121,12 +128,17 @@ namespace MapRenderer.Unity.Rendering.Map
                               * AltitudeMultiplier;
             if (altitude < 0.1) altitude = 0.1;
 
-            CameraPoseMath.ComputePose(altitude,
+            CameraPoseMath.ComputeRelativePose(altitude,
                                        CurrentProperties.Heading.Value,
                                        CurrentProperties.Tilt.Value,
                                        out double3 pos,
                                        out double3 fwd,
                                        out double3 up);
+
+            // Single owner: store the relative pose BEFORE pushing it to the transform, so every reader
+            // (MapView.BuildSceneFrame included) takes the same value the transform gets — never a
+            // transform.position round-trip.
+            CameraRelativePosition = pos;
 
             Camera.orthographic = false;
             Camera.fieldOfView  = (float)CurrentProperties.VerticalFovDeg;

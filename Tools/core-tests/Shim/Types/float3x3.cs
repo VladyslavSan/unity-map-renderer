@@ -14,5 +14,9 @@ namespace Unity.Mathematics
             this.c1 = c1;
             this.c2 = c2;
         }
+
+        // S2 (symbol projection): SceneFrame.Rebase defaults to identity on Mercator.
+        public static readonly float3x3 identity =
+            new float3x3(new float3(1f, 0f, 0f), new float3(0f, 1f, 0f), new float3(0f, 0f, 1f));
     }
 }

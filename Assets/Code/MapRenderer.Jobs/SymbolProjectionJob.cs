@@ -35,6 +35,9 @@ namespace MapRenderer.Jobs
         /// <summary>The per-frame floating-origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>) — subtracted before the camera transform.</summary>
         [ReadOnly] public double3 SceneOriginRender;
 
+        /// <summary>The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on Mercator) — applied AFTER the double subtract.</summary>
+        [ReadOnly] public float3x3 Rebase;
+
         /// <summary>The combined view-projection matrix for the current frame (<c>projectionMatrix * worldToCameraMatrix</c>).</summary>
         [ReadOnly] public float4x4 ViewProj;
 
@@ -49,7 +52,7 @@ namespace MapRenderer.Jobs
         public void Execute(int index)
         {
             bool ok = LabelScreenProjection.TryProjectPoint(
-                Points[index], SceneOriginRender, ViewProj, ViewportLogicalPx, out float2 screen, out float depth);
+                Points[index], SceneOriginRender, ViewProj, ViewportLogicalPx, Rebase, out float2 screen, out float depth);
             OutScreen[index] = screen;
             OutDepth[index]  = depth;
             OutValid[index]  = (byte)(ok ? 1 : 0);

@@ -20,6 +20,14 @@ namespace Unity.Mathematics
                           a.c0.y * b.x + a.c1.y * b.y + a.c2.y * b.z,
                           a.c0.z * b.x + a.c1.z * b.y + a.c2.z * b.z);
 
+        // S2 (symbol projection): SceneFrame.Rebase = transpose(TangentBasisAt(lookAt)). Transpose a
+        // column-major float3x3: new column i = old row i. Mirrors Unity.Mathematics.transpose so the fast
+        // gate agrees with the EditMode/Burst gate.
+        public static float3x3 transpose(float3x3 m)
+            => new float3x3(new float3(m.c0.x, m.c1.x, m.c2.x),
+                            new float3(m.c0.y, m.c1.y, m.c2.y),
+                            new float3(m.c0.z, m.c1.z, m.c2.z));
+
         // S20 T2: LabelScreenProjection.TryProjectAnchor's view-projection apply. Column-major float4x4,
         // same convention as the float3x3 overload above: m·v = c0·x + c1·y + c2·z + c3·w.
         public static float4 mul(float4x4 a, float4 b)

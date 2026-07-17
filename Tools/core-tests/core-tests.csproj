@@ -51,6 +51,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/Polygon.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/PolygonAssembler.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/Earcut.cs" />
+    <!-- S4: shared projection-subdivision policy (Core, engine-free) + its tests (shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineCurvatureSubdivision.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Imaging/SnapshotCoverage.cs" />
 
     <!-- VerifiedDisposable: shared IDisposable base (Core, engine-free) -->
@@ -422,10 +425,14 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverage.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageTests.cs" />
+    <!-- S3: globe far-side horizon cull, a gather fade-out trigger (engine-free) + its tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/HorizonCull.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedVertexTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />

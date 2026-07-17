@@ -380,6 +380,27 @@ So the curved path sets `PlacedQuad.RotationRadians = tangent` and must **NOT** 
 `BillboardRotationRadians` (tangent + bearing = double rotation). Point labels keep the bearing path; curved
 labels take the tangent branch.
 
+**Per-glyph orientation = chord across the glyph's footprint (not the single-segment tangent).** Each glyph is
+rotated by `atan2(At(arc+halfWidth) − At(arc−halfWidth))` — the chord its own footprint spans — rather than the
+raw piecewise-constant segment tangent (`PolylineArcMath.SegmentTangent` returns one angle for a whole segment,
+so a glyph straddling a polyline vertex would otherwise snap to one segment's angle while its neighbour snaps to
+the other, and their inner corners collide). The chord blends the two segment angles across a vertex so glyphs
+tile edge-to-edge (MapLibre's approach). The `text-max-angle` **cull** gate stays on the raw **segment** tangent
+(`StageCurvedAnchor` decouples cull from render: cull answers "is the path too kinky to place a label here"; the
+chord blend is purely how each glyph is oriented), so culling is behaviour-preserving and the Burst/managed
+staged-count parity holds. Teeth: `LabelStagingMathCurvedVertexTests` (RED-verified — a glyph on a bend gets the
+blended chord angle, not a raw segment angle; a straight run is unchanged).
+
+> **Known limitation (tracked, not fixed) — corner spacing compression.** Glyphs are positioned at equal
+> **arc-length** along the polyline (`PolylineArcMath.At`), but render as straight rigid quads. Where the line
+> bends, the straight-line (chord) distance between adjacent glyph centres is **shorter than their arc-length
+> advance**, so the boxes overlap by ≈ `advance − chord` at sharp corners — letters visibly bunch at real road
+> bends (worst where a vertex falls mid-label). The chord-orientation fix above corrects the *rotation* at bends
+> but NOT this *spacing* compression. A real fix is structural (chord-distance glyph stepping, or a corner-rounded
+> placement path) with genuine trade-offs (chord-walking distorts text at sharp corners; rounding changes label
+> shape) — deferred to a dedicated curved-text-placement slice, gated on a MapLibre-algorithm comparison. Not
+> blocking; curved-label polish.
+
 **Zero per-frame alloc.** The per-frame walk runs over **reused** scratch (a persistent projected-polyline
 buffer grown geometrically, a reused walker), never a fresh `float2[]`/`List` per label per frame.
 `CurvedTextLayout` stays build-time (its per-glyph result cached on the label), so only the walk is per-frame.
@@ -401,8 +422,9 @@ points), but the look under rotation/tilt wants a maintainer eyeball; the keep-u
 
 # 4. Projection support (globe-ready labels)
 
-**Status: designed, not started.** Land **S1 + S2 now** (both Mercator byte-identical, both real bug fixes);
-defer **S3–S5** until there is a committed globe label fixture to eyeball.
+**Status: S1 + S2 + S3 + S4 landed** (all Mercator byte-identical, all real latent-globe bug fixes) on branch
+`feat/symbol-projection-support`. **S5 deferred** — it is an on-device eyeball that needs a committed globe
+label fixture and an exercised globe camera path on screen (there is none yet).
 
 Make the subsystem render correctly under any `IProjection` — notably `SphericalProjection` (the globe) —
 reaching the projection-correctness the fill/line mesh path already has via `ProjectPointsJob<TProj>`. A label on
@@ -471,16 +493,36 @@ S1–S4 share the invariant **Mercator snapshots byte-identical**; each is headl
 
 | Stage | Change | Falsifiable teeth |
 |---|---|---|
-| **S1** | Dedup: add a Y axis to `CrossTileLabelKey` + rename the scale to `MetersPerPixel` | A 30°N/30°S same-longitude pair must NOT dedup to one cell; no symbol/label file references `WebMercator.GroundResolution`; Mercator dedup + snapshot parity |
-| **S2** (keystone) | Apply `SceneFrame.Rebase` in the label projection seam | Under `SphericalProjection` at a non-origin look-at, the look-at's own anchor projects to viewport center (RED-verified against current code) |
-| **S3** | Horizon cull via `TryGetHorizonOccluder`, folded into `OutValid` | Far-hemisphere anchor culled, near-side kept; occluded label absent from collision input |
-| **S4** (hardest) | Subdivide the tile-local path; feed one sequence to anchor-compute + projection | Forced-long 2-vertex globe segment splits (mid-vertex off the chord); each anchor lands at its correct arc position after subdivision |
+| **S1** ✅ | Dedup: add a Y axis to `CrossTileLabelKey` + rename the scale to `MetersPerPixel` | A 30°N/30°S same-longitude pair must NOT dedup to one cell; no symbol/label file references `WebMercator.GroundResolution`; Mercator dedup + snapshot parity |
+| **S2** ✅ (keystone) | Apply `SceneFrame.Rebase` in the label projection seam | Under a non-origin globe rebase, the label seam matches the mesh-RTC oracle (`FloatingOrigin.TileToSceneRebased`) and differs from the no-rebase result — RED-verified off by ~48M px; Burst-vs-inline parity within ULP noise; Mercator snapshot parity |
+| **S3** ✅ | Horizon cull via `TryGetHorizonOccluder` — done as a FADE in `GatherSymbolPoints` (not a hard `OutValid` drop → labels would pop) | Far-hemisphere anchor culled, near-side kept; occluded label eases out (kept staged), absent from collision once faded |
+| **S4** ✅ (hardest) | Subdivide the tile-local path once (shared `LineCurvatureSubdivision` policy — the `SegmentSteps`/`MaxCurveSegments` leaf unified with the mesh path); feed the ONE finer sequence to both anchor-compute + projection | Forced-long 2-vertex globe segment splits (mid-vertex off the chord); anchor count/tile-position invariant, only `Segment` refined; each anchor resolves to its correct arc position; **RED-verified** vs the injected coarse-`Compute`/finer-`PathRender` desync; Mercator byte-identical |
 | **S5** | Globe end-to-end validation + eyeball | Labels only on the near hemisphere; curved road text tracks the projected curve to the limb; collision stable under a slow globe rotate |
 
 S1 and S2 are independent and Mercator-identical. S2 must precede S3 (horizon math needs the rebased frame) and
 S4's validation. **S2 is the keystone** — all globe label correctness rests on it, though it fails loudly
 (visibly wrong) the moment anyone looks. **S4 is the hardest** — an index desync mis-anchors labels silently,
 surviving even an eyeball.
+
+### S4 post-stage findings (recorded at merge; non-blocking, from the dual review)
+
+- **Arch-conditional RED-verify (the one worth knowing).** The S4 subdivision unified the mesh path's
+  `SegmentSteps` policy into `Core/Geometry/LineCurvatureSubdivision`, which surfaced a latent overflow inherited
+  verbatim from the mesh path: `(int)math.ceil(ang / maxRefineAngleRad)` casts an out-of-range double for a
+  pathological tolerance. The cast is **architecture-dependent** — x64 truncates to `int.MinValue` (defeats the
+  `< 1` guard → returns 1, *no* subdivision where the most was needed); arm64 saturates to `int.MaxValue` (still
+  trips the `> MaxCurveSegments` cap → correct-looking 128). Fixed by clamping in double space *before* the cast
+  (`(int)math.clamp(math.ceil(…), 1, MaxCurveSegments)`), deterministic on any arch (also traced NaN → 128). But
+  the two guarding teeth (`SegmentSteps_Extremes…`, `Subdivide_PathologicalTolerance…`) only go **RED on x64** —
+  the Unity EditMode gate (x64 Mono/Rosetta) is where they caught it; the fast `dotnet test` loop (native arm64)
+  passes them fix-or-no-fix. An arm64-only contributor must NOT trust those two as a tripwire on the fast loop.
+- **Tooth-c fixture fragility (S4-T6).** `Extract_GlobeProjection_…`'s resolve-position tooth passes at ~0 error
+  only because the z=1 diagonal subdivides into an *even* step count, landing the geographic midpoint on an exact
+  finer-path vertex. If the synthetic geometry is ever retuned to an odd count, the anchor falls mid-sub-segment
+  (~1 km sagitta > the 1.0 m tolerance) and flips falsely RED with no real bug. Teeth (b) `Segment > 0` and the
+  desync RED-verify carry the real weight; retune the tolerance if the fixture changes.
+- **Weak chord threshold (S4-T6a).** `distFromChord > 1.0` (metre-scale render units) distinguishes curved-from-
+  flat but does not tightly pin the sag magnitude. Acceptable — (b)/(c) pin the alignment.
 
 ## Verdict
 

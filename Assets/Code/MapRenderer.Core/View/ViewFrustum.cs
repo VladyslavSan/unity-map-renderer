@@ -45,7 +45,7 @@ namespace MapRenderer.Core.View
 
         /// <summary>
         /// Builds the frustum from a render-space camera pose (look-at at the origin, as
-        /// <see cref="CameraPoseMath.ComputePose"/> emits) plus the perspective parameters. <paramref name="fwd"/>
+        /// <see cref="CameraPoseMath.ComputeRelativePose"/> emits) plus the perspective parameters. <paramref name="fwd"/>
         /// points toward the look-at, <paramref name="up"/> is the camera up. FOV is the <b>vertical</b> field of
         /// view in degrees; horizontal is derived from <paramref name="aspect"/> (width/height), matching a
         /// Unity camera with a vertical FOV axis.

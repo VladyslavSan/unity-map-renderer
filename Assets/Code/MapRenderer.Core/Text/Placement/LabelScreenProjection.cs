@@ -36,6 +36,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <param name="sceneOriginRender">The per-frame scene origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>).</param>
         /// <param name="viewProj">The combined view-projection matrix for the CURRENT frame (<c>projectionMatrix * worldToCameraMatrix</c>).</param>
         /// <param name="viewportLogicalPx">The logical (DPR-normalized) viewport size in pixels.</param>
+        /// <param name="rebase">The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on
+        /// Mercator) — applied AFTER the double subtract (mirrors <c>FloatingOrigin.TileToSceneRebased</c>).</param>
         /// <param name="screenPx">The projected logical screen pixel (y-up, origin bottom-left) — valid only when this method returns <c>true</c>.</param>
         /// <param name="depth">NDC depth (<c>clip.z / clip.w</c>) — valid only when this method returns <c>true</c>.</param>
         public static bool TryProjectAnchor(
@@ -43,10 +45,11 @@ namespace MapRenderer.Core.Text.Placement
             in double3 sceneOriginRender,
             in float4x4 viewProj,
             in double2 viewportLogicalPx,
+            in float3x3 rebase,
             out float2 screenPx,
             out float depth)
         {
-            if (!TryProjectPoint(renderPos, sceneOriginRender, viewProj, viewportLogicalPx, out screenPx, out depth))
+            if (!TryProjectPoint(renderPos, sceneOriginRender, viewProj, viewportLogicalPx, rebase, out screenPx, out depth))
                 return false; // behind the camera
 
             return IsWithinViewportMargin(screenPx, viewportLogicalPx); // fully outside the viewport (+ margin)?
@@ -73,11 +76,16 @@ namespace MapRenderer.Core.Text.Placement
         /// vertex may be far off-screen while the label's visible portion is on-screen, so the margin cull
         /// (correct for a point anchor) would wrongly drop the whole line.
         /// </summary>
+        /// <param name="rebase">The per-frame render→look-at-ENU rotation (<c>SceneFrame.Rebase</c>, identity on
+        /// Mercator). Applied AFTER the double subtract + float-narrow (mirrors
+        /// <c>FloatingOrigin.TileToSceneRebased</c> — rebasing before the subtract would rotate full-scale world
+        /// coordinates and blow the float32 precision budget).</param>
         public static bool TryProjectPoint(
             in double3 renderPos,
             in double3 sceneOriginRender,
             in float4x4 viewProj,
             in double2 viewportLogicalPx,
+            in float3x3 rebase,
             out float2 screenPx,
             out float depth)
         {
@@ -85,7 +93,9 @@ namespace MapRenderer.Core.Text.Placement
             // FloatingOrigin.TileToSceneRebased, which does the same field-by-field for the same reason —
             // keeps this file compiling identically against the core-tests shim's minimal float2/float4.
             double3 local = renderPos - sceneOriginRender;
-            float4 clip = math.mul(viewProj, new float4((float)local.x, (float)local.y, (float)local.z, 1f));
+            float3 localF = new float3((float)local.x, (float)local.y, (float)local.z);
+            float3 rebased = math.mul(rebase, localF); // rotate into the look-at ENU frame (identity on Mercator)
+            float4 clip = math.mul(viewProj, new float4(rebased, 1f));
 
             if (clip.w <= 0f)
             {

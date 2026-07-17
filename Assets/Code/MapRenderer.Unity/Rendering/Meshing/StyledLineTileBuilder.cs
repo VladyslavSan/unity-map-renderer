@@ -99,11 +99,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
         private const double DefaultMiterLimit    = 2.0;
         private const int    DefaultRoundSegments = 4;
 
-        // Per-segment curvature-subdivision cap: however far a segment's projected arc reaches, it is split into at
-        // most this many parts so a degenerate span can't blow up. The ANGLE tolerance is projection-supplied
-        // (IProjection.MaxRefineAngleRad); this is only the safety cap.
-        private const int MaxCurveSegments = 128;
-
         // S91-B: lines project through the SAME projection surface as fills, not a bespoke hardcoded
         // WebMercator.Forward. Launch-time projection config threads a chosen projection here; until then this
         // single seam defaults to WebMercator (Mercator output is bit-for-bit).
@@ -364,15 +359,20 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// interpolation in tile space; every sub-point projects onto the surface (step 3 re-projects it), so long
         /// chords stop faceting. Writes the subdivided points into <paramref name="subPts"/> (grown on demand) and
         /// returns their count.
-        /// <para>A flat projection returns <c>maxRefineAngleRad = ∞</c>, so <see cref="SegmentSteps"/> yields 1 step
-        /// per segment and the output is the original ring — the Mercator path is the degenerate value of the SAME
-        /// code, with no capability flag.</para>
+        /// <para>A flat projection returns <c>maxRefineAngleRad = ∞</c>, so
+        /// <see cref="LineCurvatureSubdivision.SegmentSteps"/> yields 1 step per segment and the output is the
+        /// original ring — the Mercator path is the degenerate value of the SAME code, with no capability flag.</para>
+        /// <para>S4: the split-count POLICY (<c>SegmentSteps</c> + its <c>MaxCurveSegments</c> cap) is shared with
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor"/> via
+        /// <see cref="LineCurvatureSubdivision"/> — this method keeps its own <c>NativeList</c> densification loop
+        /// (container plumbing, not policy).</para>
         /// </summary>
         internal static int SubdivideCenterline(
             List<double2> ring, NativeArray<double3> up, int n, NativeList<double2> subPts, double maxRefineAngleRad)
         {
             int count = 1; // the first point, then `segs` points per segment (sub-points + the segment end)
-            for (int k = 0; k < n - 1; k++) count += SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
+            for (int k = 0; k < n - 1; k++)
+                count += LineCurvatureSubdivision.SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
 
             subPts.Resize(count, NativeArrayOptions.UninitializedMemory);
 
@@ -380,7 +380,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             int w = 1;
             for (int k = 0; k < n - 1; k++)
             {
-                int     segs = SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
+                int     segs = LineCurvatureSubdivision.SegmentSteps(up[k], up[k + 1], maxRefineAngleRad);
                 double2 a    = ring[k];
                 double2 b    = ring[k + 1];
                 for (int j = 1; j <= segs; j++)
@@ -390,18 +390,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 }
             }
             return w;
-        }
-
-        /// <summary>Number of equal sub-segments a centerline segment is split into so its projected arc (the angle
-        /// between the two unit surface normals) stays under <paramref name="maxRefineAngleRad"/>; ≥1, capped at
-        /// <see cref="MaxCurveSegments"/>. A ∞ tolerance (flat projection) always yields 1 (no subdivision).</summary>
-        private static int SegmentSteps(double3 upA, double3 upB, double maxRefineAngleRad)
-        {
-            double ang  = math.acos(math.clamp(math.dot(upA, upB), -1.0, 1.0));
-            int    segs = (int)math.ceil(ang / maxRefineAngleRad);
-            if (segs < 1) segs = 1;
-            if (segs > MaxCurveSegments) segs = MaxCurveSegments;
-            return segs;
         }
     }
 }

@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
+using MapRenderer.Core.View.Camera;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -312,6 +313,11 @@ namespace MapRenderer.Unity.Text.Placement
         /// many tile-unload fade-outs completed this frame.</summary>
         internal int LastDepartingCulledCount { get; private set; }
 
+        /// <summary>S3: labels skipped on the last Tick because their anchor is hidden behind the globe's own
+        /// bulk (<see cref="HorizonCull"/>) — never projected or collided. Telemetry — always 0 under a planar
+        /// projection (Mercator's <c>TryGetHorizonOccluder</c> returns false ⇒ the trigger is inert).</summary>
+        internal int LastHorizonCulledCount { get; private set; }
+
         /// <summary>The persistent billboard mesh <see cref="Tick"/> rebuilds every call. Test surface — E2:
         /// this mesh is ALSO the one the slot's <see cref="LabelSlotPresenter"/> renders from, a real scene
         /// <see cref="MeshRenderer"/> that Unity redraws headless without a manual attach (see
@@ -455,6 +461,7 @@ namespace MapRenderer.Unity.Text.Placement
                 LastDistanceCulledCount = 0;
                 LastTileCoverageCulledCount = 0;
                 LastDepartingCulledCount = 0;
+                LastHorizonCulledCount = 0;
 
                 int slotCount = (symbolLayers != null && symbolLayers.Count > 0) ? symbolLayers.Count : 1;
                 EnsureSlots(slotCount);
@@ -469,12 +476,22 @@ namespace MapRenderer.Unity.Text.Placement
                     float4x4 viewProj = math.mul(ToFloat4x4(_camera.Camera.projectionMatrix),
                         ToFloat4x4(_camera.Camera.worldToCameraMatrix));
                     double3 sceneOriginRender = frame.SceneOriginRender;
+                    float3x3 rebase = frame.Rebase;
+
+                    // S3: the globe far-side horizon cull's params, built ONCE per Tick. `occ == false` on a
+                    // planar projection (WebMercatorProjection.TryGetHorizonOccluder) ⇒ globeRadiusSq = -1 ⇒
+                    // HorizonCull.IsHiddenBeyondHorizon is an unconditional no-op for every record. `cameraRelative`
+                    // is Stage U's SceneFrame.CameraRelativePosition (ComputeRelativePose's `pos`, folded in by
+                    // MapView.BuildSceneFrame) — NOT a fresh pose computation and NOT transform.position.
+                    bool occ = _camera.Projection.TryGetHorizonOccluder(out double3 occCentre, out double occRadius);
+                    double3 cameraRelative = frame.CameraRelativePosition;
+                    double  globeRadiusSq  = occ ? occRadius * occRadius : -1.0;
 
                     // B-3: the pre-projection horizon/distance cull radius (render metres around the look-at) —
-                    // one logical pixel of ground = GroundResolution(zoom), so LabelViewportSpans screen-widths
+                    // one logical pixel of ground = MetersPerPixel(zoom), so LabelViewportSpans screen-widths
                     // of ground. Labels beyond it are skipped BEFORE projection/collision (the horizon pile-up).
                     double cullRadius = LabelViewDistance.CullRadiusMeters(
-                        viewportLogicalPx, WebMercator.GroundResolution(_camera.CurrentProperties.Zoom), LabelViewportSpans);
+                        viewportLogicalPx, CameraPoseMath.MetersPerPixel(_camera.CurrentProperties.Zoom), LabelViewportSpans);
 
                     // Map bearing (heading) — drives text-translate-anchor:map and text-rotation-alignment:map
                     // (#4). Read once per frame; zero for a north-up map, where map- and viewport-alignment
@@ -496,9 +513,9 @@ namespace MapRenderer.Unity.Text.Placement
                         {
                             // Per-tile screen-coverage pre-cull: flag whole tiles too small on screen this frame,
                             // BEFORE the per-record gather reads the flags (camera-dependent → every frame).
-                            ComputeTileCoverageCull(batch, sceneOriginRender, viewProj, viewportLogicalPx);
-                            GatherSymbolPoints(batch, sceneOriginRender, cullRadius);
-                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx);
+                            ComputeTileCoverageCull(batch, sceneOriginRender, viewProj, viewportLogicalPx, rebase);
+                            GatherSymbolPoints(batch, sceneOriginRender, cullRadius, rebase, cameraRelative, occCentre, globeRadiusSq);
+                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
                         }
 
                         using (PmStage.Auto())
@@ -635,7 +652,7 @@ namespace MapRenderer.Unity.Text.Placement
         // managed + tiny (dozens of tiles, four projected corners each). Records with no tile (RecordTile == -1,
         // e.g. the demo/test seam) are never flagged here.
         private void ComputeTileCoverageCull(SymbolLabelBatch batch, double3 sceneOriginRender, in float4x4 viewProj,
-            double2 viewportLogicalPx)
+            double2 viewportLogicalPx, in float3x3 rebase)
         {
             int tiles = batch.TileCount;
             if (_tileCulled.Length < tiles) Array.Resize(ref _tileCulled, math.max(tiles, 16));
@@ -644,7 +661,7 @@ namespace MapRenderer.Unity.Text.Placement
                 SymbolLabelBatch.TileQuad q = batch.TileCorners[t];
                 double coverage = LabelTileCoverage.ScreenCoverage(
                     q.TopLeft, q.TopRight, q.BottomRight, q.BottomLeft,
-                    sceneOriginRender, viewProj, viewportLogicalPx);
+                    sceneOriginRender, viewProj, viewportLogicalPx, rebase);
                 _tileCulled[t] = (byte)(LabelTileCoverage.IsCulled(coverage, MinTileScreenCoverage) ? 1 : 0);
             }
         }
@@ -652,26 +669,32 @@ namespace MapRenderer.Unity.Text.Placement
         // ── B-2: gather + project every symbol's screen geometry ──────────────────────────────────────────────
         // Flatten every un-culled record's world points (from the batch SoA) into _symbolPoints — a point's anchor,
         // a line's path vertices — recording each record's start in the native _sjPointOffset (-1 = culled →
-        // skipped by the stage job). Cheap: array reads + the tile-coverage + B-3 distance culls, no matrix mul;
-        // the projection (matrix mul) happens once, in ProjectSymbols.
-        private void GatherSymbolPoints(SymbolLabelBatch batch, double3 sceneOriginRender, double cullRadius)
+        // skipped by the stage job). Cheap: array reads + the tile-coverage + B-3 distance + S3 horizon culls, no
+        // matrix mul; the projection (matrix mul) happens once, in ProjectSymbols.
+        private void GatherSymbolPoints(SymbolLabelBatch batch, double3 sceneOriginRender, double cullRadius,
+            in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq)
         {
             _sjPointOffset.ResizeUninitialized(batch.Count);
             _symbolPoints.Clear();
             _forceFadeOut.Clear();
             for (int r = 0; r < batch.Count; r++)
             {
-                // Three fade-out triggers, cheapest first: the record's tile is LEAVING cover (retain-as-departing —
+                // Four fade-out triggers, cheapest first: the record's tile is LEAVING cover (retain-as-departing —
                 // flagged by the batch builder from CollectInto's active/departing split), the tile-coverage cull
-                // (whole tile too small on screen this frame — flag set by ComputeTileCoverageCull), and the B-3
-                // distance cull (this label past the horizon radius). A departing record is never also coverage/
-                // distance culled here — its fade-out is unconditional.
+                // (whole tile too small on screen this frame — flag set by ComputeTileCoverageCull), the B-3
+                // distance cull (this label past the horizon radius), and S3's globe horizon cull (this label's
+                // anchor is hidden behind the earth's own bulk — short-circuits to false on a planar projection
+                // via globeRadiusSq < 0). A departing record is never also coverage/distance/horizon culled here —
+                // its fade-out is unconditional.
                 bool departing  = batch.RecordDeparting[r];
                 bool tileCulled = !departing && batch.RecordTile[r] >= 0 && _tileCulled[batch.RecordTile[r]] != 0;
                 bool distCulled = !departing && !tileCulled &&
                     LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius);
+                bool horizonCulled = !departing && !tileCulled && !distCulled &&
+                    HorizonCull.IsHiddenBeyondHorizon(batch.RepAnchor[r], sceneOriginRender, rebase,
+                                                      cameraRelative, globeCentreRelative, globeRadiusSq);
 
-                if (departing || tileCulled || distCulled)
+                if (departing || tileCulled || distCulled || horizonCulled)
                 {
                     // Don't pop a label that was on screen last frame: if its fade is still alive, KEEP staging it
                     // (so it eases out in place at its live position) and force its fade-out in emit. Only once it
@@ -685,7 +708,8 @@ namespace MapRenderer.Unity.Text.Placement
                     {
                         if (departing) LastDepartingCulledCount++;
                         else if (tileCulled) LastTileCoverageCulledCount++;
-                        else LastDistanceCulledCount++;
+                        else if (distCulled) LastDistanceCulledCount++;
+                        else LastHorizonCulledCount++;
                         _sjPointOffset[r] = -1;
                         continue;
                     }
@@ -729,11 +753,9 @@ namespace MapRenderer.Unity.Text.Placement
             return true;
         }
 
-        // Project the gathered _symbolPoints to screen/depth/valid. Parallel Burst job at/above the threshold, else
-        // a serial loop over the SAME LabelScreenProjection.TryProjectPoint (so the two fills are bit-identical —
-        // the job Schedule+Complete overhead only pays off at high counts, and below it a job could cost MORE than
-        // the serial matrix-muls it replaces, so B-2 can only help, never regress the common case).
-        private void ProjectSymbols(double3 sceneOriginRender, in float4x4 viewProj, double2 viewportLogicalPx)
+        // Project the gathered _symbolPoints to screen/depth/valid via the Burst SymbolProjectionJob, run inline
+        // with .Run() — no managed serial fallback (see the .Run() comment below for why).
+        private void ProjectSymbols(double3 sceneOriginRender, in float4x4 viewProj, double2 viewportLogicalPx, in float3x3 rebase)
         {
             int total = _symbolPoints.Length;
             _symbolScreen.Resize(total, NativeArrayOptions.UninitializedMemory);
@@ -749,6 +771,7 @@ namespace MapRenderer.Unity.Text.Placement
             {
                 Points            = _symbolPoints.AsArray(),
                 SceneOriginRender = sceneOriginRender,
+                Rebase            = rebase,
                 ViewProj          = viewProj,
                 ViewportLogicalPx = viewportLogicalPx,
                 OutScreen         = _symbolScreen.AsArray(),

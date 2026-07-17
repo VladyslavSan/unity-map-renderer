@@ -5,7 +5,9 @@
 
 using NUnit.Framework;
 using Unity.Mathematics;
+using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View;
 
 namespace MapRenderer.Tests.Text.Placement
 {
@@ -42,7 +44,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sceneOrigin = new double3(0.0, 0.0, 0.0);
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out float2 screenPx, out float depth);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out float2 screenPx, out float depth);
 
             Assert.IsTrue(ok, "a point in front of the camera and inside the viewport must not be culled");
             // clip=(2,1,4,4) -> ndc=(0.5,0.25,1) -> screenPx=(0.75*200, 0.625*100) = (150, 62.5).
@@ -61,7 +63,7 @@ namespace MapRenderer.Tests.Text.Placement
             var renderPos = new double3(52.0, 1.0, 54.0); // local = renderPos - sceneOrigin = (2,1,4)
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out float2 screenPx, out float depth);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out float2 screenPx, out float depth);
 
             Assert.IsTrue(ok);
             Assert.AreEqual(150f, screenPx.x, 1e-4f, "rebased local must reproduce the SAME golden pixel as the origin-relative test");
@@ -84,7 +86,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sceneOrigin = new double3(0.0, 0.0, 0.0);
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out _, out _);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out _, out _);
 
             Assert.IsFalse(ok, "an anchor behind the camera (clip.w <= 0) must be culled");
         }
@@ -96,7 +98,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sceneOrigin = new double3(0.0, 0.0, 0.0);
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out _, out _);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out _, out _);
 
             Assert.IsFalse(ok, "clip.w == 0 is the inclusive boundary of the behind-camera cull");
         }
@@ -110,7 +112,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sceneOrigin = new double3(0.0, 0.0, 0.0);
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out float2 screenPx, out _);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out float2 screenPx, out _);
 
             Assert.IsFalse(ok, "a projected pixel far outside the viewport (even with a positive w) must be culled");
         }
@@ -123,11 +125,70 @@ namespace MapRenderer.Tests.Text.Placement
             var sceneOrigin = new double3(0.0, 0.0, 0.0);
 
             bool ok = LabelScreenProjection.TryProjectAnchor(
-                in renderPos, in sceneOrigin, in ViewProj, in Viewport, out float2 screenPx, out _);
+                in renderPos, in sceneOrigin, in ViewProj, in Viewport, float3x3.identity, out float2 screenPx, out _);
 
             Assert.IsTrue(ok);
             Assert.AreEqual(100f, screenPx.x, 1e-4f);
             Assert.AreEqual(50f, screenPx.y, 1e-4f);
+        }
+
+        // ── S2 keystone tooth: a NON-identity rebase (SceneFrame.Rebase on a globe look-at) must actually be
+        //    applied, not silently dropped. Uses a real globe rebase (transpose(TangentBasisAt(lookAt))) at a
+        //    NON-origin look-at, and a NON-look-at anchor -- a point AT the look-at has local = anchor -
+        //    sceneOrigin = 0, so rebase * 0 = 0 with or without the fix (non-discriminating, the design table's
+        //    original phrasing). This anchor's local delta is nonzero, so the rebase actually moves the pixel. ──
+        [Test]
+        public void TryProjectPoint_NonIdentityRebase_MatchesMeshOracle_AndDiffersFromNoRebase()
+        {
+            var proj = new SphericalProjection();
+            var lookAt = new GeoCoordinate { Latitude = 45.0, Longitude = 30.0 };
+            double3 sceneOrigin = proj.Project(lookAt);
+            float3x3 basis = proj.TangentBasisAt(lookAt);
+            float3x3 rebase = math.transpose(basis); // matches SceneFrame.Rebase's definition
+
+            // NON-look-at anchor -- local = anchor - sceneOrigin != 0, so the rebase is discriminating.
+            var anchorGeo = new GeoCoordinate { Latitude = 47.0, Longitude = 33.0 };
+            double3 anchor = proj.Project(anchorGeo);
+
+            var viewProj = float4x4.identity;
+            var viewport = new double2(200.0, 100.0);
+
+            // (1) Correctness vs the mesh oracle: FloatingOrigin.TileToSceneRebased is the SAME "double subtract,
+            //     narrow to float, rotate" the seam must perform for the tile-placement RTC math. Reproduce its
+            //     clip/screen pixel by hand and compare against the fixed TryProjectPoint's result.
+            float3 oracleLocal = FloatingOrigin.TileToSceneRebased(anchor, sceneOrigin, rebase);
+            float4 oracleClip = math.mul(viewProj, new float4(oracleLocal, 1f));
+            float2 oracleScreen = new float2(
+                (oracleClip.x / oracleClip.w * 0.5f + 0.5f) * (float)viewport.x,
+                (oracleClip.y / oracleClip.w * 0.5f + 0.5f) * (float)viewport.y);
+
+            bool ok = LabelScreenProjection.TryProjectPoint(
+                in anchor, in sceneOrigin, in viewProj, in viewport, rebase, out float2 screenPx, out _);
+
+            Assert.IsTrue(ok, "the anchor must project in front of this identity-viewProj camera");
+            Assert.AreEqual(oracleScreen.x, screenPx.x, 1e-3f, "rebased seam pixel must match the mesh-RTC oracle");
+            Assert.AreEqual(oracleScreen.y, screenPx.y, 1e-3f, "rebased seam pixel must match the mesh-RTC oracle");
+
+            // (2) Discrimination: the no-rebase (identity) result must differ -- proves the rebase is load-bearing,
+            //     not a no-op that happens to cancel out.
+            bool okNoRebase = LabelScreenProjection.TryProjectPoint(
+                in anchor, in sceneOrigin, in viewProj, in viewport, float3x3.identity, out float2 screenPxNoRebase, out _);
+            Assert.IsTrue(okNoRebase);
+            Assert.That(math.distance(screenPx, screenPxNoRebase), Is.GreaterThan(1e-3f),
+                "a non-identity rebase must move the projected pixel -- dropping it would silently reproduce the no-rebase result");
+
+            // (3) Rebase self-check (non-circular -- hand-computed targets, independent of transpose's internals):
+            //     rebase maps each render basis column back to its own ENU axis.
+            AssertApprox(math.mul(rebase, basis.c0), new float3(1f, 0f, 0f), "rebase * basis.c0 must recover East");
+            AssertApprox(math.mul(rebase, basis.c1), new float3(0f, 1f, 0f), "rebase * basis.c1 must recover Up");
+            AssertApprox(math.mul(rebase, basis.c2), new float3(0f, 0f, 1f), "rebase * basis.c2 must recover North");
+        }
+
+        private static void AssertApprox(float3 actual, float3 expected, string message)
+        {
+            Assert.AreEqual(expected.x, actual.x, 1e-5f, message);
+            Assert.AreEqual(expected.y, actual.y, 1e-5f, message);
+            Assert.AreEqual(expected.z, actual.z, 1e-5f, message);
         }
     }
 }

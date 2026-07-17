@@ -25,7 +25,7 @@ namespace MapRenderer.Tests
         private static (GameObject go, Camera cam, RenderTexture rt) BuildUnityCamera(in CameraProperties c)
         {
             double alt = CameraPoseMath.AltitudeForZoom(c.Zoom, Vp.y, c.VerticalFovDeg);
-            CameraPoseMath.ComputePose(alt, c.Heading.Value, c.Tilt.Value,
+            CameraPoseMath.ComputeRelativePose(alt, c.Heading.Value, c.Tilt.Value,
                 out double3 pos, out double3 fwd, out double3 up);
 
             var rt = new RenderTexture((int)Vp.x, (int)Vp.y, 24);

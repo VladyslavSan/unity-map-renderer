@@ -61,7 +61,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                 bool ok = LabelScreenProjection.TryProjectAnchor(
                     in renderPos, in sceneOriginRender, in viewProj, in viewportLogicalPx,
-                    out float2 screenPx, out float depth);
+                    float3x3.identity, out float2 screenPx, out float depth);
 
                 Assert.IsTrue(ok, "an anchor near the look-at, in front of an overhead camera, must not be culled");
                 Assert.AreEqual(expectedScreen.x, screenPx.x, 0.5f,
@@ -106,7 +106,7 @@ namespace MapRenderer.Tests.Text.Placement
                 double2 viewportLogicalPx = mapCamera.ViewportPx / mapCamera.DevicePixelRatio;
 
                 bool ok = LabelScreenProjection.TryProjectAnchor(
-                    in renderPos, in sceneOriginRender, in viewProj, in viewportLogicalPx, out _, out _);
+                    in renderPos, in sceneOriginRender, in viewProj, in viewportLogicalPx, float3x3.identity, out _, out _);
 
                 Assert.IsFalse(ok, "an anchor behind the real (tilted) camera must be culled");
             }

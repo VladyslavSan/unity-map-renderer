@@ -136,7 +136,7 @@ namespace MapRenderer.Tests
         public void Pose_PitchZero_CameraOverhead_LooksDown()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
                 out double3 pos, out double3 fwd, out double3 up);
 
             Assert.AreEqual(0.0,      pos.x, 1e-6, "At pitch=0, X must be 0 (directly above).");
@@ -157,8 +157,8 @@ namespace MapRenderer.Tests
         {
             double altitude = 10000.0;
 
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0),  Angle.FromDegrees(0.0), out _, out _, out double3 upNorth);
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(90.0), Angle.FromDegrees(0.0), out _, out _, out double3 upEast);
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0),  Angle.FromDegrees(0.0), out _, out _, out double3 upNorth);
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(90.0), Angle.FromDegrees(0.0), out _, out _, out double3 upEast);
 
             // The up-vectors should differ (heading-derived, not fixed world-up).
             double diffX = Math.Abs(upNorth.x - upEast.x);
@@ -177,7 +177,7 @@ namespace MapRenderer.Tests
         public void Pose_Pitch45_TiltsTowardHorizon_StaysAbove()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
                 out double3 pos, out double3 fwd, out _);
 
             Assert.Greater(pos.y, 0.0, "Camera must be above origin (pos.y > 0) at tilt=45.");
@@ -198,7 +198,7 @@ namespace MapRenderer.Tests
             foreach (double t in new[] { 0.0, 30.0, 45.0, 60.0, 89.0 })
             foreach (double h in new[] { 0.0, 90.0, 200.0, 359.0 })
             {
-                CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(h), Angle.FromDegrees(t),
+                CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(h), Angle.FromDegrees(t),
                     out _, out _, out double3 up);
                 Assert.Greater(up.y, -1e-9,
                     $"up.y must be ≥ 0 (sky up) at tilt={t}, heading={h}; got {up.y:F4} " +
@@ -217,7 +217,7 @@ namespace MapRenderer.Tests
         public void Pose_Tilt90_LooksAtHorizon_SkyUp()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(90.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(90.0),
                 out double3 pos, out double3 fwd, out double3 up);
 
             Assert.AreEqual(0.0, pos.x, 1e-3, "At heading=0 the camera has no east/west offset (pos.x ≈ 0).");
@@ -242,7 +242,7 @@ namespace MapRenderer.Tests
         public void Pose_TiltPositive_Heading0_OrbitsToSouth_LooksNorth()
         {
             double altitude = 10000.0;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(45.0),
                 out double3 pos, out double3 fwd, out _);
 
             Assert.Less(pos.z,    0.0, "Camera must orbit to the SOUTH (pos.z < 0) at heading=0 tilt=45.");

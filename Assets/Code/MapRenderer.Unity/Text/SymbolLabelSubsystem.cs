@@ -13,6 +13,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Map;
@@ -461,10 +462,10 @@ namespace MapRenderer.Unity.Text
         /// <summary>Aggregate every loaded tile's labels into <paramref name="output"/> for this frame's
         /// <see cref="LabelPlacementSystem.Tick"/> (which then projects/collides/billboards them). A-3: point
         /// labels are deduped across tiles at a grid of one logical pixel at the CURRENT display zoom
-        /// (<see cref="WebMercator.GroundResolution"/>) — so the same symbol from a parent + child tile during a
+        /// (<see cref="CameraPoseMath.MetersPerPixel"/>) — so the same symbol from a parent + child tile during a
         /// zoom transition collapses to one, and the grid tracks zoom (a fixed grid cannot serve all zooms).</summary>
         public void CollectInto(List<LabelInstance> output)
-            => _store.CollectInto(output, WebMercator.GroundResolution(_camera.CurrentProperties.Zoom));
+            => _store.CollectInto(output, CameraPoseMath.MetersPerPixel(_camera.CurrentProperties.Zoom));
 
         // Lever C step 2: the blittable label batch — the per-frame placement source of truth. Rebuilt EVERY frame
         // from the current collected set. The version cache that skipped rebuilds on a stable collected set was
@@ -481,7 +482,7 @@ namespace MapRenderer.Unity.Text
         /// camera-independent, so it is done here too (not per Tick).</summary>
         public SymbolLabelBatch CurrentBatch()
         {
-            double quantize  = WebMercator.GroundResolution(_camera.CurrentProperties.Zoom);
+            double quantize  = CameraPoseMath.MetersPerPixel(_camera.CurrentProperties.Zoom);
             int    slotCount = _allSymbolLayers.Count > 0 ? _allSymbolLayers.Count : 1;
             // CollectInto appends DEPARTING labels (tiles leaving cover, kept warm for a fade-out) after the active
             // ones and reports the split; the builder flags the departing records so the placement gather fades them

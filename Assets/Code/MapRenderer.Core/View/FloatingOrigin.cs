@@ -66,7 +66,7 @@ namespace MapRenderer.Core.View
         /// Projection-agnostic generalization of <see cref="TileLocalToScene"/> (S91-C): the tile
         /// GameObject's local <b>position</b> in render space when the scene is rebased into the look-at's
         /// local ENU frame — the placement that makes ONE camera-orbit pose
-        /// (<c>CameraPoseMath.ComputePose</c>, look-at at the render origin, up=+Y) work for BOTH the plane
+        /// (<c>CameraPoseMath.ComputeRelativePose</c>, look-at at the render origin, up=+Y) work for BOTH the plane
         /// and the globe.
         ///
         /// <para>The mesh vertices are baked tile-origin-relative (Level 1) about

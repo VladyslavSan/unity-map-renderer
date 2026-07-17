@@ -7,6 +7,7 @@
 //   • Pose / clip-plane / perspective correctness of the Unity camera transform (D6 fixes).
 
 using NUnit.Framework;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
@@ -216,6 +217,54 @@ namespace MapRenderer.Tests
                 float lateralDiff = Mathf.Abs(posE.x - posN.x) + Mathf.Abs(posE.z - posN.z);
                 Assert.Greater(lateralDiff, posN.y * 0.1f,
                     $"Bearing 0→90 at pitch=45 must move camera laterally. Δ(x+z)={lateralDiff:F2}.");
+            }
+            finally { TearDown(rootGo, camGo); }
+        }
+
+        // ── Stage U: floating-origin single owner ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Stage U teeth: <see cref="MapCamera.CameraRelativePosition"/> is the single owner of the camera's
+        /// pose relative to the floating origin — stored straight off <see cref="CameraPoseMath.ComputeRelativePose"/>'s
+        /// <c>pos</c>, never read back off <c>Camera.transform.position</c>. A non-trivial pose (heading AND
+        /// tilt both non-zero, so no axis degenerates to zero and a swapped/rounded value would show) proves:
+        /// (1) <c>MapCamera.CameraRelativePosition</c> == the independently recomputed <c>ComputeRelativePose</c>
+        /// <c>pos</c>, exactly (both are the same double3, no narrowing); (2) it matches
+        /// <c>Camera.transform.position</c> within the float32-cast tolerance the transform assignment incurs;
+        /// (3) <c>MapView.BuildSceneFrame</c> folds the SAME stored value into <c>SceneFrame.CameraRelativePosition</c>
+        /// — no second pose computation, no round-trip. A shallow impl that re-derived or read the transform
+        /// back would still pass every other test in this file but fail here.
+        /// </summary>
+        [Test]
+        public void SyncToCamera_CameraRelativePosition_IsSingleOwner_NoRoundTrip()
+        {
+            var initial = new CameraProperties(
+                new GeoCoordinate3D { Longitude = 12.5, Latitude = 34.0, Altitude = 0 },
+                zoom: 9.0, heading: 40.0, tilt: 25.0);
+
+            var (view, mapCam, cam, rootGo, camGo) = CreateCameraRig(initial);
+            try
+            {
+                mapCam.SetProperties(initial);
+                mapCam.SyncToCamera();
+
+                // Independently recompute the expected relative pose the same way SyncToCamera does.
+                double altitude = CameraPoseMath.AltitudeForZoom(
+                    initial.Zoom, cam.pixelHeight, initial.VerticalFovDeg);
+                CameraPoseMath.ComputeRelativePose(altitude, initial.Heading.Value, initial.Tilt.Value,
+                    out double3 expectedPos, out _, out _);
+
+                Assert.AreEqual(expectedPos, mapCam.CameraRelativePosition,
+                    "MapCamera.CameraRelativePosition must equal ComputeRelativePose's pos exactly.");
+
+                Assert.AreEqual((float)expectedPos.x, cam.transform.position.x, 1e-3f, "x vs. transform");
+                Assert.AreEqual((float)expectedPos.y, cam.transform.position.y, 1e-3f, "y vs. transform");
+                Assert.AreEqual((float)expectedPos.z, cam.transform.position.z, 1e-3f, "z vs. transform");
+
+                // BuildSceneFrame folds the SAME stored value in — no second ComputeRelativePose call.
+                var frame = view.View.BuildSceneFrame(mapCam.CurrentProperties);
+                Assert.AreEqual(mapCam.CameraRelativePosition, frame.CameraRelativePosition,
+                    "SceneFrame.CameraRelativePosition must be the same value MapCamera stored — single owner.");
             }
             finally { TearDown(rootGo, camGo); }
         }

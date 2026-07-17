@@ -16,7 +16,7 @@ namespace MapRenderer.Core.Text.Placement
     /// <para><b>Why quantize, and to what.</b> The same geo feature is MVT-quantized to each tile's own extent
     /// grid, so a parent (coarser) and child (finer) tile place its anchor a few metres apart. Snapping the
     /// render-space (Mercator-metre) anchor to a grid of <c>quantizeMeters</c> collapses that difference to one
-    /// cell. The caller passes <c>quantizeMeters = WebMercator.GroundResolution(displayZoom)</c> — one logical
+    /// cell. The caller passes <c>quantizeMeters = CameraPoseMath.MetersPerPixel(displayZoom)</c> — one logical
     /// PIXEL at the current zoom: coarse enough that adjacent-zoom reprojection diffs land in the same cell
     /// (they are sub-pixel-to-a-few-pixels apart), fine enough that two genuinely distinct labels &gt; a pixel
     /// apart stay separate. A fixed grid cannot serve all zooms (a metre at z5 vs a metre at z14 differ by
@@ -31,31 +31,37 @@ namespace MapRenderer.Core.Text.Placement
     {
         public readonly long GridX;
         public readonly long GridZ;
+        public readonly long GridY;
         public readonly int LayerId;
         public readonly string Text;
 
-        public CrossTileLabelKey(long gridX, long gridZ, int layerId, string text)
+        public CrossTileLabelKey(long gridX, long gridZ, long gridY, int layerId, string text)
         {
-            GridX = gridX; GridZ = gridZ; LayerId = layerId; Text = text;
+            GridX = gridX; GridZ = gridZ; GridY = gridY; LayerId = layerId; Text = text;
         }
 
         /// <summary>
         /// The identity of a point label whose render-space (pre-RTC Mercator) anchor is
         /// <paramref name="anchorRender"/>, on layer <paramref name="layerId"/>, reading
-        /// <paramref name="text"/>, snapped to a <paramref name="quantizeMeters"/> grid. The ground plane is XZ
-        /// (Y is up), so only x/z are quantized. <paramref name="quantizeMeters"/> ≤ 0 falls back to a 1-metre
-        /// grid (a defensive default; callers pass a real display-zoom pixel size).
+        /// <paramref name="text"/>, snapped to a <paramref name="quantizeMeters"/> grid. All three axes are
+        /// quantized: on the Mercator plane render.y ≡ 0 for every surface label, so <c>GridY</c> is inert there
+        /// (the key partition is unchanged); on the globe two equator-mirrored anchors (e.g. 30°N vs 30°S at the
+        /// same longitude) share render X/Z but differ in Y — without the Y axis they'd collide into one label.
+        /// <paramref name="quantizeMeters"/> ≤ 0 falls back to a 1-metre grid (a defensive default; callers pass
+        /// a real display-zoom pixel size).
         /// </summary>
         public static CrossTileLabelKey For(in double3 anchorRender, int layerId, string text, double quantizeMeters)
         {
             double q = quantizeMeters > 0.0 ? quantizeMeters : 1.0;
             long gx = (long)math.round(anchorRender.x / q);
             long gz = (long)math.round(anchorRender.z / q);
-            return new CrossTileLabelKey(gx, gz, layerId, text);
+            long gy = (long)math.round(anchorRender.y / q);
+            return new CrossTileLabelKey(gx, gz, gy, layerId, text);
         }
 
         public bool Equals(CrossTileLabelKey other)
-            => GridX == other.GridX && GridZ == other.GridZ && LayerId == other.LayerId && Text == other.Text;
+            => GridX == other.GridX && GridZ == other.GridZ && GridY == other.GridY
+               && LayerId == other.LayerId && Text == other.Text;
 
         public override bool Equals(object obj) => obj is CrossTileLabelKey o && Equals(o);
 
@@ -66,6 +72,7 @@ namespace MapRenderer.Core.Text.Placement
                 int h = 17;
                 h = h * 31 + GridX.GetHashCode();
                 h = h * 31 + GridZ.GetHashCode();
+                h = h * 31 + GridY.GetHashCode();
                 h = h * 31 + LayerId;
                 h = h * 31 + (Text?.GetHashCode() ?? 0);
                 return h;

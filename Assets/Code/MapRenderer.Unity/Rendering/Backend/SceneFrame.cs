@@ -29,10 +29,26 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <summary>Render→look-at-local-ENU rotation (identity for Mercator); also each tile's orientation.</summary>
         public readonly float3x3 Rebase;
 
-        public SceneFrame(double3 sceneOriginRender, float3x3 rebase)
+        /// <summary>
+        /// The camera's position relative to this frame's floating origin — <c>MapCamera.CameraRelativePosition</c>
+        /// / <c>CameraPoseMath.ComputeRelativePose</c>'s <c>pos</c>; the horizon occluder and the camera share
+        /// this frame. <c>default</c> on frames built without a camera pose (the 2-arg ctor / <see cref="Mercator"/>)
+        /// — they don't feed the label horizon cull.
+        /// </summary>
+        public readonly double3 CameraRelativePosition;
+
+        public SceneFrame(double3 sceneOriginRender, float3x3 rebase, double3 cameraRelativePosition)
         {
-            SceneOriginRender = sceneOriginRender;
-            Rebase            = rebase;
+            SceneOriginRender      = sceneOriginRender;
+            Rebase                 = rebase;
+            CameraRelativePosition = cameraRelativePosition;
+        }
+
+        /// <summary>Frame without a camera pose (<see cref="CameraRelativePosition"/> defaults to zero) — kept
+        /// for the ~30 call sites that only need placement, not the label horizon cull.</summary>
+        public SceneFrame(double3 sceneOriginRender, float3x3 rebase)
+            : this(sceneOriginRender, rebase, default)
+        {
         }
 
         /// <summary>

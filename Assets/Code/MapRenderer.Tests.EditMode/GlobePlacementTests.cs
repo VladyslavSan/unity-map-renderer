@@ -3,7 +3,7 @@
 // a mirrored globe of green blobs reads the same to the eye, but east-lands-left fails an assertion here.
 //
 // The scheme (S91-C): the scene is rebased into the look-at's local ENU
-// frame so ONE camera orbit (CameraPoseMath.ComputePose, look-at at the render origin, up=+Y) serves plane
+// frame so ONE camera orbit (CameraPoseMath.ComputeRelativePose, look-at at the render origin, up=+Y) serves plane
 // AND globe. A tile places at rotation = rebase, position = FloatingOrigin.TileToSceneRebased(...), where
 // rebase = transpose(projection.TangentBasisAt(lookAt)).
 //
@@ -77,7 +77,7 @@ namespace MapRenderer.Tests
 
         // ── End-to-end handedness through the REAL camera pose ─────────────────────────────────────
         // Project a point EAST of the look-at and one NORTH, rebase both into the scene frame, and push them
-        // through the camera built from CameraPoseMath.ComputePose. In Unity view space (worldToCameraMatrix:
+        // through the camera built from CameraPoseMath.ComputeRelativePose. In Unity view space (worldToCameraMatrix:
         // camera looks down −Z, +X right, +Y up) east must land +X and north must land +Y. Uses the camera's
         // view matrix only (no GPU) so it is deterministic in headless batch mode.
 
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests
 
         private static GameObject BuildOrbitCamera(double altitude, double headingDeg, double tiltDeg)
         {
-            CameraPoseMath.ComputePose(altitude,
+            CameraPoseMath.ComputeRelativePose(altitude,
                 Angle.FromDegrees(headingDeg), Angle.FromDegrees(tiltDeg),
                 out double3 pos, out double3 fwd, out double3 up);
 

@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
@@ -99,11 +100,39 @@ namespace MapRenderer.Core.Style.Symbol
                         // units is `spacing · extent / TilePixelSize`. Projection-agnostic: uses only the layer
                         // extent + the 512 convention, no projection scale.
                         double spacingTileUnits = spacing * extent / WebMercator.TilePixelSize;
+
+                        // S4: subdivide the tile-local path ONCE so ProjectPath and LineAnchorPlacement.Compute
+                        // both index against the SAME finer sequence — never subdivide only one of the two, or
+                        // LineAnchor.Segment silently desyncs from PathRender (docs/labels-and-symbols-design.md
+                        // §4). On a flat projection (MaxRefineAngleRad == ∞, e.g. Mercator) this bypasses
+                        // LineCurvatureSubdivision.Subdivide entirely and passes the ORIGINAL path straight
+                        // through — the live Mercator byte-identity guarantee (zero-alloc, unchanged behaviour).
+                        double maxRefineAngleRad = projection.MaxRefineAngleRad;
+                        IReadOnlyList<double2> densePath;
+                        if (double.IsPositiveInfinity(maxRefineAngleRad))
+                        {
+                            densePath = path;
+                        }
+                        else
+                        {
+                            // Per-vertex surface normal drives the split metric (the projected arc a segment
+                            // subtends); re-derives geo per vertex, mirroring the mesh path's own re-projection
+                            // of the subdivided points.
+                            var ups = new double3[path.Count];
+                            for (int i = 0; i < path.Count; i++)
+                            {
+                                double2 lonLat = tileId.ToLonLat(path[i].x, path[i].y, extent);
+                                ups[i] = projection.ProjectPoint(
+                                    new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x }).Up;
+                            }
+                            densePath = LineCurvatureSubdivision.Subdivide(path, ups, maxRefineAngleRad);
+                        }
+
                         output.Add(new SymbolLabel
                         {
                             Placement = placement,
-                            PathRender = ProjectPath(path, tileId, extent, projection),
-                            LineAnchors = LineAnchorPlacement.Compute(path, spacingTileUnits, placement),
+                            PathRender = ProjectPath(densePath, tileId, extent, projection),
+                            LineAnchors = LineAnchorPlacement.Compute(densePath, spacingTileUnits, placement),
                             Text = text,
                             TextSizePx = textSize,
                             PaddingPx = padding,
@@ -161,7 +190,8 @@ namespace MapRenderer.Core.Style.Symbol
         }
 
         // Project a tile-local line string to render-space (PRE-RTC) vertices.
-        private static double3[] ProjectPath(List<double2> path, TileId tileId, double extent, IProjection projection)
+        private static double3[] ProjectPath(
+            IReadOnlyList<double2> path, TileId tileId, double extent, IProjection projection)
         {
             var pts = new double3[path.Count];
             for (int i = 0; i < path.Count; i++)

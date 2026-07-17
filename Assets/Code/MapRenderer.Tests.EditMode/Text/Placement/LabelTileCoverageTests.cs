@@ -34,7 +34,7 @@ namespace MapRenderer.Tests.Text.Placement
             // NDC corners (-1,-1),(1,-1),(1,1),(-1,1) → screen (0,0),(1000,0),(1000,1000),(0,1000) → area == viewport.
             double c = LabelTileCoverage.ScreenCoverage(
                 new double3(-1, -1, 0), new double3(1, -1, 0), new double3(1, 1, 0), new double3(-1, 1, 0),
-                Origin, Identity, Viewport);
+                Origin, Identity, Viewport, float3x3.identity);
             Assert.AreEqual(1.0, c, 1e-6);
             Assert.IsFalse(LabelTileCoverage.IsCulled(c, 0.05), "a full-screen tile is never culled");
         }
@@ -45,7 +45,7 @@ namespace MapRenderer.Tests.Text.Placement
             // NDC span 0.2 × 0.2 → coverage 0.25 · 0.2 · 0.2 = 0.01 (1% of the screen).
             double c = LabelTileCoverage.ScreenCoverage(
                 new double3(-0.1, -0.1, 0), new double3(0.1, -0.1, 0), new double3(0.1, 0.1, 0), new double3(-0.1, 0.1, 0),
-                Origin, Identity, Viewport);
+                Origin, Identity, Viewport, float3x3.identity);
             Assert.AreEqual(0.01, c, 1e-6);
             Assert.IsTrue(LabelTileCoverage.IsCulled(c, 0.05), "1% < 5% → culled");
             Assert.IsFalse(LabelTileCoverage.IsCulled(c, 0.005), "1% > 0.5% → kept");
@@ -57,10 +57,10 @@ namespace MapRenderer.Tests.Text.Placement
             // Reversed ring order (CW vs CCW) flips the shoelace sign; the abs must yield the same coverage.
             double ccw = LabelTileCoverage.ScreenCoverage(
                 new double3(-1, -1, 0), new double3(1, -1, 0), new double3(1, 1, 0), new double3(-1, 1, 0),
-                Origin, Identity, Viewport);
+                Origin, Identity, Viewport, float3x3.identity);
             double cw = LabelTileCoverage.ScreenCoverage(
                 new double3(-1, 1, 0), new double3(1, 1, 0), new double3(1, -1, 0), new double3(-1, -1, 0),
-                Origin, Identity, Viewport);
+                Origin, Identity, Viewport, float3x3.identity);
             Assert.AreEqual(ccw, cw, 1e-9);
         }
 
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             double c = LabelTileCoverage.ScreenCoverage(
                 new double3(-1, -1, 0), new double3(1, -1, 0), new double3(1, 1, 0), new double3(-1, 1, 0),
-                Origin, AllBehind, Viewport);
+                Origin, AllBehind, Viewport, float3x3.identity);
             Assert.IsTrue(double.IsPositiveInfinity(c), "a behind-camera corner → +inf coverage");
             Assert.IsFalse(LabelTileCoverage.IsCulled(c, 0.05), "+inf coverage is never culled");
         }
@@ -79,7 +79,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             double c = LabelTileCoverage.ScreenCoverage(
                 new double3(-1, -1, 0), new double3(1, -1, 0), new double3(1, 1, 0), new double3(-1, 1, 0),
-                Origin, Identity, new double2(0, 0));
+                Origin, Identity, new double2(0, 0), float3x3.identity);
             Assert.IsTrue(double.IsPositiveInfinity(c), "a zero-area viewport → cull nothing");
         }
 

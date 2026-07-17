@@ -4,7 +4,7 @@
 // TileToSceneRebased) is exercised in production code but no test drove a NON-identity rebase.
 //
 // Drives the GameObjects backend (its transform hierarchy is GPU-independent, so the placement is asserted
-// numerically even headless), then renders it through the SAME CameraPoseMath.ComputePose orbit the live
+// numerically even headless), then renders it through the SAME CameraPoseMath.ComputeRelativePose orbit the live
 // MapCamera uses — a correctly-oriented globe means the backend wiring matches the math proven in
 // GlobePlacementTests.
 
@@ -73,9 +73,9 @@ namespace MapRenderer.Tests.Visual
                 Assert.AreEqual(expectedRot.value.w, rot.w, 1e-4f, "container rotation.w == quaternion(rebase)");
                 Assert.AreNotEqual(quaternion.identity.value.x, rot.x, "globe rotation must not be identity");
 
-                // ── Visual proof: render the backend's globe through the real ComputePose orbit. ──
+                // ── Visual proof: render the backend's globe through the real ComputeRelativePose orbit. ──
                 double altitude = 2.5 * SphericalProjection.Radius;
-                CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
+                CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
                     out double3 cpos, out double3 fwd, out double3 up);
 
                 cameraGo   = new GameObject("GlobeBackendCamera");

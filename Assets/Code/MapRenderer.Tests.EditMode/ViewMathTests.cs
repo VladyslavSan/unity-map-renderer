@@ -502,7 +502,7 @@ namespace MapRenderer.Tests
 
             // Rebuild the frustum planes (same math as ViewFrustum.FromPose) and the render frame the selector used.
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
-            CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value, out double3 pos, out double3 fwd, out double3 up);
+            CameraPoseMath.ComputeRelativePose(altitude, cam.Heading.Value, cam.Tilt.Value, out double3 pos, out double3 fwd, out double3 up);
             double near = math.max(0.1, CameraPoseMath.NearClip(altitude)), aspect = vp.x / vp.y;
             double far = new GeometryAwareFarPlane().FarMetres(altitude, cam.Tilt.Value, cam.VerticalFovDeg, aspect);
             double3 f = math.normalize(fwd), r = math.normalize(math.cross(f, up)), u = math.cross(r, f);

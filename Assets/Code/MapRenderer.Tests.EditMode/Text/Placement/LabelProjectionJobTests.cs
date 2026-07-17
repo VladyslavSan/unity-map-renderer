@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                 new SymbolProjectionJob
                 {
-                    Points = points, SceneOriginRender = origin, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    Points = points, SceneOriginRender = origin, Rebase = float3x3.identity, ViewProj = viewProj, ViewportLogicalPx = viewport,
                     OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
                 }.Schedule(n, 8).Complete();
 
@@ -66,12 +66,73 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int i = 0; i < n; i++)
                 {
                     bool ok = LabelScreenProjection.TryProjectPoint(points[i], origin, viewProj, viewport,
-                        out float2 s, out float d);
+                        float3x3.identity, out float2 s, out float d);
                     Assert.AreEqual(ok, outValid[i] != 0, $"valid flag mismatch at {i}");
                     if (ok)
                     {
                         Assert.AreEqual(s.x, outScreen[i].x, 1e-4f, $"screen.x mismatch at {i}");
                         Assert.AreEqual(s.y, outScreen[i].y, 1e-4f, $"screen.y mismatch at {i}");
+                        Assert.AreEqual(d, outDepth[i], 1e-4f, $"depth mismatch at {i}");
+                    }
+                    anyValid |= ok; anyInvalid |= !ok;
+                }
+                Assert.IsTrue(anyValid, "test matrix should project some points in front of the camera");
+                Assert.IsTrue(anyInvalid, "…and some behind it, to exercise both branches");
+            }
+            finally
+            {
+                points.Dispose(); outScreen.Dispose(); outDepth.Dispose(); outValid.Dispose();
+            }
+        }
+
+        // ── S2-T2: same parity, but with a NON-identity Rebase (a real globe rebase) — proves the Burst job
+        //    carries the rotation identically to the inline (managed) seam, not just the identity fast-path. ──
+        [Test]
+        public void SymbolProjectionJob_MatchesInlineProjection_PerPoint_NonIdentityRebase()
+        {
+            const int n = 64;
+            var rng = new System.Random(54321);
+            var proj = new SphericalProjection();
+            var lookAt = new GeoCoordinate { Latitude = 45.0, Longitude = 30.0 };
+            double3 origin = proj.Project(lookAt);
+            float3x3 rebase = math.transpose(proj.TangentBasisAt(lookAt));
+            double2 viewport = new double2(1280.0, 720.0);
+            float4x4 viewProj = math.mul(
+                float4x4.PerspectiveFov(math.radians(60f), (float)(viewport.x / viewport.y), 0.1f, 5000f),
+                float4x4.Translate(new float3(0f, 0f, -800f)));
+
+            var points = new NativeArray<double3>(n, Allocator.TempJob);
+            var outScreen = new NativeArray<float2>(n, Allocator.TempJob);
+            var outDepth = new NativeArray<float>(n, Allocator.TempJob);
+            var outValid = new NativeArray<byte>(n, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < n; i++)
+                    points[i] = origin + new double3(
+                        (rng.NextDouble() - 0.5) * 4000.0, (rng.NextDouble() - 0.5) * 4000.0,
+                        (rng.NextDouble() - 0.5) * 4000.0);
+
+                new SymbolProjectionJob
+                {
+                    Points = points, SceneOriginRender = origin, Rebase = rebase, ViewProj = viewProj, ViewportLogicalPx = viewport,
+                    OutScreen = outScreen, OutDepth = outDepth, OutValid = outValid,
+                }.Schedule(n, 8).Complete();
+
+                bool anyValid = false, anyInvalid = false;
+                for (int i = 0; i < n; i++)
+                {
+                    bool ok = LabelScreenProjection.TryProjectPoint(points[i], origin, viewProj, viewport,
+                        rebase, out float2 s, out float d);
+                    Assert.AreEqual(ok, outValid[i] != 0, $"valid flag mismatch at {i}");
+                    if (ok)
+                    {
+                        // Tolerance widened vs Tooth 1's identity-rebase 1e-4f: the Burst-compiled math.mul(rebase, …)
+                        // dot-products may FMA/reorder differently than the managed inline path, a legitimate
+                        // sub-ULP-scale divergence at these pixel magnitudes (1 float32 ULP at ~1300 is ~1.5e-4) —
+                        // NOT present on the identity rebase, where the two paths stay bit-identical (Tooth 1). Kept
+                        // far tighter than the RED signal (a dropped/wrong rebase misses by tens of millions of px).
+                        Assert.AreEqual(s.x, outScreen[i].x, 1e-2f, $"screen.x mismatch at {i}");
+                        Assert.AreEqual(s.y, outScreen[i].y, 1e-2f, $"screen.y mismatch at {i}");
                         Assert.AreEqual(d, outDepth[i], 1e-4f, $"depth mismatch at {i}");
                     }
                     anyValid |= ok; anyInvalid |= !ok;

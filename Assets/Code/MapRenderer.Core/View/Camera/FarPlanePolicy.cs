@@ -65,7 +65,7 @@ namespace MapRenderer.Core.View.Camera
         public double FarMetres(double altitude, Angle tilt, double fovDegVertical, double aspect)
         {
             // Pose in the look-at render frame (heading irrelevant to the far magnitude — sphere/FOV symmetric).
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), tilt,
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), tilt,
                 out double3 pos, out double3 fwd, out double3 up);
             double3 f = math.normalize(fwd);
             double3 r = math.normalize(math.cross(f, up));

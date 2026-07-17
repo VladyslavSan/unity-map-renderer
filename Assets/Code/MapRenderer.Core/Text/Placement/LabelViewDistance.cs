@@ -27,7 +27,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// The cull radius in render/Mercator metres: <paramref name="viewportSpans"/> × the viewport's larger
         /// logical dimension × <paramref name="groundResolutionMeters"/> (metres per logical pixel at the current
-        /// zoom, e.g. <c>WebMercator.GroundResolution(zoom)</c>). A non-positive input yields 0 (which
+        /// zoom, e.g. <c>CameraPoseMath.MetersPerPixel(zoom)</c>). A non-positive input yields 0 (which
         /// <see cref="IsCulled"/> treats as "cull nothing", so a mis-wired caller degrades to the pre-B-3
         /// behaviour rather than culling everything).
         /// </summary>

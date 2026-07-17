@@ -62,7 +62,7 @@ namespace MapRenderer.Tests
 
             // ── Real Unity camera, posed EXACTLY as MapCamera.SyncToCamera (DPR=1) ──────────────────────
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, fov);
-            CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value,
+            CameraPoseMath.ComputeRelativePose(altitude, cam.Heading.Value, cam.Tilt.Value,
                 out double3 pos, out double3 fwd, out double3 up);
 
             var go   = new GameObject("TileDiagCam");

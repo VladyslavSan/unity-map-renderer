@@ -70,9 +70,9 @@ namespace MapRenderer.Tests.Visual
             mapGo.transform.rotation      = new Quaternion(q.value.x, q.value.y, q.value.z, q.value.w);
             mapGo.transform.localPosition = new Vector3(position.x, position.y, position.z);
 
-            // ── Camera: the real ComputePose orbit. ──
+            // ── Camera: the real ComputeRelativePose orbit. ──
             double altitude = 2.5 * SphericalProjection.Radius;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
                 out double3 pos, out double3 fwd, out double3 up);
 
             var cameraGo = new GameObject("GlobeLineCamera");

@@ -31,12 +31,12 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         public static double ScreenCoverage(
             in double3 corner0, in double3 corner1, in double3 corner2, in double3 corner3,
-            in double3 sceneOriginRender, in float4x4 viewProj, in double2 viewportLogicalPx)
+            in double3 sceneOriginRender, in float4x4 viewProj, in double2 viewportLogicalPx, in float3x3 rebase)
         {
-            if (!LabelScreenProjection.TryProjectPoint(corner0, sceneOriginRender, viewProj, viewportLogicalPx, out float2 p0, out _) ||
-                !LabelScreenProjection.TryProjectPoint(corner1, sceneOriginRender, viewProj, viewportLogicalPx, out float2 p1, out _) ||
-                !LabelScreenProjection.TryProjectPoint(corner2, sceneOriginRender, viewProj, viewportLogicalPx, out float2 p2, out _) ||
-                !LabelScreenProjection.TryProjectPoint(corner3, sceneOriginRender, viewProj, viewportLogicalPx, out float2 p3, out _))
+            if (!LabelScreenProjection.TryProjectPoint(corner0, sceneOriginRender, viewProj, viewportLogicalPx, rebase, out float2 p0, out _) ||
+                !LabelScreenProjection.TryProjectPoint(corner1, sceneOriginRender, viewProj, viewportLogicalPx, rebase, out float2 p1, out _) ||
+                !LabelScreenProjection.TryProjectPoint(corner2, sceneOriginRender, viewProj, viewportLogicalPx, rebase, out float2 p2, out _) ||
+                !LabelScreenProjection.TryProjectPoint(corner3, sceneOriginRender, viewProj, viewportLogicalPx, rebase, out float2 p3, out _))
                 return double.PositiveInfinity; // any corner behind the near plane → treat as visible
 
             double viewportArea = viewportLogicalPx.x * viewportLogicalPx.y;

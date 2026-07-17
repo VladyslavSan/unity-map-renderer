@@ -27,6 +27,10 @@ namespace MapRenderer.Core.View
         /// projected or collided (the trimmed tilted-view horizon pile-up). Tune the cull by watching this.</summary>
         public int DistanceCulledLabels { get; init; }
 
+        /// <summary>S3: labels skipped on the last Tick because their anchor is hidden behind the globe's own
+        /// bulk (<c>HorizonCull</c>). Always 0 under a planar projection.</summary>
+        public int HorizonCulledLabels { get; init; }
+
         /// <summary>Collision CANDIDATES on the last Tick — labels that survived projection and entered the
         /// greedy pass (a point label counts 1; a curved / repeated line label counts 1 per along-line anchor).</summary>
         public int CollisionCandidateCount { get; init; }

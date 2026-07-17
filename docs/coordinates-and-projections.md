@@ -143,7 +143,7 @@ on the managed side (through the boxed struct; no Burst constraint there).
   (forward) vector is the **inverse of the earth normal at `LookAt`** (top-down); `tilt = 90°` ⇒ the view is
   **parallel to the surface at `LookAt`** (horizon), and is the limit ⇒ range `[0°, 90°]`. The normal is
   **projection-dependent**: constant `+Y` on Mercator, the geodetic normal `IProjection.UpAt(lon, lat)` (§6)
-  on the globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputePose`).
+  on the globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputeRelativePose`).
   (`Tilt`/`Heading` become `ConstrainedAngle` camera params — S68.)
 
 ### 7.1 Handedness, winding & why the ECEF reflection is load-bearing

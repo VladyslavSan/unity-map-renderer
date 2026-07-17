@@ -1,5 +1,5 @@
 // GlobeCameraSnapshotTests (S91-C, sub-step b) — renders the countries fixture on the globe THROUGH THE REAL
-// runtime placement: the camera pose comes from CameraPoseMath.ComputePose (the same orbit math the live
+// runtime placement: the camera pose comes from CameraPoseMath.ComputeRelativePose (the same orbit math the live
 // MapCamera uses) and the tile is placed by the ENU-rebase (rotation = rebase, position =
 // FloatingOrigin.TileToSceneRebased). This is the visible corroboration of the numerical handedness teeth in
 // GlobePlacementTests — a sane, framed, correctly-oriented globe means the quaternion/handedness is right,
@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color OceanBg = new Color(0.04f, 0.09f, 0.18f, 1f);
 
         [Test]
-        public void RendersGlobeThroughComputePoseAndRebase_WritesPng()
+        public void RendersGlobeThroughComputeRelativePoseAndRebase_WritesPng()
         {
             var proj = new SphericalProjection();
 
@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Visual
             // ── Camera: the REAL orbit pose (look-at at the render origin, up=+Y). ──
             // Altitude hand-picked to frame the globe (radius R): 2.5·R ⇒ the globe fills most of a 35° FOV.
             double altitude = 2.5 * SphericalProjection.Radius;
-            CameraPoseMath.ComputePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
+            CameraPoseMath.ComputeRelativePose(altitude, Angle.FromDegrees(0.0), Angle.FromDegrees(0.0),
                 out double3 pos, out double3 fwd, out double3 up);
 
             var cameraGo = new GameObject("GlobeOrbitCamera");

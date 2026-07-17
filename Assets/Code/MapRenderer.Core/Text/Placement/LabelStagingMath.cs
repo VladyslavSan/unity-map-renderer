@@ -163,19 +163,42 @@ namespace MapRenderer.Core.Text.Placement
 
             int boxStart  = boxCount;
             int quadStart = quadCount;
-            float prevTangent = 0f;
+            float prevCenterTangent = 0f;
             for (int g = 0; g < glyphs.Length; g++)
             {
                 CurvedGlyph cg = glyphs[g];
                 float arc = centerArc + dir * (cg.ArcCenter - labelCenterBaked) * scale;
-                PolylineArcMath.At(path, cumulative, pathLen, total, arc, ref cursor, out float2 pt, out float tangent);
+                PolylineArcMath.At(path, cumulative, pathLen, total, arc, ref cursor, out float2 pt, out float centerTangentAtGlyph);
 
-                if (g > 0 && math.abs(AngleDelta(tangent, prevTangent)) > maxAngleRad)
+                // The max-angle gate answers "is the PATH too kinky to place a label here" — a path-curvature
+                // property, so it stays on the raw per-glyph SEGMENT tangent (byte-identical to pre-fix
+                // behaviour; a Burst-vs-managed atan2 ULP mismatch on the blended angle below would otherwise
+                // flip cull decisions right at the threshold, see LabelStageJobTests.BurstStage_MatchesManaged).
+                if (g > 0 && math.abs(AngleDelta(centerTangentAtGlyph, prevCenterTangent)) > maxAngleRad)
                 {
                     boxCount = boxStart; quadCount = quadStart; // roll back this anchor's partial appends
                     return false;                                // too sharp a bend → drop the label here (#6)
                 }
-                prevTangent = tangent;
+                prevCenterTangent = centerTangentAtGlyph;
+
+                // Orient the rigid glyph quad by the CHORD across its OWN footprint, not the single-point
+                // segment tangent: a glyph straddling a polyline VERTEX would otherwise rotate to one
+                // segment's raw angle while its neighbour (advance-spaced, not vertex-spaced) rotates to
+                // the other, so their inner corners collide on the concave side of the bend. The chord
+                // blends the two segment angles in proportion to how much of the footprint sits on each
+                // side of the vertex, so consecutive glyphs tile edge-to-edge (MapLibre's fix). This is
+                // purely a RENDER-orientation choice — it does not feed the cull gate above.
+                float halfWidthPx = (cg.Cell.BottomRight.x - cg.Cell.TopLeft.x) * scale * 0.5f;
+                float tangent = centerTangentAtGlyph;
+                if (halfWidthPx > 1e-4f)
+                {
+                    float arcLeft  = math.max(0f, math.min(total, arc - halfWidthPx));
+                    float arcRight = math.max(0f, math.min(total, arc + halfWidthPx));
+                    PolylineArcMath.At(path, cumulative, pathLen, total, arcLeft,  ref cursor, out float2 pLeft,  out _);
+                    PolylineArcMath.At(path, cumulative, pathLen, total, arcRight, ref cursor, out float2 pRight, out _);
+                    float2 chord = pRight - pLeft;
+                    if (math.lengthsq(chord) > 1e-12f) tangent = (float)math.atan2(chord.y, chord.x);
+                }
 
                 pt = LabelTranslate.ApplyTranslate(pt, s.TranslatePx, s.TranslateAnchor, bearingRadians);
                 float rotation = tangent + flip; // tangent ONLY — not the label bearing (would double-rotate)

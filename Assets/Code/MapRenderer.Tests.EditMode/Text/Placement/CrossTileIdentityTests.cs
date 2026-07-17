@@ -8,6 +8,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Text;
 
 namespace MapRenderer.Tests.Text.Placement
@@ -67,6 +68,21 @@ namespace MapRenderer.Tests.Text.Placement
             // proves the granularity had to be display-relative, not a fixed max-zoom grid.
             double qMax = WebMercator.GroundResolution(22);
             Assert.Greater(math.abs(a10.x - a11.x), qMax, "a max-zoom grid would NOT collapse the diff (why display-zoom)");
+        }
+
+        // ── (S1) the 3-axis defect: on the globe, two equator-mirrored anchors (30°N / 30°S, same longitude)
+        //    share render X/Z (both ∝ cosφ) but differ in Y (=sinφ·R, opposite sign) — an x/z-only key collides
+        //    them into one label. Non-look-at latitudes so cosφ≠0 (X/Z genuinely equal, not both ~0). ──
+        [Test]
+        public void GlobeEquatorMirroredAnchors_AreDistinct()
+        {
+            var proj = new SphericalProjection();
+            double3 render30N = proj.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 45.0 });
+            double3 render30S = proj.Project(new GeoCoordinate { Latitude = -30.0, Longitude = 45.0 });
+            double q = CameraPoseMath.MetersPerPixel(6.0);
+
+            Assert.AreNotEqual(CrossTileLabelKey.For(render30N, 0, "X", q), CrossTileLabelKey.For(render30S, 0, "X", q),
+                "30°N and 30°S at the same longitude share render X/Z but must stay distinct labels (the Y axis)");
         }
 
         // ── (1b)/(2) synthetic mid-cell control: within a cell → same key; a few cells away → different key

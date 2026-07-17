@@ -319,7 +319,8 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
             //    rebase and the label projection below both read the just-committed pose. DPI is refreshed from
-            //    the live config before the commit (it feeds the altitude framing).
+            //    the live config before the commit (it feeds the altitude framing). This ordering is also what
+            //    keeps Camera.CameraRelativePosition fresh for BuildSceneFrame one line below.
             Camera.DevicePixelRatio = _config.DevicePixelRatio;
             Camera.SyncToCamera();
 
@@ -338,7 +339,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // projection + the look-at. Mercator: rebase = identity and SceneOriginRender = (mercX, 0, mercZ)
             // (== SceneFrame.Mercator(cam.CenterMercator())), so placement is bit-for-bit the pre-S91 translation.
             // Globe: rebase rotates every tile into the look-at's local ENU frame (up = +Y), so the same
-            // CameraPoseMath.ComputePose orbit frames it.
+            // CameraPoseMath.ComputeRelativePose orbit frames it.
             using (PmInstancedRebuild.Auto())
                 TileManager.InstancedRebuild(sceneFrame);
 
@@ -387,8 +388,14 @@ namespace MapRenderer.Unity.Rendering.Map
         /// projection's valid range (<see cref="IProjection.ClampValidLatitude"/>) — ±85.05° for Web-Mercator
         /// (matching <c>CenterMercator</c>), ±90° for the globe. For Web-Mercator the basis is the identity, so
         /// the frame equals <c>SceneFrame.Mercator(cam.CenterMercator())</c> bit-for-bit.
+        ///
+        /// <para>Folds in <see cref="MapCamera.CameraRelativePosition"/> — fresh because <c>LateUpdate</c> runs
+        /// <see cref="MapCamera.SyncToCamera"/> before this call, never a <c>transform.position</c> round-trip.</para>
         /// </summary>
-        private Backend.SceneFrame BuildSceneFrame(in CameraProperties cam)
+        /// <remarks><c>internal</c> (not <c>private</c>) solely so the single-owner test can call it directly
+        /// after <see cref="MapCamera.SyncToCamera"/> without re-driving the whole <see cref="LateUpdate"/>
+        /// pipeline — no other production caller.</remarks>
+        internal Backend.SceneFrame BuildSceneFrame(in CameraProperties cam)
         {
             IProjection proj = Camera.Projection;
             var lookAt = new GeoCoordinate
@@ -396,7 +403,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 Latitude  = proj.ClampValidLatitude(cam.LookAt.Latitude),
                 Longitude = cam.LookAt.Longitude,
             };
-            return new Backend.SceneFrame(proj.Project(lookAt), math.transpose(proj.TangentBasisAt(lookAt)));
+            return new Backend.SceneFrame(proj.Project(lookAt), math.transpose(proj.TangentBasisAt(lookAt)),
+                Camera.CameraRelativePosition);
         }
 
         // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
@@ -466,6 +474,7 @@ namespace MapRenderer.Unity.Rendering.Map
             CachedLabelTiles        = _symbols.CachedTileCount,
             InputLabelCount         = Labels.LastInputLabelCount,
             DistanceCulledLabels    = Labels.LastDistanceCulledCount,
+            HorizonCulledLabels     = Labels.LastHorizonCulledCount,
             CollisionCandidateCount = Labels.LastCandidateCount,
             CollisionSurvivorCount  = Labels.LastSurvivorCount,
             PlacedQuadCount         = Labels.LastQuadCount,

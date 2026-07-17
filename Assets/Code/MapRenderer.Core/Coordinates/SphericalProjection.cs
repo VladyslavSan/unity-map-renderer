@@ -88,7 +88,7 @@ namespace MapRenderer.Core.Geo
         // ── Camera interaction (managed side) — globe orbit ray-cast (S91-C) ──────────────────────
         //
         // Reconstructs the SAME render-space camera the renderer builds (MapCamera.SyncToCamera: altitude from
-        // AltitudeForZoom, orbit via CameraPoseMath.ComputePose, look-at at the render origin, +Y up) and the
+        // AltitudeForZoom, orbit via CameraPoseMath.ComputeRelativePose, look-at at the render origin, +Y up) and the
         // look-at ENU frame the geometry is rebased into (S91-C Slice 1). The render-space globe is a sphere of
         // radius R centred at (0, −R, 0): the look-at surface point sits at the origin (+Y up), so the sphere
         // centre is R straight down. ScreenToGround casts the pixel ray at that sphere; GroundToScreen is the
@@ -113,7 +113,7 @@ namespace MapRenderer.Core.Geo
             out double3 east, out double3 upR, out double3 north, out double3 sceneOrigin)
         {
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, cam.VerticalFovDeg);
-            CameraPoseMath.ComputePose(altitude, cam.Heading.Value, cam.Tilt.Value, out camPos, out fwd, out up);
+            CameraPoseMath.ComputeRelativePose(altitude, cam.Heading.Value, cam.Tilt.Value, out camPos, out fwd, out up);
             right = math.cross(up, fwd); // Unity left-handed screen basis: right = up × forward
 
             // Render-ECEF ENU basis at the look-at (double precision; axis-swap (X,Z,Y) matching ProjectPoint).

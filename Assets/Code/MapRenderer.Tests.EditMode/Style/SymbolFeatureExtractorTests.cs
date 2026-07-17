@@ -9,6 +9,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
@@ -169,6 +170,135 @@ namespace MapRenderer.Tests
             var pointOverLines = new List<SymbolStyle.SymbolLabel>();
             SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
             Assert.AreEqual(0, pointOverLines.Count, "point placement skips LineString features");
+        }
+
+        // ── S4-T5: Mercator extractor length-identity — the engine-free half of the byte-identity invariant ──
+
+        [Test]
+        public void Extract_LinePlacement_Mercator_PathRenderLengthMatchesOriginalVertexCount()
+        {
+            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            var projection = new WebMercatorProjection(); // MaxRefineAngleRad == +infinity
+
+            var lineLayer = new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "geolines",
+                LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
+            };
+
+            var lineLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineLabels);
+            Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
+
+            MvtLayer geolines = tile.GetLayer("geolines");
+            List<List<double2>> paths = MvtGeometry.Decode(geolines.Features[0].Geometry);
+            int originalVertexCount = paths[0].Count;
+
+            Assert.AreEqual(originalVertexCount, lineLabels[0].PathRender.Length,
+                "S4: on a flat projection (MaxRefineAngleRad == +infinity) LineCurvatureSubdivision.Subdivide "
+                + "must never fire — PathRender length stays the original decoded vertex count");
+        }
+
+        // ── S4-T6: globe subdivision + anchor alignment (the crux) ─────────────────────────────────────
+
+        /// <summary>Minimal engine-free <see cref="ITileFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
+        /// test doubles for a synthetic tile — mirrors <c>A7TileFeatureSourceTests.FixtureDecodedTile</c>/
+        /// <c>FixtureTileLayer</c> (test-only, duplicated locally per convention rather than shared, since both
+        /// are private test fixtures, not a production type).</summary>
+        private sealed class FixtureDecodedTile : IDecodedTile
+        {
+            private readonly ITileLayer _layer;
+            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
+            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
+        }
+
+        private sealed class FixtureTileLayer : ITileLayer
+        {
+            public string Name { get; set; }
+            public uint Extent { get; set; }
+            public IReadOnlyList<ITileFeature> Features { get; set; }
+        }
+
+        /// <summary>Protobuf zigzag ENcode — the inverse of <see cref="MvtGeometry.ZigZag"/> — for hand-building
+        /// a synthetic MVT command stream.</summary>
+        private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
+
+        /// <summary>Hand-encodes a single 2-point LineString <c>(0,0) → (extent,extent)</c> as an MVT geometry
+        /// command stream: MoveTo(1 point) + LineTo(1 point), zigzag-encoded deltas (mirrors <see cref="MvtGeometry.Decode"/>).</summary>
+        private static uint[] DiagonalLineGeometry(uint extent)
+            => new uint[]
+            {
+                (1u) | (1u << 3), 0, 0,                                       // MoveTo (0,0)
+                (2u) | (1u << 3), ZigZagEncode(extent), ZigZagEncode(extent), // LineTo (extent,extent)
+            };
+
+        [Test]
+        public void Extract_GlobeProjection_SubdividesLongLineSegment_AndAnchorStaysAligned()
+        {
+            const uint extent = 4096;
+            var feature = new InMemoryTileFeature
+            {
+                GeometryType = MapRenderer.Core.Tiles.TileGeometryType.LineString,
+                Geometry = DiagonalLineGeometry(extent),
+            };
+            var layer = new FixtureTileLayer
+            {
+                Name = "lines",
+                Extent = extent,
+                Features = new List<ITileFeature> { feature },
+            };
+            var tile = new FixtureDecodedTile(layer);
+            // A low zoom so the two endpoints' surface normals subtend a large arc — many splits.
+            var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var projection = new SphericalProjection(); // MaxRefineAngleRad ~2 degrees (finite)
+
+            var lineLayer = new SymbolStyle.StyleLayer
+            {
+                Id = "lines",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "lines",
+                LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
+            };
+
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, labels);
+
+            Assert.AreEqual(1, labels.Count, "one line label for the single synthetic feature");
+            SymbolStyle.SymbolLabel label = labels[0];
+
+            // (a) tooth #1 — subdivision fired, off the chord.
+            Assert.Greater(label.PathRender.Length, 2, "the globe must subdivide the 2-vertex line");
+            double3 chordStart = label.PathRender[0];
+            double3 chordEnd = label.PathRender[label.PathRender.Length - 1];
+            double3 chordMid = (chordStart + chordEnd) * 0.5;
+            double3 midVertex = label.PathRender[label.PathRender.Length / 2];
+            double distFromChord = math.length(midVertex - chordMid);
+            Assert.Greater(distFromChord, 1.0,
+                "an inserted mid vertex must sit OFF the straight render chord (curvature, not a facet)");
+
+            // (b) tooth #2 — count/position invariant, index refined.
+            Assert.IsNotNull(label.LineAnchors);
+            Assert.AreEqual(1, label.LineAnchors.Length, "line-center still places a single anchor (arc-length invariant)");
+            Assert.Greater(label.LineAnchors[0].Segment, 0,
+                "the anchor's segment index must be refined onto the finer path (0 would mean it never resubdivided)");
+
+            // (c) tooth #3 — resolves to the correct arc position on the RENDER curve. Independently project the
+            // geographic midpoint of the (still 2-vertex) tile-local line — the arc-length midpoint of a straight
+            // 2-point segment is its linear midpoint — and compare against what the anchor resolves to.
+            double2 midTile = new double2(extent * 0.5, extent * 0.5);
+            double2 midLonLat = tileId.ToLonLat(midTile.x, midTile.y, extent);
+            double3 expectedRenderMid = projection.Project(
+                new GeoCoordinate { Latitude = midLonLat.y, Longitude = midLonLat.x });
+
+            LineAnchor anchor = label.LineAnchors[0];
+            double3 segStart = label.PathRender[anchor.Segment];
+            double3 segEnd = label.PathRender[anchor.Segment + 1];
+            double3 resolved = segStart + (segEnd - segStart) * (double)anchor.T; // math.lerp has no double3 overload in the shim
+            double resolveError = math.length(resolved - expectedRenderMid);
+            Assert.Less(resolveError, 1.0,
+                "the anchor must resolve to (approximately) the true midpoint on the finer render curve");
         }
 
         [Test]

@@ -163,7 +163,8 @@ namespace MapRenderer.Core.View.Camera
         // ── Pose computation ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Computes camera position and forward/up vectors from a <see cref="CameraProperties"/>.
+        /// Computes the camera pose relative to the floating origin (the look-at at scene 0,0,0) from a
+        /// <see cref="CameraProperties"/>.
         ///
         /// <para><b>Coordinate convention:</b> right-handed, Y=up, X=east, Z=north; heading is CW from
         /// north. The camera orbits the look-at (origin under camera-relative rendering).</para>
@@ -192,7 +193,7 @@ namespace MapRenderer.Core.View.Camera
         /// <param name="pos">Output: camera position offset from look-at (render-space).</param>
         /// <param name="fwd">Output: unit forward vector (toward look-at).</param>
         /// <param name="up">Output: camera up vector (world-up preserved; non-degenerate at tilt=0).</param>
-        public static void ComputePose(double altitude,
+        public static void ComputeRelativePose(double altitude,
             Angle                             heading, Angle       tilt,
             out double3                       pos,     out double3 fwd, out double3 up)
         {
