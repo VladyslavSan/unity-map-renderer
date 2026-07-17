@@ -111,6 +111,29 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   in `Rebuild` and place each entity at its correct position the instant it is created. (Seen: S53b
   follow-up.)
 
+- **A "generous" FIXED `RenderBounds` box is NOT a safe never-cull hack — it must ENCLOSE the mesh, and a
+  fixed box centred at the origin fails at low zoom.** EG frustum-culls each entity by
+  `WorldRenderBounds = RenderBounds × LocalToWorld`; `RenderBounds` is an *entity-local* AABB. The Entities
+  backend stamped every tile `{ Center=0, Extents=1e6 }` "so culling never drops a tile." But render units
+  are **ECEF metres** (`SphericalProjection.MetersPerUnit == 1`), and a tile mesh is origin-relative with
+  one corner at local `(0,0,0)` reaching *out* to its far corner — so at low zoom the mesh is far bigger
+  than the box **and off-centre from it**: Mercator z3 spans ≈5e6 m, z4 ≈2.5e6 m; the globe at z0–1 reaches
+  the earth radius R≈6.4e6 m. The `1e6` box then hugs the origin corner, and EG culls the **whole tile** the
+  instant that corner leaves the frustum — tiles vanish in the **Game** view while the **Scene** view (a
+  wider camera + different frustum) still shows them, and **screen-space labels** (`1e9` bound, a separate
+  path) fill the gaps, which misleads you into thinking the geometry is present-but-hidden. The bug switches
+  off above the zoom where a tile shrinks below `1e6` m (Mercator ≈z6), which is the diagnostic tell. **Fix:
+  stamp `RenderBounds` from the mesh's own tight `mesh.bounds`** (the fill/line builders already compute a
+  correctly-centred AABB in the same origin-relative frame as the vertices, so it maps correctly under the
+  same `LocalToWorld`; a rotation only inflates the world AABB — conservative). Keep the generous box only as
+  a fallback for a *degenerate* (zero-size) mesh. **General rule: never fake bounds with a constant — a bound
+  that doesn't enclose its geometry is a latent cull bug that only shows at some scales.** (BRG was immune:
+  it does minimal culling — emits all live items, no per-instance frustum test — behind a `1e8` batch bound;
+  GameObject `MeshRenderer` reads `mesh.bounds` itself. So this was Entities-only.) Verify with an
+  enclosure test at the `AddTileLayer` seam (a >1e6-span mesh's `RenderBounds` must contain every vertex),
+  not a snapshot — culling drops zero-pixel geometry, so on-screen tiles stay pixel-identical.
+  (Seen: 2026-07-17 — tiles culled in Game view at globe z0–1 / Mercator z3–4, maintainer-confirmed fixed.)
+
 - **`Child` is `ICleanupBufferElementData`, so destroying a transform-parent leaves a cleanup-zombie.**
   `ParentSystem` adds a `Child` buffer to any entity that becomes a parent; because it is a *cleanup*
   buffer, `EntityManager.DestroyEntity` on that parent does not finalize it — the entity lingers (and

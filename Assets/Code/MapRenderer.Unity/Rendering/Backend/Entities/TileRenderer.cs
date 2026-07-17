@@ -267,6 +267,21 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
+        /// The draw item entity's local <see cref="RenderBounds"/> (the AABB EG frustum-culls against,
+        /// before <see cref="LocalToWorld"/>). Test observability for the "tile culled in Game view"
+        /// regression: it must ENCLOSE the mesh, not the old fixed { Center=0, Extents=1e6 } box.
+        /// Returns two NaN float3s for an unknown/dead handle.
+        /// </summary>
+        internal (float3 center, float3 extents) GetRenderBoundsLocal(int handle)
+        {
+            if (IsDisposed || !_items.TryGetValue(handle, out var rec)
+                || !_em.Exists(rec.Entity) || !_em.HasComponent<RenderBounds>(rec.Entity))
+                return (new float3(float.NaN), new float3(float.NaN));
+            AABB b = _em.GetComponentData<RenderBounds>(rec.Entity).Value;
+            return (b.Center, b.Extents);
+        }
+
+        /// <summary>
         /// XZ scene-space bounding box covering all live tile entities (each entity's
         /// <see cref="LocalToWorld"/> translation, plus <paramref name="tileSizeWorld"/> for the tile's
         /// mesh extent beyond its origin). Used by tests to frame a camera that sees all entities (there
@@ -398,13 +413,26 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 Value = float4x4.TRS(InitialScenePos(tileOriginRender), InitialSceneRot(), new float3(1f))
             });
 
-            // Generous bounds: floating-origin keeps tiles near the origin and the camera frames them,
-            // so we never want frustum culling to silently drop a tile in a headless single-shot render.
+            // RenderBounds drives EG frustum culling (WorldRenderBounds = this × LocalToWorld). It MUST
+            // enclose the mesh: the builders compute a tight, correctly-centred AABB in the same
+            // origin-relative frame as the vertices (StyledFillTileBuilder / StyledLineTileBuilder), so we
+            // mirror mesh.bounds. The old fixed { Center=0, Extents=1e6 } box was both undersized and
+            // off-centre once render units are ECEF metres: at low zoom a tile spans several 1e6 m
+            // (Mercator z3≈5e6, globe z0–1 out to R≈6.4e6), so the box hugged one corner and EG culled the
+            // whole tile whenever that corner left the frustum — tiles vanished in the Game view (but not
+            // Scene view, a wider frustum) at exactly those zooms. A rotation in LocalToWorld only inflates
+            // the world AABB (conservative). Fallback: a mesh that arrives with degenerate (zero-size)
+            // bounds keeps the generous never-cull box rather than being culled-always.
             if (_em.HasComponent<RenderBounds>(e))
-                _em.SetComponentData(e, new RenderBounds
-                {
-                    Value = new AABB { Center = float3.zero, Extents = new float3(1e6f) }
-                });
+            {
+                Bounds mb = mesh.bounds;
+                float3 center = new float3(mb.center.x, mb.center.y, mb.center.z);   // Unity Bounds → math at the boundary
+                float3 half   = new float3(mb.extents.x, mb.extents.y, mb.extents.z);
+                AABB aabb = math.any(half > 0f)
+                    ? new AABB { Center = center, Extents = half }
+                    : new AABB { Center = float3.zero, Extents = new float3(1e6f) };
+                _em.SetComponentData(e, new RenderBounds { Value = aabb });
+            }
 #if UNITY_EDITOR
             // Name the entity after its style layer ("water", "road-primary", …) so the Entities Hierarchy
             // reads like the old GameObject backend; fall back to the (shared) material name if unavailable.

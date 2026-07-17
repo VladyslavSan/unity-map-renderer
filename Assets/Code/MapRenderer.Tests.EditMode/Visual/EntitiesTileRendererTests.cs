@@ -272,6 +272,66 @@ namespace MapRenderer.Tests.Visual
             finally { r.Dispose(); }
         }
 
+        // ── Frustum-cull bounds (GPU-independent) ───────────────────────────────────────────────
+        // Regression: at low zoom (Mercator z3–4, globe z0–1) render units are ECEF metres, so a single
+        // tile mesh spans several 1e6 m. The backend used to stamp every entity a fixed
+        // { Center=0, Extents=1e6 } RenderBounds; that box is both undersized AND off-centre from such a
+        // mesh, so EG frustum-culled the whole tile whenever the tile's origin corner left the Game
+        // frustum — tiles vanished in the Game view but not the (wider) Scene view. RenderBounds must
+        // ENCLOSE the mesh. Asserting enclosure (not "≠ 1e6") encodes the actual violated invariant.
+
+        [Test]
+        public void AddTileLayer_RenderBounds_EncloseLargeMesh_NotFixed1e6Box()
+        {
+            // A tile-sized mesh whose extent exceeds the old 1e6 box, positioned like a real tile (one
+            // corner at the local origin, geometry reaching out to +5e6 m — a Mercator ~z3 span).
+            const float span = 5_000_000f; // > 1e6 → the old fixed box cannot enclose it
+            var mesh = new Mesh
+            {
+                vertices = new[]
+                {
+                    new Vector3(0f,    0f, 0f),
+                    new Vector3(span,  0f, 0f),
+                    new Vector3(span,  0f, span),
+                    new Vector3(0f,    0f, span),
+                },
+                triangles = new[] { 0, 1, 2, 0, 2, 3 },
+            };
+            mesh.RecalculateBounds(); // tight AABB the builders would carry
+
+            var (fixtureMesh, mat) = FixtureFill();
+            var r = new EntitiesTileRenderer(new[] { mat });
+            try
+            {
+                var tid = new TileId { Z = 3, X = 0, Y = 0 };
+                int h = r.AddTileLayer(mesh, double3.zero, 0, tid);
+
+                var (center, extents) = r.GetRenderBoundsLocal(h);
+                float3 lo = center - extents;
+                float3 hi = center + extents;
+
+                // Every mesh vertex must lie inside the RenderBounds AABB (with a hair of slack).
+                foreach (Vector3 vtx in mesh.vertices)
+                {
+                    var v = new float3(vtx.x, vtx.y, vtx.z);
+                    Assert.IsTrue(math.all(v >= lo - 1f) && math.all(v <= hi + 1f),
+                        $"RenderBounds [{lo} .. {hi}] must enclose mesh vertex {v}. The fixed 1e6 box " +
+                        "(the regression) leaves this tile's far corner outside the AABB, so EG culls the " +
+                        "whole tile once its near corner exits the Game frustum.");
+                }
+
+                // Teeth against a degenerate pass: the box must actually be tile-sized, not the 1e6 hack.
+                Assert.Greater(extents.x, 2_000_000f,
+                    "RenderBounds must track the (5e6-wide) mesh, not the fixed 1e6 box.");
+            }
+            finally
+            {
+                r.Dispose();
+                Object.DestroyImmediate(mesh);
+                Object.DestroyImmediate(fixtureMesh);
+            }
+        }
+
         // ── Dispose (GPU-independent) ───────────────────────────────────────────────────────────
 
         [Test]
