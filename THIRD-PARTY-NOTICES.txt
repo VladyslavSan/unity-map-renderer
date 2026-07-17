@@ -123,6 +123,25 @@ Assets/Fixtures/maplibre-demo-style.json
   copyrighted work under MapLibre's Apache-2.0 license (which applies to
   MapLibre GL JS source code, not the style schemas or Natural Earth data).
 
+Assets/StreamingAssets/Fixtures/liberty.json
+  The OpenFreeMap "Liberty" MapLibre GL style document (spec version 8), committed as the demo basemap
+  style and as a parser/pipeline test fixture (TileJsonTests, GlobeLineWindingTests,
+  RightHandedSphereProjectionWindingTests, BoundaryGlitchMeshTests). Pretty-printed from the upstream
+  single-line original; the content is otherwise unmodified.
+  Source:  OpenFreeMap — https://openfreemap.org/  •  https://github.com/hyperknot/openfreemap
+  Project license: MIT — Copyright (c) 2023 Zsolt Ero. (LICENSE.md:
+    https://github.com/hyperknot/openfreemap/blob/main/LICENSE.md)
+  The Liberty style design (a fork of OSM Liberty, tracing back to OSM Bright / Mapbox Open Styles) and
+  the OpenMapTiles schema it targets are BSD-3-Clause (code) + CC BY 4.0 (design). The style references
+  live OpenFreeMap endpoints for vector tiles, raster hillshade, sprites, and glyphs (see LIVE NETWORK
+  ENDPOINT below) — none of that tile / sprite / glyph data is bundled in this repo.
+
+  REQUIRED ATTRIBUTION — non-MapLibre clients (and any printed media / video) MUST display:
+      OpenFreeMap © OpenMapTiles Data from OpenStreetMap
+  (MapLibre GL adds it automatically; other renderers must add it themselves.) Underlying map data
+  © OpenStreetMap contributors — https://www.openstreetmap.org/copyright. The raster hillshade source
+  is Natural Earth (public domain).
+
 Assets/Fixtures/glyphs/NotoSansRegular/*.pbf.bytes
   (0-255.pbf.bytes, 1536-1791.pbf.bytes, 64256-64511.pbf.bytes, 65024-65279.pbf.bytes)
   Pre-baked SDF glyph-bitmap ranges for the "Noto Sans Regular, ..." font stack, fetched from
@@ -143,3 +162,14 @@ https://demotiles.maplibre.org/tiles/{z}/{x}/{y}.pbf
   Underlying geometry: Natural Earth — public domain (no attribution required).
   Endpoint maintained by: MapLibre contributors.
   Subject to the endpoint's terms of service and fair-use policy.
+
+https://tiles.openfreemap.org/  (vector planet, natural_earth raster, sprites, fonts)
+  The OpenFreeMap tile / sprite / glyph endpoints referenced by
+  Assets/StreamingAssets/Fixtures/liberty.json, fetched at runtime when the demo renders the Liberty
+  basemap. NOT bundled in this repo.
+    - Vector tiles:  https://tiles.openfreemap.org/planet                          (OpenMapTiles schema; data © OpenStreetMap)
+    - Raster shade:  https://tiles.openfreemap.org/natural_earth/ne2sr/{z}/{x}/{y}.png   (Natural Earth — public domain)
+    - Sprites:       https://tiles.openfreemap.org/sprites/ofm_f384/ofm
+    - Glyphs/fonts:  https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf        (Noto Sans — SIL OFL-1.1)
+  Provider: OpenFreeMap — MIT, © 2023 Zsolt Ero. Free public endpoint; subject to its terms / fair-use.
+  Required attribution: "OpenFreeMap © OpenMapTiles Data from OpenStreetMap".
