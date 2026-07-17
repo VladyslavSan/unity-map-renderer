@@ -7,8 +7,9 @@ namespace MapRenderer.Core.Geometry
     /// <summary>
     /// Clean-room ear-clipping polygon triangulator. Implements the ear-clipping technique from
     /// first principles: a vertex is an "ear" if it is convex and the candidate triangle contains
-    /// no reflex vertex. Holes are bridged into the outer ring by finding a visible vertex pair
-    /// and splicing duplicate vertices.
+    /// no reflex vertex. Holes are bridged into the outer ring by finding a non-crossing, locally-
+    /// inside visible vertex pair (<see cref="FindBridgeVertex"/>, guarded by <see cref="LocallyInside"/>
+    /// and the <see cref="SectorContainsSector"/> tiebreak) and splicing duplicate vertices.
     ///
     /// API: call Triangulate() to get both the flat vertex array (in the internal order Earcut
     /// uses, which includes bridge-duplicate verts) and the triangle indices into that array.
@@ -18,7 +19,16 @@ namespace MapRenderer.Core.Geometry
     /// Y-down tile space); holes to CW-on-screen (positive shoelace). This is done internally;
     /// callers need not pre-arrange winding.
     ///
-    /// Stall guard: if a full pass yields no ear, bail with a force-clip rather than looping.
+    /// Stall cascade (mesh-triangulation-robustness §5, direction W): on a full pass with no ear,
+    /// a first stall does a full ear-status refresh (unchanged — catches stale isEar values). A
+    /// second stall on the SAME ring invokes a mapbox-style failure cascade that never emits an
+    /// overlapping/inverted triangle: CureLocalIntersections resolves a local bridging-seam bowtie;
+    /// failing that, SplitPolygon finds a valid diagonal and recurses the ear loop on the two
+    /// independent halves; failing that, the locus is dropped cleanly (§3.1) — no triangle is ever
+    /// folded. The bridge selection is validate-and-fallback provably non-crossing (see the hole
+    /// loop and LocallyInside), so on clean input the merged ring stays simple and the cascade never
+    /// fires — it is a genuinely-degenerate-input escape only, never the success path. Splits are
+    /// bounded (MaxSplits) and their per-attempt search is bounded (scanBudget).
     /// Degenerate rings (|area| below threshold) are pre-skipped in PolygonAssembler.
     /// </summary>
     public static class Earcut
@@ -32,9 +42,11 @@ namespace MapRenderer.Core.Geometry
             public readonly double2[] Vertices;  // flat vertex array in Earcut's internal order
             public readonly int[] Indices;       // triangle indices into Vertices
             /// <summary>
-            /// Number of times the stall guard fired a force-clip during triangulation.
-            /// A non-zero value means at least one vertex was force-clipped without passing the
-            /// ear test (the input ring is likely self-intersecting or degenerate).
+            /// Number of loci the stall cascade could not resolve and dropped cleanly (never a
+            /// fold — see the class doc's stall-cascade note). A non-zero value means the cure →
+            /// split → drop cascade exhausted every non-folding option for at least one
+            /// locus; the input ring is likely genuinely self-intersecting or degenerate there, and
+            /// that locus is simply missing from the output rather than filled with garbage.
             /// Exposed via return value to keep Core free of UnityEngine logging.
             /// </summary>
             public readonly int ForceClips;
@@ -139,8 +151,41 @@ namespace MapRenderer.Core.Geometry
                 // Find the hole's leftmost vertex.
                 int holeLM = HoleLeftmostIndex(vx, vy, holeStart, holeCount);
 
-                // Find the outer-ring vertex to bridge to.
+                // Find the outer-ring vertex to bridge to (leftward-ray heuristic + reflex refinement).
                 int outerBridge = FindBridgeVertex(vx, vy, next, prev, holeLM, mergedRingStart, mergedRingCount);
+
+                // Provably-non-crossing guarantee. The heuristic above picks a good bridge on the common
+                // case but is NOT guaranteed non-crossing for a concave outer (its leftward-ray endpoint
+                // pick can land "around" a reflex notch). A crossing bridge makes the spliced merged ring
+                // self-intersecting → a reversed residual pocket → the ear loop clips a triangle OUTSIDE
+                // the polygon (silent overlap, ForceClips still 0). So VALIDATE the chosen bridge against
+                // BOTH the merged ring AND this hole's own ring; if it crosses either (or isn't locally
+                // inside), REPLACE it with the nearest vertex whose bridge is provably clear. This keeps
+                // the merged ring simple throughout, so no reversed residual can arise on clean input.
+                // The heuristic result is kept whenever it is already valid ⇒ clean cases stay byte-
+                // identical; only genuinely-crossing bridges change.
+                bool BridgeValid(int cand)
+                    => LocallyInside(vx, vy, prev, next, cand, holeLM)
+                       && !BridgeCrossesRing(vx, vy, next, holeLM, cand, mergedRingStart, mergedRingCount)
+                       && !BridgeCrossesRing(vx, vy, next, holeLM, cand, holeStart, holeCount);
+
+                if (!BridgeValid(outerBridge))
+                {
+                    int bestCand = -1;
+                    double bestDist = double.MaxValue;
+                    int scan = mergedRingStart;
+                    for (int i = 0; i < mergedRingCount; i++)
+                    {
+                        if (BridgeValid(scan))
+                        {
+                            double bdx = vx[scan] - vx[holeLM], bdy = vy[scan] - vy[holeLM];
+                            double bd  = bdx * bdx + bdy * bdy;
+                            if (bd < bestDist) { bestDist = bd; bestCand = scan; }
+                        }
+                        scan = next[scan];
+                    }
+                    if (bestCand >= 0) outerBridge = bestCand; // else: dirty input; cure/split/drop backstop
+                }
 
                 // Reserve 2 bridge-copy slots:
                 //   copyHoleLM  — a copy of holeLM inserted at the END of the hole traversal
@@ -188,127 +233,398 @@ namespace MapRenderer.Core.Geometry
                 mergedRingCount = total; // all slots up to here form the merged ring
             }
 
-            // ---- Ear-clipping loop. ----
+            // ---- Ear-clipping loop, with a cure → split → retry failure cascade on stall. ----
+            //
+            // The old stall guard used to force-clip a non-ear vertex to escape a stall — that emits
+            // an overlapping/inverted triangle (a fold) whenever bridging tangled the merged ring
+            // (design §2 root cause). It is replaced by a mapbox-style cascade that NEVER folds:
+            //   1. CureLocalIntersections — resolve a local self-touching bowtie (the seam-crossing
+            //      pattern bridging creates) by cutting the one valid triangle and splicing the two
+            //      offending vertices out; then retry the ear loop.
+            //   2. SplitPolygon + retry — if curing can't unstick it, find a valid diagonal between
+            //      two non-adjacent live vertices, split the ring into two independent rings, and
+            //      recurse the ear loop on each half.
+            //   3. If neither can make progress on a genuinely degenerate locus, drop that locus
+            //      cleanly (§3.1) — emit nothing for it. `forceClipCount` now counts only these
+            //      clean drops (0 on the clean corpus); it is never incremented for a fold.
             var indices = new List<int>(math.max(0, (total - 2) * 3));
             var removed = new bool[total];
+            var isEar   = new bool[total];
             int forceClipCount = 0;
 
-            // Precompute ear status.
-            var isEar = new bool[total];
-            for (int i = 0; i < total; i++)
-                isEar[i] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, i);
+            // capacity currently == total (set by the bridging phase above); EnsureCapacity grows
+            // every parallel array together (grow-on-demand, Edit 3) the rare times SplitPolygon
+            // needs a fresh slot. Splits are a failure-path escape only — bounded below.
+            int splitsUsed = 0;
+            const int MaxSplits = 512; // finite ceiling (lessons: never an unbounded data-derived loop)
 
-            int remaining = total;
-
-            while (remaining > 3)
+            void EnsureCapacity(int needed)
             {
-                // Find first live vertex for ring walk.
-                int start = -1;
-                for (int i = 0; i < total; i++)
-                    if (!removed[i]) { start = i; break; }
-                if (start < 0) break;
+                if (needed <= capacity) return;
+                int newCap = math.max(needed, capacity * 2);
+                Array.Resize(ref vx, newCap);
+                Array.Resize(ref vy, newCap);
+                Array.Resize(ref prev, newCap);
+                Array.Resize(ref next, newCap);
+                Array.Resize(ref removed, newCap);
+                Array.Resize(ref isBridgeCopy, newCap);
+                Array.Resize(ref isEar, newCap);
+                capacity = newCap;
+            }
 
-                // stallLimit: if we complete a full pass (remaining steps) without clipping an ear,
-                // refresh all ear statuses (catches stale isEar values from distant ear removals)
-                // before resorting to a force-clip as the true last resort.
-                int stallLimit = remaining;
-                int stallIter  = 0;
-                bool clippedAny = false;
-                bool didFullRefresh = false;
+            // mapbox splitPolygon: duplicate a and b into two fresh vertices (a2, b2) and rewire so
+            // the ring splits into two independent cycles — [a → b → … → a] and [a2 → … → b2 → a2].
+            // Split-added vertices are real ring vertices (isBridgeCopy = false), unlike the
+            // zero-width bridge-seam copies, so they participate fully in point-in-triangle tests.
+            int SplitPolygon(int a, int b)
+            {
+                EnsureCapacity(total + 2);
+                int a2 = total++;
+                int b2 = total++;
 
-                int v = start;
-                for (int iter = 0; iter < remaining * 4 && remaining > 3; iter++)
+                vx[a2] = vx[a]; vy[a2] = vy[a];
+                vx[b2] = vx[b]; vy[b2] = vy[b];
+                isBridgeCopy[a2] = false;
+                isBridgeCopy[b2] = false;
+                removed[a2] = false;
+                removed[b2] = false;
+
+                int an = next[a];
+                int bp = prev[b];
+
+                next[a] = b;  prev[b] = a;
+                next[a2] = an; prev[an] = a2;
+                next[b2] = a2; prev[a2] = b2;
+                next[bp] = b2; prev[b2] = bp;
+
+                return b2;
+            }
+
+            // mapbox cureLocalIntersections: at vertex p, edges (a=prev[p]→p) and (next[p]→b=next[next[p]])
+            // may cross (the seam-touching pattern bridging creates). If so — and the shortcut a→b is
+            // locally valid on both ends — cut triangle (a, p, b), splice p and next[p] out of the ring,
+            // and continue. Bounded by the ring's own live-vertex count; never emits a crossing triangle.
+            bool CureLocalIntersections(ref int start, ref int remaining)
+            {
+                bool curedAny = false;
+                int p = start;
+                int guard = 0;
+                int maxIter = remaining + 8;
+                do
                 {
-                    if (removed[v]) { v = next[v]; continue; }
+                    if (removed[p]) { p = next[p]; guard++; continue; }
+                    int a  = prev[p];
+                    int pn = next[p];
+                    int b  = next[pn];
 
-                    if (isEar[v])
+                    if (a != b && a != p && pn != p && !removed[a] && !removed[pn] && !removed[b] &&
+                        !(vx[a] == vx[b] && vy[a] == vy[b]) &&
+                        Intersects(vx, vy, a, p, pn, b) &&
+                        LocallyInside(vx, vy, prev, next, a, b) &&
+                        LocallyInside(vx, vy, prev, next, b, a))
                     {
-                        int p = prev[v], n = next[v];
+                        indices.Add(a);
                         indices.Add(p);
-                        indices.Add(v);
-                        indices.Add(n);
+                        indices.Add(b);
 
-                        next[p] = n;
-                        prev[n] = p;
-                        removed[v] = true;
-                        remaining--;
-                        clippedAny = true;
-                        stallIter = 0;
-                        didFullRefresh = false;
+                        removed[p]  = true;
+                        removed[pn] = true;
+                        next[a] = b;
+                        prev[b] = a;
+                        remaining -= 2;
+                        curedAny = true;
 
-                        // Update ear status for the two neighbors whose candidate triangle changed.
-                        isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
-                        isEar[n] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, n);
+                        isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a);
+                        isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, b);
 
-                        v = n;
+                        start = b;
+                        p = b;
+                        if (remaining <= 3) break;
                     }
-                    else
+                    p = next[p];
+                    guard++;
+                } while (p != start && guard < maxIter);
+
+                return curedAny;
+            }
+
+            // mapbox isValidDiagonal: a candidate split diagonal (a, b) must not be an existing edge,
+            // must not cross any other edge of the ring, must be locally inside at BOTH endpoints, and
+            // its midpoint must fall inside the ring (guards against a diagonal that tunnels through a
+            // reflex notch between two edges without technically crossing either one).
+            bool IsValidDiagonal(int a, int b, int ringGuardBound)
+            {
+                if (a == b || next[a] == b || prev[a] == b || removed[a] || removed[b]) return false;
+                if (IntersectsRing(a, b, ringGuardBound)) return false;
+                if (!LocallyInside(vx, vy, prev, next, a, b)) return false;
+                if (!LocallyInside(vx, vy, prev, next, b, a)) return false;
+                if (!MiddleInside(a, b, ringGuardBound)) return false;
+                return true;
+            }
+
+            bool IntersectsRing(int a, int b, int ringGuardBound)
+            {
+                int p = a;
+                int guard = 0;
+                do
+                {
+                    if (!removed[p])
                     {
-                        v = next[v];
-                        stallIter++;
-                        if (stallIter > stallLimit)
+                        int q = next[p];
+                        if (!removed[q] && p != a && p != b && q != a && q != b &&
+                            Intersects(vx, vy, p, q, a, b))
+                            return true;
+                    }
+                    p = next[p];
+                    guard++;
+                } while (p != a && guard < ringGuardBound);
+                return false;
+            }
+
+            bool MiddleInside(int a, int b, int ringGuardBound)
+            {
+                double mx = (vx[a] + vx[b]) * 0.5;
+                double my = (vy[a] + vy[b]) * 0.5;
+                bool inside = false;
+                int p = a;
+                int guard = 0;
+                do
+                {
+                    if (!removed[p])
+                    {
+                        int q = next[p];
+                        double px = vx[p], py = vy[p], qx = vx[q], qy = vy[q];
+                        if ((py > my) != (qy > my))
                         {
-                            if (!didFullRefresh)
+                            double ix = px + (my - py) / (qy - py) * (qx - px);
+                            if (ix > mx) inside = !inside;
+                        }
+                    }
+                    p = next[p];
+                    guard++;
+                } while (p != a && guard < ringGuardBound);
+                return inside;
+            }
+
+            // mapbox splitEarcut: scan candidate pairs (a, b) for the first valid diagonal, split on
+            // it, and recurse the ear loop on both halves. O(n²) candidate pairs on the STUCK ring
+            // only (a failure-path escape, never the success path) — bounded so a pathological locus
+            // degrades to a clean drop instead of hanging (lessons: always bound data-derived loops).
+            bool SplitAndRetry(int start, int remaining)
+            {
+                if (splitsUsed >= MaxSplits) return false;
+                int ringGuardBound = remaining + 8;
+                int scanBudget = math.min(remaining, 400); // bounded candidate-pair search width
+
+                int a = start;
+                for (int ai = 0; ai < scanBudget; ai++)
+                {
+                    if (!removed[a])
+                    {
+                        int b = next[next[a]];
+                        for (int bi = 0; bi < scanBudget && b != prev[a]; bi++)
+                        {
+                            if (!removed[b] && a != b && IsValidDiagonal(a, b, ringGuardBound))
                             {
-                                // First stall: do a full refresh of ALL remaining ear statuses.
-                                // This handles the case where a distant ear removal made a vertex
-                                // eligible (its blocking vertex was removed but isEar[v] was stale).
-                                // This is the correct escape before resorting to force-clip.
-                                for (int i = 0; i < total; i++)
-                                    if (!removed[i])
-                                        isEar[i] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, i);
-                                stallIter = 0;
-                                didFullRefresh = true;
-                                stallLimit = remaining; // reset limit for the post-refresh pass
+                                splitsUsed++;
+                                int c = SplitPolygon(a, b);
+
+                                isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a);
+                                isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, b);
+                                isEar[c] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, c);
+                                int a2 = prev[c];
+                                isEar[a2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a2);
+
+                                int remA = CountRing(a, remaining + 8);
+                                int remC = CountRing(c, remaining + 8);
+                                EarClipRing(a, remA);
+                                EarClipRing(c, remC);
+                                return true;
                             }
-                            else
+                            b = next[b];
+                        }
+                    }
+                    a = next[a];
+                }
+                return false;
+            }
+
+            int CountRing(int start, int guardBound)
+            {
+                int count = 0;
+                int p = start;
+                int guard = 0;
+                do
+                {
+                    if (!removed[p]) count++;
+                    p = next[p];
+                    guard++;
+                } while (p != start && guard < guardBound);
+                return count;
+            }
+
+            // Ear-clip exactly one ring (walked via next/prev from `start`) to completion: normal
+            // ear removal, the existing first-stall full ear-status refresh, then — on a second stall
+            // — the cure → split → drop cascade. Recurses (via SplitAndRetry) for split-derived rings.
+            // No reversed-residual handling is needed here: the bridge selection above is provably
+            // non-crossing (see the hole loop's validate-and-fallback), so the merged ring stays simple
+            // and CCW-on-screen throughout, and split/cure preserve orientation — every ring reaching
+            // this function is already CCW. (A genuinely dirty, self-intersecting input can still stall
+            // past cure+split; that locus is dropped cleanly per design §3.1, never folded.)
+            void EarClipRing(int start, int remaining)
+            {
+                if (remaining < 3) return;
+
+                // Refresh ear status for this ring's own live vertices on entry. For the top-level
+                // (unsplit) ring this recomputes values already correct from construction — no
+                // observable change; for a split/cure-derived ring it is the correctness-necessary
+                // refresh around the newly rewired seam.
+                {
+                    int p = start, guard = 0, bound = remaining + 8;
+                    do
+                    {
+                        if (!removed[p]) isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
+                        p = next[p];
+                        guard++;
+                    } while (p != start && guard < bound);
+                }
+
+                while (remaining > 3)
+                {
+                    if (removed[start])
+                    {
+                        int s = start, guard = 0;
+                        while (removed[s] && guard < total + 8) { s = next[s]; guard++; }
+                        start = s;
+                    }
+
+                    int stallLimit = remaining;
+                    int stallIter  = 0;
+                    bool clippedAny = false;
+                    bool didFullRefresh = false;
+
+                    int v = start;
+                    for (int iter = 0; iter < remaining * 4 && remaining > 3; iter++)
+                    {
+                        if (removed[v]) { v = next[v]; continue; }
+
+                        if (isEar[v])
+                        {
+                            int p = prev[v], n = next[v];
+                            indices.Add(p);
+                            indices.Add(v);
+                            indices.Add(n);
+
+                            next[p] = n;
+                            prev[n] = p;
+                            removed[v] = true;
+                            remaining--;
+                            clippedAny = true;
+                            stallIter = 0;
+                            didFullRefresh = false;
+
+                            isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
+                            isEar[n] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, n);
+
+                            if (start == v) start = n;
+                            v = n;
+                        }
+                        else
+                        {
+                            v = next[v];
+                            stallIter++;
+                            if (stallIter > stallLimit)
                             {
-                                // Stall guard: even after full refresh, no ear found. Force-clip to
-                                // escape degenerate/self-intersecting geometry.
-                                // (No UnityEngine dependency in Core; log via System.Diagnostics if needed.)
-                                int p = prev[v], n = next[v];
-                                indices.Add(p);
-                                indices.Add(v);
-                                indices.Add(n);
-                                next[p] = n;
-                                prev[n] = p;
-                                removed[v] = true;
-                                remaining--;
-                                forceClipCount++;
-                                isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
-                                isEar[n] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, n);
-                                v = n;
-                                stallIter = 0;
-                                didFullRefresh = false;
-                                clippedAny = true;
+                                if (!didFullRefresh)
+                                {
+                                    // First stall: full refresh of this ring's remaining ear statuses
+                                    // (unchanged escape from the original — catches stale isEar values
+                                    // from a distant ear removal).
+                                    int p2 = v, guard2 = 0, bound2 = remaining + 8;
+                                    do
+                                    {
+                                        if (!removed[p2])
+                                            isEar[p2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p2);
+                                        p2 = next[p2];
+                                        guard2++;
+                                    } while (p2 != v && guard2 < bound2);
+                                    stallIter = 0;
+                                    didFullRefresh = true;
+                                    stallLimit = remaining;
+                                }
+                                else
+                                {
+                                    // Second stall: cascade. Never fold.
+                                    int cureStart = v;
+                                    if (CureLocalIntersections(ref cureStart, ref remaining))
+                                    {
+                                        start = cureStart;
+                                        v = cureStart;
+                                        stallIter = 0;
+                                        didFullRefresh = false;
+                                        clippedAny = true;
+                                        if (remaining <= 3) break;
+                                        continue;
+                                    }
+
+                                    if (SplitAndRetry(v, remaining))
+                                    {
+                                        remaining = 0; // handed off to the two recursive halves
+                                        clippedAny = true;
+                                        break;
+                                    }
+
+                                    // Genuinely stuck: neither cure nor split could make progress
+                                    // (only reachable on a self-intersecting/degenerate input, since
+                                    // the non-crossing bridge keeps clean input's merged ring simple).
+                                    // Drop this locus cleanly — no triangle folds. ForceClips counts
+                                    // exactly these clean drops (0 on clean input), a VISIBLE signal.
+                                    forceClipCount++;
+                                    remaining = 0;
+                                    clippedAny = true;
+                                    break;
+                                }
                             }
                         }
                     }
+
+                    if (!clippedAny) break;
                 }
 
-                if (!clippedAny) break;
+                // Final triangle for this ring: the 3 remaining live vertices of THIS ring, listed in
+                // ascending vertex-index order — matches the original single-ring algorithm's
+                // tie-break (index order, not ring-walk order) so the top-level (unsplit) ring's
+                // final triangle stays byte-identical. The Area2>0 swap enforces CCW-on-screen output
+                // winding unconditionally: a no-op on every ring here (all are CCW — non-crossing
+                // bridge + orientation-preserving split), it is a cheap correctness guarantee that the
+                // emitted triangle can never be a fold even if a dirty-input split ever left a ring
+                // wound the other way.
+                if (remaining == 3)
+                {
+                    var live = new List<int>(3);
+                    int p = start, guard = 0, bound = remaining + 8;
+                    do
+                    {
+                        if (!removed[p]) live.Add(p);
+                        p = next[p];
+                        guard++;
+                    } while (p != start && guard < bound);
+                    if (live.Count >= 3)
+                    {
+                        live.Sort();
+                        int t0 = live[0], t1 = live[1], t2 = live[2];
+                        if (Area2(vx[t0], vy[t0], vx[t1], vy[t1], vx[t2], vy[t2]) > 0.0)
+                            (t1, t2) = (t2, t1);
+                        indices.Add(t0);
+                        indices.Add(t1);
+                        indices.Add(t2);
+                    }
+                }
             }
 
-            // Final triangle.
-            if (remaining >= 3)
-            {
-                int v0 = -1, v1 = -1, v2 = -1;
-                for (int i = 0; i < total; i++)
-                {
-                    if (removed[i]) continue;
-                    if (v0 < 0)      v0 = i;
-                    else if (v1 < 0) v1 = i;
-                    else             { v2 = i; break; }
-                }
-                if (v0 >= 0 && v1 >= 0 && v2 >= 0)
-                {
-                    indices.Add(v0);
-                    indices.Add(v1);
-                    indices.Add(v2);
-                }
-            }
+            EarClipRing(mergedRingStart, total);
 
-            // Build the flat vertex array to return alongside indices.
+            // Build the flat vertex array to return alongside indices (current, possibly grown total).
             var vertArray = new double2[total];
             for (int i = 0; i < total; i++)
                 vertArray[i] = new double2(vx[i], vy[i]);
@@ -498,12 +814,25 @@ namespace MapRenderer.Core.Geometry
                                 sMPH * sMPQ >= 0.0 &&
                                 sPHM * sPHQ >= 0.0;
 
-                            if (inside)
+                            // Non-crossing guard: the candidate bridge cur→holeLM must be locally
+                            // inside at cur (mapbox locallyInside) — this is the guard the old code
+                            // lacked, and is what stops the bridge from crossing an already-merged
+                            // seam at scale (design §2 root cause). Additive: only rejects candidates
+                            // the containment test already flagged as inside the sector.
+                            if (inside && LocallyInside(vx, vy, prev, next, cur, holeLM))
                             {
                                 double dx  = hx - qx; // > 0 (qx < hx guaranteed by band check)
                                 double tan = dx > 1e-12 ? math.abs(qy - hy) / dx : double.MaxValue;
-                                // Prefer smaller polar angle; break ties by larger qx.
-                                if (tan < bestTan || (math.abs(tan - bestTan) < 1e-14 && qx > candX))
+                                bool tanTie = math.abs(tan - bestTan) < 1e-14;
+                                // Prefer smaller polar angle; ties broken by larger qx (existing outer
+                                // tier); an exact qx tie too falls to the sectorContainsSector equal-
+                                // angle tiebreak (mapbox) for a deterministic, non-crossing choice.
+                                bool accept =
+                                    tan < bestTan ? true :
+                                    tanTie && qx > candX ? true :
+                                    tanTie && qx == candX ? SectorContainsSector(vx, vy, prev, next, bestVert, cur) :
+                                    false;
+                                if (accept)
                                 {
                                     bestTan  = tan;
                                     bestVert = cur;
@@ -535,6 +864,62 @@ namespace MapRenderer.Core.Geometry
             }
 
             return bestVert < 0 ? mergedRingStart : bestVert;
+        }
+
+        /// <summary>
+        /// Twice the signed area of triangle (p, q, r): cross((q−p), (r−p)). Matches the sign
+        /// convention already used by <see cref="IsEar"/>'s triArea2 (convex ⟺ ≤ 0 for a ring
+        /// normalised CCW-on-screen in Y-down space); this is also mapbox earcut's `area(p, q, r)`
+        /// (algebraically identical — cross((q−p),(r−p)) == cross((q−p),(r−q))), so the mapbox
+        /// convexity/locally-inside logic below ports without a sign flip.
+        /// </summary>
+        private static double Area2(double px, double py, double qx, double qy, double rx, double ry)
+            => (qx - px) * (ry - py) - (rx - px) * (qy - py);
+
+        /// <summary>
+        /// mapbox earcut's `locallyInside(a, b)`, expressed directly in THIS triangulator's convention
+        /// (CCW-on-screen ring ⇒ a vertex is convex ⟺ Area2(prev,a,next) ≤ 0, and a point X is on the
+        /// interior side of a directed edge P→Q ⟺ Area2(P,Q,X) ≤ 0 — both consistent with
+        /// <see cref="IsEar"/>). "Locally inside" means the diagonal a→b enters the polygon interior at
+        /// a: for a convex a the interior is the intersection of the two edges' half-planes (AND); for a
+        /// reflex a it is their union (OR). This is the non-crossing guard the bridge selection needs.
+        ///
+        /// NOTE: an earlier revision ported mapbox's sign literals verbatim, which is WRONG here —
+        /// mapbox's y-up `area` equals −Area2 in this y-down convention, so the branch/comparison signs
+        /// invert. That inversion silently rejected valid bridge candidates (and accepted crossing
+        /// ones), leaving the merged ring self-intersecting. Derived-from-geometry form below is
+        /// verified against convex and reflex reference vertices.
+        /// </summary>
+        private static bool LocallyInside(double[] vx, double[] vy, int[] prev, int[] next, int a, int b)
+        {
+            int ap = prev[a], an = next[a];
+            double ax = vx[a], ay = vy[a];
+            double apx = vx[ap], apy = vy[ap];
+            double anx = vx[an], any = vy[an];
+            double bx = vx[b], by = vy[b];
+
+            // Convex a ⟺ Area2(prev,a,next) ≤ 0. Interior side of edge (ap→a): Area2(ap,a,b) ≤ 0;
+            // of edge (a→an): Area2(a,an,b) ≤ 0. Convex ⇒ AND, reflex ⇒ OR.
+            bool aConvex = Area2(apx, apy, ax, ay, anx, any) <= 0.0;
+            bool insidePrevEdge = Area2(apx, apy, ax, ay, bx, by) <= 0.0;
+            bool insideNextEdge = Area2(ax, ay, anx, any, bx, by) <= 0.0;
+            return aConvex ? (insidePrevEdge && insideNextEdge)
+                           : (insidePrevEdge || insideNextEdge);
+        }
+
+        /// <summary>
+        /// Mapbox earcut's `sectorContainsSector(m, p)`: does candidate p's incident-edge sector
+        /// nest inside the current-best m's sector? Used only as the innermost tiebreak in
+        /// <see cref="FindBridgeVertex"/> — when two reflex candidates have both an equal polar
+        /// angle AND an equal x (the existing qx tiebreak also ties) — to keep the choice
+        /// deterministic without picking a candidate whose own sector could re-cross the bridge.
+        /// </summary>
+        private static bool SectorContainsSector(double[] vx, double[] vy, int[] prev, int[] next, int m, int p)
+        {
+            int mp = prev[m], mn = next[m];
+            int pp = prev[p], pn = next[p];
+            return Area2(vx[mp], vy[mp], vx[m], vy[m], vx[pp], vy[pp]) < 0.0 &&
+                   Area2(vx[pn], vy[pn], vx[m], vy[m], vx[mn], vy[mn]) < 0.0;
         }
 
         /// <summary>
@@ -599,5 +984,87 @@ namespace MapRenderer.Core.Geometry
 
         private static double Cross(double ax, double ay, double bx, double by, double px, double py)
             => (bx - ax) * (py - ay) - (by - ay) * (px - ax);
+
+        /// <summary>
+        /// Proper segment-intersection test (mapbox earcut's `intersects`): true if segment p1q1
+        /// crosses segment p2q2, including the collinear-and-overlapping case. Used by
+        /// <c>CureLocalIntersections</c> (detect the bowtie a local bridging seam creates) and
+        /// <c>IsValidDiagonal</c> (a split diagonal must not cross any other ring edge).
+        /// </summary>
+        private static bool Intersects(double[] vx, double[] vy, int p1, int q1, int p2, int q2)
+        {
+            double o1 = Area2(vx[p1], vy[p1], vx[q1], vy[q1], vx[p2], vy[p2]);
+            double o2 = Area2(vx[p1], vy[p1], vx[q1], vy[q1], vx[q2], vy[q2]);
+            double o3 = Area2(vx[p2], vy[p2], vx[q2], vy[q2], vx[p1], vy[p1]);
+            double o4 = Area2(vx[p2], vy[p2], vx[q2], vy[q2], vx[q1], vy[q1]);
+
+            bool s1 = o1 > 0.0, s1n = o1 < 0.0;
+            bool s2 = o2 > 0.0, s2n = o2 < 0.0;
+            bool s3 = o3 > 0.0, s3n = o3 < 0.0;
+            bool s4 = o4 > 0.0, s4n = o4 < 0.0;
+
+            if ((s1 != s2 || s1n != s2n) && (s3 != s4 || s3n != s4n)) return true; // general case
+
+            if (o1 == 0.0 && OnSegment(vx, vy, p1, p2, q1)) return true; // p2 lies on p1q1
+            if (o2 == 0.0 && OnSegment(vx, vy, p1, q2, q1)) return true; // q2 lies on p1q1
+            if (o3 == 0.0 && OnSegment(vx, vy, p2, p1, q2)) return true; // p1 lies on p2q2
+            if (o4 == 0.0 && OnSegment(vx, vy, p2, q1, q2)) return true; // q1 lies on p2q2
+
+            return false;
+        }
+
+        /// <summary>Given p, q, r already collinear, is q within the bounding box of segment p-r?</summary>
+        private static bool OnSegment(double[] vx, double[] vy, int p, int q, int r)
+        {
+            double px = vx[p], py = vy[p], qx = vx[q], qy = vy[q], rx = vx[r], ry = vy[r];
+            return qx <= math.max(px, rx) && qx >= math.min(px, rx) &&
+                   qy <= math.max(py, ry) && qy >= math.min(py, ry);
+        }
+
+        /// <summary>
+        /// STRICT proper segment crossing (interiors intersect at a single point) — endpoint touches
+        /// and collinear overlaps return false. Distinct from <see cref="Intersects"/> (which reports
+        /// those as true); the bridge-clearance test wants only genuine crossings so a bridge that
+        /// merely shares/touches a ring vertex is not rejected.
+        /// </summary>
+        private static bool ProperlyCross(
+            double ax, double ay, double bx, double by,
+            double cx, double cy, double dx, double dy)
+        {
+            double d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+            double d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+            double d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+            double d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+            return ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) &&
+                   ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0));
+        }
+
+        /// <summary>
+        /// Does the candidate bridge segment (holeLM → cand) properly cross any edge of the ring that
+        /// starts at <paramref name="ringStart"/> and spans <paramref name="ringCount"/> vertices via
+        /// next[]? Edges incident to holeLM or cand are skipped (they share an endpoint with the
+        /// bridge, not a crossing). Called for BOTH the already-merged ring AND the current hole's own
+        /// ring, so the accepted bridge is provably non-crossing against every existing edge — which
+        /// keeps the spliced merged ring simple (the invariant that makes reversed residuals, and thus
+        /// the pre-stall overlap the reactive mirror used to mask, impossible on clean input).
+        /// </summary>
+        private static bool BridgeCrossesRing(
+            double[] vx, double[] vy, int[] next,
+            int holeLM, int cand, int ringStart, int ringCount)
+        {
+            double ax = vx[holeLM], ay = vy[holeLM], bx = vx[cand], by = vy[cand];
+            int c = ringStart;
+            for (int i = 0; i < ringCount; i++)
+            {
+                int nc = next[c];
+                if (c != cand && nc != cand && c != holeLM && nc != holeLM)
+                {
+                    if (ProperlyCross(ax, ay, bx, by, vx[c], vy[c], vx[nc], vy[nc]))
+                        return true;
+                }
+                c = nc;
+            }
+            return false;
+        }
     }
 }

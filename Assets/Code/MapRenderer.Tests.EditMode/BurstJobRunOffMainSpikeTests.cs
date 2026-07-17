@@ -171,6 +171,7 @@ namespace MapRenderer.Tests
                 var outIdx  = new NativeArray<int>(6, Allocator.Persistent);
                 var outCnt  = new NativeArray<int>(1, Allocator.Persistent);
                 var force   = new NativeArray<int>(1, Allocator.Persistent);
+                var mergedVC = new NativeArray<int>(1, Allocator.Persistent);
                 var vx = new NativeArray<double>(4, Allocator.Persistent);
                 var vy = new NativeArray<double>(4, Allocator.Persistent);
                 var prev = new NativeArray<int>(4, Allocator.Persistent);
@@ -191,6 +192,7 @@ namespace MapRenderer.Tests
                         SortedHoleCounts = holeCnt, HoleCount = 0,
                         OutIndices = outIdx, OutIndexOffset = 0,
                         OutIndexCount = outCnt, OutForceClipCount = force,
+                        OutMergedVertexCount = mergedVC,
                         Vx = vx, Vy = vy, Prev = prev, Next = next,
                         IsBridgeCopy = isBridge, Removed = removed, IsEar = isEar,
                     }.Run();
@@ -200,6 +202,7 @@ namespace MapRenderer.Tests
                 finally
                 {
                     verts.Dispose(); holeCnt.Dispose(); outIdx.Dispose(); outCnt.Dispose(); force.Dispose();
+                    mergedVC.Dispose();
                     vx.Dispose(); vy.Dispose(); prev.Dispose(); next.Dispose();
                     isBridge.Dispose(); removed.Dispose(); isEar.Dispose();
                 }

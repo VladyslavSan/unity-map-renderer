@@ -305,6 +305,7 @@ namespace MapRenderer.Jobs
             var scratchRemoved       = new NativeArray<bool>[polyCount];
             var scratchIsEar         = new NativeArray<bool>[polyCount];
             var perPolyIdxArrays     = new NativeArray<int>[polyCount];
+            var perPolyMergedVertCnt = new NativeArray<int>[polyCount]; // EarcutJob.OutMergedVertexCount (Stage 3)
             int[] perPolyMergedVC    = new int[polyCount];
             int[] perPolyFeatureIdx  = new int[polyCount]; // S89 D2: feature index of each polygon (for per-vertex color)
 
@@ -361,10 +362,22 @@ namespace MapRenderer.Jobs
                 perPolyVerts[pi]         = polyVerts;
                 perPolySortedHoleCnt[pi] = sortedHoleCounts;
 
-                // EarcutJob scratch capacity: polyVC + 2 per hole (bridge-copy slots).
-                int scratchCap = polyVC + holeCount * 2;
-                int idxCap     = scratchCap > 2 ? (scratchCap - 2) * 3 : 3;
-                perPolyMergedVC[pi] = scratchCap;   // full merged ring size (with bridge copies)
+                // EarcutJob scratch capacity (mesh-triangulation-robustness Stage 3): baseCap = polyVC +
+                // 2 per hole (bridge-copy slots) is the deterministic merged-ring size on clean input —
+                // matches managed Earcut's initial `capacity` exactly. The cure → split → clean-drop
+                // cascade's SplitPolygon adds 2 verts per split, bounded by EarcutJob.MaxSplits (512,
+                // mirrored exactly from managed Earcut.MaxSplits) — but splits are a FAILURE-PATH escape
+                // only (0 on the clean corpus; see EarcutJob class doc). Pre-size a bounded, tile-
+                // appropriate SPLIT HEADROOM rather than the worst-case 2*MaxSplits (which would double
+                // every polygon's scratch footprint for a path that never fires on real input); on
+                // exhaustion EarcutJob.TrySplit refuses the split (never writes past these arrays) and the
+                // job drops the locus cleanly instead — see EarcutJob's OutForceClipCount doc.
+                int baseCap           = polyVC + holeCount * 2;
+                int splitBudget       = math.min(EarcutJob.MaxSplits, math.max(8, holeCount * 4));
+                int splitHeadroomVerts = splitBudget * 2;
+                int scratchCap        = baseCap + splitHeadroomVerts;
+                int idxCap            = scratchCap > 2 ? (scratchCap - 2) * 3 : 3;
+                perPolyMergedVertCnt[pi] = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
                 perPolyIdxArrays[pi] = new NativeArray<int>(idxCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 perPolyIdxCount[pi]  = new NativeArray<int>(1,      Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -388,22 +401,31 @@ namespace MapRenderer.Jobs
                     int holeCount = polyHoleCount[pi];
                     new EarcutJob
                     {
-                        PolyVertices      = perPolyVerts[pi],
-                        OuterCount        = outerLen,
-                        SortedHoleCounts  = perPolySortedHoleCnt[pi],
-                        HoleCount         = holeCount,
-                        OutIndices        = perPolyIdxArrays[pi],
-                        OutIndexOffset    = 0,
-                        OutIndexCount     = perPolyIdxCount[pi],
-                        OutForceClipCount = perPolyForceClip[pi],
-                        Vx                = scratchVx[pi],
-                        Vy                = scratchVy[pi],
-                        Prev              = scratchPrev[pi],
-                        Next              = scratchNext[pi],
-                        IsBridgeCopy      = scratchIsBridge[pi],
-                        Removed           = scratchRemoved[pi],
-                        IsEar             = scratchIsEar[pi],
+                        PolyVertices         = perPolyVerts[pi],
+                        OuterCount           = outerLen,
+                        SortedHoleCounts     = perPolySortedHoleCnt[pi],
+                        HoleCount            = holeCount,
+                        OutIndices           = perPolyIdxArrays[pi],
+                        OutIndexOffset       = 0,
+                        OutIndexCount        = perPolyIdxCount[pi],
+                        OutForceClipCount    = perPolyForceClip[pi],
+                        OutMergedVertexCount = perPolyMergedVertCnt[pi],
+                        Vx                   = scratchVx[pi],
+                        Vy                   = scratchVy[pi],
+                        Prev                 = scratchPrev[pi],
+                        Next                 = scratchNext[pi],
+                        IsBridgeCopy         = scratchIsBridge[pi],
+                        Removed              = scratchRemoved[pi],
+                        IsEar                = scratchIsEar[pi],
                     }.Run();
+
+                    // Read the job's ACTUAL final merged vertex count (base bridged count + any
+                    // split-added verts) — never assume the pre-sized scratch capacity, since the split
+                    // headroom typically goes unused (scratchVx[pi] tail beyond this is unwritten scratch,
+                    // not part of the triangulation). Never-fired backstop: EarcutJob.TrySplit's own
+                    // capacity guard makes this exceeding scratchVx[pi].Length unreachable.
+                    perPolyMergedVC[pi] = perPolyMergedVertCnt[pi][0];
+                    EnsureCapacity(perPolyMergedVC[pi], scratchVx[pi].Length, "earcut merged vertex (per polygon)");
                 }
             }
 
@@ -468,6 +490,7 @@ namespace MapRenderer.Jobs
                 perPolyIdxArrays[pi].Dispose();
                 perPolyIdxCount[pi].Dispose();
                 perPolyForceClip[pi].Dispose();
+                perPolyMergedVertCnt[pi].Dispose();
                 scratchVx[pi].Dispose(); scratchVy[pi].Dispose();
                 scratchPrev[pi].Dispose(); scratchNext[pi].Dispose();
                 scratchIsBridge[pi].Dispose(); scratchRemoved[pi].Dispose(); scratchIsEar[pi].Dispose();
