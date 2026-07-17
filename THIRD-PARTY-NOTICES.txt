@@ -33,6 +33,22 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         LitDepthNormalsPass.hlsl     ← LitDepthNormalsPass.hlsl
         LitMetaPass.hlsl             ← LitMetaPass.hlsl
 
+      Verbatim reference template (Unlit) — Assets/Code/MapRenderer.Unity/Shaders/UnityUnlit/
+      Copies of the URP Unlit shader set, vendored as the diff baseline for the planned GPU-cheap
+      Unlit map-shader variant (see docs/meshing-design.md §3 "Unlit variant"). Same provenance,
+      version, and UCL terms as the Lit set above. As with the Lit template, the ONLY changes from
+      upstream are the shader name (Universal Render Pipeline/Unlit → Template/UnityUnlit) and the
+      includes that resolve to a local sibling copy (rewritten to local-relative); DepthOnlyPass.hlsl
+      is not Unlit-specific and is not copied here. Reference-only; bound to no material at runtime.
+      See Assets/Code/MapRenderer.Unity/Shaders/UnityUnlit/README.md for provenance + refresh procedure.
+
+        Unlit.shader                 ← Unlit.shader
+        UnlitInput.hlsl              ← UnlitInput.hlsl
+        UnlitForwardPass.hlsl        ← UnlitForwardPass.hlsl
+        UnlitGBufferPass.hlsl        ← UnlitGBufferPass.hlsl
+        UnlitDepthNormalsPass.hlsl   ← UnlitDepthNormalsPass.hlsl
+        UnlitMetaPass.hlsl           ← UnlitMetaPass.hlsl
+
   (b) Editable derivatives (verbatim-plus-delta) — Assets/Code/MapRenderer.Unity/Shaders/Map/
       Each is a mirror-copy of a URP source file plus map-specific deltas (paint + tweakable
       render-state properties, the MapVertexModify / line-extrusion hook, coverage/alpha). Each

@@ -369,9 +369,42 @@ range, so no collision).
 the full Lit-style UI plus the feature section (and that editing affects the material) is a human step — the
 headless loop cannot verify inspector UI.
 
+## Unlit variant — a GPU-cheap render path (NOT IMPLEMENTED YET)
+
+**Goal (not built).** Offer a **lightweight Unlit render path** alongside the Lit one, selectable per project —
+flat-shaded map geometry that skips PBR lighting entirely. It trades the lit look (metallic/smoothness/normal
+maps, real-time shadows, SSAO, deferred) for a much smaller GPU cost: fewer passes → fewer shader variants →
+no lighting/shadow/depth-normals work, cheaper fragments. The target is mobile / low-end / battery-sensitive
+deployments, or any scene where flat colour is acceptable and frame budget is tight.
+
+**Why it's a small, self-contained job.** The Lit shaders are (by design, §3 above) *stock URP `Lit.shader`
+mirror-copy + our per-layer vertex hook + styling-as-material-properties*. An Unlit variant is the **same
+recipe against URP `Unlit.shader`** instead:
+- Mirror-copy URP `Unlit.shader` per layer under `Shaders/Map/<Layer>/` (Unlit template), UCL-attributed the
+  same way; keep the **identical** vertex hook (`Fill_VertexModify.hlsl` / `Line_VertexExtrude.hlsl`) so
+  extrusion, fill-translate, the z-fight lift, and floating-origin rebasing behave exactly as in Lit.
+- Keep **styling as material properties** (`_Color`, `_Opacity`, `_Width`, `_Blur`, …) and the DOTS-instanced
+  property bridge (BRG-compatible) — only the *lighting* side of the fragment goes away; `surfaceData.albedo *=
+  _Color.rgb; alpha *= _Opacity` collapses to a direct colour output.
+- **Fewer passes:** `UniversalForward` (unlit) + optionally `DepthOnly`/`ShadowCaster` **only if** the scene
+  still wants map geometry in depth / casting shadows; drop `UniversalGBuffer` / `DepthNormals` (no deferred, no
+  SSAO). This is the bulk of the variant savings.
+
+**Selection (not built).** A project/config switch (natural home: `MapViewConfig`) picks the **Lit** vs
+**Unlit** material set; because materials are already owned per-layer by the material factory / `MapMaterialSet`
+(styling is a material-property swap, not a mesh or pipeline change), this is a **material-set substitution** —
+the mesh build, render-layer model, and backends are untouched. Both sets read the same `UnityPerMaterial`
+style props, so a style JSON drives either identically.
+
+**Invariants to preserve when it *is* built.** Same vertex transform in every retained pass (or shadow/depth
+desync, §"multi-pass requirement"); no `MaterialPropertyBlock` on batched renderers; DOTS-instanced props for
+the BRG path; `git diff` against URP `Unlit.shader` upstream stays meaningful (verbatim-plus-delta). Enforce
+with an Unlit analogue of `ShaderStructureTests` + a headless snapshot test.
+
 ## Key references (Unity URP)
 
 - URP `Lit.shader` (authoritative pass list): https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.universal/Shaders/Lit.shader
+- URP `Unlit.shader` (template for the deferred Unlit variant above): https://github.com/Unity-Technologies/Graphics/blob/master/Packages/com.unity.render-pipelines.universal/Shaders/Unlit.shader
 - ShaderLab Pass tags; Deferred rendering path; Depth-only pass (share vertex code across passes); SRP Batcher
   compatibility; DOTS-instanced shader properties; BatchRendererGroup shaders — Unity 6000.x URP manual.
 
