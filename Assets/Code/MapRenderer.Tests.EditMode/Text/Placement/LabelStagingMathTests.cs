@@ -79,6 +79,60 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0.5f, p.Quads[0].Depth, Tol);
         }
 
+        // I5a: AtlasKind (the icon/text discriminator) must ride through emit[ordinal] unchanged — a plain
+        // pass-through, not yet consumed anywhere, but the thread must not silently drop it.
+        [Test]
+        public void StagePoint_IconAtlasKind_CarriesThroughToEmit()
+        {
+            var s = new PointStageInput
+            {
+                ScreenPx = new float2(0, 0), Depth = 0f, Projected = true,
+                BoundsMin = new float2(-12, -12), BoundsMax = new float2(12, 12),
+                TextSizePx = TextQuadLayout.OneEm, PaddingPx = 0f, SortKey = 0f,
+                FeatureIndex = 0, TileKey = 0, Slot = 0,
+                TranslateAnchor = TextTranslateAnchor.Viewport, RotationAlignment = AlignmentMode.Viewport,
+                Color = new float4(1, 1, 1, 1),
+                AtlasKind = LabelKind.Icon,
+            };
+            var iconQuad = new SymbolQuad
+            {
+                TopLeft = new float2(-8, 8), BottomRight = new float2(8, -8),
+                UvTopLeft = new float2(0.1f, 0.2f), UvBottomRight = new float2(0.3f, 0.4f),
+            };
+            var quads = new[] { iconQuad };
+            var p = Pools.New();
+
+            int staged = LabelStagingMath.StagePoint(in s, quads, bearingRadians: 0f,
+                viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+
+            Assert.AreEqual(1, staged);
+            Assert.AreEqual(LabelKind.Icon, p.Emit[0].AtlasKind, "emit must carry the icon discriminator");
+            Assert.AreEqual(iconQuad.UvTopLeft.x, p.Quads[0].Quad.UvTopLeft.x, Tol);
+            Assert.AreEqual(iconQuad.UvTopLeft.y, p.Quads[0].Quad.UvTopLeft.y, Tol);
+        }
+
+        [Test]
+        public void StagePoint_DefaultAtlasKind_IsText()
+        {
+            var s = new PointStageInput
+            {
+                ScreenPx = new float2(0, 0), Projected = true,
+                BoundsMin = new float2(-1, -1), BoundsMax = new float2(1, 1),
+                TextSizePx = TextQuadLayout.OneEm,
+                TranslateAnchor = TextTranslateAnchor.Viewport, RotationAlignment = AlignmentMode.Viewport,
+                Color = new float4(1, 1, 1, 1),
+                // AtlasKind left at its default — every pre-I5a caller never sets it.
+            };
+            var quads = new[] { Cell(1f) };
+            var p = Pools.New();
+
+            LabelStagingMath.StagePoint(in s, quads, 0f, new double2(1920, 1080), 0,
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+
+            Assert.AreEqual(LabelKind.Text, p.Emit[0].AtlasKind, "default AtlasKind must be Text (zero value)");
+        }
+
         [Test]
         public void StagePoint_BehindCamera_StagesNothing()
         {

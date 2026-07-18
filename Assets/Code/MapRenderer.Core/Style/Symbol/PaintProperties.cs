@@ -7,15 +7,17 @@ namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
     /// The parsed MapLibre symbol <b>paint</b> properties for a single symbol style layer — the
-    /// <c>text-*</c> colour/halo knobs. Each key is read from the layer's <c>paint</c> sub-tree (via
-    /// <see cref="PropertyNames"/>) and collapsed into a <see cref="StyleProperty{T}"/> (one parsed
-    /// expression + typed default), exactly as <c>Line</c>/<c>Fill</c> do. Engine-free; clean-room
-    /// (public Style Spec §symbol paint).
+    /// <c>text-*</c> colour/halo knobs plus <c>icon-opacity</c>. Each key is read from the layer's
+    /// <c>paint</c> sub-tree (via <see cref="PropertyNames"/>) and collapsed into a
+    /// <see cref="StyleProperty{T}"/> (one parsed expression + typed default), exactly as <c>Line</c>/
+    /// <c>Fill</c> do. Engine-free; clean-room (public Style Spec §symbol paint).
+    /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are deferred to the SDF epic.
     ///
     /// <para>How each is consumed (S20/S105 F1): <see cref="Color"/>/<see cref="Opacity"/> bake into the
     /// per-vertex billboard COLOUR stream (works for constant AND data-driven); the halo trio binds by name
     /// onto the per-layer material's <c>_HaloColor</c>/<c>_HaloWidthPx</c>/<c>_HaloBlurPx</c> uniforms
-    /// (constant/zoom only in the first cut).</para>
+    /// (constant/zoom only in the first cut). <see cref="IconOpacity"/> is parsed here; consumption
+    /// (icon quad alpha) is a later stage.</para>
     /// </summary>
     public sealed class PaintProperties
     {
@@ -45,6 +47,9 @@ namespace MapRenderer.Core.Style.Symbol
         /// bearing rotation) is consumed with the rotation-alignment work (roadmap #4) — until then both
         /// resolve to the same screen-space delta (identical at bearing 0).</summary>
         public TextTranslateAnchor TranslateAnchor { get; }
+
+        /// <summary>icon-opacity: icon alpha multiplier [0,1]. Default 1.0. Zoom-capable.</summary>
+        public StyleProperty<float> IconOpacity { get; }
 
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
         public bool IsInertFallback { get; }
@@ -112,6 +117,13 @@ namespace MapRenderer.Core.Style.Symbol
             TranslateAnchor = translateAnchorJson?.AsString(null) == PropertyNames.TranslateAnchorViewport
                 ? TextTranslateAnchor.Viewport
                 : TextTranslateAnchor.Map;
+
+            // icon-opacity: default 1.0
+            JsonValue iconOpacityJson = paint?.Get(PropertyNames.IconOpacity);
+            if (iconOpacityJson != null) anyPresent = true;
+            IconOpacity = iconOpacityJson != null
+                ? new StyleProperty<float>(iconOpacityJson, 1f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(1f);
 
             IsInertFallback = !anyPresent;
         }

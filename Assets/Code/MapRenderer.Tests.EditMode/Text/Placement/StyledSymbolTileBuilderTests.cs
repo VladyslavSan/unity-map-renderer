@@ -256,6 +256,76 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0, builder.SkippedLabelCount, "cancellation is not a per-label skip");
         }
 
+        // ── I5a: icon labels ride the same ShapeAsync Pass-1/Pass-2 loop as text, but must never touch the
+        //    shaper/resolver/glyph-fetch machinery (an icon-only layer may carry no text-font at all). ──
+
+        private static SymbolStyle.SymbolLabel IconLabel(in SymbolQuad iconQuad) => new SymbolStyle.SymbolLabel
+        {
+            Kind = LabelKind.Icon,
+            IconQuad = iconQuad,
+            Placement = SymbolPlacement.Point,
+            AnchorRender = default,
+            PaddingPx = 3f,
+            SortKey = 0f,
+        };
+
+        private static readonly SymbolQuad SampleIconQuad = new SymbolQuad
+        {
+            TopLeft = new float2(-8, 8), BottomRight = new float2(8, -8),
+            UvTopLeft = new float2(0.1f, 0.2f), UvBottomRight = new float2(0.3f, 0.4f),
+        };
+
+        [Test]
+        public async Task Shape_IconOnlyLayer_YieldsOneIconLabel_NoGlyphFetch_NoShaping()
+        {
+            // A glyph source that THROWS if ever asked — an icon-only layer must never reach Pass 1's fetch.
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+                throw new InvalidOperationException("icon-only layer must never request a glyph range"));
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var labels = new List<SymbolStyle.SymbolLabel> { IconLabel(SampleIconQuad) };
+            // No text-font at all — FontStack.Names left default/empty, mirroring an icon-only style layer.
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(), labels);
+
+            var output = new List<LabelInstance>();
+            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(1, output.Count, "the icon label must still be emitted");
+            Assert.AreEqual(0, builder.SkippedLabelCount, "an icon build must never be skipped");
+            LabelInstance label = output[0];
+            Assert.AreEqual(LabelKind.Icon, label.Kind);
+            Assert.IsNotNull(label.Layout, "the icon quad must be wrapped into a Layout");
+            Assert.AreEqual(1, label.Layout.Quads.Count, "a sprite is exactly one quad");
+            Assert.AreEqual(TextQuadLayout.OneEm, label.TextSizePx, 1e-6, "icon scale must be 1 (OneEm/OneEm)");
+            Assert.IsNull(label.Text, "an icon label carries no text");
+        }
+
+        [Test]
+        public async Task Shape_MixedTextAndIconLayer_YieldsBothKinds_InOriginalOrder()
+        {
+            using var manager = BuildGlyphManager();
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var labels = new List<SymbolStyle.SymbolLabel>
+            {
+                PointLabel("Aruba"),
+                IconLabel(SampleIconQuad),
+                PointLabel("Angola"),
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, labels);
+
+            var output = new List<LabelInstance>();
+            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(3, output.Count, "text + icon + text, all three survive");
+            Assert.AreEqual(0, builder.SkippedLabelCount);
+            Assert.AreEqual(LabelKind.Text, output[0].Kind); Assert.AreEqual("Aruba", output[0].Text);
+            Assert.AreEqual(LabelKind.Icon, output[1].Kind); Assert.IsNull(output[1].Text);
+            Assert.AreEqual(LabelKind.Text, output[2].Kind); Assert.AreEqual("Angola", output[2].Text);
+        }
+
         private static void AssertNamedLabel(List<SymbolStyle.SymbolLabel> extracted, List<LabelInstance> labels,
             string name, int expectedQuads)
         {

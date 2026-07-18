@@ -15,3 +15,4 @@ MonoBehaviour:
   FillMaterial: {fileID: 2100000, guid: fcbc652aad19f496999d2a827430c2b9, type: 2}
   LineMaterial: {fileID: 2100000, guid: dcd09bd3c233842c39a12f0bd2c29b3b, type: 2}
   SymbolText: {fileID: 2100000, guid: 7a9225c22565d4bd8beb73beb2abde94, type: 2}
+  SymbolIcon: {fileID: 2100000, guid: 24cd10cc7046e45eab130b3fc6b80d29, type: 2}

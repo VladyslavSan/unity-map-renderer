@@ -32,6 +32,12 @@ namespace MapRenderer.Core.Text.Placement
         public float4 Color;                        // pre-linearized × opacity
         public long   FadeId;                       // A-4 point identity (pre-hashed)
         public bool   WasPlacedLastFrame;           // A-5 incumbency (pre-resolved)
+
+        /// <summary>I5a — the texture the staged quads sample from (glyph atlas vs. sprite atlas), threaded
+        /// from <see cref="LabelInstance.Kind"/>. Default <see cref="LabelKind.Text"/> (blittable enum,
+        /// zero value, crosses the Burst boundary like every other field here). NOT YET consumed by the
+        /// draw side — this is I5a's data-only thread; I5b partitions the draw by it.</summary>
+        public LabelKind AtlasKind;
     }
 
     /// <summary>

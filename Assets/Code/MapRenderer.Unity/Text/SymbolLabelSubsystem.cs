@@ -11,6 +11,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
+using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
@@ -65,6 +66,14 @@ namespace MapRenderer.Unity.Text
         private GlyphManager _glyphManager;
         private GlyphAtlasTexture _atlasTexture;
         private StyledSymbolTileBuilder _builder;
+
+        // I5b: the sprite sheet backing every icon label's UVs — a single pre-baked image per style (unlike
+        // the glyph atlas's grow-and-append), fetched once in SetStyle and disposed on the next restyle/
+        // teardown. Null until the fetch resolves (or forever, on a style with no `sprite` URL / no symbol
+        // layers) — every icon draw path downstream (LabelPlacementSystem.Tick's spriteTexture param) is
+        // guarded on IconTexture being non-null, so a still-loading or absent sheet is inert, not a fault.
+        private SpriteSheet _spriteSheet;
+        private SpriteAtlasView _spriteAtlas;
 
         // Flat symbol-layer list (index == LabelInstance.MaterialIndex) and a source id → its layers'
         // GLOBAL indices map (only sources with symbol layers are observed). D11/E2: per-layer MATERIALS
@@ -147,6 +156,11 @@ namespace MapRenderer.Unity.Text
         /// <see cref="GlyphSourceFactory.Create"/>.</summary>
         internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride { get; set; }
 
+        /// <summary>I5b: the sprite-source factory <see cref="SetStyle"/> uses, overridable so an EditMode
+        /// test can inject a fixture source instead of the production web source — mirrors
+        /// <see cref="GlyphSourceFactoryOverride"/>. Null ⇒ the production <see cref="SpriteSourceFactory.Create"/>.</summary>
+        internal Func<StyleDocument, ISpriteSource> SpriteSourceFactoryOverride { get; set; }
+
         // Per-frame observability (mirrors TileManager's *LastTick counters) — read by tests, never the live path.
         internal int TailsStartedLastPump  { get; private set; }
         internal int AtlasUploadsLastPump  { get; private set; }
@@ -175,6 +189,17 @@ namespace MapRenderer.Unity.Text
         /// <summary>The shared SDF atlas texture backing every collected label's UVs (null before the first
         /// glyphs upload).</summary>
         public GlyphAtlasTexture Atlas => _atlasTexture;
+
+        /// <summary>I5b: the sprite sheet texture backing every ICON label's UVs (null until the style's
+        /// sprite fetch resolves, or forever on a style with no <c>sprite</c> URL / no symbol layers) — fed
+        /// to <see cref="Text.Placement.LabelPlacementSystem.Tick"/>'s <c>spriteTexture</c> param by MapView.</summary>
+        public Texture2D IconTexture => _spriteSheet?.Texture;
+
+        /// <summary>I5b: the parsed sprite index + sheet dimensions <see cref="TileSymbolLayerProcessor"/>
+        /// forwards to <c>SymbolFeatureExtractor.Extract</c> to resolve <c>icon-image</c> names. Null until the
+        /// sprite fetch resolves — a tile kicked before then extracts no icon labels and self-heals on its
+        /// next rebuild once this is set (the same null→real flip <c>TileSymbolLayerProcessor</c> documents).</summary>
+        public SpriteAtlasView SpriteAtlas => _spriteAtlas;
 
         /// <summary>Active (in-cover) label-tile count — telemetry.</summary>
         public int ActiveTileCount => _store.ActiveTileCount;
@@ -221,6 +246,13 @@ namespace MapRenderer.Unity.Text
             _readyTails.Clear();
             DisposePipeline();
 
+            // I5b: drop the previous style's sheet (if any) before fetching the new one — mirrors
+            // DisposePipeline's glyph-atlas teardown, unconditional (every restyle, even to a style with no
+            // symbol layers, must release the GPU texture).
+            _spriteSheet?.Dispose();
+            _spriteSheet = null;
+            _spriteAtlas = null;
+
             _allSymbolLayers.Clear();
             _layersBySource = new Dictionary<string, List<int>>();
             if (symbolLayers != null)
@@ -237,6 +269,11 @@ namespace MapRenderer.Unity.Text
                 }
             }
             if (_layersBySource.Count == 0) return; // no symbol layers — stay idle (demo seam still works)
+
+            // I5b: kick off the sprite-sheet fetch (fire-and-forget, cancelled via THIS style's _buildCts
+            // scope like every other in-flight build). Independent of the `glyphs` URL check below — an
+            // icon-only style has no `glyphs` but still needs its sprite sheet, so this must not be gated on it.
+            FetchSpriteSheetAsync(style, _buildCts.Token).Forget();
 
             // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) are no longer built here —
             // they live on each SymbolRenderLayer, built by RenderLayerSet.Build from this SAME symbolLayers
@@ -284,12 +321,19 @@ namespace MapRenderer.Unity.Text
             double                  zoom       = _camera.CurrentProperties.Zoom;
             var                     projection = _camera.Projection;
 
+            // I5b: read _spriteAtlas HERE, at kick time (main thread) — the same "capture Unity-adjacent
+            // inputs before the pool-side worker step" rule as zoom/projection above. Null if the sprite
+            // fetch hasn't resolved yet; the processor forwards it as-is (see ExtractLayers's spriteAtlas
+            // param) — a tile kicked before the fetch resolves extracts no icon labels this round and
+            // self-heals on its next rebuild once this is set (TileSymbolLayerProcessor's doc).
+            SpriteAtlasView spriteAtlas = _spriteAtlas;
+
             var labels = new List<LabelInstance>();
             var processors = new TileSymbolLayerProcessor[layerIndices.Count];
             for (int k = 0; k < layerIndices.Count; k++)
             {
                 int globalIndex = layerIndices[k];
-                processors[k] = new TileSymbolLayerProcessor(builder, _allSymbolLayers[globalIndex], globalIndex, labels);
+                processors[k] = new TileSymbolLayerProcessor(builder, _allSymbolLayers[globalIndex], globalIndex, labels, spriteAtlas);
             }
 
             var context = new TileLayerProcessContext
@@ -464,6 +508,51 @@ namespace MapRenderer.Unity.Text
             }
         }
 
+        /// <summary>I5b: fetch + decode this style's sprite sheet (index JSON + PNG), fire-and-forget from
+        /// <see cref="SetStyle"/> — a single keyless pair per style (unlike glyphs, no per-tile/per-fontstack
+        /// requests). A null source (no <c>sprite</c> URL — <see cref="SpriteSourceFactory.Create"/> warns
+        /// once and returns null) or an absent response (<see cref="SpriteResponse.HasData"/> false, e.g.
+        /// 404/204) leaves <see cref="_spriteSheet"/>/<see cref="_spriteAtlas"/> null — inert, never a fault;
+        /// every icon draw/extract path downstream is already guarded on them being non-null. Cancelled via
+        /// <paramref name="ct"/> (this style's <c>_buildCts</c> scope) exactly like every other in-flight
+        /// build — a restyle/teardown racing ahead of the fetch never touches the (possibly disposed) next
+        /// style's state.</summary>
+        private async UniTaskVoid FetchSpriteSheetAsync(StyleDocument style, CancellationToken ct)
+        {
+            ISpriteSource source = null;
+            try
+            {
+                source = (SpriteSourceFactoryOverride ?? SpriteSourceFactory.Create)(style);
+                if (source == null) return; // no 'sprite' URL — inert, style still loads
+
+                SpriteResponse resp = await source.FetchAsync(ct);
+                if (!resp.HasData) return; // explicitly absent (404/204) — inert
+                ct.ThrowIfCancellationRequested();
+
+                // Texture2D construction (inside the SpriteSheet ctor) is a main-thread-only Unity API —
+                // guard even though FetchAsync's own continuation typically already resumes on main (belt-
+                // and-braces, mirrors every other GPU-resource boundary in this codebase).
+                await UniTask.SwitchToMainThread();
+                ct.ThrowIfCancellationRequested();
+
+                var sheet = new SpriteSheet(resp.Png, SpriteIndex.Parse(resp.Json));
+                _spriteSheet = sheet;
+                _spriteAtlas = sheet.View;
+            }
+            catch (OperationCanceledException)
+            {
+                // Restyle/teardown mid-fetch — silent, mirrors RunTailAsync's cancellation branch.
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SymbolLabelSubsystem] sprite sheet fetch failed: {ex.Message}");
+            }
+            finally
+            {
+                source?.Dispose();
+            }
+        }
+
         /// <summary>Aggregate every loaded tile's labels into <paramref name="output"/> for this frame's
         /// <see cref="LabelPlacementSystem.Tick"/> (which then projects/collides/billboards them). A-3: point
         /// labels are deduped across tiles at a grid of one logical pixel at the CURRENT display zoom
@@ -523,6 +612,11 @@ namespace MapRenderer.Unity.Text
             _readyTails.Clear(); // A5a: ready-but-untailed builds die with the store slot cleared below
             _store.Clear();
             DisposePipeline();
+
+            // I5b: the sprite sheet, disposed as a unit (mirrors _atlasTexture above).
+            _spriteSheet?.Dispose();
+            _spriteSheet = null;
+            _spriteAtlas = null;
         }
 
         private void DisposePipeline()

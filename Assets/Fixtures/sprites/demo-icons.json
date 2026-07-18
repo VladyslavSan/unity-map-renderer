@@ -1,0 +1,6 @@
+{
+  "tri-up":     { "x": 0,  "y": 0, "width": 32, "height": 32, "pixelRatio": 1, "sdf": false },
+  "f-glyph":    { "x": 32, "y": 0, "width": 32, "height": 32, "pixelRatio": 1, "sdf": false },
+  "arrow-down": { "x": 64, "y": 0, "width": 32, "height": 32, "pixelRatio": 1, "sdf": false },
+  "ring":       { "x": 96, "y": 0, "width": 32, "height": 32, "pixelRatio": 1, "sdf": false }
+}

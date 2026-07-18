@@ -99,6 +99,43 @@ namespace MapRenderer.Tests
             Assert.AreEqual(TextTransform.None, sym.Layout.TextTransform, "text-transform default is none");
             Assert.AreEqual(AlignmentMode.Auto, sym.Layout.TextRotationAlignment, "text-rotation-alignment default is auto");
             Assert.AreEqual(AlignmentMode.Auto, sym.Layout.TextPitchAlignment, "text-pitch-alignment default is auto");
+
+            // icon-* layout defaults.
+            Assert.IsNull(sym.Layout.IconImage, "icon-image default is absent (null)");
+            Assert.AreEqual(1f, sym.Layout.IconSize.Evaluate(0.0), 1e-6, "icon-size default is 1");
+            Assert.AreEqual(2f, sym.Layout.IconPadding.Evaluate(0.0), 1e-6, "icon-padding default is 2");
+            Assert.AreEqual(TextAnchor.Center, sym.Layout.IconAnchor, "icon-anchor default is center");
+            Assert.AreEqual(AlignmentMode.Auto, sym.Layout.IconRotationAlignment, "icon-rotation-alignment default is auto");
+            Assert.IsFalse(sym.Layout.IconAllowOverlap, "icon-allow-overlap default is false");
+            Assert.IsFalse(sym.Layout.IconIgnorePlacement, "icon-ignore-placement default is false");
+            Assert.AreEqual(float2.zero, sym.Layout.IconOffset, "icon-offset default is [0,0]");
+
+            // icon-opacity paint default.
+            Assert.AreEqual(1f, sym.Paint.IconOpacity.Evaluate(0.0), 1e-6, "icon-opacity default is 1");
+        }
+
+        [Test]
+        public void SymbolLayer_IconProperties_Parse()
+        {
+            var sym = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-image':['get','icon'],'icon-size':2,'icon-offset':[3,4],'icon-anchor':'top-left',
+                    'icon-rotation-alignment':'map','icon-allow-overlap':true,'icon-ignore-placement':true,
+                    'icon-padding':5 },
+                  'paint':{ 'icon-opacity':0.5 } } ] }").Layers[0];
+
+            Assert.IsNotNull(sym.Layout.IconImage, "icon-image must be retained (raw) for per-feature resolution");
+            Assert.IsTrue(sym.Layout.IconImage.IsArray, "icon-image data-driven expression survives as a raw array (resolution is I3)");
+            Assert.AreEqual(2f, sym.Layout.IconSize.Evaluate(0.0), 1e-6);
+            Assert.AreEqual(5f, sym.Layout.IconPadding.Evaluate(0.0), 1e-6);
+            Assert.AreEqual(new float2(3, 4), sym.Layout.IconOffset);
+            Assert.AreEqual(TextAnchor.TopLeft, sym.Layout.IconAnchor, "hyphenated 'top-left' → TopLeft");
+            Assert.AreEqual(AlignmentMode.Map, sym.Layout.IconRotationAlignment);
+            Assert.IsTrue(sym.Layout.IconAllowOverlap, "icon-allow-overlap:true must parse to true");
+            Assert.IsTrue(sym.Layout.IconIgnorePlacement, "icon-ignore-placement:true must parse to true");
+
+            Assert.AreEqual(0.5f, sym.Paint.IconOpacity.Evaluate(0.0), 1e-6);
+            Assert.IsFalse(sym.Paint.IsInertFallback, "an icon-opacity-only paint sub-tree is NOT an inert fallback");
         }
 
         [Test]

@@ -35,41 +35,63 @@ namespace MapRenderer.Unity.Rendering.Style
         /// subsystem-ordinal 1:1 mapping requires it, §3.5), it just never presents.</summary>
         public Material Material { get; }
 
+        /// <summary>I5b: the owned <c>SymbolIcon</c> clone (no halo — icons have none); <c>null</c> iff
+        /// <c>MapMaterialSet.SymbolIcon</c> is unassigned (warned once) — icons just stay hidden, unlike
+        /// <see cref="Material"/> this is NOT enforced by <c>MapMaterialSet.Validate()</c> (optional-with-warn,
+        /// §I5b plan).</summary>
+        public Material IconMaterial { get; }
+
         /// <summary>The typed parsed symbol layer — MapView's D10 source-fetch derivation reads this
         /// without re-walking <c>style.Layers</c>.</summary>
         public SymbolStyle.StyleLayer SymbolLayer { get; }
 
         private readonly LabelSlotPresenter _presenter;
+        private readonly LabelSlotPresenter _iconPresenter;
 
-        private SymbolRenderLayer(SymbolStyle.StyleLayer layer, Material material, int drawIndex, Transform parent)
+        private SymbolRenderLayer(SymbolStyle.StyleLayer layer, Material material, Material iconMaterial,
+            int drawIndex, Transform parent)
         {
-            StyleLayer  = layer;
-            SymbolLayer = layer;
-            Material    = material;
-            DrawIndex   = drawIndex;
-            _presenter  = new LabelSlotPresenter(layer.Id, parent); // Hierarchy name = the style layer id
+            StyleLayer     = layer;
+            SymbolLayer    = layer;
+            Material       = material;
+            IconMaterial   = iconMaterial;
+            DrawIndex      = drawIndex;
+            _presenter     = new LabelSlotPresenter(layer.Id, parent); // Hierarchy name = the style layer id
+            _iconPresenter = new LabelSlotPresenter(layer.Id + "_Icon", parent);
         }
 
         /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the slot↔subsystem-ordinal 1:1
         /// mapping (§3.5) and the source-fetch derivation both require every Source-bearing symbol layer to
         /// take its slot even when <c>MapMaterialSet.SymbolText</c> is unassigned — in that case
         /// <see cref="Material"/> stays <c>null</c> (warn once), <see cref="RenderLayerSet.Build"/> skips the
-        /// queue write, and <see cref="Present"/> never shows.</summary>
+        /// queue write, and <see cref="Present"/> never shows. <see cref="IconMaterial"/> is resolved the
+        /// same way from <c>MapMaterialSet.SymbolIcon</c> (I5b) — independently optional, no halo bind.</summary>
         public static SymbolRenderLayer Create(
             SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex,
             Transform parent = null)
         {
             Material baseMat = settings != null ? settings.SymbolText : null;
+            Material m = null;
             if (baseMat == null)
-            {
                 Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolText unassigned — labels will not render.");
-                return new SymbolRenderLayer(layer, null, drawIndex, parent);
+            else
+            {
+                m = baseMat.CloneWithParent();
+                m.name = $"MapSymbolText_{layer.Id}";
+                BindHalo(m, layer.Paint, initialZoom);
             }
 
-            Material m = baseMat.CloneWithParent();
-            m.name = $"MapSymbolText_{layer.Id}";
-            BindHalo(m, layer.Paint, initialZoom);
-            return new SymbolRenderLayer(layer, m, drawIndex, parent);
+            Material baseIconMat = settings != null ? settings.SymbolIcon : null;
+            Material iconMat = null;
+            if (baseIconMat == null)
+                Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolIcon unassigned — icons will not render.");
+            else
+            {
+                iconMat = baseIconMat.CloneWithParent();
+                iconMat.name = $"MapSymbolIcon_{layer.Id}";
+            }
+
+            return new SymbolRenderLayer(layer, m, iconMat, drawIndex, parent);
         }
 
         private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom)
@@ -100,16 +122,37 @@ namespace MapRenderer.Unity.Rendering.Style
         /// nothing must not leave last frame's labels frozen on screen (the mirror image of the blink).</summary>
         public void Present(Mesh mesh, bool visible) => _presenter.Present(mesh, Material, visible);
 
+        /// <summary>I5b: the icon analogue of <see cref="Present"/> — binds this slot's ICON mesh + this
+        /// layer's <see cref="IconMaterial"/> to a SEPARATE persistent renderer (icons and text draw as two
+        /// meshes/materials per slot, not one). Syncs <see cref="IconMaterial"/>'s <c>renderQueue</c> to
+        /// <see cref="Material"/>'s every call (compare-assign, so a steady frame costs nothing extra) —
+        /// <see cref="RenderLayerSet.Build"/> only writes the TEXT material's queue (it doesn't know about
+        /// <see cref="IconMaterial"/>), so icons must inherit their layer's painter-order position here
+        /// instead of getting their own (which would desync a fill declared between icon and text queues).
+        /// <paramref name="visible"/> false hides unconditionally, mirroring <see cref="Present"/>.</summary>
+        public void PresentIcon(Mesh mesh, bool visible)
+        {
+            if (IconMaterial != null && Material != null && IconMaterial.renderQueue != Material.renderQueue)
+                IconMaterial.renderQueue = Material.renderQueue;
+            _iconPresenter.Present(mesh, IconMaterial, visible);
+        }
+
         /// <summary>Whether this layer's presenter is currently drawing. Test surface — see
         /// <c>LabelSlotPresenter.Enabled</c>.</summary>
         internal bool PresenterVisible => _presenter.Enabled;
+
+        /// <summary>Whether this layer's ICON presenter is currently drawing. Test surface — mirrors
+        /// <see cref="PresenterVisible"/> for the icon draw path.</summary>
+        internal bool IconPresenterVisible => _iconPresenter.Enabled;
 
         public void ApplyZoom(double zoom) { } // no-op — zoom-expression halo is a documented follow-up (§7 risk 9)
 
         public void Dispose()
         {
             _presenter.Dispose();
+            _iconPresenter.Dispose();
             if (Material != null) RenderLayerSet.DestroyMaterialInstance(Material);
+            if (IconMaterial != null) RenderLayerSet.DestroyMaterialInstance(IconMaterial);
         }
     }
 }

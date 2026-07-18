@@ -95,5 +95,27 @@ namespace MapRenderer.Core.Style.Symbol
         /// (<c>map</c>) or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
         /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
         public AlignmentMode RotationAlignment { get; init; }
+
+        /// <summary>
+        /// I3 — distinguishes a text label from an icon label. Default <see cref="LabelKind.Text"/> so
+        /// every pre-I3 label (which never sets this) is unaffected. An icon label reuses this same carrier's
+        /// text-named fields for its icon-* counterparts rather than duplicating a parallel set:
+        /// <see cref="AnchorRender"/> (icon-anchor point), <see cref="Placement"/> (always
+        /// <see cref="SymbolPlacement.Point"/> — icons are point-placement only, I3), <see cref="SortKey"/>
+        /// (<c>symbol-sort-key</c>, shared with text), <see cref="PaddingPx"/> (<c>icon-padding</c>),
+        /// <see cref="AllowOverlap"/>/<see cref="IgnorePlacement"/> (<c>icon-allow-overlap</c>/<c>icon-ignore-placement</c>),
+        /// <see cref="RotationAlignment"/> (<c>icon-rotation-alignment</c>), <see cref="Paint"/>.Opacity
+        /// (<c>icon-opacity</c>). <see cref="Text"/> stays null on an icon label.
+        /// </summary>
+        public LabelKind Kind { get; init; }
+
+        /// <summary>The laid-out icon quad (sheet-pixel space, anchor-relative) — meaningful only when
+        /// <see cref="Kind"/> is <see cref="LabelKind.Icon"/>; default (all-zero) otherwise.</summary>
+        public SymbolQuad IconQuad { get; init; }
+
+        /// <summary>I6: the resolved sprite name — the icon's cross-tile identity; null for text. Threaded
+        /// into <see cref="LabelInstance"/> and folded into <see cref="CrossTileLabelKey"/> so distinct
+        /// co-located icons no longer collide (I5b's deferred gap).</summary>
+        public string IconImage { get; init; }
     }
 }

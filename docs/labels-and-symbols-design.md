@@ -9,6 +9,7 @@ layout, metrics).
 2. **[Smoothness & robustness](#2-smoothness--robustness)** — pull/reconcile, cross-tile identity, the fade state machine, the perf tracks.
 3. **[Curved along-line text](#3-curved-along-line-text)** — `symbol-placement: line` / `line-center` (mostly landed).
 4. **[Projection support](#4-projection-support-globe-ready-labels)** — globe-ready labels under any `IProjection` (designed, not started).
+5. **[Icon support](#5-icon-support-sprite-symbols)** — `icon-image` sprite symbols; the sibling of text under one anchor (in progress).
 
 ---
 
@@ -598,3 +599,126 @@ occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrig
   *when* its style re-evaluates).
 - The build-time half (decode → per-layer extract) rides the per-layer tile pipeline
   (`docs/per-layer-tile-processing-design.md`).
+
+---
+
+# 5. Icon support (sprite symbols)
+
+**Status: I1–I5b + the I6 icon-identity fix landed (icon pipeline complete through the on-GPU draw + cross-tile
+identity); I6 remaining = the maintainer on-screen eyeball only (see §5.5).** MapLibre's `symbol` layer has two
+decoupled elements sharing one anchor: **text**
+(`text-*`, glyph-SDF atlas — §1–§4) and **icons** (`icon-*`, a *sprite* — a named rectangle in a pre-baked
+sprite sheet). Icons are the genuinely-simpler sibling: **no shaping, no per-codepoint glyph fetch, no curved
+layout** — one feature → one anchor → one sprite quad. The data/layout path reuses the text seams almost
+verbatim (`SymbolQuad` was left glyph/sprite-agnostic on purpose; the point-label projection/collision/billboard
+machinery is already text-agnostic screen-space). The genuinely-new work is a **second atlas** (sprite sheet,
+not the dynamically-packed glyph atlas) and a **second material** (plain RGBA sample, not SDF+halo).
+
+## 5.1 Scope fences (v1) — what "simpler than text" means, precisely
+
+The "icons are a simpler version of text" framing holds **only** with these fences. They are load-bearing;
+a stage plan may not quietly cross one.
+
+- **IN:** `symbol-placement: point` icons; `icon-image` (incl. **data-driven** — evaluated per feature, an
+  unknown sprite name is skipped, not fatal); `icon-size` (with sprite `pixelRatio` applied); `icon-offset`;
+  `icon-anchor`; `icon-rotation-alignment` (point: `auto`→`viewport`); `icon-allow-overlap`;
+  `icon-ignore-placement`; `icon-padding`; `icon-opacity`. **Non-SDF (RGBA) sprites only.**
+- **OUT (separate epics, do not build):**
+  - **Combined text+icon collision / layout coupling** — `icon-text-fit`(+`-padding`), `text-optional`,
+    `icon-optional`. v1 treats an icon as its **own** collision candidate with its **own** box, sharing only
+    the feature anchor with any co-located text. The fully-correct MapLibre model (one symbol = a
+    text-box + icon-box union placed all-or-nothing, with `*-optional` fallbacks) is the hard part and is
+    a deliberate follow-up.
+  - **SDF / recolorable sprites** — the `"sdf": true` sprite variant + `icon-color`/`icon-halo-*`. Deferring
+    these is *exactly* what keeps the icon shader trivial (a straight `tex2D` sample, no SDF median-distance,
+    no halo). `icon-color`/`icon-halo-*` parse-and-carry is allowed but stays inert until the SDF path lands.
+  - `icon-line-placement` (icons along a line / `symbol-placement: line` with an icon), `icon-keep-upright`,
+    `icon-pitch-alignment`, `icon-translate`, `icon-image` **stretchable** (`content`/`stretchX/Y`). Icons on
+    line features are dropped in v1 (text still places along the line as today).
+
+## 5.2 The sprite sheet (vs. the glyph atlas)
+
+A MapLibre **sprite** is a pre-baked sheet: one PNG (`ofm.png`) + one JSON index (`ofm.json`) mapping each
+sprite name to a rectangle. The style's top-level `"sprite"` URL (liberty.json: `.../sprites/ofm_f384/ofm`)
+gets `.json`/`.png` (and `@2x` for hi-DPI) appended. Index shape (clean-room, from the public spec):
+
+```
+{ "airport-11": { "x": 0, "y": 0, "width": 22, "height": 22, "pixelRatio": 2, "sdf": false }, … }
+```
+
+Contrast with `GlyphAtlas` (§1): the glyph atlas is **dynamically packed** at runtime as codepoints arrive and
+**grows** (the UV-staleness hazard, `glyph-atlas-uv-growth-staleness`). The sprite sheet is **fixed and
+pre-baked** — decoded once, never grows, UVs are stable. So the icon atlas is far simpler: a parsed
+`SpriteIndex` (name → rect) over an immutable texture. `pixelRatio` is the sheet's DPI scale: the sprite's
+**logical** size is `width/pixelRatio` × `height/pixelRatio`, and `icon-size` scales *that*.
+
+## 5.3 Architecture — where each piece lives (mirrors the text path)
+
+| Concern | Text (existing) | Icon (this epic) |
+|---|---|---|
+| Atlas index (Core, engine-free) | `GlyphAtlas`/`GlyphAtlasEntry` (dynamic) | **`SpriteIndex`** (parsed once; name→`SpriteEntry{x,y,w,h,pixelRatio,sdf}`) |
+| Style parse (Core) | `Symbol.LayoutProperties`/`PaintProperties` (`text-*`) | **`icon-*`** on the same `Symbol.StyleLayer` (add to Layout/Paint; new `PropertyNames`) |
+| Extract (Core) | `SymbolFeatureExtractor` → `SymbolLabel` (text) | same extractor emits **icon** `SymbolLabel`s (icon fields) |
+| Layout → quad (Core) | `TextQuadLayout`/`CurvedTextLayout` → `SymbolQuad[]` | **`IconQuadLayout`** → one `SymbolQuad` (sprite UVs) |
+| Atlas texture (Unity) | `GlyphAtlasTexture` + `GlyphManager` | **`SpriteSheet`** (PNG→`Texture2D`) + a sprite source (JSON+PNG fetch) |
+| Per-frame batch (Core) | `SymbolLabelBatch` (`Kind{Point,Curved}`) | icon records in the batch (see §5.4 — the crux) |
+| Draw (Unity) | `SymbolRenderLayer` + `SymbolText.shader` (SDF) | **`SymbolIcon.shader`** (RGBA) + a sprite-texture bind |
+
+The build-time half rides the same per-layer tile pipeline (`TileSymbolLayerProcessor`); the per-frame half is
+the same `LabelPlacementSystem.Tick`. Collision is the same global grid — an icon is just another candidate box.
+
+## 5.4 The load-bearing decision (I5): how icons ride `SymbolLabelBatch`
+
+`SymbolLabelBatch`, `LabelStageJob`, and `SymbolBillboardJob` all switch on `Kind{Point,Curved}`, and the icon
+draw must bind a **different texture** (the sprite sheet) than the glyph atlas. This is the crux that decides how
+invasive the render plumbing (I5) is; the I5 plan must settle it explicitly. Two candidates:
+
+- **(A) New `Kind.Icon`** — a point-like record whose quad's UVs index the sprite sheet, routed to a separate
+  material slot / draw with the sprite texture bound. Cleanest separation; touches every `Kind` switch.
+- **(B) Ride `Point` + an atlas discriminator** — icons stage exactly like point text but carry an
+  "atlas = sprite" flag that partitions the *draw* (like the existing per-layer material slots) so the sprite
+  texture binds for icon quads. Smaller stage/billboard-job change; the discriminator lives at emit/draw.
+
+Bias toward **(B)** unless staging genuinely differs (it should not — an icon is a single axis-aligned quad, the
+degenerate point-text case): staging/collision are texture-blind; only the *draw* needs the other texture. But
+the plan must name and defend the choice; a wrong call here is the expensive rework.
+
+## 5.5 Stages
+
+Core-first: I1–I3 are pure `MapRenderer.Core`, fully verifiable on the fast `dotnet test` loop (~0.1s) — the
+**honestly shippable** deliverable. I4–I5 are Unity render plumbing whose "an icon actually draws" is a
+**maintainer eyeball** (headless verifies compile + existing snapshots only — same class as the deferred §4 S5
+globe eyeball). Each stage: plan → develop → review → headless gate (Editor closed) → one revertible commit.
+
+| Stage | Change | Falsifiable teeth |
+|---|---|---|
+| **I1** ✅ | `SpriteIndex` (Core): parse sprite JSON → name→`SpriteEntry`; `TryGetSprite`. **Committed fixture** (`Assets/Fixtures/sprites/sample-sprite.{json,png}`, hand-authored, network-free) so I3+ have real test data. | Parse the fixture; a known name resolves to its exact rect + `pixelRatio`; an unknown name → false; malformed JSON → empty index, no throw. |
+| **I2** ✅ | `icon-*` style parse (Core): `PropertyNames` + `Symbol.LayoutProperties`/`PaintProperties` gain the §5.1-IN keys (data-driven `icon-image`, `icon-size`, `icon-offset`, `icon-anchor`, `icon-rotation-alignment`, `icon-allow-overlap`, `icon-ignore-placement`, `icon-padding`, `icon-opacity`). | Each key parses to its typed property/default; the no-`icon-*` layer is byte-identical to today; the `PropertyNames`-only-source test still passes. |
+| **I3** ✅ | Extract + layout (Core): `SymbolFeatureExtractor` emits an icon `SymbolLabel` per point feature whose `icon-image` resolves to a known sprite (unknown → skip); `IconQuadLayout` builds the single `SymbolQuad` from `SpriteEntry`+`icon-size`(×`pixelRatio`)+`icon-anchor`+`icon-offset`. Text-only tiles unchanged. Icons ride the extractor via a trailing optional `SpriteAtlasView = null` (the sole prod caller passes null ⇒ byte-identical until I5); `SymbolLabel` gains `Kind{Text,Icon}`+`IconQuad`. | An icon-image feature yields one icon label with the right anchor/size/UVs; unknown sprite → no label; anchor/offset shift the quad correctly; a text-only layer emits zero icon labels (parity). |
+| **I4** ✅ | Sprite atlas texture + source (Unity): `SpriteSheet` (PNG→`Texture2D` via `LoadImage`, immutable) + a JSON+PNG sprite source (fetch, prior art `UnityWebRequestGlyphSource`/`GlyphSourceFactory`; fixture-backed source for tests, prior art `FixtureGlyphSource`); produce the runtime `SpriteAtlasView`. `SpriteSheet` **row-flips** on decode so the sprite texture shares the glyph atlas's "top-left coord == GetPixel(coord)" contract (⇒ I5 binds either texture through the same shader, no UV re-flip). | Fixture PNG loads to a `Texture2D` of the right dims (64×64); a known sprite's UVs sample the correct texel colour (marker red/star green/dot blue — the orientation pin + anti-flip guard); missing sprite URL → graceful no-icons (warn once), style still loads. |
+| **I5a** ✅ | Data-path plumbing (Core+Unity, **§5.4-B**): `LabelInstance.Kind` + `AtlasKind` on `PointStageInput`/`CandidateEmit` (carried but NOT consumed ⇒ inert); `StyledSymbolTileBuilder` shapes an icon `LabelInstance` (skip glyph shaping, `IconQuad`→`Layout`, `TextSizePx=OneEm` ⇒ scale 1). Fully **headless-verified**. | Icon label stages as a 1-box point candidate at scale 1 (box = quad + padding, no double-scale); its `PlacedQuad` carries the sprite UVs; text path byte-identical; Burst-vs-managed parity green. |
+| **I5b** ✅ | Render (Unity): `SymbolIcon.shader` (RGBA, template + 3 deltas — straight sample, no SDF/halo, no UV re-flip) + `MapSymbolIcon.mat`; per-`(slot,AtlasKind)` draw partition binding the **sprite** texture for the icon bucket; `SymbolRenderLayer` icon material/presenter; `SymbolLabelSubsystem` loads the `SpriteSheet` at `SetStyle` + threads the real `SpriteAtlasView` (the null→real flip). Compile-green + snapshots; **on-screen render EYEBALL-OWED**. | Shader compiles; the icon bucket binds the SPRITE texture + icon material (`SymbolIconWiring` tooth); text snapshots byte-identical (icons off ⇒ no change). **Icon identity fenced to I6** (icons carry null `Text` ⇒ co-located distinct icons share fade/dedup). |
+| **I6 code** ✅ | Icon identity: `SymbolLabel`/`LabelInstance` carry `IconImage` (the sprite name); folded into `CrossTileLabelKey` (⇒ `PointFadeId`) so co-located distinct icons dedup/fade as two while the same icon across a zoom swap stays one. Guarded-skip fold ⇒ text keys/fades/snapshots byte-identical. | Two distinct co-located icons → distinct keys/FadeIds (RED pre-fix); same icon parent+child → one identity; text parity byte-identical. |
+| **I6 eyeball** (maintainer) | The icon material is pre-wired into `Assets/Settings/Map/MapMaterialSet.asset`; liberty already carries the `sprite` URL — press Play and verify. | On-screen: icons draw at POI anchors, correct sprite/size/opacity, upright (not double-flipped), interleaved with text/fills; a real `sprite`-URL style lights up POI markers; icon-vs-text z-order. |
+**Invariant across I1–I5:** *text-only styles are byte-identical* — an icon change never perturbs the existing
+text snapshots (the icon path is inert when no `icon-image` resolves). I1–I3 RED-verify their regression teeth;
+I4 pins orientation headlessly; I5a is fully headless; I5b proves compile + byte-identical text + the sprite
+texture bind, with the rasterized result **eyeball-owed**.
+
+**Landed (2026-07-18, autonomous plan→develop→review chain, each stage headless-gated + committed):** I1–I5b +
+the I6 icon-identity fix — the full icon pipeline from sprite-JSON parse to an on-GPU draw partition, with
+cross-tile identity keyed on the sprite name. **Remaining (I6, maintainer):** only the on-screen eyeball (the
+icon material is pre-wired into `Assets/Settings/Map/MapMaterialSet.asset`; liberty already carries the `sprite`
+URL — press Play).
+
+## 5.6 Grounding (touch points)
+
+Core: `Style/Symbol/PropertyNames`, `Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`,
+`Style/Symbol/SymbolFeatureExtractor` (the `isLine`/point branches — icons ride point), `Style/Symbol/SymbolLabel`
+(icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad), `Text/TextQuadLayout` (prior art for
+the new `IconQuadLayout`), a new `Text/Sprites/SpriteIndex`+`SpriteEntry`. Unity: `Text/GlyphManager`/
+`GlyphAtlasTexture` (prior art for the sprite `Texture2D`), `Rendering/Source/GlyphSourceFactory`+
+`UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolLabelBatchBuilder`,
+`Text/Placement/LabelPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
+(template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolBillboardJob`, `LabelStageJob`, `LabelCollisionJob`
+(unchanged — texture-blind). Style: top-level `"sprite"` in `StyleDocument`/`StyleParser`; `liberty.json:17`.

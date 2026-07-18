@@ -8,20 +8,24 @@ namespace MapRenderer.Core.Style.Symbol
     /// <summary>
     /// The parsed MapLibre symbol <b>layout</b> properties for a single symbol style layer. Read from the
     /// layer's <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public Style
-    /// Spec §symbol layout). TEXT-ONLY.
+    /// Spec §symbol layout).
     ///
     /// <para>Zoom-capable numeric properties (<see cref="TextSize"/>, <see cref="SymbolSortKey"/>,
     /// <see cref="TextPadding"/>, <see cref="TextMaxWidth"/>, <see cref="TextLineHeight"/>,
-    /// <see cref="TextLetterSpacing"/>, <see cref="TextRadialOffset"/>) are <see cref="StyleProperty{T}"/> so
-    /// they can be re-evaluated per frame; the small enum/flag knobs (<see cref="SymbolPlacement"/>,
-    /// <see cref="TextAllowOverlap"/>, <see cref="TextAnchor"/>, <see cref="TextJustify"/>,
-    /// <see cref="TextOffset"/>, <see cref="TextFont"/>) are parsed once as plain typed values (mirroring
-    /// <c>Line.LayoutProperties</c>'s Join/Cap-as-enum convention — the codebase encodes constant layout flags
-    /// directly, not as <c>StyleProperty&lt;bool&gt;</c>). <see cref="TextField"/> stays a raw
-    /// <see cref="JsonValue"/> — it is per-feature-resolved by <see cref="TextFieldResolver"/>, not a scalar
-    /// style value. <see cref="TextAnchor"/>/<see cref="TextJustify"/> are the <c>Core.Text</c> enums
-    /// (string→enum at parse); <see cref="TextLayoutOptionsBuilder"/> assembles them plus the em metrics into
-    /// a <see cref="Text.TextLayoutOptions"/> per feature.</para>
+    /// <see cref="TextLetterSpacing"/>, <see cref="TextRadialOffset"/>, <see cref="IconSize"/>,
+    /// <see cref="IconPadding"/>) are <see cref="StyleProperty{T}"/> so they can be re-evaluated per frame;
+    /// the small enum/flag knobs (<see cref="SymbolPlacement"/>, <see cref="TextAllowOverlap"/>,
+    /// <see cref="TextAnchor"/>, <see cref="TextJustify"/>, <see cref="TextOffset"/>, <see cref="TextFont"/>,
+    /// <see cref="IconAnchor"/>, <see cref="IconOffset"/>, <see cref="IconRotationAlignment"/>,
+    /// <see cref="IconAllowOverlap"/>, <see cref="IconIgnorePlacement"/>) are parsed once as plain typed
+    /// values (mirroring <c>Line.LayoutProperties</c>'s Join/Cap-as-enum convention — the codebase encodes
+    /// constant layout flags directly, not as <c>StyleProperty&lt;bool&gt;</c>). <see cref="TextField"/> and
+    /// <see cref="IconImage"/> stay raw <see cref="JsonValue"/> — <c>TextField</c> is per-feature-resolved by
+    /// <see cref="TextFieldResolver"/>, and <c>IconImage</c> is likewise per-feature (a <c>{token}</c> string
+    /// or an expression array); neither is a scalar style value here — icon sprite resolution is a later
+    /// stage. <see cref="TextAnchor"/>/<see cref="TextJustify"/> are the <c>Core.Text</c> enums (string→enum
+    /// at parse); <see cref="TextLayoutOptionsBuilder"/> assembles them plus the em metrics into a
+    /// <see cref="Text.TextLayoutOptions"/> per feature.</para>
     /// </summary>
     public sealed class LayoutProperties
     {
@@ -110,6 +114,34 @@ namespace MapRenderer.Core.Style.Symbol
         /// its own stage); point placement resolves auto→viewport (the current billboard) regardless.</summary>
         public AlignmentMode TextPitchAlignment { get; }
 
+        /// <summary>icon-image: the raw value (a <c>{token}</c> string or an expression array), or null when
+        /// absent. Per-feature-resolved; NOT a scalar here — icon sprite resolution is a later stage.</summary>
+        public JsonValue IconImage { get; }
+
+        /// <summary>icon-size: scale factor applied to the sprite's logical size. Default 1. Zoom-capable.</summary>
+        public StyleProperty<float> IconSize { get; }
+
+        /// <summary>icon-offset: [x, y] offset from the anchor, in units of the icon's own (unscaled) size.
+        /// Default [0, 0]. <b>Constant only</b> (parsed as a plain <see cref="float2"/>, not zoom/data-driven).</summary>
+        public float2 IconOffset { get; }
+
+        /// <summary>icon-anchor: anchor position for the icon. Default <see cref="Text.TextAnchor.Center"/>.
+        /// An unrecognized/malformed value degrades to the spec default (center).</summary>
+        public TextAnchor IconAnchor { get; }
+
+        /// <summary>icon-rotation-alignment: whether the icon rotates with the map (<c>map</c>) or stays
+        /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>.</summary>
+        public AlignmentMode IconRotationAlignment { get; }
+
+        /// <summary>icon-allow-overlap: skip collision, always place. Default false.</summary>
+        public bool IconAllowOverlap { get; }
+
+        /// <summary>icon-ignore-placement: place but don't block others. Default false.</summary>
+        public bool IconIgnorePlacement { get; }
+
+        /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
+        public StyleProperty<float> IconPadding { get; }
+
         /// <summary>Convenience: parse from a style layer's <c>LayoutJson</c>.</summary>
         /// <exception cref="System.ArgumentNullException">If <paramref name="layer"/> is null.</exception>
         public LayoutProperties(MapRenderer.Core.Style.StyleLayer layer)
@@ -180,6 +212,26 @@ namespace MapRenderer.Core.Style.Symbol
             TextRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.TextRotationAlignment)?.AsString(null));
             TextPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.TextPitchAlignment)?.AsString(null));
             TextOffset = ParseOffset(layout?.Get(PropertyNames.TextOffset));
+
+            IconImage = layout?.Get(PropertyNames.IconImage); // raw; resolved per feature
+
+            JsonValue iconSizeJson = layout?.Get(PropertyNames.IconSize);
+            IconSize = iconSizeJson != null
+                ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(1f);
+
+            IconOffset = ParseOffset(layout?.Get(PropertyNames.IconOffset));
+
+            IconAnchor = ParseAnchor(layout?.Get(PropertyNames.IconAnchor)?.AsString(null));
+            IconRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.IconRotationAlignment)?.AsString(null));
+
+            IconAllowOverlap = layout?.Get(PropertyNames.IconAllowOverlap)?.AsBool(false) ?? false;
+            IconIgnorePlacement = layout?.Get(PropertyNames.IconIgnorePlacement)?.AsBool(false) ?? false;
+
+            JsonValue iconPaddingJson = layout?.Get(PropertyNames.IconPadding);
+            IconPadding = iconPaddingJson != null
+                ? new StyleProperty<float>(iconPaddingJson, 2f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(2f);
         }
 
         // Spec default font stack when text-font is absent or malformed.

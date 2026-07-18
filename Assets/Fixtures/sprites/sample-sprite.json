@@ -1,0 +1,5 @@
+{
+  "marker": { "x": 0,  "y": 0,  "width": 16, "height": 16, "pixelRatio": 1, "sdf": false },
+  "star":   { "x": 16, "y": 0,  "width": 24, "height": 24, "pixelRatio": 2, "sdf": false },
+  "dot":    { "x": 0,  "y": 32, "width": 8,  "height": 8,  "pixelRatio": 1, "sdf": false }
+}

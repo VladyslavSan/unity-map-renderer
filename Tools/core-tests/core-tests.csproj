@@ -379,6 +379,20 @@
     <!-- S18 Unity-side batch: GlyphManager fetch/decode/cache/atlas tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphManagerTests.cs" />
 
+    <!-- I1: sprite JSON index — Core source, engine-free -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteEntry.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteIndex.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteIndexTests.cs" />
+
+    <!-- I3: icon labels — Core source, engine-free -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelKind.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/IconImageResolver.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IconQuadLayout.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/IconImageResolverTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/IconQuadLayoutTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorIconTests.cs" />
+
     <!-- S19: symbol layout (text-only) — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextAnchor.cs" />

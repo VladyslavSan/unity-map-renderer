@@ -86,6 +86,36 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(quad.BottomRight.y * 0.5f, bottomRight.ScreenPx.y, 1e-5f);
         }
 
+        // ── I5a: BillboardMath is glyph/sprite-AGNOSTIC by design (SymbolQuad.cs) — an icon's SymbolQuad
+        //    (from IconQuadLayout, laid out over a sprite-sheet rect) flows through the SAME BuildQuad an
+        //    icon PlacedQuad would carry (StagePoint copies quads verbatim), producing 4 vertices with the
+        //    icon's own sprite UVs — no separate icon code path needed at this layer. ──
+        [Test]
+        public void BuildQuad_IconSymbolQuad_FourVerticesCarryTheIconUvs()
+        {
+            SymbolQuad iconQuad = IconQuadLayout.Layout(
+                new MapRenderer.Core.Text.Sprites.SpriteEntry { X = 16, Y = 0, Width = 24, Height = 24, PixelRatio = 2f, Sdf = false },
+                new int2(64, 64), iconSize: 1f, TextAnchor.Center, float2.zero);
+            var anchor = new float2(50f, 75f);
+
+            var white = new float4(1f, 1f, 1f, 1f);
+            BillboardMath.BuildQuad(in iconQuad, in anchor, TextQuadLayout.OneEm, 0f, in white, 0f,
+                out BillboardVertex topLeft, out BillboardVertex topRight,
+                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
+
+            Assert.AreEqual(iconQuad.UvTopLeft.x, topLeft.Uv.x, 1e-6f);
+            Assert.AreEqual(iconQuad.UvTopLeft.y, topLeft.Uv.y, 1e-6f);
+            Assert.AreEqual(iconQuad.UvBottomRight.x, bottomRight.Uv.x, 1e-6f);
+            Assert.AreEqual(iconQuad.UvBottomRight.y, bottomRight.Uv.y, 1e-6f);
+            Assert.AreEqual(iconQuad.UvBottomRight.x, topRight.Uv.x, 1e-6f);
+            Assert.AreEqual(iconQuad.UvTopLeft.y, topRight.Uv.y, 1e-6f);
+            Assert.AreEqual(iconQuad.UvTopLeft.x, bottomLeft.Uv.x, 1e-6f);
+            Assert.AreEqual(iconQuad.UvBottomRight.y, bottomLeft.Uv.y, 1e-6f);
+
+            Assert.AreEqual(anchor.x + iconQuad.TopLeft.x, topLeft.ScreenPx.x, 1e-4f);
+            Assert.AreEqual(anchor.y + iconQuad.TopLeft.y, topLeft.ScreenPx.y, 1e-4f);
+        }
+
         // ── Decisive tooth: zoom-independence — same label, same text-size, two different anchor screen
         //    positions (simulating two camera zooms) must produce IDENTICAL screen-pixel width/height. ──
         [Test]

@@ -1,0 +1,198 @@
+// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (LabelSlotPresenter creates one,
+// SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
+//
+// I5b — the icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
+// draw-side bind; the actual on-screen sprite pixels are eyeball-owed, see the I5b plan). Three ticks:
+//   1. An icon-bearing batch through LabelPlacementSystem.Tick with a fixture sprite Texture2D + a
+//      SymbolRenderLayer whose IconMaterial is a real "Map/Symbol/Icon" clone — the icon slot mesh must
+//      build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
+//      material's _MainTex must be the sprite texture (GetTexture — no framebuffer readback, no GPU
+//      snapshot needed for this tooth).
+//   2. A TEXT-ONLY batch (no icon labels, no spriteTexture) must leave the icon presenter HIDDEN and the
+//      text mesh/material path unaffected — the #1-rule parity check.
+//   3. Shader.Find("Map/Symbol/Icon") must resolve (the shader actually compiled/imported).
+
+using System.Collections.Generic;
+using NUnit.Framework;
+using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style;
+using MapRenderer.Core.Text;
+using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Backend;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using Symbol = MapRenderer.Core.Style.Symbol;
+
+namespace MapRenderer.Tests.Text.Placement
+{
+    [TestFixture]
+    public class SymbolIconWiringTests
+    {
+        private const string StyleJson = @"{
+            ""version"": 8,
+            ""layers"": [
+                { ""id"": ""poi"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                  ""layout"": { ""icon-image"": ""marker"" } }
+            ]
+        }";
+
+        // A throwaway MapMaterialSet built directly from the real committed shaders (Shader.Find) — never
+        // loads/mutates the production Assets/Settings/Map/MapMaterialSet.asset, mirrors how every other
+        // Symbol test builds its material(s) (`new Material(Shader.Find("Map/Symbol/Text"))`).
+        private static MapMaterialSet BuildSettings()
+        {
+            var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
+            settings.SymbolText = new Material(Shader.Find("Map/Symbol/Text"));
+            settings.SymbolIcon = new Material(Shader.Find("Map/Symbol/Icon"));
+            return settings;
+        }
+
+        private static Texture2D BuildSpriteTexture()
+        {
+            var tex = new Texture2D(4, 4, TextureFormat.RGBA32, mipChain: false);
+            var pixels = new Color32[16];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(200, 50, 50, 255);
+            tex.SetPixels32(pixels);
+            tex.Apply(updateMipmaps: false);
+            return tex;
+        }
+
+        private static GlyphAtlasTexture BuildTinyAtlasTexture()
+        {
+            var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
+            var atlas = new GlyphAtlas();
+            atlas.Append(glyph);
+            var texture = new GlyphAtlasTexture();
+            texture.Upload(atlas);
+            return texture;
+        }
+
+        private static LabelInstance MakeIconLabel(double3 sceneOriginRender)
+        {
+            var quads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-8f, 8f), BottomRight = new float2(8f, -8f),
+                    UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
+                },
+            };
+            var layout = new TextLayoutResult
+            {
+                Quads = quads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1,
+            };
+            return new LabelInstance
+            {
+                AnchorRender = sceneOriginRender,
+                Layout = layout,
+                Kind = LabelKind.Icon, // I3: routes this label onto the icon draw path (AtlasKind, I5b)
+                Paint = LabelPaint.Default,
+                TextSizePx = TextQuadLayout.OneEm, // scale 1 — mirrors StyledSymbolTileBuilder's real icon path
+                SortKey = 0f,
+                FeatureIndex = 0,
+                TileKey = 0L,
+            };
+        }
+
+        private static LabelInstance MakeTextLabel(double3 sceneOriginRender)
+        {
+            var quads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                    UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
+                },
+            };
+            var layout = new TextLayoutResult { Quads = quads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
+            return new LabelInstance
+            {
+                AnchorRender = sceneOriginRender,
+                Layout = layout,
+                Paint = LabelPaint.Default,
+                TextSizePx = 24f,
+                SortKey = 0f,
+                FeatureIndex = 0,
+                TileKey = 0L,
+            };
+        }
+
+        private static (GameObject camGo, MapCamera mapCamera, SceneFrame frame) BuildScene()
+        {
+            var camGo = new GameObject("IconWiring_TestCamera");
+            var uCam = camGo.AddComponent<Camera>();
+            uCam.targetTexture = new RenderTexture(320, 240, 0);
+            var mapCamera = new MapCamera(uCam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
+            var frame = new SceneFrame(
+                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }), float3x3.identity);
+            return (camGo, mapCamera, frame);
+        }
+
+        [Test]
+        public void ShaderMapSymbolIcon_IsFound()
+        {
+            Assert.IsNotNull(Shader.Find("Map/Symbol/Icon"), "the SymbolIcon.shader must compile/import under \"Map/Symbol/Icon\".");
+        }
+
+        [Test]
+        public void IconBatch_BuildsIconMesh_AndBindsSpriteTexture_TextBatchLeavesIconPresenterHidden()
+        {
+            var (camGo, mapCamera, frame) = BuildScene();
+            var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = BuildSpriteTexture();
+            var settings = BuildSettings();
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+            Assert.IsNotNull(renderLayer.IconMaterial, "settings.SymbolIcon was assigned — IconMaterial must be a clone, not null.");
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var layers = new List<SymbolRenderLayer> { renderLayer };
+
+            try
+            {
+                // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
+                var iconBatch = new SymbolLabelBatch();
+                SymbolLabelBatchBuilder.Build(iconBatch, new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
+                system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+
+                Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Tick).");
+                Assert.IsNotNull(system.IconMesh, "the icon slot mesh must exist (EnsureSlots grows it 1:1 with the text slot).");
+                Assert.Greater(system.IconMesh.vertexCount, 0, "the icon slot mesh must have built non-zero vertices.");
+                Assert.IsTrue(renderLayer.IconPresenterVisible, "the icon presenter must be showing after an icon Tick.");
+
+                Texture boundTexture = renderLayer.IconMaterial.GetTexture("_MainTex");
+                Assert.AreSame(spriteTexture, boundTexture,
+                    "the icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
+
+                // ── 2. Text-only batch (parity: the #1 rule) — icon presenter must go back to HIDDEN, text unaffected ──
+                var textBatch = new SymbolLabelBatch();
+                SymbolLabelBatchBuilder.Build(textBatch, new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
+                system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+
+                Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");
+                Assert.IsTrue(renderLayer.PresenterVisible, "the text presenter must still show on a text-only Tick.");
+                Assert.IsFalse(renderLayer.IconPresenterVisible,
+                    "the icon presenter must be HIDDEN on a text-only Tick (spriteTexture omitted, no icon quads) — " +
+                    "the #1 rule: no sprite loaded ⇒ nothing icon-related builds/binds/presents.");
+            }
+            finally
+            {
+                renderLayer.Dispose();
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(spriteTexture);
+                Object.DestroyImmediate(settings.SymbolText);
+                Object.DestroyImmediate(settings.SymbolIcon);
+                Object.DestroyImmediate(settings);
+                Object.DestroyImmediate(camGo);
+            }
+        }
+    }
+}

@@ -69,7 +69,7 @@ namespace MapRenderer.Core.Text.Placement
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = s.FadeId, WasPlacedLastFrame = s.WasPlacedLastFrame,
             };
-            emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = quads.Length, Slot = s.Slot };
+            emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = quads.Length, Slot = s.Slot, AtlasKind = s.AtlasKind };
             return 1;
         }
 

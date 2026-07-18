@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
@@ -32,20 +33,28 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly SymbolStyle.StyleLayer[] _layerWrapper;
         private readonly int[]                    _materialIndexWrapper;
         private readonly List<LabelInstance>      _sharedOutput;
+        // I5b: forwarded verbatim to ExtractLayers' spriteAtlas param — null (fetch not resolved yet, or no
+        // 'sprite' URL) means this build extracts no icon labels; a tile kicked before the fetch resolves
+        // self-heals on its next rebuild once SymbolLabelSubsystem's sheet is set (§I5b plan).
+        private readonly SpriteAtlasView _spriteAtlas;
 
         // Set by ProcessOnWorker; null if the worker step never ran (an earlier processor in the same
         // dense pass faulted) — CompleteOnMainAsync's no-op path relies on ShapeAsync already returning
         // early on a null extraction list.
         private List<StyledSymbolTileBuilder.ExtractedLayer> _extracted;
 
+        /// <param name="spriteAtlas">I5b: forwarded verbatim to <see cref="StyledSymbolTileBuilder.ExtractLayers"/>;
+        /// null (the default) yields no icon labels — every pre-I5b caller (which omits this argument) stays
+        /// byte-identical.</param>
         public TileSymbolLayerProcessor(
             StyledSymbolTileBuilder builder, SymbolStyle.StyleLayer layer, int materialIndex,
-            List<LabelInstance> sharedOutput)
+            List<LabelInstance> sharedOutput, SpriteAtlasView spriteAtlas = null)
         {
             _builder              = builder;
             _layerWrapper         = new[] { layer };
             _materialIndexWrapper = new[] { materialIndex };
             _sharedOutput         = sharedOutput;
+            _spriteAtlas          = spriteAtlas;
         }
 
         public LayerPhase Phase => LayerPhase.WorkerThenMain;
@@ -56,7 +65,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
         {
             _extracted = _builder.ExtractLayers(
-                tile, context.Tile, _layerWrapper, context.Zoom, context.Projection, _materialIndexWrapper);
+                tile, context.Tile, _layerWrapper, context.Zoom, context.Projection, _materialIndexWrapper,
+                _spriteAtlas);
         }
 
         /// <summary>MAIN-THREAD tail (moved form of the pre-A3 <c>ShapeAsync</c> call, one layer wide): shape

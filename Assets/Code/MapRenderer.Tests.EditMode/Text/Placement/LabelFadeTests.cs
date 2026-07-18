@@ -265,5 +265,27 @@ namespace MapRenderer.Tests.Text.Placement
                                LabelPlacementSystem.PointFadeId(a, 0, "U"),
                                "different text is a different label even at the same anchor");
         }
+
+        // ── I6: the icon analogue — two co-located icon labels (text=null, distinct icon-image) must get
+        //    DISTINCT fade ids (pre-fix they'd collide: text==null for both). Same icon-image at the same
+        //    anchor shares an id (the seamless no-op icons now get too). A text label's id is unchanged when
+        //    iconImage is omitted/explicitly-null (the #1 invariant: guard-skip, not `?? 0`). ──
+        [Test]
+        public void PointFadeId_IconIdentity_DistinctIconsSeparate_SameIconShares_TextUnaffected()
+        {
+            double3 a = new double3(5_000_000.0, 0, 3_000_000.0);
+
+            Assert.AreNotEqual(LabelPlacementSystem.PointFadeId(a, 0, null, "a"),
+                                LabelPlacementSystem.PointFadeId(a, 0, null, "b"),
+                                "same cell/layer, text=null, different icon-image → distinct fade ids");
+
+            Assert.AreEqual(LabelPlacementSystem.PointFadeId(a, 0, null, "a"),
+                             LabelPlacementSystem.PointFadeId(a, 0, null, "a"),
+                             "the same icon-image at the same anchor shares one fade id");
+
+            Assert.AreEqual(LabelPlacementSystem.PointFadeId(a, 0, "Paris"),
+                             LabelPlacementSystem.PointFadeId(a, 0, "Paris", null),
+                             "a text label's fade id is unchanged whether iconImage is omitted or explicitly null");
+        }
     }
 }

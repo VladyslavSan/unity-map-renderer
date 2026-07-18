@@ -109,7 +109,11 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 RotationAlignment = label.RotationAlignment, Color = LabelPlacementSystem.LinearColor(label),
-                FadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text),
+                // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
+                // is unchanged — PointFadeId's guard-skip fold).
+                FadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage),
+                // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
+                AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
             };
             int detail = batch.AddPoint(input, quadStart, quadCount);
 

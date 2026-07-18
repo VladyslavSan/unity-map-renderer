@@ -123,8 +123,11 @@ namespace MapRenderer.Unity.Rendering.Map
             // fields (placeholder budget defaults pending in-editor VRAM profiling, stage Risk 3).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
             // S20: one label system per view, owning this view's camera (constructed here, after Camera is
-            // set — a field initializer would see a null Camera).
-            Labels      = new LabelPlacementSystem(Camera, _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null);
+            // set — a field initializer would see a null Camera). I5b: the icon base material rides alongside
+            // the text one — both optional (null → that draw path stays inert, see MapMaterialSet.SymbolIcon's doc).
+            Labels      = new LabelPlacementSystem(Camera,
+                _config.MaterialSet != null ? _config.MaterialSet.SymbolText : null,
+                _config.MaterialSet != null ? _config.MaterialSet.SymbolIcon : null);
             // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
             // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
@@ -372,7 +375,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 // frame (allocation-free; the version cache was removed). Then project/collide/build the placement,
                 // presenting each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
                 Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
-                    _symbolRenderLayers);
+                    _symbolRenderLayers, _symbols.IconTexture);
             }
             else
             {

@@ -27,6 +27,10 @@ namespace MapRenderer.Unity.Rendering.Materials
         [Tooltip("Base material for symbol text render items. Cloned per style layer.")]
         [SerializeField] public Material SymbolText;
 
+        [Tooltip("Base material for symbol icon (sprite) render items. Cloned per style layer. Optional — " +
+                 "unassigned means icons will not render (labels still do); NOT enforced by Validate().")]
+        [SerializeField] public Material SymbolIcon;
+
         /// <summary>
         /// Epic A / A2 (DECISION 2): fail LOUD when any base material is unassigned, rather than letting a
         /// null base silently reach the pipeline (a null-material fill/line/background/symbol slot would

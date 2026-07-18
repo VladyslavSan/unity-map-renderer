@@ -130,11 +130,23 @@ namespace MapRenderer.Unity.Text.Placement
         private readonly List<Mesh>                   _slotMeshes = new List<Mesh>();
         private readonly List<NativeList<PlacedQuad>> _slotQuads  = new List<NativeList<PlacedQuad>>();
 
+        // I5b: the icon analogue of _slotMeshes/_slotQuads — one (mesh, quad-buffer) per MATERIAL SLOT,
+        // grown 1:1 with the text slots in EnsureSlots. A candidate's staged quads land in EITHER this
+        // bucket or the text one, keyed by CandidateEmit.AtlasKind (see the emit loop in Tick) — icons and
+        // text of the SAME symbol layer/slot draw as two separate meshes/materials (different atlas
+        // texture, different shader — Map/Symbol/Icon has no SDF/halo).
+        private readonly List<Mesh>                   _slotIconMeshes = new List<Mesh>();
+        private readonly List<NativeList<PlacedQuad>> _slotIconQuads  = new List<NativeList<PlacedQuad>>();
+
         // E2: the demo/no-style path's presenters (no per-layer SymbolRenderLayer list passed) — grown
         // 1:1 with _slotMeshes in EnsureSlots. Production frames pass symbolLayers and use THOSE layers'
         // own presenters instead; this list stays un-created (lazy — List<T> allocates nothing until Add)
         // on production styles.
         private readonly List<LabelSlotPresenter> _fallbackPresenters = new List<LabelSlotPresenter>();
+
+        // I5b: the icon analogue of _fallbackPresenters — the demo/no-style path's ICON presenters, grown
+        // 1:1 with _slotIconMeshes in EnsureSlots.
+        private readonly List<LabelSlotPresenter> _fallbackIconPresenters = new List<LabelSlotPresenter>();
 
         // §7.10 1b: the symbolLayers list PresentSlot showed on the PREVIOUS Tick — the production branch can
         // hide its own _fallbackPresenters directly (it owns that list), but the demo/fallback branch has no
@@ -147,6 +159,12 @@ namespace MapRenderer.Unity.Text.Placement
         // The default material — a clone of MapMaterialSet.SymbolText — used for the demo path (no per-layer
         // materials passed) and as the fallback for any slot without a supplied material.
         private Material _material;
+
+        // I5b: the icon analogue of _material — a clone of MapMaterialSet.SymbolIcon, used for the demo path
+        // and as the fallback for any slot without a supplied icon material. Null (no warning — icons are
+        // optional; SymbolRenderLayer already warns once for the production per-layer case) means icons
+        // never build/present, text is unaffected.
+        private Material _iconMaterial;
 
         private NativeList<BillboardVertex> _vertexScratch;
         private NativeList<int>             _indexScratch;
@@ -325,6 +343,10 @@ namespace MapRenderer.Unity.Text.Placement
         /// attach a temporary MeshRenderer instead" workaround is gone).</summary>
         internal Mesh Mesh => _slotMeshes.Count > 0 ? _slotMeshes[0] : null;
 
+        /// <summary>I5b: the icon analogue of <see cref="Mesh"/> — slot 0's persistent ICON billboard mesh.
+        /// Test surface.</summary>
+        internal Mesh IconMesh => _slotIconMeshes.Count > 0 ? _slotIconMeshes[0] : null;
+
         /// <summary>The default material <see cref="Tick"/> refreshes every call (atlas texture + screen params). Test surface — see <see cref="Mesh"/>.</summary>
         internal Material Material => _material;
 
@@ -348,7 +370,9 @@ namespace MapRenderer.Unity.Text.Placement
         /// to <see cref="Tick"/> as the <c>symbolLayers</c> list.
         /// </summary>
         /// <param name="baseMaterial">The <c>MapMaterialSet.SymbolText</c> base; null → labels won't render (logged once).</param>
-        public LabelPlacementSystem(MapCamera camera, Material baseMaterial)
+        /// <param name="iconBaseMaterial">I5b: the <c>MapMaterialSet.SymbolIcon</c> base; null (default) →
+        /// icons won't render (no warning here — icons are optional; text is unaffected either way).</param>
+        public LabelPlacementSystem(MapCamera camera, Material baseMaterial, Material iconBaseMaterial = null)
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
 
@@ -407,6 +431,14 @@ namespace MapRenderer.Unity.Text.Placement
                 _material      = baseMaterial.CloneWithParent();
                 _material.name = "LabelPlacementSystem_Material";
             }
+
+            // I5b: icons are optional — a null iconBaseMaterial just means _iconMaterial stays null (the
+            // per-Tick icon build/present guards on it, exactly like every icon path guards on spriteTexture).
+            if (iconBaseMaterial != null)
+            {
+                _iconMaterial      = iconBaseMaterial.CloneWithParent();
+                _iconMaterial.name = "LabelPlacementSystem_IconMaterial";
+            }
         }
 
         /// <summary>
@@ -424,15 +456,19 @@ namespace MapRenderer.Unity.Text.Placement
         /// <see cref="float.PositiveInfinity"/> SNAPS every fade to its target (no animation), so a single-Tick
         /// test renders fully-placed labels exactly as before A-4 (byte-parity); production passes
         /// <c>Time.deltaTime</c>.</param>
+        /// <param name="spriteTexture">I5b: the sprite sheet backing every ICON label's <see cref="SymbolQuad"/>
+        /// UVs (<c>SymbolLabelSubsystem.IconTexture</c>). Null (default) → icons never build/present — every
+        /// icon draw path is guarded on this being non-null, so an omitted/absent sprite sheet is byte-identical
+        /// to before I5b (text-only).</param>
         public void Tick(in SceneFrame frame, IReadOnlyList<LabelInstance> labels, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity)
+            float deltaTime = float.PositiveInfinity, Texture2D spriteTexture = null)
         {
             // Demo / test seam: convert the managed carriers into the blittable batch (the SAME conversion the
             // production subsystem does once per collected-set change), then tick it. Rebuilt every call here;
             // production threads a pre-built, version-cached batch instead. No layer list — every label draws
             // through the single default material/presenter (slot 0).
             SymbolLabelBatchBuilder.Build(_demoBatch, labels, 1, _camera.Projection);
-            Tick(frame, _demoBatch, atlas, deltaTime, null, labels?.Count ?? 0);
+            Tick(frame, _demoBatch, atlas, deltaTime, null, labels?.Count ?? 0, spriteTexture);
         }
 
         /// <summary>Production entry: tick a pre-built, version-cached <see cref="SymbolLabelBatch"/> (built off the
@@ -442,12 +478,15 @@ namespace MapRenderer.Unity.Text.Placement
         /// (production, each owning its own material + persistent presenter — D11/E2). Null / empty → the demo
         /// path: every label draws through the single default material/presenter. Collision is GLOBAL
         /// regardless; only the draw is partitioned by layer.</param>
+        /// <param name="spriteTexture">I5b — see the managed-list overload's doc.</param>
         public void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null)
-            => Tick(frame, batch, atlas, deltaTime, symbolLayers, batch?.Count ?? 0);
+            float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null,
+            Texture2D spriteTexture = null)
+            => Tick(frame, batch, atlas, deltaTime, symbolLayers, batch?.Count ?? 0, spriteTexture);
 
         private void Tick(in SceneFrame frame, SymbolLabelBatch batch, GlyphAtlasTexture atlas,
-            float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputLabelCount)
+            float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputLabelCount,
+            Texture2D spriteTexture = null)
         {
             TickCount++;
             LastInputLabelCount = inputLabelCount;
@@ -465,7 +504,7 @@ namespace MapRenderer.Unity.Text.Placement
 
                 int slotCount = (symbolLayers != null && symbolLayers.Count > 0) ? symbolLayers.Count : 1;
                 EnsureSlots(slotCount);
-                for (int g = 0; g < slotCount; g++) _slotQuads[g].Clear();
+                for (int g = 0; g < slotCount; g++) { _slotQuads[g].Clear(); _slotIconQuads[g].Clear(); }
 
                 int  totalQuads = 0;
                 bool didBuild   = false;
@@ -564,8 +603,13 @@ namespace MapRenderer.Unity.Text.Placement
                             float opacity = EaseFade(cand.FadeId, survived ? 1f : 0f, deltaTime);
                             if (opacity <= FadeEpsilon) continue;
 
+                            // I5b: an icon candidate's quads land in the ICON bucket, not the text one — the
+                            // two draw as separate meshes/materials per slot (different atlas texture, no
+                            // SDF/halo). AtlasKind defaults to LabelKind.Text (I3's zero-value contract), so
+                            // every pre-I5b candidate routes exactly where it always did.
                             CandidateEmit          emit   = _sjEmit[cand.LabelIndex];
-                            NativeList<PlacedQuad> bucket = _slotQuads[emit.Slot];
+                            NativeList<PlacedQuad> bucket = emit.AtlasKind == LabelKind.Icon
+                                ? _slotIconQuads[emit.Slot] : _slotQuads[emit.Slot];
                             for (int k = 0; k < emit.QuadCount; k++)
                             {
                                 PlacedQuad q = _sjQuads[emit.QuadStart + k];
@@ -593,9 +637,23 @@ namespace MapRenderer.Unity.Text.Placement
                 for (int g = 0; g < slotCount; g++)
                 {
                     bool built = _slotQuads[g].Length > 0
-                        && BuildSlotMesh(_slotQuads[g], _slotMeshes[g], ResolveSlotMaterial(g, symbolLayers), viewportLogicalPx, atlas);
+                        && BuildSlotMesh(_slotQuads[g], _slotMeshes[g], ResolveSlotMaterial(g, symbolLayers), viewportLogicalPx, atlas.Texture);
                     PresentSlot(g, symbolLayers, built);
                 }
+
+                // I5b: the icon analogue of the loop above — a SECOND present pass over the icon meshes.
+                // Guarded on spriteTexture != null (every icon draw path's rule): with no sprite sheet loaded
+                // _slotIconQuads is empty anyway (nothing ever routes there — see the emit loop), so this is a
+                // pure no-op for the text-only case (byte-identical to before I5b). ResolveIconMaterial's own
+                // null check covers a loaded sprite sheet with no icon material configured (warn-once, hidden).
+                for (int g = 0; g < slotCount; g++)
+                {
+                    Material iconMaterial = ResolveIconMaterial(g, symbolLayers);
+                    bool iconBuilt = spriteTexture != null && iconMaterial != null && _slotIconQuads[g].Length > 0
+                        && BuildSlotMesh(_slotIconQuads[g], _slotIconMeshes[g], iconMaterial, viewportLogicalPx, spriteTexture);
+                    PresentIconSlot(g, symbolLayers, iconBuilt);
+                }
+
                 // §7.10 1b: remember what THIS Tick presented through so a flip to the OTHER path next Tick
                 // can hide it (PresentSlot's else-branch reads this — see _lastSymbolLayers's header comment).
                 _lastSymbolLayers = symbolLayers;
@@ -606,6 +664,13 @@ namespace MapRenderer.Unity.Text.Placement
         private Material ResolveSlotMaterial(int slot, IReadOnlyList<SymbolRenderLayer> symbolLayers)
             => (symbolLayers != null && slot < symbolLayers.Count && symbolLayers[slot]?.Material != null)
                 ? symbolLayers[slot].Material : _material;
+
+        // I5b: the icon analogue of ResolveSlotMaterial — the supplied layer's own IconMaterial, else the
+        // default icon material. Either (or both) may be null (icons are optional-with-warn) — the caller's
+        // build guard checks for null before using the result.
+        private Material ResolveIconMaterial(int slot, IReadOnlyList<SymbolRenderLayer> symbolLayers)
+            => (symbolLayers != null && slot < symbolLayers.Count && symbolLayers[slot]?.IconMaterial != null)
+                ? symbolLayers[slot].IconMaterial : _iconMaterial;
 
         // Hands slot g's just-built mesh (or a hide) to its presenter: the layer's OWN LabelSlotPresenter in
         // production (D11/E2 — SymbolRenderLayer.Present forwards to it), or this system's fallback presenter
@@ -633,6 +698,24 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
+        // I5b: the icon analogue of PresentSlot — mirrors it exactly, over the ICON mesh/material/presenters
+        // (SymbolRenderLayer.PresentIcon / _fallbackIconPresenters) instead of the text ones. Same §7.10 1b
+        // both-paths-never-enabled-at-once rule.
+        private void PresentIconSlot(int slot, IReadOnlyList<SymbolRenderLayer> symbolLayers, bool built)
+        {
+            if (symbolLayers != null && slot < symbolLayers.Count)
+            {
+                symbolLayers[slot].PresentIcon(_slotIconMeshes[slot], built);
+                _fallbackIconPresenters[slot].Present(null, null, false);
+            }
+            else
+            {
+                _fallbackIconPresenters[slot].Present(_slotIconMeshes[slot], _iconMaterial, built);
+                if (_lastSymbolLayers != null && slot < _lastSymbolLayers.Count)
+                    _lastSymbolLayers[slot].PresentIcon(null, false);
+            }
+        }
+
         // Ensures slotCount (mesh, quad-buffer, fallback presenter) slots exist. Grows only when a style
         // adds symbol layers — amortized, warm-up only; steady-state Ticks reuse the slots (T4 no-per-frame-GC).
         private void EnsureSlots(int slotCount)
@@ -644,6 +727,13 @@ namespace MapRenderer.Unity.Text.Placement
                 _slotMeshes.Add(mesh);
                 _slotQuads.Add(new NativeList<PlacedQuad>(Allocator.Persistent));
                 _fallbackPresenters.Add(new LabelSlotPresenter($"LabelPlacementSystem_FallbackPresenter{_slotMeshes.Count - 1}"));
+
+                // I5b: the icon slot, grown 1:1 with the text slot above.
+                var iconMesh = new Mesh { name = $"LabelPlacementSystem_IconMesh{_slotIconMeshes.Count}" };
+                iconMesh.MarkDynamic();
+                _slotIconMeshes.Add(iconMesh);
+                _slotIconQuads.Add(new NativeList<PlacedQuad>(Allocator.Persistent));
+                _fallbackIconPresenters.Add(new LabelSlotPresenter($"LabelPlacementSystem_FallbackIconPresenter{_slotIconMeshes.Count - 1}"));
             }
         }
 
@@ -951,8 +1041,10 @@ namespace MapRenderer.Unity.Text.Placement
         /// camera zooms); reusing <see cref="CrossTileLabelKey"/> lets the same symbol from a swapped tile keep
         /// its opacity record (the seamless no-op) at high zoom. <c>internal</c> so an EditMode test can pin the
         /// stable-across-zoom + within-grid-collapse behaviour directly.</summary>
-        internal static long PointFadeId(in double3 anchorRender, int layerId, string text)
-            => Hash64(CrossTileLabelKey.For(anchorRender, layerId, text, FadeGridMeters));
+        /// <param name="iconImage">I6: the icon's resolved sprite name (null for text, <see cref="LabelInstance.IconImage"/>)
+        /// — folded into the fade id via a guard-skip (see <see cref="Hash64"/>) so a text label's id is unchanged.</param>
+        internal static long PointFadeId(in double3 anchorRender, int layerId, string text, string iconImage = null)
+            => Hash64(CrossTileLabelKey.For(anchorRender, layerId, text, iconImage, FadeGridMeters));
 
         private static long Hash64(in CrossTileLabelKey k)
         {
@@ -963,6 +1055,11 @@ namespace MapRenderer.Unity.Text.Placement
                 h = (h ^ (ulong)k.GridZ) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)k.LayerId) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)(k.Text?.GetHashCode() ?? 0)) * 1099511628211UL;
+                // I6 guard-skip fold: only mix IconImage when non-null, so a text label's fade id (IconImage
+                // always null) hashes IDENTICALLY to before this field existed — same #1 invariant as
+                // CrossTileLabelKey.GetHashCode (an unconditional `?? 0` fold would still perturb every text id).
+                if (k.IconImage != null)
+                    h = (h ^ (ulong)(uint)k.IconImage.GetHashCode()) * 1099511628211UL;
                 return (long)h;
             }
         }
@@ -970,8 +1067,13 @@ namespace MapRenderer.Unity.Text.Placement
         // Rebuilds slot mesh's vertex/index buffers from quads and refreshes material's per-frame uniforms
         // (atlas + screen params). Returns false (mesh left untouched) when the billboard job wrote nothing —
         // the caller then hides the slot's presenter instead of presenting a stale/empty mesh.
-        private bool BuildSlotMesh(NativeList<PlacedQuad> quads,             Mesh              mesh, Material material,
-            double2                                        viewportLogicalPx, GlyphAtlasTexture atlas)
+        //
+        // I5b: `atlasTexture` (was `GlyphAtlasTexture atlas`) — the texture to BIND, not a specific atlas
+        // type, so this one method serves both the glyph atlas (text call passes atlas.Texture) and the
+        // sprite sheet (icon call passes spriteTexture) — same vertex/index build, same _MainTex slot,
+        // different shader/material behind it (Map/Symbol/Text vs Map/Symbol/Icon).
+        private bool BuildSlotMesh(NativeList<PlacedQuad> quads,             Mesh    mesh, Material material,
+            double2                                        viewportLogicalPx, Texture atlasTexture)
         {
             using (PmBuildSubmit.Auto())
             {
@@ -1010,7 +1112,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // RenderMesh's worldBounds was — screen-space verts ⇒ "never cull" stays correct (Risk #1).
                 mesh.bounds = HugeBounds;
 
-                material.SetTexture(AtlasPropId, atlas.Texture);
+                material.SetTexture(AtlasPropId, atlasTexture);
                 material.SetVector(ScreenParamsLogicalPropId,
                     new Vector4((float)viewportLogicalPx.x, (float)viewportLogicalPx.y, 0f, 0f));
 
@@ -1049,6 +1151,11 @@ namespace MapRenderer.Unity.Text.Placement
                 _fallbackPresenters[g].Dispose();
             _fallbackPresenters.Clear();
 
+            // I5b: icon presenters, disposed alongside — before the meshes they reference (same ordering rule).
+            for (int g = 0; g < _fallbackIconPresenters.Count; g++)
+                _fallbackIconPresenters[g].Dispose();
+            _fallbackIconPresenters.Clear();
+
             for (int g = 0; g < _slotMeshes.Count; g++)
             {
                 _slotMeshes[g].DestroySafely();
@@ -1058,8 +1165,20 @@ namespace MapRenderer.Unity.Text.Placement
             _slotMeshes.Clear();
             _slotQuads.Clear();
 
+            for (int g = 0; g < _slotIconMeshes.Count; g++)
+            {
+                _slotIconMeshes[g].DestroySafely();
+                _slotIconQuads[g].Dispose();
+            }
+
+            _slotIconMeshes.Clear();
+            _slotIconQuads.Clear();
+
             _material.DestroySafely();
             _material = null;
+
+            _iconMaterial.DestroySafely();
+            _iconMaterial = null;
 
             _vertexScratch.Dispose();
             _indexScratch.Dispose();

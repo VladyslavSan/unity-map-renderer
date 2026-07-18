@@ -82,9 +82,14 @@ namespace MapRenderer.Unity.Text
         /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
         /// may run it on the thread pool. Returns the shaping inputs <see cref="ShapeAsync"/> consumes on main.
         /// </summary>
+        /// <param name="spriteAtlas">I5a — forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
+        /// <c>null</c> (the default) yields no icon labels, so every pre-I5a caller (which omits this
+        /// argument) is byte-identical to before I5a. The production caller (<c>TileSymbolLayerProcessor</c>)
+        /// still omits it — icon draw isn't wired until I5b, so it stays inert in prod for now.</param>
         public List<ExtractedLayer> ExtractLayers(
             IDecodedTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
-            double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null)
+            double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null,
+            MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
             var result = new List<ExtractedLayer>(symbolLayers?.Count ?? 0);
             if (tile == null || symbolLayers == null || projection == null) return result;
@@ -93,7 +98,7 @@ namespace MapRenderer.Unity.Text
                 StyleLayer layer = symbolLayers[l];
                 if (layer == null) continue;
                 var labels = new List<SymbolLabel>();
-                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, labels);
+                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, labels, spriteAtlas);
                 if (labels.Count == 0) continue;
                 int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
                 result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = layer.Layout.TextFont }, labels));
@@ -111,10 +116,11 @@ namespace MapRenderer.Unity.Text
             IProjection projection,
             List<LabelInstance> output,
             IReadOnlyList<int> materialIndices = null,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
             if (output == null) return UniTask.CompletedTask;
-            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices), output, ct);
+            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas), output, ct);
         }
 
         /// <summary>
@@ -137,21 +143,55 @@ namespace MapRenderer.Unity.Text
 
                 // Pass 1 — REQUEST every glyph the labels need (async fetch/decode/atlas-append). Each
                 // (fontStack, range) is fetched at most once (GlyphManager caches), so repeated codepoints
-                // and repeated names are cheap.
+                // and repeated names are cheap. I5a: an icon label carries no Text (null) — skip it here
+                // BEFORE dereferencing .Length, or an icon-only layer NREs on its very first label.
                 for (int i = 0; i < extracted.Count; i++)
                 {
+                    if (extracted[i].Kind == LabelKind.Icon) continue;
                     string text = extracted[i].Text;
                     for (int c = 0; c < text.Length; c++)
                         await _glyphManager.EnsureFontStackRangeAsync(fontStack, text[c], ct);
                 }
 
-                // Pass 2 — the glyphs are in the shared atlas: shape + lay out + emit.
-                FontStackResolver resolver = _glyphManager.CreateResolver(fontStack);
+                // Pass 2 — the glyphs are in the shared atlas: shape + lay out + emit. I5a: the resolver is
+                // only needed by TEXT labels (an icon-only layer may carry no text-font at all), so it is
+                // built lazily on first use rather than unconditionally — an icon-only layer never touches
+                // the font stack / GlyphManager resolver machinery.
+                FontStackResolver resolver = null;
                 for (int i = 0; i < extracted.Count; i++)
                 {
                     try
                     {
                         SymbolLabel s = extracted[i];
+                        if (s.Kind == LabelKind.Icon)
+                        {
+                            // I5a: an icon is a single pre-laid-out quad (SymbolFeatureExtractor already
+                            // resolved sprite + icon-size/-offset/-anchor) — no shaping, just wrap it into the
+                            // same TextLayoutResult shape the point-text path emits, so it rides the SAME
+                            // point-placement path downstream (§5.4: Kind.Point + AtlasKind, no parallel path).
+                            TextLayoutResult iconLayout = IconQuadLayout.ToLayoutResult(s.IconQuad);
+                            output.Add(new LabelInstance
+                            {
+                                AnchorRender = s.AnchorRender,
+                                Placement = SymbolPlacement.Point,
+                                Kind = LabelKind.Icon,
+                                Layout = iconLayout,
+                                IconImage = s.IconImage, // I6: cross-tile icon identity
+                                Paint = s.Paint,
+                                TextSizePx = TextQuadLayout.OneEm, // scale 1 — IconQuadLayout already baked icon-size in
+                                PaddingPx = s.PaddingPx,
+                                SortKey = s.SortKey,
+                                FeatureIndex = s.FeatureIndex,
+                                TileKey = s.TileKey,
+                                AllowOverlap = s.AllowOverlap,
+                                IgnorePlacement = s.IgnorePlacement,
+                                MaterialIndex = materialIndex,
+                                RotationAlignment = s.RotationAlignment,
+                            });
+                            continue;
+                        }
+
+                        resolver ??= _glyphManager.CreateResolver(fontStack);
                         ShapedRun run = _shaper.Shape(new ShapingRequest
                         {
                             Text = s.Text,

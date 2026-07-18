@@ -10,6 +10,7 @@ using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.Style.Symbol
@@ -36,13 +37,20 @@ namespace MapRenderer.Core.Style.Symbol
         /// <param name="zoom">Current zoom, for evaluating zoom-dependent text-size/sort-key/paint.</param>
         /// <param name="projection">Geo → render-space projection.</param>
         /// <param name="output">Caller-owned list the extracted labels are appended to.</param>
+        /// <param name="spriteAtlas">
+        /// I3 — the sprite sheet <c>icon-image</c> resolves against; <c>null</c> (the default) yields NO icon
+        /// labels regardless of the layer's <c>icon-*</c> properties, so every pre-I3 caller (which omits this
+        /// argument) is byte-identical to before I3. Point placement only — a line-placement layer never emits
+        /// icons even when an atlas is supplied.
+        /// </param>
         public static void Extract(
             MapRenderer.Core.Style.StyleLayer layer,
             IDecodedTile tile,
             TileId tileId,
             double zoom,
             IProjection projection,
-            List<SymbolLabel> output)
+            List<SymbolLabel> output,
+            SpriteAtlasView spriteAtlas = null)
         {
             if (!(layer is StyleLayer symbolLayer) || tile == null || projection == null || output == null)
                 return;
@@ -72,10 +80,31 @@ namespace MapRenderer.Core.Style.Symbol
                 if (feature.GeometryType != wantGeometry) continue; // point layer skips lines and vice-versa
 
                 // A6: the feature IS an IFeature (the neutral carrier implements it directly) — no adapter alloc.
+                // I3: text and icon are INDEPENDENT — a feature may resolve either, both, or neither. Only
+                // when NEITHER resolves is the feature skipped (the pre-I3 "text==null -> skip" rule is the
+                // isLine-or-null-atlas special case of this, so line/text-only-atlas behaviour is unchanged).
                 string text = TextFieldResolver.Resolve(layout.TextField, feature);
-                if (text == null) continue; // absent/empty text-field → no label
-                // text-transform (Slice B): case-fold the resolved label before it is shaped downstream.
-                text = layout.TextTransform.Apply(text);
+                if (text != null)
+                {
+                    // text-transform (Slice B): case-fold the resolved label before it is shaped downstream.
+                    text = layout.TextTransform.Apply(text);
+                }
+
+                // I3: icons are point-placement only (isLine skips them entirely) and only resolved when the
+                // caller supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
+                bool hasIcon = false;
+                SpriteEntry iconEntry = default;
+                // I6: hoisted to feature scope (was block-local + discarded) — the resolved sprite name is the
+                // icon's cross-tile identity, needed at the icon-emit site below (SymbolLabel.IconImage).
+                string iconImage = null;
+                if (!isLine && spriteAtlas != null)
+                {
+                    iconImage = IconImageResolver.Resolve(layout.IconImage, feature);
+                    if (iconImage != null)
+                        hasIcon = spriteAtlas.Index.TryGetSprite(iconImage, out iconEntry);
+                }
+
+                if (text == null && !hasIcon) continue; // neither a text label nor an icon → nothing to emit
 
                 // Per-feature evaluated style (zoom + feature — safe for constant/zoom/data-driven).
                 float textSize = layout.TextSize.Evaluate(zoom, feature);
@@ -84,6 +113,27 @@ namespace MapRenderer.Core.Style.Symbol
                 float spacing  = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, feature)); // px, >= 1 (spec)
                 float maxAngle = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees (#6)
                 LabelPaint labelPaint = EvaluatePaint(paint, zoom, feature);
+
+                // I3: the icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
+                // point within a MultiPoint feature) — build once here, stamp onto every point label below.
+                SymbolQuad iconQuad = default;
+                LabelPaint iconPaint = default;
+                float iconPadding = 0f;
+                if (hasIcon)
+                {
+                    float iconSize = layout.IconSize.Evaluate(zoom, feature);
+                    iconPadding = layout.IconPadding.Evaluate(zoom, feature);
+                    float iconOpacity = paint.IconOpacity.Evaluate(zoom, feature);
+                    iconQuad = IconQuadLayout.Layout(iconEntry, spriteAtlas.Size, iconSize, layout.IconAnchor, layout.IconOffset);
+                    iconPaint = new LabelPaint
+                    {
+                        TextColor = new float4(1f, 1f, 1f, 1f),
+                        Opacity = iconOpacity,
+                        HaloColor = new float4(1f, 1f, 1f, 1f),
+                        HaloWidthPx = 0f,
+                        HaloBlurPx = 0f,
+                    };
+                }
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
 
@@ -171,24 +221,49 @@ namespace MapRenderer.Core.Style.Symbol
                             double3 anchor = projection.Project(
                                 new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
 
-                            output.Add(new SymbolLabel
+                            // I3: text and icon are independent labels over the SAME anchor — text first,
+                            // then icon, so a feature with both emits two labels in a stable order.
+                            if (text != null)
                             {
-                                AnchorRender = anchor,
-                                Placement = SymbolPlacement.Point,
-                                Text = text,
-                                TextSizePx = textSize,
-                                PaddingPx = padding,
-                                SortKey = sortKey,
-                                AllowOverlap = layout.TextAllowOverlap,
-                                IgnorePlacement = layout.TextIgnorePlacement,
-                                FeatureIndex = ordinal++,
-                                TileKey = tileKey,
-                                Paint = labelPaint,
-                                LayoutOptions = layoutOptions,
-                                TranslatePx = translatePx,
-                                TranslateAnchor = paint.TranslateAnchor,
-                                RotationAlignment = layout.TextRotationAlignment,
-                            });
+                                output.Add(new SymbolLabel
+                                {
+                                    AnchorRender = anchor,
+                                    Placement = SymbolPlacement.Point,
+                                    Text = text,
+                                    TextSizePx = textSize,
+                                    PaddingPx = padding,
+                                    SortKey = sortKey,
+                                    AllowOverlap = layout.TextAllowOverlap,
+                                    IgnorePlacement = layout.TextIgnorePlacement,
+                                    FeatureIndex = ordinal++,
+                                    TileKey = tileKey,
+                                    Paint = labelPaint,
+                                    LayoutOptions = layoutOptions,
+                                    TranslatePx = translatePx,
+                                    TranslateAnchor = paint.TranslateAnchor,
+                                    RotationAlignment = layout.TextRotationAlignment,
+                                });
+                            }
+
+                            if (hasIcon)
+                            {
+                                output.Add(new SymbolLabel
+                                {
+                                    AnchorRender = anchor,
+                                    Placement = SymbolPlacement.Point,
+                                    Kind = LabelKind.Icon,
+                                    IconQuad = iconQuad,
+                                    IconImage = iconImage,
+                                    PaddingPx = iconPadding,
+                                    SortKey = sortKey,
+                                    AllowOverlap = layout.IconAllowOverlap,
+                                    IgnorePlacement = layout.IconIgnorePlacement,
+                                    RotationAlignment = layout.IconRotationAlignment,
+                                    Paint = iconPaint,
+                                    FeatureIndex = ordinal++,
+                                    TileKey = tileKey,
+                                });
+                            }
                         }
                     }
                 }

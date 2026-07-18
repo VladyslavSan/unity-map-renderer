@@ -197,7 +197,9 @@ namespace MapRenderer.Unity.Text
                     // Only point labels carry a cross-tile identity in v1; line labels emit as-is.
                     if (label.Placement != SymbolPlacement.Point) { output.Add(label); continue; }
 
-                    var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, quantizeMeters);
+                    // I6: icon cross-tile identity now rides label.IconImage (null for text, so a text key's
+                    // dedup identity is unchanged from before I6 — see CrossTileLabelKey's guard-skip fold).
+                    var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage, quantizeMeters);
                     int z = (int)(label.TileKey >> 44); // PackTileKey: z in the high bits (finest zoom wins)
                     if (!_dedup.TryGetValue(key, out DedupEntry cur)
                         || z > cur.Z || (z == cur.Z && label.TileKey < cur.TileKey))
@@ -229,7 +231,8 @@ namespace MapRenderer.Unity.Text
                     if (label == null) continue;
                     if (claims != null && label.Placement == SymbolPlacement.Point)
                     {
-                        var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, quantizeMeters);
+                        // I6: same guard-skip identity as the active-side key above (label.IconImage null for text).
+                        var key = CrossTileLabelKey.For(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage, quantizeMeters);
                         if (claims.ContainsKey(key)) continue;                 // active/earlier copy already shows it
                         claims[key] = new DedupEntry { Label = label, Z = 0, TileKey = label.TileKey }; // claim (ContainsKey only)
                     }

@@ -1,10 +1,12 @@
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// The single source of the MapLibre <c>symbol</c> / <c>text-*</c> style key strings — layout AND paint.
-    /// Every other class in <c>Style.Symbol</c> references these constants; no <c>"text-…"</c>/<c>"symbol-…"</c>
-    /// string literal lives anywhere else (enforced by a test, mirroring <c>Style.Line</c>). Clean-room: keys
-    /// from the public MapLibre Style Spec §symbol layer. TEXT-ONLY — <c>icon-*</c> keys are a later stage.
+    /// The single source of the MapLibre <c>symbol</c> / <c>text-*</c>/<c>icon-*</c> style key strings —
+    /// layout AND paint. Every other class in <c>Style.Symbol</c> references these constants; no
+    /// <c>"text-…"</c>/<c>"icon-…"</c>/<c>"symbol-…"</c> string literal lives anywhere else (enforced by a
+    /// test, mirroring <c>Style.Line</c>). Clean-room: keys from the public MapLibre Style Spec §symbol
+    /// layer. The point <c>icon-*</c> layout/paint keys (§5.1 IN) are included; <c>icon-color</c> and the
+    /// <c>icon-halo-*</c> trio are deferred to the SDF epic.
     /// </summary>
     public static class PropertyNames
     {
@@ -30,6 +32,14 @@ namespace MapRenderer.Core.Style.Symbol
         public const string TextAllowOverlap   = "text-allow-overlap";
         public const string TextIgnorePlacement = "text-ignore-placement";
         public const string TextPadding        = "text-padding";
+        public const string IconImage          = "icon-image";
+        public const string IconSize           = "icon-size";
+        public const string IconOffset         = "icon-offset";
+        public const string IconAnchor         = "icon-anchor";
+        public const string IconRotationAlignment = "icon-rotation-alignment";
+        public const string IconAllowOverlap   = "icon-allow-overlap";
+        public const string IconIgnorePlacement = "icon-ignore-placement";
+        public const string IconPadding        = "icon-padding";
 
         // ── paint ──
         public const string TextColor          = "text-color";
@@ -39,6 +49,7 @@ namespace MapRenderer.Core.Style.Symbol
         public const string TextHaloBlur       = "text-halo-blur";
         public const string TextTranslate      = "text-translate";
         public const string TextTranslateAnchor = "text-translate-anchor";
+        public const string IconOpacity        = "icon-opacity";
 
         // ── symbol-placement values (S20 is point-only; the others render unlabeled until a follow-up) ──
         public const string PlacementPoint      = "point";

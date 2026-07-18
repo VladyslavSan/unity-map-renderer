@@ -108,5 +108,20 @@ namespace MapRenderer.Core.Text.Placement
         /// or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
         /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
         public AlignmentMode RotationAlignment { get; init; }
+
+        /// <summary>I5a — distinguishes a text label from an icon label, threaded from
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.Kind"/>. Default <see cref="LabelKind.Text"/>
+        /// so every pre-I5a label (which never sets this) is unaffected. An icon label's single quad rides
+        /// inside <see cref="Layout"/> (via <c>IconQuadLayout.ToLayoutResult</c>) — this carrier gains no
+        /// separate icon-quad field, it just relabels the SAME point-placement path with a Kind tag (the
+        /// §5.4 decision: ride <c>Kind.Point</c> + this discriminator, not a parallel icon path). NOT yet
+        /// consumed by the draw side (I5b).</summary>
+        public LabelKind Kind { get; init; }
+
+        /// <summary>I6 icon identity, threaded from <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.IconImage"/>;
+        /// null for text. Folded into <see cref="CrossTileLabelKey"/> (guard-skip — a null value leaves a text
+        /// key's hash/equality unchanged) so distinct co-located icons no longer collide in cross-tile dedup
+        /// / the A-4 point fade id.</summary>
+        public string IconImage { get; init; }
     }
 }

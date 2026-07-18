@@ -4,6 +4,8 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
 
@@ -346,6 +348,91 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, output.Count, "the active copy shows; the departing twin is skipped (no double-draw)");
             Assert.AreEqual(1, activeCount, "…and it is the active one (nothing appended after the split)");
             Assert.AreEqual(1, output[0].FeatureIndex, "the surviving label is the active tile's");
+        }
+
+        // ═══ I6: icon cross-tile identity dedup (the I5b-deferred gap this stage closes) ═══
+
+        // A point label pinned to a fixed co-located anchor (double3.zero for every call — "co-located" needs no
+        // coordinate math since every test here only varies text/iconImage/tile) — mirrors CrossTileIdentityTests'
+        // PointLabel helper, extended with an iconImage param.
+        private static LabelInstance IconOrTextLabel(int layer, string text, string iconImage, int feature, TileId tile)
+            => new LabelInstance
+            {
+                Placement = SymbolPlacement.Point,
+                MaterialIndex = layer,
+                Text = text,
+                IconImage = iconImage,
+                FeatureIndex = feature,
+                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+            };
+
+        private static List<LabelInstance> CollectQuantized(SymbolTileLabelStore store, double q)
+        {
+            var output = new List<LabelInstance>();
+            store.CollectInto(output, q);
+            return output;
+        }
+
+        // ── ★ RED pre-fix: two co-located icons (same anchor cell + layer, text=null, DISTINCT icon-image) used
+        //    to collide into one (label.Text == null for both ⇒ the pre-I6 4-arg key ignored the icon). Now both
+        //    survive CollectInto. ──
+        [Test]
+        public void IconDedup_DistinctIconImage_SameCellAndLayer_BothSurvive()
+        {
+            const double q = 50.0;
+            var tile = new TileId { Z = 12, X = 3, Y = 4 };
+            var a = IconOrTextLabel(0, null, "sprite-a", 1, tile);
+            var b = IconOrTextLabel(0, null, "sprite-b", 2, tile);
+
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var key = new SymbolTileLabelStore.Key("src", tile);
+            store.CompleteBuild(key, store.BeginBuild(key), new List<LabelInstance> { a, b });
+
+            Assert.AreEqual(2, CollectQuantized(store, q).Count, "distinct icon-image at the same cell are NOT merged");
+        }
+
+        // ── Same icon-image in a parent + child tile still dedups to ONE (the seamless-swap property icons
+        //    now share with text). ──
+        [Test]
+        public void IconDedup_SameIconImage_ParentAndChildTile_DedupsToOne()
+        {
+            const double q = 50.0;
+            var parent = new TileId { Z = 10, X = 500, Y = 400 };
+            var child = new TileId { Z = 11, X = 1000, Y = 800 };
+            var parentLabel = IconOrTextLabel(0, null, "sprite-a", 1, parent);
+            var childLabel = IconOrTextLabel(0, null, "sprite-a", 2, child);
+
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var kParent = new SymbolTileLabelStore.Key("src", parent);
+            var kChild = new SymbolTileLabelStore.Key("src", child);
+            store.CompleteBuild(kParent, store.BeginBuild(kParent), new List<LabelInstance> { parentLabel });
+            store.CompleteBuild(kChild, store.BeginBuild(kChild), new List<LabelInstance> { childLabel });
+
+            List<LabelInstance> output = CollectQuantized(store, q);
+            Assert.AreEqual(1, output.Count, "the same icon in a parent+child tile collapses to one");
+            Assert.AreSame(childLabel, output[0], "the finest (child) tile's label wins");
+        }
+
+        // ── Byte-identical control: the pre-I6 text-dedup case, unaffected by the icon change — a text label at
+        //    the same cell/layer in a parent+child tile still dedups to one, finest-zoom wins. ──
+        [Test]
+        public void TextDedup_SameTextAndCell_ParentAndChildTile_DedupsToOne_Unaffected()
+        {
+            const double q = 50.0;
+            var parent = new TileId { Z = 10, X = 500, Y = 400 };
+            var child = new TileId { Z = 11, X = 1000, Y = 800 };
+            var parentLabel = IconOrTextLabel(0, "Metropolis", null, 1, parent);
+            var childLabel = IconOrTextLabel(0, "Metropolis", null, 2, child);
+
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            var kParent = new SymbolTileLabelStore.Key("src", parent);
+            var kChild = new SymbolTileLabelStore.Key("src", child);
+            store.CompleteBuild(kParent, store.BeginBuild(kParent), new List<LabelInstance> { parentLabel });
+            store.CompleteBuild(kChild, store.BeginBuild(kChild), new List<LabelInstance> { childLabel });
+
+            List<LabelInstance> output = CollectQuantized(store, q);
+            Assert.AreEqual(1, output.Count, "text dedup is unchanged by I6");
+            Assert.AreSame(childLabel, output[0], "the finest (child) tile's label wins");
         }
     }
 }
