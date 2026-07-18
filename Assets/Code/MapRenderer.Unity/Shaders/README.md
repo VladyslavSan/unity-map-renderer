@@ -14,8 +14,8 @@ the invariants they hold.
 ### Minimal delta over stock URP Lit
 
 Every map shader is **stock URP Lit, verbatim, minus only genuine logic deltas**. A verbatim copy of
-the URP Lit set is vendored at `UnityLit/` (`Shader "Template/UnityLit"`) as a diff baseline — a `diff`
-of a map pass against its `UnityLit/` counterpart should reduce to exactly:
+the URP Lit set is vendored at `Unity/Lit/` (`Shader "Template/UnityLit"`) as a diff baseline — a `diff`
+of a map pass against its `Unity/Lit/` counterpart should reduce to exactly:
 
 1. the Properties header (map paint props + the tweakable render-state params
    `_SrcBlend/_DstBlend/_SrcBlendAlpha/_DstBlendAlpha/_ZWrite/_ZTest/_Cull/_BlendOp`),
@@ -24,7 +24,7 @@ of a map pass against its `UnityLit/` counterpart should reduce to exactly:
 
 Everything else stays byte-identical, **including the full keyword-gated feature set**. Do not
 hand-strip "unused" keywords (`_NORMALMAP`, `_DETAIL`, …): `shader_feature` compiles them out when the
-material doesn't set them, so keeping them costs nothing and preserves parity. See `UnityLit/README.md`.
+material doesn't set them, so keeping them costs nothing and preserves parity. See `Unity/Lit/README.md`.
 
 ### No flat-ground assumption — the per-vertex frame
 

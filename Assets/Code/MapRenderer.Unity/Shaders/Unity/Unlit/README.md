@@ -2,7 +2,7 @@
 
 A **verbatim copy** of Unity's Universal Render Pipeline *Unlit* shader set, vendored into the repo to
 serve as a **reference template** for the planned GPU-cheap Unlit map-shader variant (see
-`docs/meshing-design.md` §3 "Unlit variant"). It is the Unlit counterpart to the `UnityLit/` template:
+`docs/meshing-design.md` §3 "Unlit variant"). It is the Unlit counterpart to the `../Lit/` template:
 keeping these files in-tree lets a future `Map/*` Unlit shader be diffed directly against its upstream
 counterpart to confirm the only differences are the intended ones.
 
@@ -23,7 +23,7 @@ counterpart to confirm the only differences are the intended ones.
 
 The shader's `DepthOnly` pass includes stock `DepthOnlyPass.hlsl`, which is **not** Unlit-specific and is
 **not** copied here — that include is left on its package path (the same file is vendored under
-`UnityLit/DepthOnlyPass.hlsl` if a local baseline is ever needed). Likewise the `Meta`/`MotionVectors`/
+`../Lit/DepthOnlyPass.hlsl` if a local baseline is ever needed). Likewise the `Meta`/`MotionVectors`/
 `XRMotionVectors` passes and every `#include_with_pragmas "…/ShaderLibrary/…"` keep their package paths.
 
 ## Modifications from upstream
@@ -44,7 +44,7 @@ The `Template/UnityUnlit` shader is reference-only; it is not used by any materi
 ## How a future Unlit map shader relates to this template
 
 An Unlit `Map/*` shader should diff against this template down to the same small delta set the Lit map
-shaders keep over `UnityLit/` (see `../UnityLit/README.md`):
+shaders keep over `../Lit/` (see `../Lit/README.md`):
 
 1. **Properties header** — our own map props (`_Color`, `_Opacity`, `_Width`, `_Blur`, gap/dash/offset, …)
    plus the render-state params that make the shader tweakable (`_SrcBlend`/`_DstBlend`/`_SrcBlendAlpha`/

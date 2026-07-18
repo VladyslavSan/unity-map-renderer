@@ -2,7 +2,7 @@
 //
 // Origin:   Packages/com.unity.render-pipelines.universal/Shaders/LitDepthNormalsPass.hlsl
 //           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
-//           Verbatim reference copy: Assets/Code/MapRenderer.Unity/Shaders/UnityLit/LitDepthNormalsPass.hlsl
+//           Verbatim reference copy: Assets/Code/MapRenderer.Unity/Shaders/Unity/Lit/LitDepthNormalsPass.hlsl
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 //
