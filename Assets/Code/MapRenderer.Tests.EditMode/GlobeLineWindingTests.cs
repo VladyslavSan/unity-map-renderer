@@ -1,8 +1,9 @@
-// GlobeLineWindingTests — the line RIBBON must wind the same way relative to its surface normal on the globe
-// as on the (confirmed-correct) flat Mercator build, so one Cull mode culls the back hemisphere without hiding
-// the near one. Lines are extruded in the vertex shader (pos + across·side·width), so — unlike fills — the
-// rendered winding is NOT visible in the centerline mesh positions; this test RECONSTRUCTS the extruded ribbon
-// the way the shader does, then measures sign(dot(faceNormal, surfaceNormal)) per triangle.
+// GlobeLineWindingTests — the line RIBBON's emitted front face must point OUT of the surface (sign +1) on BOTH
+// the globe and the flat Mercator build, so stock Cull Back (shipped MapLine.mat _Cull:2) keeps the near-side
+// ribbon and culls the far side without hiding the near one. Asserts the absolute +1 invariant AND globe ==
+// Mercator (one cull mode fits both). Lines are extruded in the vertex shader (pos + across·side·width), so —
+// unlike fills — the rendered winding is NOT visible in the centerline mesh positions; this test RECONSTRUCTS
+// the extruded ribbon the way the shader does, then measures sign(dot(faceNormal, surfaceNormal)) per triangle.
 //
 // Winding is derived BY CONSTRUCTION (S100): the ribbon `across = cross(along, up)` is tied to the SAME `up`
 // the centerline was projected with (one frame), so the globe ribbon winds the same way as the flat Mercator
@@ -64,6 +65,13 @@ namespace MapRenderer.Tests
 
             Assert.Greater(mUnif, 0.99, "Mercator ribbon winding is not uniform");
             Assert.Greater(gUnif, 0.99, "globe ribbon winding is not uniform");
+            // ABSOLUTE invariant (post the GPU-boundary winding reversal in StyledLineTileBuilder): the extruded
+            // ribbon's front face points OUT of the surface (sign +1), the orientation stock Cull Back (shipped
+            // MapLine.mat _Cull:2) keeps for the camera-facing side. Sign −1 means the reversal was dropped and
+            // the ribbon renders inverted. Closes the hole the relative-only check left (both sides could flip
+            // together and stay green).
+            Assert.AreEqual(1, mSign, $"{fixture}: Mercator ribbon front face must point OUT (Unity-front under stock Cull Back)");
+            Assert.AreEqual(1, gSign, $"{fixture}: globe ribbon front face must point OUT (Unity-front under stock Cull Back)");
             Assert.AreEqual(mSign, gSign,
                 $"{fixture}: globe line ribbon winds OPPOSITE to Mercator relative to the surface normal — " +
                 "back-face culling that shows Mercator would hide the near hemisphere on the globe.");

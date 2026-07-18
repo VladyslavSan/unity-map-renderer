@@ -42,6 +42,14 @@ essay. Keep the two in sync: when a rule changes, edit `conventions.md` and upda
   (`StyledFillTileBuilder`, `StyledLineTileBuilder`); generic names (`MeshBuilder`, `TileMeshFactory`) are
   reserved for genuinely type-agnostic dispatchers.
 
+- **Geometry producers declare their output winding; boundaries convert.** A triangle-producing type (`Earcut`,
+  `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`) states its output winding + coordinate space in
+  its XML summary. There is **one canonical winding** (CCW in tile space); the producer never bakes the render
+  convention. The Unity-front reversal for stock Cull Back happens at **one** boundary per mesh kind
+  (`StyledFill`/`StyledLineTileBuilder`) — same "convert at the Unity boundary, never upstream" rule as
+  `double3`→`Vector3`. Keeps `Core` engine-free and the parity oracles hashing canonical winding. Cause + full
+  contract in `docs/coordinates-and-projections.md` §7.1; pinned by `GlobeFill`/`GlobeLineWindingTests`.
+
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not
   belong on the production class. Allowed footprint: broaden `private` → `internal` (+ `InternalsVisibleTo`),
   or put computed accessors/adapters as extension methods in the **test** assembly. Not allowed: `public`

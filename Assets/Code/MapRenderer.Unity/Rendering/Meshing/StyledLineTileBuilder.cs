@@ -292,10 +292,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         });
                     }
 
-                    // No winding flip: `across = cross(along, up)` ties the ribbon to the same `up` the centerline
-                    // was projected with (one frame), so front-faces point outward for every projection.
-                    for (int k = 0; k < ni; k++)
-                        tempIndices.Add(offset + outI[k]);
+                    // Reverse triangle winding at this GPU-index boundary (mirrors the fill reversal in
+                    // StyledFillTileBuilder). The ribbon `across = cross(along, up)` is tied to the same `up` the
+                    // centerline was projected with (one frame), so ribbons wind consistently across projections;
+                    // but the ECEF→render mapping is orientation-reversing (§7.1), so the raw order renders
+                    // back-faces toward the camera. Swapping the 2nd/3rd index per triangle makes the rendered
+                    // front face genuinely Unity-front — enabling stock Cull Back (MapLine _Cull:2), which also
+                    // culls far-side globe ribbons (no more double-sided workaround).
+                    for (int k = 0; k + 2 < ni; k += 3)
+                    {
+                        tempIndices.Add(offset + outI[k + 0]);
+                        tempIndices.Add(offset + outI[k + 2]); // 2nd/3rd
+                        tempIndices.Add(offset + outI[k + 1]); // swapped
+                    }
                 }
             }
             }

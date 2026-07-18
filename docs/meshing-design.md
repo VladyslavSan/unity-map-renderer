@@ -66,8 +66,9 @@ resulting vertices afterward. On the globe a post-Project **Subdivide** then ref
 
 **Why lines Triangulate *after* Project.** The ribbon extrusion needs the **projected 3D centerline plus its
 `up`** to build the cross-section: `across = normalize(cross(along, up))`, tying the ribbon width to the same
-`up` the centerline was projected with (**winding by construction** — correct front-faces for every projection,
-no flip; see [`coordinates-and-projections.md` §7.1](coordinates-and-projections.md) and §8). So the centerline
+`up` the centerline was projected with (**winding consistent by construction** across projections — no
+per-projection flip; the uniform Unity-front reversal for stock Cull Back happens at the mesh-write boundary,
+see [`coordinates-and-projections.md` §7.1](coordinates-and-projections.md) and §8). So the centerline
 is subdivided and projected first, then `LineRibbonJob` triangulates in render space.
 
 ## Threading & lifetime (both kinds)
@@ -180,8 +181,9 @@ it cleans the outer silhouettes cheaply. It is currently off (`m_MSAA: 1`) in th
 - **Min-width floor** (`Line_VertexExtrude.hlsl`) — the sole thin-line safeguard now.
 - **`_Blur` (line-blur)** — a real MapLibre paint property, opt-in soft edge, default 0 = hard. Not AA.
 - **Dash** coverage and its along-line feather.
-- **Front-face cull** (`MapLine.mat` `_Cull: 1`) — matches `MapFill`; culls far-side globe lines. Unrelated to AA
-  but landed alongside.
+- **Back-face cull** (`MapLine.mat` `_Cull: 2`, stock URP) — matches `MapFill`; the mesh-boundary winding
+  reversal makes ribbons Unity-front, so stock Back culls far-side globe lines (retired the double-sided
+  globe-line workaround). Unrelated to AA but landed alongside.
 
 A git **stash** holds the `_LINE_AA_OUTSET` outset-AA toggle + `sideScale` groundwork — useful raw material if
 the single-pass route reuses a distance parametrization. Naming gotcha that still stands: never name an internal

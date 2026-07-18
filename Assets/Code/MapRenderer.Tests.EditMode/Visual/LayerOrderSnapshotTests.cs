@@ -177,11 +177,12 @@ namespace MapRenderer.Tests.Visual
             };
             mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
             mesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
-            // CCW winding — MapFill.mat sets _Cull:1 (Cull Front), so the front-facing {0,2,1,0,3,2} order
-            // renders INVISIBLE from above (the §7.11 bug: these quads drew nothing, and the composite tooth
-            // passed vacuously on the lone blue line). {0,1,2,0,2,3} matches earcut's outer-ring CCW-on-screen
-            // convention (Earcut.cs:17) so the real cull state renders them — same fix as BackgroundRenderLayer.
-            mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+            // This quad is hand-built (it does NOT flow through StyledFillTileBuilder's boundary winding reversal),
+            // so it must be wound to be Unity-front under the shipped MapFill.mat _Cull:2 (stock Cull Back).
+            // Viewed from above (+Y normal), the Unity-front-facing order is {0,2,1,0,3,2}; {0,1,2,0,2,3} would
+            // render INVISIBLE (back-facing → culled), re-creating the vacuous-composite failure. (Pre-flip this
+            // was inverted: Cull Front + {0,1,2,0,2,3}. Same render, mirrored convention.)
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
             mesh.RecalculateBounds();
 
             var go = new GameObject("FillQuad");

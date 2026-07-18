@@ -18,6 +18,9 @@ namespace MapRenderer.Core.Geometry
     /// Winding normalisation: outer ring is normalised to CCW-on-screen (negative shoelace in
     /// Y-down tile space); holes to CW-on-screen (positive shoelace). This is done internally;
     /// callers need not pre-arrange winding.
+    /// OUTPUT WINDING: triangles are emitted CCW — the pipeline's single canonical winding. It is reversed
+    /// once to Unity-front at the mesh-write boundary (`StyledFillTileBuilder`) for stock Cull Back; the
+    /// producer never bakes the render convention. See `docs/coordinates-and-projections.md` §7.1.
     ///
     /// Stall cascade (mesh-triangulation-robustness §5, direction W): on a full pass with no ear,
     /// a first stall does a full ear-status refresh (unchanged — catches stale isEar values). A

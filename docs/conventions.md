@@ -229,6 +229,29 @@ assumes it handles lines too, and bolts line logic onto a fill builder. The reti
 *(Established S54 — the retired Gen-1 `MeshBuilder` / `TileMeshFactory` were the naming offenders this rule
 targets.)*
 
+## Geometry producers declare their output winding; boundaries convert
+
+A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`)
+must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
+method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
+whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens
+at **exactly one place per mesh kind**: the GPU mesh-write boundary (`StyledFillTileBuilder` /
+`StyledLineTileBuilder`), where the canonical CCW is reversed to Unity-front for stock **Cull Back**.
+
+**The rule in two halves — producers declare, boundaries convert:**
+- A producer **never bakes the render convention** into its output. Winding-for-Unity-culling is a consumer-side
+  concern (the same "convert at the Unity boundary, never upstream" rule as `double`→`float` / `double3`→`Vector3`).
+  Baking it upstream would (a) leak a Unity assumption into engine-free `Core`, and (b) break the parity oracles
+  that hash the canonical IR (`JobifiedPipelineTests`, `GlobeSubdivisionJobParityTests`).
+- The conversion lives at **one** boundary per kind, stated in a comment that names the reflection cause
+  (`docs/coordinates-and-projections.md` §7.1). Don't scatter per-projection or per-path winding flips — the
+  winding is uniform by construction, so one reversal serves every projection.
+
+**Why:** the winding a producer emits in 2D tile space is *inverted* by the time it reaches Unity's left-handed
+render space (the load-bearing ECEF reflection, §7.1). If each producer's convention isn't stated, every consumer
+re-derives the sign by hand — the exact "why do we reverse this?" confusion this rule removes. Pinned by
+`GlobeFillWindingTests` / `GlobeLineWindingTests` (absolute: front face points out of the surface).
+
 ## Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class
 
 Two resource classes, kept strictly apart (platform-forced, not stylistic — jobs can't touch a

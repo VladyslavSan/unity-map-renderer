@@ -34,6 +34,10 @@ namespace MapRenderer.Jobs
     /// per-tile <c>Budget</c> so a whole-globe z0 tile can't explode. A flat projection (constant up) never
     /// splits — it passes straight through.
     ///
+    /// <para>OUTPUT WINDING: each refined triangle preserves its parent's vertex order, so the output stays CCW —
+    /// the pipeline's single canonical winding (inherited from <c>Earcut</c>), reversed once to Unity-front at the
+    /// mesh-write boundary (<c>StyledFillTileBuilder</c>) for stock Cull Back; see <c>docs §7.1</c>.</para>
+    ///
     /// <para><b>Burst.</b> The projection is the generic struct <typeparamref name="TProj"/> (the
     /// <see cref="ProjectPointsJob{TProj}"/> pattern) so Burst devirtualises + inlines <c>ProjectPoint</c> /
     /// <c>TangentBasisAt</c> — no managed call. The recursion is an EXPLICIT stack (Burst does not reliably

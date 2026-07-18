@@ -8,6 +8,8 @@
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Unity.Rendering.Materials;
+using UnityEngine.Rendering;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -27,9 +29,10 @@ namespace MapRenderer.Tests.Visual
                 viewSize: 2f,                       // globe ≈ 2 units across (radius ≈ 1)
                 projection: new SphericalProjection());
 
-            // Back-face cull so only the near hemisphere shows (no far-side bleed through ocean gaps).
-            // 0=Off, 1=Front, 2=Back. If the sphere renders inside-out, the tile→sphere winding is flipped.
-            if (mat != null) mat.SetFloat("_Cull", 2f);
+            // Stock Cull Back (matches the shipped MapFill.mat) so only the near hemisphere shows (no far-side
+            // bleed through ocean gaps). Post the GPU-boundary winding reversal (StyledFillTileBuilder), the near-
+            // hemisphere fills are genuinely Unity-front → Back keeps them.
+            if (mat != null) mat.SetCull(CullMode.Back);
 
             // Directional light to shade the sphere (Lit material is near-black at ambient-only).
             var lightGo = new GameObject("GlobeLight");

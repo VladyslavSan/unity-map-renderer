@@ -456,11 +456,11 @@ namespace MapRenderer.Jobs
             var outIndices     = new NativeArray<int>(totalIdxCount > 0 ? totalIdxCount : 1,
                                                       Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
-            // Winding is projection-independent: the render mapping transforms triangle vertices and the surface
-            // normal identically (the globe's ECEF axis-swap reflects both), so the front/back orientation is
-            // preserved and the raw earcut winding is correct for planar AND curved projections alike. (An earlier
-            // globe-only reversal, premised on the axis-swap "reflecting the winding", inverted the globe's
-            // front-faces — the reported "front renders as back" glitch. Guarded by GlobeFillWindingTests.)
+            // This buffer is the CANONICAL earcut IR: raw CCW-in-tile-space winding, byte-identical to the managed
+            // earcut reference (JobifiedPipelineTests parity), and projection-independent. The Unity-front winding
+            // conversion (for stock Cull Back) is applied DOWNSTREAM at the GPU mesh-write boundary — the ribbon in
+            // StyledLineTileBuilder and both fill writes in StyledFillTileBuilder — never here; keep this IR
+            // convention-neutral so the earcut parity + globe-subdivide parity oracles hash raw winding.
             int globalVertBase = 0;
             int globalIdxBase  = 0;
             for (int pi = 0; pi < polyCount; pi++)

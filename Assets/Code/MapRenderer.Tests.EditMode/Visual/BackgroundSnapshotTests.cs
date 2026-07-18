@@ -316,11 +316,10 @@ namespace MapRenderer.Tests.Visual
             return half;
         }
 
-        /// <summary>The <c>LayerOrderSnapshotTests.BuildFillQuad</c> vertex-attribute recipe, with the
-        /// triangle winding REVERSED to match the real fill material's <c>_Cull=1</c> (Front) render state —
-        /// production fill meshes (earcut-derived) come out wound so that convention keeps them; a hand-built
-        /// quad wound the "naive" way is front-facing under Unity's standard convention and gets exactly the
-        /// triangles <c>_Cull=1</c> discards.</summary>
+        /// <summary>The <c>LayerOrderSnapshotTests.BuildFillQuad</c> vertex-attribute recipe. This hand-built
+        /// quad does NOT flow through <c>StyledFillTileBuilder</c>'s boundary winding reversal, so it is wound to be
+        /// Unity-front under the shipped <c>MapFill.mat _Cull:2</c> (stock Cull Back): viewed from above (+Y
+        /// normal) the front-facing order is <c>{0,2,1,0,3,2}</c>.</summary>
         private static Mesh BuildFillQuadMesh(float half)
         {
             var mesh = new Mesh { name = "MidStackFillQuad" };
@@ -339,7 +338,7 @@ namespace MapRenderer.Tests.Visual
             };
             mesh.uv = new[] { Vector2.zero, Vector2.right, Vector2.one, Vector2.up };
             mesh.colors = new[] { Color.white, Color.white, Color.white, Color.white };
-            mesh.triangles = new[] { 0, 1, 2, 0, 2, 3 };
+            mesh.triangles = new[] { 0, 2, 1, 0, 3, 2 };
             mesh.RecalculateBounds();
             return mesh;
         }

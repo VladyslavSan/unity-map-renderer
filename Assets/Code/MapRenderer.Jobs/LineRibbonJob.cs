@@ -18,8 +18,10 @@ namespace MapRenderer.Jobs
     /// emission order, same tie-breaking, same worst-case sizing. The ONLY substitution is the per-segment
     /// direction: where the 2D tessellator's left normal is <c>(−dy, dx)</c>, here
     /// <c>across = normalize(cross(along, up))</c> — tied to the SAME <c>up</c> the centerline was projected with,
-    /// so front-face winding is correct BY CONSTRUCTION (no winding flip; <c>docs §7.1</c>,
-    /// <c>GlobeLineWindingTests</c>). Round arcs, which the 2D code sweeps with <c>atan2</c> on the unit circle,
+    /// so ribbon winding is UNIFORM across projections BY CONSTRUCTION (no per-projection flip). OUTPUT WINDING:
+    /// CCW — the pipeline's single canonical winding (same as <see cref="LineTessellator"/>), reversed once to
+    /// Unity-front at the mesh-write boundary (<c>StyledLineTileBuilder</c>) for stock Cull Back; see
+    /// <c>docs §7.1</c> and <c>GlobeLineWindingTests</c>. Round arcs, which the 2D code sweeps with <c>atan2</c> on the unit circle,
     /// are swept here in the local tangent-plane basis (<c>cos·e0 + sin·e1</c>) — the same equal-angle sweep,
     /// generalised to a curved surface.</para>
     ///

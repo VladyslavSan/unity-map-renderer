@@ -218,8 +218,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     s3[i] = featureColors[buffers.VertexFeatureIdx[i]];  // per-feature linear color
                 }
 
-                for (int i = 0; i < totalIndices; i++)
-                    indices[i] = buffers.TriangleIndices[i];
+                // Reverse triangle winding at this GPU-index boundary: the canonical earcut IR is CCW in tile
+                // space, but the ECEF→render mapping is orientation-reversing (§7.1), so raw winding renders
+                // back-faces toward the camera. Swapping the 2nd/3rd index per triangle makes the front face
+                // genuinely Unity-front → stock Cull Back (MapFill _Cull:2). Mirrors StyledLineTileBuilder.
+                for (int i = 0; i + 2 < totalIndices; i += 3)
+                {
+                    indices[i + 0] = buffers.TriangleIndices[i + 0];
+                    indices[i + 1] = buffers.TriangleIndices[i + 2]; // 2nd/3rd
+                    indices[i + 2] = buffers.TriangleIndices[i + 1]; // swapped
+                }
 
                 md.subMeshCount = 1;
                 md.SetSubMesh(0, new SubMeshDescriptor(0, totalIndices, MeshTopology.Triangles), NoValidate);
@@ -284,7 +292,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     s2[i] = new Vector4(east.x, east.y, east.z, 1f);      // w=+1: same TBN handedness as the Mercator path
                     s3[i] = featureColors[fv.Feature];
                 }
-                for (int i = 0; i < ni; i++) indices[i] = outIx[i];
+                // Reverse winding at the GPU-index boundary (same as the flat path above): the subdivided output
+                // inherits the canonical earcut CCW order, flipped here to Unity-front for stock Cull Back.
+                for (int i = 0; i + 2 < ni; i += 3)
+                {
+                    indices[i + 0] = outIx[i + 0];
+                    indices[i + 1] = outIx[i + 2]; // 2nd/3rd
+                    indices[i + 2] = outIx[i + 1]; // swapped
+                }
 
                 md.subMeshCount = 1;
                 md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);

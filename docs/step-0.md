@@ -52,6 +52,6 @@ sample-tile.bytes ─► MvtDecoder ─► MvtGeometry (command stream → rings
 - `mesh.indexFormat = UInt32` (dense tiles exceed 65535 verts).
 - Single-tile precision: subtract the tile-origin Mercator (double), then cast to float.
 - Spike rendered double-sided (`Cull Off`) and deferred winding. RESOLVED: the raw MVT/earcut winding is
-  projection-correct for planar AND globe (the render mapping transforms verts + surface normal identically),
-  so fills front-face outward on both; the fill forward pass now drives `Cull [_Cull]`. See
-  `GlobeFillWindingTests`.
+  uniform for planar AND globe (the render mapping transforms verts + surface normal identically), and is
+  reversed once at the `StyledFillTileBuilder` mesh-write boundary to a genuine Unity-front face — so stock
+  `Cull Back` (`_Cull:2`) keeps the camera-facing surface on both. See `GlobeFillWindingTests`.

@@ -154,7 +154,9 @@ on the managed side (through the boxed struct; no Burst constraint there).
 ## 7. Axis conventions (Unity is left-handed, Y-up) — LOCKED defaults
 - **ECEF → Unity:** `unity = (X, Z, Y)` (swap Y/Z; flips right-handed Z-up → left-handed Y-up).
 - **Mercator plane → Unity:** east → `+X`, north → `+Z`, elevation/height → `+Y`.
-- Front-face winding: **CCW**. Globe surface normal for lighting = geodetic `up` (§3).
+- Winding: geometry is **constructed CCW** (canonical earcut/ribbon IR), then **reversed to Unity-front at the
+  GPU mesh-write boundary** (`StyledFill`/`StyledLineTileBuilder`) so stock **Cull Back** (`_Cull:2`) keeps the
+  camera-facing surface (§7.1). Globe surface normal for lighting = geodetic `up` (§3).
 - **Camera tilt is defined relative to the surface normal at `LookAt`.** `tilt = 0°` ⇒ the camera view
   (forward) vector is the **inverse of the earth normal at `LookAt`** (top-down); `tilt = 90°` ⇒ the view is
   **parallel to the surface at `LookAt`** (horizon), and is the limit ⇒ range `[0°, 90°]`. The normal is
@@ -178,15 +180,21 @@ is exactly cancelled by the `(East, Up, North)` **column ordering** of `Ecef.Tan
 `(−1)·(−1) = +1`. The reflection and the column order are a **matched pair**. `GlobePlacementTests` guards this
 directly: *"det(B) must be +1 (proper rotation)"*.
 
-**Winding is a per-path concern, not a world-handedness property.** After the rebase, both projections render in
-the same right-handed local frame — there is no world-handedness difference to "fix". Front-face correctness is
-decided per geometry **construction**:
-- **Fills** map all three triangle vertices through `ProjectPoint` (one map) → self-consistent → the raw
-  MVT/earcut winding is already correct, **no flip**.
-- **Lines** build the centerline through `ProjectPoint` but the `across` extrusion through `TangentBasisAt` (a
-  *separate* frame) → the two maps disagree in orientation on the globe → the ribbon inverts → **needs a winding
-  reversal**. `IProjection.ReversesWinding` names this handedness fact; **only the line path consults it** (fills
-  ignore it). Pinned by Mercator-calibrated `GlobeFillWindingTests` / `GlobeLineWindingTests`.
+**Winding: canonical CCW construction, reversed once at the GPU boundary.** After the rebase, both projections
+render in the same right-handed local frame — there is no world-handedness difference to "fix", and both paths
+wind **consistently by construction** (S100): fills map all three triangle vertices through one `ProjectPoint`,
+and lines tie `across = cross(along, up)` to the same `up` the centerline was projected with — so the canonical
+winding is uniform across fills, lines, and every projection, with **no per-projection flip** (`ReversesWinding`
+/`IsCurved` were retired — §8 rule 5; there is no handedness/curvature lookup). But that canonical order is
+**CCW**, and the ECEF→render reflection makes CCW render back-faces toward the camera. So the **GPU mesh-write
+boundary reverses triangle winding once, uniformly** — both `StyledFillTileBuilder` fill writes, the globe
+subdivide output, `StyledLineTileBuilder`, and the test `SyntheticLineMesh.Upload` — to yield a genuine
+Unity-front face for **stock Cull Back** (`MapFill`/`MapLine` `_Cull:2`, matching the already-stock
+`MapSymbolText`). The upstream IR (`TileMeshBuffers.TriangleIndices`, the subdivide job output) stays
+CCW/convention-neutral so the earcut and globe-subdivide parity oracles hash raw winding. Pinned by
+`GlobeFillWindingTests` / `GlobeLineWindingTests` — now an **absolute** check (front face points OUT of the
+surface, dominant sign +1) *plus* globe == Mercator, so an inversion can't hide behind a relative-only compare
+(the hole that let "front renders as back" ship).
 
 **The de-reflection experiment (rejected).** Hypothesis: make Spherical right-handed like Mercator
 (`(X,Z,Y)→(X,Z,−Y)`, a rotation) across `Ecef.Forward` / `TangentBasis` / `ProjectPoint` / `ReconstructView` +
@@ -194,8 +202,10 @@ inverse trig, and drop the line flip. Measured, on a branch:
 1. **`det(TangentBasis) → −1`** ⇒ `GlobePlacementTests` fails (rebase is no longer a rotation ⇒ the tile-transform
    quaternion is garbage). The reflection is structurally required — confirming the matched pair above.
 2. **Winding did not unify — it *swapped*.** A global de-reflection flips *every* mesh-local winding, so the fill
-   (which needed no flip) inverted while the line (which needed one) became correct — you trade the line flip for a
-   fill flip. `GlobeFillWindingTests` went red (globe +1 vs Mercator −1); the line test went green. Net zero.
+   inverted while the line became correct — you trade one flip for another. `GlobeFillWindingTests` went red
+   (globe +1 vs Mercator −1); the line test went green. Net zero. *(This predates S100: winding is now uniform by
+   construction, and a single boundary reversal serves both paths — so a de-reflection would just move the one
+   reversal, not swap per-path flips. The load-bearing-reflection conclusion is unchanged.)*
 3. **Snapshots were unchanged (a render no-op).** The coordinated de-reflection composes straight back through the
    rebase (`rebase' · project'` = `rebase · project`), so the *rendered pixels* are identical — the reflection is an
    internal representation detail, invisible on screen.
@@ -204,8 +214,10 @@ inverse trig, and drop the line flip. Measured, on a branch:
 - A right↔left handedness change is necessarily a reflection; you cannot "rotate it away".
 - If a reflection is composed into a downstream **rotation** (here `rebase`), it is load-bearing — moving it flips
   the downstream determinant and breaks any rotation-only consumer (quaternion, `LookRotation`).
-- Winding correctness lives with the geometry **construction**, not the projection's world handedness. Two paths
-  that build differently (single-map vs. two-map) can need opposite treatment under the *same* projection.
+- Winding correctness lives with the geometry **construction**, not the projection's world handedness — and
+  (S100) it is uniform across paths (`across = cross(along, up)` ties the ribbon to the centerline's `up`), so
+  one reversal at the mesh-write boundary serves fills and lines on every projection: no per-path, no
+  per-projection flip.
 - When handedness reasoning gets slippery, **don't derive the sign — calibrate to a known-good reference and test**
   (both winding tests calibrate the globe against Mercator; snapshots catch a mirror the winding sign can't).
 

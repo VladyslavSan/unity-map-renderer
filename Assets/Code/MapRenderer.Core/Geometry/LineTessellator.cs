@@ -29,13 +29,16 @@ namespace MapRenderer.Core.Geometry
         /// <summary>
         /// Result of a polyline mesh build: flat vertex array and triangle indices,
         /// mirroring <see cref="Earcut.Result"/> shape.
+        /// OUTPUT WINDING: CCW — the pipeline's single canonical winding (same as <see cref="Earcut"/>),
+        /// reversed once to Unity-front at the mesh-write boundary (`StyledLineTileBuilder`) for stock Cull
+        /// Back; the producer never bakes the render convention. See `docs/coordinates-and-projections.md` §7.1.
         /// </summary>
         public readonly struct Result
         {
             /// <summary>Flat array of all ribbon vertices in emission order.</summary>
             public readonly LineVertex[] Vertices;
 
-            /// <summary>Triangle indices (3 per triangle) into <see cref="Vertices"/>.</summary>
+            /// <summary>Triangle indices (3 per triangle) into <see cref="Vertices"/>, wound CCW (see struct summary).</summary>
             public readonly int[] Indices;
 
             public Result(LineVertex[] vertices, int[] indices)

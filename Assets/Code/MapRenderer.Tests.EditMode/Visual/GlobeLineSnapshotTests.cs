@@ -53,7 +53,8 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat("_MetersPerPixel", 1f);
             mat.SetColor("_BaseColor",      new Color(1f, 0.85f, 0.2f, 1f)); // amber borders
             mat.SetFloat("_Opacity",        1f);
-            mat.SetFloat("_Cull",           0f); // double-sided ribbons (winding-agnostic on the globe)
+            mat.SetFloat("_Cull",           2f); // stock Cull Back: near-side ribbons show, far-side culled
+                                                 // (post winding reversal — no more double-sided workaround)
 
             var mapGo = new GameObject("GlobeLine");
             mapGo.AddComponent<MeshFilter>().sharedMesh = mesh;

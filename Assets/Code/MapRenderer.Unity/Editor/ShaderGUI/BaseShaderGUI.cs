@@ -96,9 +96,12 @@ namespace MapRenderer.Unity.Editor
         /// </summary>
         public override void ValidateMaterial(Material material)
         {
-            // Double-sided GI from cull state (URP BaseShaderGUI L929).
+            // Double-sided GI from cull state (URP BaseShaderGUI L929). URP compares the RenderFace enum
+            // (Front=2), which equals CullMode.Back (2) — i.e. double-sided GI is on unless we cull back faces
+            // (the single-sided front-rendering default). Compare against CullMode.Back, NOT CullMode.Front:
+            // the latter left DoubleSidedGI on for our stock Cull-Back materials.
             if (material.HasProperty(ShaderProperties.PropertyId.CullMode))
-                material.doubleSidedGI = (CullMode)material.GetFloat(ShaderProperties.PropertyId.CullMode) != CullMode.Front;
+                material.doubleSidedGI = (CullMode)material.GetFloat(ShaderProperties.PropertyId.CullMode) != CullMode.Back;
 
             // Emission (URP BaseShaderGUI L943-953): the editor-only FixupEmissiveFlag reconciles the GI flag
             // with the emission colour first, then the keyword follows the flag (a black colour ⇒ EmissiveIsBlack

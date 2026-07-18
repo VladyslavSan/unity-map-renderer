@@ -1,13 +1,17 @@
-// GlobeFillWindingTests — the fill geometry must wind the SAME way relative to its surface normal on the
-// globe as it does on the (user-confirmed-correct) flat Mercator build, so that a single Cull mode culls the
-// back hemisphere without hiding the near one. The globe render mapping (ECEF axis-swap) is a reflection, and
-// the winding-vs-normal orientation is easy to get backwards by hand — so this test does NOT assert an absolute
-// sign. It measures Mercator's dominant sign(dot(cross(edges), normal)) — the gold reference — and requires the
-// globe's dominant sign to EQUAL it. Handedness-convention-free by construction.
+// GlobeFillWindingTests — the fill geometry's emitted front face must genuinely point OUT of the surface, so
+// stock Cull Back (shipped MapFill.mat _Cull:2) keeps the camera-facing surface on BOTH the flat Mercator and
+// the globe build. This asserts TWO things: (1) an ABSOLUTE invariant — the dominant sign(dot(cross(edges),
+// up)) is +1 (front face aligned with the outward normal; the LayerOrderSnapshotTests {0,2,1,0,3,2} +Y-normal
+// quad computes the same +1 and renders under Cull Back); and (2) globe == Mercator, so one cull mode fits both.
+// An earlier version asserted ONLY the relative equality and stayed green while BOTH sides were inverted
+// (front-renders-as-back) — the absolute check closes that hole. The globe render mapping (ECEF axis-swap) is a
+// reflection that flips raw winding; StyledFillTileBuilder reverses triangle indices at the GPU mesh-write
+// boundary to restore a Unity-front result, which is what makes the sign come out +1.
 //
-// Both builds run the real production mesh build: Mercator through TileMeshPipeline's flat path,
-// the globe through the reverseWinding branch + GlobeFillSubdivideJob (a distinct emission path). A near-uniform
-// dominant sign on each side also proves MVT/earcut winding is deterministic (no mixed-orientation triangles).
+// Both builds run the real production mesh build: Mercator through TileMeshPipeline's earcut/project IR, the
+// globe through GlobeFillSubdivideJob (a distinct emission path) — both reversed once at the StyledFillTileBuilder
+// write. A near-uniform dominant sign on each side also proves MVT/earcut winding is deterministic (no
+// mixed-orientation triangles).
 
 using System.IO;
 using System.Collections.Generic;
@@ -115,8 +119,19 @@ namespace MapRenderer.Tests
             Assert.Greater(mUnif, 0.99, "Mercator fill winding is not uniform (mixed-orientation triangles)");
             Assert.Greater(gUnif, 0.99, "globe fill winding is not uniform (mixed-orientation triangles)");
 
-            // The gold reference: Mercator's front face is correct (maintainer-confirmed). The globe must wind
-            // the SAME way relative to its outward normal, so one Cull mode is correct for both projections.
+            // ABSOLUTE invariant (post the GPU-boundary winding reversal in StyledFillTileBuilder): each emitted
+            // triangle's right-handed face normal must ALIGN with the outward surface normal (sign +1) — the
+            // front face genuinely points OUT of the surface. That is exactly the orientation stock Cull Back
+            // (shipped MapFill.mat _Cull:2) keeps for the camera-facing surface. Same convention as the
+            // LayerOrderSnapshotTests fill quad: {0,2,1,0,3,2} with a +Y normal ⇒ dot(cross_RH, up) = +1, which
+            // renders under Cull Back; the old {0,1,2} gave −1 and needed the compensating Cull Front. A sign of
+            // −1 here means the reversal was dropped and the render is inverted (front-renders-as-back). This
+            // catches the inversion that the earlier relative-only guard could not — it stayed green while both
+            // sides flipped together.
+            Assert.AreEqual(1, mSign, "Mercator fill front face must point OUT of the surface (Unity-front under stock Cull Back)");
+            Assert.AreEqual(1, gSign, "globe fill front face must point OUT of the surface (Unity-front under stock Cull Back)");
+            // Consistency: globe must wind the SAME as Mercator relative to its outward normal, so one cull mode
+            // is correct for both projections.
             Assert.AreEqual(mSign, gSign,
                 "globe fill winds OPPOSITE to Mercator relative to the surface normal — back-face culling that " +
                 "shows Mercator would hide the near hemisphere on the globe (the reported glitch).");

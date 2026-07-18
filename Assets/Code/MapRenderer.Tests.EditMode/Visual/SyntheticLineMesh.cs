@@ -137,6 +137,7 @@ namespace MapRenderer.Tests.Visual
                 }
                 if (res.Indices != null)
                 {
+                    // Winding reversal happens once in Upload() (the shared chokepoint) — keep canonical here.
                     for (int i = 0; i < res.Indices.Length; i++)
                         indices[iOff + i] = vOff + res.Indices[i];
                     iOff += res.Indices.Length;
@@ -167,7 +168,15 @@ namespace MapRenderer.Tests.Visual
 
             md.SetIndexBufferParams(iCount, IndexFormat.UInt32);
             var idx = md.GetIndexData<int>();
-            for (int i = 0; i < iCount; i++) idx[i] = indices[i];
+            // Reverse triangle winding to match StyledLineTileBuilder's GPU-boundary reversal, so these synthetic
+            // ribbons stay Unity-front under the shipped MapLine.mat _Cull:2 (stock Cull Back). Single chokepoint
+            // for every SyntheticLineMesh build path (BuildFromPoints / BuildFromResult / BuildGoldenShapes).
+            for (int i = 0; i + 2 < iCount; i += 3)
+            {
+                idx[i + 0] = indices[i + 0];
+                idx[i + 1] = indices[i + 2]; // 2nd/3rd
+                idx[i + 2] = indices[i + 1]; // swapped
+            }
 
             md.subMeshCount = 1;
             md.SetSubMesh(0, new SubMeshDescriptor(0, iCount, MeshTopology.Triangles));
