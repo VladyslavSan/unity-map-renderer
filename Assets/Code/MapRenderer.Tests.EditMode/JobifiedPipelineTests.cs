@@ -247,15 +247,15 @@ namespace MapRenderer.Tests
                 if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
                     polyGeoms.Add(f.Geometry);
 
-            var pipelineInput = new TileMeshPipeline.LayerInput
+            var pipelineInput = new FillMeshPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms,
                 Extent    = extent,
                 Tile      = new TileId { Z = 0, X = 0, Y = 0 },
-                OriginRender = new double3(originX, 0.0, originY), // == ProjectTileCornerOrigin bit-for-bit for Mercator
+                OriginRender = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
             };
 
-            TileMeshBuffers buffers = TileMeshPipeline.Schedule(pipelineInput);
+            TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
             try
             {
                 int vertCount  = buffers.VertexCount[0];
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests
                     polyGeoms.Add(f.Geometry);
 
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-            var singleInput = new TileMeshPipeline.LayerInput
+            var singleInput = new FillMeshPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms, Extent = extent,
                 Tile = new TileId { Z = 0, X = 0, Y = 0 },
@@ -316,7 +316,7 @@ namespace MapRenderer.Tests
             int    singleIndexCount = 0;
             string singleVertHash   = null;
             string singleIdxHash    = null;
-            TileMeshBuffers singleBuffers = TileMeshPipeline.Schedule(singleInput);
+            TileMeshBuffers singleBuffers = FillMeshPipeline.Schedule(singleInput);
             try
             {
                 singleVertCount  = singleBuffers.VertexCount[0];
@@ -329,7 +329,7 @@ namespace MapRenderer.Tests
             // Schedule N tiles.
             var allBuffers = new TileMeshBuffers[N];
             for (int i = 0; i < N; i++)
-                allBuffers[i] = TileMeshPipeline.Schedule(singleInput);
+                allBuffers[i] = FillMeshPipeline.Schedule(singleInput);
 
             int totalVerts = 0;
             try

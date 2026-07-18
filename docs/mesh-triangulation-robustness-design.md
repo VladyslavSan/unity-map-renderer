@@ -102,7 +102,7 @@ are **RED against today's earcut**, so their hard assertions land RED-first but 
 a tracking note**, keeping the normal gate green while the reproduction is one flag away. Removing the
 ignore is the acceptance gate for the fix stages — flip to always-on green when the fix lands.
 
-**Optional later:** a thin Unity EditMode wrapper drives the *jobified* path (`TileMeshPipeline` +
+**Optional later:** a thin Unity EditMode wrapper drives the *jobified* path (`FillMeshPipeline` +
 `GlobeFillSubdivideJob`) over the same corpus, so the full engine pipeline is covered, not just managed
 Core. Deferred behind the pure-Core bench (the bug is pre-projection, so Core covers it).
 
@@ -154,7 +154,7 @@ sound core ear-clip:
    `baseCap + 2*min(MaxSplits, max(8, holeCount*4))` with `TrySplit` refusing (drop-clean) before any
    overflow; `OutMergedVertexCount` keeps `MatchManagedPath`'s hash bit-identical. `MatchManagedPath`
    un-`[Explicit]`'d and GREEN (managed==Burst on countries, resolved by cure not split). New
-   `JobifiedWaterTriangulationTests` drives the real `TileMeshPipeline` over `water-8-135-80` and validates
+   `JobifiedWaterTriangulationTests` drives the real `FillMeshPipeline` over `water-8-135-80` and validates
    no-folds/area via `MeshCoverageValidator.ValidateTriangulation`. No GPU snapshot renders water → no
    re-bake needed. `run-tests.sh` 1490/1490 green. Dual-reviewed (Opus APPROVE + Codex no-OOB).
 

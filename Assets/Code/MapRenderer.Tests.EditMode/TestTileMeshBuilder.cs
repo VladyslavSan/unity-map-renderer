@@ -31,7 +31,7 @@ namespace MapRenderer.Tests
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
             // Mercator: (mercX, 0, mercZ) == MercatorBounds().min; globe: the ECEF corner. Derive it from
             // (id, projection) here (NOT a caller-supplied Mercator origin) so a globe fixture bakes correctly.
-            double3 renderOrigin = TileMeshPipeline.ProjectTileCornerOrigin(id, projection);
+            double3 renderOrigin = TileRenderOrigin.Project(id, projection);
             StyledFillTileBuilder.WriteMeshData(mda[0], features, paint, zoom, extent, id,
                 renderOrigin, out int vertexCount, out Bounds bounds, projection);
             return Finish(mda, vertexCount, bounds, "TestFill");
@@ -55,7 +55,7 @@ namespace MapRenderer.Tests
             IReadOnlyList<ITileFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, IProjection projection)
         {
-            double3 renderOrigin = TileMeshPipeline.ProjectTileCornerOrigin(id, projection);
+            double3 renderOrigin = TileRenderOrigin.Project(id, projection);
             var mda = Mesh.AllocateWritableMeshData(1);
             StyledLineTileBuilder.WriteMeshData(mda[0], features, paint, layout, zoom, extent, id,
                 renderOrigin, out int vertexCount, out Bounds bounds, projection);

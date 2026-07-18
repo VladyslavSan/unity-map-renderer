@@ -296,7 +296,7 @@ namespace MapRenderer.Unity.Text
             {
                 Tile             = tile,
                 Zoom             = zoom,
-                TileOriginRender = TileMeshPipeline.ProjectTileCornerOrigin(tile, projection),
+                TileOriginRender = TileRenderOrigin.Project(tile, projection),
                 Projection       = projection,
             };
 

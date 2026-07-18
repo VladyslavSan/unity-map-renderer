@@ -1,4 +1,4 @@
-// Unity EditMode only — uses NativeArray, Burst jobs (TileMeshPipeline). NOT included in
+// Unity EditMode only — uses NativeArray, Burst jobs (FillMeshPipeline). NOT included in
 // Tools/core-tests/core-tests.csproj (see WaterTriangulationTests.cs for the engine-free twin).
 
 using System.Collections.Generic;
@@ -16,12 +16,12 @@ namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// mesh-triangulation-robustness Stage 3 acceptance tooth (plan Edit 4): drives the REAL jobified
-    /// fill path — <see cref="TileMeshPipeline.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
+    /// fill path — <see cref="FillMeshPipeline.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
     /// committed corpus water tile, and validates the output has no folds and conserves area. This is the
     /// jobified analogue of <c>WaterTriangulationTests</c> (which only exercises the managed twin via
     /// <c>Earcut.Triangulate</c>, engine-free); it is the tooth that actually proves the VISIBLE render
     /// path is fixed, since production fill meshes are built exclusively through
-    /// <c>StyledFillTileBuilder</c> → <c>TileMeshPipeline</c> → <see cref="EarcutJob"/> (the managed
+    /// <c>StyledFillTileBuilder</c> → <c>FillMeshPipeline</c> → <see cref="EarcutJob"/> (the managed
     /// <c>Earcut</c> is a differential oracle only, never in the render path).
     /// </summary>
     public class JobifiedWaterTriangulationTests
@@ -59,7 +59,7 @@ namespace MapRenderer.Tests.Meshing
             var tileId    = new TileId { Z = 8, X = 135, Y = 80 };
             var (bMin, _) = tileId.MercatorBounds();
 
-            var pipelineInput = new TileMeshPipeline.LayerInput
+            var pipelineInput = new FillMeshPipeline.LayerInput
             {
                 FeatureGeometries = polyGeoms,
                 Extent       = extent,
@@ -67,7 +67,7 @@ namespace MapRenderer.Tests.Meshing
                 OriginRender = new double3(bMin.x, 0.0, bMin.y),
             };
 
-            TileMeshBuffers buffers = TileMeshPipeline.Schedule(pipelineInput);
+            TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
             try
             {
                 Assert.IsTrue(buffers.IsCreated, "jobified pipeline produced no buffers for a tile with water polygons");

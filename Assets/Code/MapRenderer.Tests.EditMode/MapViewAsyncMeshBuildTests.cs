@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
     ///   The stage names 5 sites. Only ONE is on the live Update path: the old
     ///   StyledFillTileBuilder.cs:125 site (now replaced by managed projection in BuildMeshData).
     ///   The other sites are off-path test-only utilities:
-    ///     - TileMeshPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
+    ///     - FillMeshPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
     ///   (S54 retired the Gen-1 MapFillBootstrap single-tile sync bootstrap entirely.)
     ///   A naive grep of the full tree finds these; they are intentionally not in the live Update path.
     /// </summary>

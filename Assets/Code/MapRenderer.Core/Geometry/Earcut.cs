@@ -75,7 +75,7 @@ namespace MapRenderer.Core.Geometry
 
             // Sort valid holes by (leftmost-x, min-y, original-hole-index) for fully-deterministic
             // bridging order. The three-level sort matches the jobified pipeline's Array.Sort in
-            // TileMeshPipeline (which also sorts by leftmost-x then min-y then ring-index),
+            // FillMeshPipeline (which also sorts by leftmost-x then min-y then ring-index),
             // guaranteeing bit-identical output between the managed and Burst paths.
             // List.Sort is unstable; without the tiebreaks, equal-leftmost-x holes produce
             // non-deterministic ordering that breaks the parity hash tests.

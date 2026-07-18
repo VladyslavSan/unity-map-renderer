@@ -34,7 +34,7 @@ namespace MapRenderer.Jobs
     /// multiple frames). <see cref="TileMeshBuffers.Dispose()"/> must be called after the pipeline
     /// handle completes — never dispose while jobs are in-flight.
     /// </summary>
-    public static class TileMeshPipeline
+    public static class FillMeshPipeline
     {
         // Pipeline-stage profiler markers (MapRenderer.Pipeline.*).
         // These sit on the schedule-then-Complete main-thread path — exactly the stall the perf epic measures.
@@ -129,7 +129,7 @@ namespace MapRenderer.Jobs
         {
             if (count > capacity)
                 throw new InvalidOperationException(
-                    $"TileMeshPipeline sizing overflow: {what} count {count} exceeds pre-sized " +
+                    $"FillMeshPipeline sizing overflow: {what} count {count} exceeds pre-sized " +
                     $"capacity {capacity}. With exact PrecountRingsAndVertices sizing this should be " +
                     "unreachable — it indicates a sizing-vs-decode desync (the pre-count walk no longer " +
                     "mirrors MvtDecodeJob.Execute). Fix the pre-count to match the decode job.");
@@ -150,7 +150,7 @@ namespace MapRenderer.Jobs
             /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
             /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
             /// bake origin, shared with the tile transform (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the
-            /// corner's ECEF). Use <see cref="ProjectTileCornerOrigin"/> to compute it.</summary>
+            /// corner's ECEF). Use <c>TileRenderOrigin.Project</c> (Core) to compute it.</summary>
             public double3 OriginRender;
 
             /// <summary>S91: the projection the geometry is built with (a stateless struct behind
@@ -510,7 +510,7 @@ namespace MapRenderer.Jobs
 
                 // 4b: project through the chosen projection (struct type dispatch → ProjectPointsJob<TProj>).
                 // RTC origin (docs §5) = the caller-supplied SW-corner render origin — the SINGLE source now,
-                // shared with the tile transform (S91-C). The caller computes it via ProjectTileCornerOrigin
+                // shared with the tile transform (S91-C). The caller computes it via TileRenderOrigin.Project
                 // with the SAME projection, so origin and vertices share one projection (Mercator: bit-for-bit
                 // the old internal recompute; correct for the globe too).
                 double3 originWorld = input.OriginRender;
@@ -555,36 +555,8 @@ namespace MapRenderer.Jobs
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// The RTC render-space origin for a tile: the tile's SW corner (tile-space west+south, i.e. px=0,
-        /// py=extent) as geodetic, projected through the chosen projection. Mercator: ≈ MercatorBounds().min
-        /// (sub-nanometre drift from the lon/lat round-trip). Globe: the corner's ECEF. Projection-derived so
-        /// the origin and the vertices share one projection — correct for the globe, not just the plane.
-        ///
-        /// <para>S91-C: public and the SINGLE source of a tile's bake origin — both the mesh bake
-        /// (<see cref="LayerInput.OriginRender"/>) and the tile transform (via <c>TileManager</c>) call it, so
-        /// the two RTC levels cancel exactly.</para>
-        /// </summary>
-        public static double3 ProjectTileCornerOrigin(TileId tile, IProjection projection)
-        {
-            // Matches TileId.ToLonLat exactly (math.sinh, same u/v), so the Mercator origin equals
-            // MercatorBounds().min bit-for-bit — the tile-transform (FloatingOrigin) uses that, and the mesh
-            // must share it. (Sub-nm vs the vertices' exp-form sinh in TileToGeoJob — invisible.)
-            double pow2z = math.pow(2.0, tile.Z);
-            double u     = tile.X / pow2z;         // west edge (px = 0)
-            double v     = (tile.Y + 1.0) / pow2z; // south edge (py = extent)
-
-            var geo = new GeoCoordinate
-            {
-                Latitude  = math.atan(math.sinh(math.PI_DBL * (1.0 - 2.0 * v))) * 180.0 / math.PI_DBL,
-                Longitude = u * 360.0 - 180.0,
-            };
-            // null ⇒ planar default (no boxing — direct struct call).
-            return projection != null
-                ? projection.ProjectPoint(geo).World
-                : new WebMercatorProjection().ProjectPoint(geo).World;
-        }
+        // (The tile's bake origin is TileRenderOrigin.Project — Core, engine-free, shared by every geometry
+        //  kind; it is NOT fill-specific, so it does not live on this fill pipeline.)
 
         private static double LeftmostX(NativeArray<double2> verts, int start, int len)
         {

@@ -18,7 +18,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// S40 managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
     /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
-    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>TileMeshPipeline</c>
+    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>FillMeshPipeline</c>
     ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
     ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core geometry
     ///   (<c>Earcut</c>/<c>PolygonAssembler</c>) is retired from this path (differential oracle only).
@@ -128,7 +128,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             using var sBuild = PmBuildMesh.Auto();
 
             // First (Burst): collect this layer's polygon features + their per-feature linear color, then
-            // run the Burst decode→assemble→earcut→project chain via TileMeshPipeline (Run(), so it
+            // run the Burst decode→assemble→earcut→project chain via FillMeshPipeline (Run(), so it
             // works on this worker thread). The managed List<>/array mesh garbage is gone — geometry
             // lives in NativeArrays. Color stays managed (paint.Color is an expression over string keys).
             var geoms         = new List<uint[]>(selectedFeatures.Count);
@@ -151,7 +151,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (geoms.Count == 0)
                 return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
 
-            TileMeshBuffers buffers = TileMeshPipeline.Schedule(new TileMeshPipeline.LayerInput
+            TileMeshBuffers buffers = FillMeshPipeline.Schedule(new FillMeshPipeline.LayerInput
             {
                 FeatureGeometries = geoms,
                 Extent            = extent,

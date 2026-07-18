@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
         /// — MED 5 — so a caller reconstructing absolute positions must add this back).</summary>
         private static (Mesh mesh, double3 origin) BuildViaProcessor(IProjection projection)
         {
-            double3 origin = TileMeshPipeline.ProjectTileCornerOrigin(CoarseTile, projection);
+            double3 origin = TileRenderOrigin.Project(CoarseTile, projection);
             var context = new TileLayerProcessContext
             {
                 Tile = CoarseTile, Zoom = CoarseTile.Z, TileOriginRender = origin, Projection = projection,

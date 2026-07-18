@@ -14,7 +14,7 @@ namespace MapRenderer.Jobs
     /// Lifetime rule (NativeArray × cancellation safety):
     ///   Never call <see cref="Dispose"/> while a job referencing these buffers is still in-flight.
     ///   Always <c>JobHandle.Complete()</c> before disposing, even on cancellation.
-    ///   The <see cref="TileMeshPipeline"/> coordinator enforces this.
+    ///   The <see cref="FillMeshPipeline"/> coordinator enforces this.
     ///
     /// Allocator: <see cref="Allocator.Persistent"/> — tiles live for multiple frames;
     /// TempJob has a ~4-frame safety guard and will throw an error if the job takes longer.

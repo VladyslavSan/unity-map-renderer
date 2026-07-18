@@ -8,7 +8,7 @@
 // reflection that flips raw winding; StyledFillTileBuilder reverses triangle indices at the GPU mesh-write
 // boundary to restore a Unity-front result, which is what makes the sign come out +1.
 //
-// Both builds run the real production mesh build: Mercator through TileMeshPipeline's earcut/project IR, the
+// Both builds run the real production mesh build: Mercator through FillMeshPipeline's earcut/project IR, the
 // globe through GlobeFillSubdivideJob (a distinct emission path) — both reversed once at the StyledFillTileBuilder
 // write. A near-uniform dominant sign on each side also proves MVT/earcut winding is deterministic (no
 // mixed-orientation triangles).

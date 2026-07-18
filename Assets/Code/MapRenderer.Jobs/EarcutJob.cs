@@ -38,10 +38,10 @@ namespace MapRenderer.Jobs
     ///
     /// <b>Scratch capacity (mesh-triangulation-robustness Stage 3).</b> <see cref="Vx"/>/<see cref="Vy"/>/
     /// <see cref="Prev"/>/<see cref="Next"/>/<see cref="Removed"/>/<see cref="IsBridgeCopy"/>/<see cref="IsEar"/>
-    /// are fixed-size <c>NativeArray</c>s pre-sized by <c>TileMeshPipeline</c> to the deterministic
+    /// are fixed-size <c>NativeArray</c>s pre-sized by <c>FillMeshPipeline</c> to the deterministic
     /// merged-ring size PLUS a bounded split headroom (<see cref="MaxSplits"/> mirrors managed's cap
     /// exactly, but the Burst pre-sizing is a smaller, tile-appropriate bound — see
-    /// <c>TileMeshPipeline</c>'s scratchCap sizing doc). <see cref="TrySplit"/> checks remaining
+    /// <c>FillMeshPipeline</c>'s scratchCap sizing doc). <see cref="TrySplit"/> checks remaining
     /// capacity before writing a split's two new vertices; if the headroom is exhausted it refuses the
     /// split (never writes past the array) and the caller falls through to the clean-drop path — same
     /// as managed running out of <see cref="MaxSplits"/>, just a tighter bound in the rare case it binds.

@@ -119,7 +119,7 @@ namespace MapRenderer.Tests
             var context = new TileLayerProcessContext
             {
                 Tile = tileId, Zoom = 0.0,
-                TileOriginRender = TileMeshPipeline.ProjectTileCornerOrigin(tileId, projection),
+                TileOriginRender = TileRenderOrigin.Project(tileId, projection),
                 Projection = projection,
             };
 

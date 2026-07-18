@@ -2,7 +2,7 @@
 
 How decoded vector-tile geometry becomes drawn, lit meshes: the per-kind build pipeline, line antialiasing, the
 URP-Lit shading convention every map shader follows, and the render-layer model that gives every painted style
-layer a uniform place. Read this before touching `TileMeshPipeline`, `StyledFillTileBuilder`,
+layer a uniform place. Read this before touching `FillMeshPipeline`, `StyledFillTileBuilder`,
 `StyledLineTileBuilder`, `LineRibbonJob`, the map shaders under `Shaders/Map/`, or `IRenderLayer`/`RenderLayerSet`.
 
 1. **[Mesh pipeline](#1-mesh-pipeline)** — how MVT bytes become a mesh, per geometry kind (fill vs line orderings, the build/consume loop).
@@ -23,7 +23,7 @@ The only survivor is `LineTessellator`, where "tessellate" now means strictly **
 
 | Former loose meaning | Now called | Lives in |
 |----------------------|-----------|----------|
-| the whole decode→mesh chain | **the mesh pipeline** | `TileMeshPipeline`, the `StyledFill/LineTileBuilder`s |
+| the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
 | inserting curvature points (globe) | **Subdivide** | `SubdivideCenterline`, `GlobeFillSubdivideJob` |
 | earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `Earcut`, `LineTessellator` (oracle), `LineRibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
@@ -56,7 +56,7 @@ overload it replaced.
 
 | Kind | Order | Where |
 |------|-------|-------|
-| **Fill** | Decode → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `TileMeshPipeline.Schedule` does Decode→Assemble→Triangulate→Project; `StyledFillTileBuilder` adds the globe Subdivide (`GlobeFillSubdivideDispatch`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)`) then writes the mesh. |
+| **Fill** | Decode → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshPipeline.Schedule` does Decode→Assemble→Triangulate→Project; `StyledFillTileBuilder` adds the globe Subdivide (`GlobeFillSubdivideDispatch`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)`) then writes the mesh. |
 | **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `StyledLineTileBuilder.WriteMeshData` (called via `LineRenderLayer.WriteInto`): `SubdivideCenterline` → per-point `TileToGeoJob` + `IProjection.ProjectPoint` → `LineRibbonJob` → writes the mesh. |
 
 **Why fills Triangulate *before* Project.** Ear-clipping is a **planar 2D algorithm**, and triangle
@@ -83,11 +83,12 @@ cancellation contract" and the mesh-ownership rule in [`conventions-short.md`](c
 
 | Type | Assembly | Role |
 |------|----------|------|
-| `TileMeshPipeline` | `MapRenderer.Jobs` | Fill: coordinates Decode→Assemble→Triangulate→Project; owns `LayerInput` + `ProjectTileCornerOrigin`. Produces `TileMeshBuffers`. |
+| `FillMeshPipeline` | `MapRenderer.Jobs` | Fill: coordinates Decode→Assemble→Triangulate→Project; owns `LayerInput`. Produces `TileMeshBuffers`. |
+| `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on `FillMeshPipeline`. |
 | `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
 | `LineRibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
 | `LineTessellator` | `MapRenderer.Core` | The planar differential **oracle** for `LineRibbonJob` (`LineRibbonJobTests`). |
-| `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `TileMeshPipeline` → globe Subdivide → write mesh. |
+| `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshPipeline` → globe Subdivide → write mesh. |
 | `StyledLineTileBuilder` | `MapRenderer.Unity` | Line orchestration: Subdivide → Project → `LineRibbonJob` → write mesh. |
 | `MeshDataPayload` / `IRenderLayerPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |
 | `TileManager` | `MapRenderer.Unity` | The tile-build loop: `KickMeshBuild` / `MeshBuildTask` (build) and `ConsumeMeshBuild` (consume), throttled by `MaxMeshBuildsPerTick` / `MaxConsumesPerTick`. |

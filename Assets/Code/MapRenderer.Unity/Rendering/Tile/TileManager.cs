@@ -961,7 +961,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
                         // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
                         // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
-                        double3 origin = TileMeshPipeline.ProjectTileCornerOrigin(id, cfg.Projection);
+                        double3 origin = TileRenderOrigin.Project(id, cfg.Projection);
 
                         // Epic A / A2 (design §B Q1, HIGH 2): a source-less (background) record only CREATES
                         // a pending record here — it does NOT kick the mesh build inline. The kick moves to

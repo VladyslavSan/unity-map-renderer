@@ -49,12 +49,12 @@ the decoder emits.
 
 ## Why NOT a single geodetic waist (the rejected over-correction)
 
-1. **Earcut runs in tile-local integer space *before* geodetic conversion.** `TileMeshPipeline.Schedule` order
+1. **Earcut runs in tile-local integer space *before* geodetic conversion.** `FillMeshPipeline.Schedule` order
    is Decode (tile-local) → RingAssembly (tile-local) → **Earcut (tile-local, Stage 3)** → TileToGeo (Stage 4a)
    → Project. Ear-clipping's orientation/convexity are **sign tests** — invariant under affine maps, **not**
    under the nonlinear `atan∘sinh` tile→geo reprojection. Triangulating on geodetic coords would silently break
    every byte-identical fill snapshot and re-open the **globe-winding failure class** the code still carries a
-   scar for (`TileMeshPipeline`'s "an earlier globe-only reversal inverted the globe's front-faces").
+   scar for (`FillMeshPipeline`'s "an earlier globe-only reversal inverted the globe's front-faces").
 2. **Hardcoded scale-dependent epsilons prove tile-local is the working space.** `RingAssemblyJob`'s
    `DegenerateThreshold = 1.0` and `EarcutJob`'s `1e-10 … 1e-14` are calibrated to tile-integer magnitude
    (`[0, 4096]`). Geodetic degrees are a different scale entirely.
@@ -103,7 +103,7 @@ to represent geodetic data, and earcut's signature still only ever accepts `Tile
 monomorphism fence is intact.
 
 **`Vertices`/`RingOffsets`/`RingFeatureIdx` are an extraction; `FeatureGeometryType` is genuinely new.**
-`TileMeshPipeline.Schedule` already allocates the first three as private locals, runs `MvtDecodeJob` into them,
+`FillMeshPipeline.Schedule` already allocates the first three as private locals, runs `MvtDecodeJob` into them,
 and disposes them inline after earcut — promoting them to a named, shared, multi-consumer struct is the bulk of
 stage B1. `FeatureGeometryType` does **not** exist yet (grep-empty) — it is added because `RingAssemblyJob` runs
 in **Burst** and cannot read the managed `ITileFeature.GeometryType` enum, so the kind must be materialized
@@ -189,7 +189,7 @@ structurally ≈ reimplementing geojson-vt's core. Under two-waist, *MVT* is the
 
 | Stage | Scope | Bar | Key teeth / prereq |
 |---|---|---|---|
-| **B1** | Extract `TileGeometryBuffers` from `TileMeshPipeline`'s private locals; fill-only, no seam yet | **byte-identical** | fill snapshots unchanged; dispose still frees every array. *Safe pure-refactor down-payment, landable without the A8 trigger* |
+| **B1** | Extract `TileGeometryBuffers` from `FillMeshPipeline`'s private locals; fill-only, no seam yet | **byte-identical** | fill snapshots unchanged; dispose still frees every array. *Safe pure-refactor down-payment, landable without the A8 trigger* |
 | **B2** | `ITileGeometryMaterializer` seam + MVT impl (wraps `MvtDecodeJob`); fill routes through it. **Trigger: A8/GeoJSON** | byte-identical | a non-MVT tile-local fixture flows through unchanged Stages 2–4; per-layer materialize (no union yet) |
 | **B3** | Line onto the buffer; delete its `MvtGeometry.Decode` call | **verified-equivalent** (differential oracle, not pixel-byte) | line snapshots equal the managed-decode oracle; `FeatureGeometryType` gate (#1); unfiltered rings (#2); the fused-`RingAssemblyJob` fence (#5) |
 | **B4** | Symbol onto the buffer; **move symbol's coordinate half Core→Unity**; retire `MvtGeometry.Decode` | verified-equivalent | `SymbolProcessorParityTests`; Core has no `NativeArray` ref |
@@ -246,7 +246,7 @@ Throughout: **Waist 2 (`TileToGeoJob → ProjectPointsJob<TProj>`) stays exactly
 
 `MapRenderer.Jobs/`: `MvtDecodeJob` (kind-agnostic path walk; tile-local `double2` out), `TileToGeoJob`
 (tile-local→geodetic, projection-independent), `ProjectPointsJob<TProj>` (geodetic→world, generic over
-`IProjection`), `TileMeshPipeline.Schedule` (the Decode→RingAssembly→Earcut→TileToGeo→Project order + the private
+`IProjection`), `FillMeshPipeline.Schedule` (the Decode→RingAssembly→Earcut→TileToGeo→Project order + the private
 buffers to promote), `RingAssemblyJob` (signed-area classification + `DegenerateThreshold`), `EarcutJob` (the
 tile-scale epsilons), `ProjectionDispatch` (the Burst-dispatch precedent). `MapRenderer.Core/Mvt/`:
 `MvtGeometry.Decode` (the managed twin to retire), `MvtModels.MvtFeature` (keeps `uint[]`, needs `Ordinal`).
