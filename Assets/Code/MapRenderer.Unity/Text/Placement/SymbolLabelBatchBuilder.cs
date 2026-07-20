@@ -137,9 +137,12 @@ namespace MapRenderer.Unity.Text.Placement
             int anchorStart = batch.AnchorCount;
             for (int a = 0; a < anchorCount; a++) batch.AddAnchor(anchors[a]);
             int anchorFadeStart = batch.AnchorFadeCount;
+            // label.MaterialIndex = the symbol layer's slot — the SAME per-layer id PointFadeId folds in. Load-bearing:
+            // FeatureIndex restarts per layer, so without it two roads in different layers of one tile collide (the
+            // stuck-at-partial-opacity fade fight). See LineFadeId's doc.
             for (int a = 0; a < anchorCount; a++)
-                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.FeatureIndex, a));
-            batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.FeatureIndex, -1)); // fallback
+                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
+            batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
 
             var input = new CurvedStageInput
             {

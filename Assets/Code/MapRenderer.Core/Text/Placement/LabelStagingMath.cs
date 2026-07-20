@@ -222,15 +222,24 @@ namespace MapRenderer.Core.Text.Placement
             return true;
         }
 
-        /// <summary>A-4 LINE fade identity: within-tile (tile, feature, anchor-index) FNV-1a-64. Anchor index -1 is
-        /// the centred fallback. Pure arithmetic — the caller precomputes these per anchor so the staging math needs
-        /// no string or set state.</summary>
-        public static long LineFadeId(long tileKey, int featureIndex, int anchorIndex)
+        /// <summary>A-4 LINE fade identity: (tile, LAYER, feature, anchor-index) FNV-1a-64. Anchor index -1 is the
+        /// centred fallback. Pure arithmetic — the caller precomputes these per anchor so the staging math needs no
+        /// string or set state.
+        /// <para><b><paramref name="layerId"/> is load-bearing, not decorative.</b> <see cref="SymbolFeatureExtractor"/>
+        /// runs once PER symbol layer and restarts its <c>FeatureIndex</c> ordinal at 0 each time, so
+        /// <c>(tileKey, featureIndex)</c> is NOT unique across layers of one tile — two different roads in two
+        /// different line-symbol layers share it. Without the layer dimension their fade ids collide, and because a
+        /// fade id must be unique per live candidate (each frame's <see cref="LabelPlacementSystem"/> does one
+        /// read-modify-write of the opacity per id), the collision makes two candidates FIGHT over one opacity and
+        /// stick at a partial value forever. <see cref="LabelPlacementSystem.PointFadeId"/> already folds in its
+        /// layer id for the same reason; this is the line analogue.</para></summary>
+        public static long LineFadeId(long tileKey, int layerId, int featureIndex, int anchorIndex)
         {
             unchecked
             {
                 ulong h = 1469598103934665603UL; // FNV-1a 64
                 h = (h ^ (ulong)tileKey) * 1099511628211UL;
+                h = (h ^ (ulong)(uint)layerId) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)featureIndex) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)anchorIndex) * 1099511628211UL;
                 return (long)h;

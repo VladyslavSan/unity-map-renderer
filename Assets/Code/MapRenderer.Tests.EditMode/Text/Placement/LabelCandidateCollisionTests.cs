@@ -27,7 +27,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             public Scene Add(int labelIndex, float sortKey, int featureIndex,
                 (float minX, float minY, float maxX, float maxY)[] rects,
-                bool allowOverlap = false, bool ignorePlacement = false, long tileKey = 0L)
+                bool allowOverlap = false, bool ignorePlacement = false, long tileKey = 0L, long fadeId = 0L)
             {
                 int start = _boxes.Count;
                 foreach (var r in rects)
@@ -42,6 +42,7 @@ namespace MapRenderer.Tests.Text.Placement
                     AllowOverlap = allowOverlap,
                     IgnorePlacement = ignorePlacement,
                     LabelIndex = labelIndex,
+                    FadeId = fadeId,
                 });
                 return this;
             }
@@ -163,6 +164,40 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEquivalent(expected, Build(1).Survivors());
             CollectionAssert.AreEquivalent(expected, Build(2).Survivors(),
                 "the survivor set must not depend on candidate insertion order (mixed point + curved)");
+        }
+
+        // ── STRICT TOTAL ORDER for a curved feature's repeated anchors: two overlapping candidates sharing
+        //    (SortKey, FeatureIndex, TileKey) — a road's adjacent repeat anchors — must resolve DETERMINISTICALLY
+        //    by FadeId, independent of input order. Without the FadeId final tiebreak they compare EQUAL; the
+        //    unstable heapsort's tie-resolution then flips with input order, and the A-5 incumbency feedback drives
+        //    a frame-to-frame limit cycle → a collision loser that never finishes fading ("line labels, one won't
+        //    fade" — stuck even with a still camera). RED against the pre-fix comparator (reversed input flips the
+        //    survivor); GREEN once FadeId makes the order total. ──
+        [Test]
+        public void SelectSurvivors_SameFeatureAnchors_ResolveDeterministicallyByFadeId()
+        {
+            // Two overlapping candidates, SAME sort key + feature + tile (one road's two repeat anchors), distinct FadeId.
+            Scene Build(bool reversed)
+            {
+                var s = new Scene();
+                if (reversed)
+                {
+                    s.Add(labelIndex: 1, sortKey: 10f, featureIndex: 7, rects: R((5, 0, 25, 20)), tileKey: 3L, fadeId: 200L);
+                    s.Add(labelIndex: 0, sortKey: 10f, featureIndex: 7, rects: R((0, 0, 20, 20)), tileKey: 3L, fadeId: 100L);
+                }
+                else
+                {
+                    s.Add(labelIndex: 0, sortKey: 10f, featureIndex: 7, rects: R((0, 0, 20, 20)), tileKey: 3L, fadeId: 100L);
+                    s.Add(labelIndex: 1, sortKey: 10f, featureIndex: 7, rects: R((5, 0, 25, 20)), tileKey: 3L, fadeId: 200L);
+                }
+                return s;
+            }
+            // The lower-FadeId candidate (labelIndex 0, fadeId 100) wins — and it wins REGARDLESS of input order.
+            CollectionAssert.AreEquivalent(new[] { 0 }, Build(false).Survivors(),
+                "lower FadeId wins the same-(sort,feature,tile) tie");
+            CollectionAssert.AreEquivalent(new[] { 0 }, Build(true).Survivors(),
+                "…and the survivor is INDEPENDENT of input order — the tie is broken by FadeId, not the unstable " +
+                "sort (pre-fix the greedy winner flips with input order, and the A-5 feedback oscillates it frame-to-frame)");
         }
 
         // ── Flags carry through the multi-box path: allow-overlap places unconditionally; ignore-placement

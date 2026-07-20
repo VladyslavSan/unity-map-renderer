@@ -55,6 +55,13 @@ namespace MapRenderer.Core.Style.Symbol
             if (!(layer is StyleLayer symbolLayer) || tile == null || projection == null || output == null)
                 return;
 
+            // NOTE: layer minzoom/maxzoom is deliberately NOT gated here. Tile DATA tops out at a max source zoom
+            // (e.g. z14 for OpenFreeMap), so at higher camera zooms those tiles are OVERZOOMED (reused, not
+            // rebuilt) — gating at build time would freeze layer visibility at the build zoom and hide layers
+            // (poi_r1/r7/r20 @ minzoom 15/16/17) that MapLibre reveals as you zoom past the data level. The gate
+            // therefore lives at DISPLAY time against the LIVE camera zoom (see StyleLayer.IsVisibleAtZoom, applied
+            // per-frame in LabelPlacementSystem) so overzoomed data still turns layers on/off correctly.
+
             ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             if (tileLayer == null) return;
             double extent = tileLayer.Extent;

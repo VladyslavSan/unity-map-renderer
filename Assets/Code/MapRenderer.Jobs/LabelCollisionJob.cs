@@ -52,6 +52,11 @@ namespace MapRenderer.Jobs
                 LabelCandidate c = Candidates[i];
                 int start = c.BoxStart, end = c.BoxStart + c.BoxCount;
 
+                // Zoom-gated OUT: a suppressed candidate (owning layer outside the live camera zoom's minzoom/maxzoom)
+                // is ABSENT for collision — never placed, never a blocker — so it neither wins nor blocks the winner
+                // while it eases to 0 (still emitted, fading, by the caller). Mirrors LabelCollision.SelectSurvivors.
+                if (c.Suppressed) { Survivors[i] = 0; continue; }
+
                 // Place if it ignores collision, OR none of its boxes overlaps an already-placed blocker. Test ALL
                 // boxes first (all-or-nothing) — no box is inserted until the whole candidate wins (no self-block).
                 bool place = c.AllowOverlap;

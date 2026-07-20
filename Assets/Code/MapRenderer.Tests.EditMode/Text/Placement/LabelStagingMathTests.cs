@@ -161,8 +161,8 @@ namespace MapRenderer.Tests.Text.Placement
             var validPath  = new byte[] { 1, 1 };
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) } };
             var anchors    = new[] { new LineAnchor(0, 0.5f) };  // arc distance 50 along the 100-px line
-            long fid = LabelStagingMath.LineFadeId(9, 3, 0);
-            var fadeIds    = new[] { fid, LabelStagingMath.LineFadeId(9, 3, -1) };
+            long fid = LabelStagingMath.LineFadeId(9, 0, 3, 0);
+            var fadeIds    = new[] { fid, LabelStagingMath.LineFadeId(9, 0, 3, -1) };
             var wasPlaced  = new byte[] { 0, 0 };
             var pathScratch = new float2[2];
             var cumScratch  = new float[2];
@@ -208,6 +208,27 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(0, staged);
             Assert.AreEqual(0, p.BoxCount);
+        }
+
+        // Regression: LineFadeId must fold in the LAYER dimension. SymbolFeatureExtractor restarts its FeatureIndex
+        // ordinal per layer, so two different roads in different line-symbol layers of ONE tile share
+        // (tileKey, featureIndex, anchorIndex). Without the layer id their fade ids collide — and a per-candidate fade
+        // id collision makes two live labels fight over one opacity and stick at a partial value forever (the
+        // "line labels overlap and one never fades" bug). RED against the pre-fix 3-arg id (no layer term).
+        [Test]
+        public void LineFadeId_DiffersByLayer_ForSameTileFeatureAnchor()
+        {
+            const long tile = 246313140626018L;
+            long layerA = LabelStagingMath.LineFadeId(tile, layerId: 0, featureIndex: 0, anchorIndex: 0);
+            long layerB = LabelStagingMath.LineFadeId(tile, layerId: 1, featureIndex: 0, anchorIndex: 0);
+            Assert.AreNotEqual(layerA, layerB, "two layers' feature-0 anchor-0 must not share a fade id");
+
+            // Stable identity: the same (tile, layer, feature, anchor) always hashes identically (cross-frame fade
+            // continuity depends on it), and the other dimensions still distinguish.
+            Assert.AreEqual(layerA, LabelStagingMath.LineFadeId(tile, 0, 0, 0), "same key must be stable");
+            Assert.AreNotEqual(layerA, LabelStagingMath.LineFadeId(tile, 0, 1, 0), "feature dimension distinguishes");
+            Assert.AreNotEqual(layerA, LabelStagingMath.LineFadeId(tile, 0, 0, 1), "anchor dimension distinguishes");
+            Assert.AreNotEqual(layerA, LabelStagingMath.LineFadeId(tile + 1, 0, 0, 0), "tile dimension distinguishes");
         }
     }
 }

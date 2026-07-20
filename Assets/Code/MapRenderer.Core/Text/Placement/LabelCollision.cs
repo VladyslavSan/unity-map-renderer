@@ -144,6 +144,16 @@ namespace MapRenderer.Core.Text.Placement
             if (a.WasPlacedLastFrame != b.WasPlacedLastFrame) return a.WasPlacedLastFrame ? -1 : 1;
             if (a.FeatureIndex != b.FeatureIndex) return a.FeatureIndex < b.FeatureIndex ? -1 : 1;
             if (a.TileKey != b.TileKey) return a.TileKey < b.TileKey ? -1 : 1;
+            // STRICT total order: a curved feature's repeated anchors all share (SortKey, FeatureIndex, TileKey), so
+            // WITHOUT this final key they compare EQUAL — the heapsort's tie-resolution is then unstable and the A-5
+            // incumbency feedback (WasPlacedLastFrame reflects last frame's survivors) can drive a limit CYCLE: the
+            // placed-anchor subset oscillates frame-to-frame even on a STILL camera, flipping which neighbours are
+            // blocked so their collision losers never finish fading (the "overlapping line labels, one won't fade"
+            // bug). FadeId is the anchor's stable per-frame identity (LineFadeId(tile,feature,anchorIndex) / the point
+            // fade id), unique per candidate, so it makes the order TOTAL — restoring the one-step fixed point the
+            // A-5 comment above relies on. Distinct-FeatureIndex labels never reach here, so existing behaviour and
+            // the permutation-invariance/hysteresis teeth are unchanged.
+            if (a.FadeId != b.FadeId) return a.FadeId < b.FadeId ? -1 : 1;
             return 0;
         }
 
@@ -196,6 +206,11 @@ namespace MapRenderer.Core.Text.Placement
                 LabelCandidate c = candidates[i];
                 int start = c.BoxStart;
                 int end   = c.BoxStart + c.BoxCount;
+
+                // Zoom-gated OUT: a suppressed candidate (owning layer outside the live camera zoom's minzoom/maxzoom)
+                // is treated as ABSENT — never placed, never a blocker (its boxes are not inserted) — so it neither
+                // wins nor blocks the genuine winner while it eases to 0. It is still emitted (fading) by the caller.
+                if (c.Suppressed) { survivor[i] = false; continue; }
 
                 // Place if it ignores collision, OR none of its boxes overlaps an already-placed blocker.
                 // Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate wins.

@@ -70,7 +70,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TranslatePx = float2.zero, TranslateAnchor = TextTranslateAnchor.Viewport,
                 MaxAngleDeg = 90f, KeepUpright = true, Color = new float4(1, 1, 1, 1),
             };
-            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 1, 0), LabelStagingMath.LineFadeId(1, 1, -1) };
+            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 0, 1, 0), LabelStagingMath.LineFadeId(1, 0, 1, -1) };
             var wasPlaced = new byte[] { 0, 0 };
             var pathScratch = new float2[3];
             var cumScratch = new float[3];
@@ -121,7 +121,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TranslatePx = float2.zero, TranslateAnchor = TextTranslateAnchor.Viewport,
                 MaxAngleDeg = 90f, KeepUpright = true, Color = new float4(1, 1, 1, 1),
             };
-            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 2, 0), LabelStagingMath.LineFadeId(1, 2, -1) };
+            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 0, 2, 0), LabelStagingMath.LineFadeId(1, 0, 2, -1) };
             var wasPlaced = new byte[] { 0, 0 };
             var pathScratch = new float2[2];
             var cumScratch = new float[2];

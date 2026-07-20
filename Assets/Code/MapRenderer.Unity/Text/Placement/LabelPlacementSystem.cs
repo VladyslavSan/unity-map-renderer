@@ -576,6 +576,12 @@ namespace MapRenderer.Unity.Text.Placement
                     //     native pools (B-4a). Size the grid, schedule + Complete (synchronous for B-4a; B-4b defers
                     //     the Complete a frame). _sjCandidates is sorted in place by the job; the emit loop below
                     //     reads the sorted native candidates + survivor flags.
+                    // Mark out-of-zoom candidates LabelCandidate.Suppressed BEFORE collision, so a label whose layer
+                    // is outside the LIVE camera zoom's minzoom/maxzoom neither wins nor blocks the true winner (it
+                    // still eases to 0 in the emit loop). Display-time gate → overzoom works: a z14 tile reveals
+                    // poi_r1/r7/r20 as the camera passes 15/16/17, and hides them on zoom-out.
+                    ApplySuppression(candidateCount, symbolLayers, _camera.CurrentProperties.Zoom);
+
                     LastCandidateCount = candidateCount;
                     using (PmCollide.Auto())
                         LastSurvivorCount = RunCollision(candidateCount, boxCount);
@@ -592,15 +598,17 @@ namespace MapRenderer.Unity.Text.Placement
                         for (int s = 0; s < candidateCount; s++)
                         {
                             LabelCandidate cand = _sjCandidates[s]; // sorted in place by the collision job
-                            // A record the gather cull kept alive is being staged ONLY to fade out — force its
-                            // target to 0 and drop it from incumbency, regardless of whether it won collision.
-                            bool fadeOut  = _forceFadeOut.Contains(cand.FadeId);
-                            bool survived = !fadeOut && _nSurvivors[s] != 0;
-                            _seenFade.Add(cand.FadeId);
-                            // A-5: incumbency tracks COLLISION survival (not opacity) — a just-born survivor still at
-                            // ~0 alpha is placed, so it must stay sticky. Keyed by FadeId (line labels: per-anchor).
-                            if (survived) _placedLastFrame.Add(cand.FadeId);
-                            float opacity = EaseFade(cand.FadeId, survived ? 1f : 0f, deltaTime);
+                            long fadeId = cand.FadeId;
+                            _seenFade.Add(fadeId);
+                            // Show a genuine collision survivor; everything else (a loser, a gather-cull force-out, or
+                            // a Suppressed out-of-zoom candidate — its survivor flag is already 0) eases toward 0.
+                            // The collision is a stable fixed point (total-order tiebreak) and each live candidate has a
+                            // unique fade id (tile, layer, feature, anchor), so a stable loser eases cleanly to 0 and
+                            // stays hidden — no sticky/cooldown machinery needed.
+                            bool fadeOut = _forceFadeOut.Contains(fadeId);
+                            bool show    = !fadeOut && _nSurvivors[s] != 0;
+                            if (show) _placedLastFrame.Add(fadeId); // A-5 incumbency tracks genuine survival
+                            float opacity = EaseFade(fadeId, show ? 1f : 0f, deltaTime);
                             if (opacity <= FadeEpsilon) continue;
 
                             // I5b: an icon candidate's quads land in the ICON bucket, not the text one — the
@@ -1033,6 +1041,24 @@ namespace MapRenderer.Unity.Text.Placement
                 float next = math.max(_fadeOpacity[id] - step, 0f);
                 if (next <= FadeEpsilon) _fadeOpacity.Remove(id);
                 else _fadeOpacity[id] = next;
+            }
+        }
+
+        // Mark each just-staged candidate LabelCandidate.Suppressed BEFORE collision when its owning layer is OUT OF
+        // the live camera zoom's minzoom/maxzoom (MapLibre layer visibility). A suppressed candidate is treated as
+        // absent — never placed, never a blocker — while it still eases to 0 (fading out) in the emit loop. Evaluated
+        // per-frame against the LIVE zoom — NOT the tile build zoom — so overzoomed tiles reveal/hide layers as the
+        // camera crosses a layer boundary. Cheap main-thread pass; Slot comes from the emit record.
+        private void ApplySuppression(int candidateCount, IReadOnlyList<SymbolRenderLayer> symbolLayers, double zoom)
+        {
+            if (symbolLayers == null || symbolLayers.Count == 0) return; // demo path → no per-layer zoom ranges
+            for (int s = 0; s < candidateCount; s++)
+            {
+                LabelCandidate c = _sjCandidates[s];
+                int slot = _sjEmit[c.LabelIndex].Slot;
+                bool suppress = slot >= 0 && slot < symbolLayers.Count && symbolLayers[slot]?.StyleLayer != null
+                    && !symbolLayers[slot].StyleLayer.IsVisibleAtZoom(zoom);
+                if (c.Suppressed != suppress) { c.Suppressed = suppress; _sjCandidates[s] = c; }
             }
         }
 

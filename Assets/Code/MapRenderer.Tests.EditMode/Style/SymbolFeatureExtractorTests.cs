@@ -100,6 +100,48 @@ namespace MapRenderer.Tests
             Assert.AreEqual(2f, labels[0].PaddingPx, 1e-6, "text-padding spec default is 2");
         }
 
+        // ── Layer visibility predicate (MapLibre minzoom<=zoom<maxzoom, min inclusive / max EXCLUSIVE, null =
+        //    unbounded). This is evaluated at DISPLAY time against the live camera zoom (see the extraction test
+        //    below for WHY it is not gated at build time). ──
+        [Test]
+        public void StyleLayer_IsVisibleAtZoom_MinInclusive_MaxExclusive_NullUnbounded()
+        {
+            MapRenderer.Core.Style.StyleLayer L(double? min, double? max) =>
+                new SymbolStyle.StyleLayer { Id = "x", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, MinZoom = min, MaxZoom = max };
+
+            Assert.IsFalse(L(15.0, null).IsVisibleAtZoom(14.0), "below minzoom → hidden");
+            Assert.IsTrue (L(15.0, null).IsVisibleAtZoom(15.0), "at minzoom → visible (inclusive)");
+            Assert.IsTrue (L(15.0, null).IsVisibleAtZoom(16.0), "above minzoom → visible");
+            Assert.IsFalse(L(null, 8.0).IsVisibleAtZoom(8.0),  "at maxzoom → hidden (exclusive)");
+            Assert.IsTrue (L(null, 8.0).IsVisibleAtZoom(7.99), "just below maxzoom → visible");
+            Assert.IsTrue (L(null, null).IsVisibleAtZoom(14.0), "unbounded → visible at any zoom");
+            Assert.IsTrue (L(15.0, 17.0).IsVisibleAtZoom(16.0), "within [min,max) → visible");
+            Assert.IsFalse(L(15.0, 17.0).IsVisibleAtZoom(17.0), "at max of a bounded range → hidden");
+        }
+
+        // ── Extraction is deliberately zoom-VISIBILITY-agnostic: it emits a layer's labels regardless of the
+        //    layer's minzoom/maxzoom, because tile DATA tops out at a max source zoom (z14 for OpenFreeMap) and is
+        //    OVERZOOMED at higher camera zooms without rebuilding. Gating at build time would freeze visibility and
+        //    hide layers MapLibre reveals as you zoom past the data level; the gate lives at display time instead
+        //    (StyleLayer.IsVisibleAtZoom). This pins that a minzoom-15 layer STILL extracts at z14 (a build-time
+        //    gate here would be the regression). ──
+        [Test]
+        public void Extract_DoesNotGateByLayerZoom_SoOverzoomWorks()
+        {
+            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            var projection = new WebMercatorProjection();
+            var layer = new SymbolStyle.StyleLayer
+            {
+                Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "centroids",
+                LayoutJson = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"), MinZoom = 15.0, // MapLibre-hidden at z14
+            };
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, labels);
+            Assert.AreEqual(248, labels.Count,
+                "a minzoom-15 layer must still EXTRACT at z14 (its labels live in the store); display-time " +
+                "IsVisibleAtZoom hides them until the camera reaches z15 — so overzoomed data reveals them correctly");
+        }
+
         [Test]
         public void Extract_TextTransform_CaseFoldsResolvedLabel()
         {

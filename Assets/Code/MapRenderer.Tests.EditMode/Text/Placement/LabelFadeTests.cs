@@ -161,6 +161,30 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "settled: only the winner B remains, A has faded to 0");
         }
 
+        // ── A stable collision loser eases fully to 0 and STAYS hidden (no re-pump, no partial-opacity hover). The
+        //    total-order collision tiebreak makes the survivor set a fixed point, so a deterministic loser fades out
+        //    cleanly with a plain ease — no sticky/cooldown machinery. (The earlier "stuck bright" oscillation is
+        //    fixed at the root in LabelCandidateCollisionTests.SelectSurvivors_SameFeatureAnchors_*.) ──
+        [Test]
+        public void Tick_StableCollisionLoser_FadesFullyOutAndStaysHidden()
+        {
+            using var h = new Harness();
+            var bOnly = new List<LabelInstance> { Point(h.Origin, 10f, "B", 1) };
+            // A deterministically beats B every frame (lower sort key) at the same anchor — a STABLE outcome.
+            var aBeatsB = new List<LabelInstance> { Point(h.Origin, 5f, "A", 0), Point(h.Origin, 10f, "B", 1) };
+
+            h.System.Tick(in h.Frame, bOnly, h.Atlas); // B alone, snap to full
+            Assert.AreEqual(1, h.System.LastQuadCount, "B places alone");
+
+            h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(2, h.System.LastQuadCount, "mid-transition: A fading in, B fading out (both drawn briefly)");
+
+            // B loses every frame → it eases to 0 and stays there; only A remains, and it settles at full opacity.
+            for (int i = 0; i < 8; i++) h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "a stable loser fully fades out — only the winner A remains");
+            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…and the winner is at full opacity, not stuck partial");
+        }
+
         // ── B-3: a label far past the horizon radius is culled BEFORE projection/collision; the near label
         //    still places. (The Core radius math is pinned in LabelViewDistanceTests; this proves the wiring.) ──
         [Test]

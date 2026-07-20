@@ -40,6 +40,13 @@ namespace MapRenderer.Core.Style
         /// <summary>Layer <c>maxzoom</c>. Nullable: the spec lists no default (absent = unbounded above).</summary>
         public double? MaxZoom;
 
+        /// <summary>MapLibre layer visibility at a given DISPLAY (camera) zoom: <c>minzoom &lt;= zoom &lt; maxzoom</c>,
+        /// with a null bound meaning unbounded. <b>minzoom is inclusive, maxzoom is EXCLUSIVE</b> (Style Spec). Must
+        /// be evaluated against the LIVE camera zoom every frame — NOT the tile build zoom — so overzoomed tiles
+        /// (camera past the source's max data zoom) still turn layers on/off as MapLibre does.</summary>
+        public bool IsVisibleAtZoom(double zoom)
+            => (!MinZoom.HasValue || zoom >= MinZoom.Value) && (!MaxZoom.HasValue || zoom < MaxZoom.Value);
+
         /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null. Parsed in S10.</summary>
         public JsonValue Filter;
 

@@ -44,9 +44,22 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>A-4: this candidate's cross-frame FADE identity (stable across frames + tile swaps) —
         /// <see cref="LabelPlacementSystem"/> keys its persistent opacity record by this so a label eases in/out
-        /// instead of popping. Point labels: a fixed-grid quantized-anchor hash (zoom-STABLE, unlike the A-3
-        /// display-zoom dedup key); line labels: a within-tile (tile, feature, anchor) hash.</summary>
+        /// instead of popping. It must be UNIQUE per live candidate (one opacity read-modify-write per id per frame),
+        /// or two candidates sharing it fight over one opacity and stick at a partial value. Point labels: a
+        /// fixed-grid quantized-anchor hash folding in the layer (zoom-STABLE, unlike the A-3 display-zoom dedup
+        /// key); line labels: a (tile, LAYER, feature, anchor) hash — the layer term is load-bearing because
+        /// <c>FeatureIndex</c> restarts per layer (see <see cref="LabelStagingMath.LineFadeId"/>).</summary>
         public long FadeId;
+
+        /// <summary>Display-time ZOOM GATE: this candidate is EXCLUDED from placement this frame — the greedy never
+        /// places it and it never blocks others (as if absent from collision) — because its owning symbol layer is
+        /// outside the LIVE camera zoom's <c>minzoom</c>/<c>maxzoom</c> (MapLibre layer visibility). Set on the main
+        /// thread just before the collision pass (<c>LabelPlacementSystem.ApplySuppression</c>) against the live zoom
+        /// — NOT the tile build zoom — so overzoomed tiles reveal/hide layers as the camera crosses a boundary. A
+        /// suppressed candidate is still STAGED (its quads ease to 0, fading out); only its collision role is removed
+        /// — so it fades without blocking the genuine winner. Default false ⇒ every in-zoom candidate participates
+        /// exactly as before.</summary>
+        public bool Suppressed;
 
         /// <summary>A-5: this candidate was a SURVIVOR last frame (looked up by <see cref="FadeId"/> against the
         /// placement system's kept-set). It biases <see cref="LabelCollision.ComparePlacementOrder(in LabelCandidate,in LabelCandidate)"/>
