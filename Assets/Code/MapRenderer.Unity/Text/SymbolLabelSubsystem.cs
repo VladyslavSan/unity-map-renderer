@@ -93,6 +93,14 @@ namespace MapRenderer.Unity.Text
         private static readonly ProfilerMarker PmAtlasUpload =
             new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.AtlasUpload");
 
+        // The two halves of CurrentBatch (nest under MapView's MapRenderer.Symbol.BatchBuild): the A-3 cross-tile
+        // dedup gather vs the LabelInstance→SoA build (+ tile-corner projection). Split so the profiler shows which
+        // half of the per-frame batch rebuild dominates at high zoom (the ~19.5ms z14-15 main-thread hot spot).
+        private static readonly ProfilerMarker PmBatchCollect =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.Collect");
+        private static readonly ProfilerMarker PmBatchSoA =
+            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA");
+
         // Per-(source, tile) built labels, with the active/cached lifecycle that mirrors the tile MESH cache
         // (Model B) so labels survive a leave-cover → cache-hit → re-enter-cover round trip. Sized to the
         // prepared mesh cache's count cap so a cached tile's labels always outlive its meshes.
@@ -582,8 +590,11 @@ namespace MapRenderer.Unity.Text
             // ones and reports the split; the builder flags the departing records so the placement gather fades them
             // out instead of popping. Pass the projection so the batch stores each tile's render-space corners for
             // the per-frame tile-coverage pre-cull (camera-independent → built here).
-            _store.CollectInto(_batchCollect, quantize, out int activeCount);
-            SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection, activeCount);
+            int activeCount;
+            using (PmBatchCollect.Auto())
+                _store.CollectInto(_batchCollect, quantize, out activeCount);
+            using (PmBatchSoA.Auto())
+                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection, activeCount);
             return _batch;
         }
 

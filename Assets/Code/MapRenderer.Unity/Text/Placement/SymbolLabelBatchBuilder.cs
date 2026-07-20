@@ -4,6 +4,7 @@
 
 using System.Collections.Generic;
 using Unity.Mathematics;
+using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
@@ -30,6 +31,19 @@ namespace MapRenderer.Unity.Text.Placement
         // and non-reentrant (demo Tick + the subsystem's CurrentBatch both run on the main thread), so one shared
         // instance is safe.
         [System.ThreadStatic] private static Dictionary<long, int> _tileDedup;
+
+        // SoA-build breakdown markers (nest under MapRenderer.Symbol.BatchBuild.SoA), splitting the per-frame
+        // LabelInstance→SoA conversion into three natures so the profiler shows what actually dominates:
+        //   Project — per-unique-tile 4-corner projection (movable to build-time; measured ~7% of SoA).
+        //   Hash    — fade-id string hash + sRGB→linear colour, the movable-to-build-time conversion (~22%).
+        //   Copy    — bulk glyph/quad/anchor appends into the ONE contiguous pool the Burst jobs read; INTRINSIC
+        //             per frame (a stale/off-main decision still gathers survivors into one buffer) — measured
+        //             the dominant ~70%, which is why the answer is off-main/GPU-projected rendering, not a
+        //             build-time precompute (that would only retire Hash+Project). Marker Begin/End is a near-
+        //             no-op when the profiler is not recording, so the per-label cost in production is negligible.
+        private static readonly ProfilerMarker PmSoAProject = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA.Project");
+        private static readonly ProfilerMarker PmSoAHash    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA.Hash");
+        private static readonly ProfilerMarker PmSoACopy    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA.Copy");
 
         /// <summary>Rebuild <paramref name="batch"/> in place from <paramref name="labels"/> (collected order
         /// preserved so the collision ordinal — and thus the mesh — stays byte-identical). <paramref name="slotCount"/>
@@ -75,10 +89,14 @@ namespace MapRenderer.Unity.Text.Placement
             // Tile-local corners (extent 1) in ring order TL,TR,BR,BL → geo → render, via the SAME path that built
             // AnchorRender (SymbolFeatureExtractor: ToLonLat → projection.Project). No MercatorBounds/flat-earth
             // shortcut — this stays globe-correct.
-            double3 topLeft     = ProjectCorner(tile, 0.0, 0.0, projection);
-            double3 topRight    = ProjectCorner(tile, 1.0, 0.0, projection);
-            double3 bottomRight = ProjectCorner(tile, 1.0, 1.0, projection);
-            double3 bottomLeft  = ProjectCorner(tile, 0.0, 1.0, projection);
+            double3 topLeft, topRight, bottomRight, bottomLeft;
+            using (PmSoAProject.Auto())
+            {
+                topLeft     = ProjectCorner(tile, 0.0, 0.0, projection);
+                topRight    = ProjectCorner(tile, 1.0, 0.0, projection);
+                bottomRight = ProjectCorner(tile, 1.0, 1.0, projection);
+                bottomLeft  = ProjectCorner(tile, 0.0, 1.0, projection);
+            }
             idx = batch.AddTile(topLeft, topRight, bottomRight, bottomLeft);
             tileIndexByKey[tileKey] = idx;
             return idx;
@@ -96,8 +114,19 @@ namespace MapRenderer.Unity.Text.Placement
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
             int quadCount = quads?.Count ?? 0;
             int quadStart = batch.QuadCount;
-            for (int q = 0; q < quadCount; q++) batch.AddQuad(quads[q]);
+            using (PmSoACopy.Auto())
+                for (int q = 0; q < quadCount; q++) batch.AddQuad(quads[q]);
 
+            // Hash: the movable-to-build-time conversion (sRGB→linear color + fade-id string hash).
+            float4 color;
+            long   fadeId;
+            using (PmSoAHash.Auto())
+            {
+                color  = LabelPlacementSystem.LinearColor(label);
+                // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
+                // is unchanged — PointFadeId's guard-skip fold).
+                fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
+            }
             var input = new PointStageInput
             {
                 // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
@@ -108,10 +137,8 @@ namespace MapRenderer.Unity.Text.Placement
                 Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
                 AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                RotationAlignment = label.RotationAlignment, Color = LabelPlacementSystem.LinearColor(label),
-                // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
-                // is unchanged — PointFadeId's guard-skip fold).
-                FadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage),
+                RotationAlignment = label.RotationAlignment, Color = color,
+                FadeId = fadeId,
                 // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
             };
@@ -127,7 +154,8 @@ namespace MapRenderer.Unity.Text.Placement
             IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
             int glyphCount = glyphs?.Count ?? 0;
             int glyphStart = batch.GlyphCount;
-            for (int g = 0; g < glyphCount; g++) batch.AddGlyph(glyphs[g]);
+            using (PmSoACopy.Auto())
+                for (int g = 0; g < glyphCount; g++) batch.AddGlyph(glyphs[g]);
 
             // Copy anchors (capped at the staging cap, which StageCurved re-applies) + pre-resolve their fade ids
             // (one per anchor + a trailing fallback for the centred label). Incumbency stays per-frame (not stored).
@@ -135,14 +163,20 @@ namespace MapRenderer.Unity.Text.Placement
             int anchorLen = anchors?.Length ?? 0;
             int anchorCount = math.min(anchorLen, LabelStagingMath.MaxAnchorsPerLine);
             int anchorStart = batch.AnchorCount;
-            for (int a = 0; a < anchorCount; a++) batch.AddAnchor(anchors[a]);
+            using (PmSoACopy.Auto())
+                for (int a = 0; a < anchorCount; a++) batch.AddAnchor(anchors[a]);
             int anchorFadeStart = batch.AnchorFadeCount;
             // label.MaterialIndex = the symbol layer's slot — the SAME per-layer id PointFadeId folds in. Load-bearing:
             // FeatureIndex restarts per layer, so without it two roads in different layers of one tile collide (the
             // stuck-at-partial-opacity fade fight). See LineFadeId's doc.
-            for (int a = 0; a < anchorCount; a++)
-                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
-            batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
+            float4 curvedColor;
+            using (PmSoAHash.Auto())
+            {
+                for (int a = 0; a < anchorCount; a++)
+                    batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
+                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
+                curvedColor = LabelPlacementSystem.LinearColor(label);
+            }
 
             var input = new CurvedStageInput
             {
@@ -152,7 +186,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
-                Color = LabelPlacementSystem.LinearColor(label),
+                Color = curvedColor,
             };
             int detail = batch.AddCurved(input, glyphStart, glyphCount, anchorStart, anchorCount, anchorFadeStart);
 
@@ -161,7 +195,8 @@ namespace MapRenderer.Unity.Text.Placement
             double3[] path = label.PathRender;
             int pathLen = path?.Length ?? 0;
             int worldStart = batch.WorldPointCount;
-            for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
+            using (PmSoACopy.Auto())
+                for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
             batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, tileIndex, departing);
         }

@@ -62,15 +62,27 @@ namespace MapRenderer.Unity.Rendering.Map
     public sealed class MapView
     {
         // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
+        //   LateUpdate       — UMBRELLA over the whole per-frame pipeline. Its self-time (total − the children
+        //                      below) is the residual unmarked cost: if it is ~0 every per-frame span is mapped.
+        //   CameraAdvance    — commit this frame's camera pose (SyncToCamera: pose math + transform/clip push).
         //   ApplyZoom        — push zoom uniforms into every layer material (scales with layer count).
         //   InstancedRebuild — drive the render backend per frame (on Entities this ticks the EG system groups).
         //   ManagerTick      — cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
+        //   SceneFrame       — build the per-frame floating-origin scene frame (projection Project + tangent basis).
+        //   SymbolBatch      — aggregate the frame's active labels: A-3 cross-tile dedup (CollectInto) + LabelInstance
+        //                      → SoA batch build. Runs between Symbol.Collect and Labels.Tick — a managed main-thread
+        //                      hot spot in its own right (grows with the on-screen label count at high zoom).
+        private static readonly ProfilerMarker PmLateUpdate       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.LateUpdate");
+        private static readonly ProfilerMarker PmCameraAdvance     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Camera.Advance");
         private static readonly ProfilerMarker PmApplyZoom        = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom");
         private static readonly ProfilerMarker PmInstancedRebuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.InstancedRebuild");
         private static readonly ProfilerMarker PmManagerTick      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.ManagerTick");
-        // The symbol reconcile + label AGGREGATION that runs before Labels.Tick — a candidate for the LateUpdate
-        // time the coarse markers didn't map (A-1 pull/reconcile + A-3 cross-tile dedup CollectInto).
+        private static readonly ProfilerMarker PmSceneFrame       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.SceneFrame");
+        // The symbol reconcile that runs before the label aggregation (A-1 pull/reconcile + PumpBuilds).
         private static readonly ProfilerMarker PmSymbolCollect    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Collect");
+        // The label AGGREGATION (A-3 cross-tile dedup CollectInto + SoA batch build) — its own marker so the
+        // dedup/build cost is not misattributed to the unmarked LateUpdate self-time (it feeds Labels.Tick).
+        private static readonly ProfilerMarker PmSymbolBatch      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild");
 
         // ── Injected collaborators (correct by construction — never null) ────────────────────────
         private readonly MapViewConfig _config;
@@ -320,16 +332,21 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public void LateUpdate()
         {
+            using var _lateUpdate = PmLateUpdate.Auto(); // umbrella: self-time = residual unmarked per-frame cost
+
             // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
             //    rebase and the label projection below both read the just-committed pose. DPI is refreshed from
             //    the live config before the commit (it feeds the altitude framing). This ordering is also what
             //    keeps Camera.CameraRelativePosition fresh for BuildSceneFrame one line below.
             Camera.DevicePixelRatio = _config.DevicePixelRatio;
-            Camera.SyncToCamera();
+            using (PmCameraAdvance.Auto())
+                Camera.SyncToCamera();
 
             // ONE snapshot for the rest of the frame — tiles and labels share it, so they can't diverge.
             CameraProperties cameraProperties = Camera.CurrentProperties;
-            Backend.SceneFrame sceneFrame = BuildSceneFrame(cameraProperties);
+            Backend.SceneFrame sceneFrame;
+            using (PmSceneFrame.Auto())
+                sceneFrame = BuildSceneFrame(cameraProperties);
 
             // 2. Move the tiles. ApplyZoom first — so a fractional-zoom-only change always pushes uniforms
             //    (fill/line zoom paint, zoom-step dasharrays for pixel line width).
@@ -372,9 +389,14 @@ namespace MapRenderer.Unity.Rendering.Map
                     _symbols.PumpBuilds();
                 }
                 // Lever C: the blittable label batch — collect (+ cross-tile dedup) + LabelInstance→SoA, rebuilt every
-                // frame (allocation-free; the version cache was removed). Then project/collide/build the placement,
-                // presenting each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
-                Labels.Tick(sceneFrame, _symbols.CurrentBatch(), _symbols.Atlas, Time.deltaTime,
+                // frame (allocation-free; the version cache was removed). Hoisted out of the Labels.Tick argument so
+                // its managed dedup/build cost is MARKED (Symbol.BatchBuild), not folded into the umbrella self-time.
+                SymbolLabelBatch batch;
+                using (PmSymbolBatch.Auto())
+                    batch = _symbols.CurrentBatch();
+                // Then project/collide/build the placement, presenting each slot through its own SymbolRenderLayer
+                // (D11/E2 — material + persistent presenter).
+                Labels.Tick(sceneFrame, batch, _symbols.Atlas, Time.deltaTime,
                     _symbolRenderLayers, _symbols.IconTexture);
             }
             else
