@@ -293,7 +293,6 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            system.MinTileScreenCoverage = 0.0; // the realistic z14 tile is finer than this z12 camera's view
             try
             {
                 system.Tick(in frame, new[] { label }, atlasTexture);

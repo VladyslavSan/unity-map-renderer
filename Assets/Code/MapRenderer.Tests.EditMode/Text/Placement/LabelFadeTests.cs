@@ -6,7 +6,6 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
@@ -61,8 +60,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         // Epic A / A1: point labels draw through the WORLD path now — the fade opacity (stream 1) no longer
         // rides system.Mesh's vertex-colour alpha (BillboardVertex.Color.a); it lives on the world slot's
-        // Opacity stream (WorldMeshReadback.MaxOpacity). tileKey defaults to 0L (every label in this file
-        // bar one uses it — fade/opacity assertions are position-independent, see Risk R1's note).
+        // Opacity stream (WorldMeshReadback.MaxOpacity). tileKey defaults to 0L — every label in this file
+        // uses it (fade/opacity assertions are position-independent).
         private static float MaxAlpha(LabelPlacementSystem system, long tileKey = 0L)
             => system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
@@ -200,51 +199,11 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "only the near label places");
         }
 
-        // ── A label whose TILE gets coverage-culled while the label itself is still on screen must FADE OUT in
-        //    place, not pop. The pre-cull produces no geometry, so before the soft-cull fix the fade record decayed
-        //    silently and the label vanished for a frame. Now the gather cull keeps staging a still-visible label
-        //    (forcing its fade to 0) until it has faded, then finally skips it. ──
-        [Test]
-        public void Tick_TileCoverageCulled_FadesOut_InsteadOfPopping()
-        {
-            using var h = new Harness();
-            // A high-zoom tile at the look-at: tiny on screen (well under any coverage threshold) yet in front of
-            // the camera, so the tile-coverage cull fires while the label's own anchor is still centre-screen.
-            long tileKey = SymbolFeatureExtractor.PackTileKey(new TileId { Z = 14, X = 8647, Y = 7735 });
-            var labels = new List<LabelInstance>
-            {
-                new LabelInstance
-                {
-                    AnchorRender = h.Origin, Placement = SymbolPlacement.Point, Layout = OneQuad(),
-                    Paint = LabelPaint.Default, TextSizePx = 24f, PaddingPx = 2f, SortKey = 0f, Text = "A",
-                    FeatureIndex = 0, TileKey = tileKey,
-                },
-            };
-
-            // 1) Cull disabled → the label places and snaps to full opacity.
-            h.System.MinTileScreenCoverage = 0.0;
-            h.System.Tick(in h.Frame, labels, h.Atlas); // default dt → snap to full
-            Assert.AreEqual(1, h.System.LastQuadCount, "the label places with the cull disabled");
-            Assert.Greater(MaxAlpha(h.System, tileKey), 0.99f, "…at full opacity");
-
-            // 2) Enable the cull → the tiny tile is culled, but the on-screen label must FADE (still drawn, dimmer),
-            //    not disappear for a frame.
-            h.System.MinTileScreenCoverage = 0.05;
-            h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.1f);
-            Assert.AreEqual(1, h.System.LastQuadCount, "a culled-but-visible label keeps drawing (fading, not popping)");
-            float dim = MaxAlpha(h.System, tileKey);
-            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
-            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
-
-            // 3) After enough steps it finishes fading and is finally dropped (the cull's perf win applies once invisible).
-            for (int i = 0; i < 10; i++) h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.1f);
-            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the culled label is fully skipped");
-        }
-
         // ── Retain-as-departing: when a tile leaves cover its labels are flagged DEPARTING (RecordDeparting, set
-        //    from CollectInto's active/departing split) so they FADE OUT in place instead of popping — the tile-
-        //    UNLOAD analogue of the coverage-cull fade. Simulated here by building the batch with activeCount: the
-        //    same label is active first, then departing (activeCount excludes it). ──
+        //    from CollectInto's active/departing split) so they FADE OUT in place instead of popping (the B-3
+        //    distance / S3 horizon culls' companion fade-out trigger — the tile-coverage pre-cull now runs
+        //    upstream of the batch and pops instead, see LabelTileCoverageFilter). Simulated here by building
+        //    the batch with activeCount: the same label is active first, then departing (activeCount excludes it). ──
         [Test]
         public void Tick_DepartingRecord_FadesOut_InsteadOfPopping()
         {
@@ -272,6 +231,42 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < 10; i++) h.System.Tick(in h.Frame, departing, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the departing label is fully skipped");
             Assert.Greater(h.System.LastDepartingCulledCount, 0, "…and its skip is attributed to departing telemetry");
+        }
+
+        // ── REVISION 2: coverage-fading (a tile's on-screen coverage crossed below threshold, flagged
+        //    RecordCoverageFading by LabelTileCoverageFilter/Build — a SEPARATE flag from RecordDeparting, since
+        //    the tile is still ACTIVE, just small on screen) FADES OUT in place instead of popping — mirrors
+        //    Tick_DepartingRecord_FadesOut_InsteadOfPopping above, one flag over. ──
+        [Test]
+        public void Tick_CoverageFadingRecord_FadesOut_InsteadOfPopping()
+        {
+            using var h = new Harness();
+            var labels = new List<LabelInstance> { Point(h.Origin, sortKey: 0f, text: "A", feature: 0) }; // TileKey = 0L
+
+            // 1) Not coverage-fading (no coverageFadingTiles) → places and snaps to full opacity.
+            var notFading = new SymbolLabelBatch();
+            SymbolLabelBatchBuilder.Build(notFading, labels, slotCount: 1, projection: null, activeCount: int.MaxValue);
+            h.System.Tick(in h.Frame, notFading, h.Atlas);
+            Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
+
+            // 2) The SAME label's tile crosses below the coverage threshold — RecordCoverageFading flags it. It
+            //    must keep drawing while it fades, not vanish for a frame.
+            var fading = new SymbolLabelBatch();
+            var fadingTiles = new HashSet<long> { 0L };
+            SymbolLabelBatchBuilder.Build(fading, labels, slotCount: 1, projection: null, activeCount: int.MaxValue,
+                coverageFadingTiles: fadingTiles);
+            Assert.IsTrue(fading.RecordCoverageFading[0], "sanity: the record is flagged coverage-fading");
+            h.System.Tick(in h.Frame, fading, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "a coverage-fading-but-visible label keeps drawing (fading, not popping)");
+            float dim = MaxAlpha(h.System);
+            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
+            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
+
+            // 3) After enough steps it finishes fading and is dropped — counted as coverage-fading (not departing).
+            for (int i = 0; i < 10; i++) h.System.Tick(in h.Frame, fading, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the coverage-fading label is fully skipped");
+            Assert.Greater(h.System.LastCoverageFadingCulledCount, 0, "…and its skip is attributed to coverage-fading telemetry");
         }
 
         // ── The point fade id is a FIXED-grid identity: it collapses anchors within a few metres (a cross-tile

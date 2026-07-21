@@ -114,8 +114,10 @@ rebuild, `SymbolLabelBatchBuilder`:
 
 - flattens each label into the SoA in collected order (so collision ordinals — and the mesh — stay
   byte-identical);
-- resolves the managed-only bits (glyph quads, sRGB→linear colour, fade ids);
-- projects each unique tile's 4 corners into render space once, for the tile-coverage cull (§1.5).
+- resolves the managed-only bits (glyph quads, sRGB→linear colour, fade ids).
+
+Between the cross-tile dedup and the SoA build, `CurrentBatch` also runs the tile-coverage pre-cull (§1.5) —
+a low-coverage tile's active labels never reach the builder at all.
 
 The batch carries a **`BuildId`** bumped on every rebuild; `LabelPlacementSystem` mirrors it into native buffers
 only when `BuildId` changes.
@@ -132,9 +134,9 @@ Tick(sceneFrame, batch, atlas, dt, materials, version)
  │
  ├─ PmProject
  │   ├─ PmProjectFill
- │   │   ├─ ComputeTileCoverageCull(batch, origin, viewProj, viewport)   ◄── per-tile pre-cull (§1.5)
- │   │   ├─ GatherSymbolPoints(...)   : flatten un-culled records' world points; a culled record's
- │   │   │                              offset is set to -1 (tile-coverage cull, then B-3 distance cull)
+ │   │   ├─ GatherSymbolPoints(...)   : flatten un-culled records' world points; a culled record's offset
+ │   │   │                              is set to -1 (B-3 distance cull, then S3 horizon cull — the
+ │   │   │                              tile-coverage pre-cull already ran upstream, in CurrentBatch, §1.5)
  │   │   └─ ProjectSymbols(...)       : Burst SymbolProjectionJob — world → screen/depth for all at once
  │   └─ PmStage
  │       └─ RunStageJob(...)          : Burst LabelStageJob — collision boxes + rotated-glyph quads
@@ -150,18 +152,22 @@ Tick(sceneFrame, batch, atlas, dt, materials, version)
                                         (one draw per non-empty material slot)
 ```
 
-Three fade-out triggers happen **before** any projection/staging/collision, in `GatherSymbolPoints`:
+Four fade-out triggers happen **before** any projection/staging/collision, in `GatherSymbolPoints`:
 
 1. **Departing** (`RecordDeparting`): the record's tile is leaving cover (§1.6). Fades out unconditionally.
-2. **Tile-coverage pre-cull**: drop a whole tile's records when the tile is a screen sliver.
+2. **Coverage-fading** (`RecordCoverageFading`): the record's tile just dropped below the §1.5 coverage
+   threshold and is easing out over the grace window before it is dropped from the build entirely. Set by the
+   §1.5 pre-cull; a still-loaded, in-cover tile (distinct from `RecordDeparting`'s leaving-cover meaning).
 3. **B-3 distance cull** (`LabelViewDistance`): drop an individual label beyond a horizon radius.
+4. **S3 horizon cull** (`HorizonCull`): drop a label whose anchor is hidden behind the globe's own bulk
+   (no-op under a planar projection).
 
 A triggered record is **not** hard-dropped while its fade is still alive: gather keeps STAGING it (re-projected
 to its live position) and forces its opacity toward 0 in emit — so it eases OUT in place instead of popping.
 Only once fully faded does gather set its offset to `-1` (the Burst stage job's "skip"). This soft-cull is the
 single mechanism behind all three; no job changed to add any of them.
 
-## 1.5 Tile-coverage pre-cull  *(IMPLEMENTED)*
+## 1.5 Tile-coverage pre-cull  *(IMPLEMENTED — moved ahead of the SoA build)*
 
 A coarse step *before* the per-label pipeline: skip a tile's labels entirely when the tile covers less than ~N%
 of the screen. Small-on-screen tiles are the horizon pile-up under tilt — most of their labels get
@@ -170,15 +176,59 @@ stabilizes per-frame label cost with barely any lost information. Complements th
 cull (a horizon *radius*): this is a per-**tile** *screen-area* metric, which catches the tilt-foreshortened
 slivers a radius keeps.
 
-**Load-bearing constraint:** coverage is camera-dependent, so it must **not** enter the batch build (§1.3). Work
-splits by what depends on the camera:
+**Where it runs.** Originally the cull ran post-build (flagged in `LabelPlacementSystem.Tick`, applied in
+gather) to preserve a per-batch version cache that has since been removed (`cb0786c7`) — once that cache was
+gone, nothing justified paying for the SoA build (glyph/quad copies, sRGB→linear, fade-id hashing) on a tile
+whose labels were about to be discarded. The cull now runs in `SymbolLabelSubsystem.CurrentBatch`, **after**
+the A-3 cross-tile dedup and **before** `SymbolLabelBatchBuilder.Build`:
 
-| Camera-**independent** — once per batch (`SymbolLabelBatchBuilder`) | Camera-**dependent** — every frame (`ComputeTileCoverageCull`) |
-| --- | --- |
-| Dedup tiles by `TileKey`; project each tile's 4 corners to **render space** (`TileId.ToLonLat → IProjection.Project` — globe-correct, no flat-earth `MercatorBounds` shortcut) | Project those corners to **screen**; shoelace area ÷ viewport area |
-| Store `SymbolLabelBatch.TileCorners[]` (a `TileQuad` per tile) + `RecordTile[]` | Flag tiles below `MinTileScreenCoverage`; gather drops flagged records |
+```
+CurrentBatch(frame, minCoverage, now)
+    _store.CollectInto(_batchCollect, quantize, out activeCount)        // A-3 dedup (§1.1)
+    activeCount = LabelTileCoverageFilter.FilterActive(                 // ◄── pre-build cull (this section):
+        _batchCollect, activeCount, projection, frame.SceneOriginRender, viewProj, viewportLogicalPx,
+        frame.Rebase, minCoverage,                                      //     classify Keep / Fade / Drop,
+        _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
+        now, DepartingGraceSeconds, _tileDecisionScratch, out culled)   //     Drop-only labels leave the list
+    swap(_coverageAbovePrev, _coverageAboveThisFrame); PurgeExpiredCoverageDeadlines(now)
+    SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, projection, activeCount,
+        _coverageFadingTiles)                                           // SoA build; flags RecordCoverageFading
+```
 
-The metric is an engine-free Core unit, **`LabelTileCoverage`** (`LabelTileCoverageTests`):
+Cull **after** dedup, not before/inside it: culling pre-dedup would change dedup *winners* — a <5%-coverage
+child tile culled ahead of its A-3 pass would let its >5% parent win the finest-zoom-wins tiebreak
+(`z = TileKey>>44`) and render a label that is hidden today. Cull-after-dedup preserves winners exactly and
+keeps `SymbolTileLabelStore`/`CollectInto` untouched.
+
+**Scope: active labels only** (`_batchCollect[0, activeCount)`) — the departing tail (§1.6, tiles leaving
+cover retained for a fade-out) is untouched by this filter regardless of its own tile's coverage.
+
+The filter itself is an engine-free Core seam, **`LabelTileCoverageFilter.FilterActive`** — every dependency
+(`LabelInstance`, `TileId.ToLonLat`, `SymbolFeatureExtractor.UnpackTileKey`, `IProjection`/`GeoCoordinate`,
+`LabelTileCoverage.ScreenCoverage`/`IsCulled`) is Core, so it compiles into `Tools/core-tests`
+(`LabelTileCoverageFilterTests`) for a fast, RED-verifiable loop over the compaction (active-cull +
+departing-preserve + activeCount recount). It resolves each unique `TileKey`'s corners
+(`TileId.ToLonLat → IProjection.Project`, ring TL/TR/BR/BL — globe-correct, no flat-earth `MercatorBounds`
+shortcut) and coverage (`LabelTileCoverage.ScreenCoverage`/`IsCulled`, same metric as before) ONCE per call via
+a reused scratch cache (`_tileDecisionScratch`, decided once per tile), then compacts the active range in
+place. Each tile is classified **Keep / Fade / Drop** (a `null` label is never culled — `Build`'s null-guard
+expects it to pass through):
+
+- **Keep** (`≥ threshold`): stays active; the A-4 fade eases it *in* if it is new. Clears any live fade deadline.
+- **Fade** (`< threshold` but was visible): stays in the build, its tile added to `_coverageFadingTiles` so
+  `Build` sets `RecordCoverageFading` → gather's 4th trigger (§1.4) eases it *out* in place instead of popping.
+- **Drop** (`< threshold`, steady/never-visible/grace-expired): removed from the list pre-build — the perf win.
+
+**Fade-then-drop, not pop.** A tile crossing below threshold must fade out like every other cull (§1.4), so
+the filter keeps a small amount of reused, alloc-free cross-frame state on the subsystem: `_coverageAbovePrev`
+/ `_coverageAboveThisFrame` (ping-pong `HashSet` of tiles that were ≥ threshold, self-bounding — each set is
+cleared+refilled and swapped every call) and `_coverageDepartingUntil` (tileKey → wall-clock fade-out
+deadline). A **fresh** above→below crossing (`_coverageAbovePrev` contains the tile) stamps `now + grace`
+**once**; while below with a live deadline it keeps Fading; once `now ≥ deadline` — or if it was never visible
+— it Drops. Crossing back above clears the deadline (fade in), and a later re-crossing re-arms it. Grace
+(`DepartingGraceSeconds` = fade duration + 0.2 s) is deliberately > the fade, and the deadlines self-purge
+(`PurgeExpiredCoverageDeadlines`) so an unloaded tile leaves no stranded state. The wall-clock `now` is threaded
+from `MapView.LateUpdate` (`Time.timeAsDouble`, shared with `ReconcileLoadedTiles`).
 
 ```
 ScreenCoverage(4 render corners, sceneOrigin, viewProj, viewport)
@@ -189,15 +239,32 @@ ScreenCoverage(4 render corners, sceneOrigin, viewProj, viewport)
 IsCulled(coverage, minCoverage)  →  minCoverage > 0 && coverage < minCoverage
 ```
 
-`minCoverage ≤ 0` disables the cull (the kill-switch); `+∞` is never below a finite threshold, so a
-near-plane-straddling tile is always kept. Default `MinTileScreenCoverage = 0.05` — a maintainer
-eyeball-tunable. Telemetry: `LastTileCoverageCulledCount`. **Deferred:** a green/red survived-vs-culled debug
-overlay (would make the threshold easy to tune by eye), tilt-scaling the threshold, and explicit hysteresis (the
-A-4 fade softens boundary flicker for v1).
+`minCoverage ≤ 0` (or a null projection) disables the cull (the kill-switch, same convention as before); `+∞`
+is never below a finite threshold, so a near-plane-straddling tile is always kept. Default
+`MapViewConfig.LabelTileCoverageCull = 0.05` (threaded through `MapView.LateUpdate` → `CurrentBatch`) — a
+maintainer eyeball-tunable. Telemetry: `SymbolLabelSubsystem.LastTileCoverageCulledCount` (the Drop count,
+moved from `LabelPlacementSystem`) + `LabelPlacementSystem.LastCoverageFadingCulledCount` (the fully-faded
+coverage-fade count, the gather-side companion).
+
+**Behaviour vs the old post-build cull:** the *rendered set* is unchanged (a tile below threshold is hidden
+either way; cull stays after the A-3 dedup so winners are preserved), and static-frame GPU snapshots are
+byte-identical (no re-bake). The one change is the **transition is preserved**: a tile crossing below threshold
+**fades out** over the grace window (via `RecordCoverageFading`, §1.4) exactly like the old gather cull did,
+rather than popping — only a tile that was *never* on screen is dropped silently (nothing to pop). This was a
+correction over a first (pop) cut of this stage; matches the rest of the label system, all of which fades.
+
+**Deferred / follow-ups:** a green/red survived-vs-culled debug overlay (tune the threshold by eye);
+tilt-scaling the threshold; explicit hysteresis *on the threshold itself* (distinct from the fade grace);
+culling ahead of the A-3 dedup (would change dedup winners — see above). Telemetry is surfaced through
+`SymbolTelemetrySnapshot.CoverageDroppedLabels` / `CoverageFadingLabels` → the `MapTelemetryPanel` (beside the
+distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
+viewport are single shared definitions (`LabelPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
+read by both `CurrentBatch` and `Tick`.
 
 ## 1.6 Retain-as-departing — fading a tile out when it leaves cover
 
-The coverage/distance culls fade a record still *in* the batch. A normal **tile unload** is different: the tile
+The B-3 distance / S3 horizon culls fade a record still *in* the batch (§1.4; the tile-coverage pre-cull, §1.5,
+now pops instead — it runs before the batch even exists). A normal **tile unload** is different: the tile
 leaves cover, its labels leave the collected set, the batch rebuilds without them, and they would pop. The fix
 keeps them in the batch for a grace window.
 
@@ -574,15 +641,16 @@ fixes the defect. One tunable to surface in S3: the horizon-cull grazing margin 
 
 ## Grounding (touch points)
 
-`MapRenderer.Unity/Text/`: `SymbolLabelSubsystem` (queue/pump/store, scale at `:467,484`),
-`SymbolTileLabelStore` (active/cached/departing), `SymbolLabelBatch`/`SymbolLabelBatchBuilder` (SoA bridge,
-`ProjectCorner`), `Placement/LabelPlacementSystem` (`Tick`, `ComputeTileCoverageCull`, scale at `:477`),
-`Placement/LabelScreenProjection` (`:87-88` — the projection seam), `Placement/LabelStagingMath`
+`MapRenderer.Unity/Text/`: `SymbolLabelSubsystem` (queue/pump/store, scale at `:467,484`, + the pre-build
+tile-coverage cull in `CurrentBatch`, §1.5), `SymbolTileLabelStore` (active/cached/departing),
+`SymbolLabelBatch`/`SymbolLabelBatchBuilder` (SoA bridge), `Placement/LabelPlacementSystem` (`Tick`, scale at
+`:477`), `Placement/LabelScreenProjection` (`:87-88` — the projection seam), `Placement/LabelStagingMath`
 (`StageCurved` `:126`, tangent `:181`), `Placement/BillboardMath`, `SymbolFeatureExtractor` (`ProjectPath`
 `:164-173`, `LineAnchorPlacement.Compute` `:106`). `MapRenderer.Jobs/`: `SymbolProjectionJob` (`OutValid`),
 `LabelStageJob`, `LabelCollisionJob`, `SymbolBillboardJob`. `MapRenderer.Core/Text/`: `CodepointTextShaper`,
 `TextQuadLayout`, `CurvedTextLayout`, `PolylineArcWalker`, `Placement/CrossTileLabelKey`, `Placement/LineAnchor`
-(`:20`), `Placement/LabelTileCoverage`, `Placement/LabelViewDistance`. `MapRenderer.Core/Geo/`: `IProjection`
+(`:20`), `Placement/LabelTileCoverage`, `Placement/LabelTileCoverageFilter` (the pre-build cull, §1.5),
+`Placement/LabelViewDistance`. `MapRenderer.Core/Geo/`: `IProjection`
 (`Project`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection` (`ProjectPoint` `:51-55`,
 occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrigin`. Mesh-path prior art:
 `StyledLineTileBuilder.SubdivideCenterline`, `ProjectPointsJob<TProj>`, `FrustumTileSelector`.

@@ -155,9 +155,6 @@ namespace MapRenderer.Tests.Text.Placement
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
-            // The realistic z14 tileKey above (Risk R1) is finer than this z8 camera's view — disable the
-            // orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' identical note).
-            system.MinTileScreenCoverage = 0.0;
             var snap = new SnapshotRenderer(Size, Size);
             try
             {

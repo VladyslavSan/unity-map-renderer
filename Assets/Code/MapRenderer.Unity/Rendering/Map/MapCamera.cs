@@ -93,6 +93,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// viewport — no fallback).</summary>
         public double2 ViewportPx => new double2(Camera.pixelWidth, Camera.pixelHeight);
 
+        /// <summary>Logical (DPR-normalized) viewport size — <see cref="ViewportPx"/> ÷ <see cref="DevicePixelRatio"/>,
+        /// the screen-space unit the label placement + coverage-cull passes measure in. One definition shared by
+        /// both consumers (<c>SymbolLabelSubsystem.CurrentBatch</c> and <c>LabelPlacementSystem.Tick</c>).</summary>
+        public double2 ViewportLogicalPx => ViewportPx / DevicePixelRatio;
+
         /// <summary>
         /// Merge <paramref name="update"/> over the current properties. Updates <see cref="CurrentProperties"/>
         /// immediately; does NOT touch the Unity camera — the transform is propagated once per frame by

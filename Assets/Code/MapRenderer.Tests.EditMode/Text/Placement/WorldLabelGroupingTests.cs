@@ -104,8 +104,7 @@ namespace MapRenderer.Tests.Text.Placement
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
             var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
 
-            // Two DISTINCT tiles (arbitrary — unrelated to the camera's actual view, so the coverage pre-cull
-            // is disabled below, same rationale as WorldPointEmitRenderTests.Dispose_..._NoLeak).
+            // Two DISTINCT tiles (arbitrary — unrelated to the camera's actual view).
             var tileA = new TileId { Z = 12, X = 100, Y = 200 };
             var tileB = new TileId { Z = 12, X = 105, Y = 200 };
             long tileAKey = SymbolFeatureExtractor.PackTileKey(tileA);
@@ -117,7 +116,6 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
                 worldIconBase: new Material(Shader.Find("Map/Symbol/IconWorld")));
-            system.MinTileScreenCoverage = 0.0;
 
             try
             {
@@ -210,7 +208,6 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
                 worldIconBase: new Material(Shader.Find("Map/Symbol/IconWorld")));
-            system.MinTileScreenCoverage = 0.0;
 
             try
             {

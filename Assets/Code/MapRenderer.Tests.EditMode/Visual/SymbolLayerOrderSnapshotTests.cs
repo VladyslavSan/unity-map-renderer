@@ -256,9 +256,6 @@ namespace MapRenderer.Tests.Visual
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
-            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
-            system.MinTileScreenCoverage = 0.0;
             var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.85f, 0.1f, 1f), materialIndex: 0);
             var batch = new SymbolLabelBatch();
             var layers = new List<SymbolRenderLayer> { renderLayer };
@@ -341,9 +338,6 @@ namespace MapRenderer.Tests.Visual
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
-            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
-            system.MinTileScreenCoverage = 0.0;
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
 
             using var snap = new SnapshotRenderer(Size, Size);
@@ -430,9 +424,6 @@ namespace MapRenderer.Tests.Visual
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
-            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
-            system.MinTileScreenCoverage = 0.0;
             var layers = new List<SymbolRenderLayer> { renderLayer };
             var batch = new SymbolLabelBatch();
 

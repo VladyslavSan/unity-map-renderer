@@ -9,6 +9,8 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using UnityEngine.TestTools.Constraints;
+using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
@@ -16,11 +18,13 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests; // TestGlyphSource
+using Is = UnityEngine.TestTools.Constraints.Is;
 using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Text
@@ -273,7 +277,7 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                active = _subsystem.CurrentBatch();
+                active = _subsystem.CurrentBatch(default, 0.0);
                 if (active.Count > 0) break;
                 yield return null;
             }
@@ -287,10 +291,53 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "the tile left cover");
             Assert.AreEqual(1, _subsystem.DepartingTileCount, "…and is departing (fading out), not dropped");
 
-            SymbolLabelBatch departing = _subsystem.CurrentBatch();
+            SymbolLabelBatch departing = _subsystem.CurrentBatch(default, 0.0);
             Assert.Greater(departing.Count, 0, "the departing tile's labels are still collected (so they can fade)");
             Assert.AreEqual(departing.Count, DepartingRecordCount(departing),
                 "…and every record is flagged departing → the placement layer fades them out instead of popping");
+        }
+
+        // ── Alloc tooth: LabelTileCoverageFilter.FilterActive's per-call Dictionary/List compaction must not
+        //    allocate once warm — mirrors LabelPlacementAllocTests' steady-state guarantee, now covering the
+        //    pre-build cull too (a non-zero minCoverage exercises the real filter path, not its no-op guard). ──
+        [UnityTest]
+        public IEnumerator CurrentBatch_Warm_WithCoverageCullEnabled_AllocatesNoGCMemory()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+            DriveTileBytesReady(tile);
+
+            // A VALID (identity-rebase) scene frame — NOT `default`, whose zero Rebase collapses all four tile
+            // corners to one point ⇒ zero-area quad ⇒ coverage 0 ⇒ every label culled. A tiny POSITIVE threshold
+            // keeps `minCoverage > 0` so the REAL filter path runs (projection + per-tile coverage + compaction,
+            // the alloc surface we measure) rather than the no-op guard, while being small enough that a
+            // well-formed on-screen tile always survives — so the sanity precondition below holds regardless of
+            // how the (unsynced) test camera frames the tile. The alloc behaviour is identical whether the filter
+            // keeps or drops tiles (both fill the scratch dict + call RemoveRange).
+            var frame = SceneFrame.Mercator(new double2(0.0, 0.0));
+            const double keepAllButRunFilter = 1e-9;
+
+            SymbolLabelBatch batch = null;
+            for (int f = 0; f < 200; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                batch = _subsystem.CurrentBatch(frame, keepAllButRunFilter);
+                if (batch.Count > 0) break;
+                yield return null;
+            }
+            Assert.Greater(batch.Count, 0, "sanity: the tile committed label records before the alloc measurement");
+
+            // Warm-up call (first-touch Dictionary/List growth allowed) then the STEADY call is measured. Block
+            // body (NOT an expression lambda): `() => _subsystem.CurrentBatch(...)` binds NUnit's value-returning
+            // `Assert.That<T>(Func<T>, ...)` overload — it hands the returned SymbolLabelBatch to the constraint
+            // instead of invoking Is.Not.AllocatingGCMemory()'s delegate form, throwing
+            // "the actual value must be a TestDelegate" at runtime. A block-body lambda is a plain TestDelegate.
+            _subsystem.CurrentBatch(frame, keepAllButRunFilter);
+            Assert.That(() => { _subsystem.CurrentBatch(frame, keepAllButRunFilter); },
+                Is.Not.AllocatingGCMemory(),
+                "a steady-state CurrentBatch (coverage cull enabled) must allocate ZERO managed garbage");
         }
 
         private static int DepartingRecordCount(SymbolLabelBatch batch)

@@ -99,9 +99,6 @@ namespace MapRenderer.Tests.Text.Placement
 
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // The realistic z14 tileKey above (Risk R1) is finer than this z8 camera's view — disable the
-            // orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' identical note).
-            system.MinTileScreenCoverage = 0.0;
             using var snap = new SnapshotRenderer(Size, Size);
             try
             {
@@ -163,9 +160,6 @@ namespace MapRenderer.Tests.Text.Placement
             byte[] zeroPixels, nonzeroPixels;
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // The realistic z14 tiles above are finer than this z8 camera's view — disable the orthogonal
-            // tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' identical note).
-            system.MinTileScreenCoverage = 0.0;
             try
             {
                 var zeroLabel = new LabelInstance
@@ -239,10 +233,6 @@ namespace MapRenderer.Tests.Text.Placement
             int meshesBefore = Resources.FindObjectsOfTypeAll<Mesh>().Length;
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // This tooth is about mesh/presenter LIFETIME, not coverage-cull realism — the 3 arbitrary tiles
-            // below are unrelated to the camera's actual view, so disable the pre-cull (else every label
-            // would legitimately be culled and never build a slot at all).
-            system.MinTileScreenCoverage = 0.0;
             try
             {
                 // Three DIFFERENT tiles over three Ticks → three distinct world slots created (one mesh + one

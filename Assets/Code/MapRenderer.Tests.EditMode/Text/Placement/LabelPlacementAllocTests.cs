@@ -184,7 +184,6 @@ namespace MapRenderer.Tests.Text.Placement
 
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            system.MinTileScreenCoverage = 0.0;
 
             try
             {
@@ -261,7 +260,6 @@ namespace MapRenderer.Tests.Text.Placement
 
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            system.MinTileScreenCoverage = 0.0;
 
             try
             {

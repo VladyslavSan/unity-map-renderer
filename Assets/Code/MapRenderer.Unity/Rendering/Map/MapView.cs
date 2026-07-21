@@ -373,29 +373,31 @@ namespace MapRenderer.Unity.Rendering.Map
             //    Production: the symbol subsystem's real map labels (when the style has symbol layers).
             //    Fallback: the demo LabelInstances/LabelAtlas seam (SyntheticLabelSource), used only when a
             //    style has NO symbol layers — so a leftover demo component can't mask the real feature.
-            // Push the live-tunable label knobs (read from the shared config every Tick, so an Inspector tweak
-            // during Play takes effect the same frame — mirrors the DevicePixelRatio push above).
-            Labels.MinTileScreenCoverage = _config.LabelTileCoverageCull;
             if (_symbols.HasSymbolLayers)
             {
+                // ONE wall-clock read shared by ReconcileLoadedTiles' departing-tile grace window and CurrentBatch's
+                // coverage-fade grace window (REVISION 2) — same frame, same clock, no double Time.timeAsDouble read.
+                double now = Time.timeAsDouble;
+
                 // A-1: PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already
                 // reflected) and reconcile the label store before collecting — restores kept-warm labels for
                 // cache-hit re-entries, releases tiles that left cover. Then aggregate the active labels.
                 using (PmSymbolCollect.Auto())
                 {
                     TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                    // Pass this frame's wall-clock so the store can time the departing (leave-cover) fade-out window.
-                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch, Time.timeAsDouble);
+                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch, now);
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     _symbols.PumpBuilds();
                 }
-                // Lever C: the blittable label batch — collect (+ cross-tile dedup) + LabelInstance→SoA, rebuilt every
-                // frame (allocation-free; the version cache was removed). Hoisted out of the Labels.Tick argument so
-                // its managed dedup/build cost is MARKED (Symbol.BatchBuild), not folded into the umbrella self-time.
+                // Lever C: the blittable label batch — collect (+ cross-tile dedup) + the pre-build tile-coverage
+                // cull + LabelInstance→SoA, rebuilt every frame (allocation-free; the version cache was removed).
+                // Hoisted out of the Labels.Tick argument so its managed dedup/build cost is MARKED
+                // (Symbol.BatchBuild), not folded into the umbrella self-time. Pass this frame's SAME sceneFrame
+                // snapshot the tiles used, so the coverage cull's projection matches the placement below exactly.
                 SymbolLabelBatch batch;
                 using (PmSymbolBatch.Auto())
-                    batch = _symbols.CurrentBatch();
+                    batch = _symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
                 // Then project/collide/build the placement, presenting each slot through its own SymbolRenderLayer
                 // (D11/E2 — material + persistent presenter).
                 Labels.Tick(sceneFrame, batch, _symbols.Atlas, Time.deltaTime,
@@ -502,6 +504,8 @@ namespace MapRenderer.Unity.Rendering.Map
             InputLabelCount         = Labels.LastInputLabelCount,
             DistanceCulledLabels    = Labels.LastDistanceCulledCount,
             HorizonCulledLabels     = Labels.LastHorizonCulledCount,
+            CoverageDroppedLabels   = _symbols.LastTileCoverageCulledCount,
+            CoverageFadingLabels    = Labels.LastCoverageFadingCulledCount,
             CollisionCandidateCount = Labels.LastCandidateCount,
             CollisionSurvivorCount  = Labels.LastSurvivorCount,
             PlacedQuadCount         = Labels.LastQuadCount,

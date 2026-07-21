@@ -445,6 +445,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverage.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageTests.cs" />
+    <!-- Moves the coverage cull ahead of the SoA batch build (cull-after-dedup, before Build) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverageFilter.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageFilterTests.cs" />
     <!-- S3: globe far-side horizon cull, a gather fade-out trigger (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/HorizonCull.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />

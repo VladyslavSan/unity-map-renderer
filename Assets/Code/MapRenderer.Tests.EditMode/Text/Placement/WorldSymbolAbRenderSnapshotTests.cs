@@ -114,13 +114,11 @@ namespace MapRenderer.Tests.Text.Placement
             // ── OLD path: a real LabelPlacementSystem.Tick — since A1, this Tick produces the WORLD path's
             // output for a point label (the design's "Open items" note: this arm is repointed to
             // real-Tick-vs-scaffold, no longer a literal screen-space "old"). Needs its own world base
-            // material (D7) + the tile-coverage pre-cull disabled (the realistic z14 tile above is finer than
-            // this z8 camera's view — see SymbolAtlasOrientationSnapshotTests' identical note). ──────────
+            // material (D7). ──────────────────────────────────────────────────────────────────────────
             using (var system = new LabelPlacementSystem(mapCamera,
                        worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld"))))
             using (var snapOld = new SnapshotRenderer(Size, Size))
             {
-                system.MinTileScreenCoverage = 0.0;
                 system.Tick(in frame, new[] { label }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the OLD path's label must not be culled.");
 

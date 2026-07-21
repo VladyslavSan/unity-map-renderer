@@ -31,6 +31,16 @@ namespace MapRenderer.Core.View
         /// bulk (<c>HorizonCull</c>). Always 0 under a planar projection.</summary>
         public int HorizonCulledLabels { get; init; }
 
+        /// <summary>§1.5 tile-coverage pre-cull: labels DROPPED before the SoA build because their tile is
+        /// steadily below the on-screen coverage threshold (never-visible, or the fade-out grace has expired) —
+        /// the per-frame build savings. Watch this against <c>MapViewConfig.LabelTileCoverageCull</c> to tune it.</summary>
+        public int CoverageDroppedLabels { get; init; }
+
+        /// <summary>§1.5 companion: labels whose tile just crossed below the coverage threshold and finished
+        /// easing out this Tick (the hard-skip after the fade — they FADED rather than popped). The transient
+        /// tail of <see cref="CoverageDroppedLabels"/> as tiles leave coverage.</summary>
+        public int CoverageFadingLabels { get; init; }
+
         /// <summary>Collision CANDIDATES on the last Tick — labels that survived projection and entered the
         /// greedy pass (a point label counts 1; a curved / repeated line label counts 1 per along-line anchor).</summary>
         public int CollisionCandidateCount { get; init; }

@@ -121,8 +121,6 @@ namespace MapRenderer.Tests.Text.Placement
                 // Epic A / A1: point labels now draw through the world path — the demo tick needs its own
                 // world base material for a live opacity read (see MaxAlpha's header).
                 System = new LabelPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-                // B-3/tile culls are orthogonal to S3 — disabled so only the horizon trigger can fire below.
-                System.MinTileScreenCoverage = 0.0;
             }
 
             /// <summary>The REAL 3-arg <see cref="MapView.BuildSceneFrame"/> path — see the class header's

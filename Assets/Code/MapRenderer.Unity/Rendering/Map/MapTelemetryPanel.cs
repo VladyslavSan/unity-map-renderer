@@ -112,6 +112,14 @@ namespace MapRenderer.Unity.Rendering.Map
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulledLabels;
 
+        [Tooltip("§1.5 tile-coverage pre-cull: labels dropped before the SoA build (tile steadily below the " +
+                 "on-screen coverage threshold). Watch this to tune LabelTileCoverageCull.")]
+        public int SymbolCoverageDroppedLabels;
+
+        [Tooltip("§1.5 companion: labels whose tile just crossed below coverage and finished fading out this " +
+                 "Tick (they faded, not popped) — the transient tail of the coverage drop.")]
+        public int SymbolCoverageFadingLabels;
+
         [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
                  "a curved/repeated line label is 1 per along-line anchor).")]
         public int SymbolCollisionCandidates;
@@ -172,6 +180,8 @@ namespace MapRenderer.Unity.Rendering.Map
             SymbolCachedLabelTiles    = sym.CachedLabelTiles;
             SymbolInputLabelCount     = sym.InputLabelCount;
             SymbolDistanceCulledLabels = sym.DistanceCulledLabels;
+            SymbolCoverageDroppedLabels = sym.CoverageDroppedLabels;
+            SymbolCoverageFadingLabels = sym.CoverageFadingLabels;
             SymbolCollisionCandidates = sym.CollisionCandidateCount;
             SymbolCollisionSurvivors  = sym.CollisionSurvivorCount;
             SymbolPlacedQuads         = sym.PlacedQuadCount;

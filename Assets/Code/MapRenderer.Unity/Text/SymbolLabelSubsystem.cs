@@ -1,11 +1,13 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file is in MapRenderer.Unity.Text.
-// It uses NO Unity.Mathematics types, so there is no float2/double3 trap to avoid here.
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file is in MapRenderer.Unity.Text —
+// it uses Unity.Mathematics types (CurrentBatch's viewProj/viewport), but MapRenderer.Unity.Text does not
+// collide with any bare UnityEngine type, so TOP-LEVEL `using Unity.Mathematics;` + unqualified types is safe.
 
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using Unity.Mathematics;
 using Unity.Profiling;
 using UnityEngine;
 using MapRenderer.Core.Geo;
@@ -17,6 +19,7 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
@@ -577,25 +580,99 @@ namespace MapRenderer.Unity.Text
         private readonly SymbolLabelBatch      _batch        = new SymbolLabelBatch();
         private readonly List<LabelInstance>   _batchCollect = new List<LabelInstance>();
 
+        // REVISION 2 — fade-preserving coverage cull: cross-frame state LabelTileCoverageFilter.FilterActive
+        // reads/writes each call, all reused (alloc-free once warm). A coverage-fading tile is STILL ACTIVE (in
+        // cover, just below the on-screen coverage threshold) — a SEPARATE lifecycle from RecordDeparting's
+        // "tile unloaded→cached" (see SymbolLabelBatch's doc).
+        //   _coverageAbovePrev/_coverageAboveThisFrame — PING-PONG (ref-swapped after each call, not mutated in
+        //     place): self-bounding, unlike a single set that would grow unboundedly for a tile that goes above
+        //     once then vanishes.
+        private HashSet<long> _coverageAbovePrev = new();
+        private HashSet<long> _coverageAboveThisFrame = new();
+        // TileKey → fade-out deadline (now + DepartingGraceSeconds), stamped once on the crossing frame, purged
+        // once expired (PurgeExpiredCoverageDeadlines, below) — mirrors SymbolTileLabelStore's departing stamps.
+        private readonly Dictionary<long, double> _coverageDepartingUntil = new();
+        // This call's coverage-fading tile keys — handed to SymbolLabelBatchBuilder.Build so it can flag each
+        // record's RecordCoverageFading.
+        private readonly HashSet<long> _coverageFadingTiles = new();
+        // Reused per-TileKey Keep/Fade/Drop decision cache for LabelTileCoverageFilter.FilterActive — cleared +
+        // repopulated every call so a tile shared by many labels is classified ONCE per rebuild, not once per label.
+        private readonly Dictionary<long, byte> _tileDecisionScratch = new();
+        // Reused scratch for the expired-deadline sweep (PurgeExpiredCoverageDeadlines) — never reallocated in
+        // steady state.
+        private readonly List<long> _coverageDepartingPurgeScratch = new();
+
+        /// <summary>Tile-coverage pre-cull: labels dropped from the LAST <see cref="CurrentBatch"/> because their
+        /// tile covered less than <paramref name="minCoverage"/>'s worth of the screen (never entered the SoA build,
+        /// gather, projection, or collision). Telemetry — mirrors <see cref="LabelPlacementSystem.LastDistanceCulledCount"/>.</summary>
+        internal int LastTileCoverageCulledCount { get; private set; }
+
         /// <summary>The blittable <see cref="SymbolLabelBatch"/> for this frame, rebuilt every frame from the current
-        /// collected set: the A-3 cross-tile dedup (<see cref="SymbolTileLabelStore.CollectInto"/>) + the
-        /// LabelInstance→SoA conversion (<see cref="SymbolLabelBatchBuilder.Build"/>). Both reuse their buffers, so
-        /// the rebuild is allocation-free (CPU only). Tile-corner projection for the coverage pre-cull is
-        /// camera-independent, so it is done here too (not per Tick).</summary>
-        public SymbolLabelBatch CurrentBatch()
+        /// collected set: the A-3 cross-tile dedup (<see cref="SymbolTileLabelStore.CollectInto"/>), the pre-build
+        /// tile-coverage cull (<see cref="LabelTileCoverageFilter.FilterActive"/> — AFTER dedup so it can't change
+        /// dedup winners, BEFORE the SoA build so a Dropped tile's labels never enter it), then the
+        /// LabelInstance→SoA conversion (<see cref="SymbolLabelBatchBuilder.Build"/>). All three reuse their
+        /// buffers, so the rebuild is allocation-free (CPU only).
+        ///
+        /// <para>REVISION 2: the coverage cull is a Keep/Fade/Drop classification, not a plain two-way cull — a
+        /// tile crossing below threshold FADES OUT (<see cref="SymbolLabelBatch.RecordCoverageFading"/>, handed to
+        /// the placement gather) instead of popping; only a tile that was never on screen (or whose fade grace
+        /// expired) actually Drops. See <see cref="LabelTileCoverageFilter"/>'s type doc for the full state
+        /// machine.</para></summary>
+        /// <param name="frame">This frame's scene frame (camera-relative rebase) — the SAME snapshot the tiles and
+        /// <see cref="LabelPlacementSystem.Tick"/> use, so the coverage cull's projection matches exactly.</param>
+        /// <param name="minCoverage">The coverage threshold (<c>MapViewConfig.LabelTileCoverageCull</c>) —
+        /// non-positive disables the cull entirely (mirrors <see cref="LabelTileCoverage.IsCulled"/>).</param>
+        /// <param name="now">This frame's wall-clock (seconds), for the coverage-fade grace deadline — mirrors
+        /// <see cref="ReconcileLoadedTiles"/>'s <c>nowSeconds</c>. Default 0.0 keeps existing no-clock call sites
+        /// compiling (a no-op when <paramref name="minCoverage"/> is non-positive, since the filter's cross-frame
+        /// state is then never touched).</param>
+        public SymbolLabelBatch CurrentBatch(in SceneFrame frame, double minCoverage, double now = 0.0)
         {
             double quantize  = CameraPoseMath.MetersPerPixel(_camera.CurrentProperties.Zoom);
             int    slotCount = _allSymbolLayers.Count > 0 ? _allSymbolLayers.Count : 1;
             // CollectInto appends DEPARTING labels (tiles leaving cover, kept warm for a fade-out) after the active
             // ones and reports the split; the builder flags the departing records so the placement gather fades them
-            // out instead of popping. Pass the projection so the batch stores each tile's render-space corners for
-            // the per-frame tile-coverage pre-cull (camera-independent → built here).
+            // out instead of popping.
             int activeCount;
             using (PmBatchCollect.Auto())
+            {
                 _store.CollectInto(_batchCollect, quantize, out activeCount);
+
+                // Cull-after-dedup, before-build: a Dropped tile's ACTIVE labels never reach the SoA build (the
+                // ~13ms SoA.Copy scales with what's on screen); a Fading tile's labels still reach it, flagged, so
+                // the placement gather can ease them out. Departing labels are untouched (scope fence).
+                float4x4 viewProj = LabelPlacementSystem.ViewProj(_camera.Camera);
+                double2 viewportLogicalPx = _camera.ViewportLogicalPx;
+                activeCount = LabelTileCoverageFilter.FilterActive(_batchCollect, activeCount, _camera.Projection,
+                    frame.SceneOriginRender, viewProj, viewportLogicalPx, frame.Rebase, minCoverage,
+                    _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
+                    now, DepartingGraceSeconds, _tileDecisionScratch, out int culled);
+                LastTileCoverageCulledCount = culled;
+
+                // Ping-pong the above-threshold sets (ref-swap, no realloc) and purge coverage-fade deadlines that
+                // elapsed as of THIS frame's clock — mirrors SymbolTileLabelStore.PurgeExpiredDeparting, just for
+                // the coverage path. Order matters: the swap/purge happen AFTER FilterActive reads them.
+                (_coverageAbovePrev, _coverageAboveThisFrame) = (_coverageAboveThisFrame, _coverageAbovePrev);
+                PurgeExpiredCoverageDeadlines(now);
+            }
             using (PmBatchSoA.Auto())
-                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection, activeCount);
+                SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, _camera.Projection, activeCount, _coverageFadingTiles);
             return _batch;
+        }
+
+        // Drop coverage-fade deadlines whose grace window elapsed (now >= expiry) — the reused per-call scratch
+        // avoids a per-purge allocation. A purged tile's labels are no longer forced-fading; if it is STILL below
+        // threshold on a later frame with no live deadline and not in AbovePrev, FilterActive drops it outright
+        // (grace exceeds the fade duration, so by expiry it has already faded to invisible — never a pop).
+        private void PurgeExpiredCoverageDeadlines(double now)
+        {
+            if (_coverageDepartingUntil.Count == 0) return;
+            _coverageDepartingPurgeScratch.Clear();
+            foreach (KeyValuePair<long, double> kv in _coverageDepartingUntil)
+                if (now >= kv.Value) _coverageDepartingPurgeScratch.Add(kv.Key);
+            for (int i = 0; i < _coverageDepartingPurgeScratch.Count; i++)
+                _coverageDepartingUntil.Remove(_coverageDepartingPurgeScratch[i]);
         }
 
         private void WarnOnAtlasOverflow()

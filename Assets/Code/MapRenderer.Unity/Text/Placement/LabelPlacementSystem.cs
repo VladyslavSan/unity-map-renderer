@@ -118,22 +118,6 @@ namespace MapRenderer.Unity.Text.Placement
         // more distant labels, lower to cull the horizon harder — a maintainer tunable (see LabelViewDistance).
         private const double LabelViewportSpans = 8.0;
 
-        /// <summary>
-        /// Tile-coverage pre-cull threshold: a tile whose on-screen coverage this frame is LESS than this fraction
-        /// of the viewport has all its labels skipped (its 4 render-space corners projected + shoelaced —
-        /// <see cref="LabelTileCoverage"/>). Catches the tilt-foreshortened horizon slivers the B-3 distance radius
-        /// keeps; those labels are collision-discarded anyway. Runtime-tunable (mirrors
-        /// <c>SymbolLabelSubsystem.MaxBuildsPerFrame</c>) so it can be eyeballed live: raise to cull more
-        /// aggressively, <b>set &lt;= 0 to disable the cull entirely</b>. Default 0.05 (5% of the screen) — a
-        /// CONSERVATIVE start. The A-4 fade softens a tile popping in/out around the threshold; explicit hysteresis
-        /// and the green/red debug overlay are follow-ups.
-        /// </summary>
-        public double MinTileScreenCoverage { get; set; } = 0.05;
-
-        // Reused per-unique-tile cull flags (1 = below the coverage threshold this frame → its records skipped in
-        // gather). Grow-only so a steady frame allocates nothing (T4).
-        private byte[] _tileCulled = Array.Empty<byte>();
-
         // ── A-4: fade state machine ──────────────────────────────────────────────────────────────────────
         // A persistent per-FADE-identity opacity (LabelCandidate.FadeId) eased toward 1 (collision-placed) or 0
         // (suppressed / gone) at 1/FadeDurationSeconds per second, so a label eases in/out instead of popping.
@@ -242,12 +226,6 @@ namespace MapRenderer.Unity.Text.Placement
         /// projected or collided). Telemetry — a proxy for how much the tilted-view horizon pile-up was trimmed.</summary>
         internal int LastDistanceCulledCount { get; private set; }
 
-        /// <summary>Tile-coverage pre-cull: labels skipped on the last Tick because their tile covered less than
-        /// <see cref="MinTileScreenCoverage"/> of the screen (never gathered/projected/collided). Telemetry —
-        /// mirrors <see cref="LastDistanceCulledCount"/>; a proxy for how much of the horizon tile pile-up was
-        /// dropped whole.</summary>
-        internal int LastTileCoverageCulledCount { get; private set; }
-
         /// <summary>Retain-as-departing: labels skipped on the last Tick because their tile is leaving cover and the
         /// label has already faded out (before that it stays STAGED, fading — no pop). Telemetry — a proxy for how
         /// many tile-unload fade-outs completed this frame.</summary>
@@ -257,6 +235,12 @@ namespace MapRenderer.Unity.Text.Placement
         /// bulk (<see cref="HorizonCull"/>) — never projected or collided. Telemetry — always 0 under a planar
         /// projection (Mercator's <c>TryGetHorizonOccluder</c> returns false ⇒ the trigger is inert).</summary>
         internal int LastHorizonCulledCount { get; private set; }
+
+        /// <summary>Coverage-fade: labels skipped on the last Tick because their tile's on-screen coverage crossed
+        /// below threshold (<see cref="Core.Text.Placement.LabelTileCoverageFilter"/>) and have now fully faded out
+        /// (before that they stay STAGED, fading — no pop). Telemetry — mirrors <see cref="LastDepartingCulledCount"/>,
+        /// just for the coverage-crossing trigger.</summary>
+        internal int LastCoverageFadingCulledCount { get; private set; }
 
         /// <summary>Epic A / A1 (design §11 A1 D9 §E-flip): the WORLD mesh bound to <c>(tileKey, slot, kind)</c>'s
         /// slot, or null if no such slot has been emitted to yet. Test surface — returns whatever the slot last
@@ -416,14 +400,14 @@ namespace MapRenderer.Unity.Text.Placement
 
             using (PmTick.Auto())
             {
-                double2 viewportLogicalPx = _camera.ViewportPx / _camera.DevicePixelRatio;
+                double2 viewportLogicalPx = _camera.ViewportLogicalPx;
 
                 LastCandidateCount = 0;
                 LastSurvivorCount = 0;
                 LastDistanceCulledCount = 0;
-                LastTileCoverageCulledCount = 0;
                 LastDepartingCulledCount = 0;
                 LastHorizonCulledCount = 0;
+                LastCoverageFadingCulledCount = 0;
 
                 _worldRenderer.BeginFrame(); // Epic A / A1: clear every live world slot's accumulators
 
@@ -433,8 +417,7 @@ namespace MapRenderer.Unity.Text.Placement
                 if (batch != null && batch.Count > 0 && atlas?.Texture != null && _worldTextMaterial != null)
                 {
                     didBuild = true;
-                    float4x4 viewProj = math.mul(ToFloat4x4(_camera.Camera.projectionMatrix),
-                        ToFloat4x4(_camera.Camera.worldToCameraMatrix));
+                    float4x4 viewProj = ViewProj(_camera.Camera);
                     double3 sceneOriginRender = frame.SceneOriginRender;
                     float3x3 rebase = frame.Rebase;
 
@@ -471,9 +454,10 @@ namespace MapRenderer.Unity.Text.Placement
                         // screen positions below rather than projecting each anchor/path inline.
                         using (PmProjectFill.Auto())
                         {
-                            // Per-tile screen-coverage pre-cull: flag whole tiles too small on screen this frame,
-                            // BEFORE the per-record gather reads the flags (camera-dependent → every frame).
-                            ComputeTileCoverageCull(batch, sceneOriginRender, viewProj, viewportLogicalPx, rebase);
+                            // Tile-coverage pre-cull now runs upstream, in SymbolLabelSubsystem.CurrentBatch (via
+                            // Core's LabelTileCoverageFilter) — a Dropped tile's labels never reach this batch at
+                            // all. A Fading tile's labels DO still reach it (RecordCoverageFading), so gather can
+                            // ease them out instead of popping (the 4th fade-out trigger below).
                             GatherSymbolPoints(batch, sceneOriginRender, cullRadius, rebase, cameraRelative, occCentre, globeRadiusSq);
                             ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
                         }
@@ -558,30 +542,14 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Flag each unique tile whose on-screen coverage this frame is below MinTileScreenCoverage — a coarse
-        // pre-cull ahead of the per-record gather. Camera-dependent, so it runs every (non-skipped) frame; it is
-        // managed + tiny (dozens of tiles, four projected corners each). Records with no tile (RecordTile == -1,
-        // e.g. the demo/test seam) are never flagged here.
-        private void ComputeTileCoverageCull(SymbolLabelBatch batch, double3 sceneOriginRender, in float4x4 viewProj,
-            double2 viewportLogicalPx, in float3x3 rebase)
-        {
-            int tiles = batch.TileCount;
-            if (_tileCulled.Length < tiles) Array.Resize(ref _tileCulled, math.max(tiles, 16));
-            for (int t = 0; t < tiles; t++)
-            {
-                SymbolLabelBatch.TileQuad q = batch.TileCorners[t];
-                double coverage = LabelTileCoverage.ScreenCoverage(
-                    q.TopLeft, q.TopRight, q.BottomRight, q.BottomLeft,
-                    sceneOriginRender, viewProj, viewportLogicalPx, rebase);
-                _tileCulled[t] = (byte)(LabelTileCoverage.IsCulled(coverage, MinTileScreenCoverage) ? 1 : 0);
-            }
-        }
-
         // ── B-2: gather + project every symbol's screen geometry ──────────────────────────────────────────────
         // Flatten every un-culled record's world points (from the batch SoA) into _symbolPoints — a point's anchor,
         // a line's path vertices — recording each record's start in the native _sjPointOffset (-1 = culled →
-        // skipped by the stage job). Cheap: array reads + the tile-coverage + B-3 distance + S3 horizon culls, no
-        // matrix mul; the projection (matrix mul) happens once, in ProjectSymbols.
+        // skipped by the stage job). Cheap: array reads + the coverage/distance/horizon fade triggers, no matrix
+        // mul; the projection (matrix mul) happens once, in ProjectSymbols. The tile-coverage pre-cull's DROP
+        // decision runs upstream now (SymbolLabelSubsystem.CurrentBatch, via Core's LabelTileCoverageFilter) — a
+        // Dropped tile's labels never reach this batch; a FADING tile's labels still do (RecordCoverageFading),
+        // handled below like departing/distance/horizon.
         private void GatherSymbolPoints(SymbolLabelBatch batch, double3 sceneOriginRender, double cullRadius,
             in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq)
         {
@@ -591,26 +559,28 @@ namespace MapRenderer.Unity.Text.Placement
             for (int r = 0; r < batch.Count; r++)
             {
                 // Four fade-out triggers, cheapest first: the record's tile is LEAVING cover (retain-as-departing —
-                // flagged by the batch builder from CollectInto's active/departing split), the tile-coverage cull
-                // (whole tile too small on screen this frame — flag set by ComputeTileCoverageCull), the B-3
-                // distance cull (this label past the horizon radius), and S3's globe horizon cull (this label's
-                // anchor is hidden behind the earth's own bulk — short-circuits to false on a planar projection
-                // via globeRadiusSq < 0). A departing record is never also coverage/distance/horizon culled here —
-                // its fade-out is unconditional.
+                // flagged by the batch builder from CollectInto's active/departing split), its tile's on-screen
+                // COVERAGE crossed below threshold (RecordCoverageFading — LabelTileCoverageFilter's Fade
+                // classification), the B-3 distance cull (this label past the horizon radius), and S3's globe
+                // horizon cull (this label's anchor is hidden behind the earth's own bulk — short-circuits to false
+                // on a planar projection via globeRadiusSq < 0). Each trigger short-circuits the cheaper ones before
+                // it — a departing or coverage-fading record is never also distance/horizon culled here; its
+                // fade-out is unconditional.
                 bool departing  = batch.RecordDeparting[r];
-                bool tileCulled = !departing && batch.RecordTile[r] >= 0 && _tileCulled[batch.RecordTile[r]] != 0;
-                bool distCulled = !departing && !tileCulled &&
+                bool coverageFading = !departing && batch.RecordCoverageFading[r];
+                bool distCulled = !departing && !coverageFading &&
                     LabelViewDistance.IsCulled(batch.RepAnchor[r], sceneOriginRender, cullRadius);
-                bool horizonCulled = !departing && !tileCulled && !distCulled &&
+                bool horizonCulled = !departing && !coverageFading && !distCulled &&
                     HorizonCull.IsHiddenBeyondHorizon(batch.RepAnchor[r], sceneOriginRender, rebase,
                                                       cameraRelative, globeCentreRelative, globeRadiusSq);
 
-                if (departing || tileCulled || distCulled || horizonCulled)
+                if (departing || coverageFading || distCulled || horizonCulled)
                 {
                     // Don't pop a label that was on screen last frame: if its fade is still alive, KEEP staging it
                     // (so it eases out in place at its live position) and force its fade-out in emit. Only once it
                     // has fully faded do we actually skip it — that is where the perf win lands (and, for a departing
-                    // tile, where the store then purges it: grace > fade, so it is already invisible).
+                    // tile or a coverage-fading tile, where the store/filter then purges it: grace > fade, so it is
+                    // already invisible).
                     if (MarkFadeOutIfAlive(batch, r))
                     {
                         // fall through: gather it like a normal record; the emit loop drives its opacity to 0
@@ -618,7 +588,7 @@ namespace MapRenderer.Unity.Text.Placement
                     else
                     {
                         if (departing) LastDepartingCulledCount++;
-                        else if (tileCulled) LastTileCoverageCulledCount++;
+                        else if (coverageFading) LastCoverageFadingCulledCount++;
                         else if (distCulled) LastDistanceCulledCount++;
                         else LastHorizonCulledCount++;
                         _sjPointOffset[r] = -1;
@@ -954,6 +924,13 @@ namespace MapRenderer.Unity.Text.Placement
         /// <c>internal</c> so <c>LabelScreenProjectionUnityTests</c> reuses the SAME conversion instead of
         /// duplicating it (the test-code-bloat convention's allowed footprint: broaden private → internal).
         /// </summary>
+        /// <summary>The camera's view-projection matrix (projection × world-to-camera) as a
+        /// <see cref="float4x4"/> — the single definition shared by label placement (<see cref="Tick"/>) and the
+        /// coverage pre-cull (<c>SymbolLabelSubsystem.CurrentBatch</c>), read live off the committed camera so
+        /// both see the same frame's matrices. Column-major (<see cref="ToFloat4x4"/> convention).</summary>
+        internal static float4x4 ViewProj(Camera camera)
+            => math.mul(ToFloat4x4(camera.projectionMatrix), ToFloat4x4(camera.worldToCameraMatrix));
+
         internal static float4x4 ToFloat4x4(Matrix4x4 m)
         {
             Vector4 c0 = m.GetColumn(0);
