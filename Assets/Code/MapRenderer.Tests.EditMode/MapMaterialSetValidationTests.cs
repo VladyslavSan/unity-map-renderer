@@ -15,13 +15,16 @@ namespace MapRenderer.Tests
     {
         // A THROWAWAY MapMaterialSet per test — never the shared production asset (nulling a base here must
         // never mutate the committed asset other tests in the same batch also load via MapMaterialSetTestUtil).
-        private static MapMaterialSet NewSet(bool fill, bool line, bool symbol)
+        // symbolWorld defaults true (assigned) so the existing fill/line cases below keep testing exactly
+        // what they tested before — SymbolTextWorld is the only symbol base left (commit 2 retired the
+        // screen SymbolText field), pinned by its own dedicated case.
+        private static MapMaterialSet NewSet(bool fill, bool line, bool symbolWorld = true)
         {
             var prod = MapMaterialSetTestUtil.Load();
             var set  = ScriptableObject.CreateInstance<MapMaterialSet>();
-            set.FillMaterial = fill   ? prod.FillMaterial : null;
-            set.LineMaterial = line   ? prod.LineMaterial : null;
-            set.SymbolText   = symbol ? prod.SymbolText   : null;
+            set.FillMaterial     = fill       ? prod.FillMaterial     : null;
+            set.LineMaterial     = line       ? prod.LineMaterial     : null;
+            set.SymbolTextWorld  = symbolWorld ? prod.SymbolTextWorld : null;
             return set;
         }
 
@@ -30,6 +33,31 @@ namespace MapRenderer.Tests
         {
             var set = NewSet(true, true, true);
             try { Assert.DoesNotThrow(() => set.Validate()); }
+            finally { UnityEngine.Object.DestroyImmediate(set); }
+        }
+
+        // ── Epic A / A1 (Codex #2): SymbolTextWorld is REQUIRED; SymbolIconWorld stays optional-with-warn —
+        //    pinning the required-vs-optional policy split. ──
+
+        [Test]
+        public void Validate_UnassignedSymbolTextWorld_ThrowsNamingIt()
+        {
+            var set = NewSet(true, true, symbolWorld: false);
+            try
+            {
+                var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
+                StringAssert.Contains("SymbolTextWorld", ex.Message);
+            }
+            finally { UnityEngine.Object.DestroyImmediate(set); }
+        }
+
+        [Test]
+        public void Validate_UnassignedSymbolIconWorld_DoesNotThrow_OptionalPolicy()
+        {
+            // SymbolIconWorld is never assigned by NewSet, so all required bases assigned + SymbolIconWorld
+            // left null must NOT throw.
+            var set = NewSet(true, true, true);
+            try { Assert.DoesNotThrow(() => set.Validate(), "SymbolIconWorld is optional-with-warn, not enforced."); }
             finally { UnityEngine.Object.DestroyImmediate(set); }
         }
 
@@ -53,18 +81,6 @@ namespace MapRenderer.Tests
             {
                 var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
                 StringAssert.Contains("LineMaterial", ex.Message);
-            }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
-        }
-
-        [Test]
-        public void Validate_UnassignedSymbolText_ThrowsNamingIt()
-        {
-            var set = NewSet(true, true, false);
-            try
-            {
-                var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-                StringAssert.Contains("SymbolText", ex.Message);
             }
             finally { UnityEngine.Object.DestroyImmediate(set); }
         }

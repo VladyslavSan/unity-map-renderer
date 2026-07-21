@@ -1,6 +1,8 @@
 // Engine-free: no UnityEngine dependency. Pure data carrier (no Unity.Mathematics types) — no
 // namespace-collision guard needed.
 
+using System;
+
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
@@ -70,5 +72,45 @@ namespace MapRenderer.Core.Text.Placement
         /// blocks a genuinely higher-priority label. The placement layer sets this each frame (feedback of history
         /// into collision — the one deliberately-relaxed spot of the "downstream of SelectSurvivors" rule).</summary>
         public bool WasPlacedLastFrame;
+
+        /// <summary>
+        /// DEBUG-INVARIANT CHECK — the collision consumer's contract on a frame's staged candidate stream. The
+        /// staging loop (<see cref="LabelStagingMath"/>'s StagePoint / StageCurvedAnchor) appends each candidate's
+        /// boxes CONTIGUOUSLY, one candidate at a time — never sharing a box, never skipping one — so in staging
+        /// order the candidate ranges must TILE <c>[0, boxCount)</c> exactly: <c>candidates[0].BoxStart == 0</c>,
+        /// each following <c>BoxStart == previous BoxStart + BoxCount</c>, all counts <c>&gt;= 0</c>, and the last
+        /// range ending at <c>boxCount</c>. <see cref="LabelCollisionGridSizing.NodeUpperBoundByCandidates"/> and
+        /// the collision job's per-reference insert assume exactly this; a violation means a candidate range is
+        /// out-of-range or overlaps another — the never-reproduced dense-scene node-pool overflow. Returns
+        /// <c>true</c> with the offending candidate index (or <paramref name="candidates"/><c>.Length</c> when the
+        /// ranges under-cover) and the <see cref="BoxStart"/> it should have had; <c>false</c> when the invariant
+        /// holds. Pure and allocation-free so a <c>[Conditional("UNITY_ASSERTIONS")]</c> caller can run it every
+        /// frame; O(<paramref name="candidates"/>.Length). Pass the candidates already sliced to the live count.
+        /// </summary>
+        public static bool TryFindRangeTilingViolation(ReadOnlySpan<LabelCandidate> candidates, int boxCount,
+            out int violatingIndex, out int expectedBoxStart)
+        {
+            int offset = 0;
+            for (int i = 0; i < candidates.Length; i++)
+            {
+                LabelCandidate c = candidates[i];
+                if (c.BoxCount < 0 || c.BoxStart != offset || offset + c.BoxCount > boxCount)
+                {
+                    violatingIndex = i;
+                    expectedBoxStart = offset;
+                    return true;
+                }
+                offset += c.BoxCount;
+            }
+            if (offset != boxCount) // ranges are well-formed but leave a gap: they under-cover [0, boxCount)
+            {
+                violatingIndex = candidates.Length;
+                expectedBoxStart = offset;
+                return true;
+            }
+            violatingIndex = -1;
+            expectedBoxStart = 0;
+            return false;
+        }
     }
 }

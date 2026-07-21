@@ -4,13 +4,13 @@
 // I5b — the icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
 // draw-side bind; the actual on-screen sprite pixels are eyeball-owed, see the I5b plan). Three ticks:
 //   1. An icon-bearing batch through LabelPlacementSystem.Tick with a fixture sprite Texture2D + a
-//      SymbolRenderLayer whose IconMaterial is a real "Map/Symbol/Icon" clone — the icon slot mesh must
-//      build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
+//      SymbolRenderLayer whose WorldIconMaterial is a real "Map/Symbol/IconWorld" clone — the icon slot mesh
+//      must build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
 //      material's _MainTex must be the sprite texture (GetTexture — no framebuffer readback, no GPU
 //      snapshot needed for this tooth).
 //   2. A TEXT-ONLY batch (no icon labels, no spriteTexture) must leave the icon presenter HIDDEN and the
 //      text mesh/material path unaffected — the #1-rule parity check.
-//   3. Shader.Find("Map/Symbol/Icon") must resolve (the shader actually compiled/imported).
+//   3. Shader.Find("Map/Symbol/IconWorld") must resolve (the shader actually compiled/imported).
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -44,12 +44,14 @@ namespace MapRenderer.Tests.Text.Placement
 
         // A throwaway MapMaterialSet built directly from the real committed shaders (Shader.Find) — never
         // loads/mutates the production Assets/Settings/Map/MapMaterialSet.asset, mirrors how every other
-        // Symbol test builds its material(s) (`new Material(Shader.Find("Map/Symbol/Text"))`).
+        // Symbol test builds its material(s) (`new Material(Shader.Find("Map/Symbol/TextWorld"))`).
         private static MapMaterialSet BuildSettings()
         {
             var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
-            settings.SymbolText = new Material(Shader.Find("Map/Symbol/Text"));
-            settings.SymbolIcon = new Material(Shader.Find("Map/Symbol/Icon"));
+            // Epic A / A1 (Codex #2): SymbolTextWorld is REQUIRED — points/icons draw through the world
+            // path, so both world bases must be assigned for this wiring tooth to observe real content.
+            settings.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
+            settings.SymbolIconWorld = new Material(Shader.Find("Map/Symbol/IconWorld"));
             return settings;
         }
 
@@ -135,10 +137,11 @@ namespace MapRenderer.Tests.Text.Placement
             return (camGo, mapCamera, frame);
         }
 
+        // Epic A / A1 (D5): the world-anchored icon shader pair must compile/import.
         [Test]
-        public void ShaderMapSymbolIcon_IsFound()
+        public void ShaderMapSymbolIconWorld_IsFound()
         {
-            Assert.IsNotNull(Shader.Find("Map/Symbol/Icon"), "the SymbolIcon.shader must compile/import under \"Map/Symbol/Icon\".");
+            Assert.IsNotNull(Shader.Find("Map/Symbol/IconWorld"), "the SymbolIconWorld.shader must compile/import under \"Map/Symbol/IconWorld\".");
         }
 
         [Test]
@@ -149,37 +152,41 @@ namespace MapRenderer.Tests.Text.Placement
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
-            Assert.IsNotNull(renderLayer.IconMaterial, "settings.SymbolIcon was assigned — IconMaterial must be a clone, not null.");
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
 
             try
             {
                 // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
+                // Epic A / A1: icons draw through the WORLD path now — the icon quad no longer lands on
+                // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
+                // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
                 var iconBatch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(iconBatch, new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
                 system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Tick).");
-                Assert.IsNotNull(system.IconMesh, "the icon slot mesh must exist (EnsureSlots grows it 1:1 with the text slot).");
-                Assert.Greater(system.IconMesh.vertexCount, 0, "the icon slot mesh must have built non-zero vertices.");
-                Assert.IsTrue(renderLayer.IconPresenterVisible, "the icon presenter must be showing after an icon Tick.");
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh worldIconMesh),
+                    "the world icon slot mesh must exist (created lazily on the icon's first Emit).");
+                Assert.Greater(worldIconMesh.vertexCount, 0, "the world icon slot mesh must have built non-zero vertices.");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon), "the world icon presenter must be showing after an icon Tick.");
 
-                Texture boundTexture = renderLayer.IconMaterial.GetTexture("_MainTex");
+                Assert.IsNotNull(renderLayer.WorldIconMaterial, "settings.SymbolIconWorld was assigned — WorldIconMaterial must be a clone, not null.");
+                Texture boundTexture = renderLayer.WorldIconMaterial.GetTexture("_MainTex");
                 Assert.AreSame(spriteTexture, boundTexture,
-                    "the icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
+                    "the world icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
 
-                // ── 2. Text-only batch (parity: the #1 rule) — icon presenter must go back to HIDDEN, text unaffected ──
+                // ── 2. Text-only batch (parity: the #1 rule) — world icon slot must go back to HIDDEN, text unaffected ──
                 var textBatch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(textBatch, new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
                 system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
 
                 Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");
-                Assert.IsTrue(renderLayer.PresenterVisible, "the text presenter must still show on a text-only Tick.");
-                Assert.IsFalse(renderLayer.IconPresenterVisible,
-                    "the icon presenter must be HIDDEN on a text-only Tick (spriteTexture omitted, no icon quads) — " +
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the world text presenter must still show on a text-only Tick.");
+                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon),
+                    "the world icon presenter must be HIDDEN on a text-only Tick (spriteTexture omitted, no icon quads) — " +
                     "the #1 rule: no sprite loaded ⇒ nothing icon-related builds/binds/presents.");
             }
             finally
@@ -188,8 +195,8 @@ namespace MapRenderer.Tests.Text.Placement
                 system.Dispose();
                 atlasTexture.Dispose();
                 Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(settings.SymbolText);
-                Object.DestroyImmediate(settings.SymbolIcon);
+                Object.DestroyImmediate(settings.SymbolTextWorld);
+                Object.DestroyImmediate(settings.SymbolIconWorld);
                 Object.DestroyImmediate(settings);
                 Object.DestroyImmediate(camGo);
             }

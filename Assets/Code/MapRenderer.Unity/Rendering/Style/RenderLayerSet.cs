@@ -88,7 +88,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 if (layer == null) continue; // genuinely unpainted, or unconfigured material — no slot
 
                 if (layer.Material != null) // null only when that slot's own base material is unconfigured — skip the queue write
-                    layer.Material.renderQueue = LayerDrawOrder.TransparentQueue + drawIndex;
+                    layer.Material.renderQueue = LayerDrawOrder.QueueFor(drawIndex);
                 _layers.Add(layer);
                 drawIndex++;
             }

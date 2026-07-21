@@ -419,7 +419,9 @@
     <!-- S20 Slice 1: placement/billboard math (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelPaint.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelInstance.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardVertex.cs" />
+    <!-- Epic A / A1: WorldBillboardVertex is BillboardMath.BuildWorldQuad's output type — must compile
+         alongside BillboardMath.cs (below) even though A0 didn't need it here (no real emit yet). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/WorldBillboardVertex.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PlacedQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CandidateEmit.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStageInputs.cs" />
@@ -449,6 +451,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedVertexTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
@@ -462,7 +465,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollision.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollisionGrid.cs" />
 
-    <!-- S20 Slice 1: T3 billboard golden + zoom-independence, T2 screen-projection golden + culling
+    <!-- Epic A / A1: T3 BuildWorldQuad billboard golden, T2 screen-projection golden + culling
          (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelScreenProjectionTests.cs" />
@@ -470,5 +473,6 @@
     <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateCollisionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateRangeTilingTests.cs" />
   </ItemGroup>
 </Project>

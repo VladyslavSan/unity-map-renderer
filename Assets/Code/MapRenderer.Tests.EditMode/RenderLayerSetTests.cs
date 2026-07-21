@@ -146,7 +146,7 @@ namespace MapRenderer.Tests
             // .CreateBackgroundMaterial) — no slot is null when the material set is configured.
             Assert.IsNotNull(set[0].Material, "bg now owns a material (E3) — BackgroundRenderLayer.Create clones MapMaterialSet.FillMaterial.");
             Assert.IsNotNull(set[1].Material);
-            Assert.IsNotNull(set[2].Material, "symbol-b now owns a material (E2, D11) — SymbolRenderLayer.Create clones MapMaterialSet.SymbolText.");
+            Assert.IsNotNull(set[2].Material, "symbol-b now owns a material (E2, D11) — SymbolRenderLayer.Create clones MapMaterialSet.SymbolTextWorld.");
             Assert.IsNotNull(set[3].Material);
             Assert.IsNotNull(set[4].Material);
             Assert.AreNotSame(set[0].Material, set[1].Material, "bg and fill-a must be distinct instances.");
@@ -157,6 +157,41 @@ namespace MapRenderer.Tests
             Assert.AreNotSame(set[1].Material, set[4].Material, "fill-a and fill-d must be distinct instances.");
             Assert.AreNotSame(set[2].Material, set[3].Material, "symbol-b and line-c must be distinct instances.");
             Assert.AreNotSame(set[3].Material, set[4].Material, "line-c and fill-d must be distinct instances.");
+        }
+
+        // Commit-2 deletion (§0.1): the world icon material's renderQueue used to be set SOLELY by
+        // WorldLabelRenderer.ResolveMaterial's per-frame sync (deleted this commit) — this style, with two
+        // symbol layers at distinct draw indices, pins that BOTH world materials now carry the correct
+        // Build-time queue with NO Tick at all.
+        private const string TwoSymbolLayersStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""symbol-a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""la"", ""layout"": { ""text-field"": ""{NAME}"" } },
+        { ""id"": ""symbol-b"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""lb"", ""layout"": { ""text-field"": ""{NAME}"" } }
+    ]
+}";
+
+        [Test]
+        public void Build_SymbolLayers_WorldTextAndIconQueues_SetAtBuildTime_NoTickNeeded()
+        {
+            var settings = MapMaterialSetTestUtil.Load();
+            Assert.IsNotNull(settings.SymbolIconWorld,
+                "this tooth needs SymbolIconWorld assigned on the production set to observe the icon queue write.");
+
+            using var set = new RenderLayerSet();
+            set.Build(StyleParser.Parse(TwoSymbolLayersStyleJson), 0.0, settings);
+
+            Assert.AreEqual(2, set.Count, "one render layer per declared symbol layer.");
+            for (int i = 0; i < set.Count; i++)
+            {
+                var symbolLayer = (SymbolRenderLayer)set[i];
+                Assert.AreEqual(LayerDrawOrder.QueueFor(i), symbolLayer.WorldTextMaterial.renderQueue,
+                    $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material, §0.2), with NO Tick.");
+                Assert.AreEqual(LayerDrawOrder.QueueFor(i), symbolLayer.WorldIconMaterial.renderQueue,
+                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create (§0.1), with NO Tick — " +
+                    "the per-frame WorldLabelRenderer.ResolveMaterial sync that used to write this is now DELETED.");
+            }
         }
 
         [Test]

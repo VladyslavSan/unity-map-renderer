@@ -13,9 +13,10 @@
 
 CBUFFER_START(UnityPerMaterial)
 // _ScreenParamsLogical — (logicalWidth, logicalHeight, 0, 0) in pixels; refreshed every frame by
-//   LabelPlacementSystem. Converts a vertex's logical-screen-px POSITION to clip space (the
-//   Graphics.RenderMesh screen-space bypass — see SymbolText_ForwardPass.hlsl's vertex stage, kept
-//   byte-identical here).
+//   LabelPlacementSystem/WorldLabelRenderer. Converted a vertex's logical-screen-px POSITION to clip space
+//   directly in the retired screen-space shader's Graphics.RenderMesh bypass; the surviving world path's
+//   vertex stage still reads it, but only to scale the constant-px glyph-corner OFFSET into clip space —
+//   the position itself now comes from the stock object/view/projection transform.
 float4 _ScreenParamsLogical;
 CBUFFER_END
 

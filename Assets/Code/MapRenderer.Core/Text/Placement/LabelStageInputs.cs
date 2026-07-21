@@ -25,6 +25,21 @@ namespace MapRenderer.Core.Text.Placement
         public int    FeatureIndex;
         public long   TileKey;
         public int    Slot;                         // pre-clamped material/mesh slot
+
+        /// <summary>Epic A / A1 (design §3.4, §11 A1 D2): the Level-1 RTC bake for the world-anchored draw
+        /// path — <c>(float3)(AnchorRender − TileOriginRender)</c>, computed ONCE by
+        /// <see cref="MapRenderer.Unity.Text.Placement.SymbolLabelBatchBuilder.AddPoint"/> against the SAME
+        /// <see cref="TileOriginRender"/> the world renderer places its presenter with (so the two RTC
+        /// terms cancel exactly). Read only by <see cref="LabelStagingMath.StagePoint"/>'s world-carry
+        /// (D2/D6) — NOT used by screen projection/collision, which stay on <see cref="ScreenPx"/>.</summary>
+        public float3 AnchorLocal;
+
+        /// <summary>Epic A / A1 (design §3.4, §11 A1 D2): the render-space tile origin
+        /// <see cref="AnchorLocal"/> was baked against — resolved null-safe from <c>TileKey</c> alone (NEVER
+        /// the coverage <c>tileIndex</c>, which is -1 in the demo/test seam — see D2's BLOCKER note). Carried
+        /// to <see cref="CandidateEmit.TileOriginRender"/> so the world renderer can place its presenter
+        /// without indexing a batch tile array.</summary>
+        public double3 TileOriginRender;
         public bool   AllowOverlap, IgnorePlacement;
         public float2 TranslatePx;
         public TextTranslateAnchor TranslateAnchor;
@@ -58,5 +73,12 @@ namespace MapRenderer.Core.Text.Placement
         public float  MaxAngleDeg;                  // text-max-angle
         public bool   KeepUpright;                  // text-keep-upright
         public float4 Color;                        // pre-linearized × opacity
+
+        /// <summary>Stage AC (curved-world): the render-space tile origin this label's per-glyph
+        /// <see cref="PlacedQuad.AnchorLocal"/> bakes are baked against — resolved by
+        /// <see cref="MapRenderer.Unity.Text.Placement.SymbolLabelBatchBuilder.AddCurved"/> via the SAME
+        /// null-safe <c>ResolveTileOrigin</c> helper <see cref="PointStageInput.TileOriginRender"/> uses, so
+        /// the bake and the world renderer's per-tile placement cancel exactly (§3.4).</summary>
+        public double3 TileOriginRender;
     }
 }

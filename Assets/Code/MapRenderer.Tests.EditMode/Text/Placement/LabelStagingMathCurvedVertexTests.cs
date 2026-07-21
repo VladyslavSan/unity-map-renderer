@@ -52,6 +52,13 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var depthPath = new[] { 0f, 0f, 0f };
             var validPath = new byte[] { 1, 1, 1 };
+            // World path mirrors the screen path 1:1 (index-aligned) — a flat XZ-plane bend at the same angle.
+            var worldPath = new[]
+            {
+                new double3(0, 0, 0),
+                new double3(100, 0, 0),
+                new double3(100 + 100 * math.cos(bendRad), 0, 100 * math.sin(bendRad)),
+            };
 
             // 3 glyphs, ArcCenter cumulative-advance midpoints (40-baked-px advance each), scale = 1
             // (TextSizePx == OneEm). The MIDDLE glyph is 20-baked-px half-wide and lands exactly on the vertex
@@ -76,7 +83,7 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch = new float[3];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, glyphs, anchors,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
 
@@ -107,6 +114,8 @@ namespace MapRenderer.Tests.Text.Placement
             var screenPath = new[] { float2.zero, direction * 200f };
             var depthPath = new[] { 0f, 0f };
             var validPath = new byte[] { 1, 1 };
+            // World path mirrors the screen path 1:1 (index-aligned) on the flat XZ plane.
+            var worldPath = new[] { double3.zero, new double3(direction.x, 0, direction.y) * 200.0 };
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
@@ -127,13 +136,58 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch = new float[2];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, glyphs, anchors,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
 
             Assert.AreEqual(1, staged);
             for (int q = 0; q < p.QuadCount; q++)
                 Assert.AreEqual(tiltRad, p.Quads[q].RotationRadians, Tol);
+        }
+
+        [Test]
+        public void StageCurved_TextTranslate_IsCarriedOntoTheWorldEmitDelta()
+        {
+            // Regression (dual-review, Codex): the curved world path is the ONLY live sink now, and
+            // WorldLabelRenderer.Emit adds emit.TranslateDeltaPx to every world corner. If StageCurvedAnchor's
+            // emit leaves TranslateDeltaPx defaulted to zero (the bug), any curved label with a nonzero
+            // `text-translate` renders at the UNtranslated position in production. Assert the delta is carried.
+            var screenPath = new[] { float2.zero, new float2(200f, 0f) };
+            var depthPath = new[] { 0f, 0f };
+            var validPath = new byte[] { 1, 1 };
+            var worldPath = new[] { double3.zero, new double3(200, 0, 0) };
+            var glyphs = new[]
+            {
+                new CurvedGlyph { ArcCenter = 40f, Cell = Cell(10f) },
+                new CurvedGlyph { ArcCenter = 80f, Cell = Cell(10f) },
+            };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            // Viewport anchor, bearing 0 ⇒ ApplyTranslate delta = (tx, -ty) = (7, 3) for translate (7, -3).
+            var translatePx = new float2(7f, -3f);
+            var s = new CurvedStageInput
+            {
+                TextSizePx = TextQuadLayout.OneEm, PaddingPx = 0f, SortKey = 0f,
+                FeatureIndex = 3, TileKey = 1, Slot = 0,
+                TranslatePx = translatePx, TranslateAnchor = TextTranslateAnchor.Viewport,
+                MaxAngleDeg = 90f, KeepUpright = true, Color = new float4(1, 1, 1, 1),
+            };
+            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 0, 3, 0), LabelStagingMath.LineFadeId(1, 0, 3, -1) };
+            var wasPlaced = new byte[] { 0, 0 };
+            var pathScratch = new float2[2];
+            var cumScratch = new float[2];
+            var p = Pools.New();
+
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
+                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+
+            Assert.AreEqual(1, staged);
+            Assert.IsTrue(p.Emit[0].IsWorld && p.Emit[0].AlongLine, "curved must route to the world sink");
+            float2 expectedDelta = LabelTranslate.ApplyTranslate(float2.zero, translatePx, TextTranslateAnchor.Viewport, 0f);
+            Assert.AreEqual(expectedDelta.x, p.Emit[0].TranslateDeltaPx.x, Tol, "world emit must carry text-translate.x");
+            Assert.AreEqual(expectedDelta.y, p.Emit[0].TranslateDeltaPx.y, Tol, "world emit must carry text-translate.y");
+            Assert.That(math.abs(p.Emit[0].TranslateDeltaPx.x) > Tol || math.abs(p.Emit[0].TranslateDeltaPx.y) > Tol,
+                "delta must be nonzero for a nonzero translate (guards the defaulted-to-zero bug)");
         }
     }
 }

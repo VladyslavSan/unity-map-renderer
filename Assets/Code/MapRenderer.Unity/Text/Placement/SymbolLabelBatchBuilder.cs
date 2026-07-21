@@ -32,6 +32,12 @@ namespace MapRenderer.Unity.Text.Placement
         // instance is safe.
         [System.ThreadStatic] private static Dictionary<long, int> _tileDedup;
 
+        // Epic A / A1 (design §11 A1 D2 — the BLOCKER fix): a SEPARATE per-Build cache, TileKey → the
+        // world-anchored render-space tile origin (TileRenderOrigin.Project), decoupled from the coverage
+        // dedup above (whose ResolveTileIndex deliberately returns -1 in the demo/test seam — see its own
+        // doc). Reused + cleared each Build (same no-alloc discipline as _tileDedup).
+        [System.ThreadStatic] private static Dictionary<long, double3> _worldOriginCache;
+
         // SoA-build breakdown markers (nest under MapRenderer.Symbol.BatchBuild.SoA), splitting the per-frame
         // LabelInstance→SoA conversion into three natures so the profiler shows what actually dominates:
         //   Project — per-unique-tile 4-corner projection (movable to build-time; measured ~7% of SoA).
@@ -64,6 +70,11 @@ namespace MapRenderer.Unity.Text.Placement
             Dictionary<long, int> tileIndexByKey = _tileDedup ??= new Dictionary<long, int>();
             tileIndexByKey.Clear();
 
+            // Epic A / A1 D2: a SEPARATE cache for the world-anchored bake's tile origin — cleared alongside
+            // the coverage dedup above but never consulted by it (see ResolveTileOrigin's doc).
+            Dictionary<long, double3> worldOriginByKey = _worldOriginCache ??= new Dictionary<long, double3>();
+            worldOriginByKey.Clear();
+
             for (int i = 0; i < labels.Count; i++)
             {
                 LabelInstance label = labels[i];
@@ -71,8 +82,10 @@ namespace MapRenderer.Unity.Text.Placement
 
                 int tileIndex = ResolveTileIndex(batch, projection, tileIndexByKey, label.TileKey);
                 bool departing = i >= activeCount; // collected-order split: departing labels come last (see CollectInto)
-                if (label.Placement == SymbolPlacement.Point) AddPoint(batch, label, slotCount, tileIndex, departing);
-                else                                          AddCurved(batch, label, slotCount, tileIndex, departing);
+                if (label.Placement == SymbolPlacement.Point)
+                    AddPoint(batch, label, slotCount, tileIndex, departing, projection, worldOriginByKey);
+                else
+                    AddCurved(batch, label, slotCount, tileIndex, departing, projection, worldOriginByKey);
             }
         }
 
@@ -108,7 +121,23 @@ namespace MapRenderer.Unity.Text.Placement
             return projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
         }
 
-        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex, bool departing)
+        /// <summary>
+        /// Epic A / A1 (design §11 A1 D2 — the BLOCKER fix): resolves <paramref name="tileKey"/>'s
+        /// world-anchored render-space tile origin, ALWAYS valid — <see cref="TileRenderOrigin.Project"/> is
+        /// null-safe (<paramref name="projection"/> null ⇒ planar Mercator fallback), so this NEVER returns
+        /// the coverage cull's <c>-1</c> degenerate (<see cref="ResolveTileIndex"/> stays untouched, kept
+        /// separate on purpose — see that method's doc). Cached per unique tile key within one <see cref="Build"/>.
+        /// </summary>
+        private static double3 ResolveTileOrigin(long tileKey, IProjection projection, Dictionary<long, double3> cache)
+        {
+            if (cache.TryGetValue(tileKey, out double3 origin)) return origin;
+            origin = TileRenderOrigin.Project(SymbolFeatureExtractor.UnpackTileKey(tileKey), projection);
+            cache[tileKey] = origin;
+            return origin;
+        }
+
+        private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex,
+            bool departing, IProjection projection, Dictionary<long, double3> worldOriginByKey)
         {
             // Copy this label's glyph quads into the flat pool (empty/absent layout → 0 quads, stages nothing later).
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
@@ -127,6 +156,17 @@ namespace MapRenderer.Unity.Text.Placement
                 // is unchanged — PointFadeId's guard-skip fold).
                 fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
             }
+            // Epic A / A1 D2: the world-anchored Level-1 RTC bake — AnchorLocal = anchorRender − tileOriginRender,
+            // the SAME double3 origin ResolveTileOrigin resolves (null-safe, decoupled from the coverage -1
+            // degenerate above) — so the presenter placement and this bake cancel exactly (§3.4).
+            double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
+            // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
+            // FloatingOrigin.TileToSceneRebased's identical narrowing).
+            float3 anchorLocal = new float3(
+                (float)(label.AnchorRender.x - tileOriginRender.x),
+                (float)(label.AnchorRender.y - tileOriginRender.y),
+                (float)(label.AnchorRender.z - tileOriginRender.z));
+
             var input = new PointStageInput
             {
                 // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
@@ -141,6 +181,7 @@ namespace MapRenderer.Unity.Text.Placement
                 FadeId = fadeId,
                 // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
+                AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
             };
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
@@ -148,7 +189,8 @@ namespace MapRenderer.Unity.Text.Placement
             batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, tileIndex, departing);
         }
 
-        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex, bool departing)
+        private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount, int tileIndex,
+            bool departing, IProjection projection, Dictionary<long, double3> worldOriginByKey)
         {
             // Copy glyphs.
             IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
@@ -178,6 +220,11 @@ namespace MapRenderer.Unity.Text.Placement
                 curvedColor = LabelPlacementSystem.LinearColor(label);
             }
 
+            // Stage AC (curved-world): the SAME null-safe origin AddPoint's D2 bake uses (ResolveTileOrigin —
+            // TileRenderOrigin.Project, never the coverage tileIndex's -1 degenerate), so the per-glyph
+            // AnchorLocal bake StageCurvedAnchor computes and this tile's render-space origin cancel exactly.
+            double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
+
             var input = new CurvedStageInput
             {
                 TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
@@ -186,7 +233,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
-                Color = curvedColor,
+                Color = curvedColor, TileOriginRender = tileOriginRender,
             };
             int detail = batch.AddCurved(input, glyphStart, glyphCount, anchorStart, anchorCount, anchorFadeStart);
 

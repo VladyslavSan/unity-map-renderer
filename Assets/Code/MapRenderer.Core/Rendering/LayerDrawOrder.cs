@@ -47,6 +47,14 @@ namespace MapRenderer.Core.Rendering
         public const int TransparentBandStart = 2501;
 
         /// <summary>
+        /// Render queue for a single declared layer at <paramref name="drawIndex"/>, using the default
+        /// <see cref="TransparentQueue"/> base. The one formula home for <c>TransparentQueue + drawIndex</c> —
+        /// callers assigning a single layer's queue (rather than a whole-style batch via
+        /// <see cref="ComputeQueues(int)"/>) use this instead of re-deriving the offset inline.
+        /// </summary>
+        public static int QueueFor(int drawIndex) => TransparentQueue + drawIndex;
+
+        /// <summary>
         /// Compute the per-layer render-queue values for <paramref name="layerCount"/> declared layers,
         /// using the default <see cref="TransparentQueue"/> base.
         /// </summary>

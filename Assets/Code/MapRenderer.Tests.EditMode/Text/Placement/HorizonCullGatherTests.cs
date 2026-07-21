@@ -77,12 +77,11 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = 24f, PaddingPx = 2f, SortKey = 0f, Text = text, FeatureIndex = feature, TileKey = 0L,
             };
 
-        private static float MaxAlpha(Mesh mesh)
-        {
-            float a = 0f;
-            foreach (Color c in mesh.colors) a = math.max(a, c.a);
-            return a;
-        }
+        // Epic A / A1: point labels draw through the WORLD path now — see LabelFadeTests.MaxAlpha's identical
+        // header for the full rationale (fade opacity rides the world slot's stream-1 Opacity, not
+        // system.Mesh's vertex-colour alpha).
+        private static float MaxAlpha(LabelPlacementSystem system, long tileKey = 0L)
+            => system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
         /// <summary>Great-circle destination point from the equator/prime-meridian (0,0) — the fixed look-at
         /// every test in this fixture uses — at compass <paramref name="bearingDeg"/> (CW from north) and
@@ -119,7 +118,9 @@ namespace MapRenderer.Tests.Text.Placement
                 View = component.View;
 
                 Atlas = BuildTinyAtlasTexture();
-                System = new LabelPlacementSystem(Camera, new Material(Shader.Find("Map/Symbol/Text")));
+                // Epic A / A1: point labels now draw through the world path — the demo tick needs its own
+                // world base material for a live opacity read (see MaxAlpha's header).
+                System = new LabelPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 // B-3/tile culls are orthogonal to S3 — disabled so only the horizon trigger can fire below.
                 System.MinTileScreenCoverage = 0.0;
             }
@@ -247,7 +248,7 @@ namespace MapRenderer.Tests.Text.Placement
             SceneFrame frame1 = h.Frame();
             h.System.Tick(in frame1, labels, h.Atlas);
             Assert.AreEqual(1, h.System.LastQuadCount, "the anchor places while the camera looks at it");
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…at full opacity");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
             // 2) The camera rotates to look at the ANCHOR'S ANTIPODE — the same anchor is now on the far side.
             //    It must keep drawing while it fades, not vanish for a frame.
@@ -256,7 +257,7 @@ namespace MapRenderer.Tests.Text.Placement
             SceneFrame frame2 = h.Frame();
             h.System.Tick(in frame2, labels, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a horizon-occluded-but-visible anchor keeps drawing (fading, not popping)");
-            float dim = MaxAlpha(h.System.Mesh);
+            float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
             Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
 

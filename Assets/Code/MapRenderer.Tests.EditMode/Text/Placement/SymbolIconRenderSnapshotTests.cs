@@ -3,7 +3,7 @@
 //
 // This is the machine-checkable form of the I5b/I6 "on-screen eyeball": it renders four DISTINCT, deliberately
 // ASYMMETRIC demo sprites (a committed fixture — an up-triangle, an "F", a down-arrow, a ring) through the REAL
-// LabelPlacementSystem.Tick → Map/Symbol/Icon shader → row-flipped SpriteSheet texture, reads the framebuffer
+// LabelPlacementSystem.Tick → Map/Symbol/IconWorld shader → row-flipped SpriteSheet texture, reads the framebuffer
 // back, and writes Logs/snapshots/symbol-icons.png. Asymmetric shapes make any vertical flip / horizontal
 // mirror visible (a symmetric square could not). The test asserts the frame is non-blank and that the four
 // icons' saturated colors are all present (each distinct sprite actually sampled); the human-facing check is
@@ -99,6 +99,10 @@ namespace MapRenderer.Tests.Text.Placement
                 ("ring",        k, -k),
             };
 
+            // Epic A / A1 Risk R1: a realistic containing tile keeps the world-anchored bake float32-safe
+            // (TileKey=0 is ~2e7m away — see SymbolAtlasOrientationSnapshotTests' identical note).
+            long tileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
+
             var labels = new List<LabelInstance>();
             for (int i = 0; i < placements.Length; i++)
             {
@@ -117,7 +121,7 @@ namespace MapRenderer.Tests.Text.Placement
                     AllowOverlap = true,               // render diagnostic — never collision-cull
                     SortKey = 0f,
                     FeatureIndex = i,
-                    TileKey = 0L,
+                    TileKey = tileKey,
                 });
             }
 
@@ -142,13 +146,18 @@ namespace MapRenderer.Tests.Text.Placement
                 AllowOverlap = true,
                 SortKey = 0f,
                 FeatureIndex = 99,
-                TileKey = 0L,
+                TileKey = tileKey,
             });
 
+            // Epic A / A1: point text + icons draw through the world path (D7) — the ONLY draw path since
+            // commit 1 retired the screen materials/path.
             var system = new LabelPlacementSystem(
                 mapCamera,
-                new Material(Shader.Find("Map/Symbol/Text")),
-                new Material(Shader.Find("Map/Symbol/Icon")));
+                new Material(Shader.Find("Map/Symbol/TextWorld")),
+                new Material(Shader.Find("Map/Symbol/IconWorld")));
+            // The realistic z14 tileKey above (Risk R1) is finer than this z8 camera's view — disable the
+            // orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' identical note).
+            system.MinTileScreenCoverage = 0.0;
             var snap = new SnapshotRenderer(Size, Size);
             try
             {

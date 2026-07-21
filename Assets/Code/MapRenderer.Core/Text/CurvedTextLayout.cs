@@ -74,6 +74,7 @@ namespace MapRenderer.Core.Text
                             UvTopLeft = uvMin,
                             UvBottomRight = uvMax,
                             LineIndex = 0,
+                            Page = entry.Page,
                         },
                     });
                 }

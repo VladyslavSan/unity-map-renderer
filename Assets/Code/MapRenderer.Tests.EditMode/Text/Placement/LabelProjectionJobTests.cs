@@ -169,10 +169,15 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             h.System.Tick(in h.Frame, Scene(), h.Atlas);
-            var firstV = h.System.Mesh.vertices;   // capture before the next Tick overwrites the persistent mesh
-            var firstT = h.System.Mesh.triangles;
-            var firstC = h.System.Mesh.colors;
-            var firstUv = h.System.Mesh.uv;
+
+            // Epic A / A1 (hardening round C) + Stage AC: the two POINT labels ("A"/"B") draw through the
+            // WORLD path since A1, and the curved line ALSO draws through it since Stage AC — so the
+            // index-mapping stability this tooth exists for is pinned entirely on the world surface (points
+            // AND the curved label share ONE world text slot: same TileKey=0L/Slot=0/Kind=Text — see
+            // Harness.Point/CurvedAcrossView).
+            Assert.IsTrue(h.System.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh0), "the world text slot must exist (2 on-screen points).");
+            WorldMeshReadback.Read(worldMesh0, out WorldBillboardVertex[] firstWorldV, out float[] firstWorldOpacity);
+            Assert.Greater(firstWorldV.Length, 0, "the two on-screen points must have emitted world vertices (mapping intact).");
 
             // (a) the far point is culled and the null contributes nothing; (b) the two on-screen points at minimum
             //     stage as candidates and something places — a broken index mapping would mis-project them off-
@@ -181,13 +186,14 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.GreaterOrEqual(h.System.LastCandidateCount, 2, "the two on-screen points must stage (mapping intact)");
             Assert.Greater(h.System.LastQuadCount, 0, "the on-screen labels must place (else the scene is vacuous / mapping broken)");
 
-            // Stability: an identical second Tick must reproduce the mesh bit-for-bit (deterministic fill over the
-            // UninitializedMemory buffers + a stable index mapping).
+            // Stability: an identical second Tick must reproduce the world mesh bit-for-bit (deterministic
+            // fill over the UninitializedMemory buffers + a stable index mapping).
             h.System.Tick(in h.Frame, Scene(), h.Atlas);
-            Assert.AreEqual(firstT, h.System.Mesh.triangles, "triangle topology drifted across identical Ticks");
-            Assert.AreEqual(firstC, h.System.Mesh.colors, "vertex colors drifted across identical Ticks");
-            Assert.AreEqual(firstUv, h.System.Mesh.uv, "UVs drifted across identical Ticks");
-            Assert.AreEqual(firstV, h.System.Mesh.vertices, "vertex positions drifted across identical Ticks (nondeterministic fill?)");
+
+            Assert.IsTrue(h.System.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh1), "the world text slot must still exist.");
+            WorldMeshReadback.Read(worldMesh1, out WorldBillboardVertex[] secondWorldV, out float[] secondWorldOpacity);
+            Assert.AreEqual(firstWorldV, secondWorldV, "WORLD vertex data (AnchorLocal/ColorRGB/Uv/Page/OffsetPx/AlignFlags) drifted across identical Ticks — the two point labels' index mapping is unstable.");
+            Assert.AreEqual(firstWorldOpacity, secondWorldOpacity, "WORLD opacity stream drifted across identical Ticks.");
         }
 
         // ── Harness: a MapCamera + tiny atlas + label builders (point + a curved line spanning the view). ──
@@ -210,7 +216,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Origin = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 });
                 Frame = new SceneFrame(Origin, float3x3.identity);
                 Atlas = BuildTinyAtlasTexture();
-                System = new LabelPlacementSystem(Camera, new Material(Shader.Find("Map/Symbol/Text")));
+                // Epic A / A1: point labels now draw through the world path — needs its own world base
+                // material for the stability tooth to observe real world-mesh content.
+                System = new LabelPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
 
             public LabelInstance Point(double3 anchor, float sortKey, string text, int feature)

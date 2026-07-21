@@ -156,7 +156,7 @@ namespace MapRenderer.Tests.Text.Placement
             var twoLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender), MakeLabel(1, frame.SceneOriginRender) };
             var oneLabel = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender) };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 Assert.AreEqual(0, system.TickCount, "TickCount starts at 0 before any Tick.");
@@ -206,23 +206,31 @@ namespace MapRenderer.Tests.Text.Placement
             var baseline = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender) };
             var moved    = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, translate) };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: this label is a POINT (default Placement) — it now draws through the world path.
+            // The screen-space translate no longer shows up as a delta on system.Mesh's Position (screen px);
+            // D4 carries it as an ADDITIVE, UNROTATED OffsetPx delta instead (BillboardMath.BuildWorldQuad),
+            // with the SAME A0-F2 Y-negation as the glyph corner — so the sign convention differs from the
+            // OLD path's raw screen-vertex delta (see BuildWorldQuad's doc for the derivation).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, baseline, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "one label, one quad");
-                Vector3[] v0 = system.Mesh.vertices;
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh0), "the world slot mesh must exist.");
+                WorldMeshReadback.Read(mesh0, out WorldBillboardVertex[] v0, out _);
 
                 system.Tick(in frame, moved, atlasTexture);
-                Vector3[] v1 = system.Mesh.vertices;
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh1), "the world slot mesh must exist.");
+                WorldMeshReadback.Read(mesh1, out WorldBillboardVertex[] v1, out _);
 
                 Assert.AreEqual(v0.Length, v1.Length, "same vertex count (only the translate changed)");
                 Assert.Greater(v0.Length, 0, "the label placed at least one quad");
                 for (int i = 0; i < v0.Length; i++)
                 {
-                    Assert.AreEqual(translate.x, v1[i].x - v0[i].x, 1e-3f, $"vertex {i}: +tx in screen x");
-                    Assert.AreEqual(-translate.y, v1[i].y - v0[i].y, 1e-3f, $"vertex {i}: -ty in screen y (y-down text-translate → y-up screen)");
-                    Assert.AreEqual(0f, v1[i].z - v0[i].z, 1e-3f, $"vertex {i}: depth unchanged by a screen translate");
+                    Assert.AreEqual(translate.x, v1[i].OffsetPx.x - v0[i].OffsetPx.x, 1e-3f, $"vertex {i}: +tx in OffsetPx.x");
+                    Assert.AreEqual(translate.y, v1[i].OffsetPx.y - v0[i].OffsetPx.y, 1e-3f, $"vertex {i}: +ty in OffsetPx.y (D4's SAME Y-negation as the corner, applied to both — the two negations cancel back to +ty)");
+                    Assert.AreEqual(v0[i].AnchorLocal, v1[i].AnchorLocal, "the anchor itself is untouched by a screen-space translate — only OffsetPx moves");
                 }
             }
             finally
@@ -254,23 +262,31 @@ namespace MapRenderer.Tests.Text.Placement
             var viewportLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Viewport) };
             var mapLabels      = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Map) };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: this label is a POINT — it now draws through the world path. The rotation is baked
+            // into OffsetPx (D3 — every frame, byte-equivalent to the old path while A1's emit runs every
+            // Tick) rather than a raw screen-vertex position, so this reads OffsetPx off the world mesh
+            // instead of system.Mesh.vertices. Winding is IDENTICAL to the old path (BuildWorldQuad mirrors
+            // BuildQuad's TL/TR/BR/BL corner order).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, viewportLabels, atlasTexture);
-                Vector3[] vp = system.Mesh.vertices; // v[0]=TL, v[1]=TR, v[2]=BR, v[3]=BL
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh viewportMesh), "the world slot mesh must exist.");
+                WorldMeshReadback.Read(viewportMesh, out WorldBillboardVertex[] vp, out _); // v[0]=TL, v[1]=TR, v[2]=BR, v[3]=BL
                 Assert.AreEqual(4, vp.Length, "one quad → 4 verts");
 
                 system.Tick(in frame, mapLabels, atlasTexture);
-                Vector3[] mp = system.Mesh.vertices;
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mapMesh), "the world slot mesh must exist.");
+                WorldMeshReadback.Read(mapMesh, out WorldBillboardVertex[] mp, out _);
 
-                // Viewport: top edge horizontal (axis-aligned billboard) — TL.y == TR.y.
-                Assert.AreEqual(vp[0].y, vp[1].y, 1e-3f, "viewport billboard's top edge stays horizontal");
+                // Viewport: top edge horizontal (axis-aligned billboard) — TL.OffsetPx.y == TR.OffsetPx.y.
+                Assert.AreEqual(vp[0].OffsetPx.y, vp[1].OffsetPx.y, 1e-3f, "viewport billboard's top edge stays horizontal");
                 // Map under a 45° bearing: the quad is rotated, so the top edge is NOT horizontal.
-                Assert.That(math.abs(mp[0].y - mp[1].y), Is.GreaterThan(1f),
+                Assert.That(math.abs(mp[0].OffsetPx.y - mp[1].OffsetPx.y), Is.GreaterThan(1f),
                     "rotation-alignment:map must rotate the billboard under a non-zero bearing (top edge no longer horizontal)");
                 // And it genuinely differs from the viewport placement (rotation actually applied).
-                Assert.That(math.abs(mp[1].x - vp[1].x) + math.abs(mp[1].y - vp[1].y), Is.GreaterThan(1f),
+                Assert.That(math.abs(mp[1].OffsetPx.x - vp[1].OffsetPx.x) + math.abs(mp[1].OffsetPx.y - vp[1].OffsetPx.y), Is.GreaterThan(1f),
                     "map- and viewport-aligned billboards must differ under a non-zero bearing");
             }
             finally
@@ -360,25 +376,33 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Stage AC (curved-world): curved now routes to the world sink like point/icon — needs its own
+            // world base material for the world text slot to actually build+present (mirrors A1's point
+            // migration, e.g. WorldPointEmitRenderTests).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { lineLabel }, atlasTexture);
 
                 Assert.AreEqual(3, system.LastQuadCount, "one quad per curved glyph (line label placed, not dropped)");
-                Vector3[] v = system.Mesh.vertices;
+
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh), "the world text slot must exist (curved now draws through the world path).");
+                WorldMeshReadback.Read(worldMesh, out WorldBillboardVertex[] v, out _);
                 Assert.AreEqual(12, v.Length, "3 glyphs x 4 verts");
 
-                // The glyphs are DISTRIBUTED along the line, not stacked at one point: the 2D spread of all
-                // vertices exceeds the ~48px arc span (robust to the projected line's screen orientation).
-                float minX = float.MaxValue, maxX = float.MinValue, minY = float.MaxValue, maxY = float.MinValue;
-                foreach (Vector3 vv in v)
+                // The glyphs are DISTRIBUTED along the line, not stacked at one point: each glyph's world
+                // AnchorLocal (Stage AC — the Level-1 RTC bake) differs from its neighbours', so the 3D
+                // spread of all corners' AnchorLocal exceeds a small threshold (robust to the projected
+                // line's world orientation; the world path no longer has a single screen-px anchor to spread).
+                float3 minA = new float3(float.MaxValue), maxA = new float3(float.MinValue);
+                foreach (WorldBillboardVertex vv in v)
                 {
-                    minX = math.min(minX, vv.x); maxX = math.max(maxX, vv.x);
-                    minY = math.min(minY, vv.y); maxY = math.max(maxY, vv.y);
+                    minA = math.min(minA, vv.AnchorLocal);
+                    maxA = math.max(maxA, vv.AnchorLocal);
                 }
-                float spread = math.length(new float2(maxX - minX, maxY - minY));
-                Assert.Greater(spread, 40f, "glyphs spread along the projected line (~48px arc), not stacked at one anchor");
+                float spread = math.length(maxA - minA);
+                Assert.Greater(spread, 1f, "glyphs spread along the projected line (distinct world anchors), not stacked at one point");
             }
             finally
             {
@@ -431,7 +455,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { Curved(SymbolPlacement.LineCenter) }, atlasTexture);
@@ -491,7 +515,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { label }, atlasTexture);
@@ -547,7 +571,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { Curved(170f) }, atlasTexture);
@@ -600,22 +624,29 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Stage AC (curved-world): curved now routes to the world sink — needs a world base material for
+            // the world text slot to build+present (mirrors the LineCenter-distribution tooth above).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 system.Tick(in frame, new List<LabelInstance> { Curved(true) }, atlasTexture);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:true still places all 3 glyphs");
-                Vector3[] upright = (Vector3[])system.Mesh.vertices.Clone();
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh uprightMesh), "the world text slot must exist.");
+                WorldMeshReadback.Read(uprightMesh, out WorldBillboardVertex[] upright, out _);
 
                 system.Tick(in frame, new List<LabelInstance> { Curved(false) }, atlasTexture);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:false still places all 3 glyphs");
-                Vector3[] raw = system.Mesh.vertices;
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh rawMesh), "the world text slot must still exist.");
+                WorldMeshReadback.Read(rawMesh, out WorldBillboardVertex[] raw, out _);
 
-                // The flag has a real effect: the reversed-walk + glyph flip lays the label out differently.
+                // The flag has a real effect: the reversed arc walk (different world anchor per glyph) + the
+                // negated world Tangent lay the label out differently — compare BOTH the new baked fields.
                 Assert.AreEqual(upright.Length, raw.Length, "same glyph count → same vertex count");
                 bool anyDiff = false;
                 for (int i = 0; i < upright.Length && !anyDiff; i++)
-                    if (math.length((float3)(upright[i] - raw[i])) > 0.5f) anyDiff = true;
+                    if (math.length(upright[i].AnchorLocal - raw[i].AnchorLocal) > 0.5f
+                        || math.length(upright[i].Tangent - raw[i].Tangent) > 0.1f) anyDiff = true;
                 Assert.IsTrue(anyDiff,
                     "keep-upright:true must lay a right-to-left label out differently than keep-upright:false");
             }
@@ -668,7 +699,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 // Collision ON: the two coincident labels fight → only the lower-key one survives (3 glyphs).

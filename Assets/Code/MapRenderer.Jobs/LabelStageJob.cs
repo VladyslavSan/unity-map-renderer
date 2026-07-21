@@ -49,6 +49,11 @@ namespace MapRenderer.Jobs
         public NativeArray<float2> Screen;
         public NativeArray<float>  Depth;
         public NativeArray<byte>   Valid;
+        // Stage AC (curved-world): the SAME gathered world polyline Screen was projected FROM — index-aligned
+        // 1:1 with Screen/Depth/Valid (LabelPlacementSystem._symbolPoints). The curved arm slices it at the
+        // SAME (off, wc) as the screen path so a glyph's world anchor/tangent sample the identical (segment, t)
+        // the screen arc walk resolves. Point arm never reads this.
+        public NativeArray<double3> WorldPointsRender;
         public NativeArray<byte>   PointWasPlaced;   // A-5 incumbency per point detail
         public NativeArray<byte>   AnchorWasPlaced;  // A-5 incumbency per global anchor-fade index
         public float   Bearing;
@@ -100,15 +105,16 @@ namespace MapRenderer.Jobs
                     int fadeStart   = CurvedAnchorFadeStart[d];
                     CurvedStageInput s = Curveds[d];
 
-                    ReadOnlySpan<float2> screen = Screen.AsSpan().Slice(off, wc);
-                    ReadOnlySpan<float>  depth  = Depth.AsSpan().Slice(off, wc);
-                    ReadOnlySpan<byte>   valid  = Valid.AsSpan().Slice(off, wc);
+                    ReadOnlySpan<float2>  screen = Screen.AsSpan().Slice(off, wc);
+                    ReadOnlySpan<float>   depth  = Depth.AsSpan().Slice(off, wc);
+                    ReadOnlySpan<byte>    valid  = Valid.AsSpan().Slice(off, wc);
+                    ReadOnlySpan<double3> world  = WorldPointsRender.AsSpan().Slice(off, wc);
                     ReadOnlySpan<CurvedGlyph> glyphs  = Glyphs.AsSpan().Slice(CurvedGlyphStart[d], CurvedGlyphCount[d]);
                     ReadOnlySpan<LineAnchor>  anchors = Anchors.AsSpan().Slice(CurvedAnchorStart[d], anchorCount);
                     ReadOnlySpan<long> fadeIds   = AnchorFadeIds.AsSpan().Slice(fadeStart, anchorCount + 1);
                     ReadOnlySpan<byte> wasPlaced = AnchorWasPlaced.AsSpan().Slice(fadeStart, anchorCount + 1);
 
-                    candidateCount += LabelStagingMath.StageCurved(in s, screen, depth, valid, glyphs, anchors,
+                    candidateCount += LabelStagingMath.StageCurved(in s, screen, depth, valid, world, glyphs, anchors,
                         fadeIds, wasPlaced, path.Slice(0, wc), cum.Slice(0, wc), Bearing, candidateCount,
                         boxes, ref boxCount, quads, ref quadCount, cands, emit);
                 }

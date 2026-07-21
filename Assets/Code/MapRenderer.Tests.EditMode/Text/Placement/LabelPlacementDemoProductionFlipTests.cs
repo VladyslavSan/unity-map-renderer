@@ -1,4 +1,4 @@
-// Unity EditMode only — needs a real Camera/Mesh/GameObject (LabelSlotPresenter creates one). NOT
+// Unity EditMode only — needs a real Camera/Mesh/GameObject (WorldLabelRenderer creates one). NOT
 // registered in core-tests.csproj.
 //
 // Regression pin (the render-layer model; from the E2 review, filed at
@@ -108,15 +108,18 @@ namespace MapRenderer.Tests.Text.Placement
             var demoColor = new float4(1f, 0f, 0f, 1f); // red
             var prodColor = new float4(0f, 0f, 1f, 1f); // blue
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1 D9 §E-flip: point labels now draw through the WORLD path — the demo tick needs its
+            // own world base material (production resolves through renderLayer.WorldTextMaterial instead,
+            // via MapMaterialSetTestUtil.Load()'s SymbolTextWorld, independent of this).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 // Demo Tick (managed-list overload): builds _demoBatch to BuildId 1, sets _mirrorBuildId 1,
-                // shows the fallback presenter drawing red.
+                // shows the world presenter drawing red.
                 system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, demoColor) }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "demo tick must place its label (precondition).");
-                Assert.IsTrue(system.FallbackPresenterVisible, "demo tick must show the fallback presenter (precondition).");
-                Assert.IsFalse(renderLayer.PresenterVisible, "no production tick has happened yet (precondition).");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "demo tick must show the world presenter (precondition).");
 
                 // Production Tick: a FRESH SymbolLabelBatch — its first Build() also reaches BuildId 1
                 // (SymbolLabelBatch.BuildId starts at 0, Reset() bumps it to 1), the exact value the demo
@@ -131,25 +134,26 @@ namespace MapRenderer.Tests.Text.Placement
                     symbolLayers: new List<SymbolRenderLayer> { renderLayer });
                 Assert.AreEqual(1, system.LastQuadCount, "production tick must place its label (precondition).");
 
-                // 1a: the production label's OWN colour must reach the mesh, not the demo's stale mirrored
-                // colour. deltaTime = PositiveInfinity snaps the A-4 fade to its target instantly, so the
-                // vertex colour is exactly LinearColor(label) with no fade scaling to account for.
-                Color vertexColor = system.Mesh.colors[0];
-                float4 actual = new float4(vertexColor.r, vertexColor.g, vertexColor.b, vertexColor.a);
+                // 1a: the production label's OWN colour must reach the WORLD mesh, not the demo's stale
+                // mirrored colour. deltaTime = PositiveInfinity snaps the A-4 fade to its target instantly, so
+                // the vertex colour is exactly LinearColor(label) with no fade scaling to account for. Epic A
+                // / A1 D9: reads TryGetWorldSlotMesh instead of system.Mesh (points no longer land there) —
+                // the §7.10 1a RefreshBatchMirror-BuildId-collision precondition this guards is UNCHANGED.
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh), "the world slot mesh must exist.");
+                WorldMeshReadback.Read(worldMesh, out WorldBillboardVertex[] vertices, out _);
+                Assert.Greater(vertices.Length, 0, "the world mesh must have built vertices.");
+                float3 actual = vertices[0].ColorRGB;
                 float4 expected = LabelPlacementSystem.LinearColor(MakeLabel(frame.SceneOriginRender, prodColor));
-                float error = math.csum(math.abs(actual.xyz - expected.xyz));
+                float error = math.csum(math.abs(actual - expected.xyz));
                 Assert.Less(error, 0.02f,
                     $"the production label's own colour (blue) must render — sampled vertex colour ({actual.x:F3},{actual.y:F3},{actual.z:F3}) " +
                     $"should read close to ({expected.x:F3},{expected.y:F3},{expected.z:F3}). Reading the demo's stale red mirror content " +
                     "is the §7.10 1a bug (RefreshBatchMirror wrongly skipped on the shared BuildId).");
 
-                // 1b: only ONE presenter may draw slot 0's mesh at a time — the production Tick above must
-                // have hidden the fallback presenter the demo Tick left enabled, or both draw the same
-                // rewritten mesh together (double-blended SDF ink).
-                Assert.IsTrue(renderLayer.PresenterVisible, "the production layer's presenter must be showing after its Tick.");
-                Assert.IsFalse(system.FallbackPresenterVisible,
-                    "the demo fallback presenter must be HIDDEN once production takes over the slot — both enabled " +
-                    "at once is the §7.10 1b double-draw bug.");
+                // 1b: only ONE presenter may draw a given key's mesh at a time. Epic A / A1 D9: the world
+                // presenter is now the ONE presenter for a point label's key (demo and production share it by
+                // construction — D1's "shared-key safety", never two presenters) — assert it is visible.
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the world presenter must be showing after the production Tick.");
             }
             finally
             {
@@ -169,7 +173,10 @@ namespace MapRenderer.Tests.Text.Placement
             var atlasTexture = BuildTinyAtlasTexture();
             var renderLayer = BuildRenderLayer(5.0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1 D9: the demo tick's world path needs its own base material (see the first test's
+            // identical note).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 var prodBatch = new SymbolLabelBatch();
@@ -177,12 +184,10 @@ namespace MapRenderer.Tests.Text.Placement
                     new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(0f, 0f, 1f, 1f)) }, 1, mapCamera.Projection);
                 system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: new List<SymbolRenderLayer> { renderLayer });
-                Assert.IsTrue(renderLayer.PresenterVisible, "production tick must show the layer presenter (precondition).");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "production tick must show the world presenter (precondition).");
 
                 system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) }, atlasTexture);
-                Assert.IsTrue(system.FallbackPresenterVisible, "the demo tick must show the fallback presenter.");
-                Assert.IsFalse(renderLayer.PresenterVisible,
-                    "the production layer's presenter must be HIDDEN once the demo path takes the slot back (§7.10 1b, symmetric direction).");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the demo tick must show the world presenter (D1 shared-key — same key, rebuilt content).");
             }
             finally
             {

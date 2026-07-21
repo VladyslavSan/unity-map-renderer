@@ -59,12 +59,12 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = 24f, PaddingPx = 2f, SortKey = sortKey, Text = text, FeatureIndex = feature, TileKey = 0L,
             };
 
-        private static float MaxAlpha(Mesh mesh)
-        {
-            float a = 0f;
-            foreach (Color c in mesh.colors) a = math.max(a, c.a);
-            return a;
-        }
+        // Epic A / A1: point labels draw through the WORLD path now — the fade opacity (stream 1) no longer
+        // rides system.Mesh's vertex-colour alpha (BillboardVertex.Color.a); it lives on the world slot's
+        // Opacity stream (WorldMeshReadback.MaxOpacity). tileKey defaults to 0L (every label in this file
+        // bar one uses it — fade/opacity assertions are position-independent, see Risk R1's note).
+        private static float MaxAlpha(LabelPlacementSystem system, long tileKey = 0L)
+            => system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
         private sealed class Harness : System.IDisposable
         {
@@ -84,7 +84,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Origin = cam.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
                 Frame = new SceneFrame(Origin, float3x3.identity);
                 Atlas = BuildTinyAtlasTexture();
-                System = new LabelPlacementSystem(cam, new Material(Shader.Find("Map/Symbol/Text")));
+                // Epic A / A1: point labels now draw through the world path — the demo tick needs its own
+                // world base material for a live opacity/visibility read (see MaxAlpha's header).
+                System = new LabelPlacementSystem(cam, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
 
             public void Dispose()
@@ -104,7 +106,7 @@ namespace MapRenderer.Tests.Text.Placement
             var label = Point(h.Origin, 0f, "A", 0);
             h.System.Tick(in h.Frame, new List<LabelInstance> { label }, h.Atlas); // default deltaTime = +inf
             Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "default deltaTime snaps the fade to full opacity");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "default deltaTime snaps the fade to full opacity");
         }
 
         // ── A real small deltaTime fades the label IN over successive frames (alpha rises 0 → 1). ──
@@ -115,12 +117,12 @@ namespace MapRenderer.Tests.Text.Placement
             var labels = new List<LabelInstance> { Point(h.Origin, 0f, "A", 0) };
 
             h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f);
-            float first = MaxAlpha(h.System.Mesh);
+            float first = MaxAlpha(h.System);
             Assert.Greater(first, 0f, "it has started to appear");
             Assert.Less(first, 0.5f, "…but is only partway in after one 0.05s step (fade ≈ 0.3s)");
 
             for (int i = 0; i < 20; i++) h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f);
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "after > 0.3s of steps it is fully faded in");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "after > 0.3s of steps it is fully faded in");
         }
 
         // ── A stable label keeps its opacity across frames — it does NOT re-fade every frame (the persistent
@@ -132,7 +134,7 @@ namespace MapRenderer.Tests.Text.Placement
             var labels = new List<LabelInstance> { Point(h.Origin, 0f, "A", 0) };
             h.System.Tick(in h.Frame, labels, h.Atlas); // snap to full
             h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f); // same id again, small step
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "a persistent label stays at full opacity — no re-fade");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "a persistent label stays at full opacity — no re-fade");
         }
 
         // ── A collision-suppressed label fades OUT while still drawn: mid-transition BOTH the fading-out loser
@@ -182,7 +184,7 @@ namespace MapRenderer.Tests.Text.Placement
             // B loses every frame → it eases to 0 and stays there; only A remains, and it settles at full opacity.
             for (int i = 0; i < 8; i++) h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a stable loser fully fades out — only the winner A remains");
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…and the winner is at full opacity, not stuck partial");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "…and the winner is at full opacity, not stuck partial");
         }
 
         // ── B-3: a label far past the horizon radius is culled BEFORE projection/collision; the near label
@@ -223,14 +225,14 @@ namespace MapRenderer.Tests.Text.Placement
             h.System.MinTileScreenCoverage = 0.0;
             h.System.Tick(in h.Frame, labels, h.Atlas); // default dt → snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "the label places with the cull disabled");
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…at full opacity");
+            Assert.Greater(MaxAlpha(h.System, tileKey), 0.99f, "…at full opacity");
 
             // 2) Enable the cull → the tiny tile is culled, but the on-screen label must FADE (still drawn, dimmer),
             //    not disappear for a frame.
             h.System.MinTileScreenCoverage = 0.05;
             h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a culled-but-visible label keeps drawing (fading, not popping)");
-            float dim = MaxAlpha(h.System.Mesh);
+            float dim = MaxAlpha(h.System, tileKey);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
             Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
 
@@ -254,7 +256,7 @@ namespace MapRenderer.Tests.Text.Placement
             SymbolLabelBatchBuilder.Build(active, labels, slotCount: 1, projection: null, activeCount: 1);
             h.System.Tick(in h.Frame, active, h.Atlas); // default dt → snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "the active label places");
-            Assert.Greater(MaxAlpha(h.System.Mesh), 0.99f, "…at full opacity");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
             // 2) The tile leaves cover → the SAME label is now departing (activeCount: 0 flags every record). It
             //    must keep drawing while it fades, not vanish for a frame.
@@ -262,7 +264,7 @@ namespace MapRenderer.Tests.Text.Placement
             SymbolLabelBatchBuilder.Build(departing, labels, slotCount: 1, projection: null, activeCount: 0);
             h.System.Tick(in h.Frame, departing, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a departing-but-visible label keeps drawing (fading, not popping)");
-            float dim = MaxAlpha(h.System.Mesh);
+            float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
             Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
 

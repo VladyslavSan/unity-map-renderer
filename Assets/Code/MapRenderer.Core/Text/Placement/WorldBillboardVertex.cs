@@ -1,0 +1,72 @@
+// Engine-free: no UnityEngine dependency.
+// BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored label
+// mesh (Epic A, world-anchored-labels-design.md §3.1/§11 A0) — fed straight to Mesh.SetVertexBufferData
+// by WorldBillboardMeshBuilder — field DECLARATION order is the vertex stream byte layout and MUST match
+// WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
+// TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (OffsetPx), TexCoord3 (AlignFlags), TexCoord5 (Tangent) —
+// Unity's canonical ascending VertexAttribute enum order (Position=0, Color=3, TexCoord0=4, TexCoord1=5,
+// TexCoord2=6, TexCoord3=7, TexCoord5=9; see BillboardVertex/StyledLineTileBuilder's identical rule).
+// Declaring these out of order triggers Unity's "non-standard order" auto-adjustment, which silently
+// reinterprets the byte layout against a DIFFERENT stream than this struct actually writes
+// (BillboardVertex's header documents the exact failure mode: the label renders nothing). Keep to
+// blittable fields only.
+//
+// FROZEN at A0 (world-anchored-labels-design.md §11 A0): A1/A2/A3 are purely additive on top of this
+// layout — never a reshuffle of stream 0. Stage AC (curved-world) appends Tangent as the new LAST
+// field/descriptor (TEXCOORD5) — AlignFlags is no longer last, Tangent is (see its own doc below); this
+// still honors "append, never reshuffle existing attributes." Opacity is NOT here — it is stream 1 (a
+// separate per-frame dynamic array, TexCoord4 on the mesh) so a fade update (A2) never touches this
+// stream's topology.
+
+using Unity.Mathematics;
+
+namespace MapRenderer.Core.Text.Placement
+{
+    /// <summary>
+    /// One world-anchored billboard-corner vertex — the world-space sibling of <see cref="BillboardVertex"/>.
+    /// The anchor is a real render-space position (GPU-projected via stock MVP,
+    /// <c>TransformObjectToHClip</c>); the glyph corner itself is still a constant-px screen offset applied
+    /// in the vertex shader, so text stays legible-sized at any distance (see
+    /// <c>SymbolTextWorld_ForwardPass.hlsl</c>).
+    /// </summary>
+    public struct WorldBillboardVertex
+    {
+        /// <summary>Tile-local render-space position (POSITION) — <c>anchorRender − tileOriginRender</c>,
+        /// baked ONCE at emit (Level 1 of the two-level RTC, <see cref="MapRenderer.Core.View.FloatingOrigin"/>).
+        /// Never rebaked on camera motion; the object-to-world transform supplies Level 2 every frame.</summary>
+        public float3 AnchorLocal;
+
+        /// <summary>Per-vertex color (COLOR): carries the OLD path's <see cref="LabelPaint.TextColor"/>.rgb
+        /// VERBATIM — no sRGB→linear conversion (A0 equivalence requires the identical color value; see
+        /// this file's header and the A0 plan's color-space note). Opacity is stream 1, not this field.</summary>
+        public float3 ColorRGB;
+
+        /// <summary>Normalized atlas UV (TEXCOORD0) — straight from <see cref="SymbolQuad.UvTopLeft"/>/
+        /// <see cref="SymbolQuad.UvBottomRight"/>, no flip (mirrors <see cref="BillboardVertex.Uv"/>).</summary>
+        public float2 Uv;
+
+        /// <summary>The glyph atlas Texture2DArray layer (TEXCOORD1) <see cref="Uv"/> samples from — straight
+        /// from <see cref="SymbolQuad.Page"/> (mirrors <see cref="BillboardVertex.Page"/>); a <c>float</c>,
+        /// not an <c>int</c>, because it rides a Float32x1 vertex stream.</summary>
+        public float Page;
+
+        /// <summary>UNROTATED glyph-corner offset from the anchor (TEXCOORD2), in LOGICAL screen pixels —
+        /// the world-path analogue of <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus
+        /// any rotation (A0 is north-up; map-aligned bearing rotation is applied in the vertex shader once
+        /// <c>AlignFlags</c> is wired, A1/A3 — see <c>SymbolTextWorld_ForwardPass.hlsl</c>).</summary>
+        public float2 OffsetPx;
+
+        /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0). WRITTEN by A0 (always
+        /// 0 — viewport-aligned, matching the old path's only mode today), UNREAD by the A0 shader (the
+        /// <c>_MapBearingRadians</c> uniform + the shader branch are plumbed at A1/A3). Stage AC adds bit1 =
+        /// along-line tangent rotation (set only by curved; point/icon leave it clear).</summary>
+        public float AlignFlags;
+
+        /// <summary>Stage AC (curved-world) — TEXCOORD5, the new LAST field (see this file's header):
+        /// tile-local WORLD direction along the line at this glyph (unit-normalized, the keep-upright
+        /// negation already baked in by <see cref="MapRenderer.Core.Text.Placement.LabelStagingMath"/>).
+        /// Read by the shader ONLY when <see cref="AlignFlags"/> bit1 is set (curved); <see cref="float3.zero"/>
+        /// for point/icon (an unread attribute — their render stays byte-identical).</summary>
+        public float3 Tangent;
+    }
+}

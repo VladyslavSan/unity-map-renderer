@@ -172,7 +172,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// RenderMeshArray, so no per-entity array or structural migration is created. The placeholder mesh is
         /// empty and never drawn (Prefab); it exists only because AddComponents requires a RenderMeshArray.
         /// E1: seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
-        /// symbol/background layer (null Material, §3.3) that AddTileLayer is never called for.
+        /// background layer (null Material, when unconfigured) or a symbol layer (non-null
+        /// <c>WorldTextMaterial</c>, §0.2) that AddTileLayer is never called for either way; this is an
+        /// inert, ID-overridden prototype seed, harmless regardless of which kind supplies it.
         /// </summary>
         private void BuildLayerPrototype()
         {

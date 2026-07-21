@@ -233,6 +233,9 @@ namespace MapRenderer.Tests.Visual
             Assert.IsTrue(r.IsDisposed, "IsDisposed must be true after Dispose.");
             Assert.IsTrue(rootGo == null, "Dispose must destroy the backend root GameObject (and its children).");
             Assert.IsNull(r.Root, "Root accessor must read null after dispose.");
+            // SceneTileTree-extraction regression: pre-extraction this read _containers.Count (0 on an empty
+            // dictionary); ContainerCount must mirror Root's null-after-dispose guard, not NRE on the now-null _tree.
+            Assert.AreEqual(0, r.ContainerCount, "ContainerCount must read 0, not throw, after Dispose.");
             Assert.DoesNotThrow(() => r.Dispose(), "Dispose must be idempotent.");
         }
     }

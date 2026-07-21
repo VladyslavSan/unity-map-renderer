@@ -18,7 +18,9 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(set, $"MapMaterialSet asset missing at '{AssetPath}'.");
             Assert.IsNotNull(set.FillMaterial, "MapMaterialSet.FillMaterial must be assigned for tests.");
             Assert.IsNotNull(set.LineMaterial, "MapMaterialSet.LineMaterial must be assigned for tests.");
-            Assert.IsNotNull(set.SymbolText, "MapMaterialSet.SymbolText must be assigned for tests.");
+            // Epic A / A1: SymbolTextWorld is REQUIRED (Codex #2 policy, MapMaterialSet.Validate) — the only
+            // point-text draw path after commit 1 retired the screen path.
+            Assert.IsNotNull(set.SymbolTextWorld, "MapMaterialSet.SymbolTextWorld must be assigned for tests.");
             return set;
         }
     }

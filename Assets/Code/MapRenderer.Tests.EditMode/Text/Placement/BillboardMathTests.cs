@@ -10,13 +10,17 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// S20 T3: <see cref="BillboardMath.BuildQuad"/> golden (element-by-element corners/UVs) + the
-    /// decisive zoom-independence tooth (same label at two different anchor screen positions — i.e. two
-    /// different camera zooms — must yield IDENTICAL screen-pixel width/height; only the anchor moves).
+    /// Epic A / A1 (design §11 A1 D2/D3/D4/D6): <see cref="BillboardMath.BuildWorldQuad"/> golden
+    /// (element-by-element corners/UVs, up to the A0-F2 Y-negation) + AnchorLocal/Tangent/AlignFlags carry-
+    /// through. The screen-space <c>BuildQuad</c> this class tested pre-Epic-A is retired with the dead
+    /// screen render path it built for; <c>BuildWorldQuad</c> is its only surviving production consumer.
     /// </summary>
     [TestFixture]
     public class BillboardMathTests
     {
+        // `in default(float3)` isn't addressable (CS8156) — a static readonly field is.
+        private static readonly float3 ZeroFloat3 = new float3(0f, 0f, 0f);
+
         private static SymbolQuad MakeQuad()
             => new SymbolQuad
             {
@@ -27,169 +31,136 @@ namespace MapRenderer.Tests.Text.Placement
                 LineIndex = 0,
             };
 
-        // ── Golden: scale = 1 (textSizePx == TextQuadLayout.OneEm) — corners == anchor + baked corners ──
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+        // Epic A / A1 (design §11 A1 D2/D3/D4/D6): BuildWorldQuad — the world-anchored sibling of BuildQuad.
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+        // ── Golden: unit scale, no rotation, no translate, anchor at 0 — the expected corners below are the
+        //    same anchor-relative baked-px corners MakeQuad()'s TopLeft/BottomRight decompose into (no
+        //    scale/rotation/anchor to apply at these params), up to the A0-F2 Y-negation (OffsetPx.y is the
+        //    corner's Y negated). Pins the corner math is REUSED, not re-derived, and that
+        //    AnchorLocal/Page/AlignFlags carry through. Inlined literals — the old BuildQuad oracle this test
+        //    used is retired with the dead screen render path it built. ──
         [Test]
-        public void BuildQuad_UnitScale_CornersMatchAnchorPlusBakedPx()
+        public void BuildWorldQuad_UnitScale_NoRotationNoTranslate_MatchesBuildQuad_WithA0F2YNegation()
         {
             SymbolQuad quad = MakeQuad();
-            var anchor = new float2(100f, 200f);
-            const float depth = 0.42f;
-            var color = new float4(0.1f, 0.2f, 0.3f, 0.4f);
+            var anchorLocal = new float3(10f, 20f, 30f);
+            var colorRgb = new float3(0.2f, 0.4f, 0.6f);
 
-            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, depth, in color, 0f,
-                out BillboardVertex topLeft, out BillboardVertex topRight,
-                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
+            // The anchor-relative corners BuildQuad would have produced for MakeQuad() at unit scale, zero
+            // rotation, anchor (0,0): TopLeft/BottomRight verbatim, TopRight/BottomLeft cross the two.
+            var expectedTl = quad.TopLeft;
+            var expectedTr = new float2(quad.BottomRight.x, quad.TopLeft.y);
+            var expectedBr = quad.BottomRight;
+            var expectedBl = new float2(quad.TopLeft.x, quad.BottomRight.y);
 
-            Assert.AreEqual(anchor.x + quad.TopLeft.x, topLeft.ScreenPx.x, 1e-5f);
-            Assert.AreEqual(anchor.y + quad.TopLeft.y, topLeft.ScreenPx.y, 1e-5f);
+            BillboardMath.BuildWorldQuad(in quad, in anchorLocal, TextQuadLayout.OneEm, in colorRgb, 0f, in float2.zero,
+                in ZeroFloat3, 0f,
+                out WorldBillboardVertex worldTl, out WorldBillboardVertex worldTr,
+                out WorldBillboardVertex worldBr, out WorldBillboardVertex worldBl);
 
-            Assert.AreEqual(anchor.x + quad.BottomRight.x, topRight.ScreenPx.x, 1e-5f, "top-right shares BottomRight's x");
-            Assert.AreEqual(anchor.y + quad.TopLeft.y, topRight.ScreenPx.y, 1e-5f, "top-right shares TopLeft's y");
-
-            Assert.AreEqual(anchor.x + quad.BottomRight.x, bottomRight.ScreenPx.x, 1e-5f);
-            Assert.AreEqual(anchor.y + quad.BottomRight.y, bottomRight.ScreenPx.y, 1e-5f);
-
-            Assert.AreEqual(anchor.x + quad.TopLeft.x, bottomLeft.ScreenPx.x, 1e-5f, "bottom-left shares TopLeft's x");
-            Assert.AreEqual(anchor.y + quad.BottomRight.y, bottomLeft.ScreenPx.y, 1e-5f, "bottom-left shares BottomRight's y");
-
-            // UVs: no flip — topLeft gets UvTopLeft verbatim, bottomRight gets UvBottomRight verbatim.
-            Assert.AreEqual(quad.UvTopLeft.x, topLeft.Uv.x, 1e-6f);
-            Assert.AreEqual(quad.UvTopLeft.y, topLeft.Uv.y, 1e-6f);
-            Assert.AreEqual(quad.UvBottomRight.x, bottomRight.Uv.x, 1e-6f);
-            Assert.AreEqual(quad.UvBottomRight.y, bottomRight.Uv.y, 1e-6f);
-            Assert.AreEqual(quad.UvBottomRight.x, topRight.Uv.x, 1e-6f, "top-right shares UvBottomRight's u");
-            Assert.AreEqual(quad.UvTopLeft.y, topRight.Uv.y, 1e-6f, "top-right shares UvTopLeft's v");
-
-            // Depth + color pass through to every vertex unchanged.
-            foreach (BillboardVertex v in new[] { topLeft, topRight, bottomRight, bottomLeft })
+            foreach ((float2 expectedScreenPx, WorldBillboardVertex world, float2 expectedUv, string label) in new[]
+                     {
+                         (expectedTl, worldTl, quad.UvTopLeft, "topLeft"),
+                         (expectedTr, worldTr, new float2(quad.UvBottomRight.x, quad.UvTopLeft.y), "topRight"),
+                         (expectedBr, worldBr, quad.UvBottomRight, "bottomRight"),
+                         (expectedBl, worldBl, new float2(quad.UvTopLeft.x, quad.UvBottomRight.y), "bottomLeft"),
+                     })
             {
-                Assert.AreEqual(depth, v.Depth, 1e-6f);
-                Assert.AreEqual(color.x, v.Color.x, 1e-6f);
-                Assert.AreEqual(color.w, v.Color.w, 1e-6f);
+                Assert.AreEqual(expectedScreenPx.x, world.OffsetPx.x, 1e-5f, $"{label}: OffsetPx.x matches BuildQuad's ScreenPx.x (no translate offset here — anchor is 0)");
+                Assert.AreEqual(-expectedScreenPx.y, world.OffsetPx.y, 1e-5f, $"{label}: OffsetPx.y is the A0-F2 NEGATION of BuildQuad's ScreenPx.y");
+                Assert.AreEqual(expectedUv.x, world.Uv.x, 1e-6f, $"{label}: UV stays attached to its ORIGINAL corner (no flip)");
+                Assert.AreEqual(expectedUv.y, world.Uv.y, 1e-6f, $"{label}: UV.y unflipped too");
+                Assert.AreEqual(anchorLocal, world.AnchorLocal, $"{label}: AnchorLocal is the same on every corner");
+                Assert.AreEqual(0f, world.AlignFlags, $"{label}: AlignFlags stays 0 in A1 (viewport-aligned only; A3 wires the map-bearing bit)");
+                Assert.AreEqual(ZeroFloat3, world.Tangent, $"{label}: Tangent stays zero for a point/icon caller (Stage AC, unread by the shader when AlignFlags bit1 is clear)");
             }
         }
 
-        // ── Golden: half scale (textSizePx == OneEm/2) halves the baked-px extent around the anchor ──
+        // ── D4: text-translate rides as an ADDITIVE, UNROTATED corner offset (with the SAME Y-negation as
+        //    the corner) — every corner shifts by translateDeltaPx identically, no double-apply, no rotation
+        //    of the translate itself. ──
         [Test]
-        public void BuildQuad_HalfScale_CornersHalveTheBakedExtentAroundAnchor()
+        public void BuildWorldQuad_TranslateDelta_ShiftsEveryCorner_UnrotatedWithSameYNegation()
         {
             SymbolQuad quad = MakeQuad();
-            var anchor = new float2(0f, 0f);
-            float halfSize = TextQuadLayout.OneEm * 0.5f;
+            var translateDeltaPx = new float2(7f, -3f);
 
-            BillboardMath.BuildQuad(in quad, in anchor, halfSize, 0f, in float4.zero, 0f,
-                out BillboardVertex topLeft, out _, out BillboardVertex bottomRight, out _);
+            BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
+                in ZeroFloat3, 0f,
+                out WorldBillboardVertex tl0, out WorldBillboardVertex tr0, out WorldBillboardVertex br0, out WorldBillboardVertex bl0);
+            BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in translateDeltaPx,
+                in ZeroFloat3, 0f,
+                out WorldBillboardVertex tl1, out WorldBillboardVertex tr1, out WorldBillboardVertex br1, out WorldBillboardVertex bl1);
 
-            Assert.AreEqual(quad.TopLeft.x * 0.5f, topLeft.ScreenPx.x, 1e-5f);
-            Assert.AreEqual(quad.TopLeft.y * 0.5f, topLeft.ScreenPx.y, 1e-5f);
-            Assert.AreEqual(quad.BottomRight.x * 0.5f, bottomRight.ScreenPx.x, 1e-5f);
-            Assert.AreEqual(quad.BottomRight.y * 0.5f, bottomRight.ScreenPx.y, 1e-5f);
+            var expectedDelta = new float2(translateDeltaPx.x, -translateDeltaPx.y); // same negation as the corner
+            foreach ((WorldBillboardVertex before, WorldBillboardVertex after, string label) in new[]
+                     {
+                         (tl0, tl1, "topLeft"), (tr0, tr1, "topRight"), (br0, br1, "bottomRight"), (bl0, bl1, "bottomLeft"),
+                     })
+            {
+                Assert.AreEqual(expectedDelta.x, after.OffsetPx.x - before.OffsetPx.x, 1e-5f, $"{label}: translate delta x");
+                Assert.AreEqual(expectedDelta.y, after.OffsetPx.y - before.OffsetPx.y, 1e-5f, $"{label}: translate delta y");
+            }
         }
 
-        // ── I5a: BillboardMath is glyph/sprite-AGNOSTIC by design (SymbolQuad.cs) — an icon's SymbolQuad
-        //    (from IconQuadLayout, laid out over a sprite-sheet rect) flows through the SAME BuildQuad an
-        //    icon PlacedQuad would carry (StagePoint copies quads verbatim), producing 4 vertices with the
-        //    icon's own sprite UVs — no separate icon code path needed at this layer. ──
+        // ── NEW-F2: colour carries VERBATIM — no sRGB→linear (or any other) conversion. A non-trivial,
+        //    non-black/non-white colour in must come out byte-identical, on every corner. ──
         [Test]
-        public void BuildQuad_IconSymbolQuad_FourVerticesCarryTheIconUvs()
-        {
-            SymbolQuad iconQuad = IconQuadLayout.Layout(
-                new MapRenderer.Core.Text.Sprites.SpriteEntry { X = 16, Y = 0, Width = 24, Height = 24, PixelRatio = 2f, Sdf = false },
-                new int2(64, 64), iconSize: 1f, TextAnchor.Center, float2.zero);
-            var anchor = new float2(50f, 75f);
-
-            var white = new float4(1f, 1f, 1f, 1f);
-            BillboardMath.BuildQuad(in iconQuad, in anchor, TextQuadLayout.OneEm, 0f, in white, 0f,
-                out BillboardVertex topLeft, out BillboardVertex topRight,
-                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
-
-            Assert.AreEqual(iconQuad.UvTopLeft.x, topLeft.Uv.x, 1e-6f);
-            Assert.AreEqual(iconQuad.UvTopLeft.y, topLeft.Uv.y, 1e-6f);
-            Assert.AreEqual(iconQuad.UvBottomRight.x, bottomRight.Uv.x, 1e-6f);
-            Assert.AreEqual(iconQuad.UvBottomRight.y, bottomRight.Uv.y, 1e-6f);
-            Assert.AreEqual(iconQuad.UvBottomRight.x, topRight.Uv.x, 1e-6f);
-            Assert.AreEqual(iconQuad.UvTopLeft.y, topRight.Uv.y, 1e-6f);
-            Assert.AreEqual(iconQuad.UvTopLeft.x, bottomLeft.Uv.x, 1e-6f);
-            Assert.AreEqual(iconQuad.UvBottomRight.y, bottomLeft.Uv.y, 1e-6f);
-
-            Assert.AreEqual(anchor.x + iconQuad.TopLeft.x, topLeft.ScreenPx.x, 1e-4f);
-            Assert.AreEqual(anchor.y + iconQuad.TopLeft.y, topLeft.ScreenPx.y, 1e-4f);
-        }
-
-        // ── Decisive tooth: zoom-independence — same label, same text-size, two different anchor screen
-        //    positions (simulating two camera zooms) must produce IDENTICAL screen-pixel width/height. ──
-        [Test]
-        public void BuildQuad_SameLabelTwoAnchors_IdenticalScreenPixelSize()
+        public void BuildWorldQuad_ColorRgb_CarriesVerbatim_NoGammaConversion()
         {
             SymbolQuad quad = MakeQuad();
-            const float textSizePx = 32f;
-            var anchorZoomedOut = new float2(50f, 60f);
-            var anchorZoomedIn = new float2(730f, 210f); // a totally different screen position
+            var colorRgb = new float3(0.73f, 0.11f, 0.42f); // deliberately non-trivial — a double-convert would move this
 
-            BillboardMath.BuildQuad(in quad, in anchorZoomedOut, textSizePx, 0f, in float4.zero, 0f,
-                out BillboardVertex topLeftOut, out _, out BillboardVertex bottomRightOut, out _);
-            BillboardMath.BuildQuad(in quad, in anchorZoomedIn, textSizePx, 0f, in float4.zero, 0f,
-                out BillboardVertex topLeftIn, out _, out BillboardVertex bottomRightIn, out _);
+            BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in colorRgb, 0f, in float2.zero,
+                in ZeroFloat3, 0f,
+                out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
-            float widthOut = bottomRightOut.ScreenPx.x - topLeftOut.ScreenPx.x;
-            float heightOut = topLeftOut.ScreenPx.y - bottomRightOut.ScreenPx.y;
-            float widthIn = bottomRightIn.ScreenPx.x - topLeftIn.ScreenPx.x;
-            float heightIn = topLeftIn.ScreenPx.y - bottomRightIn.ScreenPx.y;
-
-            Assert.AreEqual(widthOut, widthIn, 1e-5f, "billboard screen-pixel WIDTH must not depend on anchor position (zoom-independent)");
-            Assert.AreEqual(heightOut, heightIn, 1e-5f, "billboard screen-pixel HEIGHT must not depend on anchor position (zoom-independent)");
-
-            // Teeth: the two anchors are genuinely different, so this isn't trivially true because both
-            // builds happened to collapse to the same point.
-            Assert.AreNotEqual(topLeftOut.ScreenPx.x, topLeftIn.ScreenPx.x, "test precondition: the two anchors must differ");
+            foreach (WorldBillboardVertex v in new[] { tl, tr, br, bl })
+            {
+                Assert.AreEqual(colorRgb.x, v.ColorRGB.x, 1e-6f, "R carries verbatim");
+                Assert.AreEqual(colorRgb.y, v.ColorRGB.y, 1e-6f, "G carries verbatim");
+                Assert.AreEqual(colorRgb.z, v.ColorRGB.z, 1e-6f, "B carries verbatim");
+            }
         }
 
-        // ── Zero rotation: axis-aligned — top edge stays horizontal, left edge stays vertical, for ANY anchor. ──
+        // ── Winding: TL/TR/BR/BL matches BuildQuad's convention exactly (same corner→attribute mapping) —
+        //    WorldLabelRenderer's index emit (TL,TR,BR / TL,BR,BL) depends on this. ──
         [Test]
-        public void BuildQuad_ZeroRotation_IsAxisAligned()
+        public void BuildWorldQuad_Winding_MatchesBuildQuadConvention()
         {
             SymbolQuad quad = MakeQuad();
-            var anchor = new float2(17f, -42f);
+            BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
+                in ZeroFloat3, 0f,
+                out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
-            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, 0f, in float4.zero, 0f,
-                out BillboardVertex topLeft, out BillboardVertex topRight,
-                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
-
-            Assert.AreEqual(topLeft.ScreenPx.y, topRight.ScreenPx.y, 1e-5f, "top edge must be horizontal (axis-aligned, no rotation)");
-            Assert.AreEqual(topLeft.ScreenPx.x, bottomLeft.ScreenPx.x, 1e-5f, "left edge must be vertical (axis-aligned, no rotation)");
-            Assert.AreEqual(bottomRight.ScreenPx.y, bottomLeft.ScreenPx.y, 1e-5f, "bottom edge must be horizontal");
-            Assert.AreEqual(topRight.ScreenPx.x, bottomRight.ScreenPx.x, 1e-5f, "right edge must be vertical");
+            // TR shares BR's baked x / TL's baked y (mirrors BuildQuad's trLocal = (brLocal.x, tlLocal.y)) —
+            // after negation, TR.OffsetPx.y == TL.OffsetPx.y (both share the top edge).
+            Assert.AreEqual(tl.OffsetPx.y, tr.OffsetPx.y, 1e-5f, "TL/TR share the top edge (same Y)");
+            Assert.AreEqual(br.OffsetPx.y, bl.OffsetPx.y, 1e-5f, "BR/BL share the bottom edge (same Y)");
+            Assert.AreEqual(tl.OffsetPx.x, bl.OffsetPx.x, 1e-5f, "TL/BL share the left edge (same X)");
+            Assert.AreEqual(tr.OffsetPx.x, br.OffsetPx.x, 1e-5f, "TR/BR share the right edge (same X)");
         }
 
-        // ── Rotation (#4): a +90° rotation about the anchor maps each anchor-relative corner (x,y) -> (-y,x)
-        //    in the y-up frame. Explicit angle (no bearing/sign ambiguity) — the headless red-proof for the
-        //    rotation capability that along-line text (#5) reuses. ──
+        // ── Stage AC (curved-world) D-I/D-A: tangentLocal/alignFlags ride VERBATIM onto every corner —
+        //    curved's discriminator (bit1 set, a nonzero Tangent) must not be dropped or blended per-corner. ──
         [Test]
-        public void BuildQuad_NinetyDegrees_RotatesEveryCornerAboutTheAnchor()
+        public void BuildWorldQuad_TangentLocalAndAlignFlags_CarryVerbatimToEveryCorner()
         {
             SymbolQuad quad = MakeQuad();
-            var anchor = new float2(100f, 200f);
-            float halfPi = math.PI / 2f;
+            var tangentLocal = new float3(0.6f, 0.0f, 0.8f); // a unit-ish along-line direction
+            const float alongLineAlignFlags = 2f; // D-I bit1
 
-            BillboardMath.BuildQuad(in quad, in anchor, TextQuadLayout.OneEm, 0f, in float4.zero, halfPi,
-                out BillboardVertex topLeft, out BillboardVertex topRight,
-                out BillboardVertex bottomRight, out BillboardVertex bottomLeft);
+            BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
+                in tangentLocal, alongLineAlignFlags,
+                out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
-            // Local corner (x,y) rotated +90° (CCW, y-up) -> (-y, x), then translated to the anchor.
-            AssertRotated90(anchor, quad.TopLeft, topLeft.ScreenPx, "topLeft");
-            AssertRotated90(anchor, new float2(quad.BottomRight.x, quad.TopLeft.y), topRight.ScreenPx, "topRight");
-            AssertRotated90(anchor, quad.BottomRight, bottomRight.ScreenPx, "bottomRight");
-            AssertRotated90(anchor, new float2(quad.TopLeft.x, quad.BottomRight.y), bottomLeft.ScreenPx, "bottomLeft");
-
-            // Teeth: the quad is genuinely rotated — the top edge is no longer horizontal (it's vertical now).
-            Assert.AreNotEqual(topLeft.ScreenPx.y, topRight.ScreenPx.y, "a rotated quad's top edge must not stay horizontal");
-        }
-
-        private static void AssertRotated90(float2 anchor, float2 local, float2 actual, string label)
-        {
-            var expected = new float2(anchor.x - local.y, anchor.y + local.x); // (x,y)->(-y,x) about anchor
-            Assert.AreEqual(expected.x, actual.x, 1e-4f, $"{label} x after +90°");
-            Assert.AreEqual(expected.y, actual.y, 1e-4f, $"{label} y after +90°");
+            foreach ((WorldBillboardVertex v, string label) in new[] { (tl, "topLeft"), (tr, "topRight"), (br, "bottomRight"), (bl, "bottomLeft") })
+            {
+                Assert.AreEqual(tangentLocal, v.Tangent, $"{label}: Tangent carries verbatim to every corner");
+                Assert.AreEqual(alongLineAlignFlags, v.AlignFlags, $"{label}: AlignFlags carries verbatim to every corner");
+            }
         }
     }
 }

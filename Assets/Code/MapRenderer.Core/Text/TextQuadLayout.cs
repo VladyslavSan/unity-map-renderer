@@ -205,6 +205,7 @@ namespace MapRenderer.Core.Text
                     UvTopLeft = q.UvTopLeft,
                     UvBottomRight = q.UvBottomRight,
                     LineIndex = q.LineIndex,
+                    Page = q.Page,
                 };
 
                 any = true;
@@ -258,6 +259,7 @@ namespace MapRenderer.Core.Text
                     UvTopLeft = uvMin,
                     UvBottomRight = uvMax,
                     LineIndex = lineIndex,
+                    Page = entry.Page,
                 });
             }
 
@@ -304,6 +306,7 @@ namespace MapRenderer.Core.Text
                     UvTopLeft = q.UvTopLeft,
                     UvBottomRight = q.UvBottomRight,
                     LineIndex = q.LineIndex,
+                    Page = q.Page,
                 };
             }
         }

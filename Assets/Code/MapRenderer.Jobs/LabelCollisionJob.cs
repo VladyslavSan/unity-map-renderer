@@ -107,10 +107,21 @@ namespace MapRenderer.Jobs
                 int rowBase = cy * GridW;
                 for (int cx = cx0; cx <= cx1; cx++)
                 {
-                    int cell = rowBase + cx;
-                    NodeBox[nodeCount]  = boxIndex;
-                    NodeNext[nodeCount] = CellHead[cell];
-                    CellHead[cell]      = nodeCount;
+                    // Last-resort bounds guard: the pool is pre-sized on the MAIN thread by
+                    // LabelCollisionGridSizing (managed float) while THIS insert runs in Burst — the two can
+                    // truncate a cell-boundary coordinate differently, so a box may map one cell wider here
+                    // than the sizing counted. NodeUpperBound now carries a ±1-cell margin that makes this
+                    // branch unreachable in practice; keep it as a hard floor because a Burst job CANNOT grow
+                    // its NativeArray (unlike the retired managed grid), and an overflow write is a crash.
+                    // Skipping a node only drops a blocker prefilter entry (a slightly-permissive survivor),
+                    // never a crash. nodeCount still advances so the pass stays deterministic.
+                    if (nodeCount < NodeBox.Length)
+                    {
+                        int cell = rowBase + cx;
+                        NodeBox[nodeCount]  = boxIndex;
+                        NodeNext[nodeCount] = CellHead[cell];
+                        CellHead[cell]      = nodeCount;
+                    }
                     nodeCount++;
                 }
             }
@@ -208,8 +219,17 @@ namespace MapRenderer.Jobs
             };
         }
 
-        /// <summary>The exact upper bound on grid nodes: every box (whether or not it ends up inserted) covers
-        /// <c>(cellsX·cellsY)</c> cells — summed, this bounds <see cref="LabelCollisionJob.NodeBox"/>'s length.</summary>
+        /// <summary>An upper bound on grid nodes: every box (whether or not it ends up inserted) covers
+        /// <c>(cellsX·cellsY)</c> cells — summed, this bounds <see cref="LabelCollisionJob.NodeBox"/>'s length.
+        /// <para><b>±1-cell margin (each axis, each side):</b> this runs on the MAIN thread (managed float)
+        /// while <see cref="LabelCollisionJob.Insert"/> maps the SAME coords in Burst — a coordinate sitting
+        /// on a cell boundary can truncate one cell either way between the two, so the job may cover up to one
+        /// extra cell per side that a tight bound would miss. A Burst job CANNOT grow its pre-sized
+        /// <see cref="NativeArray{T}"/> mid-run (the retired managed grid could, so it never overflowed — this
+        /// margin restores that safety), and an under-count is an out-of-range write. Widening each cell span
+        /// by 2 (one cell per side) provably covers a ±1-cell truncation drift; the cost is a few extra ints
+        /// per box. <see cref="LabelCollisionJob.Insert"/>'s bounds guard is the last-resort floor beneath
+        /// this.</para></summary>
         public static int NodeUpperBound(NativeArray<LabelBox> boxes, int count, in Dims d)
         {
             int total = 0;
@@ -218,7 +238,41 @@ namespace MapRenderer.Jobs
                 LabelBox b = boxes[i];
                 int cx0 = CellX(b.Min.x, d), cx1 = CellX(b.Max.x, d);
                 int cy0 = CellY(b.Min.y, d), cy1 = CellY(b.Max.y, d);
-                total += (cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+                total += (cx1 - cx0 + 3) * (cy1 - cy0 + 3); // +1 exact span, +2 for the ±1-cell Mono/Burst drift margin
+            }
+            return total;
+        }
+
+        /// <summary>The node upper bound counted the way <see cref="LabelCollisionJob"/> actually INSERTS —
+        /// per CANDIDATE box-reference, not per unique box. <see cref="NodeUpperBound"/> sums each box in
+        /// <c>[0,boxCount)</c> ONCE; this sums every box in every candidate's <c>[BoxStart, BoxStart+BoxCount)</c>
+        /// range, exactly mirroring the job's insert loop. It equals the per-unique bound when the ranges tile
+        /// disjointly (the normal case — staging appends contiguously, see
+        /// <see cref="LabelCandidate.TryFindRangeTilingViolation"/>) and STRICTLY EXCEEDS it if a box were ever
+        /// shared by two candidates, so the pool can never under-count regardless of the staged stream's shape.
+        /// This robustness is the point: it does not depend on the disjointness invariant holding, so a future
+        /// staging change can't silently overflow the pool. (It was adopted after a dense-scene node-pool overflow
+        /// whose exact trigger was never reproduced — the debug assert in <c>LabelPlacementSystem.RunCollision</c>
+        /// now catches a malformed stream if one ever occurs.) Ranges are clamped to <c>[0,boxCount)</c> — a garbage
+        /// or oversized range costs at most <c>boxCount</c> iterations, never an unbounded loop. Keeps the same
+        /// ±1-cell drift margin as <see cref="NodeUpperBound"/> (a precautionary Mono/Burst boundary-truncation
+        /// guard, also unconfirmed as the trigger).</summary>
+        public static int NodeUpperBoundByCandidates(NativeArray<LabelCandidate> candidates, int candidateCount,
+            NativeArray<LabelBox> boxes, int boxCount, in Dims d)
+        {
+            int total = 0;
+            for (int i = 0; i < candidateCount; i++)
+            {
+                LabelCandidate c = candidates[i];
+                int lo = math.max(0, c.BoxStart);
+                int hi = math.min(boxCount, c.BoxStart + c.BoxCount);
+                for (int b = lo; b < hi; b++)
+                {
+                    LabelBox bx = boxes[b];
+                    int cx0 = CellX(bx.Min.x, d), cx1 = CellX(bx.Max.x, d);
+                    int cy0 = CellY(bx.Min.y, d), cy1 = CellY(bx.Max.y, d);
+                    total += (cx1 - cx0 + 3) * (cy1 - cy0 + 3); // +1 exact span, +2 for the ±1-cell Mono/Burst drift margin
+                }
             }
             return total;
         }

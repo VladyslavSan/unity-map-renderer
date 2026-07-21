@@ -69,7 +69,18 @@ namespace MapRenderer.Core.Text.Placement
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = s.FadeId, WasPlacedLastFrame = s.WasPlacedLastFrame,
             };
-            emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = quads.Length, Slot = s.Slot, AtlasKind = s.AtlasKind };
+            // Epic A / A1 (design §11 A1 D2/D6): carry the world-anchored draw payload alongside the
+            // (unchanged) screen candidate/box/quad above — IsWorld=true marks this candidate for
+            // WorldLabelRenderer's emit branch (D2/D6), never a curved one (StageCurvedAnchor leaves these
+            // fields default). TranslateDeltaPx is the SAME translate already folded into screenPx above,
+            // expressed as a delta from the untranslated anchor (D4) — the world path adds it to OffsetPx
+            // instead of the (unavailable, un-projected) anchor.
+            emit[ordinal] = new CandidateEmit
+            {
+                QuadStart = quadStart, QuadCount = quads.Length, Slot = s.Slot, AtlasKind = s.AtlasKind,
+                AnchorLocal = s.AnchorLocal, TileOriginRender = s.TileOriginRender, TileKey = s.TileKey,
+                TranslateDeltaPx = screenPx - s.ScreenPx, IsWorld = true,
+            };
             return 1;
         }
 
@@ -87,6 +98,7 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         public static int StageCurved(in CurvedStageInput s,
             ReadOnlySpan<float2> screenPath, ReadOnlySpan<float> depthPath, ReadOnlySpan<byte> validPath,
+            ReadOnlySpan<double3> worldPath,
             ReadOnlySpan<CurvedGlyph> glyphs, ReadOnlySpan<LineAnchor> anchors,
             ReadOnlySpan<long> anchorFadeIds, ReadOnlySpan<byte> anchorWasPlaced,
             Span<float2> pathScratch, Span<float> cumulativeScratch,
@@ -125,7 +137,7 @@ namespace MapRenderer.Core.Text.Placement
             {
                 float centerArc = PolylineArcMath.ArcDistanceAt(cumulativeScratch, pathLen, anchors[a].Segment, anchors[a].T);
                 if (centerArc - halfSpan < 0f || centerArc + halfSpan > total) continue; // label spills the ends
-                if (StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, glyphs, ref cursor,
+                if (StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, glyphs, ref cursor,
                         ordinal + staged, anchorFadeIds[a], anchorWasPlaced[a] != 0,
                         centerArc, labelCenterBaked, scale, pathDepth, bearingRadians,
                         boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit))
@@ -134,7 +146,7 @@ namespace MapRenderer.Core.Text.Placement
 
             // No build-time anchor's projected position fit this frame → try one centred label at the arc midpoint.
             if (staged == 0 &&
-                StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, glyphs, ref cursor,
+                StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, glyphs, ref cursor,
                     ordinal, anchorFadeIds[anchorCount], anchorWasPlaced[anchorCount] != 0,
                     total * 0.5f, labelCenterBaked, scale, pathDepth, bearingRadians,
                     boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit))
@@ -143,10 +155,38 @@ namespace MapRenderer.Core.Text.Placement
             return staged;
         }
 
+        // Stage AC (curved-world): resolves `arc` to its screen point/tangent AND (seg,t) in one pass — the
+        // SAME formula PolylineArcMath.At uses internally (byte-identical to At's own output), but also
+        // surfaces the segment index/parametric t so the caller can sample the WORLD polyline at the
+        // IDENTICAL position — no second, independently-diverging walk.
+        private static void AtWithSegment(ReadOnlySpan<float2> path, ReadOnlySpan<float> cumulative, int pathLen,
+            float total, float arc, ref int cursor,
+            out float2 point, out float tangentRadians, out int seg, out float t)
+        {
+            if (arc <= 0f)
+            {
+                seg = 0; t = 0f;
+                point = path[0];
+                tangentRadians = PolylineArcMath.SegmentTangent(path, pathLen, 0);
+                return;
+            }
+            if (arc >= total)
+            {
+                seg = pathLen - 2; t = 1f;
+                point = path[pathLen - 1];
+                tangentRadians = PolylineArcMath.SegmentTangent(path, pathLen, pathLen - 2);
+                return;
+            }
+            PolylineArcMath.SegmentAt(cumulative, pathLen, total, arc, ref cursor, out seg, out t);
+            point = math.lerp(path[seg], path[seg + 1], t);
+            tangentRadians = PolylineArcMath.SegmentTangent(path, pathLen, seg);
+        }
+
         // Stages ONE curved-label instance centred at `centerArc`. Rolls the box/quad pools back and returns false
         // if any adjacent-glyph line curvature exceeds text-max-angle (the label is dropped at this anchor, #6).
         private static bool StageCurvedAnchor(in CurvedStageInput s,
             ReadOnlySpan<float2> path, ReadOnlySpan<float> cumulative, int pathLen, float total,
+            ReadOnlySpan<double3> worldPath,
             ReadOnlySpan<CurvedGlyph> glyphs, ref int cursor,
             int ordinal, long fadeId, bool wasPlaced,
             float centerArc, float labelCenterBaked, float scale, float pathDepth, float bearingRadians,
@@ -168,7 +208,8 @@ namespace MapRenderer.Core.Text.Placement
             {
                 CurvedGlyph cg = glyphs[g];
                 float arc = centerArc + dir * (cg.ArcCenter - labelCenterBaked) * scale;
-                PolylineArcMath.At(path, cumulative, pathLen, total, arc, ref cursor, out float2 pt, out float centerTangentAtGlyph);
+                AtWithSegment(path, cumulative, pathLen, total, arc, ref cursor,
+                    out float2 pt, out float centerTangentAtGlyph, out int segArc, out float tArc);
 
                 // The max-angle gate answers "is the PATH too kinky to place a label here" — a path-curvature
                 // property, so it stays on the raw per-glyph SEGMENT tangent (byte-identical to pre-fix
@@ -181,6 +222,11 @@ namespace MapRenderer.Core.Text.Placement
                 }
                 prevCenterTangent = centerTangentAtGlyph;
 
+                // Stage AC: the world anchor at the SAME (seg,t) the screen walk above just resolved — the
+                // Level-1 RTC bake (worldPoint − TileOriginRender). segDirWorld is the raw-segment fallback
+                // direction (SampleWorld's zero-length-segment skip), used below when the chord is degenerate.
+                PolylineArcMath.SampleWorld(worldPath, pathLen, segArc, tArc, out double3 worldPt, out double3 segDirWorld);
+
                 // Orient the rigid glyph quad by the CHORD across its OWN footprint, not the single-point
                 // segment tangent: a glyph straddling a polyline VERTEX would otherwise rotate to one
                 // segment's raw angle while its neighbour (advance-spaced, not vertex-spaced) rotates to
@@ -190,15 +236,37 @@ namespace MapRenderer.Core.Text.Placement
                 // purely a RENDER-orientation choice — it does not feed the cull gate above.
                 float halfWidthPx = (cg.Cell.BottomRight.x - cg.Cell.TopLeft.x) * scale * 0.5f;
                 float tangent = centerTangentAtGlyph;
+                double3 chordDirWorld = segDirWorld; // fallback: raw segment direction (degenerate/no-chord case)
                 if (halfWidthPx > 1e-4f)
                 {
                     float arcLeft  = math.max(0f, math.min(total, arc - halfWidthPx));
                     float arcRight = math.max(0f, math.min(total, arc + halfWidthPx));
-                    PolylineArcMath.At(path, cumulative, pathLen, total, arcLeft,  ref cursor, out float2 pLeft,  out _);
-                    PolylineArcMath.At(path, cumulative, pathLen, total, arcRight, ref cursor, out float2 pRight, out _);
+                    AtWithSegment(path, cumulative, pathLen, total, arcLeft,  ref cursor,
+                        out float2 pLeft,  out _, out int segLeft,  out float tLeft);
+                    AtWithSegment(path, cumulative, pathLen, total, arcRight, ref cursor,
+                        out float2 pRight, out _, out int segRight, out float tRight);
                     float2 chord = pRight - pLeft;
                     if (math.lengthsq(chord) > 1e-12f) tangent = (float)math.atan2(chord.y, chord.x);
+
+                    // World chord — the SAME arcLeft/arcRight screen-arc distances (and their just-resolved
+                    // (seg,t)), sampled on the WORLD polyline instead of the screen one.
+                    PolylineArcMath.SampleWorld(worldPath, pathLen, segLeft,  tLeft,  out double3 worldLeft,  out _);
+                    PolylineArcMath.SampleWorld(worldPath, pathLen, segRight, tRight, out double3 worldRight, out _);
+                    double3 worldChord = worldRight - worldLeft;
+                    if (math.lengthsq(worldChord) > 1e-12) chordDirWorld = worldChord;
                 }
+
+                // Unit-normalize (direction only feeds the shader's atan2, D-E — magnitude never matters) and
+                // bake the SAME keep-upright negation the screen `flip` above already decided.
+                double3 unitTangent = math.lengthsq(chordDirWorld) > 1e-18 ? math.normalize(chordDirWorld) : double3.zero;
+                if (reversed) unitTangent = -unitTangent;
+                float3 tangentLocal = new float3((float)unitTangent.x, (float)unitTangent.y, (float)unitTangent.z);
+                // Level-1 RTC bake (manual per-component narrow — no assumed double3→float3 cast operator,
+                // mirrors SymbolLabelBatchBuilder.AddPoint's identical narrowing).
+                float3 anchorLocal = new float3(
+                    (float)(worldPt.x - s.TileOriginRender.x),
+                    (float)(worldPt.y - s.TileOriginRender.y),
+                    (float)(worldPt.z - s.TileOriginRender.z));
 
                 pt = LabelTranslate.ApplyTranslate(pt, s.TranslatePx, s.TranslateAnchor, bearingRadians);
                 float rotation = tangent + flip; // tangent ONLY — not the label bearing (would double-rotate)
@@ -208,6 +276,7 @@ namespace MapRenderer.Core.Text.Placement
                 {
                     Quad = cg.Cell, AnchorScreenPx = pt, TextSizePx = s.TextSizePx,
                     Depth = pathDepth, Color = s.Color, RotationRadians = rotation,
+                    AnchorLocal = anchorLocal, Tangent = tangentLocal,
                 };
             }
 
@@ -218,7 +287,22 @@ namespace MapRenderer.Core.Text.Placement
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = fadeId, WasPlacedLastFrame = wasPlaced,
             };
-            emit[ordinal] = new CandidateEmit { QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot };
+            // Epic AC (curved-world): flip curved onto the SAME world-anchored draw sink point/icon already
+            // use (D2/D6's IsWorld branch) — AlongLine additionally tells WorldLabelRenderer.Emit to read each
+            // quad's OWN AnchorLocal/Tangent (a curved candidate has no single per-candidate anchor).
+            // text-translate: WorldLabelRenderer.Emit adds emit.TranslateDeltaPx to every world corner (both
+            // point and curved go through BuildWorldQuad). The delta is position-independent (ApplyTranslate
+            // depends only on translatePx/anchor/bearing — NOT the input point), so it is one value per label:
+            // ApplyTranslate(0, …) = the delta itself. Curved's per-glyph screen `pt` above is translated for
+            // the dead screen/A-B path; this carries the SAME translate into the live world path.
+            float2 translateDeltaPx = LabelTranslate.ApplyTranslate(
+                float2.zero, s.TranslatePx, s.TranslateAnchor, bearingRadians);
+            emit[ordinal] = new CandidateEmit
+            {
+                QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = LabelKind.Text,
+                TileKey = s.TileKey, TileOriginRender = s.TileOriginRender, TranslateDeltaPx = translateDeltaPx,
+                IsWorld = true, AlongLine = true,
+            };
             return true;
         }
 

@@ -34,13 +34,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // The managed reference: LabelStagingMath.StageCurved over one curved label.
         private static Result Managed(in CurvedStageInput s, float2[] screen, float[] depth, byte[] valid,
-            CurvedGlyph[] glyphs, LineAnchor[] anchors, long[] fadeIds, byte[] wasPlaced, float bearing)
+            double3[] world, CurvedGlyph[] glyphs, LineAnchor[] anchors, long[] fadeIds, byte[] wasPlaced, float bearing)
         {
             int maxBoxes = (anchors.Length + 1) * glyphs.Length + 1;
             var boxes = new LabelBox[maxBoxes]; var quads = new PlacedQuad[maxBoxes];
             var cands = new LabelCandidate[anchors.Length + 1]; var emit = new CandidateEmit[anchors.Length + 1];
             int bc = 0, qc = 0;
-            int staged = LabelStagingMath.StageCurved(in s, screen, depth, valid, glyphs, anchors, fadeIds, wasPlaced,
+            int staged = LabelStagingMath.StageCurved(in s, screen, depth, valid, world, glyphs, anchors, fadeIds, wasPlaced,
                 new float2[screen.Length], new float[screen.Length], bearing, 0,
                 boxes, ref bc, quads, ref qc, cands, emit);
             return new Result { Staged = staged, BoxCount = bc, QuadCount = qc, Boxes = boxes, Quads = quads, Candidates = cands };
@@ -48,7 +48,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // The Burst path: LabelStageJob over a one-record curved batch mirror.
         private static Result Native(in CurvedStageInput s, float2[] screen, float[] depth, byte[] valid,
-            CurvedGlyph[] glyphs, LineAnchor[] anchors, long[] fadeIds, byte[] wasPlaced, float bearing)
+            double3[] world, CurvedGlyph[] glyphs, LineAnchor[] anchors, long[] fadeIds, byte[] wasPlaced, float bearing)
         {
             int pathLen = screen.Length;
             int maxBoxes = (anchors.Length + 1) * glyphs.Length + 1;
@@ -64,6 +64,7 @@ namespace MapRenderer.Tests.Text.Placement
             var nQuads = new NativeArray<SymbolQuad>(1, alloc);
             var nGlyphs = From(glyphs); var nAnchors = From(anchors); var nFade = From(fadeIds);
             var pointOffset = One(0); var nScreen = From(screen); var nDepth = From(depth); var nValid = From(valid);
+            var nWorld = From(world); // Stage AC (curved-world): the gathered world polyline, index-aligned with Screen
             var pwp = One<byte>(0); var awp = From(wasPlaced);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<LabelBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
@@ -77,7 +78,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Curveds = curveds, CurvedGlyphStart = cgs, CurvedGlyphCount = cgc,
                 CurvedAnchorStart = cas, CurvedAnchorCount = cac, CurvedAnchorFadeStart = cafs,
                 Quads = nQuads, Glyphs = nGlyphs, Anchors = nAnchors, AnchorFadeIds = nFade,
-                PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid,
+                PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid, WorldPointsRender = nWorld,
                 PointWasPlaced = pwp, AnchorWasPlaced = awp, Bearing = bearing, Viewport = new double2(1920, 1080),
                 PathScratch = path, CumScratch = cum,
                 Boxes = oBoxes, StagedQuads = oQuads, Candidates = oCands, Emit = oEmit, OutCounts = counts,
@@ -91,7 +92,7 @@ namespace MapRenderer.Tests.Text.Placement
             kinds.Dispose(); detail.Dispose(); worldCount.Dispose(); points.Dispose(); pqs.Dispose(); pqc.Dispose();
             curveds.Dispose(); cgs.Dispose(); cgc.Dispose(); cas.Dispose(); cac.Dispose(); cafs.Dispose();
             nQuads.Dispose(); nGlyphs.Dispose(); nAnchors.Dispose(); nFade.Dispose();
-            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); pwp.Dispose(); awp.Dispose();
+            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); pwp.Dispose(); awp.Dispose();
             path.Dispose(); cum.Dispose(); oBoxes.Dispose(); oQuads.Dispose(); oCands.Dispose(); oEmit.Dispose(); counts.Dispose();
             return r;
         }
@@ -117,15 +118,21 @@ namespace MapRenderer.Tests.Text.Placement
             var anchors = new[] { new LineAnchor(0, 1f) }; // anchor at the joint (arc 60)
             var fadeIds = new[] { 111L, 222L };            // anchor + centred fallback
             var wasPlaced = new byte[] { 0, 0 };
+            // Stage AC (curved-world): the gathered WORLD polyline the screen path was projected from — same
+            // bend, embedded in the render-space XZ plane (east=X, north=Z), at a nontrivial (nonzero, large)
+            // tile origin so the T-ULP bake below exercises a real double-narrow, not a degenerate zero.
+            var world = new double3[screen.Length];
+            for (int i = 0; i < screen.Length; i++) world[i] = new double3(screen[i].x, 0.0, screen[i].y);
+            var tileOriginRender = new double3(1_250_000.0, 0.0, -430_000.0);
             var s = new CurvedStageInput
             {
                 TextSizePx = TextQuadLayout.OneEm, PaddingPx = 2f, SortKey = 0f, FeatureIndex = 1, TileKey = 5,
                 Slot = 0, TranslateAnchor = TextTranslateAnchor.Viewport, MaxAngleDeg = maxAngleDeg,
-                KeepUpright = true, Color = new float4(1, 1, 1, 1),
+                KeepUpright = true, Color = new float4(1, 1, 1, 1), TileOriginRender = tileOriginRender,
             };
 
-            Result m = Managed(in s, screen, depth, valid, glyphs, anchors, fadeIds, wasPlaced, 0f);
-            Result n = Native(in s, screen, depth, valid, glyphs, anchors, fadeIds, wasPlaced, 0f);
+            Result m = Managed(in s, screen, depth, valid, world, glyphs, anchors, fadeIds, wasPlaced, 0f);
+            Result n = Native(in s, screen, depth, valid, world, glyphs, anchors, fadeIds, wasPlaced, 0f);
 
             // Placement DECISIONS must be identical (a ULP flip at the bend would change these).
             Assert.AreEqual(m.Staged, n.Staged, $"staged count (bend {bendDeg}, maxAngle {maxAngleDeg})");
@@ -150,6 +157,19 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(m.Quads[i].AnchorScreenPx.x, n.Quads[i].AnchorScreenPx.x, GeomTol);
                 Assert.AreEqual(m.Quads[i].AnchorScreenPx.y, n.Quads[i].AnchorScreenPx.y, GeomTol);
                 Assert.AreEqual(m.Quads[i].RotationRadians, n.Quads[i].RotationRadians, 1e-4f);
+
+                // Stage AC T-ULP: the new baked float3 fields come from a double3 subtract + normalize
+                // (rsqrt) computed in BOTH the managed and the Burst path — a REAL cross-backend numeric
+                // tolerance (Burst's rsqrt/atan2 diverge from Mono by ULPs), not a snapshot re-bake. Must be
+                // compared (never left untested), within a STATED bound: AnchorLocal at GeomTol (same as the
+                // screen anchor above — it's the same class of narrowed-double bake); Tangent (a unit vector)
+                // at a small absolute tolerance.
+                Assert.AreEqual(m.Quads[i].AnchorLocal.x, n.Quads[i].AnchorLocal.x, GeomTol, "AnchorLocal.x");
+                Assert.AreEqual(m.Quads[i].AnchorLocal.y, n.Quads[i].AnchorLocal.y, GeomTol, "AnchorLocal.y");
+                Assert.AreEqual(m.Quads[i].AnchorLocal.z, n.Quads[i].AnchorLocal.z, GeomTol, "AnchorLocal.z");
+                Assert.AreEqual(m.Quads[i].Tangent.x, n.Quads[i].Tangent.x, 1e-5f, "Tangent.x");
+                Assert.AreEqual(m.Quads[i].Tangent.y, n.Quads[i].Tangent.y, 1e-5f, "Tangent.y");
+                Assert.AreEqual(m.Quads[i].Tangent.z, n.Quads[i].Tangent.z, 1e-5f, "Tangent.z");
             }
         }
 

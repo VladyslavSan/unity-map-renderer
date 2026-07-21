@@ -41,9 +41,11 @@ namespace MapRenderer.Tests
         {
             var prod = MapMaterialSetTestUtil.Load();
             var set  = ScriptableObject.CreateInstance<MapMaterialSet>();
-            set.FillMaterial = prod.FillMaterial;
-            set.LineMaterial = prod.LineMaterial;
-            set.SymbolText   = prod.SymbolText;
+            set.FillMaterial    = prod.FillMaterial;
+            set.LineMaterial    = prod.LineMaterial;
+            // Epic A / A1: SymbolTextWorld is REQUIRED (Codex #2) — else Validate() throws on it instead
+            // of the FillMaterial null this test's commit-ordering tooth actually targets.
+            set.SymbolTextWorld = prod.SymbolTextWorld;
             return set;
         }
 

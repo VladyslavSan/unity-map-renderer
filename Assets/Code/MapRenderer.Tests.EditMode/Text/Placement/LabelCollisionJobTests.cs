@@ -170,5 +170,147 @@ namespace MapRenderer.Tests.Text.Placement
             Add(4, 30f, (1000, 1000, 1020, 1012));                            // point, far away (always places)
             AssertSame(cands.ToArray(), boxes.ToArray(), "multi-box + point candidates");
         }
+
+        // Regression (live-demo crash at a dense scene): the node pool is pre-sized on the MAIN thread
+        // (LabelCollisionGridSizing, managed float) but filled by the job in BURST — a coordinate on a cell
+        // boundary can truncate one cell wider in Burst than the managed sizing counted, so the job needs one
+        // more node than the pool holds. A Burst job CANNOT grow a NativeArray (the retired managed grid could,
+        // so it never overflowed), and an under-count was an out-of-range WRITE → IndexOutOfRangeException from
+        // LabelCollisionJob.Insert, crashing the frame every time at that scene. Insert now guards every write
+        // against NodeBox.Length. This forces the under-count directly (a starved pool over a scene that places
+        // many boxes) and asserts the job COMPLETES instead of throwing. RED without the guard: NodeBox[cap]
+        // write throws. Survivors stay correct here because the boxes are disjoint (a dropped node only removes
+        // a blocker prefilter entry — disjoint boxes never block anyway).
+        [Test]
+        public void StarvedNodePool_GuardsInsteadOfThrowing()
+        {
+            // 12 disjoint single-cell boxes on a coarse grid → all place, each inserts ≥1 node (≥12 total).
+            const int n = 12;
+            var cands = new LabelCandidate[n];
+            var boxes = new LabelBox[n];
+            for (int i = 0; i < n; i++)
+            {
+                float x = i * 500f, y = i * 500f; // far apart → disjoint → all survive
+                boxes[i] = new LabelBox { Min = new float2(x, y), Max = new float2(x + 20f, y + 12f),
+                    SortKey = 0, FeatureIndex = i, TileKey = 0, LabelIndex = i };
+                cands[i] = new LabelCandidate { BoxStart = i, BoxCount = 1, SortKey = 0,
+                    FeatureIndex = i, TileKey = 0, LabelIndex = i };
+            }
+
+            var nc = new NativeArray<LabelCandidate>(n, Allocator.TempJob);
+            var nb = new NativeArray<LabelBox>(n, Allocator.TempJob);
+            var ns = new NativeArray<byte>(n, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < n; i++) { nc[i] = cands[i]; nb[i] = boxes[i]; }
+                LabelCollisionGridSizing.Dims dims = LabelCollisionGridSizing.ComputeDims(nb, n);
+                int cells = dims.W * dims.H;
+                var cellHead = new NativeArray<int>(cells, Allocator.TempJob);
+                var nodeBox  = new NativeArray<int>(3, Allocator.TempJob); // STARVED: 3 nodes for ≥12 inserts
+                var nodeNext = new NativeArray<int>(3, Allocator.TempJob);
+                try
+                {
+                    for (int c = 0; c < cells; c++) cellHead[c] = -1;
+                    Assert.DoesNotThrow(() =>
+                        new LabelCollisionJob
+                        {
+                            Candidates = nc, CandidateCount = n, Boxes = nb, BoxCount = n,
+                            Survivors = ns, OutSurvivorCount = outCount,
+                            CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                            GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                            GridW = dims.W, GridH = dims.H,
+                        }.Schedule().Complete(),
+                        "Insert must guard writes against a starved node pool (Burst cannot grow it), not throw IndexOutOfRange");
+                    Assert.AreEqual(n, outCount[0], "disjoint boxes all survive even when node inserts are dropped by the guard");
+                }
+                finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
+            }
+            finally { nc.Dispose(); nb.Dispose(); ns.Dispose(); outCount.Dispose(); }
+        }
+
+        // The node-storage bound carries a ±1-cell margin (each axis, each side) so a Mono/Burst boundary-cell
+        // truncation drift can never overflow the pre-sized pool. Assert the margin is present: the bound must
+        // exceed the tight (exact) per-box cell count for a scene of multi-cell boxes.
+        [Test]
+        public void NodeUpperBound_CarriesDriftMargin()
+        {
+            var (_, boxes) = RandomScene(40, 9, 3000f, 2000f, 100f, 300f, 100f, 300f);
+            var nb = new NativeArray<LabelBox>(boxes.Length, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < boxes.Length; i++) nb[i] = boxes[i];
+                LabelCollisionGridSizing.Dims dims = LabelCollisionGridSizing.ComputeDims(nb, boxes.Length);
+                int bound = LabelCollisionGridSizing.NodeUpperBound(nb, boxes.Length, in dims);
+
+                int tight = 0;
+                for (int i = 0; i < boxes.Length; i++)
+                {
+                    LabelBox b = nb[i];
+                    int cx0 = (int)math.clamp((b.Min.x - dims.MinX) * dims.InvCell, 0, dims.W - 1);
+                    int cx1 = (int)math.clamp((b.Max.x - dims.MinX) * dims.InvCell, 0, dims.W - 1);
+                    int cy0 = (int)math.clamp((b.Min.y - dims.MinY) * dims.InvCell, 0, dims.H - 1);
+                    int cy1 = (int)math.clamp((b.Max.y - dims.MinY) * dims.InvCell, 0, dims.H - 1);
+                    tight += (cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+                }
+                Assert.Greater(bound, tight, "NodeUpperBound must exceed the tight per-box cell count (the ±1-cell drift margin)");
+            }
+            finally { nb.Dispose(); }
+        }
+
+        // ROOT CAUSE of the live dense-scene crash: candidate box ranges are NOT guaranteed disjoint — a box can
+        // be referenced by more than one candidate. The job (LabelCollisionJob.Insert) inserts every box in every
+        // placed candidate's [BoxStart,BoxStart+BoxCount) range, so a SHARED box is inserted once PER candidate.
+        // The old per-UNIQUE-box bound (NodeUpperBound) counts it once → under-count → pool overflow. Even the
+        // ±1-cell margin only raises the overflow THRESHOLD; enough sharing still overflows it (proven here).
+        // NodeUpperBoundByCandidates counts per reference (matches the job), so it scales with the sharing.
+        [Test]
+        public void SharedBox_PerCandidateBound_CoversJobInserts_PerUniqueUndercounts()
+        {
+            // One 1-cell box referenced by MANY AllowOverlap candidates → the job inserts it once per candidate.
+            const int shares = 10;
+            var boxes = new NativeArray<LabelBox>(1, Allocator.TempJob);
+            var cands = new NativeArray<LabelCandidate>(shares, Allocator.TempJob);
+            var ns = new NativeArray<byte>(shares, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                boxes[0] = new LabelBox { Min = new float2(10f, 10f), Max = new float2(30f, 22f),
+                    SortKey = 0, FeatureIndex = 0, TileKey = 0, LabelIndex = 0 }; // < 64px → 1 cell
+                for (int i = 0; i < shares; i++)
+                    cands[i] = new LabelCandidate { BoxStart = 0, BoxCount = 1, AllowOverlap = true,
+                        SortKey = 0, FeatureIndex = i, TileKey = 0, LabelIndex = i };
+
+                LabelCollisionGridSizing.Dims dims = LabelCollisionGridSizing.ComputeDims(boxes, 1);
+                int perUnique = LabelCollisionGridSizing.NodeUpperBound(boxes, 1, in dims);
+                int perCand   = LabelCollisionGridSizing.NodeUpperBoundByCandidates(cands, shares, boxes, 1, in dims);
+                const int jobInserts = shares; // box 0 is one cell → one node per referencing candidate
+
+                Assert.Less(perUnique, jobInserts,
+                    "the per-UNIQUE-box bound (even with the ±1 margin) under-counts a box shared by many candidates — the overflow bug");
+                Assert.GreaterOrEqual(perCand, jobInserts,
+                    "the per-CANDIDATE bound counts the shared box per reference, covering every insert — the fix");
+
+                // Functional: sized by the per-candidate bound, the job fits and every AllowOverlap candidate places.
+                var cellHead = new NativeArray<int>(dims.W * dims.H, Allocator.TempJob);
+                var nodeBox  = new NativeArray<int>(perCand, Allocator.TempJob);
+                var nodeNext = new NativeArray<int>(perCand, Allocator.TempJob);
+                try
+                {
+                    for (int c = 0; c < cellHead.Length; c++) cellHead[c] = -1;
+                    new LabelCollisionJob
+                    {
+                        Candidates = cands, CandidateCount = shares, Boxes = boxes, BoxCount = 1,
+                        Survivors = ns, OutSurvivorCount = outCount,
+                        CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                        GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                        GridW = dims.W, GridH = dims.H,
+                    }.Schedule().Complete();
+                    Assert.AreEqual(shares, outCount[0], "every AllowOverlap candidate places");
+                }
+                finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
+            }
+            finally { boxes.Dispose(); cands.Dispose(); ns.Dispose(); outCount.Dispose(); }
+        }
     }
 }

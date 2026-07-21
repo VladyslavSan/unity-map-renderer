@@ -1,7 +1,7 @@
 // Symbol_Input.hlsl — Map/Symbol/Text layer CBUFFER + SDF atlas sampler.
 //
 // UNLIKE Fill_LitInput.hlsl / Line_LitInput.hlsl, this is NOT derived from URP's LitInput.hlsl — Symbol
-// is the affirmed F2 divergence (unlit SDF text, not a lit surface; see Shaders/Map/Symbol/Text/README.md).
+// is the affirmed F2 divergence (unlit SDF text, not a lit surface).
 // No UnityPerMaterial DOTS-instancing bridge either: Symbol submits via Graphics.RenderMesh/RenderParams
 // (one draw call per frame, SRP-Batcher-compatible CBUFFER), never BatchRendererGroup — there is nothing
 // to instance.
@@ -22,8 +22,9 @@
 CBUFFER_START(UnityPerMaterial)
 // (B) Internal — engine plumbing, never style-bound:
 // _ScreenParamsLogical — (logicalWidth, logicalHeight, 0, 0) in pixels; refreshed every frame by
-//   LabelPlacementSystem. Converts a vertex's logical-screen-px POSITION to clip space (the
-//   Graphics.RenderMesh screen-space bypass — see the pass body + README).
+//   LabelPlacementSystem/WorldLabelRenderer. Scales the constant-px glyph-corner OFFSET into clip space
+//   (see the world pass's vertex stage) — the vertex POSITION itself comes from the stock
+//   object/view/projection transform, not a logical-px bypass.
 float4 _ScreenParamsLogical;
 // _MainTex_TexelSize — (1/w, 1/h, w, h) of the SDF atlas, auto-populated by Unity. Used by the analytic AA
 //   to convert the SDF's texel range into screen pixels (see the fragment). In the CBUFFER for SRP Batcher.
@@ -46,7 +47,10 @@ float  _HaloWidthPx;
 float  _HaloBlurPx;
 CBUFFER_END
 
-TEXTURE2D(_MainTex);
+// Stage M: a Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map
+// that fits in one page) upload exactly one layer, and every vertex's Page is 0, so the array sample at
+// layer 0 is pixel-identical to the pre-Stage-M plain Texture2D sample.
+TEXTURE2D_ARRAY(_MainTex);
 SAMPLER(sampler_MainTex);
 
 #endif // MAP_SYMBOL_INPUT_INCLUDED

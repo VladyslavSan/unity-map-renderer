@@ -44,23 +44,52 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, atlas.OverflowCount, "25 small glyphs fit a 256x256 atlas with no overflow");
         }
 
+        // =========================================================================================
+        // Stage M: a glyph that no longer fits the CURRENT page now opens a NEW page instead of being
+        // dropped — this is the multi-page capacity behaviour M-T2 pins end-to-end (layout/vertex/render);
+        // this test is the atlas-level slice of it.
+        // =========================================================================================
         [Test]
-        public void FixedAtlas_Overflow_SkipsGracefully_AndCounts()
+        public void FixedAtlas_PageOverflow_OpensNewPage_InsteadOfDropping()
         {
             // 16 wide (1 cell per shelf) x 32 tall: a 16-tall cell fits at y=0 and y=16; the third would
-            // start at y=32 and overflow. So exactly two glyphs fit, the rest are dropped (not thrown).
+            // start at y=32 on page 0 — Stage M opens page 1 for it instead of dropping it.
             var atlas = new GlyphAtlas(width: 16, fixedHeight: 32);
 
-            atlas.Append(Glyph(65, w: 10, h: 10)); // cell 16x16 → y=0
-            atlas.Append(Glyph(66, w: 10, h: 10)); // cell 16x16 → y=16
-            Assert.AreEqual(0, atlas.OverflowCount, "two 16px cells fit a 32px-tall atlas");
-            Assert.IsTrue(atlas.TryGetEntry(65, out _));
-            Assert.IsTrue(atlas.TryGetEntry(66, out _));
+            GlyphAtlasEntry first = atlas.Append(Glyph(65, w: 10, h: 10)); // cell 16x16 → page 0, y=0
+            GlyphAtlasEntry second = atlas.Append(Glyph(66, w: 10, h: 10)); // cell 16x16 → page 0, y=16
+            Assert.AreEqual(0, atlas.OverflowCount, "two 16px cells fit a 32px-tall page");
+            Assert.AreEqual(1, atlas.PageCount, "no new page needed yet");
+            Assert.AreEqual(0, first.Page);
+            Assert.AreEqual(0, second.Page);
 
-            atlas.Append(Glyph(67, w: 10, h: 10)); // would start at y=32 → overflow
-            Assert.AreEqual(1, atlas.OverflowCount, "the third glyph overflows and is counted");
-            Assert.IsFalse(atlas.TryGetEntry(67, out _), "an overflowed glyph gets NO entry (layout omits it)");
-            Assert.AreEqual(new int2(16, 32), atlas.Size, "Size is unchanged by overflow");
+            GlyphAtlasEntry third = atlas.Append(Glyph(67, w: 10, h: 10)); // would start at y=32 on page 0
+            Assert.AreEqual(0, atlas.OverflowCount,
+                "Stage M: no longer a drop — the glyph lands on a fresh page instead");
+            Assert.AreEqual(2, atlas.PageCount, "the third glyph forced a second page open");
+            Assert.AreEqual(1, third.Page, "the third glyph packed onto page 1");
+            Assert.AreEqual(new int2(0, 0), third.AtlasOrigin, "page 1 is a fresh packer — starts at its own origin");
+            Assert.IsTrue(atlas.TryGetEntry(67, out GlyphAtlasEntry roundTrip), "the page-1 glyph round-trips through TryGetEntry");
+            Assert.AreEqual(1, roundTrip.Page);
+            Assert.AreEqual(new int2(16, 32), atlas.Size, "Size (per-page) is unchanged by paging");
+        }
+
+        // =========================================================================================
+        // Genuine overflow (Stage M redefinition): a cell that doesn't fit even a BRAND-NEW empty page
+        // (taller than the fixed page height) is still dropped and counted — paging only helps a cell that
+        // fits A page, just not the current one.
+        // =========================================================================================
+        [Test]
+        public void FixedAtlas_CellTallerThanPage_StillOverflows_EvenOnAFreshPage()
+        {
+            var atlas = new GlyphAtlas(width: 16, fixedHeight: 32);
+
+            GlyphAtlasEntry entry = atlas.Append(Glyph(1, w: 10, h: 40)); // cell 16x46 — taller than any page
+
+            Assert.AreEqual(1, atlas.OverflowCount, "a cell taller than the fixed page height never fits, even fresh");
+            Assert.AreEqual(1, atlas.PageCount, "no page was opened for a cell that can't fit any page");
+            Assert.IsFalse(atlas.TryGetEntry(1, out _), "a genuinely overflowed glyph gets NO entry");
+            Assert.AreEqual(default(GlyphAtlasEntry).Page, entry.Page, "default(GlyphAtlasEntry) returned on overflow");
         }
 
         [Test]
@@ -78,6 +107,65 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(originAtFirst, stillFirst.AtlasOrigin, "an early glyph's atlas origin never moves");
             Assert.AreEqual(sizeAtFirst, atlas.Size,
                 "and the UV denominator (Size) is unchanged → its baked UVs stay valid");
+        }
+
+        // =========================================================================================
+        // Stage M robustness (Codex finding #2): a cell WIDER than the fixed page must be surfaced as
+        // OverflowCount overflow, NOT throw. GlyphAtlasPacker.TryPack throws for an over-wide cell, so
+        // without the width preflight in TryPackFixed a single over-wide glyph aborts the whole build.
+        // =========================================================================================
+        [Test]
+        public void FixedAtlas_CellWiderThanPage_CountsAsOverflow_DoesNotThrow()
+        {
+            var atlas = new GlyphAtlas(width: 32, fixedHeight: 64);
+
+            // Cell width = 40 + 2*3 = 46 > 32 page width. Pre-fix this threw ArgumentOutOfRangeException.
+            GlyphAtlasEntry entry = default;
+            Assert.DoesNotThrow(() => entry = atlas.Append(Glyph(1, w: 40, h: 10)),
+                "an over-wide cell must be counted as overflow, never throw and abort the build");
+
+            Assert.AreEqual(1, atlas.OverflowCount, "the over-wide glyph is counted as overflow");
+            Assert.AreEqual(1, atlas.PageCount, "no page was opened for a cell that can't fit any page");
+            Assert.IsFalse(atlas.TryGetEntry(1, out _), "an over-wide (overflowed) glyph gets NO entry");
+            Assert.AreEqual(default(GlyphAtlasEntry).Page, entry.Page, "default(GlyphAtlasEntry) returned on overflow");
+
+            // A subsequently appended glyph that DOES fit still packs normally — the atlas is not broken.
+            GlyphAtlasEntry ok = atlas.Append(Glyph(2, w: 10, h: 10));
+            Assert.IsTrue(atlas.TryGetEntry(2, out _), "a fitting glyph still packs after an over-wide overflow");
+            Assert.AreEqual(0, ok.Page);
+        }
+
+        // =========================================================================================
+        // Stage M robustness (Codex finding #3): page growth is capped at GlyphAtlas.MaxPages. Once the cap
+        // is reached, a glyph that would need a NEW page is surfaced as OverflowCount overflow instead of
+        // allocating unboundedly (OOM / Texture2DArray layer limit). The existing pages keep their content.
+        // =========================================================================================
+        [Test]
+        public void FixedAtlas_HittingMaxPages_SurfacesOverflow_InsteadOfGrowingUnbounded()
+        {
+            // A page sized to exactly ONE 16px cell (16 wide, 16 tall) → every appended glyph opens a fresh
+            // page, so page count == glyph count until the cap bites.
+            var atlas = new GlyphAtlas(width: 16, fixedHeight: 16);
+
+            // Fill exactly MaxPages pages (one glyph each). None overflow.
+            for (uint c = 0; c < GlyphAtlas.MaxPages; c++)
+            {
+                GlyphAtlasEntry e = atlas.Append(Glyph(c, w: 10, h: 10));
+                Assert.AreEqual((int)c, e.Page, $"glyph {c} lands on its own fresh page");
+            }
+            Assert.AreEqual(GlyphAtlas.MaxPages, atlas.PageCount, "exactly MaxPages pages allocated");
+            Assert.AreEqual(0, atlas.OverflowCount, "nothing overflowed while filling up to the cap");
+
+            // The next glyph would need page MaxPages (index == MaxPages) — capped → overflow, no new page.
+            GlyphAtlasEntry over = atlas.Append(Glyph(999, w: 10, h: 10));
+            Assert.AreEqual(1, atlas.OverflowCount, "the glyph past the page cap is counted as overflow");
+            Assert.AreEqual(GlyphAtlas.MaxPages, atlas.PageCount, "the page count is CAPPED — no unbounded growth");
+            Assert.IsFalse(atlas.TryGetEntry(999, out _), "the capped-out glyph gets no entry");
+            Assert.AreEqual(default(GlyphAtlasEntry).Page, over.Page);
+
+            // An earlier page's glyph is untouched by the overflow (the cap doesn't corrupt existing pages).
+            Assert.IsTrue(atlas.TryGetEntry(0, out GlyphAtlasEntry firstStill));
+            Assert.AreEqual(0, firstStill.Page);
         }
     }
 }

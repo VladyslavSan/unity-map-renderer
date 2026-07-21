@@ -32,5 +32,13 @@ namespace MapRenderer.Core.Text
 
         /// <summary>0-based wrapped line index this quad belongs to (see <see cref="TextLayoutResult.LineCount"/>).</summary>
         public int LineIndex { get; init; }
+
+        /// <summary>
+        /// Stage M: the glyph atlas page (Texture2DArray layer) <see cref="UvTopLeft"/>/<see cref="UvBottomRight"/>
+        /// sample from — copied from the source <see cref="GlyphAtlasEntry.Page"/> at layout time. 0 for
+        /// every quad (including every icon/sprite quad — the sprite sheet stays single-page) until the
+        /// glyph atlas overflows onto a second page.
+        /// </summary>
+        public int Page { get; init; }
     }
 }

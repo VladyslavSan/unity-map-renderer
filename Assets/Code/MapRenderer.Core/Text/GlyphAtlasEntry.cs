@@ -37,5 +37,12 @@ namespace MapRenderer.Core.Text
 
         /// <summary>Horizontal advance in pixels.</summary>
         public int Advance { get; init; }
+
+        /// <summary>
+        /// Stage M: which <see cref="GlyphAtlas"/> page (Texture2DArray layer) this glyph was packed
+        /// into. 0 for every glyph until the atlas overflows a page's fixed capacity (single-page
+        /// behaviour is byte-identical — every entry stays <c>Page == 0</c>).
+        /// </summary>
+        public int Page { get; init; }
     }
 }

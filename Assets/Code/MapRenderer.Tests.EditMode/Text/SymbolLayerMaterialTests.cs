@@ -11,12 +11,15 @@ namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// S105 Slice 4 (A5b) → E2 (D11): each symbol style layer gets its OWN material — a distinct
-    /// <see cref="MapMaterialSet.SymbolText"/> clone (NOT one shared material) — with its <c>text-halo-*</c>
-    /// bound by name. This is what makes per-layer halo variation possible (F1). Ownership migrated from
-    /// <c>SymbolLabelSubsystem</c> into <see cref="SymbolRenderLayer"/> in E2 (D11: "per-layer materials
-    /// live on the layer object, one owner") — the tooth is unchanged (per-layer halo), only the owner
-    /// under test is: this now builds the render layers directly via <see cref="RenderLayerSet.Build"/>
-    /// (the same production path <c>MapView.SetStyle</c> drives) instead of going through the subsystem.
+    /// <see cref="MapMaterialSet.SymbolTextWorld"/> clone (NOT one shared material) — with its
+    /// <c>text-halo-*</c> bound by name. This is what makes per-layer halo variation possible (F1).
+    /// Ownership migrated from <c>SymbolLabelSubsystem</c> into <see cref="SymbolRenderLayer"/> in E2
+    /// (D11: "per-layer materials live on the layer object, one owner") — the tooth is unchanged
+    /// (per-layer halo), only the owner under test is: this now builds the render layers directly via
+    /// <see cref="RenderLayerSet.Build"/> (the same production path <c>MapView.SetStyle</c> drives) instead
+    /// of going through the subsystem. <see cref="IRenderLayer.Material"/> IS
+    /// <see cref="SymbolRenderLayer.WorldTextMaterial"/> (§0.2 — the screen material is retired), so the two
+    /// used to be asserted separately are now the same object; asserted here as a single identity.
     /// </summary>
     [TestFixture]
     public class SymbolLayerMaterialTests
@@ -35,7 +38,7 @@ namespace MapRenderer.Tests.Text
         public void Build_PerLayerMaterials_AreDistinctClonesWithBoundHalo()
         {
             var set = ScriptableObject.CreateInstance<MapMaterialSet>();
-            set.SymbolText = new Material(Shader.Find("Map/Symbol/Text"));
+            set.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
 
             StyleDocument style = StyleParser.Parse(TwoSymbolLayers.Replace('\'', '"'));
 
@@ -46,12 +49,15 @@ namespace MapRenderer.Tests.Text
 
                 Assert.AreEqual(2, layers.Count, "one render layer per symbol style layer");
 
-                Material m0 = layers[0].Material;
-                Material m1 = layers[1].Material;
+                var symbolLayer0 = (SymbolRenderLayer)layers[0];
+                var symbolLayer1 = (SymbolRenderLayer)layers[1];
+                Material m0 = symbolLayer0.Material;
+                Material m1 = symbolLayer1.Material;
                 Assert.IsNotNull(m0);
                 Assert.IsNotNull(m1);
+                Assert.AreSame(m0, symbolLayer0.WorldTextMaterial, "Material IS WorldTextMaterial (§0.2 — the screen material is retired).");
                 Assert.AreNotSame(m0, m1, "per-layer materials are DISTINCT instances, not one shared material");
-                Assert.AreNotSame(set.SymbolText, m0, "a layer material is a CLONE of the SymbolText base, not the base asset");
+                Assert.AreNotSame(set.SymbolTextWorld, m0, "a layer material is a CLONE of the SymbolTextWorld base, not the base asset");
 
                 // Each layer's text-halo-width is bound onto its own material by name (F1) — now owned by
                 // SymbolRenderLayer (D11), not the subsystem.
@@ -60,7 +66,7 @@ namespace MapRenderer.Tests.Text
             }
             finally
             {
-                Object.DestroyImmediate(set.SymbolText);
+                Object.DestroyImmediate(set.SymbolTextWorld);
                 Object.DestroyImmediate(set);
             }
         }

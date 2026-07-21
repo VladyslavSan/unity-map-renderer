@@ -24,12 +24,16 @@ namespace MapRenderer.Unity.Rendering.Materials
         [Tooltip("Base material for all line layers. Cloned per style layer.")]
         [SerializeField] public Material LineMaterial;
         
-        [Tooltip("Base material for symbol text render items. Cloned per style layer.")]
-        [SerializeField] public Material SymbolText;
+        [Tooltip("Epic A / A1 (Map/Symbol/TextWorld): base material for the world-anchored point-text draw " +
+                 "path. Cloned per style layer (SymbolRenderLayer.WorldTextMaterial). REQUIRED — enforced by " +
+                 "Validate(), because A1 retired the screen-space point-text path: an unassigned base means " +
+                 "points never render.")]
+        [SerializeField] public Material SymbolTextWorld;
 
-        [Tooltip("Base material for symbol icon (sprite) render items. Cloned per style layer. Optional — " +
-                 "unassigned means icons will not render (labels still do); NOT enforced by Validate().")]
-        [SerializeField] public Material SymbolIcon;
+        [Tooltip("Epic A / A1 (Map/Symbol/IconWorld): base material for the world-anchored icon draw path. " +
+                 "Cloned per style layer (SymbolRenderLayer.WorldIconMaterial). Optional — unassigned means " +
+                 "world icons will not render (text still does); NOT enforced by Validate().")]
+        [SerializeField] public Material SymbolIconWorld;
 
         /// <summary>
         /// Epic A / A2 (DECISION 2): fail LOUD when any base material is unassigned, rather than letting a
@@ -48,15 +52,18 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (FillMaterial == null)
                 throw new System.InvalidOperationException(
                     "MapMaterialSet.FillMaterial is unassigned — every map base material (FillMaterial, " +
-                    "LineMaterial, SymbolText) must be set.");
+                    "LineMaterial, SymbolTextWorld) must be set.");
             if (LineMaterial == null)
                 throw new System.InvalidOperationException(
                     "MapMaterialSet.LineMaterial is unassigned — every map base material (FillMaterial, " +
-                    "LineMaterial, SymbolText) must be set.");
-            if (SymbolText == null)
+                    "LineMaterial, SymbolTextWorld) must be set.");
+            // Epic A / A1 (Codex #2 policy): SymbolTextWorld is REQUIRED — it is the ONLY point-text draw
+            // path after A1, so an unassigned base means points never render. SymbolIconWorld stays
+            // optional-with-warn — NOT checked here.
+            if (SymbolTextWorld == null)
                 throw new System.InvalidOperationException(
-                    "MapMaterialSet.SymbolText is unassigned — every map base material (FillMaterial, " +
-                    "LineMaterial, SymbolText) must be set.");
+                    "MapMaterialSet.SymbolTextWorld is unassigned — every map base material (FillMaterial, " +
+                    "LineMaterial, SymbolTextWorld) must be set.");
         }
     }
 }

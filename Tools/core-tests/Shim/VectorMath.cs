@@ -40,6 +40,10 @@ namespace Unity.Mathematics
         // S91-C: SphericalProjection.ScreenToGround/GroundToScreen (globe camera ray-cast).
         public static double  dot(double3 a, double3 b)   => a.x * b.x + a.y * b.y + a.z * b.z;
         public static double  length(double3 a)           => System.Math.Sqrt(dot(a, a));
+        public static double  lengthsq(double3 a)         => dot(a, a);
+        // Stage AC (curved-world): PolylineArcMath.SampleWorld's world-point lerp.
+        public static double3 lerp(double3 a, double3 b, double t)
+            => new double3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 
         // A-2: LineAnchorPlacement (tile-space arc lengths) + the test world-anchor recovery use double2 metrics.
         public static double  dot(double2 a, double2 b)   => a.x * b.x + a.y * b.y;

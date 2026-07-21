@@ -159,6 +159,9 @@ namespace MapRenderer.Tests.Text.Placement
             var screenPath = new[] { new float2(0, 0), new float2(100, 0) };
             var depthPath  = new[] { 0.3f, 0.7f };            // mid vertex (index 1) → pathDepth 0.7
             var validPath  = new byte[] { 1, 1 };
+            // World path mirrors the screen path 1:1 (index-aligned, per LabelStageJob's contract) — a flat
+            // east-only line at Y=Z=0, TileOriginRender left at its float3-zero default.
+            var worldPath  = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) } };
             var anchors    = new[] { new LineAnchor(0, 0.5f) };  // arc distance 50 along the 100-px line
             long fid = LabelStagingMath.LineFadeId(9, 0, 3, 0);
@@ -168,7 +171,7 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch  = new float[2];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, glyphs, anchors,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
 
@@ -184,6 +187,13 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(new float2(50, 0).x, p.Quads[0].AnchorScreenPx.x, Tol);
             Assert.AreEqual(0f, p.Quads[0].AnchorScreenPx.y, Tol);
             Assert.AreEqual(0.7f, p.Quads[0].Depth, Tol);
+            // Stage AC: the world sample at the same arc=50 midpoint, narrowed against the default-zero
+            // TileOriginRender — AnchorLocal == the world point itself; Tangent is the unit +X direction.
+            Assert.AreEqual(50f, p.Quads[0].AnchorLocal.x, Tol);
+            Assert.AreEqual(0f, p.Quads[0].AnchorLocal.y, Tol);
+            Assert.AreEqual(0f, p.Quads[0].AnchorLocal.z, Tol);
+            Assert.AreEqual(1f, p.Quads[0].Tangent.x, Tol);
+            Assert.AreEqual(0f, p.Quads[0].Tangent.y, Tol);
         }
 
         [Test]
@@ -194,6 +204,7 @@ namespace MapRenderer.Tests.Text.Placement
             var screenPath = new[] { new float2(0, 0), new float2(10, 0) };   // 10-px line
             var depthPath  = new[] { 0f, 0f };
             var validPath  = new byte[] { 1, 1 };
+            var worldPath  = new[] { new double3(0, 0, 0), new double3(10, 0, 0) };
             // glyph span 0..100 baked-px * scale 1 = 100 px label, longer than the 10-px line → never fits.
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) },
                                      new CurvedGlyph { ArcCenter = 100f, Cell = Cell(6f) } };
@@ -202,7 +213,7 @@ namespace MapRenderer.Tests.Text.Placement
             var wasPlaced  = new byte[] { 0, 0 };
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, glyphs, anchors,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, new float2[2], new float[2], 0f, 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
 

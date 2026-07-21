@@ -99,7 +99,11 @@ namespace MapRenderer.Tests.Visual
                 TextSizePx = 200f,
                 SortKey = 0f,
                 FeatureIndex = 0,
-                TileKey = 0L,
+                // Epic A / A1 Risk R1: a realistic containing tile (BuildOverheadScene's look-at) keeps the
+                // world-anchored bake float32-safe — TileKey=0 is ~2e7m away (see
+                // SymbolAtlasOrientationSnapshotTests' identical note).
+                TileKey = MapRenderer.Tests.Text.Placement.TestTileKeys.PackedContaining(
+                    new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
                 MaterialIndex = materialIndex,
                 AllowOverlap = allowOverlap,
             };
@@ -246,10 +250,15 @@ namespace MapRenderer.Tests.Visual
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
             var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0, drawIndex: 1);
-            Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolText must be assigned (asserted by MapMaterialSetTestUtil.Load).");
+            Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned (asserted by MapMaterialSetTestUtil.Load).");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
+            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
+            system.MinTileScreenCoverage = 0.0;
             var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.85f, 0.1f, 1f), materialIndex: 0);
             var batch = new SymbolLabelBatch();
             var layers = new List<SymbolRenderLayer> { renderLayer };
@@ -329,7 +338,12 @@ namespace MapRenderer.Tests.Visual
             var labelA = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
             var labelB = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.2f, 0.9f, 1f), materialIndex: 1, allowOverlap: true);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
+            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
+            system.MinTileScreenCoverage = 0.0;
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
 
             using var snap = new SnapshotRenderer(Size, Size);
@@ -363,6 +377,14 @@ namespace MapRenderer.Tests.Visual
                 // Swap declared order (mutate renderQueue in place — same materials, same presenters).
                 layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
                 layerB.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
+                // Epic A / A1 (D5): points now draw through the WORLD path, whose queue lives on a SEPARATE
+                // material (WorldTextMaterial) synced from Material.renderQueue at Tick/present time (the
+                // PresentIcon precedent) — unlike the OLD path (presenter bound directly to Material, so a
+                // live queue mutation took effect on the very next Render with no re-Tick). A re-Tick here
+                // matches real usage (production always Ticks before every Render); mirrors §7.10-1a's
+                // BuildId-collision-safe pattern by rebuilding the SAME batch reference each time.
+                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA, labelB }, 2, mapCamera.Projection);
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
                 double[] aFirst = SampleAround(snap.RawPixels, ix, iy);
                 Assert.Greater(aFirst[0], aFirst[2],
@@ -405,7 +427,12 @@ namespace MapRenderer.Tests.Visual
 
             var inkColor = new Color32(230, 230, 230, 255); // near-white ink, distinct from the near-black background
             var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.9f, 0.9f, 0.9f, 1f), materialIndex: 0);
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // The realistic z14 TileKey (Risk R1, MakeCenteredLabel) is finer than this z8 camera's view —
+            // disable the orthogonal tile-coverage pre-cull (see SymbolAtlasOrientationSnapshotTests' note).
+            system.MinTileScreenCoverage = 0.0;
             var layers = new List<SymbolRenderLayer> { renderLayer };
             var batch = new SymbolLabelBatch();
 
@@ -520,8 +547,8 @@ namespace MapRenderer.Tests.Visual
                 MakeOverlappingLabel(1, frame.SceneOriginRender, sortKey: 10f), // lower key wins the collision
             };
 
-            var demoSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
-            var prodSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            var demoSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var prodSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
                 demoSystem.Tick(in frame, labels, atlasTexture);

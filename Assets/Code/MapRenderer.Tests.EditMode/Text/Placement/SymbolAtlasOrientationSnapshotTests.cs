@@ -123,10 +123,19 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = 220f, // large -- reliably legible at the readback resolution
                 SortKey = 0f,
                 FeatureIndex = 0,
-                TileKey = 0L,
+                // Epic A / A1 Risk R1: TileKey=0 (tile 0/0/0) is ~2e7m from this mid-latitude anchor —
+                // float32-unsafe for the world-anchored AnchorLocal bake (jitter/vanish on-screen). A
+                // realistic containing tile keeps the bake within one tile span (float32-safe).
+                TileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
             };
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/Text")));
+            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // The realistic z14 TileKey above (Risk R1) is finer than this z8 camera's view, so the z14
+            // tile's own on-screen coverage is legitimately tiny — disable the (orthogonal) tile-coverage
+            // pre-cull so it doesn't preempt the orientation tooth this test actually exercises (mirrors
+            // HorizonCullGatherTests/LabelFadeTests' identical MinTileScreenCoverage=0 pattern).
+            system.MinTileScreenCoverage = 0.0;
             var snap = new SnapshotRenderer(Size, Size);
             try
             {

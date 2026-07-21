@@ -1,4 +1,5 @@
 using UnityEngine;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Text.Placement;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
@@ -8,16 +9,21 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// Symbol <see cref="IRenderLayer"/>: a MapLibre <c>symbol</c> layer as a runtime render object (the
     /// render-layer model). Axes: <see cref="RenderLayerBuild.FramePlaced"/> —
-    /// rebuilt every frame from screen-space label placement, NOT the Burst tile-mesh pipeline — /
-    /// <see cref="DrawPersistence.Persistent"/> — per E0 option (c), a persistent per-slot
-    /// <see cref="LabelSlotPresenter"/> owned by this layer, rewritten in place and redrawn by Unity every
+    /// rebuilt every frame from per-label placement, NOT the Burst tile-mesh pipeline — /
+    /// <see cref="DrawPersistence.Persistent"/> — per Epic A / A1, this layer's material is bound + presented
+    /// by <see cref="Placement.WorldLabelRenderer"/> (the world-anchored draw path), redrawn by Unity every
     /// camera render with no orchestrator.
     ///
-    /// <para>Owns (D11, migrated here from <c>SymbolLabelSubsystem</c>): the per-layer <see cref="Material"/>
-    /// clone (its <c>renderQueue</c> is written by <see cref="RenderLayerSet.Build"/> like every other
-    /// layer, replacing the shader's Overlay-4000 default), the halo bind, and the presenter. Collision stays
-    /// global (D8) — only the DRAW is per-layer, via <see cref="Present"/>, called once per <c>Tick</c> from
-    /// <see cref="Placement.LabelPlacementSystem"/> with this layer's slot mesh.</para>
+    /// <para>Owns (D11, migrated here from <c>SymbolLabelSubsystem</c>): the per-layer <see cref="WorldTextMaterial"/>/
+    /// <see cref="WorldIconMaterial"/> clones and the halo bind. <see cref="Material"/> IS
+    /// <see cref="WorldTextMaterial"/> — the old screen-space <c>SymbolText</c> clone (and its
+    /// <c>IconMaterial</c> sibling) is retired; its <c>renderQueue</c> is written by
+    /// <see cref="RenderLayerSet.Build"/> like every other layer (replacing the shader's Overlay-4000
+    /// default) for free, since <c>Build</c> reads <see cref="IRenderLayer.Material"/>. The world icon's
+    /// queue has no such free ride (nothing else reads a symbol layer's icon material at Build time), so
+    /// <see cref="Create"/> writes it directly. Collision stays global (D8) — only the DRAW is per-layer,
+    /// via the material <see cref="Placement.WorldLabelRenderer.EndFrame"/> resolves for this layer's
+    /// slot.</para>
     /// </summary>
     internal sealed class SymbolRenderLayer : IRenderLayer
     {
@@ -30,68 +36,76 @@ namespace MapRenderer.Unity.Rendering.Style
         public DrawPersistence                   Persistence  => DrawPersistence.Persistent;
         public int                               DrawIndex    { get; }
 
-        /// <summary>The owned <c>SymbolText</c> clone, halo bound (D11); <c>null</c> iff
-        /// <c>MapMaterialSet.SymbolText</c> is unassigned — the layer still takes its slot (the slot↔
-        /// subsystem-ordinal 1:1 mapping requires it, §3.5), it just never presents.</summary>
-        public Material Material { get; }
+        /// <summary>The layer's primary drawn material — <see cref="WorldTextMaterial"/>. <c>null</c> iff
+        /// <c>MapMaterialSet.SymbolTextWorld</c> is unassigned (the slot↔subsystem-ordinal 1:1 mapping still
+        /// requires the layer to take its slot, §3.5; it just never presents). Its <c>renderQueue</c> is
+        /// written by <see cref="RenderLayerSet.Build"/> like every other layer's <see cref="Material"/>.</summary>
+        public Material Material => WorldTextMaterial;
 
-        /// <summary>I5b: the owned <c>SymbolIcon</c> clone (no halo — icons have none); <c>null</c> iff
-        /// <c>MapMaterialSet.SymbolIcon</c> is unassigned (warned once) — icons just stay hidden, unlike
-        /// <see cref="Material"/> this is NOT enforced by <c>MapMaterialSet.Validate()</c> (optional-with-warn,
-        /// §I5b plan).</summary>
-        public Material IconMaterial { get; }
+        /// <summary>Epic A / A1 (design §11 A1 D5): the owned <c>Map/Symbol/TextWorld</c> clone of
+        /// <c>MapMaterialSet.SymbolTextWorld</c>, halo bound — the world-anchored point-text draw path's
+        /// per-layer material, and the layer's <see cref="Material"/>. <c>null</c> iff
+        /// <c>MapMaterialSet.SymbolTextWorld</c> is unassigned (REQUIRED — enforced by
+        /// <c>MapMaterialSet.Validate()</c>, so this is null only for a throwaway/test <c>MapMaterialSet</c>
+        /// that skipped Validate).</summary>
+        public Material WorldTextMaterial { get; }
+
+        /// <summary>Epic A / A1 (design §11 A1 D5): the owned <c>Map/Symbol/IconWorld</c> clone of
+        /// <c>MapMaterialSet.SymbolIconWorld</c> (no halo). <c>null</c> iff
+        /// <c>MapMaterialSet.SymbolIconWorld</c> is unassigned (optional-with-warn) — world icons stay
+        /// hidden, text is unaffected. Its <c>renderQueue</c> is written directly by <see cref="Create"/> —
+        /// unlike <see cref="WorldTextMaterial"/>, nothing reads a symbol layer's icon material at
+        /// <see cref="RenderLayerSet.Build"/> time, so it has no free ride.</summary>
+        public Material WorldIconMaterial { get; }
 
         /// <summary>The typed parsed symbol layer — MapView's D10 source-fetch derivation reads this
         /// without re-walking <c>style.Layers</c>.</summary>
         public SymbolStyle.StyleLayer SymbolLayer { get; }
 
-        private readonly LabelSlotPresenter _presenter;
-        private readonly LabelSlotPresenter _iconPresenter;
-
-        private SymbolRenderLayer(SymbolStyle.StyleLayer layer, Material material, Material iconMaterial,
-            int drawIndex, Transform parent)
+        private SymbolRenderLayer(SymbolStyle.StyleLayer layer,
+            Material worldTextMaterial, Material worldIconMaterial, int drawIndex, Transform parent)
         {
-            StyleLayer     = layer;
-            SymbolLayer    = layer;
-            Material       = material;
-            IconMaterial   = iconMaterial;
-            DrawIndex      = drawIndex;
-            _presenter     = new LabelSlotPresenter(layer.Id, parent); // Hierarchy name = the style layer id
-            _iconPresenter = new LabelSlotPresenter(layer.Id + "_Icon", parent);
+            StyleLayer        = layer;
+            SymbolLayer       = layer;
+            WorldTextMaterial = worldTextMaterial;
+            WorldIconMaterial = worldIconMaterial;
+            DrawIndex         = drawIndex;
         }
 
         /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the slot↔subsystem-ordinal 1:1
         /// mapping (§3.5) and the source-fetch derivation both require every Source-bearing symbol layer to
-        /// take its slot even when <c>MapMaterialSet.SymbolText</c> is unassigned — in that case
+        /// take its slot even when <c>MapMaterialSet.SymbolTextWorld</c> is unassigned — in that case
         /// <see cref="Material"/> stays <c>null</c> (warn once), <see cref="RenderLayerSet.Build"/> skips the
-        /// queue write, and <see cref="Present"/> never shows. <see cref="IconMaterial"/> is resolved the
-        /// same way from <c>MapMaterialSet.SymbolIcon</c> (I5b) — independently optional, no halo bind.</summary>
+        /// queue write, and this layer's slot never presents. <see cref="WorldIconMaterial"/> is resolved the
+        /// same way from <c>MapMaterialSet.SymbolIconWorld</c> — independently optional, no halo bind, its
+        /// queue written here directly (§0.1) rather than by <c>Build</c>.</summary>
         public static SymbolRenderLayer Create(
             SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex,
             Transform parent = null)
         {
-            Material baseMat = settings != null ? settings.SymbolText : null;
-            Material m = null;
-            if (baseMat == null)
-                Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolText unassigned — labels will not render.");
+            Material baseWorldTextMat = settings != null ? settings.SymbolTextWorld : null;
+            Material worldTextMat = null;
+            if (baseWorldTextMat == null)
+                Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolTextWorld unassigned — labels will not render.");
             else
             {
-                m = baseMat.CloneWithParent();
-                m.name = $"MapSymbolText_{layer.Id}";
-                BindHalo(m, layer.Paint, initialZoom);
+                worldTextMat = baseWorldTextMat.CloneWithParent();
+                worldTextMat.name = $"MapSymbolTextWorld_{layer.Id}";
+                BindHalo(worldTextMat, layer.Paint, initialZoom);
             }
 
-            Material baseIconMat = settings != null ? settings.SymbolIcon : null;
-            Material iconMat = null;
-            if (baseIconMat == null)
-                Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolIcon unassigned — icons will not render.");
+            Material baseWorldIconMat = settings != null ? settings.SymbolIconWorld : null;
+            Material worldIconMat = null;
+            if (baseWorldIconMat == null)
+                Debug.LogWarning("[SymbolRenderLayer] MapMaterialSet.SymbolIconWorld unassigned — world icons will not render.");
             else
             {
-                iconMat = baseIconMat.CloneWithParent();
-                iconMat.name = $"MapSymbolIcon_{layer.Id}";
+                worldIconMat = baseWorldIconMat.CloneWithParent();
+                worldIconMat.name = $"MapSymbolIconWorld_{layer.Id}";
+                worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex); // §0.1: no Build-time free ride like WorldTextMaterial/Material
             }
 
-            return new SymbolRenderLayer(layer, m, iconMat, drawIndex, parent);
+            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, parent);
         }
 
         private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom)
@@ -116,43 +130,12 @@ namespace MapRenderer.Unity.Rendering.Style
             }
         }
 
-        /// <summary>Per-Tick draw handoff from <see cref="Placement.LabelPlacementSystem"/>: bind this
-        /// slot's mesh + this layer's material to the persistent renderer, or hide it. Main thread
-        /// (LateUpdate). <paramref name="visible"/> false hides unconditionally — a frame that built
-        /// nothing must not leave last frame's labels frozen on screen (the mirror image of the blink).</summary>
-        public void Present(Mesh mesh, bool visible) => _presenter.Present(mesh, Material, visible);
-
-        /// <summary>I5b: the icon analogue of <see cref="Present"/> — binds this slot's ICON mesh + this
-        /// layer's <see cref="IconMaterial"/> to a SEPARATE persistent renderer (icons and text draw as two
-        /// meshes/materials per slot, not one). Syncs <see cref="IconMaterial"/>'s <c>renderQueue</c> to
-        /// <see cref="Material"/>'s every call (compare-assign, so a steady frame costs nothing extra) —
-        /// <see cref="RenderLayerSet.Build"/> only writes the TEXT material's queue (it doesn't know about
-        /// <see cref="IconMaterial"/>), so icons must inherit their layer's painter-order position here
-        /// instead of getting their own (which would desync a fill declared between icon and text queues).
-        /// <paramref name="visible"/> false hides unconditionally, mirroring <see cref="Present"/>.</summary>
-        public void PresentIcon(Mesh mesh, bool visible)
-        {
-            if (IconMaterial != null && Material != null && IconMaterial.renderQueue != Material.renderQueue)
-                IconMaterial.renderQueue = Material.renderQueue;
-            _iconPresenter.Present(mesh, IconMaterial, visible);
-        }
-
-        /// <summary>Whether this layer's presenter is currently drawing. Test surface — see
-        /// <c>LabelSlotPresenter.Enabled</c>.</summary>
-        internal bool PresenterVisible => _presenter.Enabled;
-
-        /// <summary>Whether this layer's ICON presenter is currently drawing. Test surface — mirrors
-        /// <see cref="PresenterVisible"/> for the icon draw path.</summary>
-        internal bool IconPresenterVisible => _iconPresenter.Enabled;
-
         public void ApplyZoom(double zoom) { } // no-op — zoom-expression halo is a documented follow-up (§7 risk 9)
 
         public void Dispose()
         {
-            _presenter.Dispose();
-            _iconPresenter.Dispose();
-            if (Material != null) RenderLayerSet.DestroyMaterialInstance(Material);
-            if (IconMaterial != null) RenderLayerSet.DestroyMaterialInstance(IconMaterial);
+            if (WorldTextMaterial != null) RenderLayerSet.DestroyMaterialInstance(WorldTextMaterial); // also destroys Material (alias)
+            if (WorldIconMaterial != null) RenderLayerSet.DestroyMaterialInstance(WorldIconMaterial);
         }
     }
 }
