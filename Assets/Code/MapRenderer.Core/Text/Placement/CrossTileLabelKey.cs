@@ -18,11 +18,14 @@ namespace MapRenderer.Core.Text.Placement
     /// <para><b>Why quantize, and to what.</b> The same geo feature is MVT-quantized to each tile's own extent
     /// grid, so a parent (coarser) and child (finer) tile place its anchor a few metres apart. Snapping the
     /// render-space (Mercator-metre) anchor to a grid of <c>quantizeMeters</c> collapses that difference to one
-    /// cell. The caller passes <c>quantizeMeters = CameraPoseMath.MetersPerPixel(displayZoom)</c> — one logical
-    /// PIXEL at the current zoom: coarse enough that adjacent-zoom reprojection diffs land in the same cell
-    /// (they are sub-pixel-to-a-few-pixels apart), fine enough that two genuinely distinct labels &gt; a pixel
-    /// apart stay separate. A fixed grid cannot serve all zooms (a metre at z5 vs a metre at z14 differ by
-    /// 2^9×), so the grid MUST be display-zoom-relative — hence it is supplied per frame, not baked.</para>
+    /// cell. <c>For</c> is a general primitive parameterised by <c>quantizeMeters</c>; its production callers now
+    /// pass the FIXED <see cref="CanonicalGridMeters"/> (Stage 3: the store dedup; Stage 3b: the point fade id).
+    /// A fixed grid is correct because parent/child tile OVERLAP does not happen today (design §1.2) — the only
+    /// real dup is the SAME feature in adjacent/overlapping tiles, whose anchor is identical, so any small fixed
+    /// grid collapses it; separating two genuinely distinct labels that are close on screen is the COLLISION
+    /// pass's job, not this key's. (FUTURE, when parent/child overlap lands (design §6): the grid goes back to a
+    /// zoom-scaled value — pick the coarser band's grid + finest-zoom-wins — a change localised to the caller's
+    /// <c>quantizeMeters</c> input and <see cref="CanonicalGridMeters"/>'s use.)</para>
     ///
     /// <para><b>Boundary caveat.</b> Grid snapping misses when the two anchors straddle a cell edge; that yields
     /// a rare one-frame double-label, not a persistent error (neighbour-cell matching is a future refinement).
@@ -47,6 +50,18 @@ namespace MapRenderer.Core.Text.Placement
             GridX = gridX; GridZ = gridZ; GridY = gridY; LayerId = layerId; Text = text; IconImage = iconImage;
         }
 
+        /// <summary>The single canonical dedup+fade grid (metres). Stage 3: the cross-tile dedup key
+        /// (<see cref="MapRenderer.Unity.Text.SymbolTileLabelStore"/>) quantizes to this grid — so a point
+        /// label's dedup cell is a pure function of the tile set (Stage 3b will fold the point fade id onto it
+        /// too, making dedup cell == fade cell). Fixed (zoom-independent) because parent/child tile overlap does
+        /// not happen today (design §1.2): the only real dup is the SAME feature in adjacent/overlapping tiles,
+        /// whose anchorRender is identical, so any fixed grid collapses it; distinct-feature visual overlap is
+        /// the COLLISION pass's job, not the dedup's. 4 m (matching today's fade grid — one tuning knob, see
+        /// design §8). FUTURE (parent/child overlap, design §6): go back to a zoom-scaled grid — pick the coarser
+        /// band's grid + finest-zoom-wins; change the store's grid input + this const's use, nothing
+        /// downstream.</summary>
+        public const double CanonicalGridMeters = 4.0;
+
         /// <summary>
         /// The identity of a point label whose render-space (pre-RTC Mercator) anchor is
         /// <paramref name="anchorRender"/>, on layer <paramref name="layerId"/>, reading
@@ -61,11 +76,24 @@ namespace MapRenderer.Core.Text.Placement
         public static CrossTileLabelKey For(
             in double3 anchorRender, int layerId, string text, string iconImage, double quantizeMeters)
         {
-            double q = quantizeMeters > 0.0 ? quantizeMeters : 1.0;
-            long gx = (long)math.round(anchorRender.x / q);
-            long gz = (long)math.round(anchorRender.z / q);
-            long gy = (long)math.round(anchorRender.y / q);
+            QuantizeAnchor(anchorRender, quantizeMeters, out long gx, out long gz, out long gy);
             return new CrossTileLabelKey(gx, gz, gy, layerId, text, iconImage);
+        }
+
+        /// <summary>
+        /// The shared anchor→grid quantization: snaps all three render-space axes to a
+        /// <paramref name="quantizeMeters"/> grid (<c>≤ 0</c> ⇒ a defensive 1-metre grid). Extracted (Stage 2)
+        /// so the string-keyed <see cref="For"/> and the integer-keyed dedup key produce BIT-IDENTICAL grids
+        /// from one code path. Behaviour-preserving: the <c>q ≤ 0 → 1.0</c> fallback + <c>math.round</c> are
+        /// exactly as <see cref="For"/> did them inline.
+        /// </summary>
+        public static void QuantizeAnchor(in double3 anchorRender, double quantizeMeters,
+            out long gridX, out long gridZ, out long gridY)
+        {
+            double q = quantizeMeters > 0.0 ? quantizeMeters : 1.0;
+            gridX = (long)math.round(anchorRender.x / q);
+            gridZ = (long)math.round(anchorRender.z / q);
+            gridY = (long)math.round(anchorRender.y / q);
         }
 
         public bool Equals(CrossTileLabelKey other)

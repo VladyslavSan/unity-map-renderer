@@ -168,3 +168,48 @@ attack the residual, and should be driven by a fresh profile rather than taken o
 `MapRenderer.Symbol.BatchBuild` well under a few ms/frame **while the camera moves**, byte-identical render
 (snapshots green, no re-bake), no motion-keyed cost cliff. Phase 1 alone should reclaim the ~9 ms SoA + the
 double-copy; Phase 2 targets the Collect/concat residual if it still matters.
+
+## 9. OUTCOME — Phase 2 was a wrong turn; the real bottleneck is the per-frame dedup (2026-07-24)
+
+A maintainer Play-mode re-profile after D1+D2+D3 landed **falsified this document's founding premise.** The
+findings, and the pivot they force:
+
+**What the profile actually showed (z14-15, moving camera):**
+
+| marker | D1 (Phase 1 + coverage mask) | D2+D3 | verdict |
+|---|---|---|---|
+| `BatchBuild` | 10.04 ms | 18.16 ms | D2+D3 **regressed** it |
+| `BatchBuild.Collect` | 9.37 ms | 17.45 ms | ~2× worse |
+| ↳ `Collect.Dedup` (CollectInto) | ~9 ms | ~17 ms | **the whole cost** |
+| ↳ `Collect.Classify` (coverage) | ~0.7 ms | ~0.7 ms | negligible |
+| `BatchBuild.SoA` | ~0.7 ms | ~0.7 ms | Phase 1's bake win was real |
+
+**The founding profile mis-attributed the cost.** §1 blamed `SoA` (the glyph-copy, 8.98 ms) and built Phase 1
++ D3 to eliminate the *copy*. Phase 1's bake genuinely killed the SoA (8.98 → ~0.7 ms). But the real cost was
+always in **`Collect` — the per-frame cross-tile DEDUP** (`SymbolTileLabelStore.CollectInto`): for every
+on-screen point label, every frame, build a `CrossTileLabelKey` (which contains the label's **text string**)
+and hash it into a dictionary to pick the finest-zoom winner. That is O(labels) × string-hashed dict op, per
+frame. D3 optimized a copy that was already cheap; it removed ~0 ms.
+
+**D2 targeted the right thing (the dedup) with the wrong mechanism, and REGRESSED it.** Its incremental winner
+index cold-reseeds on every zoom-quantize change — and a moving camera zooms constantly — so `Reseed` rebuilds
+the entire index (`new Contender`/`WinnerRecord`/`TileContribution` **per label, per frame**) + GC churn:
+strictly more work than the dict dedup it replaced. **D2+D3 were reverted** (`e3a9208e`), kept in history as a
+documented negative result. Baseline is D1 (10 ms, stable).
+
+**The key structural fact (from the maintainer):** the parent/child tile *overlap* that justifies the fuzzy
+pixel-scaled grid + finest-zoom-wins machinery **does not currently happen** — coarse-under-fine display is
+future work. Today the only real duplication is **same-zoom edge/buffer + cross-source**, which is **static
+per tile-set** (independent of camera pose *and* fractional zoom). So the dedup is a **pure function of the
+loaded tile set**, recomputed every frame for nothing.
+
+**The right direction (supersedes options A–E above):** stop treating the label batch as a per-frame rebuild.
+Make the label system a **tile-event-driven state machine** — the deduped visible-label set is *state*, mutated
+only when a tile is added/removed/rebuilt, and that recomputation is **scheduled off-main** and *picked up* on
+a later update (dedup once per tile-set change, on a worker; process the cached set per frame). This is the
+`off-main-thread-principle` + the pull/reconcile label-smoothness direction, now made concrete. **Full design:
+[`labels-async-reconcile-design.md`](labels-async-reconcile-design.md).** Cheap orthogonal wins that compose
+with it: intern label text → int (kill the per-frame string hash), and reuse buffers (off-main doesn't dodge
+Unity's stop-the-world GC). Salvage from the reverted D2/D3: the `LabelStagingMath` finite-`SortKey`/NaN
+collision-order fix (real, orthogonal), and the map of the 13 tile-lifecycle mutation points (where the
+invalidation events fire).

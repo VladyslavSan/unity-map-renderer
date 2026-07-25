@@ -112,8 +112,8 @@ namespace MapRenderer.Unity.Rendering.Map
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulledLabels;
 
-        [Tooltip("§1.5 tile-coverage pre-cull: labels dropped before the SoA build (tile steadily below the " +
-                 "on-screen coverage threshold). Watch this to tune LabelTileCoverageCull.")]
+        [Tooltip("§1.5 tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
+                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune LabelTileCoverageCull.")]
         public int SymbolCoverageDroppedLabels;
 
         [Tooltip("§1.5 companion: labels whose tile just crossed below coverage and finished fading out this " +

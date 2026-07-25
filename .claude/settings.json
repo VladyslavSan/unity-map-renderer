@@ -26,9 +26,7 @@
       "Bash(pgrep:*)",
       "Bash(test:*)",
       "Edit(Assets/**)",
-      "Write(Assets/**)",
-      "Edit(docs/**)",
-      "Write(docs/**)"
+      "Edit(docs/**)"
     ],
     "deny": [
       "Bash(git push:*)",

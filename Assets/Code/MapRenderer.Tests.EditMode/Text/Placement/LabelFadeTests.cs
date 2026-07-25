@@ -308,5 +308,39 @@ namespace MapRenderer.Tests.Text.Placement
                              LabelPlacementSystem.PointFadeId(a, 0, "Paris", null),
                              "a text label's fade id is unchanged whether iconImage is omitted or explicitly null");
         }
+
+        // ── Stage 3b (ONE canonical identity): the point fade id partitions labels IDENTICALLY to the store's
+        //    dedup cell — both quantize to CrossTileLabelKey.CanonicalGridMeters. A pair co-located within the
+        //    canonical grid shares BOTH a PointFadeId and a dedup cell (CrossTileLabelKey.For equality); a pair
+        //    further apart than the grid shares NEITHER. This binds the fade identity to the SAME constant the
+        //    dedup uses, not merely to "some fixed grid": diverge the fade grid from CanonicalGridMeters and the
+        //    beyond-grid pair would agree in fade but split in dedup — which this asserts cannot happen. ──
+        [Test]
+        public void PointFadeId_AgreesWithDedupCell()
+        {
+            const double grid = CrossTileLabelKey.CanonicalGridMeters;
+            double3 a = new double3(5_000_000.0, 0, 3_000_000.0);
+            double3 near = a + new double3(grid * 0.25, 0, -grid * 0.25);   // same canonical cell
+            double3 far = a + new double3(grid * 4.0, 0, 0);                // clearly a different cell
+
+            // The dedup cell for a point label (same layer/text/icon over these anchors) — the canonical identity
+            // the store compares. Equality here IS the dedup grouping.
+            static bool SameDedupCell(double3 p, double3 q)
+                => CrossTileLabelKey.For(p, 0, "T", null, grid).Equals(CrossTileLabelKey.For(q, 0, "T", null, grid));
+            static bool SameFadeId(double3 p, double3 q)
+                => LabelPlacementSystem.PointFadeId(p, 0, "T") == LabelPlacementSystem.PointFadeId(q, 0, "T");
+
+            // Co-located pair: shares BOTH — one canonical identity.
+            Assert.IsTrue(SameDedupCell(a, near), "sanity: the near pair is one dedup cell");
+            Assert.IsTrue(SameFadeId(a, near), "co-located labels share a fade id (agreeing with the dedup cell)");
+
+            // Beyond-grid pair: shares NEITHER — fade partition tracks the dedup partition.
+            Assert.IsFalse(SameDedupCell(a, far), "sanity: the far pair splits across dedup cells");
+            Assert.IsFalse(SameFadeId(a, far), "labels beyond the canonical grid get distinct fade ids (no dedup, no shared fade)");
+
+            // The proof, stated as an equivalence: fade grouping ⟺ dedup grouping for every pair.
+            Assert.AreEqual(SameDedupCell(a, near), SameFadeId(a, near), "fade grouping == dedup grouping (near)");
+            Assert.AreEqual(SameDedupCell(a, far), SameFadeId(a, far), "fade grouping == dedup grouping (far)");
+        }
     }
 }

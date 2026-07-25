@@ -302,5 +302,137 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsFalse(departingUntil.ContainsKey(TinyTileKey), "crossing back above clears the fade deadline");
             Assert.IsFalse(fadingOut.Contains(TinyTileKey), "kept tiles aren't in the fading set");
         }
+
+        // ── D1 (Blocker 2) — LabelTileCoverageFilter.ClassifyActive: the classify-only counterpart that WRITES a
+        //    per-record Keep/Fade/Drop decision instead of compacting. D1-#3: its decisions must match which
+        //    labels FilterActive would have kept (Keep/Fade survive) vs dropped (Drop), over the SAME fixture +
+        //    cross-frame state. Each classifier gets its OWN independent cross-frame state (never shared) — running
+        //    them over shared state would let one's side effects perturb the other's result, testing a moving
+        //    target instead of "same starting state, same decision". ──
+
+        [Test]
+        public void ClassifyActive_MixedActiveAndDeparting_MatchesFilterActive_KeepFadeSurviveDropRemoved()
+        {
+            // The SAME 5-label shape as FilterActive_MixedActiveAndDeparting_CompactsStably: 3 active (kept A,
+            // culled B, kept C) + 2 departing (dep0, dep1) — activeCount = 3.
+            var keptA = new LabelInstance { TileKey = BigTileKey };
+            var culledB = new LabelInstance { TileKey = TinyTileKey };
+            var keptC = new LabelInstance { TileKey = BigTileKey };
+            var dep0 = new LabelInstance { TileKey = BigTileKey };
+            var dep1 = new LabelInstance { TileKey = TinyTileKey };
+            var labelsForFilter = new List<LabelInstance> { keptA, culledB, keptC, dep0, dep1 };
+            var labelsForClassify = new List<LabelInstance> { keptA, culledB, keptC, dep0, dep1 };
+            var isDeparting = new List<byte> { 0, 0, 0, 1, 1 };
+
+            var (abovePrevF, aboveThisFrameF, departingUntilF, fadingOutF, decisionScratchF) = FreshState();
+            var (abovePrevC, aboveThisFrameC, departingUntilC, fadingOutC, decisionScratchC) = FreshState();
+
+            int newActive = LabelTileCoverageFilter.FilterActive(
+                labelsForFilter, activeCount: 3, Projection, SceneOrigin, ViewProj, Viewport, Rebase, MinCoverage,
+                abovePrevF, aboveThisFrameF, departingUntilF, fadingOutF, now: 0.0, GraceSeconds, decisionScratchF,
+                out int culledF);
+
+            var decisions = new List<byte>();
+            LabelTileCoverageFilter.ClassifyActive(
+                labelsForClassify, isDeparting, Projection, SceneOrigin, ViewProj, Viewport, Rebase, MinCoverage,
+                abovePrevC, aboveThisFrameC, departingUntilC, fadingOutC, now: 0.0, GraceSeconds, decisionScratchC,
+                decisions, out int culledC);
+
+            Assert.AreEqual(culledF, culledC, "Drop count must match FilterActive's culledCount");
+            Assert.AreEqual(LabelTileCoverageFilter.Keep, decisions[0], "keptA survives in both");
+            Assert.AreEqual(LabelTileCoverageFilter.Drop, decisions[1], "culledB — FilterActive removed it");
+            Assert.AreEqual(LabelTileCoverageFilter.Keep, decisions[2], "keptC survives in both");
+            Assert.AreEqual(LabelTileCoverageFilter.Keep, decisions[3], "dep0 — departing, never classified (scope fence)");
+            Assert.AreEqual(LabelTileCoverageFilter.Keep, decisions[4], "dep1 — departing, never classified (scope fence)");
+
+            // Cross-check the whole survivor SET: FilterActive's compacted list (post-call, `labelsForFilter` IS the
+            // survivor set — active survivors THEN the untouched departing tail) == ClassifyActive's non-Drop records.
+            Assert.AreEqual(2, newActive, "sanity: only keptA/keptC survive the active range");
+            var survivorsFromClassify = new List<LabelInstance>();
+            for (int i = 0; i < labelsForClassify.Count; i++)
+                if (decisions[i] != LabelTileCoverageFilter.Drop) survivorsFromClassify.Add(labelsForClassify[i]);
+            Assert.AreEqual(labelsForFilter, survivorsFromClassify,
+                "ClassifyActive's Keep+Fade set (Drop excluded) must equal FilterActive's compacted survivor list");
+        }
+
+        [Test]
+        public void ClassifyActive_FadeCrossing_MatchesFilterActive_KeptAndMarkedFading()
+        {
+            var labelF = new LabelInstance { TileKey = TinyTileKey };
+            var labelsF = new List<LabelInstance> { labelF };
+            var labelC = new LabelInstance { TileKey = TinyTileKey };
+            var labelsC = new List<LabelInstance> { labelC };
+            var isDeparting = new List<byte> { 0 };
+
+            var (abovePrevF, aboveThisFrameF, departingUntilF, fadingOutF, decisionScratchF) = FreshState();
+            var (abovePrevC, aboveThisFrameC, departingUntilC, fadingOutC, decisionScratchC) = FreshState();
+
+            // Frame 1 (lenient threshold): both read the tile as kept — seeds each side's own AbovePrev independently.
+            LabelTileCoverageFilter.FilterActive(labelsF, 1, Projection, SceneOrigin, ViewProj, Viewport, Rebase,
+                LenientThreshold, abovePrevF, aboveThisFrameF, departingUntilF, fadingOutF, now: 0.0, GraceSeconds,
+                decisionScratchF, out _);
+            Swap(ref abovePrevF, ref aboveThisFrameF);
+
+            var decisions1 = new List<byte>();
+            LabelTileCoverageFilter.ClassifyActive(labelsC, isDeparting, Projection, SceneOrigin, ViewProj, Viewport,
+                Rebase, LenientThreshold, abovePrevC, aboveThisFrameC, departingUntilC, fadingOutC, now: 0.0,
+                GraceSeconds, decisionScratchC, decisions1, out _);
+            Swap(ref abovePrevC, ref aboveThisFrameC);
+            Assert.AreEqual(LabelTileCoverageFilter.Keep, decisions1[0], "frame 1: both keep (lenient threshold)");
+
+            // Frame 2 (real threshold): crosses below — FilterActive keeps it (fading), ClassifyActive must decide Fade.
+            int active2 = LabelTileCoverageFilter.FilterActive(labelsF, 1, Projection, SceneOrigin, ViewProj, Viewport,
+                Rebase, MinCoverage, abovePrevF, aboveThisFrameF, departingUntilF, fadingOutF, now: 1.0, GraceSeconds,
+                decisionScratchF, out int culled2F);
+
+            var decisions2 = new List<byte>();
+            LabelTileCoverageFilter.ClassifyActive(labelsC, isDeparting, Projection, SceneOrigin, ViewProj, Viewport,
+                Rebase, MinCoverage, abovePrevC, aboveThisFrameC, departingUntilC, fadingOutC, now: 1.0, GraceSeconds,
+                decisionScratchC, decisions2, out int culled2C);
+
+            Assert.AreEqual(1, active2, "sanity: FilterActive kept the label (fading, not dropped)");
+            Assert.AreEqual(LabelTileCoverageFilter.Fade, decisions2[0],
+                "ClassifyActive must decide Fade to match FilterActive's keep-while-fading");
+            Assert.AreEqual(culled2F, culled2C, "neither side counts a fading tile as culled");
+            Assert.IsTrue(fadingOutC.Contains(TinyTileKey), "ClassifyActive also marks the tile fading");
+            Assert.AreEqual(departingUntilF[TinyTileKey], departingUntilC[TinyTileKey],
+                "both stamp the identical fade deadline (now + grace)");
+        }
+
+        [Test]
+        public void ClassifyActive_NoProjection_OrNonPositiveThreshold_IsNoOp_AllKeep()
+        {
+            var labels = new List<LabelInstance>
+            {
+                new LabelInstance { TileKey = TinyTileKey },
+                new LabelInstance { TileKey = TinyTileKey },
+            };
+            var isDeparting = new List<byte> { 0, 0 };
+            // Pre-seed cross-frame state — the no-op guard must leave it untouched (nothing to reconcile).
+            var abovePrev = new HashSet<long> { TinyTileKey };
+            var aboveThisFrame = new HashSet<long>();
+            var departingUntil = new Dictionary<long, double> { [TinyTileKey] = 10.0 };
+            var fadingOut = new HashSet<long>();
+            var decisionScratch = new Dictionary<long, byte>();
+            var decisions = new List<byte>();
+
+            LabelTileCoverageFilter.ClassifyActive(labels, isDeparting, projection: null, SceneOrigin, ViewProj,
+                Viewport, Rebase, MinCoverage, abovePrev, aboveThisFrame, departingUntil, fadingOut, now: 0.0,
+                GraceSeconds, decisionScratch, decisions, out int culledViaNullProjection);
+            Assert.AreEqual(0, culledViaNullProjection);
+            CollectionAssert.AreEqual(
+                new[] { LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep }, decisions,
+                "null projection ⇒ classify nothing, every record reads Keep");
+            Assert.IsTrue(abovePrev.Contains(TinyTileKey), "no-op guard leaves cross-frame state alone");
+            Assert.AreEqual(10.0, departingUntil[TinyTileKey]);
+
+            LabelTileCoverageFilter.ClassifyActive(labels, isDeparting, Projection, SceneOrigin, ViewProj, Viewport,
+                Rebase, minCoverage: 0.0, abovePrev, aboveThisFrame, departingUntil, fadingOut, now: 0.0,
+                GraceSeconds, decisionScratch, decisions, out int culledViaZeroThreshold);
+            Assert.AreEqual(0, culledViaZeroThreshold);
+            CollectionAssert.AreEqual(
+                new[] { LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep }, decisions,
+                "threshold 0 ⇒ classify nothing, every record reads Keep");
+        }
     }
 }

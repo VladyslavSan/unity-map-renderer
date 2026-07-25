@@ -48,11 +48,20 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// </summary>
     public static class StyledFillTileBuilder
     {
-        // MapRenderer.Tile.BuildMesh — wraps the decode/assemble/earcut/project/write loop. Fires on a
-        // background ThreadPool thread (S47/S51); ProfilerMarkerTests tooth-1b uses ProfilerRecorderOptions.Default
-        // (not CollectOnlyOnCurrentThread) so cross-thread samples are captured.
-        private static readonly ProfilerMarker PmBuildMesh =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.BuildMesh");
+        /// <summary>Profiler marker name constants — the single source of truth for this builder's telemetry
+        /// contract. Referenced by both the <see cref="ProfilerMarker"/> fields below and the marker tests
+        /// (<c>ProfilerMarkerTests</c>, <c>MapViewAsyncMeshBuildTests</c>) so each string lives in exactly one
+        /// place; renaming a marker is a one-line edit here that the tests pick up automatically.</summary>
+        public static class ProfilerMarkerNames
+        {
+            public const string WriteMeshData = "MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData";
+        }
+
+        // Wraps the decode/assemble/earcut/project/write loop. Fires on a background ThreadPool thread (S47/S51);
+        // ProfilerMarkerTests tooth-1b uses ProfilerRecorderOptions.Default (not CollectOnlyOnCurrentThread) so
+        // cross-thread samples are captured.
+        private static readonly ProfilerMarker PmWriteMeshData =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.WriteMeshData);
 
         // Skip Unity's main-thread index validation (O(indices)) + the redundant intermediate bounds compute:
         // indices come from earcut and are covered by tests, and the canonical bounds are the worker-computed
@@ -66,10 +75,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // so the reorder does not change any stream's byte offset.
         private static readonly VertexAttributeDescriptor[] FillVertexDescriptors = new[]
         {
-            new VertexAttributeDescriptor(VertexAttribute.Position, VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.Float32, 3, stream: 0),
-            new VertexAttributeDescriptor(VertexAttribute.Tangent, VertexAttributeFormat.Float32, 4, stream: 2),
-            new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.Float32, 4, stream: 3),
+            new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3, stream: 0),
+            new VertexAttributeDescriptor(VertexAttribute.Tangent,   VertexAttributeFormat.Float32, 4, stream: 2),
+            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
         };
 
@@ -123,9 +132,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (selectedFeatures == null || selectedFeatures.Count == 0)
                 return;
 
-            // The "MapRenderer.Tile.BuildMesh" marker string is a telemetry contract asserted by
-            // ProfilerMarkerTests + MapViewAsyncMeshBuildTests — keep the string in sync with those if renamed.
-            using var sBuild = PmBuildMesh.Auto();
+            // The marker string (ProfilerMarkerNames.WriteMeshData) is a telemetry contract asserted by
+            // ProfilerMarkerTests + MapViewAsyncMeshBuildTests, which read the same const — rename in one place.
+            using var sBuild = PmWriteMeshData.Auto();
 
             // First (Burst): collect this layer's polygon features + their per-feature linear color, then
             // run the Burst decode→assemble→earcut→project chain via FillMeshPipeline (Run(), so it
@@ -180,7 +189,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (!double.IsInfinity(proj.MaxRefineAngleRad))
                 {
                     WriteGlobeSubdivided(md, in buffers, proj, id, extent, tileOriginRender, featureColors,
-                        out vertexCount, out bounds);
+                        out vertexCount,     out bounds);
                     return; // finally still disposes buffers
                 }
 
@@ -195,8 +204,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 // Phase 3: copy the Burst geometry into the stream views, accumulating the tight AABB.
                 double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
-                float3 bMin = new float3(float.MaxValue);
-                float3 bMax = new float3(float.MinValue);
+                float3 bMin      = new float3(float.MaxValue);
+                float3 bMax      = new float3(float.MinValue);
                 for (int i = 0; i < totalVerts; i++)
                 {
                     // double3 origin-relative → float3 only here at mesh-write (docs §8.2).
@@ -208,14 +217,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     float3 up = (float3)buffers.VertexUp[i];
                     s0[i] = new FillPositionNormal
                     {
-                        Position = new Vector3(v.x, v.y, v.z),
+                        Position = new Vector3(v.x,  v.y,  v.z),
                         Normal   = new Vector3(up.x, up.y, up.z),
                     };
 
                     double2 tv = buffers.TileVertices[i];
                     s1[i] = new Vector2((float)(tv.x * extentInv), (float)(tv.y * extentInv));
-                    s2[i] = FlatTangent;                                 // Mercator: constant +X east (globe → subdivided path)
-                    s3[i] = featureColors[buffers.VertexFeatureIdx[i]];  // per-feature linear color
+                    s2[i] = FlatTangent; // Mercator: constant +X east (globe → subdivided path)
+                    s3[i] = featureColors[buffers.VertexFeatureIdx[i]]; // per-feature linear color
                 }
 
                 // Reverse triangle winding at this GPU-index boundary: the canonical earcut IR is CCW in tile
@@ -247,8 +256,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // then stream the subdivided geometry — which also carries the per-vertex east Tangent. Allocation-free:
         // the earcut NativeArrays feed the job directly and the refined output lands in Temp-scope NativeLists.
         private static void WriteGlobeSubdivided(
-            Mesh.MeshData md, in TileMeshBuffers buffers, IProjection proj, TileId id, double extent,
-            double3 tileOriginRender, List<Vector4> featureColors, out int vertexCount, out Bounds bounds)
+            Mesh.MeshData md,               in TileMeshBuffers buffers, IProjection proj, TileId id, double extent,
+            double3       tileOriginRender, List<Vector4>      featureColors, out int vertexCount, out Bounds bounds)
         {
             vertexCount = 0;
             bounds      = default;
@@ -257,7 +266,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             int srcIndices = buffers.TotalIndexCount;
 
             var outV  = new NativeList<GlobeFillVertex>(srcVerts * 4, Allocator.Persistent);
-            var outIx = new NativeList<int>(srcIndices * 4, Allocator.Persistent);
+            var outIx = new NativeList<int>(srcIndices           * 4, Allocator.Persistent);
             try
             {
                 GlobeFillSubdivideDispatch.Run(
@@ -278,20 +287,23 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 NativeArray<int> indices = md.GetIndexData<int>();
 
                 double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
-                float3 bMin = new float3(float.MaxValue);
-                float3 bMax = new float3(float.MinValue);
+                float3 bMin      = new float3(float.MaxValue);
+                float3 bMax      = new float3(float.MinValue);
                 for (int i = 0; i < n; i++)
                 {
                     GlobeFillVertex fv = outV[i];
-                    float3 v = (float3)fv.World;
-                    bMin = math.min(bMin, v); bMax = math.max(bMax, v);
+                    float3          v  = (float3)fv.World;
+                    bMin = math.min(bMin, v);
+                    bMax = math.max(bMax, v);
                     float3 up = (float3)fv.Up;
-                    s0[i] = new FillPositionNormal { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
+                    s0[i] = new FillPositionNormal
+                        { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
                     s1[i] = new Vector2((float)(fv.Tile.x * extentInv), (float)(fv.Tile.y * extentInv));
                     float3 east = (float3)fv.East;
-                    s2[i] = new Vector4(east.x, east.y, east.z, 1f);      // w=+1: same TBN handedness as the Mercator path
+                    s2[i] = new Vector4(east.x, east.y, east.z, 1f); // w=+1: same TBN handedness as the Mercator path
                     s3[i] = featureColors[fv.Feature];
                 }
+
                 // Reverse winding at the GPU-index boundary (same as the flat path above): the subdivided output
                 // inherits the canonical earcut CCW order, flipped here to Unity-front for stock Cull Back.
                 for (int i = 0; i + 2 < ni; i += 3)
@@ -304,7 +316,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 md.subMeshCount = 1;
                 md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);
                 vertexCount = n;
-                float3 c3 = (bMin + bMax) * 0.5f; float3 sz = bMax - bMin;
+                float3 c3 = (bMin + bMax) * 0.5f;
+                float3 sz = bMax - bMin;
                 bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
             }
             finally

@@ -443,6 +443,8 @@ MonoBehaviour:
     MaxConsumesPerTick: 4
     MaxMeshBuildsPerTick: 2
     MaxVerticesPerTick: 50000
+    MaxReleasesPerTick: 4
+    LabelTileCoverageCull: 0.005
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
     PreparedCache:
@@ -548,6 +550,15 @@ MonoBehaviour:
   PreparedCacheByteBudget: 0
   PreparedCacheFillPercent: 0
   PreparedCacheEvictions: 0
+  SymbolActiveLabelTiles: 0
+  SymbolCachedLabelTiles: 0
+  SymbolInputLabelCount: 0
+  SymbolDistanceCulledLabels: 0
+  SymbolCoverageDroppedLabels: 0
+  SymbolCoverageFadingLabels: 0
+  SymbolCollisionCandidates: 0
+  SymbolCollisionSurvivors: 0
+  SymbolPlacedQuads: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

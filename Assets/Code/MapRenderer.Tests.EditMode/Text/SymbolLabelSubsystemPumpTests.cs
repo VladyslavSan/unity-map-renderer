@@ -23,6 +23,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Symbol = MapRenderer.Core.Style.Symbol;
@@ -270,31 +271,41 @@ namespace MapRenderer.Tests.Text
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
-            // Build the tile active — pump frames until its (async) build commits label records into the batch.
+            // Build the tile active — pump frames until its (async) build commits label records into the plan.
             DriveTileBytesReady(tile);
-            SymbolLabelBatch active = null;
+            SymbolGatherPlan active = null;
             for (int f = 0; f < 200; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 active = _subsystem.CurrentBatch(default, 0.0);
-                if (active.Count > 0) break;
+                if (active.WinnerCount > 0) break;
                 yield return null;
             }
-            Assert.Greater(active.Count, 0, "sanity: the active tile committed label records");
+            Assert.Greater(active.WinnerCount, 0, "sanity: the active tile committed label records");
             Assert.AreEqual(0, DepartingRecordCount(active), "nothing is departing while the tile is in cover");
 
             // The tile leaves cover at t=100 → released to the warm cache AND retained as departing (grace applies
-            // because the prepared mesh cache is enabled by default). CurrentBatch is rebuilt BELOW — read `active`
-            // (the same reused batch instance) only before that.
+            // because the prepared mesh cache is enabled by default).
             _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "the tile left cover");
             Assert.AreEqual(1, _subsystem.DepartingTileCount, "…and is departing (fading out), not dropped");
 
-            SymbolLabelBatch departing = _subsystem.CurrentBatch(default, 0.0);
-            Assert.Greater(departing.Count, 0, "the departing tile's labels are still collected (so they can fade)");
-            Assert.AreEqual(departing.Count, DepartingRecordCount(departing),
-                "…and every record is flagged departing → the placement layer fades them out instead of popping");
+            // Stage 4b: the departing set arrives via the off-main reconcile (1–4 frames later, apply-stale) — pump
+            // until the FRONT buffer reflects it (every record departing). A broken pickup/swap never flips the
+            // front, so this loop times out and the assertion below fails (the tooth still bites).
+            SymbolGatherPlan departing = null;
+            bool flipped = false;
+            for (int f = 0; f < 200; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
+                _subsystem.PumpBuilds();
+                departing = _subsystem.CurrentBatch(default, 0.0);
+                if (departing.WinnerCount > 0 && DepartingRecordCount(departing) == departing.WinnerCount) { flipped = true; break; }
+                yield return null;
+            }
+            Assert.IsTrue(flipped,
+                "the departing set was picked up and every record flagged departing → the placement layer fades them out instead of popping");
         }
 
         // ── Alloc tooth: LabelTileCoverageFilter.FilterActive's per-call Dictionary/List compaction must not
@@ -318,32 +329,171 @@ namespace MapRenderer.Tests.Text
             var frame = SceneFrame.Mercator(new double2(0.0, 0.0));
             const double keepAllButRunFilter = 1e-9;
 
-            SymbolLabelBatch batch = null;
-            for (int f = 0; f < 200; f++)
+            // Stage 4b: the alloc measurement must run on a FULLY quiescent frame — labels committed, no pending
+            // tail, no reconcile in flight, and the schedule generation caught up (CollectRecomputeCount stable for
+            // 2 frames). A dirty frame legitimately allocates (it captures + kicks a worker), so measuring one would
+            // be a false positive; genuine quiescence is what the steady-state alloc guarantee is about.
+            SymbolGatherPlan plan = null;
+            bool quiesced = false; int stable = 0; int lastRecompute = -1;
+            for (int f = 0; f < 400; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                batch = _subsystem.CurrentBatch(frame, keepAllButRunFilter);
-                if (batch.Count > 0) break;
+                plan = _subsystem.CurrentBatch(frame, keepAllButRunFilter);
+                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount == 0
+                               && !_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount == lastRecompute;
+                if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
+                lastRecompute = _subsystem.CollectRecomputeCount;
                 yield return null;
             }
-            Assert.Greater(batch.Count, 0, "sanity: the tile committed label records before the alloc measurement");
+            Assert.IsTrue(quiesced, "sanity: drove to full reconcile quiescence before the alloc measurement");
+            Assert.Greater(plan.WinnerCount, 0, "sanity: the tile committed label records before the alloc measurement");
 
             // Warm-up call (first-touch Dictionary/List growth allowed) then the STEADY call is measured. Block
             // body (NOT an expression lambda): `() => _subsystem.CurrentBatch(...)` binds NUnit's value-returning
-            // `Assert.That<T>(Func<T>, ...)` overload — it hands the returned SymbolLabelBatch to the constraint
+            // `Assert.That<T>(Func<T>, ...)` overload — it hands the returned SymbolGatherPlan to the constraint
             // instead of invoking Is.Not.AllocatingGCMemory()'s delegate form, throwing
             // "the actual value must be a TestDelegate" at runtime. A block-body lambda is a plain TestDelegate.
             _subsystem.CurrentBatch(frame, keepAllButRunFilter);
             Assert.That(() => { _subsystem.CurrentBatch(frame, keepAllButRunFilter); },
                 Is.Not.AllocatingGCMemory(),
-                "a steady-state CurrentBatch (coverage cull enabled) must allocate ZERO managed garbage");
+                "a steady-state CurrentBatch (coverage cull + native winner-plan build) must allocate ZERO managed garbage");
         }
 
-        private static int DepartingRecordCount(SymbolLabelBatch batch)
+        // ═══ Stage 4a (labels-async-reconcile): memoized clean-frame reuse of the collected set ═══
+
+        // ── Test 2/4: on frames with no tile event, CurrentBatch REUSES the collected buffers byte-identically and
+        //    does NOT recompute the ~11 ms cross-tile dedup (CollectRecomputeCount held flat), allocating zero GC.
+        //    minCoverage = 0.0 so ClassifyActive early-returns — the full plan is then collect-derived and
+        //    frame-independent, isolating the reconcile-governed fields (BlockId/LocalIndex/Departing/WinnerCount).
+        //    Stage 4b: the plan comes from the picked-up FRONT reconcile result; a clean frame neither schedules nor
+        //    picks up, so the front is reused byte-identically. RED-verify: delete the
+        //    `_store.CollectGeneration == _reconcileScheduledGen` guard in ScheduleReconcileIfDirty → it reschedules
+        //    every clean frame → CollectRecomputeCount climbs (and the reschedule allocates) → both the counter and
+        //    the zero-GC assertions fail (proving the guard has teeth). ──
+        [UnityTest]
+        public IEnumerator CurrentBatch_CleanFrames_ReuseCollectedSet_ByteIdentical_RecomputesOnce()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+
+            // Stage 4b: drive to FULL reconcile quiescence — labels committed (WinnerCount > 0), no straggler tail
+            // pending (ReadyTailCount == 0), NO reconcile in flight, and the schedule generation caught up
+            // (CollectRecomputeCount stable for 2 frames). Only then is a subsequent frame genuinely "clean" (neither
+            // schedules nor picks up), the precondition for the byte-identical-reuse + zero-GC assertions below.
+            DriveTileBytesReady(tile);
+            SymbolGatherPlan plan = null;
+            bool quiesced = false; int stable = 0; int lastRecompute = -1;
+            for (int f = 0; f < 400; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                plan = _subsystem.CurrentBatch(default, 0.0);
+                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount == 0
+                               && !_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount == lastRecompute;
+                if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
+                lastRecompute = _subsystem.CollectRecomputeCount;
+                yield return null;
+            }
+            Assert.IsTrue(quiesced, "sanity: drove to full reconcile quiescence (labels committed, no pending tails, nothing in flight)");
+
+            int winners = plan.WinnerCount;
+            var blockId = new int[winners]; var localIndex = new int[winners]; var departing = new byte[winners];
+            for (int i = 0; i < winners; i++) { blockId[i] = plan.BlockId[i]; localIndex[i] = plan.LocalIndex[i]; departing[i] = plan.Departing[i]; }
+            int baseline = _subsystem.CollectRecomputeCount;
+
+            // Teeth: the counter is LIVE — driving to quiescence performed at least one REAL recompute (the cold-start
+            // collect alone, _collectedAtGeneration == -1 != gen, guarantees it). Without this a dead
+            // CollectRecomputeCount++ (stuck at 0) would silently satisfy the "held flat" assertion below at 0==0, and
+            // the test would prove nothing about recompute. baseline>=1 + the flat assertion together = "recomputed
+            // (during real collects) then REUSED (across clean frames)". Increment-on-a-real-event is Test 3.
+            Assert.GreaterOrEqual(baseline, 1,
+                "the recompute counter actually fired during the real (dirty) collects — guards a dead counter");
+
+            // N clean frames replicating the production per-frame loop on the UNCHANGED loaded set (the every-frame
+            // ReconcileActiveSet on a stable cover must not bump — hence the FULL loop, not a bare CurrentBatch).
+            const int N = 5;
+            for (int f = 0; f < N; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                Assert.AreEqual(winners, p.WinnerCount, $"clean frame {f}: winner count identical to the quiesced snapshot");
+                for (int i = 0; i < winners; i++)
+                {
+                    Assert.AreEqual(blockId[i], p.BlockId[i], $"clean frame {f}: blockId[{i}] identical (reused, not recomputed)");
+                    Assert.AreEqual(localIndex[i], p.LocalIndex[i], $"clean frame {f}: localIndex[{i}] identical");
+                    Assert.AreEqual(departing[i], p.Departing[i], $"clean frame {f}: departing[{i}] identical");
+                }
+                yield return null;
+            }
+            Assert.AreEqual(baseline, _subsystem.CollectRecomputeCount,
+                "the memo skipped CollectInto on every clean frame — no recompute across all N (delete the guard and this fails)");
+
+            // Test 4 (folded in): the clean reuse loop does strictly LESS than a recompute (skips CollectInto), so it
+            // must allocate ZERO managed garbage. Warm first (above N frames), then measure a full clean-frame loop.
+            _subsystem.ReconcileLoadedTiles(loaded);
+            _subsystem.PumpBuilds();
+            _subsystem.CurrentBatch(default, 0.0);
+            Assert.That(() => { _subsystem.ReconcileLoadedTiles(loaded); _subsystem.PumpBuilds(); _subsystem.CurrentBatch(default, 0.0); },
+                Is.Not.AllocatingGCMemory(),
+                "a steady clean-frame reuse loop (reconcile + pump + CurrentBatch, no recompute) must allocate ZERO managed garbage");
+        }
+
+        // ── Test 3: a REAL tile event dirties the store → CurrentBatch recomputes (CollectRecomputeCount incremented)
+        //    AND the plan changes (every record now departing) — the pair to Test 2, catching a degenerate
+        //    "never recompute" memo that Test 2's clean-frame identity alone would pass. Mirrors the existing
+        //    CurrentBatch_TileLeftCover_FlagsRecordsDeparting departing tooth. ──
+        [UnityTest]
+        public IEnumerator CurrentBatch_TileEvent_RecomputesAndDrivesFade()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+
+            DriveTileBytesReady(tile);
+            SymbolGatherPlan active = null;
+            bool quiesced = false;
+            for (int f = 0; f < 300; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                active = _subsystem.CurrentBatch(default, 0.0);
+                if (active.WinnerCount > 0 && _subsystem.ReadyTailCount == 0) { quiesced = true; break; }
+                yield return null;
+            }
+            Assert.IsTrue(quiesced, "sanity: drove to quiescence");
+            Assert.Greater(active.WinnerCount, 0, "the active tile committed label records");
+            Assert.AreEqual(0, DepartingRecordCount(active), "nothing departing while the tile is in cover");
+            int recomputesBefore = _subsystem.CollectRecomputeCount;
+
+            // The real event: the tile leaves cover at t=100 → released to the warm cache AND departing-stamped
+            // (the store bumps its collect generation — §1 #3/#6). CurrentBatch must SCHEDULE a fresh reconcile
+            // (CollectRecomputeCount climbs) and — a few frames later, apply-stale — the picked-up front CHANGES to
+            // all-departing. Pump until the front reflects it; a degenerate never-reschedule memo, or a broken
+            // pickup/swap, leaves the front unchanged → this loop times out and fails.
+            _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
+            SymbolGatherPlan departing = null;
+            bool flipped = false;
+            for (int f = 0; f < 200; f++)
+            {
+                _subsystem.ReconcileLoadedTiles(new List<LoadedTileKey>(), nowSeconds: 100.0);
+                _subsystem.PumpBuilds();
+                departing = _subsystem.CurrentBatch(default, 0.0);
+                if (departing.WinnerCount > 0 && DepartingRecordCount(departing) == departing.WinnerCount) { flipped = true; break; }
+                yield return null;
+            }
+            Assert.Greater(_subsystem.CollectRecomputeCount, recomputesBefore,
+                "a real tile event dirtied the store → CurrentBatch scheduled a fresh reconcile (catches a degenerate never-reschedule memo)");
+            Assert.IsTrue(flipped,
+                "…and the picked-up front CHANGED — every record now flagged departing (drives the fade-out, not a stale reuse)");
+        }
+
+        private static int DepartingRecordCount(SymbolGatherPlan plan)
         {
             int n = 0;
-            for (int i = 0; i < batch.Count; i++) if (batch.RecordDeparting[i]) n++;
+            for (int i = 0; i < plan.WinnerCount; i++) if (plan.Departing[i] != 0) n++;
             return n;
         }
 

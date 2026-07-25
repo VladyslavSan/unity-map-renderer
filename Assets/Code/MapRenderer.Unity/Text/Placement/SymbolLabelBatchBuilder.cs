@@ -41,8 +41,17 @@ namespace MapRenderer.Unity.Text.Placement
         //             recording, so the per-label cost in production is negligible.
         // (the per-unique-tile 4-corner coverage-cull projection this Project marker used to bracket moved to
         // the pre-build Core LabelTileCoverageFilter — see SymbolLabelSubsystem.CurrentBatch.)
-        private static readonly ProfilerMarker PmSoAHash    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA.Hash");
-        private static readonly ProfilerMarker PmSoACopy    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild.SoA.Copy");
+        /// <summary>Profiler marker name constants (SSOT) for the SoA build sub-phases — referenced by the
+        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Hierarchical names so the Profiler flat search reads as a tree.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            internal const string SoAHash = "MapRenderer.Symbol.BatchBuild.SoA.Hash";
+            internal const string SoACopy = "MapRenderer.Symbol.BatchBuild.SoA.Copy";
+        }
+
+        private static readonly ProfilerMarker PmSoAHash = new(ProfilerCategory.Scripts, ProfilerMarkerNames.SoAHash);
+        private static readonly ProfilerMarker PmSoACopy = new(ProfilerCategory.Scripts, ProfilerMarkerNames.SoACopy);
 
         /// <summary>Rebuild <paramref name="batch"/> in place from <paramref name="labels"/> (collected order
         /// preserved so the collision ordinal — and thus the mesh — stays byte-identical). <paramref name="slotCount"/>
@@ -104,20 +113,32 @@ namespace MapRenderer.Unity.Text.Placement
             using (PmSoACopy.Auto())
                 for (int q = 0; q < quadCount; q++) batch.AddQuad(quads[q]);
 
-            // Hash: the movable-to-build-time conversion (sRGB→linear color + fade-id string hash).
-            float4 color;
-            long   fadeId;
-            using (PmSoAHash.Auto())
-            {
-                color  = LabelPlacementSystem.LinearColor(label);
-                // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
-                // is unchanged — PointFadeId's guard-skip fold).
-                fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
-            }
             // Epic A / A1 D2: the world-anchored Level-1 RTC bake — AnchorLocal = anchorRender − tileOriginRender,
             // the SAME double3 origin ResolveTileOrigin resolves (null-safe) — so the presenter placement and
             // this bake cancel exactly (§3.4).
             double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
+            PointStageInput input;
+            using (PmSoAHash.Auto()) // sRGB→linear color + fade-id string hash — the movable-to-build-time conversion.
+                input = BuildPointInput(label, slotCount, tileOriginRender);
+            int detail = batch.AddPoint(input, quadStart, quadCount);
+
+            int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
+            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, departing, coverageFading);
+        }
+
+        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label POINT field math shared by
+        /// <see cref="AddPoint"/> (the per-frame oracle) and <see cref="SymbolTileLabelBlockBaker.Bake"/> (the
+        /// build-time bake) — factored here so the two paths cannot diverge. Resolves everything stable about
+        /// <paramref name="label"/> EXCEPT its glyph quads/world anchor (copied by the caller into its own
+        /// pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin — the caller
+        /// resolves it (a per-<see cref="Build"/> cache for the oracle; a single value for the single-tile bake).</summary>
+        internal static PointStageInput BuildPointInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
+        {
+            float4 color  = LabelPlacementSystem.LinearColor(label);
+            // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
+            // is unchanged — PointFadeId's guard-skip fold).
+            long   fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
+
             // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
             // FloatingOrigin.TileToSceneRebased's identical narrowing).
             float3 anchorLocal = new float3(
@@ -125,7 +146,7 @@ namespace MapRenderer.Unity.Text.Placement
                 (float)(label.AnchorRender.y - tileOriginRender.y),
                 (float)(label.AnchorRender.z - tileOriginRender.z));
 
-            var input = new PointStageInput
+            return new PointStageInput
             {
                 // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
                 BoundsMin = label.Layout?.BoundsMin ?? float2.zero,
@@ -141,10 +162,6 @@ namespace MapRenderer.Unity.Text.Placement
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
                 AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
             };
-            int detail = batch.AddPoint(input, quadStart, quadCount);
-
-            int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
-            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, departing, coverageFading);
         }
 
         private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount,
@@ -169,30 +186,18 @@ namespace MapRenderer.Unity.Text.Placement
             // label.MaterialIndex = the symbol layer's slot — the SAME per-layer id PointFadeId folds in. Load-bearing:
             // FeatureIndex restarts per layer, so without it two roads in different layers of one tile collide (the
             // stuck-at-partial-opacity fade fight). See LineFadeId's doc.
-            float4 curvedColor;
+            // Stage AC (curved-world): the SAME null-safe origin AddPoint's D2 bake uses (ResolveTileOrigin —
+            // TileRenderOrigin.Project), so the per-glyph AnchorLocal bake StageCurvedAnchor computes and this
+            // tile's render-space origin cancel exactly.
+            double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
+            CurvedStageInput input;
             using (PmSoAHash.Auto())
             {
                 for (int a = 0; a < anchorCount; a++)
                     batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
                 batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
-                curvedColor = LabelPlacementSystem.LinearColor(label);
+                input = BuildCurvedInput(label, slotCount, tileOriginRender);
             }
-
-            // Stage AC (curved-world): the SAME null-safe origin AddPoint's D2 bake uses (ResolveTileOrigin —
-            // TileRenderOrigin.Project), so the per-glyph AnchorLocal bake StageCurvedAnchor computes and this
-            // tile's render-space origin cancel exactly.
-            double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
-
-            var input = new CurvedStageInput
-            {
-                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
-                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
-                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
-                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
-                Color = curvedColor, TileOriginRender = tileOriginRender,
-            };
             int detail = batch.AddCurved(input, glyphStart, glyphCount, anchorStart, anchorCount, anchorFadeStart);
 
             // Path world points, in order (projected + walked per frame). Cull rep = path midpoint, else the anchor
@@ -205,5 +210,24 @@ namespace MapRenderer.Unity.Text.Placement
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
             batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, departing, coverageFading);
         }
+
+        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label CURVED field math shared by
+        /// <see cref="AddCurved"/> (the per-frame oracle) and <see cref="SymbolTileLabelBlockBaker.Bake"/> (the
+        /// build-time bake) — factored here so the two paths cannot diverge. Resolves everything stable about
+        /// <paramref name="label"/> EXCEPT its glyphs/anchors/anchor-fade-ids/world path (copied by the caller
+        /// into its own pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin —
+        /// the caller resolves it (a per-<see cref="Build"/> cache for the oracle; a single value for the
+        /// single-tile bake).</summary>
+        internal static CurvedStageInput BuildCurvedInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
+            => new CurvedStageInput
+            {
+                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
+                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
+                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
+                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
+                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
+                MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
+                Color = LabelPlacementSystem.LinearColor(label), TileOriginRender = tileOriginRender,
+            };
     }
 }

@@ -31,9 +31,10 @@ namespace MapRenderer.Core.View
         /// bulk (<c>HorizonCull</c>). Always 0 under a planar projection.</summary>
         public int HorizonCulledLabels { get; init; }
 
-        /// <summary>§1.5 tile-coverage pre-cull: labels DROPPED before the SoA build because their tile is
-        /// steadily below the on-screen coverage threshold (never-visible, or the fade-out grace has expired) —
-        /// the per-frame build savings. Watch this against <c>MapViewConfig.LabelTileCoverageCull</c> to tune it.</summary>
+        /// <summary>§1.5 tile-coverage pre-cull: labels classified DROP because their tile is steadily below the
+        /// on-screen coverage threshold (never-visible, or the fade-out grace has expired). D1: kept resident in
+        /// the mirror but masked out of placement (never staged) — the per-frame savings. Watch this against
+        /// <c>MapViewConfig.LabelTileCoverageCull</c> to tune it.</summary>
         public int CoverageDroppedLabels { get; init; }
 
         /// <summary>§1.5 companion: labels whose tile just crossed below the coverage threshold and finished

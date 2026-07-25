@@ -31,6 +31,21 @@ namespace MapRenderer.Core.Text.Placement
         public const int MaxAnchorsPerLine = 256;
         private const float MaxProjectedPx  = 1e5f;    // a near-plane blow-up past this skips the label.
 
+        // Blocker B1 (salvaged from reverted 6e39e282): a NON-FINITE symbol-sort-key breaks
+        // ComparePlacementOrder's totality — with a NaN key BOTH `a < b` and `a > b` are false, so the compare
+        // FALLS THROUGH the sort-key branch (never returning 0 for the pair) and the resulting order becomes
+        // INTRANSITIVE (a 3-cycle whose sort-key/feature comparisons disagree), making the unstable heapsort's
+        // survivor set seed-/mirror-order dependent. `symbol-sort-key` projects raw expression output to float
+        // with no finite check, and `/` returns raw IEEE, so a style like ["/", 0, 0] yields NaN. Normalizing at
+        // THIS candidate-build choke (the single point where the raw baked value becomes a sort key) restores a
+        // strict total order. float.MaxValue sorts LAST (lowest priority) — a broken authoring value sorts no
+        // earlier than a legitimately-authored float.MaxValue key (a tie there falls to feature/tile/fade order).
+        // No-op on every shipped scene (defaults to 0; real styles use finite exprs), so
+        // this is byte-identical on every baked snapshot. finite ⇔ |k| ≤ MaxValue (NaN and ±Inf both fail the
+        // compare). Expressed via math.abs (not math.isfinite) so it also compiles under the Tools/core-tests
+        // Unity.Mathematics shim (has math.abs, not math.isfinite) — this file is compiled by BOTH runners.
+        internal static float SanitizeSortKey(float k) => math.abs(k) <= float.MaxValue ? k : float.MaxValue;
+
         /// <summary>
         /// Stages one POINT label: its whole-label AABB collision box + glyph quads at the projected anchor
         /// (rotated by the #4 bearing under <c>text-rotation-alignment:map</c>). Writes
@@ -48,11 +63,12 @@ namespace MapRenderer.Core.Text.Placement
 
             float2 screenPx = LabelTranslate.ApplyTranslate(s.ScreenPx, s.TranslatePx, s.TranslateAnchor, bearingRadians);
             float rotationRadians = LabelBearing.BillboardRotationRadians(s.RotationAlignment, bearingRadians);
+            float sortKey = SanitizeSortKey(s.SortKey); // B1: finite-SortKey invariant (comparator totality)
 
             int boxStart = boxCount;
             boxes[boxCount++] = LabelBox.Build(
                 screenPx, s.BoundsMin, s.BoundsMax, s.TextSizePx, s.PaddingPx,
-                s.SortKey, s.FeatureIndex, s.TileKey, ordinal, s.AllowOverlap, s.IgnorePlacement);
+                sortKey, s.FeatureIndex, s.TileKey, ordinal, s.AllowOverlap, s.IgnorePlacement);
 
             int quadStart = quadCount;
             for (int q = 0; q < quads.Length; q++)
@@ -65,7 +81,7 @@ namespace MapRenderer.Core.Text.Placement
             candidates[ordinal] = new LabelCandidate
             {
                 BoxStart = boxStart, BoxCount = 1,
-                SortKey = s.SortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
+                SortKey = sortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = s.FadeId, WasPlacedLastFrame = s.WasPlacedLastFrame,
             };
@@ -200,6 +216,7 @@ namespace MapRenderer.Core.Text.Placement
             float dir      = reversed ? -1f : 1f;
             float flip     = reversed ? math.PI : 0f;
             float maxAngleRad = math.radians(s.MaxAngleDeg);
+            float sortKey = SanitizeSortKey(s.SortKey); // B1: finite-SortKey invariant (comparator totality)
 
             int boxStart  = boxCount;
             int quadStart = quadCount;
@@ -283,7 +300,7 @@ namespace MapRenderer.Core.Text.Placement
             candidates[ordinal] = new LabelCandidate
             {
                 BoxStart = boxStart, BoxCount = glyphs.Length,
-                SortKey = s.SortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
+                SortKey = sortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = fadeId, WasPlacedLastFrame = wasPlaced,
             };

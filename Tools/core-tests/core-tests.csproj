@@ -305,7 +305,13 @@
 
     <!-- Symbol tile-label store — engine-free lifecycle bookkeeping (active/cached mirror of the mesh cache). -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolTileLabelStore.cs" />
+    <!-- Stage 4b (labels-async-reconcile): the off-main reconcile carriers + pure dedup worker (engine-free). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolLabelSnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolLabelReconciler.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolTileLabelStoreTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolLabelReconcilerTests.cs" />
+    <!-- Stage 3 (labels-async-reconcile): fixed-grid dedup zoom-invariance tooth (engine-free; shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolDedupZoomInvarianceTests.cs" />
 
     <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped LabelInstances, no synthetic source. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/StyledSymbolTileBuilderTests.cs" />
@@ -440,6 +446,9 @@
     <!-- A-3: cross-tile label identity (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CrossTileLabelKey.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/CrossTileIdentityTests.cs" />
+    <!-- Stage 2 (labels-async-reconcile): label-text interning for the low-alloc dedup key + its tests -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTextIntern.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTextInternTests.cs" />
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewDistance.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
@@ -456,6 +465,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathSortKeyTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedVertexTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
@@ -475,6 +485,7 @@
 
     <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionOrderTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateCollisionTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateRangeTilingTests.cs" />
   </ItemGroup>

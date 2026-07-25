@@ -282,5 +282,41 @@ namespace MapRenderer.Tests.Text.Placement
                 Object.DestroyImmediate(camGo);
             }
         }
+
+        // ── Stage 2 (labels-async-reconcile) T-ALLOC: a WARM per-frame cross-tile dedup allocates ZERO. The
+        //    interning happens ONCE at CompleteBuild, so the per-frame CollectInto does no string work; and the
+        //    integer DedupKey (a `readonly struct : IEquatable<DedupKey>`) does NOT box in the reused _dedup.
+        //    RED-verify: make DedupKey a `class` (or drop IEquatable, forcing boxed comparisons) → per-label
+        //    heap alloc every frame → RED. Store-only tooth (no LabelPlacementSystem needed). ──
+        [Test]
+        public void WarmDedup_ZeroAlloc()
+        {
+            var store = new SymbolTileLabelStore(cacheCap: 16);
+            var tile = new TileId { Z = 12, X = 3, Y = 4 };
+            var key = new SymbolTileLabelStore.Key("src", tile);
+
+            var labels = new List<LabelInstance>(24);
+            for (int i = 0; i < 20; i++)
+            {
+                labels.Add(new LabelInstance
+                {
+                    Placement = SymbolPlacement.Point,
+                    AnchorRender = new double3(i * 100.0, 0.0, i * 100.0), // distinct cells → distinct dedup keys
+                    MaterialIndex = 0,
+                    Text = "L" + i,
+                    TileKey = 0L,
+                });
+            }
+            store.CompleteBuild(key, store.BeginBuild(key), labels); // interns once here (off the per-frame path)
+
+            var output = new List<LabelInstance>(64);
+            const double q = 50.0;
+            store.CollectInto(output, q, out _); // warm: grow _dedup + output capacity once (allowed to allocate)
+
+            Assert.That(() => store.CollectInto(output, q, out _),
+                Is.Not.AllocatingGCMemory(),
+                "a warm per-frame dedup must allocate ZERO — interning happened once at CompleteBuild and the " +
+                "integer DedupKey does not box in the reused _dedup dictionary.");
+        }
     }
 }

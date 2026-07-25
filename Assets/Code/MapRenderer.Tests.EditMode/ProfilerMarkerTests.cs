@@ -3,7 +3,7 @@
 // Tooth 1a (greppable presence): verify every MapRenderer.* marker name is reachable via the
 //   declared static fields (compile-time check; names are greppable in source).
 // Tooth 1b (wired-not-dead): ProfilerRecorder reads sample count > 0 after driving a tile load,
-//   proving MapRenderer.Tile.BuildMesh is wired on the live MapView path (not dead code).
+//   proving MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData is wired on the live MapView path (not dead code).
 // Tooth 2 (no behavior change): covered by the existing suite (MapViewLiveLoopTests, pipeline tests).
 //
 // ProfilerRecorder notes:
@@ -27,6 +27,9 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
@@ -89,13 +92,13 @@ namespace MapRenderer.Tests
             string[] expectedNames =
             {
                 "MapRenderer.Camera.Advance",
-                "MapRenderer.Tile.CoverSelect",
-                "MapRenderer.Tile.FetchPoll",
-                "MapRenderer.Scheduler.Request",
+                TileManager.ProfilerMarkerNames.CoverSelect,
+                TileManager.ProfilerMarkerNames.FetchPoll,
+                TileManager.ProfilerMarkerNames.SchedulerRequest,
                 "MapRenderer.Tile.Decode",
-                "MapRenderer.Tile.BuildMesh",
+                StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData,
                 "MapRenderer.Mesh.Build",
-                "MapRenderer.Mesh.Upload",
+                TileManager.ProfilerMarkerNames.MeshUpload,
                 "MapRenderer.Line.MeshBuild",
                 "MapRenderer.Pipeline.Decode",
                 "MapRenderer.Pipeline.RingAssembly",
@@ -104,20 +107,31 @@ namespace MapRenderer.Tests
                 // Per-frame MapView.LateUpdate sub-phases + EG-drive split (added to localise live zoom spikes).
                 "MapRenderer.View.LateUpdate",
                 "MapRenderer.View.SceneFrame",
-                "MapRenderer.Symbol.BatchBuild",
-                "MapRenderer.Symbol.BatchBuild.Collect",
-                "MapRenderer.Symbol.BatchBuild.SoA",
-                "MapRenderer.Symbol.BatchBuild.SoA.Project",
-                "MapRenderer.Symbol.BatchBuild.SoA.Hash",
-                "MapRenderer.Symbol.BatchBuild.SoA.Copy",
+                "MapRenderer.Symbol.BatchBuild",             // MapView umbrella (not yet migrated to a const SSOT)
+                "MapRenderer.Symbol.BatchBuild.SoA.Project", // reserved sub-phase (no live marker field yet)
+                // Symbol-label markers below read their names from each type's nested ProfilerMarkerNames const
+                // (SSOT), reached via InternalsVisibleTo — renaming a marker is a one-line edit at its source.
+                SymbolLabelSubsystem.ProfilerMarkerNames.TileDecode,
+                SymbolLabelSubsystem.ProfilerMarkerNames.AtlasUpload,
+                SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollect,
+                SymbolLabelSubsystem.ProfilerMarkerNames.BatchSoA,
+                SymbolLabelBatchBuilder.ProfilerMarkerNames.SoAHash,
+                SymbolLabelBatchBuilder.ProfilerMarkerNames.SoACopy,
+                LabelPlacementSystem.ProfilerMarkerNames.Gather,
+                LabelPlacementSystem.ProfilerMarkerNames.Tick,
+                LabelPlacementSystem.ProfilerMarkerNames.Project,
+                LabelPlacementSystem.ProfilerMarkerNames.ProjectFill,
+                LabelPlacementSystem.ProfilerMarkerNames.Stage,
+                LabelPlacementSystem.ProfilerMarkerNames.Collide,
+                LabelPlacementSystem.ProfilerMarkerNames.Emit,
                 "MapRenderer.View.ApplyZoom",
                 "MapRenderer.View.ApplyZoom.Fills",
                 "MapRenderer.View.ApplyZoom.Lines",
                 "MapRenderer.View.ApplyZoom.LineDash",
                 "MapRenderer.View.InstancedRebuild",
                 "MapRenderer.Tile.ManagerTick",
-                "MapRenderer.Tile.MeshDataAllocate",
-                "MapRenderer.Tile.AddLayer",
+                TileManager.ProfilerMarkerNames.MeshDataAllocate,
+                TileManager.ProfilerMarkerNames.AddTileLayer,
                 "MapRenderer.Tile.AddLayer.Root",
                 "MapRenderer.Tile.AddLayer.Register",
                 "MapRenderer.Tile.AddLayer.Parent",
@@ -148,7 +162,7 @@ namespace MapRenderer.Tests
         //
         // Uses a [UnityTest] coroutine so we can yield a frame after the tile load completes,
         // giving the profiler a chance to commit the sample data. The recorder is started BEFORE
-        // the tile load so it captures the MapRenderer.Tile.BuildMesh samples fired in BuildTile.
+        // the tile load so it captures the MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData samples fired in BuildTile.
         //
         // S47 update: BuildMeshData (which fires PmBuildMesh) now runs on a ThreadPool thread inside
         // Task.Run. We must NOT use CollectOnlyOnCurrentThread — that would miss cross-thread samples.
@@ -156,7 +170,7 @@ namespace MapRenderer.Tests
         [UnityTest]
         public IEnumerator ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad()
         {
-            const string markerName    = "MapRenderer.Tile.BuildMesh";
+            const string markerName    = StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData;
             const string bogusName     = "MapRenderer.__NoSuchMarker__";
 
             var go   = new GameObject("MapView_ProfilerTest");

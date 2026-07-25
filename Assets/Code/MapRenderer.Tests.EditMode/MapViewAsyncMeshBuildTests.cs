@@ -34,6 +34,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -115,9 +116,10 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_TiltCover");
             var view  = go.AddComponent<MapView>().WithTestMaterials().WithTestCamera();
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 22;
-            view.Config.MaxConsumesPerTick = 256;
-            view.Config.MaxMeshBuildsPerTick = 256;
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 22;
+            view.Config.MaxConsumesPerTick    = 256;
+            view.Config.MaxMeshBuildsPerTick  = 256;
 
             try
             {
@@ -134,7 +136,7 @@ namespace MapRenderer.Tests
                 int tilted = view.LoadedTileCount();
 
                 Assert.Greater(tilted, flat,
-                    $"tilting to 60° must recompute the cover and request the horizon trapezoid " +
+                    $"tilting to 60° must recompute the cover and request the horizon trapezoid "         +
                     $"(flat={flat}, tilted={tilted}); an unchanged count means TILT is missing from the " +
                     $"TileManager cover-recompute key");
             }
@@ -159,13 +161,14 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth1_MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
-            var go   = new GameObject("MapView_T1");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var go    = new GameObject("MapView_T1");
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             try
@@ -181,7 +184,7 @@ namespace MapRenderer.Tests
                 // AllTilesSettled() must return false because mesh build is in-flight.
                 // (If this assertion fails, mesh build is synchronous in Tick — tooth 1 violated.)
                 Assert.IsFalse(view.AllTilesSettled(),
-                    "Tooth 1: After the Tick that kicks mesh build, AllTilesSettled() must be false. " +
+                    "Tooth 1: After the Tick that kicks mesh build, AllTilesSettled() must be false. "  +
                     "Mesh build must be deferred to a later frame (async Task.Run path), not consumed " +
                     "synchronously in the same Tick() call that starts it.");
 
@@ -216,13 +219,13 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth2_BuildMeshData_RunsOffMainThread()
         {
-            byte[] bytes = FixtureBytes();
-            var mvtTile  = MvtDecoder.Decode(bytes);
-            var style    = MinimalStyle();
-            var fillLayer = style.Layers[0];
-            var paint     = new Fill.PaintProperties(fillLayer);
-            var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+            byte[] bytes     = FixtureBytes();
+            var    mvtTile   = MvtDecoder.Decode(bytes);
+            var    style     = MinimalStyle();
+            var    fillLayer = style.Layers[0];
+            var    paint     = new Fill.PaintProperties(fillLayer);
+            var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
+            var    mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer, "Fixture must contain 'countries' MVT layer");
             Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
@@ -230,7 +233,7 @@ namespace MapRenderer.Tests
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             var tileOrigin = new double2(bMin.x, bMin.y);
 
-            int mainThreadId = Thread.CurrentThread.ManagedThreadId;
+            int mainThreadId     = Thread.CurrentThread.ManagedThreadId;
             int capturedThreadId = mainThreadId; // will be overwritten in the task
 
             // AllocateWritableMeshData is main-thread only; build INTO it on a background task and
@@ -277,7 +280,7 @@ namespace MapRenderer.Tests
         ///   Concrete bound: ZERO main-thread PmBuildMesh samples after a full async tile load.
         ///
         /// Two recorders (both CollectOnlyOnCurrentThread = main thread only):
-        ///   A) MapRenderer.Tile.BuildMesh  → must be ZERO  (build moved off main thread)
+        ///   A) MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData  → must be ZERO  (build moved off main thread)
         ///   B) MapRenderer.Mesh.Upload      → must be > ZERO (consume/upload still runs on main thread)
         ///
         /// Recorder B is the positive control: it confirms that PumpUntilSettled actually built the
@@ -289,27 +292,30 @@ namespace MapRenderer.Tests
         [UnityTest]
         public IEnumerator Tooth2b_MainThreadBuildMarker_ZeroHits_AfterAsyncLoad()
         {
-            const string buildMarkerName = "MapRenderer.Tile.BuildMesh";
-            const string uploadMarkerName     = "MapRenderer.Mesh.Upload";
+            const string buildMarkerName  = StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData;
+            const string uploadMarkerName = "MapRenderer.Mesh.Upload";
 
             var src   = TestDataSource.FromBytes(FixtureBytes());
             var go    = new GameObject("MapView_T2b");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             // Start recorders BEFORE the tile load. CollectOnlyOnCurrentThread restricts capture to the
             // main (test) thread — so Task.Run background samples for PmBuildMesh are NOT counted.
             // SumAllSamplesInFrame accumulates sample hits per frame (not just durations).
-            using var tessRecorder   = ProfilerRecorder.StartNew(
+            using var tessRecorder = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, buildMarkerName, capacity: 64,
-                options: ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+                options: ProfilerRecorderOptions.SumAllSamplesInFrame |
+                         ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
             using var uploadRecorder = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, uploadMarkerName, capacity: 64,
-                options: ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+                options: ProfilerRecorderOptions.SumAllSamplesInFrame |
+                         ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
 
             try
             {
@@ -329,7 +335,7 @@ namespace MapRenderer.Tests
                 // Sum marker invocations across all recorded frames.
                 // ProfilerRecorderSample.Count = number of Begin/End marker firings in that frame
                 // (correct hit-count metric — recorder.Count alone counts frame-buffer entries, not firings).
-                long tessMainHits  = 0L;
+                long tessMainHits = 0L;
                 for (int i = 0; i < tessRecorder.Count; i++)
                     tessMainHits += tessRecorder.GetSample(i).Count;
 
@@ -342,8 +348,8 @@ namespace MapRenderer.Tests
                 // true and meaningless. Upload runs in ConsumeMeshBuild on the main thread.
                 Assert.Greater(uploadMainHits, 0L,
                     $"Tooth 2b positive control: PmMeshUpload ('{uploadMarkerName}') must have fired " +
-                    $">0 times on the main thread (got {uploadMainHits}). " +
-                    "If 0, no tile was built — the ==0 build assertion would be vacuous. " +
+                    $">0 times on the main thread (got {uploadMainHits}). "                            +
+                    "If 0, no tile was built — the ==0 build assertion would be vacuous. "             +
                     "Check AllTilesSettled() and that the fixture path is correct.");
 
                 // ── Concrete bound: PmBuildMesh == 0 on the main thread ─────────────────────────
@@ -352,11 +358,11 @@ namespace MapRenderer.Tests
                 // Delta: main-thread build cost drops from full-tile duration to ZERO — the
                 // largest possible improvement in main-thread blocking, confirming S47's headline fix.
                 Assert.AreEqual(0L, tessMainHits,
-                    $"Tooth 2b: PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) " +
-                    $"on the main thread — expected 0. " +
-                    "S46 baseline: ≥1 main-thread hit per tile (sync BuildMesh path). " +
-                    "S47 async path: BuildMeshData runs in Task.Run (off main thread), so " +
-                    "PmBuildMesh must NEVER fire on the main thread during Tick. " +
+                    $"Tooth 2b: PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) "        +
+                    $"on the main thread — expected 0. "                                                +
+                    "S46 baseline: ≥1 main-thread hit per tile (sync BuildMesh path). "                 +
+                    "S47 async path: BuildMeshData runs in Task.Run (off main thread), so "             +
+                    "PmBuildMesh must NEVER fire on the main thread during Tick. "                      +
                     "If non-zero, mesh build is still synchronous on the main thread (S47 regressed). " +
                     $"Upload hits (positive control) = {uploadMainHits}.");
             }
@@ -385,13 +391,14 @@ namespace MapRenderer.Tests
         public void Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath()
         {
             byte[] bytes = FixtureBytes();
-            var src  = TestDataSource.FromBytes(bytes);
-            var go   = new GameObject("MapView_T3");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            var    src   = TestDataSource.FromBytes(bytes);
+            var    go    = new GameObject("MapView_T3");
+            var    view  = go.AddComponent<MapView>().WithTestMaterials();
+            var    style = MinimalStyle();
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             try
@@ -411,7 +418,7 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(asyncMesh, "The async path must have built a mesh");
 
                 // Direct sync path for reference.
-                var mvtTile  = MvtDecoder.Decode(bytes);
+                var mvtTile   = MvtDecoder.Decode(bytes);
                 var fillLayer = style.Layers[0];
                 var paint     = new Fill.PaintProperties(fillLayer);
                 var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
@@ -438,9 +445,9 @@ namespace MapRenderer.Tests
                     int mid  = syncVerts.Length / 2;
                     int last = syncVerts.Length - 1;
 
-                    Assert.AreEqual(syncVerts[0],    asyncVerts[0],
+                    Assert.AreEqual(syncVerts[0], asyncVerts[0],
                         "Tooth 3: First vertex position must match between sync and async paths.");
-                    Assert.AreEqual(syncVerts[mid],  asyncVerts[mid],
+                    Assert.AreEqual(syncVerts[mid], asyncVerts[mid],
                         $"Tooth 3: Middle vertex [{mid}] position must match.");
                     Assert.AreEqual(syncVerts[last], asyncVerts[last],
                         $"Tooth 3: Last vertex [{last}] position must match.");
@@ -479,9 +486,10 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             try
@@ -515,7 +523,7 @@ namespace MapRenderer.Tests
                     "even if its mesh build task completed after release.");
 
                 // New cover must be built.
-                Assert.IsTrue(view.AllTilesSettled(), "New cover tiles must all settle.");
+                Assert.IsTrue(view.AllTilesSettled(),     "New cover tiles must all settle.");
                 Assert.IsTrue(view.LoadedTileCount() > 0, "New cover tiles must be present.");
             }
             finally
@@ -538,9 +546,10 @@ namespace MapRenderer.Tests
             var go    = new GameObject("MapView_T5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             try
@@ -578,14 +587,16 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth6_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
-            var go    = new GameObject("MapView_T6");
-            var view  = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_T6");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend =
+                RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
             var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
+            view.Config.TileSelection.MinZoom = 2;
+            view.Config.TileSelection.MaxZoom = 2;
             view.WithTestCamera();
-            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxConsumesPerTick   = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
 
             try
@@ -632,13 +643,13 @@ namespace MapRenderer.Tests
         [Test]
         public void BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh()
         {
-            byte[] bytes = FixtureBytes();
-            var mvtTile   = MvtDecoder.Decode(bytes);
-            var style     = MinimalStyle();
-            var fillLayer = style.Layers[0];
-            var paint     = new Fill.PaintProperties(fillLayer);
-            var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+            byte[] bytes     = FixtureBytes();
+            var    mvtTile   = MvtDecoder.Decode(bytes);
+            var    style     = MinimalStyle();
+            var    fillLayer = style.Layers[0];
+            var    paint     = new Fill.PaintProperties(fillLayer);
+            var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
+            var    mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer);
             Assert.Greater(features.Count, 0);
@@ -685,9 +696,9 @@ namespace MapRenderer.Tests
                 int mid  = syncVerts.Length / 2;
                 int last = syncVerts.Length - 1;
 
-                Assert.AreEqual(syncVerts[0],    splitVerts[0],
+                Assert.AreEqual(syncVerts[0], splitVerts[0],
                     "First vertex position must match between the main-thread and off-main builds.");
-                Assert.AreEqual(syncVerts[mid],  splitVerts[mid],
+                Assert.AreEqual(syncVerts[mid], splitVerts[mid],
                     $"Middle vertex [{mid}] position must match.");
                 Assert.AreEqual(syncVerts[last], splitVerts[last],
                     $"Last vertex [{last}] position must match.");

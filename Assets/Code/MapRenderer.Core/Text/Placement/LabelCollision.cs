@@ -277,6 +277,25 @@ namespace MapRenderer.Core.Text.Placement
                 (a[0], a[end]) = (a[end], a[0]);
                 SiftDown(a, 0, end);
             }
+            AssertSortKeysFinite(a, n); // Blocker B1: dev-build finite-SortKey tripwire (salvaged from 6e39e282)
+        }
+
+        // Blocker B1 (salvaged from reverted 6e39e282) — the finite-SortKey tripwire. ComparePlacementOrder is only
+        // a strict total order while every SortKey is finite: a NaN key makes it INTRANSITIVE (no pair returns 0 via
+        // the sort-key branch — NaN compares false both ways), so the unstable heapsort's survivor set becomes
+        // input-/mirror-order dependent. LabelStagingMath.SanitizeSortKey normalizes non-finite baked keys at
+        // candidate build, so this can NEVER fire in production; it goes RED for a future un-normalized candidate
+        // path. Compiled out unless MAPRENDERER_LABEL_ASSERTS (a dormant, dev-build-only [Conditional] guard — the
+        // load-bearing fix is SanitizeSortKey itself; this is cheap insurance). finite ⇔ |k| ≤ MaxValue — math.abs,
+        // not math.isfinite, so it also compiles under the Tools/core-tests Unity.Mathematics shim.
+        [System.Diagnostics.Conditional("MAPRENDERER_LABEL_ASSERTS")]
+        private static void AssertSortKeysFinite(LabelCandidate[] a, int n)
+        {
+            for (int i = 0; i < n; i++)
+                if (!(math.abs(a[i].SortKey) <= float.MaxValue))
+                    throw new InvalidOperationException(
+                        $"LabelCollision: non-finite candidate SortKey ({a[i].SortKey}) at sorted index {i} — " +
+                        "normalize it at candidate build (LabelStagingMath.SanitizeSortKey, Blocker B1).");
         }
 
         private static void SiftDown(LabelCandidate[] a, int root, int n)

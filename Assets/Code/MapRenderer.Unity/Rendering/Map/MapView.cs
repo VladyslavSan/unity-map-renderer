@@ -390,17 +390,18 @@ namespace MapRenderer.Unity.Rendering.Map
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     _symbols.PumpBuilds();
                 }
-                // Lever C: the blittable label batch — collect (+ cross-tile dedup) + the pre-build tile-coverage
-                // cull + LabelInstance→SoA, rebuilt every frame (allocation-free; the version cache was removed).
-                // Hoisted out of the Labels.Tick argument so its managed dedup/build cost is MARKED
-                // (Symbol.BatchBuild), not folded into the umbrella self-time. Pass this frame's SAME sceneFrame
-                // snapshot the tiles used, so the coverage cull's projection matches the placement below exactly.
-                SymbolLabelBatch batch;
+                // Stage-2 (symbol-label native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
+                // the pre-build tile-coverage cull, recording each winner's (blockId, localIndex) against the
+                // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the Labels.Tick
+                // argument so its managed dedup/collect cost is MARKED (Symbol.BatchBuild), not folded into the
+                // umbrella self-time. Pass this frame's SAME sceneFrame snapshot the tiles used, so the coverage
+                // cull's projection matches the placement below exactly.
+                SymbolGatherPlan plan;
                 using (PmSymbolBatch.Auto())
-                    batch = _symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
-                // Then project/collide/build the placement, presenting each slot through its own SymbolRenderLayer
-                // (D11/E2 — material + persistent presenter).
-                Labels.Tick(sceneFrame, batch, _symbols.Atlas, Time.deltaTime,
+                    plan = _symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
+                // Then gather the winning blocks' baked slices → project/collide/build the placement, presenting
+                // each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
+                Labels.Tick(sceneFrame, plan, _symbols.Atlas, Time.deltaTime,
                     _symbolRenderLayers, _symbols.IconTexture);
             }
             else

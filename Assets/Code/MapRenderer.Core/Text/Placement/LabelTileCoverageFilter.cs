@@ -33,7 +33,9 @@ namespace MapRenderer.Core.Text.Placement
     /// </summary>
     public static class LabelTileCoverageFilter
     {
-        private const byte Keep = 0, Fade = 1, Drop = 2;
+        // D1 (Blocker 2): public so the Unity-side SymbolGatherPlan.Build can read a ClassifyActive decision
+        // (decisions[i] == Drop / == Fade) without duplicating the encoding.
+        public const byte Keep = 0, Fade = 1, Drop = 2;
 
         /// <summary>
         /// In-place, stable compaction of <paramref name="labels"/>' ACTIVE range <c>[0, activeCount)</c>:
@@ -68,6 +70,14 @@ namespace MapRenderer.Core.Text.Placement
         /// (cleared here) so a tile shared by many labels is classified — and its side effects (deadline
         /// stamp, above/fading-set membership) applied — ONCE per call, not once per label. The caller owns
         /// its lifetime (no per-frame GC once warm).</param>
+        /// <param name="planBlockId">Phase-1 Stage-2 (symbol-label native gather): OPTIONAL parallel winner-plan
+        /// arrays, one entry per <paramref name="labels"/> element in lockstep. When non-null, every index move
+        /// this compaction makes to <paramref name="labels"/> — the active-range compaction, the departing-tail
+        /// shift, AND the final trim — is applied IDENTICALLY to <paramref name="planBlockId"/> /
+        /// <paramref name="planLocalIndex"/>, so a downstream native gather reads a plan still aligned 1:1 with
+        /// the post-filter list. Null (the demo / coverage-test seam) skips the permutation entirely — the list
+        /// is filtered exactly as before. Engine-free: plain <see cref="int"/> lists, no Unity.Collections.</param>
+        /// <param name="planLocalIndex">See <paramref name="planBlockId"/> — permuted in lockstep with it.</param>
         public static int FilterActive(
             List<LabelInstance> labels, int activeCount, IProjection projection,
             in double3 sceneOriginRender, in float4x4 viewProj, in double2 viewportLogicalPx,
@@ -75,7 +85,8 @@ namespace MapRenderer.Core.Text.Placement
             HashSet<long> coverageAbovePrev, HashSet<long> coverageAboveThisFrame,
             Dictionary<long, double> coverageDepartingUntil, HashSet<long> coverageFadingTilesOut,
             double now, double graceSeconds,
-            Dictionary<long, byte> tileDecisionScratch, out int culledCount)
+            Dictionary<long, byte> tileDecisionScratch, out int culledCount,
+            List<int> planBlockId = null, List<int> planLocalIndex = null)
         {
             if (projection == null || minCoverage <= 0.0)
             {
@@ -85,6 +96,7 @@ namespace MapRenderer.Core.Text.Placement
                 return activeCount;
             }
 
+            bool permute = planBlockId != null && planLocalIndex != null;
             int active = math.min(activeCount, labels.Count);
             tileDecisionScratch.Clear();
             coverageAboveThisFrame.Clear();
@@ -102,17 +114,94 @@ namespace MapRenderer.Core.Text.Placement
                     culled++;
                     continue;
                 }
-                labels[write++] = label;
+                labels[write] = label;
+                if (permute) { planBlockId[write] = planBlockId[i]; planLocalIndex[write] = planLocalIndex[i]; }
+                write++;
             }
 
             int newActive = write;
-            // Shift the untouched departing tail down behind the surviving active labels.
+            // Shift the untouched departing tail down behind the surviving active labels (in lockstep).
             for (int i = active; i < labels.Count; i++)
-                labels[write++] = labels[i];
-            labels.RemoveRange(write, labels.Count - write);
+            {
+                labels[write] = labels[i];
+                if (permute) { planBlockId[write] = planBlockId[i]; planLocalIndex[write] = planLocalIndex[i]; }
+                write++;
+            }
+            int trimFrom = write, oldCount = labels.Count;
+            labels.RemoveRange(trimFrom, oldCount - trimFrom);
+            if (permute)
+            {
+                planBlockId.RemoveRange(trimFrom, oldCount - trimFrom);
+                planLocalIndex.RemoveRange(trimFrom, oldCount - trimFrom);
+            }
 
             culledCount = culled;
             return newActive;
+        }
+
+        /// <summary>
+        /// D1 (Blocker 2) classify-only counterpart of <see cref="FilterActive"/>: runs the IDENTICAL per-tile
+        /// Keep/Fade/Drop classification (<see cref="ClassifyTile"/>) + cross-frame state, but instead of
+        /// compacting <paramref name="labels"/> in place, WRITES a per-record decision into
+        /// <paramref name="decisions"/> (resized to <c>labels.Count</c>; <see cref="Keep"/>/<see cref="Fade"/>/
+        /// <see cref="Drop"/>) — so a downstream native gather can mask a Dropped record instead of the caller
+        /// physically moving/removing list elements (retiring the lockstep block-id/local-index permute).
+        ///
+        /// <para>A record whose <paramref name="isDeparting"/> flag is set (or a <c>null</c> label) is NEVER
+        /// classified — it is left at <see cref="Keep"/> unconditionally, with no side effect on the cross-frame
+        /// state. This reconciles with <see cref="FilterActive"/>'s "iterate <c>[0, activeCount)</c> only" — a
+        /// departing record is untouched by the coverage cull, a scope fence unchanged from today.</para>
+        /// </summary>
+        /// <param name="isDeparting">Per-record flag (parallel to <paramref name="labels"/>, one entry per label —
+        /// <c>0</c> active / <c>1</c> departing; see <see cref="MapRenderer.Unity.Text.SymbolTileLabelStore"/>'s
+        /// plan-aware <c>CollectInto</c> overload, the concrete producer). A <c>null</c> reads as active-eligible
+        /// but a <c>null</c> label is never classified anyway (see above).</param>
+        /// <param name="decisions">Cleared then filled with exactly <c>labels.Count</c> entries — the caller's
+        /// reused scratch (alloc-free once warm).</param>
+        public static void ClassifyActive(
+            List<LabelInstance> labels, List<byte> isDeparting, IProjection projection,
+            in double3 sceneOriginRender, in float4x4 viewProj, in double2 viewportLogicalPx,
+            in float3x3 rebase, double minCoverage,
+            HashSet<long> coverageAbovePrev, HashSet<long> coverageAboveThisFrame,
+            Dictionary<long, double> coverageDepartingUntil, HashSet<long> coverageFadingTilesOut,
+            double now, double graceSeconds,
+            Dictionary<long, byte> tileDecisionScratch, List<byte> decisions, out int culledCount)
+        {
+            int n = labels.Count;
+            decisions.Clear();
+            if (decisions.Capacity < n) decisions.Capacity = n;
+
+            if (projection == null || minCoverage <= 0.0)
+            {
+                coverageAboveThisFrame.Clear();
+                coverageFadingTilesOut.Clear();
+                for (int i = 0; i < n; i++) decisions.Add(Keep);
+                culledCount = 0;
+                return;
+            }
+
+            tileDecisionScratch.Clear();
+            coverageAboveThisFrame.Clear();
+            coverageFadingTilesOut.Clear();
+
+            int culled = 0;
+            for (int i = 0; i < n; i++)
+            {
+                LabelInstance label = labels[i];
+                bool departing = isDeparting != null && i < isDeparting.Count && isDeparting[i] != 0;
+                byte decision = Keep;
+                // A null label was never a candidate (never classified, passes through as Keep — mirrors
+                // FilterActive's null-guard); a departing record is out of scope (active-only classification).
+                if (!departing && label != null)
+                {
+                    decision = ClassifyTile(label.TileKey, projection, sceneOriginRender, viewProj,
+                        viewportLogicalPx, rebase, minCoverage, coverageAbovePrev, coverageAboveThisFrame,
+                        coverageDepartingUntil, coverageFadingTilesOut, now, graceSeconds, tileDecisionScratch);
+                    if (decision == Drop) culled++;
+                }
+                decisions.Add(decision);
+            }
+            culledCount = culled;
         }
 
         // Classify (once per tile per call, cached in tileDecisionScratch) whether tileKey's on-screen coverage

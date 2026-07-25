@@ -14,13 +14,21 @@ using MapRenderer.Unity.Text;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// A-3: cross-tile point-label identity (<see cref="CrossTileLabelKey"/>) + the store's dedup. Teeth:
-    /// (1) the display-zoom pixel grid is COARSE ENOUGH — a point's real parent (z10) vs child (z11)
-    /// reprojection lands within one grid cell (the doc's original "1px-at-max-zoom" would not);
-    /// (2) it is FINE ENOUGH — distinct labels &gt; a few cells apart keep different keys (no over-merge);
-    /// (3) the store dedups a symbol present in both a parent and child tile to ONE, finest-zoom wins;
-    /// (4) different text in the same cell does NOT merge; (5) line labels are not deduped; (6) quantize ≤ 0
-    /// disables dedup (the pre-A-3 pass-through).
+    /// A-3: cross-tile point-label identity (<see cref="CrossTileLabelKey"/>) + the store's dedup.
+    ///
+    /// <para><see cref="CrossTileLabelKey.For"/> stays a GENERAL grid primitive — still
+    /// <c>quantizeMeters</c>-parameterized, its snapping math unchanged — so the <c>For</c>-math teeth below
+    /// still assert it at an explicit grid: (1) a grid is COARSE ENOUGH — a point's real parent (z10) vs child
+    /// (z11) reprojection lands within one cell (the doc's original "1px-at-max-zoom" would not); (2) FINE ENOUGH
+    /// — distinct labels &gt; a few cells apart keep different keys; plus the 3-axis (globe Y), icon, and text
+    /// parity cases.</para>
+    ///
+    /// <para><b>Stage 3:</b> the STORE dedup no longer takes a caller grid — it keys on the fixed
+    /// <see cref="CrossTileLabelKey.CanonicalGridMeters"/> (4 m), so the <c>Store_*</c> cases below pass a gate
+    /// <c>q</c> whose MAGNITUDE the store ignores; their anchors are spaced to merge/split under the fixed 4 m
+    /// grid: (3) a symbol present in both a parent and child tile dedups to ONE, finest-zoom wins;
+    /// (4) different text in the same cell does NOT merge; (5) line labels are not deduped; (6) the gate ≤ 0
+    /// disables dedup (the pre-A-3 pass-through).</para>
     /// </summary>
     [TestFixture]
     public class CrossTileIdentityTests
@@ -164,11 +172,11 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Store_ParentAndChildSameSymbol_DedupToFinest()
         {
-            const double q = 50.0;
-            double3 anchor = new double3(q * 100.0, 0, q * 100.0); // a cell CENTRE
+            const double q = 50.0; // Stage 3: the store IGNORES this magnitude — it grids on the fixed 4 m; q only gates dedup ON.
+            double3 anchor = new double3(5000.0, 0, 5000.0); // a CanonicalGridMeters=4 cell centre (5000 = 4·1250)
             var parent = new TileId { Z = 10, X = 500, Y = 400 };
             var child = new TileId { Z = 11, X = 1000, Y = 800 };
-            var parentLabel = PointLabel(anchor + new double3(2, 0, 2), 0, "Metropolis", parent); // within a cell
+            var parentLabel = PointLabel(anchor + new double3(1, 0, 1), 0, "Metropolis", parent); // 1 m — well inside the 4 m cell
             var childLabel = PointLabel(anchor, 0, "Metropolis", child);
 
             var store = new SymbolTileLabelStore(cacheCap: 8);

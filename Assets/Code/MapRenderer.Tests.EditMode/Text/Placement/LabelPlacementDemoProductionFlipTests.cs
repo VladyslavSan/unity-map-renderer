@@ -164,6 +164,39 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
+        // Stage-2 regression: the demo batch overload tolerates a NULL batch (an empty frame) — its signature's
+        // `batch?.Count ?? 0` documents null as valid input. Before the RefreshBatchMirror null-guard, routing the
+        // batch path through RefreshBatchMirror (which reads batch.BuildId) NRE'd on null. A null Tick must (a) not
+        // throw, and (b) produce an empty frame that HIDES a label a prior Tick showed (not leave it drawing stale).
+        [Test]
+        public void NullBatchTick_DoesNotThrow_AndClearsPreviouslyShownLabels()
+        {
+            var (camGo, mapCamera, frame) = BuildScene();
+            var atlasTexture = BuildTinyAtlasTexture();
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            try
+            {
+                // Show a label first, so the null Tick has something to clear.
+                system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) }, atlasTexture);
+                Assert.AreEqual(1, system.LastQuadCount, "precondition: the label is placed.");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "precondition: the world presenter is showing.");
+
+                // The null batch overload must not NRE, and must clear the frame.
+                Assert.DoesNotThrow(() => system.Tick(in frame, (SymbolLabelBatch)null, atlasTexture),
+                    "a null batch is a valid empty-frame input (batch?.Count ?? 0) — it must not NRE via RefreshBatchMirror.");
+                Assert.AreEqual(0, system.LastQuadCount, "a null batch produces an empty frame (no quads placed).");
+                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, LabelKind.Text),
+                    "…and the previously-shown label is HIDDEN, not left drawing stale content.");
+            }
+            finally
+            {
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
         [Test]
         public void ProductionThenDemo_Flip_HidesLayerPresenter()
         {
