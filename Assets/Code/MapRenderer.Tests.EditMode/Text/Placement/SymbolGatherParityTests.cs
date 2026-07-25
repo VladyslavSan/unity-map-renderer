@@ -83,6 +83,28 @@ namespace MapRenderer.Tests.Text.Placement
                 },
             };
 
+        // Burst-gather Stage 1 (§6.2 widening): an EMPTY quad list — a point label that contributes zero quads,
+        // exercising SymbolGatherJob's `quadCount > 0` guard (a zero-length source array can yield a null Ptr).
+        private static TextLayoutResult ZeroQuad() => new TextLayoutResult
+        {
+            Quads = new List<SymbolQuad>(), BoundsMin = float2.zero, BoundsMax = float2.zero, LineCount = 1,
+        };
+
+        // Burst-gather Stage 1 (§6.2 widening): a parameterized CurvedLabel so a test can hand it an EMPTY
+        // glyph list or an EMPTY anchor array — exercising the `glyphCount > 0` / `anchorCount > 0` guards and,
+        // for the empty-anchor case, the UNGUARDED fade copy (fadeCount = anchorCount + 1 = 1, no guard).
+        private static LabelInstance CurvedLabelCustom(double3 anchor, string text, int feature, long tileKey,
+            List<CurvedGlyph> glyphs, LineAnchor[] anchors)
+            => new LabelInstance
+            {
+                AnchorRender = anchor, Placement = SymbolPlacement.Line, Text = text, Paint = LabelPaint.Default,
+                TextSizePx = 20f, PaddingPx = 2f, SortKey = 1f, FeatureIndex = feature, TileKey = tileKey,
+                MaxAngleDeg = 45f, KeepUpright = true,
+                PathRender = new[] { new double3(0, 0, 0) + anchor, new double3(10, 0, 0) + anchor, new double3(20, 0, 0) + anchor },
+                LineAnchors = anchors,
+                CurvedGlyphs = glyphs,
+            };
+
         private static SymbolTileLabelStore.Key Key(TileId t) => new SymbolTileLabelStore.Key("s", t);
 
         // Bake + commit one tile's labels as a native block (the SAME projection/tileOrigin the oracle Build resolves).
@@ -140,7 +162,7 @@ namespace MapRenderer.Tests.Text.Placement
                 decisions.Add(fading ? LabelTileCoverageFilter.Fade : LabelTileCoverageFilter.Keep);
             }
 
-            plan.Build(planBlockId, planLocalIndex, collected, isDeparting, decisions, store.OrderedBlocks);
+            plan.Build(planBlockId, planLocalIndex, collected, isDeparting, decisions, store.OrderedBlocks, winnerSetVersion: 0);
             lps.GatherIntoMirror(plan);
             gathered = new SymbolLabelBatch();
             lps.CopyMirrorInto(gathered);
@@ -225,7 +247,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(1, oracle.CurvedCount, "precondition: exactly the one curved label (A)");
                 Assert.AreEqual(3, oracle.PointCount, "precondition: A.point + B.point + D.point");
 
-                string diff = FirstDifference(oracle, gathered);
+                string diff = SymbolLabelBatchDiff.FirstDifference(oracle, gathered);
                 Assert.IsNull(diff, $"gather must be byte-identical to the Build oracle — first difference: {diff}");
             }
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
@@ -243,7 +265,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // Winner 0 is A.curved (localIndex 1 in block A); force it to read A's OTHER record (the point, index 0).
                 RunPipeline(store, harness.Lps, plan, above, skipPermute: false, perturbWinner: 0, perturbLocalIndex: 0,
                     out SymbolLabelBatch oracle, out SymbolLabelBatch gathered, out _);
-                Assert.IsNotNull(FirstDifference(oracle, gathered),
+                Assert.IsNotNull(SymbolLabelBatchDiff.FirstDifference(oracle, gathered),
                     "a perturbed winner localIndex must diverge from the oracle — the parity comparison has teeth");
             }
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
@@ -261,15 +283,19 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 RunPipeline(store, harness.Lps, plan, above, skipPermute: true, perturbWinner: -1, perturbLocalIndex: -1,
                     out SymbolLabelBatch oracle, out SymbolLabelBatch gathered, out _);
-                Assert.IsNotNull(FirstDifference(oracle, gathered),
+                Assert.IsNotNull(SymbolLabelBatchDiff.FirstDifference(oracle, gathered),
                     "an un-permuted plan desyncs from the post-filter list — the gather must diverge from the oracle");
             }
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
 
-        // Tooth #2 (gather path): once warm, a second GatherIntoMirror allocates ZERO managed garbage — the mirror
-        // native lists + plan are reused (the whole point of moving the SoA to a build-time bake). Mirrors the
-        // SymbolLabelSubsystemPumpTests.CurrentBatch_Warm_… idiom, one level down on the gather itself.
+        // Tooth #2 (gather path): once warm, a second HEAVY GatherIntoMirror allocates ZERO managed garbage — the
+        // mirror native lists + plan are reused (the whole point of moving the SoA to a build-time bake). Mirrors
+        // the SymbolLabelSubsystemPumpTests.CurrentBatch_Warm_… idiom, one level down on the gather itself.
+        // R1: post-memo, a same-version GatherIntoMirror is a memo HIT, not the heavy path this test's message
+        // claims — bump WinnerSetVersion immediately before the measured call to force a real rebuild (the honest
+        // "force a rebuild" knob: the field is internal, so the test can assign it). The memo-HIT alloc guard is
+        // LabelGatherMemoTests.GatherIntoMirror_MemoHit_AllocatesNoGCMemory (T6), kept separate.
         [Test]
         public void GatherIntoMirror_Warm_AllocatesNoGCMemory()
         {
@@ -284,58 +310,140 @@ namespace MapRenderer.Tests.Text.Placement
                     out _, out _, out _);
                 harness.Lps.GatherIntoMirror(plan); // extra warm-up (first-touch native growth already done above)
 
+                plan.WinnerSetVersion++; // force the measured call to take the heavy (rebuild) path, not a memo hit
+                // §6.4 strengthening: the version bump above is a PRECONDITION this test's own claim ("measures the
+                // heavy rebuild path") rests on — nothing previously asserted it actually engaged. A MirrorRebuildCount
+                // delta makes that load-bearing, so this test can never silently degrade into measuring a memo hit.
+                int rebuildsBefore = harness.Lps.MirrorRebuildCount;
                 Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
                     "a warm GatherIntoMirror must allocate ZERO managed garbage — native lists + plan are reused");
+                Assert.AreEqual(rebuildsBefore + 1, harness.Lps.MirrorRebuildCount,
+                    "precondition: the measured call must take the heavy rebuild path (WinnerSetVersion bump), not a memo hit");
             }
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
 
-        // Returns the first field that differs between two batches (up to each count), or null if byte-identical.
-        private static string FirstDifference(SymbolLabelBatch o, SymbolLabelBatch g)
+        // §6.2 — widen the parity fixture: a Burst-only running-offset bug only manifests when MULTIPLE winners
+        // share a block, or a ZERO-SIZED slice sits between two non-empty ones — the original 4-tile fixture (one
+        // winner per block) cannot catch either. Hand-built (no store/FilterActive — full control over winner
+        // order and which raw slot is null), this fixture exercises all four gaps in one shot:
+        //  - block A: >= 3 winners, with a NULL slot BETWEEN the first two real ones (the null-slot invariant —
+        //    localIndex 1 is never itself a winner, but it must not perturb localIndex 2's block-pool slot);
+        //  - a point label with ZERO quads (Layout.Quads empty) — the `quadCount > 0` guard;
+        //  - a curved label with ZERO glyphs, and one with ZERO LineAnchors — the `glyphCount > 0` /
+        //    `anchorCount > 0` guards AND the unguarded fade copy (fadeCount = anchorCount + 1 = 1, no guard);
+        //  - >= 2 blocks interleaved in winner order (A, B, A, B, A) so the per-block switch and the running
+        //    mirror cursors are exercised together, not block-at-a-time.
+        [Test]
+        public void Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks()
         {
-            if (o.Count != g.Count) return $"Count {o.Count} vs {g.Count}";
-            if (o.PointCount != g.PointCount) return $"PointCount {o.PointCount} vs {g.PointCount}";
-            if (o.CurvedCount != g.CurvedCount) return $"CurvedCount {o.CurvedCount} vs {g.CurvedCount}";
-            if (o.QuadCount != g.QuadCount) return $"QuadCount {o.QuadCount} vs {g.QuadCount}";
-            if (o.GlyphCount != g.GlyphCount) return $"GlyphCount {o.GlyphCount} vs {g.GlyphCount}";
-            if (o.AnchorCount != g.AnchorCount) return $"AnchorCount {o.AnchorCount} vs {g.AnchorCount}";
-            if (o.WorldPointCount != g.WorldPointCount) return $"WorldPointCount {o.WorldPointCount} vs {g.WorldPointCount}";
-            if (o.AnchorFadeCount != g.AnchorFadeCount) return $"AnchorFadeCount {o.AnchorFadeCount} vs {g.AnchorFadeCount}";
-            if (o.MaxBoxes != g.MaxBoxes) return $"MaxBoxes {o.MaxBoxes} vs {g.MaxBoxes}";
-            if (o.MaxQuads != g.MaxQuads) return $"MaxQuads {o.MaxQuads} vs {g.MaxQuads}";
-            if (o.MaxCandidates != g.MaxCandidates) return $"MaxCandidates {o.MaxCandidates} vs {g.MaxCandidates}";
+            var a = new TileId { Z = 5, X = 20, Y = 16 };
+            var b = new TileId { Z = 5, X = 21, Y = 16 };
+            double3 originA = TileRenderOrigin.Project(a, P);
+            double3 originB = TileRenderOrigin.Project(b, P);
+            long tkA = Tk(a), tkB = Tk(b);
 
-            for (int i = 0; i < o.Count; i++)
+            // Block A raw slots: [0] point ZERO quads (real) — [1] null (inert) — [2] point normal #1, 1 quad
+            // (real) — [3] point normal #2, 1 DIFFERENT quad (real) — [4] curved normal #1, 2 glyphs + 1 anchor
+            // (real) — [5] curved ZERO glyphs (real) — [6] curved normal #2, 2 DIFFERENT glyphs + 1 DIFFERENT
+            // anchor (real). Two quad-bearing points AND two glyph/anchor-bearing curveds in the SAME block is
+            // what makes the SECOND of each pair's source offset within the block's OWN pool genuinely non-zero
+            // (each #1 occupies the pool's slot 0; the zero-content records before/between contribute nothing to
+            // the running offset) — review found the original point-only widening left the curved arm's three
+            // source-offset remaps (glyph/anchor/fade start) untestable, since every fixture in the repo has at
+            // most one curved label per block. #1 and #2 carry DIFFERENT glyph/anchor content so a swapped
+            // source offset reads detectably wrong data, not coincidentally-correct data.
+            var aPointZeroQuads = new LabelInstance
             {
-                if (o.Kinds[i] != g.Kinds[i]) return $"Kinds[{i}] {o.Kinds[i]} vs {g.Kinds[i]}";
-                if (o.Detail[i] != g.Detail[i]) return $"Detail[{i}] {o.Detail[i]} vs {g.Detail[i]}";
-                if (o.WorldStart[i] != g.WorldStart[i]) return $"WorldStart[{i}] {o.WorldStart[i]} vs {g.WorldStart[i]}";
-                if (o.WorldCount[i] != g.WorldCount[i]) return $"WorldCount[{i}] {o.WorldCount[i]} vs {g.WorldCount[i]}";
-                if (!o.RepAnchor[i].Equals(g.RepAnchor[i])) return $"RepAnchor[{i}]";
-                if (o.RecordDeparting[i] != g.RecordDeparting[i]) return $"RecordDeparting[{i}] {o.RecordDeparting[i]} vs {g.RecordDeparting[i]}";
-                if (o.RecordCoverageFading[i] != g.RecordCoverageFading[i]) return $"RecordCoverageFading[{i}] {o.RecordCoverageFading[i]} vs {g.RecordCoverageFading[i]}";
-            }
-            for (int i = 0; i < o.PointCount; i++)
+                AnchorRender = new double3(10, 0, 10), Placement = SymbolPlacement.Point, Layout = ZeroQuad(),
+                Paint = LabelPaint.Default, TextSizePx = 20f, PaddingPx = 2f, SortKey = 0f, Text = "a0",
+                FeatureIndex = 10, TileKey = tkA,
+            };
+            LabelInstance aPointNormal1 = PointLabel(new double3(30, 0, 30), "a2", 12, tkA, 0.4f);
+            LabelInstance aPointNormal2 = PointLabel(new double3(35, 0, 35), "a3", 13, tkA, 0.45f);
+            LabelInstance aCurvedNormal1 = CurvedLabelCustom(new double3(40, 0, 40), "a4", 16, tkA,
+                glyphs: new List<CurvedGlyph>
+                {
+                    new CurvedGlyph { ArcCenter = 1f, Cell = OneQuad(0.1f).Quads[0] },
+                    new CurvedGlyph { ArcCenter = 2f, Cell = OneQuad(0.15f).Quads[0] },
+                },
+                anchors: new[] { new LineAnchor(0, 0.5f) });
+            LabelInstance aCurvedZeroGlyphs = CurvedLabelCustom(new double3(41, 0, 41), "a5", 17, tkA,
+                glyphs: new List<CurvedGlyph>(), anchors: new[] { new LineAnchor(0, 0.55f) });
+            LabelInstance aCurvedNormal2 = CurvedLabelCustom(new double3(42, 0, 42), "a6", 18, tkA,
+                glyphs: new List<CurvedGlyph>
+                {
+                    new CurvedGlyph { ArcCenter = 5f, Cell = OneQuad(0.8f).Quads[0] },
+                    new CurvedGlyph { ArcCenter = 6f, Cell = OneQuad(0.85f).Quads[0] },
+                },
+                anchors: new[] { new LineAnchor(0, 0.75f) });
+            var aLabels = new List<LabelInstance>
+                { aPointZeroQuads, null, aPointNormal1, aPointNormal2, aCurvedNormal1, aCurvedZeroGlyphs, aCurvedNormal2 };
+
+            // Block B raw slots: [0] curved ZERO anchors (real) — [1] point normal (real).
+            LabelInstance bCurvedZeroAnchors = CurvedLabelCustom(new double3(50, 0, 50), "b0", 14, tkB,
+                glyphs: new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 3f, Cell = OneQuad(0.6f).Quads[0] } },
+                anchors: Array.Empty<LineAnchor>());
+            LabelInstance bPointNormal = PointLabel(new double3(60, 0, 60), "b1", 15, tkB, 0.7f);
+            var bLabels = new List<LabelInstance> { bCurvedZeroAnchors, bPointNormal };
+
+            SymbolTileLabelBlock blockA = SymbolTileLabelBlockBaker.Bake(aLabels, slotCount: 1, originA);
+            SymbolTileLabelBlock blockB = SymbolTileLabelBlockBaker.Bake(bLabels, slotCount: 1, originB);
+
+            var harness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            try
             {
-                if (!o.Points[i].Equals(g.Points[i])) return $"Points[{i}]";
-                if (o.PointQuadStart[i] != g.PointQuadStart[i]) return $"PointQuadStart[{i}] {o.PointQuadStart[i]} vs {g.PointQuadStart[i]}";
-                if (o.PointQuadCount[i] != g.PointQuadCount[i]) return $"PointQuadCount[{i}] {o.PointQuadCount[i]} vs {g.PointQuadCount[i]}";
+                // Winner order A(li0), B(li0), A(li2), B(li1), A(li3), A(li4), A(li5), A(li6) — interleaved
+                // A,B,A,B,A,A,A,A; A's second winner (li2) sits right after the null at li1.
+                var blockId = new List<int> { 0, 1, 0, 1, 0, 0, 0, 0 };
+                var localIndex = new List<int> { 0, 0, 2, 1, 3, 4, 5, 6 };
+                var collected = new List<LabelInstance>
+                {
+                    aPointZeroQuads, bCurvedZeroAnchors, aPointNormal1, bPointNormal,
+                    aPointNormal2, aCurvedNormal1, aCurvedZeroGlyphs, aCurvedNormal2,
+                };
+                var isDeparting = new List<byte> { 0, 0, 0, 0, 0, 0, 0, 0 };
+                var decisions = new List<byte>
+                {
+                    LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep,
+                    LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep,
+                    LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep,
+                };
+                var orderedBlocks = new List<IDisposable> { blockA, blockB };
+
+                plan.Build(blockId, localIndex, collected, isDeparting, decisions, orderedBlocks, winnerSetVersion: 0);
+                harness.Lps.GatherIntoMirror(plan);
+                var gathered = new SymbolLabelBatch();
+                harness.Lps.CopyMirrorInto(gathered);
+
+                var oracle = new SymbolLabelBatch();
+                SymbolLabelBatchBuilder.Build(oracle, collected, slotCount: 1, P, activeCount: collected.Count, coverageFadingTiles: null);
+
+                Assert.AreEqual(8, oracle.Count, "precondition: 8 winners collected");
+                Assert.AreEqual(4, oracle.PointCount, "precondition: aPointZeroQuads + aPointNormal1 + bPointNormal + aPointNormal2");
+                Assert.AreEqual(4, oracle.CurvedCount, "precondition: bCurvedZeroAnchors + aCurvedNormal1 + aCurvedZeroGlyphs + aCurvedNormal2");
+                Assert.AreEqual(0, oracle.PointQuadCount[0], "precondition: the first-processed point (aPointZeroQuads) has zero quads");
+                Assert.AreEqual(0, oracle.CurvedAnchorCount[0], "precondition: the first-processed curved (bCurvedZeroAnchors) has zero anchors");
+                Assert.AreEqual(0, oracle.CurvedGlyphCount[2], "precondition: the third-processed curved (aCurvedZeroGlyphs) has zero glyphs");
+                // Block-level preconditions (not oracle-derived proxies — see the review's N4 finding): pin the
+                // REAL property D3-class defects need to diverge on, not a coincidental stand-in.
+                int aPointNormal2Detail = blockA.Detail[3];
+                Assert.AreNotEqual(0, blockA.PointQuadStart[aPointNormal2Detail],
+                    "precondition: aPointNormal2's source quad offset within block A's own pool is genuinely non-zero");
+                int aCurvedNormal2Detail = blockA.Detail[6];
+                Assert.AreNotEqual(0, blockA.CurvedGlyphStart[aCurvedNormal2Detail],
+                    "precondition: aCurvedNormal2's source glyph offset within block A's own pool is genuinely non-zero");
+                Assert.AreNotEqual(0, blockA.CurvedAnchorStart[aCurvedNormal2Detail],
+                    "precondition: aCurvedNormal2's source anchor offset within block A's own pool is genuinely non-zero");
+                Assert.AreNotEqual(0, blockA.CurvedAnchorFadeStart[aCurvedNormal2Detail],
+                    "precondition: aCurvedNormal2's source fade offset within block A's own pool is genuinely non-zero");
+
+                string diff = SymbolLabelBatchDiff.FirstDifference(oracle, gathered);
+                Assert.IsNull(diff, $"gather must be byte-identical to the Build oracle on the widened fixture — first difference: {diff}");
             }
-            for (int i = 0; i < o.CurvedCount; i++)
-            {
-                if (!o.Curveds[i].Equals(g.Curveds[i])) return $"Curveds[{i}]";
-                if (o.CurvedGlyphStart[i] != g.CurvedGlyphStart[i]) return $"CurvedGlyphStart[{i}]";
-                if (o.CurvedGlyphCount[i] != g.CurvedGlyphCount[i]) return $"CurvedGlyphCount[{i}]";
-                if (o.CurvedAnchorStart[i] != g.CurvedAnchorStart[i]) return $"CurvedAnchorStart[{i}]";
-                if (o.CurvedAnchorCount[i] != g.CurvedAnchorCount[i]) return $"CurvedAnchorCount[{i}]";
-                if (o.CurvedAnchorFadeStart[i] != g.CurvedAnchorFadeStart[i]) return $"CurvedAnchorFadeStart[{i}]";
-            }
-            for (int i = 0; i < o.QuadCount; i++) if (!o.Quads[i].Equals(g.Quads[i])) return $"Quads[{i}]";
-            for (int i = 0; i < o.GlyphCount; i++) if (!o.Glyphs[i].Equals(g.Glyphs[i])) return $"Glyphs[{i}]";
-            for (int i = 0; i < o.AnchorCount; i++) if (!o.Anchors[i].Equals(g.Anchors[i])) return $"Anchors[{i}]";
-            for (int i = 0; i < o.WorldPointCount; i++) if (!o.WorldPoints[i].Equals(g.WorldPoints[i])) return $"WorldPoints[{i}]";
-            for (int i = 0; i < o.AnchorFadeCount; i++) if (o.AnchorFadeIds[i] != g.AnchorFadeIds[i]) return $"AnchorFadeIds[{i}]";
-            return null;
+            finally { plan.Dispose(); harness.Dispose(); blockA.Dispose(); blockB.Dispose(); }
         }
+
     }
 }

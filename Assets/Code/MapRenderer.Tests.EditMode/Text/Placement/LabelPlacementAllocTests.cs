@@ -179,6 +179,16 @@ namespace MapRenderer.Tests.Text.Placement
                     SortKey = 0f,
                     FeatureIndex = textLabels.Count,
                     TileKey = tileKey,
+                    // R3: this label's AnchorRender coincides exactly with textLabels[0]'s (both sit at
+                    // frame.SceneOriginRender + zero offset), and PointFadeId hashes (AnchorRender,
+                    // MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so with both Text and
+                    // IconImage left at their default null, this candidate shared a FadeId with textLabels[0].
+                    // Under R3, FadeId is the display key (LabelCandidate.FadeId's uniqueness contract), so a
+                    // co-live collision fires AssertFadeIdsUnique's Debug.LogAssertion every steady-state Tick
+                    // — a real per-Tick managed allocation this GC-zero tooth exists to catch. Distinct
+                    // IconImage keeps this candidate's identity unique (harmless here — IconImage is an
+                    // identity fold only; this test supplies quads directly, no sprite atlas lookup).
+                    IconImage = "steady-state-icon",
                 },
             };
 

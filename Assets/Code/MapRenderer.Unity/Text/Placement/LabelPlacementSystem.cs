@@ -10,6 +10,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View.Camera;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling;
@@ -63,13 +64,28 @@ namespace MapRenderer.Unity.Text.Placement
             // Runs BEFORE Tick (native mirror compaction of the winners' baked slices — the Stage-2 residual
             // per-frame copy that replaced the managed SoA Build). Marked so it isn't invisible self-time in the
             // View.LateUpdate umbrella (it sits in the timeline gap between Symbol.BatchBuild and Symbol.LabelTick).
+            // R1: the heavy compaction below now runs only on a front-set change (a reconcile swap / SetStyle /
+            // Dispose) — a same-version frame runs only the three per-frame mask memcpys, so this marker now mostly
+            // measures a memo HIT (that is the point of R1: see docs/symbol-label-perf-design.md §10.2).
             internal const string Gather      = "MapRenderer.Symbol.Gather";
             internal const string Tick        = "MapRenderer.Symbol.LabelTick";
             internal const string Project     = "MapRenderer.Symbol.Project";
             internal const string ProjectFill = "MapRenderer.Symbol.ProjectFill";
             internal const string Stage       = "MapRenderer.Symbol.Stage";
+            // R3: grid sizing + Schedule only — the job's own wait no longer lives here (see CollideHarvest).
             internal const string Collide     = "MapRenderer.Symbol.Collide";
+            // R3: Complete()-ing the PREVIOUS Tick's scheduled collision, at the top of THIS Tick. Must read ≈0 —
+            // a non-zero value means the deferred job did not finish in the inter-frame gap and the wait has
+            // merely moved, not gone (see the stage design doc §10.3's Gate step P).
+            internal const string CollideHarvest = "MapRenderer.Symbol.CollideHarvest";
             internal const string Emit        = "MapRenderer.Symbol.Emit";
+            // Emit splits into two costs with DIFFERENT shapes, and lumping them hid that: EmitLoop is
+            // per-CANDIDATE (fade lookups + the per-quad world-vertex hand-off), while EmitDecay is per-LIVE-FADE-
+            // IDENTITY — DecayUnseenFadeRecords sweeps every key in _fadeOpacity every frame regardless of how many
+            // candidates there are. With tens of thousands of live identities the second can rival the first, so
+            // an optimization aimed at "Emit" could attack the wrong half. Same reason Gather got its own marker.
+            internal const string EmitLoop    = "MapRenderer.Symbol.EmitLoop";
+            internal const string EmitDecay   = "MapRenderer.Symbol.EmitDecay";
         }
 
         // Per-frame profiler markers for the label path (Profiler window → search "MapRenderer.Symbol").
@@ -97,10 +113,21 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmCollide =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Collide);
 
+        // R3: this marker MUST read ≈0 — see ProfilerMarkerNames.CollideHarvest's comment.
+        private static readonly ProfilerMarker PmCollideHarvest =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.CollideHarvest);
+
         // Emit = the A-4 fade + world-renderer hand-off (managed, main thread) that runs AFTER collision — it
         // is a candidate main-thread hot spot in its own right, not hidden inside the LabelTick umbrella.
         private static readonly ProfilerMarker PmEmit =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Emit);
+
+        // The two halves of PmEmit — see the ProfilerMarkerNames comment for why they are split.
+        private static readonly ProfilerMarker PmEmitLoop =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.EmitLoop);
+
+        private static readonly ProfilerMarker PmEmitDecay =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.EmitDecay);
 
         // Epic A / A1 (design §11 A1 D7): the world-anchored demo-path materials — clones of
         // MapMaterialSet.SymbolTextWorld/SymbolIconWorld, used for the demo path (no per-layer materials
@@ -128,6 +155,25 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<int>            _gridNodeNext;
         private NativeArray<int>           _survivorCountOut;
 
+        // R3 (deferred collision, design §10.3): the collision scheduled at the END of a Tick and consumed at the
+        // START of the next one, so the main thread never blocks on the single-threaded greedy. _pendingCandidateCount
+        // pins the candidate count the handle was scheduled over — the harvest must NOT read _sjCounts[0], which this
+        // frame's stage job is about to overwrite.
+        private JobHandle _collisionHandle;
+        private bool      _collisionPending;
+        private int       _pendingCandidateCount;
+
+        // AssertFadeIdsUnique's scratch set — persistent + Cleared per call (not a fresh Allocator.Temp container
+        // per Tick), so the debug-only duplicate check never allocates managed memory in the Editor (a per-call
+        // NativeHashSet's AtomicSafetyHandle/DisposeSentinel bookkeeping under ENABLE_UNITY_COLLECTIONS_CHECKS
+        // does — LabelPlacementAllocTests caught it as a periodic steady-state GC alloc). Allocated LAZILY, inside
+        // AssertFadeIdsUnique itself (guarded on IsCreated), NOT here in the ctor: the method's own [Conditional]
+        // strips its CALL sites in release, and the lazy-alloc guard means the method BODY never runs there either
+        // — so a release build never executes `new NativeHashSet(...)` and this stays a zero-allocation default
+        // (uncreated) struct. (A `#if UNITY_ASSERTIONS` field guard would also work, but is unnecessary — no
+        // release-build reference to this field exists outside the [Conditional] method.)
+        private NativeHashSet<long> _debugFadeIdSeen;
+
         // The batch the managed-list Tick overload (demo / test seam) builds each call from LabelInstances; the
         // production overload receives a pre-built, version-cached batch from SymbolLabelSubsystem instead.
         private readonly SymbolLabelBatch _demoBatch = new SymbolLabelBatch();
@@ -147,7 +193,18 @@ namespace MapRenderer.Unity.Text.Placement
         // fading (visible) departing label (which would pop).
         internal const float FadeDurationSeconds = 0.3f;
         private const float FadeEpsilon = 1e-3f; // below this, a record is invisible → not emitted / dropped
+        // Holds identities that are visible or fading IN — nothing is parked at 0 once a fade-OUT reaches the
+        // floor, because an invisible identity carries no state and nothing would ever collect it (see EaseFade).
+        // Sized by VISIBLE labels, not by staged candidates: the two differ by an order of magnitude in a dense
+        // view (~2.5k placed quads vs ~31k candidates), and DecayUnseenFadeRecords walks this map in full every
+        // frame, so its size is a per-frame COST and not merely memory.
         private readonly Dictionary<long, float> _fadeOpacity = new Dictionary<long, float>();
+        // The identities EaseFade STORED this frame — i.e. exactly the _fadeOpacity keys it touched, not every
+        // candidate it looked at. The direction the decay sweep needs is `stored ⇒ seen`: a key it finds unseen
+        // really was untouched, so nothing alive is swept. (The converse can fail harmlessly — two candidates
+        // sharing one FadeId, where the second drops what the first stored — but the sweep only ever consults
+        // this set for keys it enumerated out of _fadeOpacity, so a stale entry is never read.) Keeping it in
+        // lockstep with the store is why both live inside EaseFade rather than in the emit loop.
         private readonly HashSet<long> _seenFade = new HashSet<long>();
         private readonly List<long> _fadeScratchKeys = new List<long>(); // reused decay-sweep buffer (no per-frame GC)
 
@@ -164,7 +221,11 @@ namespace MapRenderer.Unity.Text.Placement
         // LabelCandidate.WasPlacedLastFrame, which biases the greedy sort so an incumbent keeps its slot over a
         // near-tied newcomer (killing the tile-churn/reprojection tiebreak flip that reads as flicker). Rebuilt
         // from the survivors AFTER each real collision. Reused across frames → zero per-frame GC (T4).
-        private readonly HashSet<long> _placedLastFrame = new HashSet<long>();
+        // R2: NATIVE so LabelStageJob can read it from Burst (the A-5 resolve moved into the job). Sized up front
+        // to the maintainer's scene order-of-magnitude so the first frames don't pay rehash growth; Clear() never
+        // shrinks, so this only shapes startup. Holds SURVIVORS (shown candidates), not all candidates.
+        private const int PlacedSetInitialCapacity = 16384;
+        private NativeHashSet<long> _placedLastFrame; // NOT readonly — allocated in the ctor
 
         // ── B-2: parallel symbol projection ─────────────────────────────────────────────────────────────────
         // Every visible symbol's screen geometry this frame — a point symbol's anchor, a line symbol's path
@@ -186,14 +247,24 @@ namespace MapRenderer.Unity.Text.Placement
         // the per-frame job inputs (gather offsets + resolved incumbency), its pre-sized outputs, and reused
         // scratch. The job calls the SAME LabelStagingMath the differential test pins; its native outputs
         // (_sjBoxes/_sjQuads/_sjCandidates/_sjEmit) feed the collision + emit passes DIRECTLY — no managed round-trip.
-        private long _mirrorBuildId = long.MinValue;
-        // §7.10 finding 1a: this ONE system is ticked by BOTH the demo (_demoBatch) and production (per-frame
-        // subsystem batch) paths, and their BuildId counters are independent — a demo Tick can leave
-        // _mirrorBuildId at the same value a DIFFERENT production batch's first build also reaches, so BuildId
-        // alone can't tell "this exact batch already mirrored" from "some other batch happens to share the
-        // number". The instance identity closes that: only skip the refresh when it is the SAME batch object
-        // AND its BuildId hasn't moved since.
-        private SymbolLabelBatch _lastBatch;
+        // §7.10 finding 1a, generalized for R1 (memoized native gather): this ONE system is ticked by BOTH the
+        // demo (_demoBatch) and production (per-frame subsystem batch/plan) paths, and their version counters
+        // (BuildId / WinnerSetVersion) are independent — a demo Tick can leave _mirrorVersion at the same value a
+        // DIFFERENT production source's first build also reaches, so the version alone can't tell "this exact
+        // source already mirrored" from "some other source happens to share the number". Instance identity closes
+        // that: only skip the refresh when it is the SAME source object (a SymbolLabelBatch OR a SymbolGatherPlan)
+        // AND its version hasn't moved since — covering both directions (a demo Tick invalidates a held production
+        // gather memo, and vice versa) via one comparison instead of two independent sentinels.
+        private object _mirrorSource;                  // the batch or the plan the mirror was last filled from
+        private long   _mirrorVersion = long.MinValue;  // that source's version: batch.BuildId | plan.WinnerSetVersion
+        // Burst-gather Stage 1 (design doc §10.9, §2 of the plan): a per-frame REUSED table of non-owning
+        // SymbolBlockView pointer-views over plan.Blocks[0, plan.BlockCount) — built by BuildBlockViews just
+        // before SymbolGatherJob.Run(), read only during that synchronous call, never held across a frame
+        // boundary. Stage 2 (async gather) must pin the owning snapshot independently of the front pin before
+        // these pointers are allowed to outlive a frame — see the design doc §2.4; NOT this stage's problem
+        // (GatherIntoMirror's .Run() is synchronous, so a view can never outlive the block it points into).
+        private NativeList<SymbolBlockView> _gatherBlockViews;
+        private NativeArray<int> _gatherCounts; // SymbolGatherJob.OutCounts — see its Count* consts for the layout
         private NativeList<byte> _mKinds;
         private NativeList<int>  _mDetail, _mWorldCount, _mPointQuadStart, _mPointQuadCount;
         private NativeList<int>  _mCurvedGlyphStart, _mCurvedGlyphCount, _mCurvedAnchorStart, _mCurvedAnchorCount, _mCurvedAnchorFadeStart;
@@ -228,7 +299,7 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mNonDroppedCount;
         private int _mMaxBoxes, _mMaxQuads, _mMaxCandidates;
         private NativeList<int>  _sjPointOffset;                 // gather output (-1 = culled)
-        private NativeList<byte> _sjPointWasPlaced, _sjAnchorWasPlaced; // per-frame A-5 incumbency
+        private NativeList<byte> _sjAnchorWasPlaced; // per-frame A-5 anchor incumbency — filled by LabelStageJob, sized here
         private NativeList<LabelBox>       _sjBoxes;             // job outputs (pre-sized to batch worst case)
         private NativeList<PlacedQuad>     _sjQuads;
         private NativeList<LabelCandidate> _sjCandidates;
@@ -246,6 +317,12 @@ namespace MapRenderer.Unity.Text.Placement
         /// rebuilt every Tick, not once at tile consume). Test surface.</summary>
         internal int TickCount { get; private set; }
 
+        /// <summary>Heavy mirror FILLS so far — bumped once per real <see cref="RefreshBatchMirror"/> / <see
+        /// cref="GatherIntoMirror"/> rebuild, never on a memo hit. Drives the telemetry panel's rebuilds/second
+        /// readout (how often the winner set actually changes ⇒ whether the memo can help at all), and is what
+        /// keeps the R1 memo tests from passing trivially on an unmemoized implementation.</summary>
+        internal int MirrorRebuildCount { get; private set; }
+
         /// <summary>The quad count submitted on the LAST <see cref="Tick"/> (0 if nothing was visible). Test surface.</summary>
         internal int LastQuadCount { get; private set; }
 
@@ -256,7 +333,10 @@ namespace MapRenderer.Unity.Text.Placement
         /// greedy pass — a point label is 1, a curved/repeated line label is 1 per anchor). Telemetry.</summary>
         internal int LastCandidateCount { get; private set; }
 
-        /// <summary>Collision SURVIVORS on the last Tick (candidates actually placed). Telemetry.</summary>
+        /// <summary>Collision SURVIVORS. R3: the collision is deferred a Tick, so this is the survivor count of
+        /// the collision run over the PREVIOUS Tick's candidates (raw <c>_survivorCountOut[0]</c>, unfiltered),
+        /// not this Tick's — one Tick behind <see cref="LastCandidateCount"/>, which is always this Tick's.
+        /// Telemetry.</summary>
         internal int LastSurvivorCount { get; private set; }
 
         /// <summary>B-3: labels skipped by the pre-projection horizon/distance cull on the last Tick (never
@@ -272,6 +352,17 @@ namespace MapRenderer.Unity.Text.Placement
         /// bulk (<see cref="HorizonCull"/>) — never projected or collided. Telemetry — always 0 under a planar
         /// projection (Mercator's <c>TryGetHorizonOccluder</c> returns false ⇒ the trigger is inert).</summary>
         internal int LastHorizonCulledCount { get; private set; }
+
+        /// <summary>A-4 fade records held — the SIZE OF THE MAP <see cref="DecayUnseenFadeRecords"/> walks each
+        /// Tick, which is the per-frame cost being measured. An identity that has finished fading OUT is dropped
+        /// rather than parked at 0 (see <c>EaseFade</c>), so this tracks the drawn label count rather than
+        /// <see cref="LastCandidateCount"/> — a view whose candidates outnumber its placed labels ten to one does
+        /// not pay the sweep ten times over.
+        /// <para>Do NOT redefine this as a filtered or epsilon-thresholded count: the RAW size is the cost, and a
+        /// filtered count would read as healthy while invisible identities piled up again — silently disarming
+        /// <c>LabelFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins exactly this.
+        /// (The map legitimately holds sub-epsilon values while a label fades IN.)</para></summary>
+        internal int LiveFadeRecordCount => _fadeOpacity.Count;
 
         /// <summary>Coverage-fade: labels skipped on the last Tick because their tile's on-screen coverage crossed
         /// below threshold (<see cref="Core.Text.Placement.LabelTileCoverageFilter"/>) and have now fully faded out
@@ -337,6 +428,10 @@ namespace MapRenderer.Unity.Text.Placement
             _gridNodeNext     = new NativeList<int>(Allocator.Persistent);
             _survivorCountOut = new NativeArray<int>(1, Allocator.Persistent);
 
+            // Burst-gather Stage 1: the reusable block-view table + SymbolGatherJob's output counts.
+            _gatherBlockViews = new NativeList<SymbolBlockView>(Allocator.Persistent);
+            _gatherCounts = new NativeArray<int>(SymbolGatherJob.CountLength, Allocator.Persistent);
+
             // Lever C step 3b: the Burst stage job's native buffers.
             _mKinds = new NativeList<byte>(Allocator.Persistent);
             _mDetail = new NativeList<int>(Allocator.Persistent);
@@ -361,8 +456,10 @@ namespace MapRenderer.Unity.Text.Placement
             _mRecordCoverageFading = new NativeList<byte>(Allocator.Persistent);
             _mRecordDropped = new NativeList<byte>(Allocator.Persistent);
             _sjPointOffset = new NativeList<int>(Allocator.Persistent);
-            _sjPointWasPlaced = new NativeList<byte>(Allocator.Persistent);
             _sjAnchorWasPlaced = new NativeList<byte>(Allocator.Persistent);
+            _placedLastFrame = new NativeHashSet<long>(PlacedSetInitialCapacity, Allocator.Persistent);
+            // _debugFadeIdSeen is NOT allocated here — see its field doc: AssertFadeIdsUnique allocates it
+            // lazily on first use, so a release build (where that [Conditional] method never runs) never pays for it.
             _sjBoxes = new NativeList<LabelBox>(Allocator.Persistent);
             _sjQuads = new NativeList<PlacedQuad>(Allocator.Persistent);
             _sjCandidates = new NativeList<LabelCandidate>(Allocator.Persistent);
@@ -472,10 +569,14 @@ namespace MapRenderer.Unity.Text.Placement
 
             using (PmTick.Auto())
             {
+                // R3: complete the PREVIOUS Tick's scheduled collision and re-key its survivors into
+                // _placedLastFrame — read by BOTH LabelStageJob (A-5 incumbency) and the emit loop below.
+                using (PmCollideHarvest.Auto())
+                    HarvestCollision();
+
                 double2 viewportLogicalPx = _camera.ViewportLogicalPx;
 
                 LastCandidateCount = 0;
-                LastSurvivorCount = 0;
                 LastDistanceCulledCount = 0;
                 LastDepartingCulledCount = 0;
                 LastHorizonCulledCount = 0;
@@ -483,8 +584,7 @@ namespace MapRenderer.Unity.Text.Placement
 
                 _worldRenderer.BeginFrame(); // Epic A / A1: clear every live world slot's accumulators
 
-                int  totalQuads = 0;
-                bool didBuild   = false;
+                int totalQuads = 0;
 
                 // D1 fix-pass (Blocker 1): gate on the EFFECTIVE non-Dropped count, not raw _mCount — an
                 // all-Dropped mirror (every resident record masked) must skip this whole block exactly like the
@@ -492,7 +592,6 @@ namespace MapRenderer.Unity.Text.Placement
                 // decaying via DecayUnseenFadeRecords below (a Dropped tile was never on screen; nothing to decay).
                 if (_mNonDroppedCount > 0 && atlas?.Texture != null && _worldTextMaterial != null)
                 {
-                    didBuild = true;
                     float4x4 viewProj = ViewProj(_camera.Camera);
                     double3 sceneOriginRender = frame.SceneOriginRender;
                     float3x3 rebase = frame.Rebase;
@@ -543,20 +642,15 @@ namespace MapRenderer.Unity.Text.Placement
                         {
                             // Stage the whole mirror in ONE Burst job (LabelStageJob) — same LabelStagingMath as the
                             // managed reference, SIMD-compiled. The mirror is already filled (RefreshBatchMirror /
-                            // GatherIntoMirror, before this core); resolve this frame's incumbency + pre-size outputs;
-                            // run; read counts. Its native outputs feed the collision + emit passes directly.
-                            ResolveIncumbency();
+                            // GatherIntoMirror, before this core); pre-size outputs (the job itself resolves this
+                            // frame's A-5 incumbency, R2); run; read counts. Its native outputs feed the collision +
+                            // emit passes directly.
                             PreSizeStageOutputs();
                             RunStageJob(bearingRadians, viewportLogicalPx);
                             candidateCount = _sjCounts[0]; boxCount = _sjCounts[1];
                         }
                     }
 
-                    // (2) Unified greedy, sort-key-driven, all-or-nothing collision — GLOBAL across all layers and
-                    //     both placement kinds — run as the Burst LabelCollisionJob directly over the stage job's
-                    //     native pools (B-4a). Size the grid, schedule + Complete (synchronous for B-4a; B-4b defers
-                    //     the Complete a frame). _sjCandidates is sorted in place by the job; the emit loop below
-                    //     reads the sorted native candidates + survivor flags.
                     // Mark out-of-zoom candidates LabelCandidate.Suppressed BEFORE collision, so a label whose layer
                     // is outside the LIVE camera zoom's minzoom/maxzoom neither wins nor blocks the true winner (it
                     // still eases to 0 in the emit loop). Display-time gate → overzoom works: a z14 tile reveals
@@ -564,55 +658,81 @@ namespace MapRenderer.Unity.Text.Placement
                     ApplySuppression(candidateCount, symbolLayers, _camera.CurrentProperties.Zoom);
 
                     LastCandidateCount = candidateCount;
-                    using (PmCollide.Auto())
-                        LastSurvivorCount = RunCollision(candidateCount, boxCount);
 
-                    // (3) A-4 FADE (strictly downstream of collision — never fed back into SelectSurvivors):
-                    //     ease each candidate's persistent opacity toward 1 (survivor) or 0 (suppressed), then
-                    //     emit its staged quads scaled by that opacity. A suppressed label is still staged this
-                    //     frame, so it fades OUT in place from its live placement (no cross-frame quad cache); a
-                    //     new label fades IN from 0. Records not seen this frame decay and are dropped (bounded).
+                    // (2) A-4 FADE, reading LAST TICK's collision verdict (R3 — re-keyed into _placedLastFrame by
+                    //     HarvestCollision at the top of this Tick): ease each candidate's persistent opacity toward
+                    //     1 (shown) or 0 (not last Tick's survivor / suppressed / force-faded), then emit its staged
+                    //     quads scaled by that opacity. A suppressed label is still staged this frame, so it fades
+                    //     OUT in place from its live placement (no cross-frame quad cache); a new label fades IN
+                    //     from 0. Records not seen this frame decay and are dropped (bounded). Emit no longer writes
+                    //     _placedLastFrame — HarvestCollision is its sole writer now (R3 §2.4) — so emit order here
+                    //     is STAGING order, not placement order (the collision below sorts _sjCandidates in place,
+                    //     but that sort happens AFTER this loop reads it — see the schedule note below).
                     using (PmEmit.Auto())
                     {
-                        _seenFade.Clear();
-                        _placedLastFrame.Clear(); // A-5: rebuild this frame's incumbents for next frame's staging
-                        for (int s = 0; s < candidateCount; s++)
+                        using (PmEmitLoop.Auto())
                         {
-                            LabelCandidate cand = _sjCandidates[s]; // sorted in place by the collision job
-                            long fadeId = cand.FadeId;
-                            _seenFade.Add(fadeId);
-                            // Show a genuine collision survivor; everything else (a loser, a gather-cull force-out, or
-                            // a Suppressed out-of-zoom candidate — its survivor flag is already 0) eases toward 0.
-                            // The collision is a stable fixed point (total-order tiebreak) and each live candidate has a
-                            // unique fade id (tile, layer, feature, anchor), so a stable loser eases cleanly to 0 and
-                            // stays hidden — no sticky/cooldown machinery needed.
-                            bool fadeOut = _forceFadeOut.Contains(fadeId);
-                            bool show    = !fadeOut && _nSurvivors[s] != 0;
-                            if (show) _placedLastFrame.Add(fadeId); // A-5 incumbency tracks genuine survival
-                            float opacity = EaseFade(fadeId, show ? 1f : 0f, deltaTime);
-                            if (opacity <= FadeEpsilon) continue;
+                            _seenFade.Clear();
+                            for (int s = 0; s < candidateCount; s++)
+                            {
+                                LabelCandidate cand = _sjCandidates[s]; // staging order — the collision job hasn't sorted yet
+                                long fadeId = cand.FadeId;
 
-                            // Epic A / A1 (design §11 A1 D2/D6) + Stage AC: every candidate now emits into the
-                            // world renderer — StagePoint and, since Stage AC, StageCurved both set
-                            // CandidateEmit.IsWorld unconditionally (the old screen _slotQuads/_slotIconQuads
-                            // bucket routing was retired with the dead render path it fed).
-                            CandidateEmit emit = _sjEmit[cand.LabelIndex];
-                            totalQuads += _worldRenderer.Emit(in emit, _sjQuads.AsArray(), opacity);
+                                // `WasPlacedLastFrame` IS `_placedLastFrame.Contains(fadeId)`, already resolved in
+                                // Burst by LabelStageJob and carried on the candidate we just loaded — so read it
+                                // instead of re-probing the set here (one native hash lookup, plus its Editor safety
+                                // check, per candidate). Exact on both arms: the job fills AnchorWasPlaced over its
+                                // whole range element-wise against AnchorFadeIds, slices both with the SAME
+                                // (fadeStart, anchorCount + 1), and StageCurved indexes the pair at one `a` (and at
+                                // `anchorCount` for the centred fallback). Safe because HarvestCollision is the set's
+                                // sole writer and ran before the stage job — the contents cannot differ between them.
+                                bool placed = cand.WasPlacedLastFrame;
+
+                                // A candidate that is neither placed nor holds a fade record can produce nothing:
+                                // EaseFade would ease 0 toward 0, store nothing (the drop branch, with no key to
+                                // remove), add nothing to _seenFade, and the caller would `continue` on the returned
+                                // 0. Skipping outright is exactly that, minus the probes — and it is the common case,
+                                // since candidates outnumber placed labels roughly ten to one in a dense view.
+                                if (!placed && !_fadeOpacity.ContainsKey(fadeId)) continue;
+
+                                // (EaseFade below records this id in _seenFade iff it stores one — see its field doc.)
+                                // Show iff this candidate's FadeId survived LAST Tick's collision (harvested above) and
+                                // it isn't force-fading-out (gather-cull) or suppressed (out-of-zoom, evaluated LIVE
+                                // this frame so the display-time gate stays same-frame — R3 §2.8). One-frame verdict
+                                // latency: a brand-new candidate or a flipped verdict shows per last Tick's outcome
+                                // for one Tick. `_forceFadeOut` is probed LAST — same boolean, but it is the rarest
+                                // term, so ordering it after the two cheap ones skips it for most candidates.
+                                bool show = placed && !cand.Suppressed && !_forceFadeOut.Contains(fadeId);
+                                float opacity = EaseFade(fadeId, show ? 1f : 0f, deltaTime);
+                                if (opacity <= FadeEpsilon) continue;
+
+                                // Epic A / A1 (design §11 A1 D2/D6) + Stage AC: every candidate now emits into the
+                                // world renderer — StagePoint and, since Stage AC, StageCurved both set
+                                // CandidateEmit.IsWorld unconditionally (the old screen _slotQuads/_slotIconQuads
+                                // bucket routing was retired with the dead render path it fed).
+                                CandidateEmit emit = _sjEmit[cand.LabelIndex];
+                                totalQuads += _worldRenderer.Emit(in emit, _sjQuads.AsArray(), opacity);
+                            }
                         }
-                        DecayUnseenFadeRecords(deltaTime);
-                    }
-                }
 
-                // A-5: a frame that produced no placement (no atlas / no labels / no material) carries no
-                // incumbents forward — clear the placed-set so next frame's staging starts clean.
-                if (!didBuild)
-                    _placedLastFrame.Clear();
+                        using (PmEmitDecay.Auto())
+                            DecayUnseenFadeRecords(deltaTime);
+                    }
+
+                    // (3) R3: schedule the collision LAST — after emit, not before. The job sorts _sjCandidates in
+                    //     place, so nothing downstream may read that array this frame once it's scheduled; emit
+                    //     above is the only reader and it already ran. Complete()s at the top of the NEXT Tick
+                    //     (HarvestCollision), so the greedy runs in the inter-frame gap instead of under a blocking
+                    //     wait here.
+                    using (PmCollide.Auto())
+                        ScheduleCollision(candidateCount, boxCount);
+                }
 
                 LastQuadCount = totalQuads;
 
                 // Epic A / A1: build + place every non-empty WORLD slot (point/icon), hide the rest, reclaim
-                // idle ones — runs every Tick regardless of didBuild (a Tick that placed nothing this frame
-                // must still hide slots a PRIOR Tick left visible).
+                // idle ones — runs every Tick regardless of whether this Tick built anything (a Tick that placed
+                // nothing this frame must still hide slots a PRIOR Tick left visible).
                 _worldRenderer.EndFrame(in frame, symbolLayers, _worldTextMaterial, _worldIconMaterial,
                     atlas?.Texture, spriteTexture, viewportLogicalPx);
             }
@@ -741,14 +861,49 @@ namespace MapRenderer.Unity.Text.Placement
             }.Run(total);
         }
 
+        // R3: complete the collision scheduled at the END of the previous Tick and RE-KEY its survivors by FadeId
+        // into _placedLastFrame. The job sorted _sjCandidates in place, so last frame's per-position survivor flags are
+        // meaningless against this frame's candidates — FadeId is the only cross-frame identity (it must be unique per
+        // live candidate: LabelCandidate.FadeId's contract, asserted in ScheduleCollision).
+        //
+        // The filter reproduces the pre-R3 emit expression exactly, on the frame the collision belonged to:
+        // _forceFadeOut still holds THAT frame's content here, because GatherSymbolPoints clears it later this Tick.
+        private void HarvestCollision()
+        {
+            if (!_collisionPending)
+            {
+                // No collision was in flight ⇒ last Tick produced no verdict (no candidates / no atlas / no labels)
+                // ⇒ no incumbents and nothing to show — the same state the pre-R3 !didBuild clear produced.
+                _placedLastFrame.Clear();
+                LastSurvivorCount = 0;
+                return;
+            }
+
+            _collisionHandle.Complete();
+            _collisionPending = false;
+
+            _placedLastFrame.Clear();
+            for (int s = 0; s < _pendingCandidateCount; s++)
+            {
+                if (_nSurvivors[s] == 0) continue;
+                long fadeId = _sjCandidates[s].FadeId;
+                if (_forceFadeOut.Contains(fadeId)) continue;
+                _placedLastFrame.Add(fadeId);
+            }
+            LastSurvivorCount = _survivorCountOut[0];
+        }
+
         // B-4a: run the greedy collision as the Burst LabelCollisionJob directly over the stage job's native output
         // pools (no managed round-trip — the stage job already wrote them native). PRE-SIZES the uniform grid on the
-        // main thread (a Burst job cannot grow a NativeArray), then schedules + Completes the job (synchronous —
-        // B-4b defers the Complete a frame). Returns the survivor count; _sjCandidates is left sorted in placement
-        // order and _nSurvivors holds the per-sorted-position survivor flags the emit loop reads.
-        private int RunCollision(int candidateCount, int boxCount)
+        // main thread (a Burst job cannot grow a NativeArray, and this sizing pass stays on frame N — R4, not this
+        // stage), then SCHEDULES the job and returns without completing it. R3 (design §10.3): the Complete moves to
+        // the START of the next Tick (HarvestCollision above), so the main thread never blocks on the single-threaded
+        // greedy — it runs in the inter-frame gap instead. _sjCandidates is left sorted in placement order by the
+        // job and _nSurvivors holds the per-sorted-position survivor flags; both are read by the NEXT Tick's harvest,
+        // not this one — see _pendingCandidateCount's field comment for why the count must be pinned here.
+        private void ScheduleCollision(int candidateCount, int boxCount)
         {
-            if (candidateCount <= 0) return 0;
+            if (candidateCount <= 0) return; // nothing pending ⇒ next Tick's harvest reads "no verdict"
 
             _nSurvivors.Resize(candidateCount, NativeArrayOptions.UninitializedMemory);
             NativeArray<LabelCandidate> nc = _sjCandidates.AsArray(); // stage job's candidates — sorted IN PLACE here
@@ -759,6 +914,9 @@ namespace MapRenderer.Unity.Text.Placement
             // the never-reproduced malformed-stream source behind the dense-scene node-pool overflow; catch it
             // loudly here with the offending candidate, rather than as a silent grid corruption downstream.
             AssertCandidateRangesTile(nc, candidateCount, boxCount);
+            // R3: FadeId is now the DISPLAY key (HarvestCollision re-keys by it), so two live candidates sharing one
+            // would both show when one wins — see LabelCandidate.FadeId's uniqueness contract and this assert's doc.
+            AssertFadeIdsUnique(nc, candidateCount);
 
             // Pre-size the uniform grid: CellHead = W*H (filled -1); the node arrays bound the job's inserts.
             // The bound is counted PER CANDIDATE box-reference (NodeUpperBoundByCandidates), NOT per unique box, so
@@ -775,7 +933,7 @@ namespace MapRenderer.Unity.Text.Placement
             NativeArray<int> cellHead = _gridCellHead.AsArray();
             for (int c = 0; c < cells; c++) cellHead[c] = -1;
 
-            new LabelCollisionJob
+            _collisionHandle = new LabelCollisionJob
             {
                 Candidates     = nc, CandidateCount = candidateCount,
                 Boxes          = nb, BoxCount = boxCount,
@@ -783,13 +941,57 @@ namespace MapRenderer.Unity.Text.Placement
                 CellHead       = cellHead, NodeBox = _gridNodeBox.AsArray(), NodeNext = _gridNodeNext.AsArray(),
                 GridMinX       = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
                 GridW          = dims.W, GridH = dims.H,
-            }.Schedule().Complete();
+            }.Schedule();
+            // Without this the job may not be handed to a worker until the next sync point, which would defeat the
+            // entire point of deferring — the wait would just move to wherever the next implicit sync lands.
+            JobHandle.ScheduleBatchedJobs();
 
-            return _survivorCountOut[0];
+            _collisionPending = true;
+            _pendingCandidateCount = candidateCount;
+        }
+
+        // Debug-only (UNITY_ASSERTIONS ⇒ Editor + development builds; compiled out of release). R3 promotes FadeId
+        // from a fade/sort key to the DISPLAY key — the emit loop shows a candidate iff its FadeId is in last frame's
+        // survivor set — so LabelCandidate.FadeId's "unique per live candidate" contract is now load-bearing for what
+        // the user sees, not just for the opacity record. Two candidates sharing an id would both show when one wins.
+        // Scope limit: this checks duplicates among the candidates of ONE frame; it cannot see sequential reuse of an
+        // id across frames (that is a designed behaviour — a stable FadeId across frames is what lets a label keep
+        // its opacity record instead of popping — so no cross-frame check is offered; see LabelDeferredCollisionTests
+        // / the R3 design doc for the one known sequential-reuse fixture hazard this does NOT catch).
+        //
+        // Reuses the persistent _debugFadeIdSeen field rather than constructing a fresh NativeHashSet per call: a
+        // per-call Allocator.Temp container's AtomicSafetyHandle/DisposeSentinel bookkeeping under
+        // ENABLE_UNITY_COLLECTIONS_CHECKS (on in the Editor, where UNITY_ASSERTIONS is also on) allocates managed
+        // memory occasionally — LabelPlacementAllocTests caught exactly this as a periodic steady-state GC alloc
+        // once a NativeHashSet<long>(Allocator.Temp) was constructed here every Tick. Instance method (not static)
+        // so it can reach the field; not itself a production cost (the whole body is compiled out of release).
+        [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
+        private void AssertFadeIdsUnique(NativeArray<LabelCandidate> candidates, int candidateCount)
+        {
+            // Lazy allocation (see the field's doc): a release build never reaches this line ([Conditional]
+            // strips the call site), so _debugFadeIdSeen stays a default (uncreated) struct there — zero
+            // allocation. 64 (not PlacedSetInitialCapacity's 16384) — Clear() keeps whatever capacity the set
+            // grows to, so it warms itself after one real-scene frame; growth is a native realloc, which cannot
+            // reintroduce the managed GC alloc the persistent-reuse pattern was adopted to fix.
+            if (!_debugFadeIdSeen.IsCreated) _debugFadeIdSeen = new NativeHashSet<long>(64, Allocator.Persistent);
+            _debugFadeIdSeen.Clear();
+            for (int i = 0; i < candidateCount; i++)
+            {
+                LabelCandidate c = candidates[i];
+                if (!_debugFadeIdSeen.Add(c.FadeId))
+                {
+                    UnityEngine.Debug.LogAssertion(
+                        $"[LabelPlacementSystem] candidate[{i}] (LabelIndex={c.LabelIndex}, FeatureIndex={c.FeatureIndex}, " +
+                        $"TileKey={c.TileKey}) shares FadeId={c.FadeId} with an earlier candidate this frame — " +
+                        "LabelCandidate.FadeId must be unique per live candidate (R3 promotes it to the display key); " +
+                        "the loser will incorrectly show alongside the winner.");
+                    return;
+                }
+            }
         }
 
         // Debug-only (UNITY_ASSERTIONS ⇒ Editor + Development builds; compiled out of release, so it costs a live
-        // build NOTHING — no field, no allocation, reads only what RunCollision already holds). Asserts the staged
+        // build NOTHING — no field, no allocation, reads only what ScheduleCollision already holds). Asserts the staged
         // candidate stream is well-formed: box ranges tiling [0,boxCount) contiguously in staging order
         // (LabelCandidate.TryFindRangeTilingViolation's contract). A fire is the never-reproduced overlap/over-range
         // source behind the dense-scene collision overflow — release still never crashes (the sizing + Insert guard
@@ -840,11 +1042,12 @@ namespace MapRenderer.Unity.Text.Placement
             // Null batch = an EMPTY frame (the demo overload's `batch?.Count ?? 0` documents null as valid input):
             // zero the mirror + reset the sentinel so TickCore's `_mNonDroppedCount > 0` gate no-ops (clearing any
             // labels a prior Tick left shown) instead of NRE-ing on batch.BuildId below.
-            if (batch == null) { _mCount = 0; _mNonDroppedCount = 0; _lastBatch = null; _mirrorBuildId = long.MinValue; return; }
-            // §7.10 1a: identity AND BuildId — see _lastBatch's header comment.
-            if (ReferenceEquals(batch, _lastBatch) && batch.BuildId == _mirrorBuildId) return;
-            _lastBatch = batch;
-            _mirrorBuildId = batch.BuildId;
+            if (batch == null) { _mCount = 0; _mNonDroppedCount = 0; _mirrorSource = null; _mirrorVersion = long.MinValue; return; }
+            // §7.10 1a: identity AND version — see _mirrorSource's header comment.
+            if (ReferenceEquals(batch, _mirrorSource) && batch.BuildId == _mirrorVersion) return;
+            MirrorRebuildCount++;
+            _mirrorSource = batch;
+            _mirrorVersion = batch.BuildId;
             int n = batch.Count;
             MirrorKinds(_mKinds, batch.Kinds, n);
             Mirror(_mDetail, batch.Detail, n); Mirror(_mWorldCount, batch.WorldCount, n);
@@ -890,132 +1093,179 @@ namespace MapRenderer.Unity.Text.Placement
         // Build over the same list (the parity teeth). departing/coverageFading are the per-frame overrides, applied
         // here from the plan (fenced OUT of the immutable block).
         //
-        // (D) Cross-overload stale-mirror guard: writes the mirror UNCONDITIONALLY (never the BuildId early-out) and
-        // RESETS the demo-path sentinel at the end, so a subsequent demo Tick(batch) can't early-out on stale
-        // production _m* and skip its own refresh.
+        // R1 (memoized gather): everything below the entry early-out is a pure function of the WINNER SET
+        // (plan.BlockId/LocalIndex/Blocks/WinnerCount), which changes only on a front-swap — see
+        // SymbolLabelSubsystem's _frontSetVersion. On a same-source-and-version frame every heavy pool below is
+        // already correct, so only the three per-frame masks are rewritten (WritePerFrameMasks).
         internal void GatherIntoMirror(SymbolGatherPlan plan)
         {
+            // Same SOURCE and same SET version ⇒ every pool below is already correct (the set is the only thing they
+            // depend on). The count term is the release-build backstop: if a future front-mutation site ever lands
+            // without a version bump, fall through and rebuild rather than memcpy a mismatched length (a checked
+            // throw in the Editor, a raw memmove out of bounds in a player).
+            bool sameSourceAndVersion = plan != null && ReferenceEquals(plan, _mirrorSource)
+                                         && plan.WinnerSetVersion == _mirrorVersion;
+            if (sameSourceAndVersion)
+            {
+                AssertMemoPlanMatchesMirror(plan);        // debug-only — fires iff the key says "same set" but the
+                                                           // count disagrees, i.e. exactly when the backstop below engages
+                if (plan.WinnerCount == _mCount)
+                {
+                    WritePerFrameMasks(plan);             // the ONLY per-frame work on a held mirror
+                    return;
+                }
+            }
+
+            MirrorRebuildCount++;
             int winners = plan?.WinnerCount ?? 0;
 
-            // First pass: total per-pool sizes, so each mirror list is resized ONCE (alloc-free once warm).
-            int records = winners, points = 0, curveds = 0, quads = 0, glyphs = 0, anchors = 0, fades = 0, worlds = 0;
-            for (int r = 0; r < winners; r++)
+            // The three per-frame masks are WritePerFrameMasks' inputs, never read by SymbolGatherJob — resized
+            // here on the main thread exactly as the old inline resize did (:1075-1076 pre-Burst-gather).
+            _mRecordDeparting.ResizeUninitialized(winners); _mRecordCoverageFading.ResizeUninitialized(winners);
+            _mRecordDropped.ResizeUninitialized(winners);
+
+            if (winners == 0)
             {
-                SymbolTileLabelBlock block = plan.Blocks[plan.BlockId[r]];
-                int li = plan.LocalIndex[r];
-                int detail = block.Detail[li];
-                if (block.Kinds[li] == (byte)SymbolLabelBatch.Kind.Point)
+                // Degenerate case: the old two loops fell through to zero naturally over `for (int r = 0; r < 0; …)`.
+                // An explicit branch keeps that behaviour without dispatching a job over an empty view table or
+                // dereferencing a null plan.Blocks/plan.BlockCount.
+                _mKinds.ResizeUninitialized(0); _mDetail.ResizeUninitialized(0);
+                _mWorldCount.ResizeUninitialized(0); _mWorldStart.ResizeUninitialized(0);
+                _mRepAnchor.ResizeUninitialized(0);
+                _mPoints.ResizeUninitialized(0); _mPointQuadStart.ResizeUninitialized(0); _mPointQuadCount.ResizeUninitialized(0);
+                _mCurveds.ResizeUninitialized(0);
+                _mCurvedGlyphStart.ResizeUninitialized(0); _mCurvedGlyphCount.ResizeUninitialized(0);
+                _mCurvedAnchorStart.ResizeUninitialized(0); _mCurvedAnchorCount.ResizeUninitialized(0);
+                _mCurvedAnchorFadeStart.ResizeUninitialized(0);
+                _mQuads.ResizeUninitialized(0); _mGlyphs.ResizeUninitialized(0);
+                _mAnchors.ResizeUninitialized(0); _mFadeIds.ResizeUninitialized(0);
+                _mWorldPoints.ResizeUninitialized(0);
+
+                _mPointCount = 0; _mCurvedCount = 0;
+                _mQuadCount = 0; _mGlyphCount = 0; _mAnchorCount = 0; _mFadeCount = 0; _mWorldPointCount = 0;
+                _mMaxBoxes = 0; _mMaxQuads = 0; _mMaxCandidates = 0;
+            }
+            else
+            {
+                BuildBlockViews(plan); // main-thread, alloc-free (see its own doc) — the per-frame view table
+
+                // Line-for-line Burst transliteration of the two managed loops this replaces — see
+                // SymbolGatherJob's own doc for the byte-identity argument and the job-shape precedent.
+                new SymbolGatherJob
                 {
-                    points++;
-                    quads += block.PointQuadCount[detail];
-                    worlds += block.WorldCount[li];
-                }
-                else
-                {
-                    curveds++;
-                    glyphs += block.CurvedGlyphCount[detail];
-                    int ac = block.CurvedAnchorCount[detail];
-                    anchors += ac; fades += ac + 1;
-                    worlds += block.WorldCount[li];
-                }
+                    BlockViews = _gatherBlockViews.AsArray(),
+                    BlockId = plan.BlockId.AsArray(),
+                    LocalIndex = plan.LocalIndex.AsArray(),
+                    WinnerCount = winners,
+                    MKinds = _mKinds, MDetail = _mDetail, MWorldCount = _mWorldCount, MWorldStart = _mWorldStart,
+                    MRepAnchor = _mRepAnchor,
+                    MPoints = _mPoints, MPointQuadStart = _mPointQuadStart, MPointQuadCount = _mPointQuadCount,
+                    MCurveds = _mCurveds,
+                    MCurvedGlyphStart = _mCurvedGlyphStart, MCurvedGlyphCount = _mCurvedGlyphCount,
+                    MCurvedAnchorStart = _mCurvedAnchorStart, MCurvedAnchorCount = _mCurvedAnchorCount,
+                    MCurvedAnchorFadeStart = _mCurvedAnchorFadeStart,
+                    MQuads = _mQuads, MGlyphs = _mGlyphs, MAnchors = _mAnchors, MFadeIds = _mFadeIds,
+                    MWorldPoints = _mWorldPoints,
+                    OutCounts = _gatherCounts,
+                }.Run();
+
+                _mPointCount = _gatherCounts[SymbolGatherJob.CountPoint];
+                _mCurvedCount = _gatherCounts[SymbolGatherJob.CountCurved];
+                _mQuadCount = _gatherCounts[SymbolGatherJob.CountQuad];
+                _mGlyphCount = _gatherCounts[SymbolGatherJob.CountGlyph];
+                _mAnchorCount = _gatherCounts[SymbolGatherJob.CountAnchor];
+                _mFadeCount = _gatherCounts[SymbolGatherJob.CountFade];
+                _mWorldPointCount = _gatherCounts[SymbolGatherJob.CountWorldPoint];
+                _mMaxBoxes = _gatherCounts[SymbolGatherJob.CountMaxBoxes];
+                _mMaxQuads = _gatherCounts[SymbolGatherJob.CountMaxQuads];
+                _mMaxCandidates = _gatherCounts[SymbolGatherJob.CountMaxCandidates];
             }
 
-            _mKinds.ResizeUninitialized(records); _mDetail.ResizeUninitialized(records);
-            _mWorldCount.ResizeUninitialized(records); _mWorldStart.ResizeUninitialized(records);
-            _mRepAnchor.ResizeUninitialized(records);
-            _mRecordDeparting.ResizeUninitialized(records); _mRecordCoverageFading.ResizeUninitialized(records);
-            _mRecordDropped.ResizeUninitialized(records);
-            _mPoints.ResizeUninitialized(points); _mPointQuadStart.ResizeUninitialized(points); _mPointQuadCount.ResizeUninitialized(points);
-            _mCurveds.ResizeUninitialized(curveds);
-            _mCurvedGlyphStart.ResizeUninitialized(curveds); _mCurvedGlyphCount.ResizeUninitialized(curveds);
-            _mCurvedAnchorStart.ResizeUninitialized(curveds); _mCurvedAnchorCount.ResizeUninitialized(curveds);
-            _mCurvedAnchorFadeStart.ResizeUninitialized(curveds);
-            _mQuads.ResizeUninitialized(quads); _mGlyphs.ResizeUninitialized(glyphs);
-            _mAnchors.ResizeUninitialized(anchors); _mFadeIds.ResizeUninitialized(fades);
-            _mWorldPoints.ResizeUninitialized(worlds);
+            _mCount = winners; // set BEFORE WritePerFrameMasks — it bounds its copies on THIS frame's count, not
+                                // the previous one (calling it before would write a partial/over-long mask range)
 
-            NativeArray<SymbolQuad>  dstQuads   = _mQuads.AsArray();
-            NativeArray<CurvedGlyph> dstGlyphs  = _mGlyphs.AsArray();
-            NativeArray<LineAnchor>  dstAnchors = _mAnchors.AsArray();
-            NativeArray<long>        dstFades   = _mFadeIds.AsArray();
-            NativeArray<double3>     dstWorlds  = _mWorldPoints.AsArray();
+            // R1: the per-frame masks (Departing/CoverageFading/Dropped) + _mNonDroppedCount are the ONLY per-frame
+            // inputs — one writer shared by the heavy path and the memo-hit early-out above, so mask byte-identity
+            // between the two is structural, not tested-for.
+            WritePerFrameMasks(plan);
 
-            int mPoint = 0, mCurved = 0, mQuad = 0, mGlyph = 0, mAnchor = 0, mFade = 0, mWorld = 0;
-            int maxBoxes = 0, maxQuads = 0, maxCandidates = 0;
-            int droppedCount = 0; // D1 fix-pass (Blocker 1): counted below, feeds _mNonDroppedCount
+            // Stamp the shared source key — a later Tick with the SAME plan+version memo-hits above; a demo
+            // Tick(batch) or a different plan mismatches on identity and falls through to its own rebuild.
+            _mirrorSource = plan; _mirrorVersion = plan?.WinnerSetVersion ?? long.MinValue;
+        }
 
-            for (int r = 0; r < winners; r++)
+        // Burst-gather Stage 1 (design doc §2.4): rebuild the reusable view table from plan.Blocks[0,
+        // plan.BlockCount) — one SymbolBlockView per block, each field a non-owning UnsafeList<T> pointer view
+        // over that block's OWN Allocator.Persistent array. NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr performs
+        // an AtomicSafetyHandle.CheckRead per call — a disposed block throws HERE, on the main thread, with a
+        // real stack, rather than the job silently reading freed memory (§2.3's decisive argument for this
+        // storage shape). Managed-allocation-free: indexing plan.Blocks (a plain array) and taking pointers off
+        // already-live NativeArrays allocates nothing (SymbolTileLabelBlockBaker.Bake always allocates all 19
+        // arrays, even at length 0, so no IsCreated guard is needed here). Called from GatherIntoMirror, above.
+        private unsafe void BuildBlockViews(SymbolGatherPlan plan)
+        {
+            _gatherBlockViews.ResizeUninitialized(plan.BlockCount);
+            for (int b = 0; b < plan.BlockCount; b++)
             {
-                SymbolTileLabelBlock block = plan.Blocks[plan.BlockId[r]];
-                int li = plan.LocalIndex[r];
-                int detail = block.Detail[li];
-                int worldStartSrc = block.WorldStart[li], worldCount = block.WorldCount[li];
-                int worldStart = mWorld;
-                if (worldCount > 0) NativeArray<double3>.Copy(block.WorldPoints, worldStartSrc, dstWorlds, mWorld, worldCount);
-                mWorld += worldCount;
-
-                if (block.Kinds[li] == (byte)SymbolLabelBatch.Kind.Point)
+                SymbolTileLabelBlock block = plan.Blocks[b];
+                _gatherBlockViews[b] = new SymbolBlockView
                 {
-                    int quadStartSrc = block.PointQuadStart[detail], quadCount = block.PointQuadCount[detail];
-                    int quadStart = mQuad;
-                    if (quadCount > 0) NativeArray<SymbolQuad>.Copy(block.Quads, quadStartSrc, dstQuads, mQuad, quadCount);
-                    mQuad += quadCount;
+                    Kinds = new UnsafeList<byte>((byte*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Kinds), block.Kinds.Length),
+                    Detail = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Detail), block.Detail.Length),
+                    WorldStart = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.WorldStart), block.WorldStart.Length),
+                    WorldCount = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.WorldCount), block.WorldCount.Length),
+                    RepAnchor = new UnsafeList<double3>((double3*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.RepAnchor), block.RepAnchor.Length),
 
-                    int slot = mPoint++;
-                    _mPoints[slot] = block.Points[detail];
-                    _mPointQuadStart[slot] = quadStart; _mPointQuadCount[slot] = quadCount;
+                    Points = new UnsafeList<PointStageInput>((PointStageInput*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Points), block.Points.Length),
+                    PointQuadStart = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.PointQuadStart), block.PointQuadStart.Length),
+                    PointQuadCount = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.PointQuadCount), block.PointQuadCount.Length),
 
-                    _mKinds[r] = (byte)SymbolLabelBatch.Kind.Point; _mDetail[r] = slot;
-                    _mWorldStart[r] = worldStart; _mWorldCount[r] = worldCount; _mRepAnchor[r] = block.RepAnchor[li];
+                    Curveds = new UnsafeList<CurvedStageInput>((CurvedStageInput*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Curveds), block.Curveds.Length),
+                    CurvedGlyphStart = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.CurvedGlyphStart), block.CurvedGlyphStart.Length),
+                    CurvedGlyphCount = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.CurvedGlyphCount), block.CurvedGlyphCount.Length),
+                    CurvedAnchorStart = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.CurvedAnchorStart), block.CurvedAnchorStart.Length),
+                    CurvedAnchorCount = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.CurvedAnchorCount), block.CurvedAnchorCount.Length),
+                    CurvedAnchorFadeStart = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.CurvedAnchorFadeStart), block.CurvedAnchorFadeStart.Length),
 
-                    maxBoxes += 1; maxQuads += quadCount; maxCandidates += 1; // mirrors SymbolLabelBatch.AddPoint
-                }
-                else
-                {
-                    int glyphStartSrc = block.CurvedGlyphStart[detail], glyphCount = block.CurvedGlyphCount[detail];
-                    int glyphStart = mGlyph;
-                    if (glyphCount > 0) NativeArray<CurvedGlyph>.Copy(block.Glyphs, glyphStartSrc, dstGlyphs, mGlyph, glyphCount);
-                    mGlyph += glyphCount;
-
-                    int anchorStartSrc = block.CurvedAnchorStart[detail], anchorCount = block.CurvedAnchorCount[detail];
-                    int anchorStart = mAnchor;
-                    if (anchorCount > 0) NativeArray<LineAnchor>.Copy(block.Anchors, anchorStartSrc, dstAnchors, mAnchor, anchorCount);
-                    mAnchor += anchorCount;
-
-                    int fadeStartSrc = block.CurvedAnchorFadeStart[detail], fadeCount = anchorCount + 1;
-                    int fadeStart = mFade;
-                    NativeArray<long>.Copy(block.AnchorFadeIds, fadeStartSrc, dstFades, mFade, fadeCount);
-                    mFade += fadeCount;
-
-                    int slot = mCurved++;
-                    _mCurveds[slot] = block.Curveds[detail];
-                    _mCurvedGlyphStart[slot] = glyphStart; _mCurvedGlyphCount[slot] = glyphCount;
-                    _mCurvedAnchorStart[slot] = anchorStart; _mCurvedAnchorCount[slot] = anchorCount;
-                    _mCurvedAnchorFadeStart[slot] = fadeStart;
-
-                    _mKinds[r] = (byte)SymbolLabelBatch.Kind.Curved; _mDetail[r] = slot;
-                    _mWorldStart[r] = worldStart; _mWorldCount[r] = worldCount; _mRepAnchor[r] = block.RepAnchor[li];
-
-                    int placements = anchorCount + 1; // mirrors SymbolLabelBatch.AddCurved
-                    maxBoxes += placements * glyphCount; maxQuads += placements * glyphCount; maxCandidates += placements;
-                }
-
-                _mRecordDeparting[r] = plan.Departing[r];
-                _mRecordCoverageFading[r] = plan.CoverageFading[r];
-                byte dropped = plan.Dropped[r];
-                _mRecordDropped[r] = dropped; // D1: resident + masked, never compacted out
-                if (dropped != 0) droppedCount++;
+                    Quads = new UnsafeList<SymbolQuad>((SymbolQuad*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Quads), block.Quads.Length),
+                    Glyphs = new UnsafeList<CurvedGlyph>((CurvedGlyph*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Glyphs), block.Glyphs.Length),
+                    Anchors = new UnsafeList<LineAnchor>((LineAnchor*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Anchors), block.Anchors.Length),
+                    WorldPoints = new UnsafeList<double3>((double3*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.WorldPoints), block.WorldPoints.Length),
+                    AnchorFadeIds = new UnsafeList<long>((long*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.AnchorFadeIds), block.AnchorFadeIds.Length),
+                };
             }
+        }
 
-            _mCount = records; _mNonDroppedCount = records - droppedCount; // Blocker 1: TickCore gates on THIS
-            _mPointCount = mPoint; _mCurvedCount = mCurved;
-            _mQuadCount = mQuad; _mGlyphCount = mGlyph; _mAnchorCount = mAnchor; _mFadeCount = mFade;
-            _mWorldPointCount = mWorld;
-            _mMaxBoxes = maxBoxes; _mMaxQuads = maxQuads; _mMaxCandidates = maxCandidates;
+        // R1: the ONLY per-frame inputs to the mirror — the three per-record byte masks (LabelTileCoverageFilter's
+        // Keep/Fade/Drop classification + the store's departing flag) and the _mNonDroppedCount they derive.
+        // Everything else the gather writes is a pure function of the winner SET, so a same-version frame runs only
+        // this. Source and destination are already native and already the same length (SymbolGatherPlan's
+        // NativeList<byte>s are WinnerCount long; the mirror masks were sized to `records` by the rebuild that
+        // filled them), so this is a straight memcpy per mask — it never resizes, reallocates, or walks a record.
+        // This is what makes the plan.WinnerCount == _mCount term in GatherIntoMirror's memo predicate non-optional
+        // (see that predicate's comment for why a length mismatch here would be unsafe).
+        private void WritePerFrameMasks(SymbolGatherPlan plan)
+        {
+            if (plan == null || _mCount == 0) { _mNonDroppedCount = 0; return; } // clean no-op (incl. the null-plan heavy path)
+            NativeArray<byte>.Copy(plan.Departing.AsArray(), 0, _mRecordDeparting.AsArray(), 0, _mCount);
+            NativeArray<byte>.Copy(plan.CoverageFading.AsArray(), 0, _mRecordCoverageFading.AsArray(), 0, _mCount);
+            NativeArray<byte>.Copy(plan.Dropped.AsArray(), 0, _mRecordDropped.AsArray(), 0, _mCount);
+            _mNonDroppedCount = _mCount - plan.DroppedCount; // Blocker 1: TickCore gates on THIS
+        }
 
-            // (D) reset the demo-path sentinel so a later demo Tick(batch) re-refreshes rather than early-out on
-            // this production mirror content.
-            _lastBatch = null; _mirrorBuildId = long.MinValue;
+        // Debug-only (fires loudly in the Editor / development builds — where the RED-verify and gate run — and
+        // costs a release player nothing): the memo key said "same set" (source + version match) but the record
+        // count disagrees. That should never happen (every front-content change bumps the version), so a fire
+        // means a future front-mutation site landed without bumping WinnerSetVersion — exactly the scenario the
+        // GatherIntoMirror predicate's count term exists to survive (see its comment).
+        [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
+        private void AssertMemoPlanMatchesMirror(SymbolGatherPlan plan)
+        {
+            if (plan.WinnerCount == _mCount) return;
+            UnityEngine.Debug.LogAssertion(
+                $"[LabelPlacementSystem] gather memo key matched (same plan, WinnerSetVersion={plan.WinnerSetVersion}) " +
+                $"but WinnerCount={plan.WinnerCount} != mirrored count={_mCount} — a front-content change did not " +
+                "bump WinnerSetVersion; falling back to a full rebuild this frame.");
         }
 
         private static void Mirror<T>(NativeList<T> dst, T[] src, int count) where T : unmanaged
@@ -1098,21 +1348,10 @@ namespace MapRenderer.Unity.Text.Placement
             return a;
         }
 
-        // A-5 per-frame: resolve each point/anchor fade id against _placedLastFrame into native arrays the job reads
-        // (the one managed, main-thread piece that stays outside the Burst job — it needs the placed-set HashSet).
-        // Reads the native mirror (_mPoints/_mFadeIds + counts) — both fill paths populate it.
-        private void ResolveIncumbency()
-        {
-            _sjPointWasPlaced.ResizeUninitialized(_mPointCount);
-            for (int i = 0; i < _mPointCount; i++)
-                _sjPointWasPlaced[i] = (byte)(_placedLastFrame.Contains(_mPoints[i].FadeId) ? 1 : 0);
-            _sjAnchorWasPlaced.ResizeUninitialized(_mFadeCount);
-            for (int i = 0; i < _mFadeCount; i++)
-                _sjAnchorWasPlaced[i] = (byte)(_placedLastFrame.Contains(_mFadeIds[i]) ? 1 : 0);
-        }
-
         // Pre-size the job's output pools to the mirror worst case (Burst cannot grow) + the arc-walk scratch to at
         // least the longest path (the total gathered-point count is a safe upper bound for any single path).
+        // R2: also sizes _sjAnchorWasPlaced — the A-5 anchor-incumbency resolve moved into LabelStageJob itself
+        // (Burst), so this method only sizes the scratch the job fills; it no longer resolves any fade id.
         private void PreSizeStageOutputs()
         {
             _sjBoxes.ResizeUninitialized(math.max(1, _mMaxBoxes));
@@ -1122,6 +1361,10 @@ namespace MapRenderer.Unity.Text.Placement
             int scratch = math.max(1, _symbolPoints.Length);
             _sjPath.ResizeUninitialized(scratch);
             _sjCum.ResizeUninitialized(scratch);
+            // No math.max(1, …) floor here, unlike the resizes above: a zero-length _mFadeCount is fine — the
+            // job's fill loop and the curved arm's fade-id slice are both empty in that case, so there's no OOB
+            // to guard against.
+            _sjAnchorWasPlaced.ResizeUninitialized(_mFadeCount);
         }
 
         private void RunStageJob(float bearingRadians, double2 viewportLogicalPx)
@@ -1140,7 +1383,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // Stage AC (curved-world): the SAME gathered world polyline Screen was projected FROM
                 // (_symbolPoints persists across the synchronous .Run() call below — see its own field doc).
                 WorldPointsRender = _symbolPoints.AsArray(),
-                PointWasPlaced = _sjPointWasPlaced.AsArray(), AnchorWasPlaced = _sjAnchorWasPlaced.AsArray(),
+                AnchorWasPlaced = _sjAnchorWasPlaced.AsArray(), Placed = _placedLastFrame.AsReadOnly(),
                 Bearing = bearingRadians, Viewport = viewportLogicalPx,
                 PathScratch = _sjPath.AsArray(), CumScratch = _sjCum.AsArray(),
                 Boxes = _sjBoxes.AsArray(), StagedQuads = _sjQuads.AsArray(),
@@ -1154,10 +1397,27 @@ namespace MapRenderer.Unity.Text.Placement
         // it SNAPS straight to the target — a single-Tick test then renders fully-placed labels (byte-parity).
         private float EaseFade(long fadeId, float target, float deltaTime)
         {
-            float current = _fadeOpacity.TryGetValue(fadeId, out float v) ? v : 0f;
+            bool had = _fadeOpacity.TryGetValue(fadeId, out float current); // absent ≡ 0 (`current` defaults to 0)
             float step = deltaTime / FadeDurationSeconds;
             float next = target > current ? math.min(current + step, target) : math.max(current - step, target);
+
+            // Storing an invisible identity would leak it permanently: DecayUnseenFadeRecords only drops keys NOT
+            // seen this frame, and a staged candidate is always seen — so every candidate that never places (most
+            // of them, in a dense view) would park a 0 that nothing collects. Drop instead. This is the same floor
+            // rule DecayUnseenFadeRecords already applies to its own decay; it just never reached the hot path.
+            // Both readers outside this loop (MarkFadeOutIfAlive / TryForceFadeOut) test `TryGetValue && > epsilon`,
+            // under which an ABSENT entry and ANY sub-epsilon stored value read alike — covering every value this
+            // branch can discard, not just exact zeros — so dropping is behaviour-preserving there.
+            // `target <= current` confines the drop to a fade-OUT (or an already-invisible identity): without it, a
+            // fade-IN whose first step landed below epsilon would be dropped and restart from 0 every frame.
+            if (next <= FadeEpsilon && target <= current)
+            {
+                if (had) _fadeOpacity.Remove(fadeId);
+                return next; // <= epsilon ⇒ the caller skips it; nothing is emitted
+            }
+
             _fadeOpacity[fadeId] = next;
+            _seenFade.Add(fadeId); // see the field doc: seen ⟺ stored, so the decay sweep can trust it
             return next;
         }
 
@@ -1273,6 +1533,17 @@ namespace MapRenderer.Unity.Text.Placement
         /// disposes the native scratch buffers. Idempotent.</summary>
         protected override void DoDispose()
         {
+            // R3: a scheduled-but-never-completed collision holds _sjCandidates/_sjBoxes/_nSurvivors/_survivorCountOut
+            // and the grid lists — disposing them under a live job is a use-after-free (a safety-system throw in the
+            // Editor). This is the only teardown path (VerifiedDisposable guarantees DoDispose runs at most once).
+            if (_collisionPending) { _collisionHandle.Complete(); _collisionPending = false; }
+
+            // R1: _mirrorSource otherwise retains a strong reference to the plan/batch indefinitely (unlike the old
+            // per-tick _lastBatch reset) — SymbolLabelSubsystem.Dispose disposes _gatherPlan while this system may
+            // still point at it, and a later gather with that plan would memo-hit and memcpy from disposed
+            // NativeLists. Not reachable through MapView teardown today; free to close.
+            _mirrorSource = null; _mirrorVersion = long.MinValue;
+
             _worldRenderer.Dispose();
 
             _worldTextMaterial.DestroySafely();
@@ -1292,6 +1563,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gridNodeNext.Dispose();
             _survivorCountOut.Dispose();
 
+            _gatherBlockViews.Dispose(); _gatherCounts.Dispose();                    // Burst-gather Stage 1 buffers
             _mKinds.Dispose(); _mDetail.Dispose(); _mWorldCount.Dispose();          // Lever C step 3b native buffers
             _mPointQuadStart.Dispose(); _mPointQuadCount.Dispose();
             _mCurvedGlyphStart.Dispose(); _mCurvedGlyphCount.Dispose();
@@ -1300,9 +1572,13 @@ namespace MapRenderer.Unity.Text.Placement
             _mQuads.Dispose(); _mGlyphs.Dispose(); _mAnchors.Dispose(); _mFadeIds.Dispose();
             _mWorldStart.Dispose(); _mRepAnchor.Dispose(); _mWorldPoints.Dispose();       // Stage-2 record-level fields
             _mRecordDeparting.Dispose(); _mRecordCoverageFading.Dispose(); _mRecordDropped.Dispose();
-            _sjPointOffset.Dispose(); _sjPointWasPlaced.Dispose(); _sjAnchorWasPlaced.Dispose();
+            _sjPointOffset.Dispose(); _sjAnchorWasPlaced.Dispose();
             _sjBoxes.Dispose(); _sjQuads.Dispose(); _sjCandidates.Dispose(); _sjEmit.Dispose();
             _sjCounts.Dispose(); _sjPath.Dispose(); _sjCum.Dispose();
+            _placedLastFrame.Dispose(); // R2: native set, ctor-allocated alongside the other persistent containers
+            // R3: AssertFadeIdsUnique's persistent scratch set (see its field doc) — lazily allocated, so a
+            // release build (or an Editor instance that never staged a candidate) may never have created it.
+            if (_debugFadeIdSeen.IsCreated) _debugFadeIdSeen.Dispose();
         }
     }
 }

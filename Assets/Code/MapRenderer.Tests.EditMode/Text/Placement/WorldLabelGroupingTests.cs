@@ -72,6 +72,12 @@ namespace MapRenderer.Tests.Text.Placement
                 // without it, collision would cull all but one (mirrors LabelPlacementAllocTests' identical note).
                 AnchorRender = anchorRender, Layout = layout, Paint = LabelPaint.Default,
                 TextSizePx = 24f, SortKey = 0f, FeatureIndex = featureIndex, TileKey = tileKey, AllowOverlap = true,
+                // R3: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey
+                // — so two labels sharing the SAME anchor (as every call site here does) with Text left at its
+                // default would collide on FadeId. Under R3, FadeId is the display key (LabelCandidate.FadeId's
+                // uniqueness contract), so co-live candidates sharing an id both show when one wins. Distinct
+                // per-featureIndex text keeps every call site's identity unique.
+                Text = "T" + featureIndex,
             };
         }
 
@@ -90,6 +96,9 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 AnchorRender = anchorRender, Layout = layout, Kind = LabelKind.Icon, Paint = LabelPaint.Default,
                 TextSizePx = TextQuadLayout.OneEm, SortKey = 0f, FeatureIndex = featureIndex, TileKey = tileKey, AllowOverlap = true,
+                // R3: same FadeId-uniqueness note as MakeTextLabel — IconImage (not Text) is the icon-kind
+                // identity fold; distinct per-featureIndex.
+                IconImage = "icon" + featureIndex,
             };
         }
 
@@ -126,6 +135,8 @@ namespace MapRenderer.Tests.Text.Placement
                     MakeIconLabel(frame.SceneOriginRender, tileAKey, featureIndex: 1),
                     MakeTextLabel(frame.SceneOriginRender, tileBKey, featureIndex: 2),
                 };
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
                 system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(labels.Count, system.LastQuadCount, "DIAGNOSTIC precondition: all three labels must place (no cull).");

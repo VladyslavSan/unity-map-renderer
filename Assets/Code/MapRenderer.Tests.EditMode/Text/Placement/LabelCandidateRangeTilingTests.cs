@@ -1,7 +1,8 @@
 // Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast
 // dotnet core-tests project. Covers LabelCandidate.TryFindRangeTilingViolation, the debug-invariant check that
-// LabelPlacementSystem.RunCollision asserts each frame: the staged candidate box-ranges must tile [0,boxCount)
-// contiguously (StagePoint/StageCurvedAnchor append one candidate's boxes at a time — never sharing or skipping).
+// LabelPlacementSystem.ScheduleCollision asserts each frame: the staged candidate box-ranges must tile
+// [0,boxCount) contiguously (StagePoint/StageCurvedAnchor append one candidate's boxes at a time — never sharing
+// or skipping).
 
 using System;
 using NUnit.Framework;

@@ -44,6 +44,18 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeList<byte> Dropped;
         internal int WinnerCount;
 
+        // R1: how many of the WinnerCount records this Build stamped Dropped — counted here, in the loop that
+        // already branches on the decision, so LabelPlacementSystem derives _mNonDroppedCount by subtraction
+        // instead of re-walking every record each frame.
+        internal int DroppedCount;
+
+        // R1: the FRONT-SET version this plan was built from — the memo key LabelPlacementSystem.GatherIntoMirror
+        // holds its pools on. Bumped by SymbolLabelSubsystem on every front-content change (reconcile swap /
+        // SetStyle / Dispose), NOT on a store mutation: the store's CollectGeneration moves at the tile event, the
+        // FRONT moves 1-4 frames later at the swap, so a CollectGeneration key would serve a stale mirror across
+        // the swap.
+        internal int WinnerSetVersion;
+
         // Resolved once per Build from the store's ordered-blocks list — the plan's own snapshot, so a later
         // collect mutating the store's list can't dangle this frame's gather. Grows geometrically, never shrinks.
         internal SymbolTileLabelBlock[] Blocks = System.Array.Empty<SymbolTileLabelBlock>();
@@ -67,11 +79,20 @@ namespace MapRenderer.Unity.Text.Placement
         /// (Blocker 2 — replaces the old <c>i &gt;= activeCount</c> derivation); <paramref name="decisions"/> is
         /// <c>LabelTileCoverageFilter.ClassifyActive</c>'s per-record Keep/Fade/Drop decision; <paramref name="orderedBlocks"/>
         /// is the store's block list <paramref name="blockId"/> indexes.</summary>
+        /// <param name="winnerSetVersion">R1: the caller's front-set version, stamped onto <see cref="WinnerSetVersion"/>
+        /// — every caller must state one (no default). At a fixed <see cref="WinnerSetVersion"/>, <see cref="BlockId"/>
+        /// / <see cref="LocalIndex"/> / <see cref="Blocks"/> / <see cref="WinnerCount"/> must be unchanged. The three
+        /// per-record masks (<see cref="Departing"/> / <see cref="CoverageFading"/> / <see cref="Dropped"/>) are
+        /// explicitly EXEMPT — they are the per-frame inputs <c>LabelPlacementSystem.WritePerFrameMasks</c> rewrites
+        /// on every tick, held mirror or not. (In production <see cref="Departing"/> happens to be set-derived too —
+        /// it comes from <c>_frontResult.IsDeparting</c> — but the memo does not rely on that.)</param>
         internal void Build(List<int> blockId, List<int> localIndex, List<LabelInstance> collected,
-            List<byte> isDeparting, List<byte> decisions, IReadOnlyList<System.IDisposable> orderedBlocks)
+            List<byte> isDeparting, List<byte> decisions, IReadOnlyList<System.IDisposable> orderedBlocks,
+            int winnerSetVersion)
         {
             int n = collected.Count;
             WinnerCount = n;
+            WinnerSetVersion = winnerSetVersion;
             BlockId.ResizeUninitialized(n);
             LocalIndex.ResizeUninitialized(n);
             Departing.ResizeUninitialized(n);
@@ -83,6 +104,7 @@ namespace MapRenderer.Unity.Text.Placement
             if (Blocks.Length < BlockCount) System.Array.Resize(ref Blocks, BlockCount);
             for (int b = 0; b < BlockCount; b++) Blocks[b] = (SymbolTileLabelBlock)orderedBlocks[b];
 
+            int droppedCount = 0;
             for (int i = 0; i < n; i++)
             {
                 BlockId[i] = blockId[i];
@@ -90,8 +112,11 @@ namespace MapRenderer.Unity.Text.Placement
                 Departing[i] = isDeparting[i];
                 byte decision = decisions[i];
                 CoverageFading[i] = (byte)(decision == LabelTileCoverageFilter.Fade ? 1 : 0);
-                Dropped[i] = (byte)(decision == LabelTileCoverageFilter.Drop ? 1 : 0);
+                bool dropped = decision == LabelTileCoverageFilter.Drop;
+                Dropped[i] = (byte)(dropped ? 1 : 0);
+                if (dropped) droppedCount++;
             }
+            DroppedCount = droppedCount;
         }
 
         protected override void DoDispose()

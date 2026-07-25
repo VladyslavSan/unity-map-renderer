@@ -51,10 +51,25 @@ namespace MapRenderer.Tests.Text.Placement
             BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1,
         };
 
-        private static LabelInstance Point(double3 anchor, float sortKey, string text, int feature)
+        // R2: n copies of OneQuad()'s single glyph, sharing its BoundsMin/BoundsMax — identical bounds ⇒ identical
+        // LabelBox ⇒ two labels built from NQuads always overlap, so only the quad COUNT distinguishes them
+        // (used to tell which of two co-located labels won via LastQuadCount).
+        private static TextLayoutResult NQuads(int n)
+        {
+            var quads = new List<SymbolQuad>(n);
+            for (int i = 0; i < n; i++)
+                quads.Add(new SymbolQuad
+                {
+                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                    UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
+                });
+            return new TextLayoutResult { Quads = quads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
+        }
+
+        private static LabelInstance Point(double3 anchor, float sortKey, string text, int feature, TextLayoutResult layout = null)
             => new LabelInstance
             {
-                AnchorRender = anchor, Placement = SymbolPlacement.Point, Layout = OneQuad(), Paint = LabelPaint.Default,
+                AnchorRender = anchor, Placement = SymbolPlacement.Point, Layout = layout ?? OneQuad(), Paint = LabelPaint.Default,
                 TextSizePx = 24f, PaddingPx = 2f, SortKey = sortKey, Text = text, FeatureIndex = feature, TileKey = 0L,
             };
 
@@ -103,7 +118,10 @@ namespace MapRenderer.Tests.Text.Placement
         {
             using var h = new Harness();
             var label = Point(h.Origin, 0f, "A", 0);
+            // R3: the collision verdict applies one Tick late (HarvestCollision consumes the PREVIOUS Tick's
+            // scheduled job) — a fade-neutral duplicate tick (§2.6) is needed before placement can be asserted.
             h.System.Tick(in h.Frame, new List<LabelInstance> { label }, h.Atlas); // default deltaTime = +inf
+            h.System.Tick(in h.Frame, new List<LabelInstance> { label }, h.Atlas);
             Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "default deltaTime snaps the fade to full opacity");
         }
@@ -115,6 +133,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var h = new Harness();
             var labels = new List<LabelInstance> { Point(h.Origin, 0f, "A", 0) };
 
+            h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f); // R3: verdict is one Tick late (§2.6)
             h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f);
             float first = MaxAlpha(h.System);
             Assert.Greater(first, 0f, "it has started to appear");
@@ -131,6 +150,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             using var h = new Harness();
             var labels = new List<LabelInstance> { Point(h.Origin, 0f, "A", 0) };
+            h.System.Tick(in h.Frame, labels, h.Atlas); // R3: verdict is one Tick late (§2.6)
             h.System.Tick(in h.Frame, labels, h.Atlas); // snap to full
             h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: 0.05f); // same id again, small step
             Assert.Greater(MaxAlpha(h.System), 0.99f, "a persistent label stays at full opacity — no re-fade");
@@ -152,9 +172,13 @@ namespace MapRenderer.Tests.Text.Placement
                 Point(h.Origin, 5f, "B", 1),   // higher priority → the winner (fades in)
             };
 
+            // R3: each candidate-set change needs its own extra Tick before its placement can be asserted —
+            // the collision verdict a Tick's emit reads is the one harvested from the PREVIOUS Tick (§2.6).
+            h.System.Tick(in h.Frame, aOnly, h.Atlas);
             h.System.Tick(in h.Frame, aOnly, h.Atlas); // A at full opacity
             Assert.AreEqual(1, h.System.LastQuadCount);
 
+            h.System.Tick(in h.Frame, both, h.Atlas, deltaTime: 0.1f);
             h.System.Tick(in h.Frame, both, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(2, h.System.LastQuadCount, "mid-transition both draw: A fading out + B fading in");
 
@@ -174,9 +198,12 @@ namespace MapRenderer.Tests.Text.Placement
             // A deterministically beats B every frame (lower sort key) at the same anchor — a STABLE outcome.
             var aBeatsB = new List<LabelInstance> { Point(h.Origin, 5f, "A", 0), Point(h.Origin, 10f, "B", 1) };
 
+            // R3: each candidate-set change needs its own extra Tick before its placement can be asserted (§2.6).
+            h.System.Tick(in h.Frame, bOnly, h.Atlas);
             h.System.Tick(in h.Frame, bOnly, h.Atlas); // B alone, snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "B places alone");
 
+            h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
             h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(2, h.System.LastQuadCount, "mid-transition: A fading in, B fading out (both drawn briefly)");
 
@@ -184,6 +211,46 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < 8; i++) h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a stable loser fully fades out — only the winner A remains");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…and the winner is at full opacity, not stuck partial");
+        }
+
+        // ── The fade map does not accumulate invisible identities. A candidate staged every frame and placed by
+        //    none (the stable collision loser above) never parks a record AT ALL — its opacity never leaves 0, so
+        //    EaseFade suppresses the store rather than writing a 0 that nothing would collect (the decay sweep
+        //    skips ids seen this frame, and a staged candidate is always seen). This is a per-frame COST, not
+        //    just memory: DecayUnseenFadeRecords walks every held record each Tick, so a dense view — where
+        //    candidates outrun placed labels by an order of magnitude — would otherwise pay that sweep over
+        //    labels nobody can see. Retention is invisible on screen, hence a state assertion rather than a
+        //    rendered one. (The live-record-then-DROPPED transition is a different path, covered behaviourally
+        //    by Tick_DepartingRecord_/Tick_CoverageFadingRecord_FadesOut_InsteadOfPopping.) ──
+        [Test]
+        public void Tick_StableCollisionLoser_LeavesNoFadeRecordBehind()
+        {
+            using var h = new Harness();
+            // Same fixture as the test above: A beats B at the same anchor every frame (lower sort key), so B is
+            // a candidate on every Tick and a survivor on none.
+            var aBeatsB = new List<LabelInstance> { Point(h.Origin, 5f, "A", 0), Point(h.Origin, 10f, "B", 1) };
+
+            for (int i = 0; i < 12; i++) h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
+
+            // PRECONDITION — without these the count assertion is vacuous. B must still be STAGED (so it still
+            // eases, and could still park a record); it must simply never place. If a cull ever removed B from
+            // staging instead, the assertion below would pass while proving nothing about retention.
+            Assert.AreEqual(2, h.System.LastCandidateCount, "both labels are still staged — B was not culled away");
+            Assert.AreEqual(1, h.System.LastQuadCount, "…but only the winner A draws; B lost every collision");
+
+            Assert.AreEqual(1, h.System.LiveFadeRecordCount,
+                "only the VISIBLE label keeps a fade record — a perpetual loser must never park one, because a " +
+                "stored 0 is never collected: DecayUnseenFadeRecords skips ids seen this frame, and a staged " +
+                "candidate is always seen.");
+
+            // STABILITY — the count must STAY at 1, not merely reach it once. An implementation that periodically
+            // cleared the map would satisfy a single sample and re-accumulate in between; this rejects it.
+            for (int i = 0; i < 6; i++)
+            {
+                h.System.Tick(in h.Frame, aBeatsB, h.Atlas, deltaTime: 0.1f);
+                Assert.AreEqual(1, h.System.LiveFadeRecordCount,
+                    $"the fade map must stay bounded across frames (extra tick {i + 1})");
+            }
         }
 
         // ── B-3: a label far past the horizon radius is culled BEFORE projection/collision; the near label
@@ -194,7 +261,9 @@ namespace MapRenderer.Tests.Text.Placement
             using var h = new Harness();
             var near = Point(h.Origin, 0f, "N", 0);
             var far = Point(h.Origin + new double3(1e8, 0, 1e8), 0f, "F", 1); // far past any horizon radius
-            h.System.Tick(in h.Frame, new List<LabelInstance> { near, far }, h.Atlas);
+            var labels = new List<LabelInstance> { near, far };
+            h.System.Tick(in h.Frame, labels, h.Atlas); // R3: verdict is one Tick late (§2.6)
+            h.System.Tick(in h.Frame, labels, h.Atlas);
             Assert.AreEqual(1, h.System.LastDistanceCulledCount, "the far label is skipped pre-projection");
             Assert.AreEqual(1, h.System.LastQuadCount, "only the near label places");
         }
@@ -213,6 +282,7 @@ namespace MapRenderer.Tests.Text.Placement
             // 1) Active (activeCount covers the label) → it places and snaps to full opacity.
             var active = new SymbolLabelBatch();
             SymbolLabelBatchBuilder.Build(active, labels, slotCount: 1, projection: null, activeCount: 1);
+            h.System.Tick(in h.Frame, active, h.Atlas); // R3: verdict is one Tick late (§2.6)
             h.System.Tick(in h.Frame, active, h.Atlas); // default dt → snap to full
             Assert.AreEqual(1, h.System.LastQuadCount, "the active label places");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
@@ -246,6 +316,7 @@ namespace MapRenderer.Tests.Text.Placement
             // 1) Not coverage-fading (no coverageFadingTiles) → places and snaps to full opacity.
             var notFading = new SymbolLabelBatch();
             SymbolLabelBatchBuilder.Build(notFading, labels, slotCount: 1, projection: null, activeCount: int.MaxValue);
+            h.System.Tick(in h.Frame, notFading, h.Atlas); // R3: verdict is one Tick late (§2.6)
             h.System.Tick(in h.Frame, notFading, h.Atlas);
             Assert.AreEqual(1, h.System.LastQuadCount, "the label places");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
@@ -341,6 +412,56 @@ namespace MapRenderer.Tests.Text.Placement
             // The proof, stated as an equivalence: fade grouping ⟺ dedup grouping for every pair.
             Assert.AreEqual(SameDedupCell(a, near), SameFadeId(a, near), "fade grouping == dedup grouping (near)");
             Assert.AreEqual(SameDedupCell(a, far), SameFadeId(a, far), "fade grouping == dedup grouping (far)");
+        }
+
+        // ── A-5 incumbency plumbing ──────────────────────────────────────────────────────────────────────────
+        // R2: end-to-end coverage for the _placedLastFrame → WasPlacedLastFrame plumbing — previously untested
+        // anywhere (LabelCandidateCollisionTests sets WasPlacedLastFrame by hand, never through
+        // LabelPlacementSystem; LabelStageJobTests feeds it as a raw input; LabelProjectionJobTests deliberately
+        // arranges distinct sort keys "so A-5 incumbency is a no-op"). X and Y sit at the SAME anchor with an
+        // EQUAL SortKey, so LabelCollision.ComparePlacementOrder falls to its incumbency term (LabelCollision.cs:144)
+        // strictly BEFORE the FeatureIndex term (:145) — if a future change reorders those two lines this test
+        // breaks loudly, which is correct. Distinct Text ⇒ distinct PointFadeId even at a shared anchor
+        // (LabelPlacementSystem.cs:1273-1303 folds Text.GetHashCode() into the FNV hash). NQuads(n) discriminates
+        // the winner via LastQuadCount — a faded-to-0 loser is `continue`d before it can emit (LabelPlacementSystem.cs:608)
+        // and contributes 0 quads to the total (WorldLabelRenderer.Emit's returned QuadCount, accumulated at :615/626).
+        [Test]
+        public void Tick_IncumbentKeepsSlot_OverEqualSortKeyNewcomer()
+        {
+            using var h = new Harness();
+            var x = Point(h.Origin, sortKey: 0f, text: "A", feature: 0, layout: NQuads(1)); // newcomer
+            var y = Point(h.Origin, sortKey: 0f, text: "B", feature: 1, layout: NQuads(2)); // incumbent
+
+            // Tick 1: Y alone places (default deltaTime snaps it to full opacity) — _placedLastFrame == { fadeId(Y) }.
+            // R3: the verdict a Tick's stage/emit reads is one Tick behind (§2.6) — duplicate (same args) so the
+            // scheduled collision has been harvested before the assertion. This ALSO matters structurally here:
+            // Y must be the harvested incumbent BEFORE the {X,Y} Tick below stages, or LabelStageJob never sees
+            // WasPlacedLastFrame=true for Y and the tiebreak this test pins never engages.
+            h.System.Tick(in h.Frame, new List<LabelInstance> { y }, h.Atlas);
+            h.System.Tick(in h.Frame, new List<LabelInstance> { y }, h.Atlas);
+            Assert.AreEqual(2, h.System.LastQuadCount, "Y places alone");
+
+            // Tick 2: X and Y tie on SortKey. Y is the A-5 incumbent ⇒ it wins the tiebreak over the newcomer X ⇒
+            // X (a brand-new fade id, never above FadeEpsilon) fades to 0 in the same tick and is skipped.
+            // R3: the FIRST {X,Y} Tick here only re-emits Y off the PRIOR (Y-alone) harvested verdict — it is the
+            // SECOND {X,Y} Tick (duplicated) whose harvest reflects the actual {X,Y} collision staged with Y's
+            // A-5 incumbency bias, which is the real tiebreak this test proves.
+            h.System.Tick(in h.Frame, new List<LabelInstance> { x, y }, h.Atlas, deltaTime: 0.1f);
+            h.System.Tick(in h.Frame, new List<LabelInstance> { x, y }, h.Atlas, deltaTime: 0.1f);
+            Assert.AreEqual(2, h.System.LastQuadCount, "the incumbent Y keeps its slot over the equal-sort-key newcomer X");
+
+            // Control (falsifies the above): a FRESH harness/system has no incumbents at all, so with the SAME
+            // { X, Y } the collision resolves purely on FeatureIndex — X (0 < 1) wins instead of Y. Two ticks:
+            // the first only schedules (R3 §2.6 — nothing harvested yet on a virgin system); the second harvests
+            // that FeatureIndex-only-tiebreak collision's verdict.
+            using var fresh = new Harness();
+            var x2 = Point(fresh.Origin, sortKey: 0f, text: "A", feature: 0, layout: NQuads(1));
+            var y2 = Point(fresh.Origin, sortKey: 0f, text: "B", feature: 1, layout: NQuads(2));
+            var controlLabels = new List<LabelInstance> { x2, y2 };
+            fresh.System.Tick(in fresh.Frame, controlLabels, fresh.Atlas);
+            fresh.System.Tick(in fresh.Frame, controlLabels, fresh.Atlas);
+            Assert.AreEqual(1, fresh.System.LastQuadCount,
+                "control: with no prior incumbent, FeatureIndex alone decides — X wins, proving tick 2's outcome above was incumbency, not a fixed bias");
         }
     }
 }

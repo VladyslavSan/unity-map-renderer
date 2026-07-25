@@ -46,10 +46,28 @@ namespace MapRenderer.Core.View
         /// greedy pass (a point label counts 1; a curved / repeated line label counts 1 per along-line anchor).</summary>
         public int CollisionCandidateCount { get; init; }
 
-        /// <summary>Collision SURVIVORS on the last Tick — candidates actually placed (the rest lost a collision).</summary>
+        /// <summary>Collision SURVIVORS — candidates actually placed (the rest lost a collision). R3 (deferred
+        /// collision): this is the verdict of the collision run over the PREVIOUS Tick's candidates, one Tick
+        /// behind <see cref="CollisionCandidateCount"/>, which is always the current Tick's.</summary>
         public int CollisionSurvivorCount { get; init; }
 
         /// <summary>Glyph quads submitted to the GPU on the last Tick (4 vertices each) — the drawn label load.</summary>
         public int PlacedQuadCount { get; init; }
+
+        /// <summary>A-4 fade records held — the size of the map the per-frame decay sweep walks, so a COST rather
+        /// than just a memory figure. An identity that has finished fading OUT is dropped rather than parked at 0,
+        /// so this should track the drawn label count and settle when the camera does; if it instead tracks
+        /// <see cref="CollisionCandidateCount"/>, invisible identities are being retained and the sweep is paying
+        /// for labels nobody can see. This is deliberately the RAW map size — never redefine it as a filtered or
+        /// epsilon-thresholded count, which would hide exactly the regression it exists to expose (a fading-IN
+        /// label legitimately holds a sub-epsilon value).</summary>
+        public int LiveFadeRecordCount { get; init; }
+
+        /// <summary>R1: CUMULATIVE heavy rebuilds of the native label mirror since startup — bumped once per real
+        /// gather, never on a memo hit. A LEVEL, per this type's contract; the panel derives the per-second rate,
+        /// which is the number that matters: it says how often the winner set actually changes, and therefore
+        /// whether the gather memo can help at all. Approaching the frame rate ⇒ the set churns every frame and
+        /// memoization is structurally dead (see `docs/symbol-label-perf-design.md` §10.4).</summary>
+        public int MirrorRebuildCount { get; init; }
     }
 }

@@ -12,9 +12,15 @@
 //       then staged off the demo's stale mirrored content instead of its own.
 //   1b (double-draw, introduced by E2): production PresentSlot never hid the fallback presenter a prior
 //       demo Tick left enabled (and vice-versa), so both draw the SAME rewritten slot mesh at once.
-// Both fixed together in LabelPlacementSystem: RefreshBatchMirror gained a _lastBatch identity guard
-// (ReferenceEquals AND BuildId, not BuildId alone); PresentSlot now hides the inactive path's presenter
-// every Tick.
+// Both fixed together in LabelPlacementSystem: RefreshBatchMirror gained a _mirrorSource identity guard
+// (ReferenceEquals AND _mirrorVersion, not the version alone); PresentSlot now hides the inactive path's
+// presenter every Tick.
+//
+// R1 (memoized native gather) generalized the guard's fields: _lastBatch/_mirrorBuildId became
+// _mirrorSource (object: the batch OR the SymbolGatherPlan the mirror was last filled from) /
+// _mirrorVersion (long: batch.BuildId or plan.WinnerSetVersion) — same identity-AND-version contract,
+// now also covering the reverse direction (a demo Tick invalidates a held production gather memo). The
+// tests below are unchanged in behaviour; only the field names in this comment moved.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -115,21 +121,32 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                // Demo Tick (managed-list overload): builds _demoBatch to BuildId 1, sets _mirrorBuildId 1,
-                // shows the world presenter drawing red.
-                system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, demoColor) }, atlasTexture);
+                // Demo Tick (managed-list overload): each Tick call REBUILDS _demoBatch (Build → Reset →
+                // BuildId++), so the R3 duplicate below (needed because the collision verdict is harvested one
+                // Tick late, §2.6) leaves _demoBatch.BuildId == 2 / _mirrorVersion == 2, not 1 — shows the world
+                // presenter drawing red.
+                var demoLabels = new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, demoColor) };
+                system.Tick(in frame, demoLabels, atlasTexture);
+                system.Tick(in frame, demoLabels, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "demo tick must place its label (precondition).");
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "demo tick must show the world presenter (precondition).");
 
-                // Production Tick: a FRESH SymbolLabelBatch — its first Build() also reaches BuildId 1
-                // (SymbolLabelBatch.BuildId starts at 0, Reset() bumps it to 1), the exact value the demo
-                // tick above already left in _mirrorBuildId — the collision the finding describes.
+                // Production Tick: a FRESH SymbolLabelBatch, Build()-ed TWICE (matching the demo side's two
+                // R3-duplicated Ticks) so its BuildId ALSO reaches 2 — the exact value the demo tick above
+                // left in _mirrorVersion, restoring the §7.10-1a BuildId collision this test exists to pin
+                // (a single Build() would reach BuildId 1 and the R3 duplicate would no longer collide, since
+                // the version-only form of RefreshBatchMirror's guard would already discriminate 1 != 2 —
+                // see LabelGatherMemoTests.cs:292-296 for why this precondition must stay true).
                 var prodBatch = new SymbolLabelBatch();
-                SymbolLabelBatchBuilder.Build(prodBatch,
-                    new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, prodColor) }, 1, mapCamera.Projection);
-                Assert.AreEqual(1, prodBatch.BuildId,
-                    "sanity: a fresh batch's first Build reaches BuildId 1, colliding with the demo mirror's.");
+                var prodLabels = new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, prodColor) };
+                SymbolLabelBatchBuilder.Build(prodBatch, prodLabels, 1, mapCamera.Projection);
+                SymbolLabelBatchBuilder.Build(prodBatch, prodLabels, 1, mapCamera.Projection);
+                Assert.AreEqual(2, prodBatch.BuildId,
+                    "sanity: two Build()s reach BuildId 2, colliding with the demo mirror's (post R3-duplicate) version.");
 
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: new List<SymbolRenderLayer> { renderLayer });
                 system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: new List<SymbolRenderLayer> { renderLayer });
                 Assert.AreEqual(1, system.LastQuadCount, "production tick must place its label (precondition).");
@@ -177,8 +194,11 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                // Show a label first, so the null Tick has something to clear.
-                system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) }, atlasTexture);
+                // Show a label first, so the null Tick has something to clear. R3: duplicate — the collision
+                // verdict is harvested one Tick late (§2.6).
+                var labels = new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) };
+                system.Tick(in frame, labels, atlasTexture);
+                system.Tick(in frame, labels, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "precondition: the label is placed.");
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "precondition: the world presenter is showing.");
 
@@ -215,11 +235,15 @@ namespace MapRenderer.Tests.Text.Placement
                 var prodBatch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(prodBatch,
                     new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(0f, 0f, 1f, 1f)) }, 1, mapCamera.Projection);
-                system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity,
-                    symbolLayers: new List<SymbolRenderLayer> { renderLayer });
+                var symbolLayers = new List<SymbolRenderLayer> { renderLayer };
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                system.Tick(in frame, prodBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "production tick must show the world presenter (precondition).");
 
-                system.Tick(in frame, new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) }, atlasTexture);
+                var demoLabels = new List<LabelInstance> { MakeLabel(frame.SceneOriginRender, new float4(1f, 0f, 0f, 1f)) };
+                system.Tick(in frame, demoLabels, atlasTexture);
+                system.Tick(in frame, demoLabels, atlasTexture);
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the demo tick must show the world presenter (D1 shared-key — same key, rebuilt content).");
             }
             finally

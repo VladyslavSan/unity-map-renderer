@@ -252,7 +252,7 @@ namespace MapRenderer.Jobs
         /// shared by two candidates, so the pool can never under-count regardless of the staged stream's shape.
         /// This robustness is the point: it does not depend on the disjointness invariant holding, so a future
         /// staging change can't silently overflow the pool. (It was adopted after a dense-scene node-pool overflow
-        /// whose exact trigger was never reproduced — the debug assert in <c>LabelPlacementSystem.RunCollision</c>
+        /// whose exact trigger was never reproduced — the debug assert in <c>LabelPlacementSystem.ScheduleCollision</c>
         /// now catches a malformed stream if one ever occurs.) Ranges are clamped to <c>[0,boxCount)</c> — a garbage
         /// or oversized range costs at most <c>boxCount</c> iterations, never an unbounded loop. Keeps the same
         /// ±1-cell drift margin as <see cref="NodeUpperBound"/> (a precautionary Mono/Burst boundary-truncation

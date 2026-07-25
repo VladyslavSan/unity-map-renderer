@@ -168,6 +168,10 @@ namespace MapRenderer.Tests.Text.Placement
                 h.Point(h.Origin + new double3(50_000, 0, 0), 3f, "B", 3), // another on-screen point
             };
 
+            // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+            // duplicate the first Tick (same scene content — FadeIds are stable across separate Scene() calls
+            // building structurally-identical labels) so the assertions below read a settled state.
+            h.System.Tick(in h.Frame, Scene(), h.Atlas);
             h.System.Tick(in h.Frame, Scene(), h.Atlas);
 
             // Epic A / A1 (hardening round C) + Stage AC: the two POINT labels ("A"/"B") draw through the

@@ -102,6 +102,8 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             try
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, new[] { label }, atlasTexture);
                 system.Tick(in frame, new[] { label }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label must not be culled.");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "the world presenter must be showing.");
@@ -169,6 +171,8 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
+                    // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                    system.Tick(in frame, new[] { zeroLabel }, atlasTexture);
                     system.Tick(in frame, new[] { zeroLabel }, atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
                     snapZero.Render(uCam);
@@ -182,6 +186,8 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
+                    // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                    system.Tick(in frame, new[] { nonzeroLabel }, atlasTexture);
                     system.Tick(in frame, new[] { nonzeroLabel }, atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
                     snapNonzero.Render(uCam);
@@ -244,7 +250,20 @@ namespace MapRenderer.Tests.Text.Placement
                     {
                         AnchorRender = frame.SceneOriginRender, Layout = layout, Paint = LabelPaint.Default,
                         TextSizePx = 40f, SortKey = 0f, FeatureIndex = i, TileKey = tileKey,
+                        // R3 (Edit 8b): all three labels share AnchorRender, and PointFadeId hashes
+                        // (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so leaving
+                        // Text at its default would give all three the SAME FadeId. Only one candidate is ever
+                        // live per Tick, so that's not an Edit 7 (same-frame) violation, but under R3 iterations
+                        // 1 and 2 would then be satisfied by the id the PREVIOUS iteration's harvested collision
+                        // already put in _placedLastFrame, instead of validating their own tile's placement —
+                        // green for the wrong reason. Distinct text per iteration keeps each id unique.
+                        Text = "T" + i,
                     };
+                    // R3: collision verdicts apply one Tick late (HarvestCollision consumes the PREVIOUS Tick's
+                    // scheduled job) — a fresh candidate's own Tick shows nothing, so a second, identical Tick is
+                    // needed before its placement can be asserted. The duplicate is fade-neutral (deltaTime
+                    // defaults to +inf, snapping to target either way) and does not move any expectation.
+                    system.Tick(in frame, new[] { label }, atlasTexture);
                     system.Tick(in frame, new[] { label }, atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, $"tick {i} must place its label.");
                 }

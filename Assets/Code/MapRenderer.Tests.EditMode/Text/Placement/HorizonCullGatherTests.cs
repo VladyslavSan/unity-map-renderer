@@ -243,7 +243,9 @@ namespace MapRenderer.Tests.Text.Placement
             var labels = new List<LabelInstance> { Point(anchor, "A", 0) };
 
             // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
+            // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
             SceneFrame frame1 = h.Frame();
+            h.System.Tick(in frame1, labels, h.Atlas);
             h.System.Tick(in frame1, labels, h.Atlas);
             Assert.AreEqual(1, h.System.LastQuadCount, "the anchor places while the camera looks at it");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");

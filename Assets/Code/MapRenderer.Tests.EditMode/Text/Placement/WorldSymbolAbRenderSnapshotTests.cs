@@ -119,6 +119,8 @@ namespace MapRenderer.Tests.Text.Placement
                        worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld"))))
             using (var snapOld = new SnapshotRenderer(Size, Size))
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, new[] { label }, atlasTexture);
                 system.Tick(in frame, new[] { label }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the OLD path's label must not be culled.");
 

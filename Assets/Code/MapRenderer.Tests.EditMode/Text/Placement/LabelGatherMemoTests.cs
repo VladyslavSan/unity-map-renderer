@@ -1,0 +1,555 @@
+// Unity EditMode only — SymbolGatherPlan / SymbolTileLabelBlock / LabelPlacementSystem.GatherIntoMirror all use
+// Unity.Collections; reached via InternalsVisibleTo("MapRenderer.Tests.EditMode"). NOT in core-tests.csproj.
+
+using System.Collections.Generic;
+using NUnit.Framework;
+using Unity.Mathematics;
+using UnityEngine;
+using UnityEngine.TestTools.Constraints;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Core.Text;
+using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Backend;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory() — T6
+
+namespace MapRenderer.Tests.Text.Placement
+{
+    /// <summary>
+    /// R1 (design §10.2, plan `label-gather-memo-plan.md`): <see cref="LabelPlacementSystem.GatherIntoMirror"/>
+    /// memoizes its heavy compaction on <see cref="SymbolGatherPlan.WinnerSetVersion"/> — a same-source,
+    /// same-version frame runs only the three per-frame masks (Departing/CoverageFading/Dropped), not the full
+    /// pool rebuild. These are the CONTENT teeth: byte-identity across held frames (T1), invalidation on a real
+    /// version change with the winner SET (T2a) or CONTENT (T3/T4/T4b) changing, and the memo-hit path's own
+    /// zero-GC guarantee (T6). <see cref="LabelPlacementSystem.MirrorRebuildCount"/> is the discriminating signal
+    /// throughout — without it every test here would pass trivially against an unmemoized implementation.
+    ///
+    /// <para>T2b (a REAL front swap through the production <see cref="MapRenderer.Unity.Text.SymbolLabelSubsystem"/>,
+    /// the stage's only end-to-end guard) and T5 (a restyle through the subsystem) live in
+    /// <c>SymbolLabelReconcileAsyncTests</c> — that fixture already owns the async pump harness (UseImmediateGlyphs
+    /// / DriveTileBytesReady / PumpToQuiescence) both need, so building a second copy of it here would duplicate
+    /// non-trivial async machinery for no benefit; this is a placement deviation from the plan's table (which
+    /// listed T5 under this file) noted for the reviewer, not a change to T5's teeth.</para>
+    ///
+    /// Fixture style follows <c>SymbolGatherParityTests</c> / <c>SymbolGatherPlanDropMaskTests</c>: a real
+    /// <see cref="SymbolTileLabelStore"/> seeded via <see cref="SymbolTileLabelBlockBaker"/>, a real
+    /// <see cref="LabelPlacementSystem"/> behind a throwaway camera/material (<see cref="LpsHarness"/> — a plain
+    /// camera, no real look-at, since <see cref="LabelPlacementSystem.GatherIntoMirror"/>/<c>CopyMirrorInto</c>
+    /// never touch the camera; <see cref="TickHarness"/> adds a real look-at only for the tests below that drive
+    /// a full <c>Tick</c>). T3 deliberately compares content across a <see cref="TickHarness"/> (zoom 12 @
+    /// 10°,10°, needed for its demo-batch <c>Tick</c> call) and a plain <see cref="LpsHarness"/> oracle (zoom 5 @
+    /// 0°,0°) — valid, not an oversight, because the gather/mirror comparison is camera-independent; the two
+    /// harnesses' differing cameras never enter it. The content-diff oracle is the shared
+    /// <see cref="SymbolLabelBatchDiff.FirstDifference"/>. Per NIT7, the REFERENCE gather alternates between TWO
+    /// persistent <see cref="SymbolGatherPlan"/> objects fed to ONE reference <see cref="LabelPlacementSystem"/>
+    /// — a different instance identity than the previous call always mismatches <c>_mirrorSource</c>, so the
+    /// reference NEVER memo-hits (a trustworthy ground truth) with zero per-tick native allocation (a
+    /// fresh-plan-per-tick oracle would leak <c>Allocator.Persistent</c> lists).
+    /// </summary>
+    [TestFixture]
+    public class LabelGatherMemoTests
+    {
+        private static readonly WebMercatorProjection P = new WebMercatorProjection();
+
+        private static TextLayoutResult OneQuad(float u) => new TextLayoutResult
+        {
+            Quads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                    UvTopLeft = new float2(u, u), UvBottomRight = new float2(u + 0.2f, u + 0.2f), LineIndex = 0,
+                },
+            },
+            BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1,
+        };
+
+        private static LabelInstance PointLabel(double3 anchor, string text, int feature, long tileKey, float u)
+            => new LabelInstance
+            {
+                AnchorRender = anchor, Placement = SymbolPlacement.Point, Layout = OneQuad(u), Paint = LabelPaint.Default,
+                TextSizePx = 20f, PaddingPx = 2f, SortKey = 0f, Text = text, FeatureIndex = feature, TileKey = tileKey,
+            };
+
+        private static SymbolTileLabelStore.Key Key(TileId t) => new SymbolTileLabelStore.Key("s", t);
+        private static long Tk(TileId t) => SymbolFeatureExtractor.PackTileKey(t);
+
+        private static void SeedTile(SymbolTileLabelStore store, TileId tile, List<LabelInstance> labels)
+        {
+            int gen = store.BeginBuild(Key(tile));
+            SymbolTileLabelBlock block = SymbolTileLabelBlockBaker.Bake(labels, slotCount: 1, TileRenderOrigin.Project(tile, P));
+            Assert.IsTrue(store.CompleteBuild(Key(tile), gen, labels, block), "sanity: block committed");
+        }
+
+        // Fills `plan` from `store`'s current winner set at `version`, with optional per-tile Fade/Drop/Departing
+        // overrides (all default Keep/not-departing). Mirrors SymbolGatherPlanDropMaskTests.BuildMaskedPlan/
+        // BuildReferencePlan but generalized over which per-frame override applies to which tile, since these tests
+        // need to vary EITHER the winner set (a different store) OR just the masks (same store, same records).
+        private static void BuildPlan(SymbolTileLabelStore store, SymbolGatherPlan plan, int version,
+            long dropTileKey = -1, long fadeTileKey = -1, long departingTileKey = -1)
+        {
+            var collected = new List<LabelInstance>();
+            var blockId = new List<int>();
+            var localIndex = new List<int>();
+            var isDeparting = new List<byte>();
+            store.CollectInto(collected, blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
+
+            var decisions = new List<byte>(collected.Count);
+            var departing = new List<byte>(collected.Count);
+            for (int i = 0; i < collected.Count; i++)
+            {
+                long tk = collected[i].TileKey;
+                byte decision = tk == dropTileKey ? LabelTileCoverageFilter.Drop
+                              : tk == fadeTileKey ? LabelTileCoverageFilter.Fade
+                              : LabelTileCoverageFilter.Keep;
+                decisions.Add(decision);
+                departing.Add(tk == departingTileKey ? (byte)1 : isDeparting[i]);
+            }
+            plan.Build(blockId, localIndex, collected, departing, decisions, store.OrderedBlocks, version);
+        }
+
+        // Owns the LPS + the throwaway Unity resources the fixture creates (mirrors SymbolGatherParityTests'
+        // LpsHarness) — GatherIntoMirror/CopyMirrorInto touch neither the camera nor the material.
+        private sealed class LpsHarness : System.IDisposable
+        {
+            public readonly LabelPlacementSystem Lps;
+            private readonly GameObject _camGo;
+            private readonly RenderTexture _rt;
+            private readonly Material _baseMaterial;
+
+            public LpsHarness()
+            {
+                _camGo = new GameObject("GatherMemo_TestCamera");
+                var uCam = _camGo.AddComponent<Camera>();
+                _rt = new RenderTexture(64, 64, 0);
+                uCam.targetTexture = _rt;
+                var mapCamera = new MapCamera(uCam, new CameraProperties(
+                    new GeoCoordinate3D { Latitude = 0, Longitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
+                _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
+                Lps = new LabelPlacementSystem(mapCamera, _baseMaterial);
+            }
+
+            public void Dispose()
+            {
+                Lps.Dispose();
+                UnityEngine.Object.DestroyImmediate(_camGo);
+                UnityEngine.Object.DestroyImmediate(_rt);
+                UnityEngine.Object.DestroyImmediate(_baseMaterial);
+            }
+        }
+
+        // A REAL look-at + atlas (mirrors SymbolGatherPlanDropMaskTests.Harness) — needed by any test that drives
+        // a full Tick (projection/staging/collision/emit), not just GatherIntoMirror/CopyMirrorInto.
+        private sealed class TickHarness : System.IDisposable
+        {
+            public readonly LabelPlacementSystem System;
+            public readonly SceneFrame Frame;
+            public readonly double3 Origin;
+            public readonly GlyphAtlasTexture Atlas;
+            private readonly GameObject _camGo;
+            private readonly RenderTexture _rt;
+            private readonly Material _baseMaterial;
+
+            public TickHarness()
+            {
+                _camGo = new GameObject("GatherMemo_TickCamera");
+                var uCam = _camGo.AddComponent<Camera>();
+                _rt = new RenderTexture(256, 256, 0);
+                uCam.targetTexture = _rt;
+                var lookAt = new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 };
+                var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt, zoom: 12.0, heading: 0.0, tilt: 0.0), projection: P);
+                Origin = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
+                Frame = new SceneFrame(Origin, float3x3.identity);
+                var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
+                var glyphAtlas = new GlyphAtlas();
+                glyphAtlas.Append(glyph);
+                Atlas = new GlyphAtlasTexture();
+                Atlas.Upload(glyphAtlas);
+                _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
+                System = new LabelPlacementSystem(mapCamera, _baseMaterial);
+            }
+
+            public void Dispose()
+            {
+                System.Dispose();
+                Atlas.Dispose();
+                UnityEngine.Object.DestroyImmediate(_camGo);
+                UnityEngine.Object.DestroyImmediate(_rt);
+                UnityEngine.Object.DestroyImmediate(_baseMaterial);
+            }
+        }
+
+        // ═══ T1: N successive same-version gathers must stay a memo HIT and byte-match a fresh gather ═══
+
+        [Test]
+        public void Memo_NTicksNoTileEvent_MirrorByteIdenticalToFreshGather()
+        {
+            var tile = new TileId { Z = 6, X = 10, Y = 10 };
+            long key = Tk(tile);
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
+
+            using var harness = new LpsHarness();
+            using var refHarness = new LpsHarness(); // NIT7: ONE reference system, TWO alternating plan objects below
+            var plan = new SymbolGatherPlan();
+            var refPlanA = new SymbolGatherPlan();
+            var refPlanB = new SymbolGatherPlan();
+            try
+            {
+                const int frames = 4;
+                for (int f = 0; f < frames; f++)
+                {
+                    BuildPlan(store, plan, version: 0); // SAME version every frame — no tile event
+                    harness.Lps.GatherIntoMirror(plan);
+                    Assert.AreEqual(1, harness.Lps.MirrorRebuildCount,
+                        $"frame {f}: no tile event ever occurred — the mirror must stay memo-HIT after the first rebuild");
+
+                    SymbolGatherPlan refPlan = (f % 2 == 0) ? refPlanA : refPlanB; // alternating identity ⇒ ref never memo-hits
+                    BuildPlan(store, refPlan, version: f);
+                    refHarness.Lps.GatherIntoMirror(refPlan);
+
+                    var got = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got);
+                    var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
+                    Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
+                        $"frame {f}: a held mirror must stay byte-identical to a fresh gather over the same content");
+                }
+            }
+            finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); store.Clear(); }
+        }
+
+        // ═══ T2a: rebuilding the SAME plan object with DIFFERENT content at a FIXED WinnerCount and a bumped
+        //          version must invalidate the memo — the coupled constraint (3.4): vary the winner SET (a
+        //          different tile), never the record count, or the release-build count backstop rescues a broken
+        //          version key and this row's RED-verify goes vacuously green. ═══
+
+        [Test]
+        public void Memo_VersionChange_Invalidates()
+        {
+            var tileA = new TileId { Z = 6, X = 20, Y = 20 };
+            var tileB = new TileId { Z = 6, X = 21, Y = 20 };
+            long keyA = Tk(tileA), keyB = Tk(tileB);
+            var storeA = new SymbolTileLabelStore(cacheCap: 8);
+            var storeB = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(storeA, tileA, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, keyA, 0.1f) });
+            SeedTile(storeB, tileB, new List<LabelInstance> { PointLabel(new double3(300, 0, 400), "b", 2, keyB, 0.2f) });
+
+            using var harness = new LpsHarness();
+            using var refHarness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            var refPlanA = new SymbolGatherPlan();
+            var refPlanB = new SymbolGatherPlan();
+            try
+            {
+                BuildPlan(storeA, plan, version: 0);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
+                Assert.AreEqual(1, plan.WinnerCount, "sanity: tile A alone is one winner");
+
+                BuildPlan(storeA, refPlanA, version: 0);
+                refHarness.Lps.GatherIntoMirror(refPlanA);
+                var got1 = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got1);
+                var want1 = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want1);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want1, got1), "frame 1 mirror must match tile A's content");
+
+                // SAME plan object, a DIFFERENT store's content (tile A → tile B), WinnerCount fixed at 1, bumped version.
+                BuildPlan(storeB, plan, version: 1);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(2, harness.Lps.MirrorRebuildCount, "a version change must trigger a real rebuild, not a memo hit");
+                Assert.AreEqual(1, plan.WinnerCount, "coupled constraint: WinnerCount stays fixed at 1 across the swap");
+
+                BuildPlan(storeB, refPlanB, version: 0);
+                refHarness.Lps.GatherIntoMirror(refPlanB);
+                var got2 = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got2);
+                var want2 = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want2);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want2, got2),
+                    "frame 2 mirror must reflect tile B's content, not a stale memo hit off tile A");
+            }
+            finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); storeA.Clear(); storeB.Clear(); }
+        }
+
+        // ═══ T3: the REVERSE cross-overload direction the old per-tick _lastBatch reset used to cover — a demo
+        //         Tick between two production gathers on the SAME plan+version must still force a rebuild. ═══
+
+        [Test]
+        public void Memo_DemoTickBetweenProductionTicks_Invalidates()
+        {
+            var tile = new TileId { Z = 6, X = 30, Y = 30 };
+            long key = Tk(tile);
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
+
+            using var harness = new TickHarness();
+            using var refHarness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            var refPlan = new SymbolGatherPlan();
+            var demoBatch = new SymbolLabelBatch();
+            try
+            {
+                // §7.10-1a precondition, deliberately reproduced: plan.WinnerSetVersion is set to 1 to COLLIDE with
+                // demoBatch's BuildId (SymbolLabelBatch.BuildId starts at 0, its first Reset()/Build bumps it to 1 —
+                // LabelPlacementDemoProductionFlipTests' exact precondition). Two independent counters that happen
+                // to share a NUMBER is the original bug's scenario; a version-0 plan would never collide with any
+                // batch's first BuildId, so the identity term's necessity (RED-verify row 2) would go untested.
+                BuildPlan(store, plan, version: 1);
+                harness.System.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.System.MirrorRebuildCount, "production gather 1: a heavy rebuild");
+
+                harness.System.GatherIntoMirror(plan); // same plan+version, no tile event
+                Assert.AreEqual(1, harness.System.MirrorRebuildCount, "production gather 2: a memo hit (still 1)");
+
+                // A demo Tick is a DIFFERENT overload/source entirely — must force its own rebuild. Its first Build
+                // reaches BuildId 1, the SAME number plan.WinnerSetVersion already holds — identity is what must
+                // discriminate them.
+                SymbolLabelBatchBuilder.Build(demoBatch,
+                    new List<LabelInstance> { PointLabel(harness.Origin, "demo", 9, 0L, 0.5f) }, 1, P);
+                Assert.AreEqual(1, demoBatch.BuildId, "sanity: the demo batch's first BuildId collides with plan.WinnerSetVersion (both 1)");
+                harness.System.Tick(in harness.Frame, demoBatch, harness.Atlas);
+                Assert.AreEqual(2, harness.System.MirrorRebuildCount, "the demo tick must rebuild the mirror (cross-overload)");
+
+                // Production gather on the SAME plan+version — must rebuild AGAIN (T3's actual teeth: the reverse
+                // direction), not memo-hit on the demo's stale mirrored content (which the dropped-identity defect
+                // would do, since plan.WinnerSetVersion(1) == the demo's stamped _mirrorVersion(1) by the collision
+                // above). RED-verified (2026-07-25): this discrimination ALSO depends on the demo batch and the
+                // plan holding the SAME record count (one label each, here) — the release-build count backstop
+                // (plan.WinnerCount == _mCount) would otherwise rescue the dropped-identity defect the same way a
+                // version mismatch would. If either fixture's label count ever changes, re-verify this row.
+                harness.System.GatherIntoMirror(plan);
+                Assert.AreEqual(3, harness.System.MirrorRebuildCount,
+                    "a production gather after a demo tick must rebuild — memo-hitting here would serve the demo's stale content");
+
+                BuildPlan(store, refPlan, version: 1);
+                refHarness.Lps.GatherIntoMirror(refPlan);
+                var got = new SymbolLabelBatch(); harness.System.CopyMirrorInto(got);
+                var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
+                    "after the demo interruption, the production gather must reflect the plan's OWN content, not the demo batch's");
+            }
+            finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
+        }
+
+        // ═══ T4: masks (Departing/CoverageFading) are per-frame inputs, legitimately varying at a FIXED version
+        //         (1.2's exemption) — must be tracked on a HELD (memo-hit) mirror, not frozen from the first
+        //         rebuild. Fixed WinnerCount throughout (else AssertMemoPlanMatchesMirror fires for the wrong
+        //         reason — 3.4's coupled constraint). Split into two single-mask tests (Codex SHOULD-FIX 2, see
+        //         below) so a cross-wire between the two masks can't hide behind a "both flipped together" test. ═══
+
+        // Split into two independent single-mask flips (Codex SHOULD-FIX 2): the original single test flipped
+        // Departing and CoverageFading TOGETHER, so an implementation that copied either source mask into BOTH
+        // destinations (e.g. WritePerFrameMasks accidentally writing plan.Departing into both
+        // _mRecordDeparting AND _mRecordCoverageFading) would still pass — both masks would read true either way.
+        // Each test below flips exactly ONE mask and asserts the OTHER stayed at its unflipped value, so a
+        // mask-to-mask cross-wire fails on the "unchanged" assertion even though the "changed" one still passes.
+
+        [Test]
+        public void Memo_DepartingFlip_TrackedWhilePoolsHeld_CoverageFadingUnchanged()
+        {
+            var tile = new TileId { Z = 6, X = 40, Y = 40 };
+            long key = Tk(tile);
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
+
+            using var harness = new LpsHarness();
+            using var refHarness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            var refPlan = new SymbolGatherPlan();
+            try
+            {
+                BuildPlan(store, plan, version: 0);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
+
+                // SAME version (no tile event) — ONLY Departing flips; CoverageFading stays Keep (untouched).
+                BuildPlan(store, plan, version: 0, departingTileKey: key);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "a mask-only change at a fixed version must stay a memo HIT");
+
+                BuildPlan(store, refPlan, version: 0, departingTileKey: key);
+                refHarness.Lps.GatherIntoMirror(refPlan);
+
+                var got = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got);
+                var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
+                    "the per-frame masks must be tracked on a HELD mirror, not frozen from the first rebuild");
+                Assert.IsTrue(got.RecordDeparting[0], "Departing must reflect the flip even on a memo-hit frame");
+                Assert.IsFalse(got.RecordCoverageFading[0],
+                    "CoverageFading must stay UNCHANGED — a mask cross-wire (e.g. Departing's source copied into both destinations) would wrongly flip this too");
+            }
+            finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
+        }
+
+        [Test]
+        public void Memo_CoverageFadingFlip_TrackedWhilePoolsHeld_DepartingUnchanged()
+        {
+            var tile = new TileId { Z = 6, X = 41, Y = 40 };
+            long key = Tk(tile);
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
+
+            using var harness = new LpsHarness();
+            using var refHarness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            var refPlan = new SymbolGatherPlan();
+            try
+            {
+                BuildPlan(store, plan, version: 0);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
+
+                // SAME version (no tile event) — ONLY CoverageFading flips; Departing stays false (untouched).
+                BuildPlan(store, plan, version: 0, fadeTileKey: key);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "a mask-only change at a fixed version must stay a memo HIT");
+
+                BuildPlan(store, refPlan, version: 0, fadeTileKey: key);
+                refHarness.Lps.GatherIntoMirror(refPlan);
+
+                var got = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got);
+                var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
+                    "the per-frame masks must be tracked on a HELD mirror, not frozen from the first rebuild");
+                Assert.IsTrue(got.RecordCoverageFading[0], "CoverageFading must reflect the flip even on a memo-hit frame");
+                Assert.IsFalse(got.RecordDeparting[0],
+                    "Departing must stay UNCHANGED — a mask cross-wire (e.g. CoverageFading's source copied into both destinations) would wrongly flip this too");
+            }
+            finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
+        }
+
+        // ═══ T4b: Dropped is invisible through CopyMirrorInto (it hard-skips in GatherSymbolPoints, not the
+        //          mirror-comparison surface) — assert it BEHAVIOURALLY, on a memo-HIT frame, via a real Tick +
+        //          WorldMeshReadback comparison against a reference that never collected the dropped tile at all
+        //          (mirrors SymbolGatherPlanDropMaskTests' pattern), with the masked side's Drop flip held at the
+        //          SAME version (a memo hit) instead of a bumped one. ═══
+
+        // Full vertex + opacity byte comparison of two world-slot meshes — mirrors
+        // SymbolGatherPlanDropMaskTests.FirstMeshDifference. Returns the first difference, or null if byte-identical.
+        private static string FirstMeshDifference(Mesh a, Mesh b)
+        {
+            WorldMeshReadback.Read(a, out WorldBillboardVertex[] va, out float[] oa);
+            WorldMeshReadback.Read(b, out WorldBillboardVertex[] vb, out float[] ob);
+            if (va.Length != vb.Length) return $"vertex count {va.Length} vs {vb.Length}";
+            for (int i = 0; i < va.Length; i++)
+                if (!va[i].Equals(vb[i])) return $"vertex[{i}] differs";
+            if (oa.Length != ob.Length) return $"opacity count {oa.Length} vs {ob.Length}";
+            for (int i = 0; i < oa.Length; i++)
+                if (oa[i] != ob[i]) return $"opacity[{i}] {oa[i]} vs {ob[i]}";
+            return null;
+        }
+
+        [Test]
+        public void Memo_DropFlip_TrackedWhilePoolsHeld()
+        {
+            var keepTile = new TileId { Z = 12, X = 2500, Y = 1500 };
+            var dropTile = new TileId { Z = 12, X = 2501, Y = 1500 };
+            long keepKey = Tk(keepTile), dropKey = Tk(dropTile);
+            var dropOffset = new double3(0, 0, 1600); // clears collision with KEEP — mirrors DropMaskTests' DropOffset
+
+            using var hMasked = new TickHarness();
+            using var hRef = new TickHarness();
+            var storeMasked = new SymbolTileLabelStore(cacheCap: 16);
+            var storeRef = new SymbolTileLabelStore(cacheCap: 16);
+            try
+            {
+                foreach (SymbolTileLabelStore store in new[] { storeMasked, storeRef })
+                {
+                    SeedTile(store, keepTile, new List<LabelInstance> { PointLabel(hMasked.Origin, "keep", 1, keepKey, 0.1f) });
+                    SeedTile(store, dropTile, new List<LabelInstance> { PointLabel(hMasked.Origin + dropOffset, "drop", 2, dropKey, 0.2f) });
+                }
+
+                var planMasked = new SymbolGatherPlan();
+                var planRef = new SymbolGatherPlan();
+                try
+                {
+                    // Frame 1: both tiles Keep on both sides — establishes a live fade for the drop tile too.
+                    // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+                    // duplicate (same plan+version, so the second Tick is a memo HIT, not a second rebuild) so
+                    // this frame's ticks actually SHOW both tiles before frame 2 masks one of them off. Without
+                    // this, frame 1 is a virgin system's first Tick and shows NOTHING — the drop tile's slot
+                    // would never be built, so :510's "masked: the Dropped slot must be HIDDEN" would pass
+                    // vacuously (never shown ⇒ trivially not visible), proving nothing about the Drop mask.
+                    BuildPlan(storeMasked, planMasked, version: 0);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildPlan(storeRef, planRef, version: 0);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+                    Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
+                        "sanity: frame 1 is a heavy rebuild — the duplicate Tick is a memo HIT (same plan+version), not a second rebuild");
+
+                    // Frame 2: MASKED flags the drop tile Dropped at the SAME version (a memo-HIT frame — the point
+                    // of this test); REFERENCE excludes the drop tile physically (a different plan/store shape,
+                    // separate rebuild — its own memoization is irrelevant here).
+                    BuildPlan(storeMasked, planMasked, version: 0, dropTileKey: dropKey);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    Assert.AreEqual(1, hMasked.System.MirrorRebuildCount,
+                        "the Drop flip at a fixed version must be a memo HIT — this is what makes the assertions below meaningful");
+
+                    var refCollected = new List<LabelInstance>();
+                    var refBlockId = new List<int>();
+                    var refLocalIndex = new List<int>();
+                    var refIsDeparting = new List<byte>();
+                    var refDecisions = new List<byte>();
+                    var allCollected = new List<LabelInstance>();
+                    var allBlockId = new List<int>();
+                    var allLocalIndex = new List<int>();
+                    var allIsDeparting = new List<byte>();
+                    storeRef.CollectInto(allCollected, allBlockId, allLocalIndex, allIsDeparting, quantizeMeters: 1.0, out _);
+                    for (int i = 0; i < allCollected.Count; i++)
+                    {
+                        if (allCollected[i].TileKey == dropKey) continue;
+                        refCollected.Add(allCollected[i]); refBlockId.Add(allBlockId[i]); refLocalIndex.Add(allLocalIndex[i]);
+                        refIsDeparting.Add(allIsDeparting[i]); refDecisions.Add(LabelTileCoverageFilter.Keep);
+                    }
+                    planRef.Build(refBlockId, refLocalIndex, refCollected, refIsDeparting, refDecisions, storeRef.OrderedBlocks, winnerSetVersion: 1);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
+
+                    Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
+                        "masked-Drop's emitted quad count (on a memo-HIT frame) must equal the reference's");
+                    Assert.AreEqual(1, hRef.System.LastQuadCount, "sanity: only the KEEP point ever draws");
+
+                    Assert.IsTrue(hMasked.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshMasked));
+                    Assert.IsTrue(hRef.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshRef));
+                    Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
+                        "the surviving KEEP point's full vertex+opacity content must be byte-identical between a memo-hit masked Drop and the reference");
+
+                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, LabelKind.Text), "masked: KEEP must be VISIBLE");
+                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, LabelKind.Text),
+                        "masked: the Dropped slot must be HIDDEN even though its mirror pools came from a memo hit");
+                }
+                finally { planMasked.Dispose(); planRef.Dispose(); }
+            }
+            finally { storeMasked.Clear(); storeRef.Clear(); }
+        }
+
+        // ═══ T6: the memo-HIT path (three mask memcpys + a subtraction) allocates ZERO managed garbage — pairs
+        //         with SymbolGatherParityTests.GatherIntoMirror_Warm_AllocatesNoGCMemory (the HEAVY-path guard,
+        //         repaired for R1 by forcing a version bump before its measured call). ═══
+
+        [Test]
+        public void GatherIntoMirror_MemoHit_AllocatesNoGCMemory()
+        {
+            var tile = new TileId { Z = 6, X = 50, Y = 50 };
+            long key = Tk(tile);
+            var store = new SymbolTileLabelStore(cacheCap: 8);
+            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
+
+            using var harness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            try
+            {
+                BuildPlan(store, plan, version: 0);
+                harness.Lps.GatherIntoMirror(plan); // heavy warm-up — first-touch native growth happens here
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: warm-up is a heavy rebuild");
+                harness.Lps.GatherIntoMirror(plan); // extra warm-up memo hit (same version — no rebuild expected)
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the measured call below must be a memo hit");
+
+                Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
+                    "a memo-hit GatherIntoMirror must allocate ZERO managed garbage — three NativeArray memcpys + a subtraction");
+            }
+            finally { plan.Dispose(); store.Clear(); }
+        }
+    }
+}

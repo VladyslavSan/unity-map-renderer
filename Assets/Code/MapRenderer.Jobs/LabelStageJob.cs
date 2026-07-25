@@ -16,9 +16,16 @@ namespace MapRenderer.Jobs
     /// overhead. ONE job, not a fan-out: the candidate ordinal is assigned in record order (each record's
     /// <c>candidateCount</c> depends on all prior), so the loop is inherently serial — like <see cref="LabelCollisionJob"/>.
     ///
-    /// <para>Outputs are pre-sized by the caller to the batch's worst case (<c>MaxBoxes/MaxQuads/MaxCandidates</c>) —
-    /// Burst cannot grow a container mid-run. The dynamic per-frame values (projected screen/depth/valid, last-frame
-    /// incumbency) arrive as native arrays resolved on the main thread before the job.</para>
+    /// <para>Outputs are pre-sized by the caller to the batch's worst case (<c>MaxBoxes/MaxQuads/MaxCandidates</c>)
+    /// and declared as fixed-length <see cref="NativeArray{T}"/>s, which genuinely cannot grow mid-run — this job's
+    /// caller doesn't know the exact per-record counts up front either, so it sizes to the worst case instead.
+    /// (Contrast <see cref="SymbolGatherJob"/>, one stage upstream of this one: its OWN pass 1 computes the
+    /// EXACT per-pool sizes before pass 2 needs them, so its outputs are <c>NativeList{T}</c>s resized once,
+    /// in-job — a single-shot, bounded resize, not per-element growth. Not a contradiction between the two jobs;
+    /// each picked the container that fits what its caller can size.) The dynamic per-frame values (projected
+    /// screen/depth/valid) arrive as native arrays resolved on the main thread before the job; A-5 incumbency (R2)
+    /// is resolved HERE instead, against the caller's <see cref="Placed"/> set — the point arm inline, the curved
+    /// arm into the <see cref="AnchorWasPlaced"/> scratch this job fills.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct LabelStageJob : IJob
@@ -54,10 +61,16 @@ namespace MapRenderer.Jobs
         // SAME (off, wc) as the screen path so a glyph's world anchor/tangent sample the identical (segment, t)
         // the screen arc walk resolves. Point arm never reads this.
         public NativeArray<double3> WorldPointsRender;
-        public NativeArray<byte>   PointWasPlaced;   // A-5 incumbency per point detail
-        public NativeArray<byte>   AnchorWasPlaced;  // A-5 incumbency per global anchor-fade index
+        // A-5 incumbency per global anchor-fade index — JOB-OWNED scratch: filled here (below) from
+        // AnchorFadeIds + Placed, not resolved by the caller. Sized by the caller to _mFadeCount.
+        public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
         public double2 Viewport;
+
+        // A-5 incumbency: last frame's collision survivors, keyed by fade id. Read from Burst — the reason
+        // LabelPlacementSystem._placedLastFrame is a NativeHashSet at all. NEVER stored across frames by the
+        // caller (see LabelPlacementSystem.RunStageJob).
+        public NativeHashSet<long>.ReadOnly Placed;
 
         // ── caller-owned scratch (>= max WorldCount) ──
         public NativeArray<float2> PathScratch;
@@ -79,6 +92,12 @@ namespace MapRenderer.Jobs
             Span<float2>         path  = PathScratch.AsSpan();
             Span<float>          cum   = CumScratch.AsSpan();
 
+            // A-5 (R2): resolve every anchor fade id against the placed-set HERE, in Burst, instead of on the main
+            // thread. Whole-range fill (not per-record): the culled records' entries are then defined, and this is
+            // byte-identical to the managed loop it replaces.
+            for (int i = 0; i < AnchorWasPlaced.Length; i++)
+                AnchorWasPlaced[i] = (byte)(Placed.Contains(AnchorFadeIds[i]) ? 1 : 0);
+
             int candidateCount = 0, boxCount = 0, quadCount = 0;
             for (int r = 0; r < Count; r++)
             {
@@ -92,7 +111,7 @@ namespace MapRenderer.Jobs
                     s.ScreenPx = Screen[off];
                     s.Depth = Depth[off];
                     s.Projected = Valid[off] != 0;
-                    s.WasPlacedLastFrame = PointWasPlaced[d] != 0;
+                    s.WasPlacedLastFrame = Placed.Contains(s.FadeId); // s is the Points[d] copy; FadeId is never patched
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
                     candidateCount += LabelStagingMath.StagePoint(in s, quadSpan, Bearing, Viewport, candidateCount,

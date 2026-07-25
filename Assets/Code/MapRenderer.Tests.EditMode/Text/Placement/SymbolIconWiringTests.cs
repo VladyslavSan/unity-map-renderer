@@ -164,6 +164,9 @@ namespace MapRenderer.Tests.Text.Placement
                 // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
                 var iconBatch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(iconBatch, new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
                 system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
@@ -181,6 +184,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // ── 2. Text-only batch (parity: the #1 rule) — world icon slot must go back to HIDDEN, text unaffected ──
                 var textBatch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(textBatch, new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
+                system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
 
                 Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");

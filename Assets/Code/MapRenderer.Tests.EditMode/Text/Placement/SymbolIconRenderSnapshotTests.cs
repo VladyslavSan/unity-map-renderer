@@ -158,6 +158,8 @@ namespace MapRenderer.Tests.Text.Placement
             var snap = new SnapshotRenderer(Size, Size);
             try
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(5, system.LastQuadCount,
                     "all four icon quads + the reference 'A' glyph quad must place (each a 1-quad point candidate; none culled).");

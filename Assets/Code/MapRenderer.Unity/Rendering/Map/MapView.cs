@@ -510,6 +510,8 @@ namespace MapRenderer.Unity.Rendering.Map
             CollisionCandidateCount = Labels.LastCandidateCount,
             CollisionSurvivorCount  = Labels.LastSurvivorCount,
             PlacedQuadCount         = Labels.LastQuadCount,
+            LiveFadeRecordCount     = Labels.LiveFadeRecordCount,
+            MirrorRebuildCount      = Labels.MirrorRebuildCount,
         };
 
         /// <summary>

@@ -161,20 +161,31 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 Assert.AreEqual(0, system.TickCount, "TickCount starts at 0 before any Tick.");
 
+                // R3 (deferred collision, design §10.3): the collision verdict a Tick's emit reads is the one
+                // HARVESTED at that Tick's top — i.e. the collision scheduled at the end of the PREVIOUS Tick,
+                // over the PREVIOUS Tick's candidates (§2.6). A candidate-set change (twoLabels → oneLabel →
+                // twoLabels) therefore needs TWO Ticks before its placement can be asserted, so each step below
+                // duplicates its Tick call (same args) — TickCount advances TWICE per assertion step (2, 4, 6),
+                // NOT because of a fudged expectation, but because it counts Ticks and this fixture now ticks
+                // twice per step. The quad-count expectations (2 / 1 / 2) — the actual subject of this test — do
+                // NOT move.
                 system.Tick(in frame, twoLabels, atlasTexture);
-                Assert.AreEqual(1, system.TickCount);
+                system.Tick(in frame, twoLabels, atlasTexture);
+                Assert.AreEqual(2, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount, "2 labels x 1 quad each = 2 placed quads.");
 
                 // Rebuilt from scratch, not accumulated: ticking with FEWER labels must report FEWER quads,
                 // not the sum of every Tick so far (which would prove a cache/append bug).
                 system.Tick(in frame, oneLabel, atlasTexture);
-                Assert.AreEqual(2, system.TickCount);
+                system.Tick(in frame, oneLabel, atlasTexture);
+                Assert.AreEqual(4, system.TickCount);
                 Assert.AreEqual(1, system.LastQuadCount,
                     "a Tick with 1 label must report 1 placed quad -- NOT 3 (2 from the prior Tick + 1), " +
                     "which would mean the buffer is cached/appended instead of rebuilt every Tick.");
 
                 system.Tick(in frame, twoLabels, atlasTexture);
-                Assert.AreEqual(3, system.TickCount);
+                system.Tick(in frame, twoLabels, atlasTexture);
+                Assert.AreEqual(6, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount);
             }
             finally
@@ -215,11 +226,15 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
+                // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+                // duplicate each candidate-set's Tick call before reading its placement.
+                system.Tick(in frame, baseline, atlasTexture);
                 system.Tick(in frame, baseline, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "one label, one quad");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh0), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh0, out WorldBillboardVertex[] v0, out _);
 
+                system.Tick(in frame, moved, atlasTexture);
                 system.Tick(in frame, moved, atlasTexture);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh1), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh1, out WorldBillboardVertex[] v1, out _);
@@ -271,11 +286,14 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, viewportLabels, atlasTexture);
                 system.Tick(in frame, viewportLabels, atlasTexture);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh viewportMesh), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(viewportMesh, out WorldBillboardVertex[] vp, out _); // v[0]=TL, v[1]=TR, v[2]=BR, v[3]=BL
                 Assert.AreEqual(4, vp.Length, "one quad → 4 verts");
 
+                system.Tick(in frame, mapLabels, atlasTexture);
                 system.Tick(in frame, mapLabels, atlasTexture);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mapMesh), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mapMesh, out WorldBillboardVertex[] mp, out _);
@@ -383,7 +401,10 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                system.Tick(in frame, new List<LabelInstance> { lineLabel }, atlasTexture);
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                var labels = new List<LabelInstance> { lineLabel };
+                system.Tick(in frame, labels, atlasTexture);
+                system.Tick(in frame, labels, atlasTexture);
 
                 Assert.AreEqual(3, system.LastQuadCount, "one quad per curved glyph (line label placed, not dropped)");
 
@@ -458,11 +479,16 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                system.Tick(in frame, new List<LabelInstance> { Curved(SymbolPlacement.LineCenter) }, atlasTexture);
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
+                var centerLabels = new List<LabelInstance> { Curved(SymbolPlacement.LineCenter) };
+                system.Tick(in frame, centerLabels, atlasTexture);
+                system.Tick(in frame, centerLabels, atlasTexture);
                 int centerQuads = system.LastQuadCount;
                 Assert.AreEqual(3, centerQuads, "line-center places exactly ONE label (3 glyphs) on the wide line");
 
-                system.Tick(in frame, new List<LabelInstance> { Curved(SymbolPlacement.Line) }, atlasTexture);
+                var lineLabels = new List<LabelInstance> { Curved(SymbolPlacement.Line) };
+                system.Tick(in frame, lineLabels, atlasTexture);
+                system.Tick(in frame, lineLabels, atlasTexture);
                 int lineQuads = system.LastQuadCount;
 
                 Assert.AreEqual(0, lineQuads % 3, "every placed `line` repeat is a full 3-glyph label");
@@ -518,7 +544,10 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                system.Tick(in frame, new List<LabelInstance> { label }, atlasTexture);
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                var labels = new List<LabelInstance> { label };
+                system.Tick(in frame, labels, atlasTexture);
+                system.Tick(in frame, labels, atlasTexture);
                 // 300 fitting anchors are clamped to MaxAnchorsPerLine (256) → exactly 256 × 3 glyphs; without
                 // the clamp all 300 would place (900 quads). Mirrors the private cap constant.
                 Assert.AreEqual(256 * 3, system.LastQuadCount, "the per-frame anchor iteration is hard-clamped to 256");
@@ -574,10 +603,15 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                system.Tick(in frame, new List<LabelInstance> { Curved(170f) }, atlasTexture);
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
+                var permissive = new List<LabelInstance> { Curved(170f) };
+                system.Tick(in frame, permissive, atlasTexture);
+                system.Tick(in frame, permissive, atlasTexture);
                 Assert.AreEqual(3, system.LastQuadCount, "a permissive text-max-angle places the label round the corner");
 
-                system.Tick(in frame, new List<LabelInstance> { Curved(40f) }, atlasTexture);
+                var strict = new List<LabelInstance> { Curved(40f) };
+                system.Tick(in frame, strict, atlasTexture);
+                system.Tick(in frame, strict, atlasTexture);
                 Assert.AreEqual(0, system.LastQuadCount,
                     "text-max-angle:40 drops the label — the ~90° corner exceeds the allowed adjacent-glyph angle");
             }
@@ -630,12 +664,17 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
-                system.Tick(in frame, new List<LabelInstance> { Curved(true) }, atlasTexture);
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
+                var uprightLabels = new List<LabelInstance> { Curved(true) };
+                system.Tick(in frame, uprightLabels, atlasTexture);
+                system.Tick(in frame, uprightLabels, atlasTexture);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:true still places all 3 glyphs");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh uprightMesh), "the world text slot must exist.");
                 WorldMeshReadback.Read(uprightMesh, out WorldBillboardVertex[] upright, out _);
 
-                system.Tick(in frame, new List<LabelInstance> { Curved(false) }, atlasTexture);
+                var rawLabels = new List<LabelInstance> { Curved(false) };
+                system.Tick(in frame, rawLabels, atlasTexture);
+                system.Tick(in frame, rawLabels, atlasTexture);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:false still places all 3 glyphs");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh rawMesh), "the world text slot must still exist.");
                 WorldMeshReadback.Read(rawMesh, out WorldBillboardVertex[] raw, out _);
@@ -702,22 +741,27 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
+                // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
                 // Collision ON: the two coincident labels fight → only the lower-key one survives (3 glyphs).
-                system.Tick(in frame, new List<LabelInstance>
+                var collidingLabels = new List<LabelInstance>
                 {
                     Curved(featureIndex: 0, sortKey: 20f, allowOverlap: false),
                     Curved(featureIndex: 1, sortKey: 10f, allowOverlap: false),
-                }, atlasTexture);
+                };
+                system.Tick(in frame, collidingLabels, atlasTexture);
+                system.Tick(in frame, collidingLabels, atlasTexture);
                 Assert.AreEqual(glyphs.Count, system.LastQuadCount,
                     "two overlapping curved labels collide — only the lower-sort-key one places (not both)");
 
                 // Control: allow-overlap ON → both place (6 glyphs), proving the drop above was collision, not a
                 // spurious single-label limit.
-                system.Tick(in frame, new List<LabelInstance>
+                var overlapAllowedLabels = new List<LabelInstance>
                 {
                     Curved(featureIndex: 0, sortKey: 20f, allowOverlap: true),
                     Curved(featureIndex: 1, sortKey: 10f, allowOverlap: true),
-                }, atlasTexture);
+                };
+                system.Tick(in frame, overlapAllowedLabels, atlasTexture);
+                system.Tick(in frame, overlapAllowedLabels, atlasTexture);
                 Assert.AreEqual(glyphs.Count * 2, system.LastQuadCount,
                     "with allow-overlap both coincident curved labels place — so the collision was real above");
             }

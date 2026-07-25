@@ -157,7 +157,10 @@ namespace MapRenderer.Tests.Text.Placement
         // Fills `plan` from the store's real winner arrays (blockId/localIndex/isDeparting), stamping every winner
         // whose TileKey == dropTileKey Drop and everything else Keep — the RESIDENT-MASKED path (every winner
         // present in the plan, regardless of decision). dropTileKey == -1 (no tile ever packs to -1) ⇒ all Keep.
-        private static void BuildMaskedPlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long dropTileKey)
+        // R1: `version` is threaded through to SymbolGatherPlan.Build — every test below rebuilds the SAME plan
+        // object across frames, so each call passes a freshly incremented per-test counter (audited by READING
+        // this call site, not by which tests happen to go RED — SHOULD-FIX 3).
+        private static void BuildMaskedPlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long dropTileKey, int version)
         {
             var collected = new List<LabelInstance>();
             var blockId = new List<int>();
@@ -169,13 +172,13 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < collected.Count; i++)
                 decisions.Add(collected[i].TileKey == dropTileKey ? LabelTileCoverageFilter.Drop : LabelTileCoverageFilter.Keep);
 
-            plan.Build(blockId, localIndex, collected, isDeparting, decisions, store.OrderedBlocks);
+            plan.Build(blockId, localIndex, collected, isDeparting, decisions, store.OrderedBlocks, version);
         }
 
         // Fills `plan` with ONLY the winners whose TileKey != excludedTileKey — the REFERENCE path (physical
         // absence, as if the excluded tile's build never happened / was never collected). excludedTileKey == -1
         // (no tile ever packs to -1) ⇒ everything included (a plain "Build the whole store" call).
-        private static void BuildReferencePlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long excludedTileKey)
+        private static void BuildReferencePlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long excludedTileKey, int version)
         {
             var collected = new List<LabelInstance>();
             var blockId = new List<int>();
@@ -194,7 +197,7 @@ namespace MapRenderer.Tests.Text.Placement
                 refCollected.Add(collected[i]); refBlockId.Add(blockId[i]); refLocalIndex.Add(localIndex[i]);
                 refIsDeparting.Add(isDeparting[i]); refDecisions.Add(LabelTileCoverageFilter.Keep);
             }
-            plan.Build(refBlockId, refLocalIndex, refCollected, refIsDeparting, refDecisions, store.OrderedBlocks);
+            plan.Build(refBlockId, refLocalIndex, refCollected, refIsDeparting, refDecisions, store.OrderedBlocks, version);
         }
 
         private static float MaxAlpha(LabelPlacementSystem system, long tileKey)
@@ -238,20 +241,31 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
+                int maskedVersion = 0, refVersion = 0; // R1: each rebuild of the SAME plan object gets a fresh version
                 try
                 {
                     // Frame 1: both tiles Keep on both harnesses — establishes a live (full-opacity) fade for the
-                    // drop tile's point too (default +∞ deltaTime snaps to full).
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1);
+                    // drop tile's point too (default +∞ deltaTime snaps to full). R3: the collision verdict a
+                    // Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) — duplicate each harness's
+                    // Tick call (SAME plan+args) before an assertion reads placement output.
+                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f, "sanity: the drop tile's point is genuinely live before the Drop");
 
                     // Frame 2: MASKED flags the drop tile's winner Dropped (resident); REFERENCE excludes it.
-                    BuildMaskedPlan(storeMasked, planMasked, dropKey);
+                    // R3: duplicate again — LastSurvivorCount/LastQuadCount otherwise still read frame 1's
+                    // harvested (pre-Drop) verdict rather than the collision frame 2 itself just scheduled with
+                    // the Drop applied, which would make the comparison below pass without exercising the Drop
+                    // mask at all.
+                    BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildReferencePlan(storeRef, planRef, dropKey);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
@@ -315,24 +329,34 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
+                int maskedVersion = 0, refVersion = 0; // R1: each rebuild of the SAME plan object gets a fresh version
                 try
                 {
                     // Frame 1: both tiles Keep — establishes a LIVE fade for the drop tile's CURVED record.
                     // Explicitly assert it actually survived + placed with positive opacity (Blocker-2 fix: the
                     // prior version never proved this) — this is what makes MarkFadeOutIfAlive's "still alive ⇒
                     // keep staging" branch a genuine divergence risk if Drop is ever folded into that OR-chain.
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1);
+                    // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+                    // duplicate each harness's Tick call (SAME plan+args) before an assertion reads placement output.
+                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(hMasked.System.LastSurvivorCount, 0, "sanity: at least one curved placement survived frame 1");
                     Assert.Greater(MaxAlpha(hMasked.System, dropKey), 0.99f,
                         "the drop tile's curved record must be a genuinely LIVE (placed, positive-opacity) fade before the Drop");
 
                     // Frame 2: MASKED flags the drop tile's curved winner Dropped (resident); REFERENCE excludes it.
-                    BuildMaskedPlan(storeMasked, planMasked, dropKey);
+                    // R3: duplicate again — see the point-only test's identical comment for why (otherwise the
+                    // comparison below reads frame 1's stale harvested verdict, not frame 2's own Drop-masked
+                    // collision).
+                    BuildMaskedPlan(storeMasked, planMasked, dropKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildReferencePlan(storeRef, planRef, dropKey);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildReferencePlan(storeRef, planRef, dropKey, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
 
                     Assert.AreEqual(hRef.System.LastCandidateCount, hMasked.System.LastCandidateCount,
@@ -388,12 +412,18 @@ namespace MapRenderer.Tests.Text.Placement
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
+                int maskedVersion = 0, refVersion = 0; // R1: each rebuild of the SAME plan object gets a fresh version
                 try
                 {
-                    // Frame 1 (default +∞ deltaTime): visible, opacity snaps to 1.0 on both sides.
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1);
+                    // Frame 1 (default +∞ deltaTime): visible, opacity snaps to 1.0 on both sides. R3: the
+                    // collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+                    // duplicate each harness's Tick call (SAME plan+args) before an assertion reads placement
+                    // output.
+                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas);
+                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas);
                     Assert.Greater(MaxAlpha(hMasked.System, soloKey), 0.99f, "sanity: frame 1 is fully visible");
 
@@ -403,18 +433,28 @@ namespace MapRenderer.Tests.Text.Placement
                     // fix-independent). A LARGE deltaTime here makes a wrongly-firing decay unambiguous (a step
                     // large enough to fully zero-and-remove the fade entry).
                     const float bigDeltaTime = 1.0f;
-                    BuildMaskedPlan(storeMasked, planMasked, soloKey);
+                    BuildMaskedPlan(storeMasked, planMasked, soloKey, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, bigDeltaTime);
-                    BuildReferencePlan(storeRef, planRef, soloKey);
+                    BuildReferencePlan(storeRef, planRef, soloKey, refVersion++);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, bigDeltaTime);
 
                     // Frame 3: reappear (Keep again on both sides) with a SMALL deltaTime, so a frozen fade (current
                     // == 1.0) and a decayed-then-removed fade (current == 0, fading in fresh) land at visibly
                     // different opacities — not coincidentally re-converged by a single symmetric ease step.
+                    // R3: F2 (all-Dropped / zero-winner) never reaches ScheduleCollision — the whole placement
+                    // block, collision included, is gated on _mNonDroppedCount > 0 (unchanged by R3) — so nothing
+                    // is pending when F3 harvests, and F3's OWN emit reads an EMPTY _placedLastFrame (harvest's
+                    // "no pending" branch), easing solo DOWN one smallDeltaTime step before its own newly-scheduled
+                    // collision (solo alone, trivial winner) can be harvested. Duplicate F3 so that harvest lands
+                    // (SAME args — still fade-neutral: solo is a live candidate throughout, never decays via
+                    // DecayUnseenFadeRecords) — both sides dip identically then recover, so the comparison and the
+                    // "reference never decayed" sanity both still hold once the second F3 Tick's harvest lands.
                     const float smallDeltaTime = 0.05f;
-                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1);
+                    BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);
                     hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
-                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1);
+                    hMasked.System.Tick(in hMasked.Frame, planMasked, hMasked.Atlas, smallDeltaTime);
+                    BuildMaskedPlan(storeRef, planRef, dropTileKey: -1, refVersion++);
+                    hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
                     hRef.System.Tick(in hRef.Frame, planRef, hRef.Atlas, smallDeltaTime);
 
                     float reappearMasked = MaxAlpha(hMasked.System, soloKey);

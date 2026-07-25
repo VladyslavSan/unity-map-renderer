@@ -295,6 +295,8 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, new[] { label }, atlasTexture);
                 system.Tick(in frame, new[] { label }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the NEW world path must place the label.");
 

@@ -138,6 +138,8 @@ namespace MapRenderer.Tests.Text.Placement
             var snap = new SnapshotRenderer(Size, Size);
             try
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, new[] { label }, atlasTexture);
                 system.Tick(in frame, new[] { label }, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label's anchor must not be culled");
 

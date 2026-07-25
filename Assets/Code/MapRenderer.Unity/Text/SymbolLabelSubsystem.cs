@@ -312,6 +312,9 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
             _frontSnapshot.Clear(); _backSnapshot.Clear();
             _frontResult.Clear();   _backResult.Clear();
+            // R1: defense in depth, not the crash-prevention (that is 3.3's plan.WinnerCount == _mCount predicate
+            // term) — every front-content change bumps, so a reader never has to re-derive which sites do.
+            _frontSetVersion++;
             _reconcileScheduledGen = -1;
 
             _lastUploadedGlyphCount = 0;
@@ -671,6 +674,14 @@ namespace MapRenderer.Unity.Text
         // still points at (design §3.2). Non-readonly — the pickup swaps them by ref.
         private SymbolLabelReconcileResult _frontResult   = new SymbolLabelReconcileResult();
         private SymbolLabelReconcileResult _backResult    = new SymbolLabelReconcileResult();
+        // R1: monotonic FRONT-SET version — bumped on every change to _frontResult's CONTENT, i.e. exactly the
+        // events that change the winner set the gather mirror is built from: a successful reconcile swap, and the
+        // SetStyle/Dispose clears. Stamped onto SymbolGatherPlan at Build time; LabelPlacementSystem.GatherIntoMirror
+        // holds its heavy pools across frames while it is unchanged. Deliberately NOT _store.CollectGeneration: that
+        // moves at the tile EVENT, while the front moves 1-4 frames later at the swap (apply-stale,
+        // labels-async-reconcile-design.md §2), so a CollectGeneration key would keep hitting straight through a
+        // swap and serve a stale mirror.
+        private int _frontSetVersion;
         private SymbolLabelSnapshot        _frontSnapshot = new SymbolLabelSnapshot();
         private SymbolLabelSnapshot        _backSnapshot  = new SymbolLabelSnapshot();
         private bool           _reconcileInFlight;
@@ -773,7 +784,7 @@ namespace MapRenderer.Unity.Text
             }
             using (PmBatchSoA.Auto())
                 _gatherPlan.Build(_frontResult.BlockId, _frontResult.LocalIndex, _frontResult.Output,
-                    _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks);
+                    _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks, _frontSetVersion);
             return _gatherPlan;
         }
 
@@ -800,6 +811,7 @@ namespace MapRenderer.Unity.Text
             {
                 (_frontResult, _backResult) = (_backResult, _frontResult);
                 (_frontSnapshot, _backSnapshot) = (_backSnapshot, _frontSnapshot);
+                _frontSetVersion++; // R1: the front's CONTENT changed — invalidate the gather memo
                 _store.ReleasePins(_backSnapshot); // the demoted old front leaves service
             }
             else
@@ -890,6 +902,7 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
             _frontSnapshot.Clear(); _backSnapshot.Clear();
             _frontResult.Clear();   _backResult.Clear();
+            _frontSetVersion++; // R1: decorative here (Build never runs again post-Dispose) — kept for uniformity
             _reconcileScheduledGen = -1;
             DisposePipeline();
 

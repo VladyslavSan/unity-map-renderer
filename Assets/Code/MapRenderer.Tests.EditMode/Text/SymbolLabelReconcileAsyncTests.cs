@@ -25,6 +25,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests; // TestGlyphSource
+using MapRenderer.Tests.Text.Placement; // SymbolLabelBatchDiff — R1 memo tests (T2b/T5)
 using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Text
@@ -467,6 +468,192 @@ namespace MapRenderer.Tests.Text
             }
         }
 
+        // ═══ R1 T2b: a REAL front swap through the production subsystem must invalidate the gather memo — the
+        //      stage's only end-to-end guard (T2a in LabelGatherMemoTests only proves the version-consulted UNIT
+        //      behaviour; only this proves the key is wired to a real reconcile swap). Three required properties
+        //      (Codex SHOULD-FIX 1 — the original construction, kept as-is, was missing all three):
+        //        (a) EVENT vs SWAP keying: immediately after the store event (BeginBuild/CompleteBuild), before
+        //            the reconcile completes, the mirror must stay a memo HIT and still serve the OLD content —
+        //            an implementation keyed on the tile EVENT (e.g. _store.CollectGeneration, the key the
+        //            plan's design note originally proposed and the plan itself corrected — §"Key choice") would
+        //            wrongly rebuild HERE instead of waiting for the swap.
+        //        (b) The rebuild must land specifically on the frame PickupCompletedReconcile's swap actually
+        //            happens (ReconcileInFlightForTest observed true, THEN the pickup call flips it false), not
+        //            merely "sometime within a settle window".
+        //        (c) The new content must be gather-VISIBLE-DIFFERENT at a FIXED WinnerCount (3.4's coupled
+        //            constraint) — a byte-identical rebuild (this test's ORIGINAL approach, mirroring
+        //            SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock's T10b construction) can never
+        //            fail SymbolLabelBatchDiff regardless of memo correctness.
+        //      The tile event commits the replacement DIRECTLY through StoreForTest (BeginBuild+Bake+
+        //      CompleteBuild — the SAME two store calls the real async worker path uses; MarkCollectDirty fires
+        //      from inside them either way, so this still exercises the real front/back double-buffer + pickup +
+        //      apply-stale state machine, only the MVT-decode step is bypassed). BOTH calls run in ONE
+        //      synchronous block, no CurrentBatch poll between them, so their two independent CollectGeneration
+        //      bumps (SymbolTileLabelStore.cs:156,195 — BeginBuild and CompleteBuild each "always bump") coalesce
+        //      into exactly ONE ScheduleReconcileIfDirty-observed event: a single, precisely-timed swap, which is
+        //      what lets (a)/(b) assert an EXACT frame instead of tolerating the legitimate-but-unpredictable
+        //      double-swap a DriveTileBytesReady-driven rebuild can trigger (see Memo_RestyleBetweenTicks_Invalidates'
+        //      sibling test and this file's SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock, both of
+        //      which DO tolerate that). ═══
+
+        [UnityTest]
+        public IEnumerator Memo_RealFrontSwap_Invalidates()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+            DriveTileBytesReady(tile);
+            yield return PumpToQuiescence(loaded);
+
+            var harness = new LpsHarness();
+            try
+            {
+                SymbolGatherPlan plan = _subsystem.CurrentBatch(default, 0.0); // the subsystem's ONE reused _gatherPlan
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
+                int winnersBefore = plan.WinnerCount;
+                Assert.Greater(winnersBefore, 0, "sanity: the tile produced at least one winner");
+                var contentBefore = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(contentBefore);
+
+                // Steady state, no tile event — the memo must engage and stay engaged.
+                for (int f = 0; f < 3; f++)
+                {
+                    _subsystem.ReconcileLoadedTiles(loaded);
+                    _subsystem.PumpBuilds();
+                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                    harness.Lps.GatherIntoMirror(p);
+                    Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {f}: no tile event — the gather must stay a memo HIT");
+                }
+
+                // The real tile event: replace the SAME store key's content with a DIFFERENT, gather-visible
+                // payload at the SAME winner count (Codex 1c) — synthetic labels far from any coordinate the
+                // real fixture decodes to, so FirstDifference below is unambiguous regardless of the fixture's
+                // own content. BeginBuild+Bake+CompleteBuild run back-to-back (no CurrentBatch poll between
+                // them — see the header comment's coalescing argument).
+                var newLabels = new List<LabelInstance>(winnersBefore);
+                for (int i = 0; i < winnersBefore; i++)
+                    newLabels.Add(PointLabel(new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f));
+                int gen = _subsystem.StoreForTest.BeginBuild(StoreKey(tile));
+                SymbolTileLabelBlock newBlock = SymbolTileLabelBlockBaker.Bake(newLabels, slotCount: 1, TileRenderOrigin.Project(tile, P));
+                Assert.IsTrue(_subsystem.StoreForTest.CompleteBuild(StoreKey(tile), gen, newLabels, newBlock), "sanity: replacement block committed");
+
+                // (a) EVENT-keying check: the frame right after the store event (before any reconcile has had a
+                // chance to complete) must still be a memo HIT serving the OLD content.
+                _subsystem.ReconcileLoadedTiles(loaded);
+                _subsystem.PumpBuilds();
+                SymbolGatherPlan pEvent = _subsystem.CurrentBatch(default, 0.0);
+                harness.Lps.GatherIntoMirror(pEvent);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount,
+                    "immediately after the store event the mirror must still be a memo HIT — event-keyed (rather " +
+                    "than swap-keyed) invalidation would wrongly rebuild here, before the reconcile has even completed");
+                var contentAtEvent = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(contentAtEvent);
+                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(contentBefore, contentAtEvent),
+                    "the OLD front's content must still be served this frame — the replacement hasn't been picked up yet");
+
+                // (b) poll until PickupCompletedReconcile's swap actually lands (ReconcileInFlightForTest observed
+                // true beforehand, then the pickup call flips it false this frame), asserting the mirror stays
+                // flat WHILE the worker is in flight and rebuilds EXACTLY on the swap frame — not merely
+                // "eventually, within a settle window".
+                bool sawInFlight = false, swappedThisFrame = false;
+                for (int f = 0; f < 400 && !swappedThisFrame; f++)
+                {
+                    _subsystem.ReconcileLoadedTiles(loaded);
+                    _subsystem.PumpBuilds();
+                    bool inFlightBefore = _subsystem.ReconcileInFlightForTest;
+                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0); // PickupCompletedReconcile runs inside this call
+                    harness.Lps.GatherIntoMirror(p);
+                    if (inFlightBefore) sawInFlight = true;
+                    if (harness.Lps.MirrorRebuildCount > 1)
+                    {
+                        swappedThisFrame = true;
+                        Assert.IsTrue(sawInFlight,
+                            "the swap must be preceded by an observed in-flight reconcile — proves the memo tracked the SWAP, not just the store event");
+                    }
+                    else
+                    {
+                        Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, $"frame {f}: still waiting for pickup — the mirror must stay a memo HIT until the swap lands");
+                        yield return null;
+                    }
+                }
+                Assert.IsTrue(swappedThisFrame, "the tile-replacement event must eventually land as a front swap");
+                Assert.AreEqual(2, harness.Lps.MirrorRebuildCount,
+                    "exactly ONE heavy rebuild for the single, precisely-timed swap — a missing version bump would leave this flat");
+
+                SymbolGatherPlan finalPlan = _subsystem.CurrentBatch(default, 0.0);
+                Assert.AreEqual(winnersBefore, finalPlan.WinnerCount, "coupled constraint: WinnerCount must be UNCHANGED across the swap");
+
+                // (c) content genuinely changed — the memo, when it correctly invalidated, picked up the
+                // REPLACEMENT, not stale OLD content held over from before the swap.
+                var contentAfter = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(contentAfter);
+                Assert.IsNotNull(SymbolLabelBatchDiff.FirstDifference(contentBefore, contentAfter),
+                    "post-swap content must DIFFER from pre-swap content — a memo that failed to invalidate would still show the OLD payload");
+
+                // Post-swap frames must go back to memo-hitting (no further event).
+                int rebuildAfterSwap = harness.Lps.MirrorRebuildCount;
+                for (int f = 0; f < 3; f++)
+                {
+                    _subsystem.ReconcileLoadedTiles(loaded);
+                    _subsystem.PumpBuilds();
+                    SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0);
+                    harness.Lps.GatherIntoMirror(p);
+                    Assert.AreEqual(rebuildAfterSwap, harness.Lps.MirrorRebuildCount, $"post-swap frame {f}: back to a memo HIT");
+                }
+
+                // Reference: an independent gather over the SAME final plan content — confirms the held mirror's
+                // content is not just "different from before" but EXACTLY the replacement.
+                var refHarness = new LpsHarness();
+                try
+                {
+                    refHarness.Lps.GatherIntoMirror(finalPlan);
+                    var got = new SymbolLabelBatch(); harness.Lps.CopyMirrorInto(got);
+                    var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
+                    Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
+                        "post-swap the held-mirror system's content must match a fresh gather over the same plan");
+                }
+                finally { refHarness.Dispose(); }
+            }
+            finally { harness.Dispose(); }
+        }
+
+        // ═══ R1 T5: a restyle (SetStyle) between two production gathers on the SAME plan object must invalidate
+        //      the memo, even though the front content collapses to EMPTY. Step 2.3's `_frontSetVersion++` is
+        //      defense-in-depth (3.3's `plan.WinnerCount == _mCount` predicate term is the actual crash-prevention
+        //      for a release player) — with the bump present this test observes no throw and a clean rebuild; the
+        //      RED-verify signal for a MISSING bump is a Debug.LogAssertion from AssertMemoPlanMatchesMirror
+        //      (NUnit fails a test on an unexpected one), not a content diff or a throw — see the plan's T5 row. ═══
+
+        [UnityTest]
+        public IEnumerator Memo_RestyleBetweenTicks_Invalidates()
+        {
+            UseImmediateGlyphs();
+            var tile = new TileId { Z = 3, X = 0, Y = 0 };
+            var loaded = new List<LoadedTileKey> { Key(tile) };
+            DriveTileBytesReady(tile);
+            yield return PumpToQuiescence(loaded);
+
+            var harness = new LpsHarness();
+            try
+            {
+                SymbolGatherPlan plan = _subsystem.CurrentBatch(default, 0.0);
+                harness.Lps.GatherIntoMirror(plan);
+                Assert.AreEqual(1, harness.Lps.MirrorRebuildCount, "sanity: the first gather is a heavy rebuild");
+                Assert.Greater(plan.WinnerCount, 0, "sanity: the tile produced at least one winner before the restyle");
+
+                // Restyle: SetStyle Clear()s _frontResult/_backResult — Step 2.3's bump site.
+                StyleDocument restyle = StyleParser.Parse(StyleJson);
+                _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
+
+                SymbolGatherPlan afterRestyle = _subsystem.CurrentBatch(default, 0.0); // SAME _gatherPlan object, now empty
+                Assert.DoesNotThrow(() => harness.Lps.GatherIntoMirror(afterRestyle),
+                    "a same-object, now-empty plan must rebuild cleanly (no out-of-range read) after a restyle");
+                Assert.AreEqual(2, harness.Lps.MirrorRebuildCount,
+                    "the restyle must invalidate the memo — a stale memo hit against a zero-length plan would either " +
+                    "throw (checked NativeArray.Copy) or silently read garbage (release player)");
+                Assert.AreEqual(0, afterRestyle.WinnerCount, "sanity: the front is empty after the restyle");
+            }
+            finally { harness.Dispose(); }
+        }
+
         // ═══ T9: the pin prevents a native USE-AFTER-FREE — a block a reconcile result still references is NOT freed
         //         at a drop site while pinned; the gather derefs its NativeArrays safely; the pin release frees it.
         //         RED-verify: revert the Release true-evict site's DisposeOrDefer to a direct Dispose → the block
@@ -526,7 +713,7 @@ namespace MapRenderer.Tests.Text
             {
                 var decisions = new List<byte>(result.Output.Count);
                 for (int i = 0; i < result.Output.Count; i++) decisions.Add(LabelTileCoverageFilter.Keep);
-                plan.Build(result.BlockId, result.LocalIndex, result.Output, result.IsDeparting, decisions, result.OrderedBlocks);
+                plan.Build(result.BlockId, result.LocalIndex, result.Output, result.IsDeparting, decisions, result.OrderedBlocks, winnerSetVersion: 0);
                 harness.Lps.GatherIntoMirror(plan); // derefs the (still-alive, pinned) block's NativeArrays — a freed block here is a UAF
                 var gathered = new SymbolLabelBatch();
                 harness.Lps.CopyMirrorInto(gathered);

@@ -265,6 +265,8 @@ namespace MapRenderer.Tests.Visual
             using var snap = new SnapshotRenderer(Size, Size);
             try
             {
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the single 'A' glyph must place (precondition, not the tooth itself).");
 
@@ -351,7 +353,10 @@ namespace MapRenderer.Tests.Visual
                 // batches can both reach BuildId=1 on their first Build() and collide on that skip guard.
                 var batch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA }, 1, mapCamera.Projection);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: new List<SymbolRenderLayer> { layerA });
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                var layerAOnly = new List<SymbolRenderLayer> { layerA };
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
                 Assert.AreEqual(1, system.LastQuadCount, "label A alone must place (precondition).");
                 snap.Render(cam);
                 AssertNotGpuContextFailure(snap);
@@ -359,7 +364,9 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsTrue(found, "solo label-A render must contain a pixel close to its ink colour — precondition for the sample point.");
 
                 // Both labels, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA, labelB }, 2, mapCamera.Projection);
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(2, system.LastQuadCount, "both overlapping labels place (AllowOverlap — the tooth is draw order, not collision).");
 
@@ -378,6 +385,7 @@ namespace MapRenderer.Tests.Visual
                 // matches real usage (production always Ticks before every Render); mirrors §7.10-1a's
                 // BuildId-collision-safe pattern by rebuilding the SAME batch reference each time.
                 SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA, labelB }, 2, mapCamera.Projection);
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
                 double[] aFirst = SampleAround(snap.RawPixels, ix, iy);
@@ -433,7 +441,9 @@ namespace MapRenderer.Tests.Visual
                 // SHOW half: one Tick with a label, render TWICE with no Tick between — no manual
                 // MeshFilter/MeshRenderer attach anywhere in this test (E2's whole point: the presenter IS
                 // a persistent scene renderer, created/bound entirely inside Tick).
+                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { label }, 1, mapCamera.Projection);
+                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
 
@@ -506,6 +516,13 @@ namespace MapRenderer.Tests.Visual
                 SortKey = sortKey,
                 FeatureIndex = featureIndex,
                 TileKey = 0L,
+                // R3: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey —
+                // so two labels sharing an anchor with the (both-default) Text/MaterialIndex this method used to
+                // leave unset would collide on FadeId. Under R3, FadeId is the display key (LabelCandidate.FadeId's
+                // uniqueness contract), so a collision would make the loser show alongside the winner. Distinct Text
+                // per label keeps the anchors identical (the real collision this test needs) while giving each a
+                // unique identity; it does not perturb the staged geometry (Layout is supplied explicitly here).
+                Text = "L" + featureIndex,
             };
         }
 
@@ -542,16 +559,24 @@ namespace MapRenderer.Tests.Visual
             var prodSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             try
             {
+                // R3: duplicate both systems' ticks — the collision verdict is harvested one Tick late (§2.6).
+                // Without this, a fresh system's single Tick harvests nothing (LastSurvivorCount == 0 on both
+                // sides), and the equality assertion below would pass VACUOUSLY (0 == 0) without ever exercising
+                // a real collision — hence the added Assert.Greater strengthening it against that.
+                demoSystem.Tick(in frame, labels, atlasTexture);
                 demoSystem.Tick(in frame, labels, atlasTexture);
 
                 var batch = new SymbolLabelBatch();
                 SymbolLabelBatchBuilder.Build(batch, labels, 1, mapCamera.Projection);
-                prodSystem.Tick(in frame, batch, atlasTexture, deltaTime: float.PositiveInfinity,
-                    symbolLayers: new List<SymbolRenderLayer> { renderLayer });
+                var symbolLayers = new List<SymbolRenderLayer> { renderLayer };
+                prodSystem.Tick(in frame, batch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                prodSystem.Tick(in frame, batch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
 
                 Assert.Greater(demoSystem.LastCandidateCount, 0, "sanity: the demo path actually staged candidates.");
                 Assert.AreEqual(demoSystem.LastCandidateCount, prodSystem.LastCandidateCount,
                     "collision candidate count must be identical — E2 must not touch anything upstream of the emit loop.");
+                Assert.Greater(demoSystem.LastSurvivorCount, 0,
+                    "sanity: a real collision actually ran and produced a survivor (otherwise the equality below could pass vacuously on 0 == 0).");
                 Assert.AreEqual(demoSystem.LastSurvivorCount, prodSystem.LastSurvivorCount,
                     "collision survivor count must be identical.");
                 Assert.AreEqual(demoSystem.LastQuadCount, prodSystem.LastQuadCount,

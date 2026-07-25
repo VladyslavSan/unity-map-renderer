@@ -65,7 +65,14 @@ namespace MapRenderer.Tests.Text.Placement
             var nGlyphs = From(glyphs); var nAnchors = From(anchors); var nFade = From(fadeIds);
             var pointOffset = One(0); var nScreen = From(screen); var nDepth = From(depth); var nValid = From(valid);
             var nWorld = From(world); // Stage AC (curved-world): the gathered world polyline, index-aligned with Screen
-            var pwp = One<byte>(0); var awp = From(wasPlaced);
+            // R2: AnchorWasPlaced is now JOB-OWNED scratch — LabelStageJob.Execute fills it from AnchorFadeIds +
+            // Placed. Allocated ZERO-FILLED (NativeArrayOptions.ClearMemory is the default), which is the property
+            // doing the work here: a MISSING fill loop reads as not-placed and fails the differential rather than
+            // matching by luck. Placed is the native incumbency set the job resolves against, built from the
+            // harness's (fadeIds, wasPlaced) ground truth — mirrors LabelPlacementSystem._placedLastFrame.
+            var awp = new NativeArray<byte>(fadeIds.Length, alloc);
+            var placed = new NativeHashSet<long>(math.max(1, fadeIds.Length), alloc);
+            for (int i = 0; i < fadeIds.Length; i++) if (wasPlaced[i] != 0) placed.Add(fadeIds[i]);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<LabelBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
             var oCands = new NativeArray<LabelCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
@@ -79,7 +86,7 @@ namespace MapRenderer.Tests.Text.Placement
                 CurvedAnchorStart = cas, CurvedAnchorCount = cac, CurvedAnchorFadeStart = cafs,
                 Quads = nQuads, Glyphs = nGlyphs, Anchors = nAnchors, AnchorFadeIds = nFade,
                 PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid, WorldPointsRender = nWorld,
-                PointWasPlaced = pwp, AnchorWasPlaced = awp, Bearing = bearing, Viewport = new double2(1920, 1080),
+                AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), Bearing = bearing, Viewport = new double2(1920, 1080),
                 PathScratch = path, CumScratch = cum,
                 Boxes = oBoxes, StagedQuads = oQuads, Candidates = oCands, Emit = oEmit, OutCounts = counts,
             }.Run();
@@ -92,7 +99,7 @@ namespace MapRenderer.Tests.Text.Placement
             kinds.Dispose(); detail.Dispose(); worldCount.Dispose(); points.Dispose(); pqs.Dispose(); pqc.Dispose();
             curveds.Dispose(); cgs.Dispose(); cgc.Dispose(); cas.Dispose(); cac.Dispose(); cafs.Dispose();
             nQuads.Dispose(); nGlyphs.Dispose(); nAnchors.Dispose(); nFade.Dispose();
-            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); pwp.Dispose(); awp.Dispose();
+            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); awp.Dispose(); placed.Dispose();
             path.Dispose(); cum.Dispose(); oBoxes.Dispose(); oQuads.Dispose(); oCands.Dispose(); oEmit.Dispose(); counts.Dispose();
             return r;
         }
@@ -101,7 +108,12 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void BurstStage_MatchesManaged_CurvedBends(
             [Values(0f, 10f, 29f, 31f, 44f, 46f, 90f)] float bendDeg,
-            [Values(30f, 45f)] float maxAngleDeg)
+            [Values(30f, 45f)] float maxAngleDeg,
+            // R2: anchorIncumbent exercises WasPlacedLastFrame != false, which NO prior case here did. This
+            // proves index-resolution PLUMBING (the job's relocated fill loop resolves the right fade id to the
+            // right boolean) — StageCurved itself never branches on wasPlaced, it only stores it onto the
+            // candidate (LabelStagingMath.cs:305), so this is not a staging-math sensitivity tooth.
+            [Values(false, true)] bool anchorIncumbent)
         {
             // A 3-vertex line: straight run, then a bend of bendDeg. Glyphs span the joint so the per-glyph tangent
             // delta straddles maxAngleDeg near the boundary values (29/31, 44/46).
@@ -117,7 +129,17 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var anchors = new[] { new LineAnchor(0, 1f) }; // anchor at the joint (arc 60)
             var fadeIds = new[] { 111L, 222L };            // anchor + centred fallback
-            var wasPlaced = new byte[] { 0, 0 };
+            // R2: derive wasPlaced from a NativeHashSet<long> of incumbent fade ids — the SAME lookup shape
+            // LabelStageJob resolves incumbency through in production (both arms resolve off one set). A
+            // hand-typed byte[] literal could hand duplicate fade ids inconsistent bytes, an input production can
+            // never produce; deriving both arms' input from one set keeps this oracle testing the staging math
+            // (well, the plumbing — see the anchorIncumbent comment above), not an impossible input.
+            var incumbentFadeIds = anchorIncumbent ? new[] { fadeIds[0] } : System.Array.Empty<long>(); // build-time anchor incumbent, centred fallback not
+            var placed = new NativeHashSet<long>(math.max(1, incumbentFadeIds.Length), Allocator.Temp);
+            foreach (long id in incumbentFadeIds) placed.Add(id);
+            var wasPlaced = new byte[fadeIds.Length];
+            for (int i = 0; i < fadeIds.Length; i++) wasPlaced[i] = (byte)(placed.Contains(fadeIds[i]) ? 1 : 0);
+            placed.Dispose();
             // Stage AC (curved-world): the gathered WORLD polyline the screen path was projected from — same
             // bend, embedded in the render-space XZ plane (east=X, north=Z), at a nontrivial (nonzero, large)
             // tile origin so the T-ULP bake below exercises a real double-narrow, not a degenerate zero.
@@ -143,6 +165,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(m.Candidates[i].BoxStart, n.Candidates[i].BoxStart, "candidate BoxStart");
                 Assert.AreEqual(m.Candidates[i].BoxCount, n.Candidates[i].BoxCount, "candidate BoxCount");
                 Assert.AreEqual(m.Candidates[i].FadeId, n.Candidates[i].FadeId, "candidate FadeId");
+                // R2: the tooth for anchorIncumbent — proves the job's relocated fill loop resolved the right
+                // fade id to the right incumbency boolean (index-resolution plumbing, not staging math).
+                Assert.AreEqual(m.Candidates[i].WasPlacedLastFrame, n.Candidates[i].WasPlacedLastFrame, "candidate WasPlacedLastFrame");
             }
             // Geometry must match within a tight tolerance (ULP trig noise only).
             for (int i = 0; i < m.BoxCount; i++)

@@ -130,6 +130,26 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Glyph quads submitted to the GPU on the last Tick (4 vertices each) — the drawn label load.")]
         public int SymbolPlacedQuads;
 
+        [Tooltip("A-4 fade records held — the size of the map the per-frame decay sweep walks, so a cost, not " +
+                 "just memory. A faded-out identity is dropped rather than parked at 0, so this should track " +
+                 "SymbolPlacedQuads and settle when the camera does; tracking SymbolCollisionCandidates instead " +
+                 "means invisible identities are being retained again.")]
+        public int SymbolLiveFadeRecords;
+
+        [Tooltip("R1: cumulative heavy rebuilds of the native label mirror (never bumped on a memo hit).")]
+        public int SymbolMirrorRebuilds;
+
+        [Tooltip("Heavy mirror rebuilds per second, averaged over the last sampling window — how often the winner " +
+                 "set actually changes. Near the frame rate means the set churns every frame and the gather memo " +
+                 "cannot help; near zero means it is hitting. See docs/symbol-label-perf-design.md §10.4.")]
+        public double SymbolMirrorRebuildsPerSecond;
+
+        // Rate sampling: a per-frame delta would read 0 or ~60 with nothing in between, so accumulate over a
+        // window and publish once per window.
+        private const double RebuildRateWindowSeconds = 0.5;
+        private double _rebuildWindowStartTime = double.NegativeInfinity;
+        private int    _rebuildWindowStartCount;
+
         private void Update() => Tick();
 
         /// <summary>
@@ -185,6 +205,29 @@ namespace MapRenderer.Unity.Rendering.Map
             SymbolCollisionCandidates = sym.CollisionCandidateCount;
             SymbolCollisionSurvivors  = sym.CollisionSurvivorCount;
             SymbolPlacedQuads         = sym.PlacedQuadCount;
+            SymbolLiveFadeRecords     = sym.LiveFadeRecordCount;
+            SymbolMirrorRebuilds      = sym.MirrorRebuildCount;
+            SampleMirrorRebuildRate(sym.MirrorRebuildCount);
+        }
+
+        // Publish the rebuild rate once per RebuildRateWindowSeconds. The first call only opens the window (no
+        // rate yet — there is no earlier sample to difference against).
+        private void SampleMirrorRebuildRate(int rebuildCount)
+        {
+            double now = Time.unscaledTimeAsDouble;
+            if (double.IsNegativeInfinity(_rebuildWindowStartTime))
+            {
+                _rebuildWindowStartTime = now;
+                _rebuildWindowStartCount = rebuildCount;
+                return;
+            }
+
+            double elapsed = now - _rebuildWindowStartTime;
+            if (elapsed < RebuildRateWindowSeconds) return;
+
+            SymbolMirrorRebuildsPerSecond = (rebuildCount - _rebuildWindowStartCount) / elapsed;
+            _rebuildWindowStartTime = now;
+            _rebuildWindowStartCount = rebuildCount;
         }
     }
 }

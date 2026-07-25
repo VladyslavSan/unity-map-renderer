@@ -198,3 +198,23 @@ build/reconcile hooks. NOT the tile pipeline / camera / projection / fill-line m
 worker, off the render thread. `BatchBuild` drops to the per-frame residual (`Classify` + `SoA` ≈ 1.5 ms).
 Byte-identical steady-state render; fade-smooth under set swaps; no motion-keyed cost cliff. **The gate is a
 maintainer Play-mode re-profile while panning/zooming — not a headless number.**
+
+## 8. OUTCOME — target met; the cost moved on (2026-07-25)
+
+Maintainer Play-mode re-profile after Stages 1–4 landed (`9bf19457`), camera moving:
+
+```
+MapRenderer.View.LateUpdate                19.36 ms
+  MapRenderer.Symbol.Gather                 5.12 ms   ← GatherIntoMirror (the native compaction)
+  MapRenderer.Symbol.LabelTick             12.45 ms
+    …Symbol.Project                         3.64 ms   (…ProjectFill ≈ 1.4, …Stage 2.27)
+    …Symbol.Collide                         5.03 ms   (JobHandle.Complete 4.06 — LabelCollisionJob 4.05)
+    …Symbol.Emit                            3.04 ms
+```
+
+`BatchBuild` no longer even appears as a top cost — the residual it now holds is ≤ 1.8 ms (19.36 − 5.12 − 12.45),
+i.e. **§7's `Classify` + `SoA` ≈ 1.5 ms target was hit and the ~11 ms per-frame dedup is gone.** This design is
+**done**; the remaining per-frame label cost is a different set of hot spots (a still-per-frame native gather, the
+synchronous collision wait, and the managed emit loop) — tracked in
+[`symbol-label-perf-design.md` §10](symbol-label-perf-design.md), which is the umbrella SSOT for per-frame label
+cost.
