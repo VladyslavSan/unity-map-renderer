@@ -75,9 +75,11 @@ namespace MapRenderer.Tests.Text.Placement
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 },
                 zoom: 8.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
+                Rebase = float3x3.identity,
+            };
 
             // Icons are drawn with vertex color = white so SAMPLE(_MainTex) * color shows the sprite's true
             // RGBA (LabelPaint.Default is BLACK text ink — it would render every icon black).
@@ -156,11 +158,18 @@ namespace MapRenderer.Tests.Text.Placement
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             var snap = new SnapshotRenderer(Size, Size);
+            // Every label here is Point placement (icons carry Kind = Icon, not Placement = Line), so the
+            // production collect's curved-then-points split cannot reorder them — see
+            // SymbolPlanMirrorParityTests for the mixed-kind case where it does.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                Assert.AreEqual(labels.Count, plan.CollectedCount,
+                    "precondition: the cross-tile dedup (fixed 4 m grid) must not merge any of these — a short " +
+                    "count here would show up below as missing ink rather than as a placement bug.");
                 Assert.AreEqual(5, system.LastQuadCount,
                     "all four icon quads + the reference 'A' glyph quad must place (each a 1-quad point candidate; none culled).");
 

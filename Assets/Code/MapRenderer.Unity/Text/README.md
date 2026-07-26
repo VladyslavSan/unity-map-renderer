@@ -23,11 +23,11 @@ TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, 
                  │  per-(source,tile) label sets, collected-set Version, static-frame skip
                  ▼
       ┌── LabelPlacementSystem.Tick(frame, labels, atlas)  (Unity/Text/Placement)  [PER FRAME, MAIN]
-      │      1. ProjectFill  — gather world points + project to screen   (SymbolProjectionJob, Jobs — .Run())
-      │      2. Stage        — lay each glyph onto the projected curve, build collision boxes + quads
-      │      3. Collide      — greedy all-or-nothing placement            (LabelCollisionJob, Jobs)
-      │      4. Emit         — A-4 fade + assemble per-slot quad buckets
-      │      5. BuildSubmit  — write the billboard Mesh + upload          (SymbolBillboardJob, Jobs)
+      │      1. ProjectPositions  — gather world points + project to screen  (SymbolProjectionJob, Jobs — .Run())
+      │      2. Stage             — lay each glyph onto the projected curve, build collision boxes + quads
+      │      3. Collide           — greedy all-or-nothing placement          (LabelCollisionJob, Jobs)
+      │      4. Emit              — A-4 fade + assemble per-slot quad buckets
+      │      5. BuildSubmit       — write the billboard Mesh + upload        (SymbolBillboardJob, Jobs)
       └──────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -125,7 +125,7 @@ All under `ProfilerCategory.Scripts`, so a re-profile is self-serve:
 |---|---|
 | `MapRenderer.Symbol.LabelTick` | the whole per-frame placement Tick |
 | `MapRenderer.Symbol.Project` | umbrella: gather + projection + staging |
-| ` ├ MapRenderer.Symbol.ProjectFill` | gather world points + project (job-wait / inline `.Run()`) |
+| ` ├ MapRenderer.Symbol.ProjectPositions` | gather world points + project (job-wait / inline `.Run()`) |
 | ` └ MapRenderer.Symbol.Stage` | the managed staging loop (**the hot spot**) |
 | `MapRenderer.Symbol.Collide` | `LabelCollisionJob` schedule + complete |
 | `MapRenderer.Symbol.Emit` | A-4 fade + per-slot quad-bucket assembly |

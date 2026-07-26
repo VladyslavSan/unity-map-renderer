@@ -134,8 +134,8 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 _quiescedPlan = _subsystem.CurrentBatch(default, 0.0);
-                bool settled = _quiescedPlan.WinnerCount > 0 && _subsystem.ReadyTailCount == 0
-                               && !_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount == lastRecompute;
+                bool settled = _quiescedPlan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
+                               && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
                 if (settled) { if (++stable >= 2) yield break; } else stable = 0;
                 lastRecompute = _subsystem.CollectRecomputeCount;
                 yield return null;
@@ -154,8 +154,8 @@ namespace MapRenderer.Tests.Text
             DriveTileBytesReady(tile);
             yield return PumpToQuiescence(new List<LoadedTileKey> { Key(tile) });
 
-            Assert.Greater(_subsystem.ReconcilerForTest.LastRunThreadId, 0, "sanity: a reconcile actually ran");
-            Assert.AreNotEqual(mainThreadId, _subsystem.ReconcilerForTest.LastRunThreadId,
+            Assert.Greater(_subsystem.Reconciler().LastRunThreadId, 0, "sanity: a reconcile actually ran");
+            Assert.AreNotEqual(mainThreadId, _subsystem.Reconciler().LastRunThreadId,
                 "the cross-tile dedup ran OFF the main thread (a thread-pool worker) — the whole point of Stage 4b");
         }
 
@@ -179,7 +179,7 @@ namespace MapRenderer.Tests.Text
             // Gate the NEXT reconcile so it parks in flight.
             var gate = new ManualResetEventSlim(false);
             _testGate = gate;
-            _subsystem.ReconcilerForTest.GateForTest = gate;
+            _subsystem.Reconciler().GateForTest = gate;
             int recomputeBefore = _subsystem.CollectRecomputeCount;
             var empty = new List<LoadedTileKey>();
 
@@ -197,7 +197,7 @@ namespace MapRenderer.Tests.Text
                 else _subsystem.ReconcileLoadedTiles(f < 5 ? empty : loaded, nowSeconds: 101.0);
                 _subsystem.PumpBuilds();
                 SymbolGatherPlan held = _subsystem.CurrentBatch(default, 0.0);
-                Assert.IsTrue(_subsystem.ReconcileInFlightForTest, $"frame {f}: the reconcile is gated in flight");
+                Assert.IsTrue(_subsystem.ReconcileInFlight(), $"frame {f}: the reconcile is gated in flight");
                 Assert.AreEqual(aWinners, held.WinnerCount, $"frame {f}: the stale FRONT A is served unchanged while pending");
                 Assert.AreEqual(0, DepartingRecordCount(held), $"frame {f}: …still the active set (no premature departing swap)");
                 if (f == 0) { idBlock = CopyInts(held.BlockId, aWinners); idLocal = CopyInts(held.LocalIndex, aWinners); idDep = CopyBytes(held.Departing, aWinners); }
@@ -264,7 +264,7 @@ namespace MapRenderer.Tests.Text
         //         misaligned partial buffer to SymbolGatherPlan.Build and crash), the old front is held, inFlight
         //         resets, and a later event reschedules + recovers. RED-verify: (a) swap-on-non-success → the
         //         misaligned back reaches the front → the held-front assertion fails (and Build would crash); (b) an
-        //         impl that swallows the fault without GetResult → ReconcileFaultObservedForTest stays false. ═══
+        //         impl that swallows the fault without GetResult → ReconcileFaultObserved stays false. ═══
 
         [UnityTest]
         public IEnumerator Reconcile_Faults_Observed_NoSwap_FrontHeld_ReschedulesOnNextEvent()
@@ -276,10 +276,10 @@ namespace MapRenderer.Tests.Text
             yield return PumpToQuiescence(loaded);
             int aWinners = _quiescedPlan.WinnerCount;
             int recomputeBefore = _subsystem.CollectRecomputeCount;
-            Assert.IsFalse(_subsystem.ReconcileFaultObservedForTest, "precondition: no fault observed yet");
+            Assert.IsFalse(_subsystem.ReconcileFaultObserved, "precondition: no fault observed yet");
 
             // Inject a fault into the NEXT reconcile, then a tile event (A leaves cover) to schedule it.
-            _subsystem.ReconcilerForTest.FaultNextRun = true;
+            _subsystem.Reconciler().FaultNextRun = true;
             var empty = new List<LoadedTileKey>();
             bool faultPicked = false;
             for (int f = 0; f < 200; f++)
@@ -287,11 +287,11 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
                 _subsystem.CurrentBatch(default, 0.0);
-                if (!_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount > recomputeBefore) { faultPicked = true; break; }
+                if (!_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount > recomputeBefore) { faultPicked = true; break; }
                 yield return null;
             }
             Assert.IsTrue(faultPicked, "the faulting reconcile was scheduled and picked up (inFlight reset)");
-            Assert.IsTrue(_subsystem.ReconcileFaultObservedForTest,
+            Assert.IsTrue(_subsystem.ReconcileFaultObserved,
                 "the worker exception was OBSERVED directly (GetResult rethrew into the catch) — not merely inferred from inFlight");
 
             SymbolGatherPlan held = _subsystem.CurrentBatch(default, 0.0);
@@ -330,16 +330,16 @@ namespace MapRenderer.Tests.Text
             // front+back ⇒ pin count 2). The worker parks.
             var gate = new ManualResetEventSlim(false);
             _testGate = gate;
-            _subsystem.ReconcilerForTest.GateForTest = gate;
+            _subsystem.Reconciler().GateForTest = gate;
             var empty = new List<LoadedTileKey>();
-            for (int f = 0; f < 20 && !_subsystem.ReconcileInFlightForTest; f++)
+            for (int f = 0; f < 20 && !_subsystem.ReconcileInFlight(); f++)
             {
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
                 _subsystem.CurrentBatch(default, 0.0);
                 yield return null;
             }
-            Assert.IsTrue(_subsystem.ReconcileInFlightForTest, "a reconcile is gated in flight (its back snapshot pins the shared block)");
+            Assert.IsTrue(_subsystem.ReconcileInFlight(), "a reconcile is gated in flight (its back snapshot pins the shared block)");
 
             // Restyle. Open the gate FIRST (SPEC A test note) so DrainInFlightReconcile observes the worker instead
             // of hanging on it. SetStyle then runs the SPEC A protocol: cancel → drain → ReleasePins(front) +
@@ -393,7 +393,7 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 _subsystem.CurrentBatch(default, 0.0);
-                if (_subsystem.ReadyTailCount == 0 && !_subsystem.ReconcileInFlightForTest
+                if (_subsystem.ReadyTailCount() == 0 && !_subsystem.ReconcileInFlight()
                     && SymbolTileLabelBlock.DebugLiveAllocCount == liveWithOneBlock) { freedBackToBaseline = true; break; }
                 yield return null;
             }
@@ -419,7 +419,7 @@ namespace MapRenderer.Tests.Text
 
             // Fault the next reconcile; a tile event (A departs) schedules it — the captured back snapshot shares the
             // tile's block with the front (refcount 2). On the fault pickup, :805 must ReleasePins the failed back.
-            _subsystem.ReconcilerForTest.FaultNextRun = true;
+            _subsystem.Reconciler().FaultNextRun = true;
             var empty = new List<LoadedTileKey>();
             bool faultObserved = false;
             for (int f = 0; f < 200; f++)
@@ -427,7 +427,7 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(empty, nowSeconds: 100.0);
                 _subsystem.PumpBuilds();
                 _subsystem.CurrentBatch(default, 0.0);
-                if (_subsystem.ReconcileFaultObservedForTest && !_subsystem.ReconcileInFlightForTest) { faultObserved = true; break; }
+                if (_subsystem.ReconcileFaultObserved && !_subsystem.ReconcileInFlight()) { faultObserved = true; break; }
                 yield return null;
             }
             Assert.IsTrue(faultObserved, "the fault was observed and its pickup completed");
@@ -456,7 +456,7 @@ namespace MapRenderer.Tests.Text
 
             var oOut = new List<LabelInstance>(); var oBlk = new List<int>();
             var oLoc = new List<int>(); var oDep = new List<byte>();
-            _subsystem.StoreForTest.CollectInto(oOut, oBlk, oLoc, oDep, SymbolLabelSubsystem.DedupEnabled, out int _);
+            _subsystem.Store().CollectInto(oOut, oBlk, oLoc, oDep, SymbolLabelSubsystem.DedupEnabled, out int _);
 
             Assert.Greater(oOut.Count, 0, "sanity: the oracle collected labels");
             Assert.AreEqual(oOut.Count, front.WinnerCount, "async front winner count == inline collect oracle");
@@ -478,13 +478,13 @@ namespace MapRenderer.Tests.Text
         //            plan's design note originally proposed and the plan itself corrected — §"Key choice") would
         //            wrongly rebuild HERE instead of waiting for the swap.
         //        (b) The rebuild must land specifically on the frame PickupCompletedReconcile's swap actually
-        //            happens (ReconcileInFlightForTest observed true, THEN the pickup call flips it false), not
+        //            happens (ReconcileInFlight() observed true, THEN the pickup call flips it false), not
         //            merely "sometime within a settle window".
         //        (c) The new content must be gather-VISIBLE-DIFFERENT at a FIXED WinnerCount (3.4's coupled
         //            constraint) — a byte-identical rebuild (this test's ORIGINAL approach, mirroring
         //            SuccessfulSwap_ReleasesDemotedFrontPins_FreesRebuiltOverBlock's T10b construction) can never
         //            fail SymbolLabelBatchDiff regardless of memo correctness.
-        //      The tile event commits the replacement DIRECTLY through StoreForTest (BeginBuild+Bake+
+        //      The tile event commits the replacement DIRECTLY through Store() (BeginBuild+Bake+
         //      CompleteBuild — the SAME two store calls the real async worker path uses; MarkCollectDirty fires
         //      from inside them either way, so this still exercises the real front/back double-buffer + pickup +
         //      apply-stale state machine, only the MVT-decode step is bypassed). BOTH calls run in ONE
@@ -533,9 +533,9 @@ namespace MapRenderer.Tests.Text
                 var newLabels = new List<LabelInstance>(winnersBefore);
                 for (int i = 0; i < winnersBefore; i++)
                     newLabels.Add(PointLabel(new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f));
-                int gen = _subsystem.StoreForTest.BeginBuild(StoreKey(tile));
+                int gen = _subsystem.Store().BeginBuild(StoreKey(tile));
                 SymbolTileLabelBlock newBlock = SymbolTileLabelBlockBaker.Bake(newLabels, slotCount: 1, TileRenderOrigin.Project(tile, P));
-                Assert.IsTrue(_subsystem.StoreForTest.CompleteBuild(StoreKey(tile), gen, newLabels, newBlock), "sanity: replacement block committed");
+                Assert.IsTrue(_subsystem.Store().CompleteBuild(StoreKey(tile), gen, newLabels, newBlock), "sanity: replacement block committed");
 
                 // (a) EVENT-keying check: the frame right after the store event (before any reconcile has had a
                 // chance to complete) must still be a memo HIT serving the OLD content.
@@ -550,7 +550,7 @@ namespace MapRenderer.Tests.Text
                 Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(contentBefore, contentAtEvent),
                     "the OLD front's content must still be served this frame — the replacement hasn't been picked up yet");
 
-                // (b) poll until PickupCompletedReconcile's swap actually lands (ReconcileInFlightForTest observed
+                // (b) poll until PickupCompletedReconcile's swap actually lands (ReconcileInFlight() observed
                 // true beforehand, then the pickup call flips it false this frame), asserting the mirror stays
                 // flat WHILE the worker is in flight and rebuilds EXACTLY on the swap frame — not merely
                 // "eventually, within a settle window".
@@ -559,7 +559,7 @@ namespace MapRenderer.Tests.Text
                 {
                     _subsystem.ReconcileLoadedTiles(loaded);
                     _subsystem.PumpBuilds();
-                    bool inFlightBefore = _subsystem.ReconcileInFlightForTest;
+                    bool inFlightBefore = _subsystem.ReconcileInFlight();
                     SymbolGatherPlan p = _subsystem.CurrentBatch(default, 0.0); // PickupCompletedReconcile runs inside this call
                     harness.Lps.GatherIntoMirror(p);
                     if (inFlightBefore) sawInFlight = true;
@@ -617,7 +617,7 @@ namespace MapRenderer.Tests.Text
 
         // ═══ R1 T5: a restyle (SetStyle) between two production gathers on the SAME plan object must invalidate
         //      the memo, even though the front content collapses to EMPTY. Step 2.3's `_frontSetVersion++` is
-        //      defense-in-depth (3.3's `plan.WinnerCount == _mCount` predicate term is the actual crash-prevention
+        //      defense-in-depth (3.3's `plan.WinnerCount == _mirrorCount` predicate term is the actual crash-prevention
         //      for a release player) — with the bump present this test observes no throw and a clean rebuild; the
         //      RED-verify signal for a MISSING bump is a Debug.LogAssertion from AssertMemoPlanMatchesMirror
         //      (NUnit fails a test on an unexpected one), not a content diff or a throw — see the plan's T5 row. ═══

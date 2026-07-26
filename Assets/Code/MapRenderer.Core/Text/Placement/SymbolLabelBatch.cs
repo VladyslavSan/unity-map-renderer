@@ -16,7 +16,7 @@ namespace MapRenderer.Core.Text.Placement
     ///
     /// <para><b>Ordering.</b> Records are in the exact collected order the old per-frame loop processed labels in,
     /// so the collision ordinal assignment (and thus the built mesh) is byte-identical. Point and curved labels
-    /// interleave; <see cref="Kinds"/> discriminates and <see cref="Detail"/> indexes the per-kind arrays.</para>
+    /// interleave; <see cref="Kinds"/> (a <see cref="LabelRecordKind"/>) discriminates and <see cref="Detail"/> indexes the per-kind arrays.</para>
     ///
     /// <para><b>Reuse.</b> Arrays grow geometrically and never shrink; <see cref="Reset"/> rewinds the counts so a
     /// rebuild reuses the buffers (no per-rebuild GC once warm). Only the STABLE per-label values live here — the
@@ -24,11 +24,8 @@ namespace MapRenderer.Core.Text.Placement
     /// </summary>
     public sealed class SymbolLabelBatch
     {
-        /// <summary>Point vs curved for record <c>r</c> (selects which detail array <see cref="Detail"/> indexes).</summary>
-        public enum Kind : byte { Point = 0, Curved = 1 }
-
         // ── per-label records, in collected order ──
-        public Kind[]    Kinds      = Array.Empty<Kind>();
+        public LabelRecordKind[] Kinds = Array.Empty<LabelRecordKind>();
         public int[]     Detail     = Array.Empty<int>();   // index into Points[] or Curveds[]
         public int[]     WorldStart = Array.Empty<int>();   // start of this label's world points in WorldPoints
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
@@ -89,7 +86,7 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         // ── append helpers (geometric growth, never shrink) — the builder appends; the counts are the live length ──
-        public int AddRecord(Kind kind, int detail, int worldStart, int worldCount, in double3 repAnchor,
+        public int AddRecord(LabelRecordKind kind, int detail, int worldStart, int worldCount, in double3 repAnchor,
             bool departing, bool coverageFading)
         {
             Grow(ref Kinds, Count); Grow(ref Detail, Count); Grow(ref WorldStart, Count); Grow(ref WorldCount, Count);

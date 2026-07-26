@@ -40,8 +40,5 @@ namespace MapRenderer.Core.Expressions
                 return false;
             }
         }
-
-        /// <summary>Convenience: evaluate or throw (for tests / callers that treat an error as fatal).</summary>
-        public Value EvaluateOrThrow(in EvaluationContext context) => Evaluate(context);
     }
 }

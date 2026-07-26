@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Geometry;
 using Unity.Mathematics;
 #if UNITY_EDITOR

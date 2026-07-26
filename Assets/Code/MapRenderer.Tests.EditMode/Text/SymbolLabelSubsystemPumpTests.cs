@@ -340,8 +340,8 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 plan = _subsystem.CurrentBatch(frame, keepAllButRunFilter);
-                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount == 0
-                               && !_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount == lastRecompute;
+                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
+                               && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
                 if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
                 lastRecompute = _subsystem.CollectRecomputeCount;
                 yield return null;
@@ -390,8 +390,8 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 plan = _subsystem.CurrentBatch(default, 0.0);
-                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount == 0
-                               && !_subsystem.ReconcileInFlightForTest && _subsystem.CollectRecomputeCount == lastRecompute;
+                bool settled = plan.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0
+                               && !_subsystem.ReconcileInFlight() && _subsystem.CollectRecomputeCount == lastRecompute;
                 if (settled) { if (++stable >= 2) { quiesced = true; break; } } else stable = 0;
                 lastRecompute = _subsystem.CollectRecomputeCount;
                 yield return null;
@@ -460,7 +460,7 @@ namespace MapRenderer.Tests.Text
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 active = _subsystem.CurrentBatch(default, 0.0);
-                if (active.WinnerCount > 0 && _subsystem.ReadyTailCount == 0) { quiesced = true; break; }
+                if (active.WinnerCount > 0 && _subsystem.ReadyTailCount() == 0) { quiesced = true; break; }
                 yield return null;
             }
             Assert.IsTrue(quiesced, "sanity: drove to quiescence");

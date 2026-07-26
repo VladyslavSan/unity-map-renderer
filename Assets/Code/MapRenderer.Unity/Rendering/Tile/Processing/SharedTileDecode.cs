@@ -34,10 +34,18 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private IDecodedTile _tile;                // decoded lazily, once, under _gate
         private ExceptionDispatchInfo _fault;       // cached decode fault, rethrown to every caller
 
-        // Moved from TileManager (A1's "declared but unwired" follow-up, closed here) — SAME name, so
-        // ProfilerMarkerTests' name-list assertion needs no edit.
+        /// <summary>Profiler marker name constants (SSOT) for the shared decode — referenced by the
+        /// <see cref="ProfilerMarker"/> field below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            // Moved from TileManager (A1's "declared but unwired" follow-up, closed here) — the NAME is
+            // unchanged, so live profiles taken before the move still line up.
+            internal const string TileDecode = "MapRenderer.Tile.Decode";
+        }
+
         private static readonly ProfilerMarker PmTileDecode =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.Decode");
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TileDecode);
 
         internal SharedTileDecode(byte[] bytes, ITileDecoder decoder)
         {

@@ -163,7 +163,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             var labels = new List<LabelInstance> { Point(farAnchor, "F", 0) };
             SceneFrame frame = h.Frame();
-            h.System.Tick(in frame, labels, h.Atlas); // fresh — never seen, no live fade to ease out
+            h.System.TickLabels(in frame, labels, h.Atlas, h.Camera.Projection); // fresh — never seen, no live fade to ease out
 
             Assert.AreEqual(0, h.System.LastQuadCount, "a fresh far-side anchor produces no geometry (hard-skip)");
             Assert.AreEqual(0, h.System.LastCandidateCount, "…and never enters the collision pass");
@@ -221,7 +221,7 @@ namespace MapRenderer.Tests.Text.Placement
                 double3 anchor = h.Camera.Projection.Project(anchorGeo);
                 var labels = new List<LabelInstance> { Point(anchor, "A", 0) };
                 SceneFrame frame = h.Frame();
-                h.System.Tick(in frame, labels, h.Atlas);
+                h.System.TickLabels(in frame, labels, h.Atlas, h.Camera.Projection);
 
                 Assert.AreEqual(expected, h.System.LastHorizonCulledCount,
                     $"heading {headingDeg}°: horizon-cull fire must match the normal {{1,1,0}} pattern — a swap or " +
@@ -245,8 +245,8 @@ namespace MapRenderer.Tests.Text.Placement
             // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
             // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
             SceneFrame frame1 = h.Frame();
-            h.System.Tick(in frame1, labels, h.Atlas);
-            h.System.Tick(in frame1, labels, h.Atlas);
+            h.System.TickLabels(in frame1, labels, h.Atlas, h.Camera.Projection);
+            h.System.TickLabels(in frame1, labels, h.Atlas, h.Camera.Projection);
             Assert.AreEqual(1, h.System.LastQuadCount, "the anchor places while the camera looks at it");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests.Text.Placement
             var rotated = new GeoCoordinate3D { Latitude = 0.0, Longitude = 180.0, Altitude = 0.0 };
             h.SetProperties(new CameraProperties(rotated, zoom: 2.0, heading: 0.0, tilt: 0.0));
             SceneFrame frame2 = h.Frame();
-            h.System.Tick(in frame2, labels, h.Atlas, deltaTime: 0.1f);
+            h.System.TickLabels(in frame2, labels, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a horizon-occluded-but-visible anchor keeps drawing (fading, not popping)");
             float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < 10; i++)
             {
                 SceneFrame frame3 = h.Frame();
-                h.System.Tick(in frame3, labels, h.Atlas, deltaTime: 0.1f);
+                h.System.TickLabels(in frame3, labels, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
             }
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the horizon-occluded anchor is fully skipped");
             Assert.Greater(h.System.LastHorizonCulledCount, 0, "…and its skip is attributed to horizon telemetry");

@@ -19,7 +19,7 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// D1-#2 (symbol-label native bake, Phase 2): the tile-coverage cull's Drop decision is now a per-record
-    /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mRecordDropped</c>)
+    /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mirrorRecordDropped</c>)
     /// instead of a physical compaction — a Dropped winner stays RESIDENT in the plan/mirror and is hard-skipped
     /// by <c>LabelPlacementSystem.GatherSymbolPoints</c>'s FIRST, unconditional check. This is the falsifiable
     /// proof that masking a Dropped record is bit-for-bit equivalent to it never having been collected — proven
@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Text.Placement
     ///   <item><see cref="AllDropped_FadeStaysFrozen_ReappearOpacityMatchesReference"/> — the Blocker-1 regression:
     ///     a frame where EVERY resident record is Dropped must behave EXACTLY like the pre-D1 empty-after-
     ///     compaction mirror (placement/fade-decay block skipped entirely), so a live fade FREEZES instead of
-    ///     decaying — <see cref="LabelPlacementSystem"/>'s <c>_mNonDroppedCount</c> gate, not raw <c>_mCount</c>.</item>
+    ///     decaying — <see cref="LabelPlacementSystem"/>'s <c>_mirrorNonDroppedCount</c> gate, not raw <c>_mirrorCount</c>.</item>
     /// </list>
     ///
     /// Each test compares the RESIDENT-MASKED production path (a plan carrying every winner, some flagged
@@ -138,7 +138,7 @@ namespace MapRenderer.Tests.Text.Placement
                 var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt, zoom: 12.0, heading: 0.0, tilt: 0.0),
                     projection: P);
                 Origin = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
-                Frame = new SceneFrame(Origin, float3x3.identity);
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 Atlas = BuildTinyAtlasTexture();
                 _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
                 System = new LabelPlacementSystem(mapCamera, _baseMaterial);
@@ -429,7 +429,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                     // Frame 2: EVERY resident record is Dropped (the only tile in the universe) — masked side keeps
                     // the winner resident+flagged Dropped; reference excludes it entirely (physically absent, the
-                    // ground truth: 0 winners ⇒ _mCount == 0 regardless of any gate, so the reference is
+                    // ground truth: 0 winners ⇒ _mirrorCount == 0 regardless of any gate, so the reference is
                     // fix-independent). A LARGE deltaTime here makes a wrongly-firing decay unambiguous (a step
                     // large enough to fully zero-and-remove the fade entry).
                     const float bigDeltaTime = 1.0f;
@@ -442,7 +442,7 @@ namespace MapRenderer.Tests.Text.Placement
                     // == 1.0) and a decayed-then-removed fade (current == 0, fading in fresh) land at visibly
                     // different opacities — not coincidentally re-converged by a single symmetric ease step.
                     // R3: F2 (all-Dropped / zero-winner) never reaches ScheduleCollision — the whole placement
-                    // block, collision included, is gated on _mNonDroppedCount > 0 (unchanged by R3) — so nothing
+                    // block, collision included, is gated on _mirrorNonDroppedCount > 0 (unchanged by R3) — so nothing
                     // is pending when F3 harvests, and F3's OWN emit reads an EMPTY _placedLastFrame (harvest's
                     // "no pending" branch), easing solo DOWN one smallDeltaTime step before its own newly-scheduled
                     // collision (solo alone, trivial winner) can be harvested. Duplicate F3 so that harvest lands

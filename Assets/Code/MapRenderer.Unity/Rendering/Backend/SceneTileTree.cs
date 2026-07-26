@@ -1,8 +1,9 @@
-using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Pool;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Unity.Common;
 
@@ -25,7 +26,7 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// (Entities/BRG draw tile fills GameObject-free, so there is no tile-backend container to piggyback on;
     /// see the label-draw-backend-rework design §5).</para>
     /// </summary>
-    internal sealed class SceneTileTree : IDisposable
+    internal sealed class SceneTileTree : VerifiedDisposable
     {
         // One per live tile: the container its callers' children are grouped under, so the scene Hierarchy
         // shows a per-tile tree. Carries the tile's projected SW-corner render origin so Rebuild can
@@ -39,34 +40,91 @@ namespace MapRenderer.Unity.Rendering.Backend
         }
 
         private readonly Dictionary<TileId, TileNode> _nodes = new Dictionary<TileId, TileNode>();
-        private GameObject _root;
+        private          GameObject                   _root;
 
-        // Last scene frame seen by Rebuild — identical blink-fix rationale to GameObjects.TileRenderer:
-        // GetOrCreateTileNode may be called AFTER Rebuild within the same frame; caching the frame lets a
-        // freshly-created container be positioned immediately instead of blinking at the world origin for a
-        // frame until the NEXT Rebuild repositions it.
-        private SceneFrame _lastFrame;
-        private bool       _hasSceneOrigin;
+        // Last scene frame seen by Rebuild, null until the first one — identical blink-fix rationale to
+        // GameObjects.TileRenderer: GetOrCreateTileNode may be called AFTER Rebuild within the same frame;
+        // caching the frame lets a freshly-created container be positioned immediately instead of blinking at
+        // the world origin for a frame until the NEXT Rebuild repositions it.
+        private SceneFrame? _lastFrame;
 
-        public SceneTileTree(string rootName) => _root = new GameObject(rootName);
+        // Tile containers recycle rather than churn: a zoom step replaces the WHOLE cover at once, so the
+        // create/destroy burst is per-transition, not per-frame. Bare GameObjects (no components), so the win
+        // here is smaller than the label path's leaves — and the per-rent `$"Tile {tileId}"` name is not saved
+        // either (a container is named for the tile it holds, so it renames on every rent).
+        //
+        // A released container parks under _poolRoot, an INACTIVE root of this tree's own. The reparent is
+        // mandatory: ObjectPool is scene-unaware — Release only files the reference away — so without it the
+        // GameObject stays under _root, and `Root`'s child set is this type's published meaning ("the live
+        // tiles"). It must not be `SetParent(null)` either: that promotes the container to a SCENE-ROOT
+        // object, live in the Hierarchy and still active, keeping its last tenancy's name ("Tile 14/8192/5461")
+        // so it is indistinguishable from a live container — a debugging hazard in the very backend whose
+        // purpose is Inspector debuggability.
+        //
+        // _poolRoot is a CHILD of _root rather than a second scene root: everything this tree owns then sits
+        // under one top-level object. NodeCount, not _root.childCount, is the live-tile quantity — see the
+        // note on NodeCount.
+        private GameObject _poolRoot;
 
-        /// <summary>The tree root's transform (null after <see cref="Dispose"/>).</summary>
-        public Transform Root => _root != null ? _root.transform : null;
+        private readonly ObjectPool<GameObject> _containerPool;
 
-        /// <summary>Number of live tile containers (one per tile that has ≥1 registered child).</summary>
+        public SceneTileTree(string rootName)
+        {
+            // HideFlags.DontSave on everything this tree owns: it is all built at runtime from tiles and has
+            // no business being serialized into a scene. It also means Unity will not destroy these on scene
+            // load — teardown is Dispose's job, which VerifiedDisposable's finalizer reports if it is missed.
+            _root     = new GameObject(rootName)          { hideFlags = HideFlags.DontSave };
+            _poolRoot = new GameObject("(container pool)") { hideFlags = HideFlags.DontSave };
+            _poolRoot.transform.SetParent(_root.transform, worldPositionStays: false);
+            _poolRoot.SetActive(false);
+
+            _containerPool = new ObjectPool<GameObject>(
+                createFunc: () => new GameObject { hideFlags = HideFlags.DontSave },
+                actionOnGet: null, // the rent site reparents — it is the only caller that knows the parent
+                actionOnRelease: go => go.transform.SetParent(_poolRoot.transform, worldPositionStays: false),
+                actionOnDestroy: go => go.DestroySafely(),
+                collectionCheck: true, // a double-release would hand one container to two tiles
+                defaultCapacity: 32,
+                maxSize: 512);
+        }
+
+        /// <summary>The tree root's transform. THROWS <see cref="System.ObjectDisposedException"/> after
+        /// <see cref="VerifiedDisposable.Dispose"/> rather than returning null — reading the tree of a torn-down
+        /// backend is a caller bug, and a silent null only defers the NRE to whoever dereferences it. A caller
+        /// that legitimately outlives the tree nulls its own reference and guards with <c>?.</c> instead
+        /// (<see cref="GameObjects.TileRenderer.Root"/>, whose own "null after dispose" contract is preserved
+        /// that way).</summary>
+        public Transform Root
+        {
+            get
+            {
+                ThrowIfDisposed();
+                return _root.transform;
+            }
+        }
+
+        /// <summary>Number of live tile containers (one per tile that has ≥1 registered child). This — not
+        /// <c>Root.childCount</c> — is the live-tile count: the root also carries the inactive
+        /// <c>"(container pool)"</c> node that recycled containers park under.</summary>
         public int NodeCount => _nodes.Count;
 
         /// <summary>The container transform for <paramref name="tileId"/>, or null if no live container.</summary>
         public Transform Container(TileId tileId)
-            => _nodes.TryGetValue(tileId, out var n) && n.Go != null ? n.Go.transform : null;
+        {
+            return _nodes.TryGetValue(tileId, out var n) && n.Go != null ? n.Go.transform : null;
+        }
 
         private float3 InitialScenePos(double3 tileOriginRender)
-            => _hasSceneOrigin
-                ? FloatingOrigin.TileToSceneRebased(tileOriginRender, _lastFrame.SceneOriginRender, _lastFrame.Rebase)
+        {
+            return _lastFrame is { } frame
+                ? FloatingOrigin.TileToSceneRebased(tileOriginRender, frame.SceneOriginRender, frame.Rebase)
                 : float3.zero;
+        }
 
         private quaternion InitialSceneRot()
-            => _hasSceneOrigin ? new quaternion(_lastFrame.Rebase) : quaternion.identity;
+        {
+            return _lastFrame is { } frame ? new quaternion(frame.Rebase) : quaternion.identity;
+        }
 
         /// <summary>
         /// Returns the existing container for <paramref name="tileId"/>, or creates one parented under the
@@ -78,8 +136,9 @@ namespace MapRenderer.Unity.Rendering.Backend
         {
             if (_nodes.TryGetValue(tileId, out var rec)) return rec.Go.transform;
 
-            var go = new GameObject($"Tile {tileId}");
+            GameObject go = _containerPool.Get();
             go.transform.SetParent(_root.transform, worldPositionStays: false);
+            go.name = $"Tile {tileId}";
             float3 pos = InitialScenePos(tileOriginRender);
             go.transform.localPosition = new Vector3(pos.x, pos.y, pos.z);
             go.transform.localRotation = InitialSceneRot(); // identity for Mercator; per-frame rebase for the globe
@@ -108,7 +167,9 @@ namespace MapRenderer.Unity.Rendering.Backend
             rec.ChildCount--;
             if (rec.ChildCount <= 0)
             {
-                rec.Go.DestroySafely();
+                // Null-guarded: Go can be destroyed out from under us (Rebuild tolerates it too), and unlike
+                // the DestroySafely this replaced, ObjectPool.Release would fault on it.
+                if (rec.Go != null) _containerPool.Release(rec.Go);
                 _nodes.Remove(tileId);
             }
             else
@@ -126,14 +187,14 @@ namespace MapRenderer.Unity.Rendering.Backend
         {
             // Cache so a tile node created later this frame (after this Rebuild) is created already
             // positioned, instead of blinking at the world origin for a frame.
-            _lastFrame      = frame;
-            _hasSceneOrigin = true;
+            _lastFrame = frame;
 
             quaternion rot = new quaternion(frame.Rebase); // same orientation for every tile (identity for Mercator)
             foreach (var kv in _nodes)
             {
                 if (kv.Value.Go == null) continue;
-                float3 pos = FloatingOrigin.TileToSceneRebased(kv.Value.TileOriginRender, frame.SceneOriginRender, frame.Rebase);
+                float3 pos = FloatingOrigin.TileToSceneRebased(kv.Value.TileOriginRender, frame.SceneOriginRender,
+                    frame.Rebase);
                 kv.Value.Go.transform.localPosition = new Vector3(pos.x, pos.y, pos.z);
                 kv.Value.Go.transform.localRotation = rot;
             }
@@ -151,24 +212,30 @@ namespace MapRenderer.Unity.Rendering.Backend
             foreach (var kv in _nodes)
             {
                 if (kv.Value.Go == null) continue;
-                Vector3 p = kv.Value.Go.transform.position;
-                if (p.x < minX) minX = p.x;
+                Vector3 p                            = kv.Value.Go.transform.position;
+                if (p.x                 < minX) minX = p.x;
                 if (p.x + tileSizeWorld > maxX) maxX = p.x + tileSizeWorld;
-                if (p.z < minZ) minZ = p.z;
+                if (p.z                 < minZ) minZ = p.z;
                 if (p.z + tileSizeWorld > maxZ) maxZ = p.z + tileSizeWorld;
             }
+
             if (minX == float.MaxValue) return new Bounds(Vector3.zero, Vector3.zero);
             float cx = (minX + maxX) * 0.5f, cz = (minZ + maxZ) * 0.5f;
             return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
         }
 
-        /// <summary>Destroys the root (and with it every container and its callers' children). Idempotent.</summary>
-        public void Dispose()
+        /// <summary>Destroys the root (and with it every LIVE container and its callers' children), then the
+        /// pool's detached containers. Runs at most once — <see cref="VerifiedDisposable"/> owns the
+        /// idempotency guard that this used to hand-roll as <c>if (_root == null) return</c>, and adds the
+        /// Editor-only finalizer that reports a tree dropped without Dispose.</summary>
+        protected override void DoDispose()
         {
-            if (_root == null) return;
             _nodes.Clear();
             _root.DestroySafely();
             _root = null;
+
+            _containerPool.Clear(); // actionOnDestroy per parked container (_poolRoot dies with _root above)
+            _poolRoot = null;
         }
     }
 }

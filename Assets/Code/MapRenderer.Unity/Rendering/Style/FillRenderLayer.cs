@@ -16,11 +16,20 @@ namespace MapRenderer.Unity.Rendering.Style
     /// </summary>
     internal sealed class FillRenderLayer : ITileMeshRenderLayer
     {
-        // Nested under MapRenderer.View.ApplyZoom — the fill applier loop (expression eval → SetFloat/
-        // SetColor), scales with fill-layer count. Preserved verbatim from the retired StyledLayerSet so the
-        // S46 greppable-marker set is intact; it now fires once per fill layer (was once around the fill loop).
+        /// <summary>Profiler marker name constants (SSOT) for this layer's telemetry — referenced by the
+        /// <see cref="ProfilerMarker"/> field below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            // Nested under MapRenderer.View.ApplyZoom — the fill applier loop (expression eval → SetFloat/
+            // SetColor), scales with fill-layer count. Preserved verbatim from the retired StyledLayerSet so
+            // the S46 greppable-marker set is intact; it now fires once per fill layer (was once around the
+            // whole fill loop).
+            internal const string ApplyZoomFills = "MapRenderer.View.ApplyZoom.Fills";
+        }
+
         private static readonly ProfilerMarker PmZoomFills =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.Fills");
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomFills);
 
         private readonly Fill.PaintProperties _paint;
         private readonly ZoomStyleApplier     _applier;

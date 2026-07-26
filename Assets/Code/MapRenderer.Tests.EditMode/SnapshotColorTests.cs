@@ -1,5 +1,4 @@
 using NUnit.Framework;
-using MapRenderer.Core.Imaging;
 
 namespace MapRenderer.Tests
 {

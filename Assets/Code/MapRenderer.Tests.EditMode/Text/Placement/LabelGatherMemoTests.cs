@@ -163,7 +163,7 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt = new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 };
                 var mapCamera = new MapCamera(uCam, new CameraProperties(lookAt, zoom: 12.0, heading: 0.0, tilt: 0.0), projection: P);
                 Origin = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
-                Frame = new SceneFrame(Origin, float3x3.identity);
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
                 var glyphAtlas = new GlyphAtlas();
                 glyphAtlas.Append(glyph);
@@ -271,66 +271,6 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); storeA.Clear(); storeB.Clear(); }
         }
 
-        // ═══ T3: the REVERSE cross-overload direction the old per-tick _lastBatch reset used to cover — a demo
-        //         Tick between two production gathers on the SAME plan+version must still force a rebuild. ═══
-
-        [Test]
-        public void Memo_DemoTickBetweenProductionTicks_Invalidates()
-        {
-            var tile = new TileId { Z = 6, X = 30, Y = 30 };
-            long key = Tk(tile);
-            var store = new SymbolTileLabelStore(cacheCap: 8);
-            SeedTile(store, tile, new List<LabelInstance> { PointLabel(new double3(100, 0, 200), "a", 1, key, 0.1f) });
-
-            using var harness = new TickHarness();
-            using var refHarness = new LpsHarness();
-            var plan = new SymbolGatherPlan();
-            var refPlan = new SymbolGatherPlan();
-            var demoBatch = new SymbolLabelBatch();
-            try
-            {
-                // §7.10-1a precondition, deliberately reproduced: plan.WinnerSetVersion is set to 1 to COLLIDE with
-                // demoBatch's BuildId (SymbolLabelBatch.BuildId starts at 0, its first Reset()/Build bumps it to 1 —
-                // LabelPlacementDemoProductionFlipTests' exact precondition). Two independent counters that happen
-                // to share a NUMBER is the original bug's scenario; a version-0 plan would never collide with any
-                // batch's first BuildId, so the identity term's necessity (RED-verify row 2) would go untested.
-                BuildPlan(store, plan, version: 1);
-                harness.System.GatherIntoMirror(plan);
-                Assert.AreEqual(1, harness.System.MirrorRebuildCount, "production gather 1: a heavy rebuild");
-
-                harness.System.GatherIntoMirror(plan); // same plan+version, no tile event
-                Assert.AreEqual(1, harness.System.MirrorRebuildCount, "production gather 2: a memo hit (still 1)");
-
-                // A demo Tick is a DIFFERENT overload/source entirely — must force its own rebuild. Its first Build
-                // reaches BuildId 1, the SAME number plan.WinnerSetVersion already holds — identity is what must
-                // discriminate them.
-                SymbolLabelBatchBuilder.Build(demoBatch,
-                    new List<LabelInstance> { PointLabel(harness.Origin, "demo", 9, 0L, 0.5f) }, 1, P);
-                Assert.AreEqual(1, demoBatch.BuildId, "sanity: the demo batch's first BuildId collides with plan.WinnerSetVersion (both 1)");
-                harness.System.Tick(in harness.Frame, demoBatch, harness.Atlas);
-                Assert.AreEqual(2, harness.System.MirrorRebuildCount, "the demo tick must rebuild the mirror (cross-overload)");
-
-                // Production gather on the SAME plan+version — must rebuild AGAIN (T3's actual teeth: the reverse
-                // direction), not memo-hit on the demo's stale mirrored content (which the dropped-identity defect
-                // would do, since plan.WinnerSetVersion(1) == the demo's stamped _mirrorVersion(1) by the collision
-                // above). RED-verified (2026-07-25): this discrimination ALSO depends on the demo batch and the
-                // plan holding the SAME record count (one label each, here) — the release-build count backstop
-                // (plan.WinnerCount == _mCount) would otherwise rescue the dropped-identity defect the same way a
-                // version mismatch would. If either fixture's label count ever changes, re-verify this row.
-                harness.System.GatherIntoMirror(plan);
-                Assert.AreEqual(3, harness.System.MirrorRebuildCount,
-                    "a production gather after a demo tick must rebuild — memo-hitting here would serve the demo's stale content");
-
-                BuildPlan(store, refPlan, version: 1);
-                refHarness.Lps.GatherIntoMirror(refPlan);
-                var got = new SymbolLabelBatch(); harness.System.CopyMirrorInto(got);
-                var want = new SymbolLabelBatch(); refHarness.Lps.CopyMirrorInto(want);
-                Assert.IsNull(SymbolLabelBatchDiff.FirstDifference(want, got),
-                    "after the demo interruption, the production gather must reflect the plan's OWN content, not the demo batch's");
-            }
-            finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
-        }
-
         // ═══ T4: masks (Departing/CoverageFading) are per-frame inputs, legitimately varying at a FIXED version
         //         (1.2's exemption) — must be tracked on a HELD (memo-hit) mirror, not frozen from the first
         //         rebuild. Fixed WinnerCount throughout (else AssertMemoPlanMatchesMirror fires for the wrong
@@ -340,7 +280,7 @@ namespace MapRenderer.Tests.Text.Placement
         // Split into two independent single-mask flips (Codex SHOULD-FIX 2): the original single test flipped
         // Departing and CoverageFading TOGETHER, so an implementation that copied either source mask into BOTH
         // destinations (e.g. WritePerFrameMasks accidentally writing plan.Departing into both
-        // _mRecordDeparting AND _mRecordCoverageFading) would still pass — both masks would read true either way.
+        // _mirrorRecordDeparting AND _mirrorRecordCoverageFading) would still pass — both masks would read true either way.
         // Each test below flips exactly ONE mask and asserts the OTHER stayed at its unflipped value, so a
         // mask-to-mask cross-wire fails on the "unchanged" assertion even though the "changed" one still passes.
 

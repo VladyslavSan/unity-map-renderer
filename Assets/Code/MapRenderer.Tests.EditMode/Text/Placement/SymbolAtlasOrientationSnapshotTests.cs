@@ -101,9 +101,11 @@ namespace MapRenderer.Tests.Text.Placement
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 }, zoom: 8.0, heading: 0.0, tilt: 0.0));
 
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
+                Rebase = float3x3.identity,
+            };
 
             // Anchor slightly NORTH of the look-at (positive local Z). The longitude is unchanged, so the
             // anchor stays at the look-at's X → the glyph renders horizontally centered (assertion 1). The
@@ -132,11 +134,12 @@ namespace MapRenderer.Tests.Text.Placement
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
             var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var snap = new SnapshotRenderer(Size, Size);
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, new[] { label }, atlasTexture);
-                system.Tick(in frame, new[] { label }, atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     "DIAGNOSTIC precondition: the label's anchor must NOT be culled (LastQuadCount should be " +
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +

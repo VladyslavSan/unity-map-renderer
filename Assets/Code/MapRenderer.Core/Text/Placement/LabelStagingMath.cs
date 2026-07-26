@@ -27,7 +27,7 @@ namespace MapRenderer.Core.Text.Placement
     public static class LabelStagingMath
     {
         /// <summary>Defence-in-depth cap on a line's repeat anchors — the staging loop and the batch builder's
-        /// per-anchor fade-id pre-resolve MUST use the same value (see SymbolLabelBatchBuilder).</summary>
+        /// per-anchor fade-id pre-resolve MUST use the same value (see the parity oracle, SymbolLabelBatchBuilder in the test assembly).</summary>
         public const int MaxAnchorsPerLine = 256;
         private const float MaxProjectedPx  = 1e5f;    // a near-plane blow-up past this skips the label.
 
@@ -279,7 +279,7 @@ namespace MapRenderer.Core.Text.Placement
                 if (reversed) unitTangent = -unitTangent;
                 float3 tangentLocal = new float3((float)unitTangent.x, (float)unitTangent.y, (float)unitTangent.z);
                 // Level-1 RTC bake (manual per-component narrow — no assumed double3→float3 cast operator,
-                // mirrors SymbolLabelBatchBuilder.AddPoint's identical narrowing).
+                // mirrors the parity oracle's AddPoint identical narrowing).
                 float3 anchorLocal = new float3(
                     (float)(worldPt.x - s.TileOriginRender.x),
                     (float)(worldPt.y - s.TileOriginRender.y),

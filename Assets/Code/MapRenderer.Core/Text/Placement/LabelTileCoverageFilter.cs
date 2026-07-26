@@ -12,7 +12,7 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// Moves the per-tile screen-coverage pre-cull (<see cref="LabelTileCoverage"/>) AHEAD of the SoA batch
     /// build — culled AFTER the A-3 cross-tile dedup (<see cref="Text.SymbolTileLabelStore.CollectInto"/>),
-    /// BEFORE <see cref="MapRenderer.Unity.Text.Placement.SymbolLabelBatchBuilder.Build"/> — so a low-coverage
+    /// BEFORE the parity oracle's <c>Build</c> (test assembly) — so a low-coverage
     /// tile's labels never enter the SoA build at all (the ~13ms <c>SoA.Copy</c> cost scales with what's on
     /// screen). NOT before/inside dedup: culling pre-dedup would change dedup WINNERS (a &lt;5%-coverage
     /// child tile culled first would let its &gt;5% parent win the finest-zoom-wins tiebreak and render a

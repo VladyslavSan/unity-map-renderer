@@ -11,6 +11,7 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Text
@@ -37,7 +38,7 @@ namespace MapRenderer.Unity.Text
     /// main thread, after any off-thread fetch work has resumed there (mirrors every other GPU-resource
     /// boundary in this codebase — the mesh/backend disposal contract).
     /// </summary>
-    public sealed class SpriteSheet : IDisposable
+    public sealed class SpriteSheet : VerifiedDisposable
     {
         private Texture2D _texture;
         private readonly SpriteIndex _index;
@@ -93,7 +94,7 @@ namespace MapRenderer.Unity.Text
             tex.Apply(updateMipmaps: false);
         }
 
-        public void Dispose()
+        protected override void DoDispose()
         {
             _texture.DestroySafely();
             _texture = null;

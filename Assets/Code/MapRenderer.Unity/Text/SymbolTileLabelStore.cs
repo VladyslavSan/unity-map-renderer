@@ -373,7 +373,7 @@ namespace MapRenderer.Unity.Text
         /// label list (the block is raw-indexed with inert null slots, so this maps straight through). Emit order
         /// is IDENTICAL to the plain overload — active CURVED during the <c>_active</c> scan, active POINT winners
         /// via the <c>_dedup</c> enumeration, then departing — so the plan stays byte-aligned with the collected
-        /// list a parity oracle (<c>SymbolLabelBatchBuilder.Build</c>) would walk.</para>
+        /// list the parity oracle (<c>SymbolLabelBatchBuilder.Build</c>, test assembly) would walk.</para>
         ///
         /// <para><b>D1 (Blocker 2):</b> <paramref name="outIsDeparting"/> materializes, PER RECORD, exactly what
         /// <paramref name="activeCount"/> already encoded positionally (<c>outIsDeparting[i] == (i &gt;= activeCount)</c>

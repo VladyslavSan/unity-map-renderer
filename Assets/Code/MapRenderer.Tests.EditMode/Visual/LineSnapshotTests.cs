@@ -1,7 +1,6 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Geometry;
 using System.Collections.Generic;
 using Unity.Mathematics;

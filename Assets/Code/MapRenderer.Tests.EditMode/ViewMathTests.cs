@@ -819,7 +819,7 @@ namespace MapRenderer.Tests
                         foreach (double2 v in corners)
                         {
                             float3  rendered = FloatingOrigin.RenderVertex(v, tileOrigin, sceneOrigin);
-                            double3 truth    = FloatingOrigin.RenderVertexTruth(v, sceneOrigin);
+                            double3 truth    = RenderVertexTruth(v, sceneOrigin);
 
                             double ex = rendered.x - truth.x;
                             double ez = rendered.z - truth.z;
@@ -864,7 +864,7 @@ namespace MapRenderer.Tests
             var (_, tMax) = tile.MercatorBounds();
 
             float3  rendered = FloatingOrigin.RenderVertex(tMax, tileOrigin, sceneOrigin);
-            double3 truth    = FloatingOrigin.RenderVertexTruth(tMax, sceneOrigin);
+            double3 truth    = RenderVertexTruth(tMax, sceneOrigin);
             double err = Math.Abs(rendered.x - truth.x);
 
             Assert.Greater(err, 0.5,
@@ -1066,5 +1066,16 @@ namespace MapRenderer.Tests
             y = (int)Math.Max(0, Math.Min(n - 1, y));
             return new TileId { Z = z, X = x, Y = y };
         }
+
+        // ── Test-local oracle ────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// The exact (double-precision) render-space truth for a vertex: <c>merc − sceneOrigin</c>. The
+        /// difference between this and <see cref="FloatingOrigin.RenderVertex"/> IS the floating-origin
+        /// precision error these tests measure — which is why it belongs here and not in Core: it is the
+        /// reference the production float path is judged against, and it had no production caller. Its old
+        /// name (<c>FloatingOrigin.RenderVertexTruth</c>) said as much.
+        /// </summary>
+        private static double3 RenderVertexTruth(double2 mercVertex, double2 sceneOriginMerc)
+            => new double3(mercVertex.x - sceneOriginMerc.x, 0.0, mercVertex.y - sceneOriginMerc.y);
     }
 }

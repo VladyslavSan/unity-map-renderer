@@ -36,13 +36,30 @@ namespace MapRenderer.Jobs
     /// </summary>
     public static class FillMeshPipeline
     {
+        /// <summary>Profiler marker name constants (SSOT) for the pipeline stages — referenced by the
+        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c>. Public rather than
+        /// internal because this assembly grants no <c>InternalsVisibleTo</c> (same shape as
+        /// <c>StyledFillTileBuilder.ProfilerMarkerNames</c>). Hierarchical names so the Profiler flat search
+        /// groups them.</summary>
+        public static class ProfilerMarkerNames
+        {
+            public const string Decode       = "MapRenderer.Pipeline.Decode";
+            public const string RingAssembly = "MapRenderer.Pipeline.RingAssembly";
+            public const string Earcut       = "MapRenderer.Pipeline.Earcut";
+            public const string Project      = "MapRenderer.Pipeline.Project";
+        }
+
         // Pipeline-stage profiler markers (MapRenderer.Pipeline.*).
         // These sit on the schedule-then-Complete main-thread path — exactly the stall the perf epic measures.
         // Separate path from the live MapView loop; wired for the Profiler window, not for the recorder test.
-        private static readonly ProfilerMarker PmPipelineDecode      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Decode");
-        private static readonly ProfilerMarker PmPipelineRingAssembly = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.RingAssembly");
-        private static readonly ProfilerMarker PmPipelineEarcut      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Earcut");
-        private static readonly ProfilerMarker PmPipelineProject     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Pipeline.Project");
+        private static readonly ProfilerMarker PmPipelineDecode =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Decode);
+        private static readonly ProfilerMarker PmPipelineRingAssembly =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.RingAssembly);
+        private static readonly ProfilerMarker PmPipelineEarcut =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Earcut);
+        private static readonly ProfilerMarker PmPipelineProject =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Project);
 
         // MVT command IDs (per MVT spec §4.3) — must match MvtDecodeJob's constants.
         private const uint MoveTo = 1;

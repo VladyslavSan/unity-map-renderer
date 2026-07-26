@@ -13,7 +13,6 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
@@ -110,7 +109,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsNotNull(ent, "Entities renderer must be constructed when Backend == Entities.");
                 Assert.IsNull(view.GameObjectRenderer(),
                     "The Entities backend must NOT construct the GameObject renderer (backend selection is exclusive).");
-                Assert.Greater(ent.DrawItemCount, 0,
+                Assert.Greater(ent.DrawItemCount(), 0,
                     "ConsumeMeshBuild must have created at least one tile-layer entity.");
 
                 // Floating origin: the entity translation must equal TileLocalToScene(tileOrigin, sceneOrigin).
@@ -120,7 +119,7 @@ namespace MapRenderer.Tests.Visual
                 float3 expected0 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin0);
 
                 bool found = false;
-                for (int h = 0; h < ent.DrawItemCount + 100; h++)
+                for (int h = 0; h < ent.DrawItemCount() + 100; h++)
                 {
                     var (tx, tz) = ent.GetInstanceTranslation(h);
                     if (float.IsNaN(tx)) continue;
@@ -138,7 +137,7 @@ namespace MapRenderer.Tests.Visual
                 ent.Rebuild(SceneFrame.Mercator(sceneOrigin1));
                 float3 expected1 = FloatingOrigin.TileLocalToScene(tileOrigin, sceneOrigin1);
                 bool updated = false;
-                for (int h = 0; h < ent.DrawItemCount + 100; h++)
+                for (int h = 0; h < ent.DrawItemCount() + 100; h++)
                 {
                     var (tx, tz) = ent.GetInstanceTranslation(h);
                     if (float.IsNaN(tx)) continue;

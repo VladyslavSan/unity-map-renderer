@@ -23,7 +23,6 @@ using Unity.Entities;
 using Unity.Transforms;
 using Unity.Rendering;
 using Unity.Mathematics;
-using MapRenderer.Core.Imaging;
 
 namespace MapRenderer.Tests.Visual
 {

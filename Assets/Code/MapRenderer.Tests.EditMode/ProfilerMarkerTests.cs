@@ -26,11 +26,20 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
-using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+// Marker-owning types reached by alias rather than by importing their whole namespace, so pulling in one
+// const cannot drag a name that collides with the Core.* usings above. `MapView` is deliberately NOT aliased
+// to MapViewComponent (as it once was) — the marker SSOT lives on the MapView class itself, and shadowing the
+// name made `MapView.ProfilerMarkerNames` silently resolve to the wrong type.
+using SharedTileDecode     = MapRenderer.Unity.Rendering.Tile.Processing.SharedTileDecode;
+using FillMeshPipeline     = MapRenderer.Jobs.FillMeshPipeline;
+using FillRenderLayer      = MapRenderer.Unity.Rendering.Style.FillRenderLayer;
+using LineRenderLayer      = MapRenderer.Unity.Rendering.Style.LineRenderLayer;
+using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 namespace MapRenderer.Tests
 {
     [TestFixture]
@@ -68,7 +77,7 @@ namespace MapRenderer.Tests
         }");
 
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
+        private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
@@ -81,9 +90,15 @@ namespace MapRenderer.Tests
 
         // ── Tooth 1a: greppable presence — all expected marker names are declared ──
         //
-        // This is a compile-time check (the static fields must exist for this code to compile).
-        // A runtime assertion that each name starts with "MapRenderer." provides belt-and-suspenders
-        // coverage without needing a reflection scan.
+        // This is a compile-time check: every entry below is a `const` reference into the owning type's
+        // nested ProfilerMarkerNames (the SSOT), so deleting or renaming a production marker breaks THIS
+        // FILE'S compile. The runtime "MapRenderer." prefix assertion is belt-and-suspenders on top.
+        //
+        // A bare string literal here would be worthless — it compiles whatever production does, so it can
+        // (and did) outlive the marker it names. Three such literals were removed when the last declaration
+        // sites moved to the SSOT pattern: "MapRenderer.Mesh.Build", "MapRenderer.Line.MeshBuild" and
+        // "MapRenderer.Symbol.BatchBuild.SoA.Project" named no marker anywhere in production. NEVER add a
+        // literal back — if a name has no const to point at, the marker does not exist.
         [Test]
         public void ProfilerMarkers_AllExpectedNamesAreReachable()
         {
@@ -91,57 +106,55 @@ namespace MapRenderer.Tests
             // and checking the name round-trips. This also confirms Unity.Profiling is accessible.
             string[] expectedNames =
             {
-                "MapRenderer.Camera.Advance",
+                MapView.ProfilerMarkerNames.CameraAdvance,
                 TileManager.ProfilerMarkerNames.CoverSelect,
                 TileManager.ProfilerMarkerNames.FetchPoll,
                 TileManager.ProfilerMarkerNames.SchedulerRequest,
-                "MapRenderer.Tile.Decode",
+                SharedTileDecode.ProfilerMarkerNames.TileDecode,
                 StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData,
-                "MapRenderer.Mesh.Build",
                 TileManager.ProfilerMarkerNames.MeshUpload,
-                "MapRenderer.Line.MeshBuild",
-                "MapRenderer.Pipeline.Decode",
-                "MapRenderer.Pipeline.RingAssembly",
-                "MapRenderer.Pipeline.Earcut",
-                "MapRenderer.Pipeline.Project",
+                FillMeshPipeline.ProfilerMarkerNames.Decode,
+                FillMeshPipeline.ProfilerMarkerNames.RingAssembly,
+                FillMeshPipeline.ProfilerMarkerNames.Earcut,
+                FillMeshPipeline.ProfilerMarkerNames.Project,
                 // Per-frame MapView.LateUpdate sub-phases + EG-drive split (added to localise live zoom spikes).
-                "MapRenderer.View.LateUpdate",
-                "MapRenderer.View.SceneFrame",
-                "MapRenderer.Symbol.BatchBuild",             // MapView umbrella (not yet migrated to a const SSOT)
-                "MapRenderer.Symbol.BatchBuild.SoA.Project", // reserved sub-phase (no live marker field yet)
+                MapView.ProfilerMarkerNames.LateUpdate,
+                MapView.ProfilerMarkerNames.SceneFrame,
+                MapView.ProfilerMarkerNames.SymbolCollect,
+                MapView.ProfilerMarkerNames.SymbolBatch,
                 // Symbol-label markers below read their names from each type's nested ProfilerMarkerNames const
                 // (SSOT), reached via InternalsVisibleTo — renaming a marker is a one-line edit at its source.
                 SymbolLabelSubsystem.ProfilerMarkerNames.TileDecode,
                 SymbolLabelSubsystem.ProfilerMarkerNames.AtlasUpload,
                 SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollect,
+                SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollectClassify,
+                SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollectDedup,
                 SymbolLabelSubsystem.ProfilerMarkerNames.BatchSoA,
-                SymbolLabelBatchBuilder.ProfilerMarkerNames.SoAHash,
-                SymbolLabelBatchBuilder.ProfilerMarkerNames.SoACopy,
                 LabelPlacementSystem.ProfilerMarkerNames.Gather,
                 LabelPlacementSystem.ProfilerMarkerNames.Tick,
                 LabelPlacementSystem.ProfilerMarkerNames.Project,
-                LabelPlacementSystem.ProfilerMarkerNames.ProjectFill,
+                LabelPlacementSystem.ProfilerMarkerNames.ProjectPositions,
                 LabelPlacementSystem.ProfilerMarkerNames.Stage,
                 LabelPlacementSystem.ProfilerMarkerNames.Collide,
                 LabelPlacementSystem.ProfilerMarkerNames.CollideHarvest,
                 LabelPlacementSystem.ProfilerMarkerNames.Emit,
                 LabelPlacementSystem.ProfilerMarkerNames.EmitLoop,
                 LabelPlacementSystem.ProfilerMarkerNames.EmitDecay,
-                "MapRenderer.View.ApplyZoom",
-                "MapRenderer.View.ApplyZoom.Fills",
-                "MapRenderer.View.ApplyZoom.Lines",
-                "MapRenderer.View.ApplyZoom.LineDash",
-                "MapRenderer.View.InstancedRebuild",
-                "MapRenderer.Tile.ManagerTick",
+                MapView.ProfilerMarkerNames.ApplyZoom,
+                FillRenderLayer.ProfilerMarkerNames.ApplyZoomFills,
+                LineRenderLayer.ProfilerMarkerNames.ApplyZoomLines,
+                LineRenderLayer.ProfilerMarkerNames.ApplyZoomLineDash,
+                MapView.ProfilerMarkerNames.InstancedRebuild,
+                MapView.ProfilerMarkerNames.ManagerTick,
                 TileManager.ProfilerMarkerNames.MeshDataAllocate,
                 TileManager.ProfilerMarkerNames.AddTileLayer,
-                "MapRenderer.Tile.AddLayer.Root",
-                "MapRenderer.Tile.AddLayer.Register",
-                "MapRenderer.Tile.AddLayer.Parent",
-                "MapRenderer.ECS.RootTransforms",
-                "MapRenderer.ECS.InitGroup",
-                "MapRenderer.ECS.SimGroup",
-                "MapRenderer.ECS.PresGroup",
+                EntitiesTileRenderer.ProfilerMarkerNames.AddLayerRoot,
+                EntitiesTileRenderer.ProfilerMarkerNames.AddLayerRegister,
+                EntitiesTileRenderer.ProfilerMarkerNames.AddLayerParent,
+                EntitiesTileRenderer.ProfilerMarkerNames.RootTransforms,
+                EntitiesTileRenderer.ProfilerMarkerNames.InitGroup,
+                EntitiesTileRenderer.ProfilerMarkerNames.SimGroup,
+                EntitiesTileRenderer.ProfilerMarkerNames.PresGroup,
             };
 
             foreach (string name in expectedNames)
@@ -177,7 +190,7 @@ namespace MapRenderer.Tests
             const string bogusName     = "MapRenderer.__NoSuchMarker__";
 
             var go   = new GameObject("MapView_ProfilerTest");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var view = go.AddComponent<MapViewComponent>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;

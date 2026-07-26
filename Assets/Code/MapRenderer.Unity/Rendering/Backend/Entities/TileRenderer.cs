@@ -51,7 +51,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     internal sealed class TileRenderer : VerifiedDisposable, ITileRenderBackend
     {
         // One draw item = one layer entity (a child of its tile's root entity).
-        private struct ItemRec
+        // internal, not private: the test assembly's observability extensions read it (see
+        // EntitiesTileRendererTestExtensions) — the sanctioned footprint for test-only accessors.
+        internal struct ItemRec
         {
             public Entity      Entity;
             public TileId      TileId;   // which tile root this layer hangs under
@@ -61,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // One per live tile: the named parent entity its layer entities are grouped under, so the
         // Entities Hierarchy shows a per-tile tree instead of a flat list. Carries the tile's projected
         // SW-corner render origin so Rebuild can reposition the whole subtree by writing only the root's transform.
-        private struct RootRec
+        internal struct RootRec
         {
             public Entity  Root;
             public double3 TileOriginRender;
@@ -73,8 +75,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // aid: it names each layer entity after its style layer in the Entities Hierarchy (matching the old
         // GameObject backend) instead of the shared material name ("MapView_Fill"). Empty ⇒ fall back to name.
         private readonly List<string>               _layerNames     = new List<string>();
-        private readonly Dictionary<int, ItemRec>   _items          = new Dictionary<int, ItemRec>();
-        private readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
+        // internal (not private) for the same reason as ItemRec/RootRec — test-assembly observability.
+        internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
+        internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
 
         // Stall #2: reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
         // root the batch empties, destroyed in ONE EntityManager.DestroyEntity(NativeArray) structural change
@@ -101,30 +104,52 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         internal int RegisteredMeshCount { get; private set; }
 
         private World         _world;
-        private EntityManager _em;
+        internal EntityManager _em;   // internal: the test-assembly observability extensions query through it
         private readonly World _prevDefaultWorld;
         private ComponentSystemBase _initGroup, _simGroup, _presGroup;
         private int  _nextHandle;
 
-        // ── Profiler markers — split the per-frame EG drive so a per-frame spike is attributable ──
-        // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
-        // InitGroup/SimGroup/PresGroup: the three system-group ticks. PresGroup runs EntitiesGraphicsSystem
-        // (instance-data upload + BRG batch (re)registration) and is the usual culprit when tiles churn.
-        private static readonly ProfilerMarker PmRootTransforms = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.RootTransforms");
-        private static readonly ProfilerMarker PmInitGroup      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.InitGroup");
-        private static readonly ProfilerMarker PmSimGroup       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.SimGroup");
-        private static readonly ProfilerMarker PmPresGroup      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.ECS.PresGroup");
+        /// <summary>Profiler marker name constants (SSOT) for the Entities backend — referenced by the
+        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            // ── the per-frame EG drive, split so a per-frame spike is attributable ──
+            // RootTransforms: the per-tile LocalTransform/LocalToWorld writes (scales with tile count).
+            // Init/Sim/PresGroup: the three system-group ticks. PresGroup runs EntitiesGraphicsSystem
+            // (instance-data upload + BRG batch (re)registration) and is the usual culprit when tiles churn.
+            internal const string RootTransforms = "MapRenderer.ECS.RootTransforms";
+            internal const string InitGroup      = "MapRenderer.ECS.InitGroup";
+            internal const string SimGroup       = "MapRenderer.ECS.SimGroup";
+            internal const string PresGroup      = "MapRenderer.ECS.PresGroup";
 
-        // ── AddTileLayer sub-phases (nested under MapRenderer.Tile.AddLayer) ──
-        // The per-tile-load spike on the render thread is hypothesised to be EG batch registration. Split
-        // AddTileLayer so the live profiler attributes the cost to its real source:
-        //   Root     — GetOrCreateRoot (creates the tile-root entity on first layer of a tile).
-        //   Register — new RenderMeshArray + RenderMeshUtility.AddComponents — the EG mesh/material batch
-        //              registration. PRIME SUSPECT for the zoom stall (per-tile RenderMeshArray, see follow-ups).
-        //   Parent   — the Parent+LocalTransform structural change + the LocalToWorld/bounds sets.
-        private static readonly ProfilerMarker PmAddRoot     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Root");
-        private static readonly ProfilerMarker PmAddRegister = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Register");
-        private static readonly ProfilerMarker PmAddParent   = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer.Parent");
+            // ── AddTileLayer sub-phases (nested under MapRenderer.Tile.AddLayer) ──
+            // The per-tile-load spike on the render thread is hypothesised to be EG batch registration. Split
+            // AddTileLayer so the live profiler attributes the cost to its real source:
+            //   Root     — GetOrCreateRoot (creates the tile-root entity on first layer of a tile).
+            //   Register — new RenderMeshArray + RenderMeshUtility.AddComponents — the EG mesh/material batch
+            //              registration. PRIME SUSPECT for the zoom stall (per-tile RenderMeshArray).
+            //   Parent   — the Parent+LocalTransform structural change + the LocalToWorld/bounds sets.
+            internal const string AddLayerRoot     = "MapRenderer.Tile.AddLayer.Root";
+            internal const string AddLayerRegister = "MapRenderer.Tile.AddLayer.Register";
+            internal const string AddLayerParent   = "MapRenderer.Tile.AddLayer.Parent";
+        }
+
+        private static readonly ProfilerMarker PmRootTransforms =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.RootTransforms);
+        private static readonly ProfilerMarker PmInitGroup =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.InitGroup);
+        private static readonly ProfilerMarker PmSimGroup =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.SimGroup);
+        private static readonly ProfilerMarker PmPresGroup =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.PresGroup);
+
+        private static readonly ProfilerMarker PmAddRoot =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.AddLayerRoot);
+        private static readonly ProfilerMarker PmAddRegister =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.AddLayerRegister);
+        private static readonly ProfilerMarker PmAddParent =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.AddLayerParent);
 
         // Last scene frame seen by Rebuild. AddTileLayer may be called AFTER Rebuild within the same frame,
         // so without caching the frame we'd create the entity at LocalToWorld.identity (world origin) and it
@@ -196,13 +221,12 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             RenderMeshArraysCreated = 1; // ONLY the prototype's — instances share it, none created per layer
         }
 
-        // ── Test / debug observability ──────────────────────────────────────────────────────────
-
-        /// <summary>Number of currently registered draw items (layer entities).</summary>
-        public int DrawItemCount => _items.Count;
-
-        /// <summary>Number of live tile root entities (one per tile that has ≥1 layer).</summary>
-        public int TileRootCount => _tileRoots.Count;
+        // ── Instrumentation counters ────────────────────────────────────────────────────────────
+        // Read only by tests, but WRITTEN by the code below, so they stay on the class: they are state this
+        // renderer produces, not a query over it. The read-only queries that used to sit here (DrawItemCount,
+        // TileRootCount, TileRootExists, RootChildBufferCount, IsParentedToTileRoot, EntityExists,
+        // GetInstanceTranslation, GetRenderBoundsLocal, GetLayerEntityName) had zero production callers and
+        // now live in the test assembly — see EntitiesTileRendererTestExtensions.
 
         /// <summary>Stall #2 tooth: number of batched DestroyEntity structural changes performed by the LAST
         /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow
@@ -213,76 +237,6 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// layer entities plus any tile root the batch emptied).</summary>
         internal int EntitiesDestroyedLastRemove { get; private set; }
 
-        /// <summary>True if a root entity is live for <paramref name="tileId"/>.</summary>
-        public bool TileRootExists(TileId tileId)
-            => !IsDisposed && _tileRoots.TryGetValue(tileId, out var r) && _em.Exists(r.Root);
-
-        /// <summary>
-        /// Number of layer entities the transform system has linked under <paramref name="tileId"/>'s root
-        /// (read from the root's <see cref="Child"/> buffer, which <see cref="ParentSystem"/> maintains).
-        /// Returns -1 if the root or its Child buffer does not exist yet (no Rebuild/tick has run). This is
-        /// the structural proxy for "the Entities Hierarchy groups these layers under the tile."
-        /// </summary>
-        public int RootChildBufferCount(TileId tileId)
-        {
-            if (IsDisposed || !_tileRoots.TryGetValue(tileId, out var r) || !_em.Exists(r.Root)) return -1;
-            if (!_em.HasComponent<Child>(r.Root)) return -1;
-            return _em.GetBuffer<Child>(r.Root).Length;
-        }
-
-        /// <summary>True if the layer entity for <paramref name="handle"/> is parented to the root of
-        /// <paramref name="tileId"/> (via its <see cref="Parent"/> component).</summary>
-        public bool IsParentedToTileRoot(int handle, TileId tileId)
-        {
-            if (IsDisposed || !_items.TryGetValue(handle, out var item) || !_em.Exists(item.Entity)) return false;
-            if (!_tileRoots.TryGetValue(tileId, out var r) || !_em.HasComponent<Parent>(item.Entity)) return false;
-            return _em.GetComponentData<Parent>(item.Entity).Value == r.Root;
-        }
-
-#if UNITY_EDITOR
-        /// <summary>Editor-only: the debug name assigned to the tile root, e.g. <c>"Tile 14/8192/5461"</c>.</summary>
-        public string GetTileRootName(TileId tileId)
-            => _tileRoots.TryGetValue(tileId, out var r) && _em.Exists(r.Root) ? _em.GetName(r.Root) : null;
-
-        /// <summary>Editor-only: the debug name assigned to a layer entity — its style layer id (e.g. "water").</summary>
-        public string GetLayerEntityName(int handle)
-            => _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity) ? _em.GetName(rec.Entity) : null;
-#endif
-
-        // IsDisposed is inherited from VerifiedDisposable (public there too — no shadow needed).
-
-        /// <summary>True if the draw item <paramref name="handle"/> still has a live entity.</summary>
-        public bool EntityExists(int handle)
-            => !IsDisposed && _items.TryGetValue(handle, out var rec) && _em.Exists(rec.Entity);
-
-        /// <summary>
-        /// Returns the world-space translation (X, Z) of the draw item's entity from the last
-        /// <see cref="Rebuild"/>. GPU-independent — reads the entity's <see cref="LocalToWorld"/>.
-        /// Returns (NaN, NaN) for an unknown/dead handle.
-        /// </summary>
-        public (float x, float z) GetInstanceTranslation(int handle)
-        {
-            if (IsDisposed || !_items.TryGetValue(handle, out var rec) || !_em.Exists(rec.Entity))
-                return (float.NaN, float.NaN);
-            float3 t = _em.GetComponentData<LocalToWorld>(rec.Entity).Position;
-            return (t.x, t.z);
-        }
-
-        /// <summary>
-        /// The draw item entity's local <see cref="RenderBounds"/> (the AABB EG frustum-culls against,
-        /// before <see cref="LocalToWorld"/>). Test observability for the "tile culled in Game view"
-        /// regression: it must ENCLOSE the mesh, not the old fixed { Center=0, Extents=1e6 } box.
-        /// Returns two NaN float3s for an unknown/dead handle.
-        /// </summary>
-        internal (float3 center, float3 extents) GetRenderBoundsLocal(int handle)
-        {
-            if (IsDisposed || !_items.TryGetValue(handle, out var rec)
-                || !_em.Exists(rec.Entity) || !_em.HasComponent<RenderBounds>(rec.Entity))
-                return (new float3(float.NaN), new float3(float.NaN));
-            AABB b = _em.GetComponentData<RenderBounds>(rec.Entity).Value;
-            return (b.Center, b.Extents);
-        }
-
         /// <summary>
         /// XZ scene-space bounding box covering all live tile entities (each entity's
         /// <see cref="LocalToWorld"/> translation, plus <paramref name="tileSizeWorld"/> for the tile's
@@ -292,7 +246,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// </summary>
         public Bounds ComputeSceneBounds(float tileSizeWorld)
         {
-            if (IsDisposed || _items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
+            if (_items.Count == 0) return new Bounds(Vector3.zero, Vector3.zero);
 
             float minX = float.MaxValue, maxX = float.MinValue;
             float minZ = float.MaxValue, maxZ = float.MinValue;

@@ -125,12 +125,5 @@ namespace MapRenderer.Core.View
             // GPU adds the two floats (object→world translation of the baked vertex).
             return new float3(vLocalX + tPosX, 0f, vLocalZ + tPosZ);
         }
-
-        /// <summary>
-        /// The exact (double-precision) render-space truth for a vertex: <c>merc − sceneOrigin</c>. The
-        /// difference between this and <see cref="RenderVertex"/> is the floating-origin precision error.
-        /// </summary>
-        public static double3 RenderVertexTruth(double2 mercVertex, double2 sceneOriginMerc)
-            => new double3(mercVertex.x - sceneOriginMerc.x, 0.0, mercVertex.y - sceneOriginMerc.y);
     }
 }

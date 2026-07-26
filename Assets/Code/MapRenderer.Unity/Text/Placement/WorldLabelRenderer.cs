@@ -7,10 +7,12 @@ using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Pool;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Style;
@@ -42,7 +44,7 @@ namespace MapRenderer.Unity.Text.Placement
     /// <para>Main-thread only (touches <see cref="Mesh"/>/<see cref="GameObject"/>, mirrors every other
     /// GPU-resource boundary in this codebase).</para>
     /// </summary>
-    internal sealed class WorldLabelRenderer : IDisposable
+    internal sealed class WorldLabelRenderer : VerifiedDisposable
     {
         // A slot idle for this many consecutive EndFrames (no content, nothing presented) is torn down —
         // roughly a second of frames at 60fps. A reappearing key just lazily re-creates its slot (D1).
@@ -57,8 +59,7 @@ namespace MapRenderer.Unity.Text.Placement
         private sealed class Slot
         {
             public Mesh Mesh;
-            public MeshFilter Filter;      // lazy — created on the first visible EndFrame (mirrors old Presenter laziness)
-            public MeshRenderer Renderer;
+            public MeshNode Node; // lazy — rented on the first visible EndFrame (mirrors old Presenter laziness)
             public NativeList<WorldBillboardVertex> Vertices;
             public NativeList<float> Opacity;
             public NativeList<int> Indices;
@@ -73,32 +74,125 @@ namespace MapRenderer.Unity.Text.Placement
         private struct LayerNodeRec
         {
             public GameObject Go;
-            public int ChildCount; // text/icon children; node dies when this hits 0
+            public int        ChildCount; // text/icon children; node dies when this hits 0
         }
 
         private readonly struct LayerNodeKey : IEquatable<LayerNodeKey>
         {
-            public readonly TileId TileId;
-            public readonly int Slot;
-            public LayerNodeKey(TileId tileId, int slot) { TileId = tileId; Slot = slot; }
+            public TileId TileId { get; init; }
+            public int    Slot   { get; init; }
+
             public bool Equals(LayerNodeKey other) => TileId.Equals(other.TileId) && Slot == other.Slot;
-            public override bool Equals(object obj) => obj is LayerNodeKey other && Equals(other);
+
             public override int GetHashCode()
             {
-                unchecked { return TileId.GetHashCode() * 31 + Slot; }
+                unchecked
+                {
+                    return TileId.GetHashCode() * 31 + Slot;
+                }
             }
         }
 
-        // "Map Labels" — the label path's own root→tile-container tree (mirrors the GameObjects tile
-        // backend's "MapTiles (GameObject backend)" tree, §5 of the rework design: labels always maintain
-        // their own tree so the organization is identical no matter which backend draws tile fills).
-        private readonly SceneTileTree _tree = new SceneTileTree("Map Labels");
-        private readonly Dictionary<LayerNodeKey, LayerNodeRec> _layerNodes = new Dictionary<LayerNodeKey, LayerNodeRec>();
+        // Hierarchy names for the label tree's three levels. Const so the two leaf names are picked from a
+        // named pair rather than a literal ternary at the construction site. Deliberately NOT shared with
+        // WorldLabelGroupingTests, which asserts these strings literally — pointing the test at the same
+        // constant would make it compare a value to itself and stop pinning the name at all.
+        private const string TreeRootName  = "Map Labels";
+        private const string TextChildName = "text";
 
-        private readonly Dictionary<WorldLabelKey, Slot> _slots = new Dictionary<WorldLabelKey, Slot>();
+        private const string IconChildName = "icon";
+
+        // Fallback layer-node name when a slot's style layer has no id — mirrors
+        // GameObjects.TileRenderer.AddTileLayer's identical fallback.
+        private const string LayerNodeFallbackName = "symbol-";
+
+        // The label path's own root→tile-container tree (mirrors the GameObjects tile backend's
+        // "MapTiles (GameObject backend)" tree, §5 of the rework design: labels always maintain their own
+        // tree so the organization is identical no matter which backend draws tile fills).
+        // internal (not private): LabelPlacementSystemTestExtensions reads NodeCount off it — the LIVE
+        // tile-container count, which _tree.Root.childCount is no longer (it also holds the pool node).
+        internal readonly SceneTileTree                          _tree       = new(TreeRootName);
+        private readonly Dictionary<LayerNodeKey, LayerNodeRec> _layerNodes = new();
+
+        private readonly Dictionary<WorldLabelKey, Slot> _slots = new();
+
+        // Recycled scene nodes. EnsureChild early-returns for a live slot, so a still camera creates nothing —
+        // but a ZOOM STEP replaces the whole cover at once and a pan churns tiles continuously, and each
+        // entering tile pays one layer node per symbol layer plus one leaf per (layer, kind). The leaves carry
+        // two AddComponent calls each (MeshFilter + MeshRenderer), which is the real cost here and the reason
+        // renting beats reallocating: a pooled leaf keeps its components, so a rent is a reparent.
+        //
+        // Text and icon get SEPARATE pools purely so a rent never has to rename ("text"/"icon" is the only way
+        // the two differ). Layer nodes are named per style layer, so that pool does rename on rent.
+        //
+        // A released node parks under _poolRoot, which is INACTIVE. ObjectPool is scene-unaware — it only
+        // files the reference away — so without a reparent a released leaf stays under its layer node, both
+        // drawing and keeping the node looking occupied. SetParent(null) is NOT the alternative: it promotes
+        // the leaf to a SCENE-ROOT object, live in the Hierarchy and still active. _poolRoot is a CHILD of
+        // the label tree root, not a second scene root, so everything label-related stays under one
+        // top-level object — which means the tree root's child count is live tiles PLUS this node.
+        private const string PoolRootName = "(node pool)";
+
+        private readonly GameObject             _poolRoot;
+        private readonly ObjectPool<MeshNode>   _textChildPool;
+        private readonly ObjectPool<MeshNode>   _iconChildPool;
+        private readonly ObjectPool<GameObject> _layerNodePool;
+
+        internal WorldLabelRenderer()
+        {
+            _poolRoot = new GameObject(PoolRootName) { hideFlags = HideFlags.DontSave };
+            _poolRoot.transform.SetParent(_tree.Root, worldPositionStays: false);
+            _poolRoot.SetActive(false);
+
+            _textChildPool = NewLeafPool(TextChildName);
+            _iconChildPool = NewLeafPool(IconChildName);
+            _layerNodePool = NewNodePool(() =>
+                new GameObject(LayerNodeFallbackName) { hideFlags = HideFlags.DontSave });
+        }
+
+        /// <summary>One detached leaf pool. <see cref="MeshNode.Release"/> drops the tenancy's mesh/material
+        /// and disables the renderer before detaching — a detached object stays ACTIVE, so that disable is
+        /// what stops a parked leaf drawing.</summary>
+        private ObjectPool<MeshNode> NewLeafPool(string name)
+            => new ObjectPool<MeshNode>(
+                createFunc: () => NewLeaf(name),
+                actionOnGet: null, // EnsureChild attaches — only it knows the layer node
+                actionOnRelease: node =>
+                {
+                    node.Release();
+                    node.Transform.SetParent(_poolRoot.transform, worldPositionStays: false);
+                },
+                actionOnDestroy: node => node.Dispose(),
+                collectionCheck: true, // a double-release would hand one node to two slots
+                defaultCapacity: 32,
+                maxSize: 512);
+
+        /// <summary>A leaf's per-node settings, applied once at CREATION (not per rent): map geometry casts
+        /// and receives no shadows, and DontSave keeps these out of the saved scene. MeshNode deliberately
+        /// decides none of this — see its header.</summary>
+        private static MeshNode NewLeaf(string name)
+        {
+            var node = new MeshNode(name);
+            node.GameObject.hideFlags        = HideFlags.DontSave;
+            node.Renderer.shadowCastingMode  = UnityEngine.Rendering.ShadowCastingMode.Off;
+            node.Renderer.receiveShadows     = false;
+            node.Renderer.enabled            = false; // EndFrame enables once a material resolves
+            return node;
+        }
+
+        /// <summary>One detached layer-node pool (bare GameObjects — no mesh, no renderer).</summary>
+        private ObjectPool<GameObject> NewNodePool(Func<GameObject> create)
+            => new ObjectPool<GameObject>(
+                createFunc: create,
+                actionOnGet: null, // each rent site reparents — only it knows the parent
+                actionOnRelease: go => go.transform.SetParent(_poolRoot.transform, worldPositionStays: false),
+                actionOnDestroy: go => go.DestroySafely(),
+                collectionCheck: true, // a double-release would hand one node to two slots
+                defaultCapacity: 32,
+                maxSize: 512);
 
         // Reused reclaim-sweep scratch (cleared each EndFrame, never reallocated in steady state — T4).
-        private readonly List<WorldLabelKey> _reclaimScratch = new List<WorldLabelKey>();
+        private readonly List<WorldLabelKey> _reclaimScratch = new();
 
         /// <summary>Clears every live slot's accumulators for a fresh emit pass. Dictionary + slots persist
         /// (no alloc in steady state).</summary>
@@ -134,6 +228,7 @@ namespace MapRenderer.Unity.Text.Placement
                 slot.Mesh.MarkDynamic();
                 _slots[key] = slot;
             }
+
             slot.TileOriginRender = emit.TileOriginRender;
 
             int quadCount = emit.QuadCount;
@@ -146,10 +241,10 @@ namespace MapRenderer.Unity.Text.Placement
                 // the projected Tangent (D-E). Point/icon keep the existing per-candidate anchor + baked
                 // screen rotation + tangentLocal=0/alignFlags=0 (byte-identical — the shader's tangent
                 // branch is never taken for them).
-                float3 anchorLocal = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
+                float3 anchorLocal     = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
                 float  rotationRadians = emit.AlongLine ? 0f : q.RotationRadians;
-                float3 tangentLocal = emit.AlongLine ? q.Tangent : float3.zero;
-                float  alignFlags = emit.AlongLine ? AlongLineAlignFlag : 0f;
+                float3 tangentLocal    = emit.AlongLine ? q.Tangent : float3.zero;
+                float  alignFlags      = emit.AlongLine ? AlongLineAlignFlag : 0f;
 
                 BillboardMath.BuildWorldQuad(in q.Quad, in anchorLocal, q.TextSizePx, q.Color.xyz,
                     rotationRadians, in emit.TranslateDeltaPx, in tangentLocal, alignFlags,
@@ -157,44 +252,65 @@ namespace MapRenderer.Unity.Text.Placement
                     out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
                 int vBase = slot.Vertices.Length;
-                slot.Vertices.Add(tl); slot.Vertices.Add(tr); slot.Vertices.Add(br); slot.Vertices.Add(bl);
+                slot.Vertices.Add(tl);
+                slot.Vertices.Add(tr);
+                slot.Vertices.Add(br);
+                slot.Vertices.Add(bl);
 
                 float opacity = q.Color.w * fadeOpacity; // stream 1 — the A-4 fade × the quad's own alpha
-                slot.Opacity.Add(opacity); slot.Opacity.Add(opacity); slot.Opacity.Add(opacity); slot.Opacity.Add(opacity);
+                slot.Opacity.Add(opacity);
+                slot.Opacity.Add(opacity);
+                slot.Opacity.Add(opacity);
+                slot.Opacity.Add(opacity);
 
-                slot.Indices.Add(vBase + 0); slot.Indices.Add(vBase + 1); slot.Indices.Add(vBase + 2);
-                slot.Indices.Add(vBase + 0); slot.Indices.Add(vBase + 2); slot.Indices.Add(vBase + 3);
+                slot.Indices.Add(vBase + 0);
+                slot.Indices.Add(vBase + 1);
+                slot.Indices.Add(vBase + 2);
+                slot.Indices.Add(vBase + 0);
+                slot.Indices.Add(vBase + 2);
+                slot.Indices.Add(vBase + 3);
             }
+
             return quadCount;
         }
+
+        private static readonly int AtlasPropId               = Shader.PropertyToID("_MainTex");
+        private static readonly int ScreenParamsLogicalPropId = Shader.PropertyToID("_ScreenParamsLogical");
 
         /// <summary>
         /// Builds every non-empty slot's mesh and lazily attaches it to a text/icon child under its tile's
         /// per-symbol-layer node in the shared <see cref="_tree"/> (root → tile container → layer node →
         /// text/icon sibling children — design §3/§5/§6), resolving its draw material from
         /// <paramref name="symbolLayers"/> (D5) or the <paramref name="fallbackTextMaterial"/>/
-        /// <paramref name="fallbackIconMaterial"/> demo path; hides every other live slot (idle-frame
+        /// <paramref name="fallbackIconMaterial"/> pair; hides every other live slot (idle-frame
         /// reclamation destroys one idle <see cref="IdleReclaimFrames"/> consecutive frames). A
         /// resolved-null material (Codex #1b — an icon slot with no <c>WorldIconMaterial</c> configured)
         /// hides that slot instead of throwing. Refreshes the tree's per-tile transform exactly ONCE per
         /// call via <see cref="SceneTileTree.Rebuild"/> — not once per slot (the A1 defect this corrects).
         /// </summary>
-        private static readonly int AtlasPropId               = Shader.PropertyToID("_MainTex");
-        private static readonly int ScreenParamsLogicalPropId = Shader.PropertyToID("_ScreenParamsLogical");
-
+        /// <param name="frame">This frame's floating-origin scene frame — the ONE
+        /// <see cref="SceneTileTree.Rebuild"/> below rebases every tile container against it.</param>
+        /// <param name="symbolLayers">Per-symbol-layer render layers, indexed by a slot's layer index; each
+        /// may own its own world text/icon material (D5). Null / empty → every slot resolves to the
+        /// fallback pair below.</param>
+        /// <param name="fallbackTextMaterial">The world TEXT material used for any slot whose layer supplies
+        /// none (and for every slot when <paramref name="symbolLayers"/> is null/empty). Null ⇒ that slot
+        /// stays hidden rather than throwing.</param>
+        /// <param name="fallbackIconMaterial">The world ICON counterpart. Null is the routine case — icons
+        /// are optional, so an unconfigured icon material hides icon slots instead of faulting.</param>
         /// <param name="atlasTexture">The glyph atlas (Texture2DArray) TEXT world materials bind to.</param>
         /// <param name="spriteTexture">The sprite sheet ICON world materials bind to (may be null — icons optional).</param>
         /// <param name="viewportLogicalPx">This frame's logical viewport size — refreshes the resolved
         /// material's <c>_ScreenParamsLogical</c> (the vertex shader's px→clip offset scale), mirrors
         /// <c>LabelPlacementSystem.BuildSlotMesh</c>'s identical per-frame refresh.</param>
-        public void EndFrame(in SceneFrame frame, IReadOnlyList<SymbolRenderLayer> symbolLayers,
-            Material fallbackTextMaterial, Material fallbackIconMaterial,
-            Texture atlasTexture, Texture spriteTexture, double2 viewportLogicalPx)
+        public void EndFrame(in SceneFrame frame,                IReadOnlyList<SymbolRenderLayer> symbolLayers,
+            Material                       fallbackTextMaterial, Material fallbackIconMaterial,
+            Texture                        atlasTexture,         Texture spriteTexture, double2 viewportLogicalPx)
         {
             foreach (KeyValuePair<WorldLabelKey, Slot> kv in _slots)
             {
-                WorldLabelKey key = kv.Key;
-                Slot slot = kv.Value;
+                WorldLabelKey key  = kv.Key;
+                Slot          slot = kv.Value;
 
                 // Idle-reclaim tracks whether this key was EMITTED to this frame (D1's "self-contained"
                 // reclamation), NOT whether it ended up presented — an emitted-but-unrenderable slot (no
@@ -208,7 +324,8 @@ namespace MapRenderer.Unity.Text.Placement
 
                 if (material != null)
                 {
-                    WorldBillboardMeshBuilder.Build(slot.Vertices.AsArray(), slot.Opacity.AsArray(), slot.Indices.AsArray(), slot.Mesh);
+                    WorldBillboardMeshBuilder.Build(slot.Vertices.AsArray(), slot.Opacity.AsArray(),
+                        slot.Indices.AsArray(), slot.Mesh);
 
                     // The texture/screen-params refresh BuildSlotMesh does for the screen path — the world
                     // material needs the SAME per-frame bind (atlas/sprite texture never changes per-slot,
@@ -219,17 +336,24 @@ namespace MapRenderer.Unity.Text.Placement
                         new Vector4((float)viewportLogicalPx.x, (float)viewportLogicalPx.y, 0f, 0f));
 
                     EnsureChild(in key, slot, symbolLayers); // lazy: tile container → layer node → text/icon child
-                    if (slot.Renderer.sharedMaterial != material) slot.Renderer.sharedMaterial = material;
-                    slot.Renderer.enabled = true;
-                    slot.IdleFrames = 0;
+                    if (slot.Node.Renderer.sharedMaterial != material) slot.Node.Renderer.sharedMaterial = material;
+                    slot.Node.Renderer.enabled = true;
+                    slot.IdleFrames       = 0;
                 }
                 else
                 {
-                    if (slot.Renderer != null) slot.Renderer.enabled = false;
+                    if (slot.Node != null)
+                    {
+                        slot.Node.Renderer.enabled = false;
+                    }
+
                     slot.IdleFrames = emittedThisFrame ? 0 : slot.IdleFrames + 1;
                 }
 
-                if (slot.IdleFrames >= IdleReclaimFrames) _reclaimScratch.Add(key);
+                if (slot.IdleFrames >= IdleReclaimFrames)
+                {
+                    _reclaimScratch.Add(key);
+                }
             }
 
             // ONE transform write per tile container per frame — not per slot (the A1 defect this corrects).
@@ -237,8 +361,8 @@ namespace MapRenderer.Unity.Text.Placement
 
             for (int i = 0; i < _reclaimScratch.Count; i++)
             {
-                WorldLabelKey key = _reclaimScratch[i];
-                Slot slot = _slots[key];
+                WorldLabelKey key  = _reclaimScratch[i];
+                Slot          slot = _slots[key];
                 ReleaseChild(in key, slot);
                 slot.Mesh.DestroySafely();
                 slot.Vertices.Dispose();
@@ -246,6 +370,7 @@ namespace MapRenderer.Unity.Text.Placement
                 slot.Indices.Dispose();
                 _slots.Remove(key);
             }
+
             _reclaimScratch.Clear();
         }
 
@@ -255,12 +380,12 @@ namespace MapRenderer.Unity.Text.Placement
         /// No-op if the child already exists (steady-state: zero GameObject churn, zero alloc).</summary>
         private void EnsureChild(in WorldLabelKey key, Slot slot, IReadOnlyList<SymbolRenderLayer> symbolLayers)
         {
-            if (slot.Renderer != null) return;
+            if (slot.Node != null) return;
 
-            TileId tileId = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
+            TileId    tileId        = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
             Transform tileContainer = _tree.GetOrCreateTileNode(tileId, slot.TileOriginRender);
 
-            var layerKey = new LayerNodeKey(tileId, key.Slot);
+            var layerKey = new LayerNodeKey { TileId = tileId, Slot = key.Slot };
             if (!_layerNodes.TryGetValue(layerKey, out LayerNodeRec layerRec) || layerRec.Go == null)
             {
                 // Name after the style layer id ("poi-label", …) so the Hierarchy reads like the tile
@@ -268,49 +393,56 @@ namespace MapRenderer.Unity.Text.Placement
                 string layerName = (symbolLayers != null && (uint)key.Slot < (uint)symbolLayers.Count)
                     ? symbolLayers[key.Slot]?.StyleLayer?.Id
                     : null;
-                if (string.IsNullOrEmpty(layerName)) layerName = $"symbol-{key.Slot}";
+                if (string.IsNullOrEmpty(layerName)) layerName = LayerNodeFallbackName + key.Slot;
 
-                var layerGo = new GameObject(layerName);
+                GameObject layerGo = _layerNodePool.Get();
                 layerGo.transform.SetParent(tileContainer, worldPositionStays: false);
-                layerGo.transform.localPosition = Vector3.zero;
+                layerGo.name                     = layerName;
+                layerGo.transform.localPosition  = Vector3.zero; // recycled: local TRS is whatever the last
+                layerGo.transform.localRotation  = Quaternion.identity; // tenant left (SetParent preserves it)
                 layerRec = new LayerNodeRec { Go = layerGo, ChildCount = 0 };
                 _tree.AddChild(tileId);
             }
 
-            var childGo = new GameObject(key.Kind == LabelKind.Icon ? "icon" : "text") { hideFlags = HideFlags.DontSave };
-            childGo.transform.SetParent(layerRec.Go.transform, worldPositionStays: false);
-            childGo.transform.localPosition = Vector3.zero;
+            MeshNode node = (key.Kind == LabelKind.Icon ? _iconChildPool : _textChildPool).Get();
 
-            slot.Filter = childGo.AddComponent<MeshFilter>();
-            slot.Filter.sharedMesh = slot.Mesh; // sharedMesh: assign once — the SAME Mesh object is rewritten in place every rebuild
+            // AttachAt resets local TRS: a recycled node carries the previous tenant's, and the grouping
+            // tooth asserts this child sits at LOCAL identity — the container carries the one per-tile
+            // placement write, never this child.
+            node.AttachAt(layerRec.Go.transform, key.Kind == LabelKind.Icon ? IconChildName : TextChildName);
 
-            slot.Renderer = childGo.AddComponent<MeshRenderer>();
-            slot.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            slot.Renderer.receiveShadows    = false;
+            slot.Node = node;
+            // sharedMesh: rebound per tenancy — the SAME Mesh is then rewritten in place every rebuild.
+            node.Filter.sharedMesh = slot.Mesh;
 
             layerRec.ChildCount++;
             _layerNodes[layerKey] = layerRec;
         }
 
-        /// <summary>Destroys <paramref name="slot"/>'s text/icon child (if ever created), releasing it from
+        /// <summary>Releases <paramref name="slot"/>'s text/icon child (if ever created) from
         /// its layer node — which is destroyed once its last child is gone, releasing the tile container in
         /// turn (via <see cref="SceneTileTree.ReleaseChildFrom"/>) once its last layer node is gone.</summary>
         private void ReleaseChild(in WorldLabelKey key, Slot slot)
         {
-            if (slot.Renderer == null) return; // never presented — nothing to tear down
+            if (slot.Node == null)
+            {
+                // never presented — nothing to tear down
+                return;
+            }
 
-            slot.Renderer.gameObject.DestroySafely();
-            slot.Filter = null;
-            slot.Renderer = null;
+            (key.Kind == LabelKind.Icon ? _iconChildPool : _textChildPool).Release(slot.Node);
+            slot.Node = null;
 
-            TileId tileId = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
-            var layerKey = new LayerNodeKey(tileId, key.Slot);
+            TileId tileId   = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
+            var    layerKey = new LayerNodeKey { TileId = tileId, Slot = key.Slot };
             if (!_layerNodes.TryGetValue(layerKey, out LayerNodeRec layerRec)) return;
 
             layerRec.ChildCount--;
             if (layerRec.ChildCount <= 0)
             {
-                layerRec.Go.DestroySafely();
+                // Null-guarded: unlike the DestroySafely this replaced, ObjectPool.Release faults on a
+                // GameObject destroyed out from under us.
+                if (layerRec.Go != null) _layerNodePool.Release(layerRec.Go);
                 _layerNodes.Remove(layerKey);
                 _tree.ReleaseChildFrom(tileId);
             }
@@ -327,10 +459,11 @@ namespace MapRenderer.Unity.Text.Placement
         // SymbolRenderLayer.Material, SymbolRenderLayer.Create for icon — §0.1), so this is pure selection —
         // no per-frame queue sync.
         private static Material ResolveMaterial(in WorldLabelKey key, IReadOnlyList<SymbolRenderLayer> symbolLayers,
-            Material fallbackTextMaterial, Material fallbackIconMaterial)
+            Material                                             fallbackTextMaterial, Material fallbackIconMaterial)
         {
             SymbolRenderLayer layer = (symbolLayers != null && (uint)key.Slot < (uint)symbolLayers.Count)
-                ? symbolLayers[key.Slot] : null;
+                ? symbolLayers[key.Slot]
+                : null;
 
             return key.Kind == LabelKind.Icon
                 ? (layer?.WorldIconMaterial ?? fallbackIconMaterial)
@@ -350,6 +483,7 @@ namespace MapRenderer.Unity.Text.Placement
                 mesh = s.Mesh;
                 return true;
             }
+
             mesh = null;
             return false;
         }
@@ -358,8 +492,10 @@ namespace MapRenderer.Unity.Text.Placement
         /// the child's own <see cref="MeshRenderer.enabled"/> in the shared tree (a child that was never
         /// created, because the slot has never resolved a material, reads as not visible).</summary>
         internal bool IsSlotVisible(long tileKey, int slot, LabelKind kind)
-            => _slots.TryGetValue(new WorldLabelKey(tileKey, slot, kind), out Slot s)
-                && s.Renderer != null && s.Renderer.enabled;
+        {
+            return _slots.TryGetValue(new WorldLabelKey(tileKey, slot, kind), out Slot s)
+                   && s.Node != null && s.Node.Renderer.enabled;
+        }
 
         /// <summary>The label tree's root transform ("Map Labels"). Test surface — the grouping tooth reads
         /// the live Hierarchy through it (root → per-tile container → per-symbol-layer node → text/icon
@@ -371,23 +507,36 @@ namespace MapRenderer.Unity.Text.Placement
         /// <c>.parent.parent</c> (the tile container) from here, and asserts this transform itself sits at
         /// LOCAL identity (the container carries the ONE per-tile placement write, not this child).</summary>
         internal Transform GetSlotTransform(long tileKey, int slot, LabelKind kind)
-            => _slots.TryGetValue(new WorldLabelKey(tileKey, slot, kind), out Slot s) && s.Renderer != null
-                ? s.Renderer.transform : null;
+            => _slots.TryGetValue(new WorldLabelKey(tileKey, slot, kind), out Slot s) && s.Node != null
+                ? s.Node.Transform
+                : null;
 
         /// <summary>Destroys every GameObject in the shared tree (containers, layer nodes, text/icon
         /// children — one <see cref="SceneTileTree.Dispose"/> call, root-down) BEFORE destroying each slot's
         /// mesh (a MeshRenderer whose sharedMesh was destroyed first logs/renders pink in edit mode), then
         /// disposes every accumulator. Idempotent (an empty dictionary after the first call is a no-op).</summary>
-        public void Dispose()
+        protected override void DoDispose()
         {
             _tree.Dispose();
+
+            // After the tree: Clear only destroys each pool's PARKED objects, and a live node is in the tree,
+            // not the pool — the line above already destroyed those. Both halves have to run or the parked set
+            // outlives the renderer.
+            _textChildPool.Clear();
+            _iconChildPool.Clear();
+            _layerNodePool.Clear(); // _poolRoot itself died with the tree root above
+
             foreach (KeyValuePair<WorldLabelKey, Slot> kv in _slots)
             {
+                // The tree already destroyed this node's GameObject; disposing the WRAPPER is still required
+                // — it owns the node and an undisposed one is reported as a leak (MeshNode.DoDispose).
+                kv.Value.Node?.Dispose();
                 kv.Value.Mesh.DestroySafely();
                 kv.Value.Vertices.Dispose();
                 kv.Value.Opacity.Dispose();
                 kv.Value.Indices.Dispose();
             }
+
             _slots.Clear();
             _layerNodes.Clear();
         }
@@ -399,15 +548,15 @@ namespace MapRenderer.Unity.Text.Placement
     /// tile+slot). A struct (not a tuple) so <see cref="Dictionary{TKey,TValue}"/> hashing avoids boxing.</summary>
     internal readonly struct WorldLabelKey : IEquatable<WorldLabelKey>
     {
-        public readonly long TileKey;
-        public readonly int Slot;
+        public readonly long      TileKey;
+        public readonly int       Slot;
         public readonly LabelKind Kind;
 
         public WorldLabelKey(long tileKey, int slot, LabelKind kind)
         {
             TileKey = tileKey;
-            Slot = slot;
-            Kind = kind;
+            Slot    = slot;
+            Kind    = kind;
         }
 
         public bool Equals(WorldLabelKey other) => TileKey == other.TileKey && Slot == other.Slot && Kind == other.Kind;

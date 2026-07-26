@@ -62,20 +62,6 @@ namespace MapRenderer.Core.View.Camera
             return (viewportHeightPx * metersPerPixel) / (2.0 * math.tan(halfFovRad));
         }
 
-        /// <summary>
-        /// Inverse of <see cref="AltitudeForZoom"/>: converts an altitude back to zoom.
-        /// Used when a <see cref="CameraPropertiesUpdate"/> supplies <c>Distance</c> (D1 round-trip).
-        /// </summary>
-        public static double ZoomForDistance(double altitudeMetres, double viewportHeightPx, double verticalFovDeg)
-        {
-            double halfFovRad     = Angle.FromDegrees(verticalFovDeg * 0.5).Radians;
-            double metersPerPixel = (2.0 * altitudeMetres * math.tan(halfFovRad)) / viewportHeightPx;
-            // altitude = (vpH * mpp) / (2 * tan(fov/2))  →  mpp = altitude*2*tan(fov/2)/vpH
-            // mpp = EarthCirc / (TilePx * 2^zoom)  →  zoom = log2(EarthCirc / (TilePx * mpp))
-            if (metersPerPixel <= 0) return 0;
-            return math.log2(EarthCircumferenceMetres / (TilePixelSize * metersPerPixel));
-        }
-
         // ── Clip planes (derived from altitude — S42 D3) ──────────────────────────────────────────
 
         // ── Fit-to-viewport minimum zoom (S92 D2) ─────────────────────────────────────────────────
@@ -270,12 +256,5 @@ namespace MapRenderer.Core.View.Camera
 
         // ── Heading interpolation (D4) ──────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Interpolates heading using the shortest angular path (D4).
-        /// 350 → 10 goes +20° (not −340°). Thin shim over <see cref="Angle.LerpShortest"/>.
-        /// A pure helper for smooth heading control (the future CameraController).
-        /// </summary>
-        public static double LerpHeadingShortest(double from, double to, double t)
-            => Angle.LerpShortest(Angle.FromDegrees(from), Angle.FromDegrees(to), t).Degrees;
     }
 }

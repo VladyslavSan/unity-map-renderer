@@ -90,9 +90,11 @@ namespace MapRenderer.Tests.Text.Placement
             Material worldMaterial = null;
             try
             {
-                SceneFrame frame0 = new SceneFrame(
-                    mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }),
-                    float3x3.identity);
+                SceneFrame frame0 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }),
+                    Rebase = float3x3.identity,
+                };
                 double altitude0 = uCam.transform.position.y;
 
                 // The FROZEN world anchor — the glyph's own world point, a diagonal world Tangent (non-
@@ -154,9 +156,11 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt1 = new GeoCoordinate3D { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude + 0.5 / 16.0, Altitude = 0.0 };
                 mapCamera.SetProperties(new CameraProperties(lookAt1, zoom: 12.0, heading: 90.0, tilt: 0.0));
                 mapCamera.SyncToCamera();
-                SceneFrame frame1 = new SceneFrame(
-                    mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }),
-                    float3x3.identity);
+                SceneFrame frame1 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }),
+                    Rebase = float3x3.identity,
+                };
 
                 PlacePresenter(presenterGo, tileOriginRender, frame1);
                 byte[] pixels1 = RenderAndReadback(uCam, "world-curved-motion-pose1.png");

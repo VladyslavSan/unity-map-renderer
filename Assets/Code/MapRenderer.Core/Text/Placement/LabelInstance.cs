@@ -7,10 +7,9 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// S20 Slice 1: one label's per-frame placement input — a synthetic carrier today (hand-built by
-    /// <c>SyntheticLabelSource</c> and, in every headless Bucket-A tooth, by the test itself); S105 will
-    /// produce these from real point features + a parsed <c>Symbol</c> style layer (§6 F6 of the stage
-    /// doc). A plain <c>sealed class</c> (not a blittable struct) because <see cref="Layout"/> is a
+    /// One label's per-frame placement input, produced from real point features + a parsed <c>Symbol</c>
+    /// style layer by <c>StyledSymbolTileBuilder</c> (tests hand-build them directly). A plain
+    /// <c>sealed class</c> (not a blittable struct) because <see cref="Layout"/> is a
     /// managed <see cref="TextLayoutResult"/> (owns a <c>List&lt;SymbolQuad&gt;</c>) — this type never
     /// crosses the Jobs boundary itself; <see cref="MapRenderer.Core.Text.Placement.PlacedQuad"/> is the
     /// blittable per-quad record the job actually consumes.
@@ -114,7 +113,7 @@ namespace MapRenderer.Core.Text.Placement
         /// so every pre-I5a label (which never sets this) is unaffected. An icon label's single quad rides
         /// inside <see cref="Layout"/> (via <c>IconQuadLayout.ToLayoutResult</c>) — this carrier gains no
         /// separate icon-quad field, it just relabels the SAME point-placement path with a Kind tag (the
-        /// §5.4 decision: ride <c>Kind.Point</c> + this discriminator, not a parallel icon path). NOT yet
+        /// §5.4 decision: ride <see cref="LabelRecordKind.Point"/> + this discriminator, not a parallel icon path). NOT yet
         /// consumed by the draw side (I5b).</summary>
         public LabelKind Kind { get; init; }
 

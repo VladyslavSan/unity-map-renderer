@@ -4,15 +4,15 @@ namespace MapRenderer.Core.View.Camera
 {
     /// <summary>
     /// S45 D2: A nullable PATCH struct. Every field is optional; only non-null fields are applied
-    /// to the current <see cref="CameraProperties"/> by <see cref="CameraSystem.Apply"/>.
+    /// to the current <see cref="CameraProperties"/> by <see cref="ApplyTo"/>.
     ///
     /// <para><b>Value type / zero allocation:</b> this is a <c>struct</c> — passing it on the
     /// Duration==0 (instant/jumpTo) fast path allocates zero bytes on the heap. No boxing unless
     /// the caller stores it as an interface (avoid).</para>
     ///
-    /// <para><b>Either Zoom or Distance may be set</b> (D1): supplying <see cref="Distance"/>
-    /// converts to zoom on apply so round-trips are exact. Both fields set is valid — last write wins
-    /// (Zoom overrides Distance).</para>
+    /// <para><b>Zoom is the only scale field</b> — D1: zoom is canonical and altitude is derived from it
+    /// (<see cref="CameraPoseMath.AltitudeForZoom"/>), so there is nothing to patch in the other
+    /// direction.</para>
     ///
     /// <para>Usage — build a patch and hand it to <see cref="ApplyTo"/> (or the MapCamera.Apply seam):</para>
     /// <code>

@@ -112,7 +112,11 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
                 var mapCamera = new MapCamera(uCam, new CameraProperties(
                     new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 12.0, heading: 0.0, tilt: 0.0));
-                var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+                var frame = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                    Rebase = float3x3.identity,
+                };
                 long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // Risk R1: a realistic tile, not TileKey=0
 
                 (double3 pathA, double3 pathB) = ShortLineAt(uCam, frame, lineAngleDeg);
@@ -159,7 +163,11 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
                 var mapCamera = new MapCamera(uCam, new CameraProperties(
                     new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 12.0, heading: 0.0, tilt: 0.0));
-                var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+                var frame = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                    Rebase = float3x3.identity,
+                };
 
                 TileId containing = TestTileKeys.Containing(lookAt, zoom: 14);
                 TileId neighbor = new TileId { X = containing.X + 1, Y = containing.Y, Z = containing.Z };
@@ -205,7 +213,7 @@ namespace MapRenderer.Tests.Text.Placement
                     new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 12.0, heading: 0.0, tilt: 0.0),
                     projection: projection);
                 float3x3 rebase = math.transpose(projection.TangentBasisAt(lookAt));
-                var frame = new SceneFrame(projection.Project(lookAt), rebase);
+                var frame = new SceneFrame { SceneOriginRender = projection.Project(lookAt), Rebase = rebase };
                 long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14);
 
                 (double3 pathA, double3 pathB) = ShortLineAt(uCam, frame, 45f);
@@ -293,11 +301,12 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, new[] { label }, atlasTexture);
-                system.Tick(in frame, new[] { label }, atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the NEW world path must place the label.");
 
                 using var snap = new SnapshotRenderer(Size, Size);

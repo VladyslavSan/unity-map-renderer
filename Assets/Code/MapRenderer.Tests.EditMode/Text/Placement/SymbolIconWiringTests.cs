@@ -132,8 +132,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             return (camGo, mapCamera, frame);
         }
 
@@ -155,6 +158,9 @@ namespace MapRenderer.Tests.Text.Placement
 
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
+            // One plan across both halves: rebuilding it advances WinnerSetVersion, which is what makes the
+            // second (text-only) tick refill the mirror instead of hitting the gather memo.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
 
             try
             {
@@ -162,12 +168,11 @@ namespace MapRenderer.Tests.Text.Placement
                 // Epic A / A1: icons draw through the WORLD path now — the icon quad no longer lands on
                 // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
                 // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
-                var iconBatch = new SymbolLabelBatch();
-                SymbolLabelBatchBuilder.Build(iconBatch, new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
+                var iconLabels = new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) };
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(iconLabels), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, iconBatch, atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(iconLabels), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Tick).");
@@ -182,10 +187,9 @@ namespace MapRenderer.Tests.Text.Placement
                     "the world icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
 
                 // ── 2. Text-only batch (parity: the #1 rule) — world icon slot must go back to HIDDEN, text unaffected ──
-                var textBatch = new SymbolLabelBatch();
-                SymbolLabelBatchBuilder.Build(textBatch, new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) }, 1, mapCamera.Projection);
-                system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, textBatch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                var textLabels = new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) };
+                system.Tick(in frame, plan.Build(textLabels), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(textLabels), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
 
                 Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the world text presenter must still show on a text-only Tick.");

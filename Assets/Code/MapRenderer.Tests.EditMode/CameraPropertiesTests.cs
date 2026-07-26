@@ -112,17 +112,17 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// ZoomForDistance is the inverse of AltitudeForZoom (round-trip tolerance 0.1%).
+        /// ZoomForAltitude is the inverse of AltitudeForZoom (round-trip tolerance 0.1%).
         /// </summary>
         [Test]
-        public void ZoomForDistance_IsInverseOfAltitudeForZoom()
+        public void ZoomForAltitude_IsInverseOfAltitudeForZoom()
         {
             for (double zoom = 1.0; zoom <= 16.0; zoom += 3.0)
             {
                 double alt       = CameraPoseMath.AltitudeForZoom(zoom, TestViewportHeight, TestFovDeg);
-                double roundTrip = CameraPoseMath.ZoomForDistance(alt, TestViewportHeight, TestFovDeg);
+                double roundTrip = ZoomForAltitude(alt, TestViewportHeight, TestFovDeg);
                 Assert.AreEqual(zoom, roundTrip, zoom * 0.001,
-                    $"ZoomForDistance(AltitudeForZoom({zoom})) must round-trip back to {zoom}.");
+                    $"ZoomForAltitude(AltitudeForZoom({zoom})) must round-trip back to {zoom}.");
             }
         }
 
@@ -256,7 +256,7 @@ namespace MapRenderer.Tests
         public void LerpHeading_ShortestPath_AcrossZero()
         {
             // 350 → 10: shortest is +20 (not −340)
-            double half = CameraPoseMath.LerpHeadingShortest(350.0, 10.0, 0.5);
+            double half = Angle.LerpShortest(Angle.FromDegrees(350.0), Angle.FromDegrees(10.0), 0.5).Degrees;
             // At t=0.5, diff=+20, heading = 350+10 = 360 ≡ 0
             bool nearZero = half < 5.0 || half > 355.0;
             Assert.IsTrue(nearZero, $"350→10 at t=0.5 should be near 0°. Got {half:F2}°.");
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests
         [Test]
         public void LerpHeading_ShortestPath_Full()
         {
-            double full = CameraPoseMath.LerpHeadingShortest(350.0, 10.0, 1.0);
+            double full = Angle.LerpShortest(Angle.FromDegrees(350.0), Angle.FromDegrees(10.0), 1.0).Degrees;
             Assert.AreEqual(10.0, full, 1e-6, "350→10 at t=1.0 must land at 10°.");
         }
 
@@ -392,6 +392,24 @@ namespace MapRenderer.Tests
             Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,
                 "D6: a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
                 "the camera TOWARD the horizon (pitch increases).");
+        }
+
+        // ── Test-local oracle ────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// Zoom from altitude — the inverse of <see cref="CameraPoseMath.AltitudeForZoom"/>, kept HERE
+        /// rather than in Core, where it had no production caller. D1 makes zoom canonical and altitude
+        /// derived, so the reverse conversion is only ever a test's question. Written against
+        /// EarthConstants/WebMercator directly rather than through the forward function's own constants:
+        /// an inverse derived independently is a STRONGER oracle than one that could drift alongside it.
+        /// </summary>
+        private static double ZoomForAltitude(double altitudeMetres, double viewportHeightPx, double verticalFovDeg)
+        {
+            double halfFovRad     = Angle.FromDegrees(verticalFovDeg * 0.5).Radians;
+            double metersPerPixel = (2.0 * altitudeMetres * math.tan(halfFovRad)) / viewportHeightPx;
+            // altitude = (vpH * mpp) / (2 * tan(fov/2))  →  mpp = altitude*2*tan(fov/2)/vpH
+            // mpp = EarthCirc / (TilePx * 2^zoom)  →  zoom = log2(EarthCirc / (TilePx * mpp))
+            if (metersPerPixel <= 0) return 0;
+            return math.log2(EarthConstants.EquatorialCircumferenceMetres / (WebMercator.TilePixelSize * metersPerPixel));
         }
     }
 }

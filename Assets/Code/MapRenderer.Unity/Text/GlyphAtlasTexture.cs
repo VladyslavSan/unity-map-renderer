@@ -11,6 +11,7 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Text;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Text
@@ -35,7 +36,7 @@ namespace MapRenderer.Unity.Text
     /// must be called from the main thread, after any off-thread fetch/decode work has resumed there
     /// (mirrors every other GPU-resource boundary in this codebase — the mesh/backend disposal contract).
     /// </summary>
-    public sealed class GlyphAtlasTexture : IDisposable
+    public sealed class GlyphAtlasTexture : VerifiedDisposable
     {
         private Texture2DArray _texture;
 
@@ -74,7 +75,7 @@ namespace MapRenderer.Unity.Text
             _texture.Apply(updateMipmaps: false);
         }
 
-        public void Dispose()
+        protected override void DoDispose()
         {
             _texture.DestroySafely();
             _texture = null;

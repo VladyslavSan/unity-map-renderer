@@ -57,26 +57,65 @@ namespace MapRenderer.Tests.Visual
                 int h1 = r.AddTileLayer(mesh, o, 0, tid);
                 int h2 = r.AddTileLayer(mesh, o, 0, tid);
 
-                Assert.AreEqual(3, r.DrawItemCount, "Three draw items registered.");
-                Assert.AreEqual(1, r.ContainerCount, "Three layers of one tile share a single container.");
+                Assert.AreEqual(3, r.DrawItemCount(), "Three draw items registered.");
+                Assert.AreEqual(1, r.ContainerCount(), "Three layers of one tile share a single container.");
                 Transform container = r.Container(tid);
                 Assert.IsNotNull(container, "A container GameObject must exist for the tile.");
                 Assert.AreEqual(3, container.childCount, "All three layer GameObjects hang under the container.");
 
                 r.RemoveItem(h1);
-                Assert.AreEqual(2, r.DrawItemCount, "RemoveItem must drop the item.");
-                Assert.AreEqual(2, r.Container(tid).childCount, "The removed layer GameObject must be destroyed.");
-                Assert.AreEqual(1, r.ContainerCount, "Container survives while the tile still has layers.");
+                Assert.AreEqual(2, r.DrawItemCount(), "RemoveItem must drop the item.");
+                Assert.AreEqual(2, r.Container(tid).childCount,
+                    "The removed layer GameObject must leave the container (recycled into the pool, not destroyed).");
+                Assert.AreEqual(1, r.ContainerCount(), "Container survives while the tile still has layers.");
 
                 r.RemoveItem(h1); // idempotent
-                Assert.AreEqual(2, r.DrawItemCount, "Removing an unknown handle is a no-op.");
+                Assert.AreEqual(2, r.DrawItemCount(), "Removing an unknown handle is a no-op.");
 
                 // Removing the last two layers must tear the container down (no empty Hierarchy node).
                 r.RemoveItem(h0);
                 r.RemoveItem(h2);
-                Assert.AreEqual(0, r.DrawItemCount, "All layers removed.");
-                Assert.AreEqual(0, r.ContainerCount, "Container is destroyed once its last layer is removed.");
+                Assert.AreEqual(0, r.DrawItemCount(), "All layers removed.");
+                Assert.AreEqual(0, r.ContainerCount(), "Container is destroyed once its last layer is removed.");
                 Assert.IsNull(r.Container(tid), "No orphan container remains.");
+            }
+            finally { r.Dispose(); }
+        }
+
+        /// <summary>The layer children are POOLED (ObjectPool + detach on release), so a removed child must
+        /// come back on the next add rather than being rebuilt — its two AddComponent calls are the whole
+        /// reason the pool exists. Nothing else in this fixture would notice a Release that destroys or a Get
+        /// that always creates: behaviour would stay correct and just cost what it did before pooling.
+        /// Also pins that a recycled child carries NO state from its previous tenancy (the Mesh belongs to
+        /// TileManager and may be destroyed the moment RemoveItem returns).</summary>
+        [Test]
+        public void RemovedLayerChild_IsRecycled_NotRebuilt_AndCarriesNoStaleState()
+        {
+            var (mesh, mat) = FixtureFill();
+            var r = new GameObjectTileRenderer(new[] { mat });
+            try
+            {
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
+                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
+
+                int h0 = r.AddTileLayer(mesh, o, 0, tid);
+                Transform first = r.Container(tid).GetChild(0);
+                Assert.IsNotNull(first, "precondition: the layer child exists.");
+
+                r.RemoveItem(h0);
+                Assert.IsTrue(first != null, "release must PARK the child for reuse, not destroy it.");
+                Assert.IsFalse(first.gameObject.activeInHierarchy,
+                    "a parked child must leave the LIVE tree — it parks under the backend's inactive pool node.");
+
+                r.AddTileLayer(mesh, o, 0, tid);
+                Transform second = r.Container(tid).GetChild(0);
+                Assert.AreSame(first, second, "the pool must hand back the SAME child GameObject.");
+
+                var mf = second.GetComponent<MeshFilter>();
+                var mr = second.GetComponent<MeshRenderer>();
+                Assert.AreSame(mesh, mf.sharedMesh, "the recycled child must be rebound to the CURRENT mesh.");
+                Assert.AreSame(mat, mr.sharedMaterial, "…and to the current material.");
+                Assert.IsTrue(mr.enabled, "…and re-enabled (release disables it).");
             }
             finally { r.Dispose(); }
         }
@@ -225,18 +264,24 @@ namespace MapRenderer.Tests.Visual
             var r = new GameObjectTileRenderer(new[] { mat });
             var tid = new TileId { Z = 0, X = 0, Y = 0 };
             r.AddTileLayer(mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid);
-            Transform root = r.Root;
+            Transform root = r.Root();
             Assert.IsNotNull(root, "Root must exist before dispose.");
             GameObject rootGo = root.gameObject;
 
             r.Dispose();
             Assert.IsTrue(r.IsDisposed, "IsDisposed must be true after Dispose.");
             Assert.IsTrue(rootGo == null, "Dispose must destroy the backend root GameObject (and its children).");
-            Assert.IsNull(r.Root, "Root accessor must read null after dispose.");
-            // SceneTileTree-extraction regression: pre-extraction this read _containers.Count (0 on an empty
-            // dictionary); ContainerCount must mirror Root's null-after-dispose guard, not NRE on the now-null _tree.
-            Assert.AreEqual(0, r.ContainerCount, "ContainerCount must read 0, not throw, after Dispose.");
             Assert.DoesNotThrow(() => r.Dispose(), "Dispose must be idempotent.");
+
+            // Two assertions used to live here — "Root accessor must read null after dispose" and
+            // "ContainerCount must read 0, not throw, after Dispose". They pinned a leniency that existed
+            // ONLY to let this test read a torn-down backend: neither accessor had a production caller. The
+            // real post-dispose invariant is the line above (the root GameObject is destroyed) plus the
+            // ObjectDisposedException asserted below. Reading a disposed object is a caller bug, not a
+            // supported query, so it is no longer answered with a plausible-looking null/0.
+            Assert.Throws<System.ObjectDisposedException>(() => r.AddTileLayer(
+                mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid),
+                "a disposed backend must reject use, not absorb it.");
         }
     }
 
@@ -305,8 +350,8 @@ namespace MapRenderer.Tests.Visual
                     "The GameObject backend must NOT construct the BRG renderer (backend selection is exclusive).");
                 Assert.IsNull(view.EntitiesRenderer(),
                     "The GameObject backend must NOT construct the Entities renderer (backend selection is exclusive).");
-                Assert.Greater(gor.DrawItemCount, 0, "Consume must have created at least one tile-layer GameObject.");
-                Assert.Greater(gor.ContainerCount, 0, "Consume must have created at least one per-tile container.");
+                Assert.Greater(gor.DrawItemCount(), 0, "Consume must have created at least one tile-layer GameObject.");
+                Assert.Greater(gor.ContainerCount(), 0, "Consume must have created at least one per-tile container.");
 
                 // Floating origin: the container position must equal TileLocalToScene(tileOrigin, sceneOrigin).
                 // The scene origin of the last pumped frame is the pumped camera's Mercator centre.

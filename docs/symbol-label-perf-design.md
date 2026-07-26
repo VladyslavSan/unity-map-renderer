@@ -265,7 +265,7 @@ cliff and no "skip when nothing changed" predicate over camera state.
 **Verified preconditions** (checked against source before committing to this):
 - The mirror `_m*` pools are written **only** in `GatherIntoMirror` / `RefreshBatchMirror`; downstream
   (`LabelStageJob`, `RunCollision`) reads them and writes the separate `_sj*` pools, and the in-place candidate
-  sort touches `_sjCandidates`, not the mirror. So a retained mirror cannot be corrupted between frames.
+  sort touches `_stageCandidates`, not the mirror. So a retained mirror cannot be corrupted between frames.
 - `_orderedBlocks` is copied wholesale from the reconcile result, and blocks are **pinned** while a snapshot is in
   service — so a block's contents cannot change under a retained mirror without a front swap.
 
@@ -283,7 +283,7 @@ cliff and no "skip when nothing changed" predicate over camera state.
   generalized to `_mirrorSource` (object) / `_mirrorVersion` (long) — one pair covering both the batch (demo) and
   plan (production) sources, so a demo `Tick(batch)` between two production gathers invalidates the production
   memo and vice versa (one `ReferenceEquals`-and-version comparison, not two parallel sentinels).
-- **A release-build backstop.** The memo predicate also checks `plan.WinnerCount == _mCount` (not just source +
+- **A release-build backstop.** The memo predicate also checks `plan.WinnerCount == _mirrorCount` (not just source +
   version) — if a future front-mutation site ever lands without a version bump, this falls through to a full
   rebuild instead of a length-mismatched `NativeArray.Copy` (a checked throw in the Editor, a silent
   out-of-bounds read in a release player). A debug-only assert fires whenever this backstop engages.
@@ -317,7 +317,7 @@ cliff and no "skip when nothing changed" predicate over camera state.
   Stage must stay current-frame, because `LabelStageJob` consumes this frame's `Screen`/`Depth`/`Valid` and
   produces screen-derived rotation/size + the curved arc-walk that the world quads are built from (the same
   camera-dependence §5 option E carves curved labels out for). Deferring the whole chain lags curved glyphs along
-  their line under motion. Cost of R3: the collision sorts `_sjCandidates` in place, so last frame's survivor
+  their line under motion. Cost of R3: the collision sorts `_stageCandidates` in place, so last frame's survivor
   flags must be re-keyed to this frame's candidates by `FadeId` — real work, its own stage.
 - **R4 — cheap main-thread scraps in `Collide`.** The grid clear is a managed `for` over `W*H` cells with
   per-element bounds checks (fold into the job / memset), and `NodeUpperBoundByCandidates` walks every
@@ -386,7 +386,7 @@ byte-identity teeth the async version needs to prove itself against.
 2. **The per-frame masks must follow the DISPLAYED set, not the newest front.** With an async gather the live
    mirror corresponds to an *older* winner set than the current reconcile front, so
    `LabelTileCoverageFilter.ClassifyActive` must classify the displayed snapshot — otherwise the masks index a
-   set the mirror is not built from. R1's `plan.WinnerCount == _mCount` backstop would catch the mismatch, but
+   set the mirror is not built from. R1's `plan.WinnerCount == _mirrorCount` backstop would catch the mismatch, but
    catching it is not the same as being correct: the classify input has to be the displayed set by construction.
 
 **Lifetime** rides the existing machinery: pin the snapshot whose blocks an in-flight gather reads, release when
@@ -435,7 +435,7 @@ belong to the later emit-job stage, where their cost can be attributed and their
 the profiled scene, inside `Symbol.Project`) — is **deleted**. `LabelStageJob` (an `IJob`, `.Run()`) resolves
 incumbency itself, per arm, because the two arms consume it differently:
 
-- **Point arm:** inlines `Placed.Contains(s.FadeId)`. `_sjPointWasPlaced` is deleted outright (field, alloc,
+- **Point arm:** inlines `Placed.Contains(s.FadeId)`. `_stagePointWasPlaced` is deleted outright (field, alloc,
   resize, fill loop, job field, Dispose).
 - **Curved arm:** the resolve loop moves to the top of `Execute()`, still filling the `AnchorWasPlaced` byte
   array. It **cannot** inline, and this is structural, not a preference: `LabelStagingMath.StageCurved` takes a
@@ -477,7 +477,7 @@ replaced by constants): the point-arm test failed `Expected: 2, But was: 3`, and
   still go red via `AnchorWasPlaced[0]` — but a case with an asymmetric polyline, or an anchor near an end so
   only the fallback can stage, would close it.
 - **Two-site sizing coupling (F4).** `AnchorWasPlaced.Length == AnchorFadeIds.Length` is now maintained by two
-  independent sites (`PreSizeStageOutputs` sizes from `_mFadeCount`; `RunStageJob` passes `_mFadeIds.AsArray()`).
+  independent sites (`PreSizeStageOutputs` sizes from `_mirrorFadeCount`; `RunStageJob` passes `_mirrorFadeIds.AsArray()`).
   Both are correct today, and safe only because `Mirror` truncates to `count` while the batch's own arrays are
   `Grow`-doubled — an asymmetry invisible unless you read both. A debug-only assert in `RunStageJob` would make a
   future mirror change fail loudly instead of silently under-filling (or reading out of bounds in a player with
@@ -533,7 +533,7 @@ them would lag curved glyphs along their line under motion. Only the verdict mov
 
 **Three structural consequences, none optional:**
 
-1. **Emit moves BEFORE the schedule.** Scheduling first races the job's in-place sort of `_sjCandidates`
+1. **Emit moves BEFORE the schedule.** Scheduling first races the job's in-place sort of `_stageCandidates`
    against the emit loop's reads of the same array — Unity's safety system throws on exactly that, which the
    RED-verify confirmed. Emit order therefore becomes **staging order** rather than placement order, changing
    the blend order of overlapping transparent quads. Measured gate exposure: of 99 `.Tick(in ` call sites, 31
@@ -565,7 +565,7 @@ cross-frame ids are the *designed* behaviour — there is no well-formed invaria
 
 **What the headless suite CANNOT prove, and why the perf verdict is a required gate step.** No EditMode
 assertion can distinguish "genuinely deferred" from "structurally deferred but eagerly completed": the harvest
-branches only on a once-per-Tick `_collisionPending` flag and `JobHandle.Complete()` is idempotent, so forcing
+branches only on a once-per-Tick `_collisionHandle is { }` check and `JobHandle.Complete()` is idempotent, so forcing
 the job to finish early changes when the CPU work happens, not when its result is applied. The plan's original
 "primary RED-verify" claimed otherwise and was **wrong**; adversarial review caught it. The verdict is a
 maintainer Play-mode profile reporting **both** numbers — `Symbol.Collide` down ~4 ms **and**

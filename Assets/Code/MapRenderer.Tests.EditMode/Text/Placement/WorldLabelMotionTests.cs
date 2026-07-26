@@ -95,7 +95,11 @@ namespace MapRenderer.Tests.Text.Placement
                 // The FROZEN world anchor — a real-world render-space point, computed ONCE. AnchorLocal is
                 // baked to float3.zero (the mesh's object-space origin IS the anchor, mirrors T2's
                 // BuildOneGlyphWorldMesh) so the object's transform alone carries the anchor's placement.
-                SceneFrame frame0 = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }), float3x3.identity);
+                SceneFrame frame0 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }),
+                    Rebase = float3x3.identity,
+                };
                 double altitude0 = uCam.transform.position.y;
                 double3 anchorRender = frame0.SceneOriginRender + new double3(0.0, 0.0, altitude0 * 0.02);
 
@@ -145,7 +149,11 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt1 = new GeoCoordinate3D { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude + 0.5, Altitude = 0.0 };
                 mapCamera.SetProperties(new CameraProperties(lookAt1, zoom: 8.0, heading: 0.0, tilt: 0.0));
                 mapCamera.SyncToCamera();
-                SceneFrame frame1 = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }), float3x3.identity);
+                SceneFrame frame1 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }),
+                    Rebase = float3x3.identity,
+                };
 
                 PlacePresenter(presenterGo, anchorRender, frame1);
                 byte[] pixels1;
@@ -245,7 +253,11 @@ namespace MapRenderer.Tests.Text.Placement
             Material worldMaterial = null;
             try
             {
-                SceneFrame frame0 = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }), float3x3.identity);
+                SceneFrame frame0 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }),
+                    Rebase = float3x3.identity,
+                };
                 double altitude0 = uCam.transform.position.y;
                 double3 anchorRender = frame0.SceneOriginRender + new double3(0.0, 0.0, altitude0 * 0.02);
 
@@ -289,7 +301,11 @@ namespace MapRenderer.Tests.Text.Placement
                 var lookAt1 = new GeoCoordinate3D { Latitude = lookAt0.Latitude + 0.5, Longitude = lookAt0.Longitude, Altitude = 0.0 };
                 mapCamera.SetProperties(new CameraProperties(lookAt1, zoom: 8.0, heading: 0.0, tilt: 0.0));
                 mapCamera.SyncToCamera();
-                SceneFrame frame1 = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }), float3x3.identity);
+                SceneFrame frame1 = new SceneFrame
+                {
+                    SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = lookAt1.Latitude, Longitude = lookAt1.Longitude }),
+                    Rebase = float3x3.identity,
+                };
 
                 PlacePresenter(presenterGo, anchorRender, frame1);
                 byte[] pixels1;

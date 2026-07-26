@@ -99,23 +99,34 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Build the frame from the projection, matching MapView.BuildSceneFrame's math (identity
             // rebase for planar Mercator).
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 }),
+                Rebase = float3x3.identity,
+            };
 
             var atlasTexture = BuildTinyAtlasTexture();
             var labels = BuildLabels(20, frame.SceneOriginRender);
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+
+            // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
+            // This is the faithful translation of what the batch path did: SymbolLabelBatchBuilder.Build
+            // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
+            // ticks measured the same memo-hit steady state they measure here.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+            SymbolGatherPlan builtPlan = plan.Build(labels);
+
 
             try
             {
                 // Warm-up ticks: first-frame NativeList growth + Mesh/Material creation is allowed to allocate.
                 for (int i = 0; i < 3; i++)
                 {
-                    system.Tick(in frame, labels, atlasTexture);
+                    system.Tick(in frame, builtPlan, atlasTexture);
                 }
 
-                Assert.That(() => system.Tick(in frame, labels, atlasTexture),
+                Assert.That(() => system.Tick(in frame, builtPlan, atlasTexture),
                     Is.Not.AllocatingGCMemory(),
                     "a steady-state Tick (same label count/shape as the warm-up) must allocate ZERO managed garbage");
             }
@@ -147,7 +158,11 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             var atlasTexture = BuildTinyAtlasTexture();
             long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom (Risk R1 + coverage-cull realism)
@@ -195,9 +210,18 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
+            // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
+            // This is the faithful translation of what the batch path did: SymbolLabelBatchBuilder.Build
+            // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
+            // ticks measured the same memo-hit steady state they measure here.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+            SymbolGatherPlan builtPlan = plan.Build(labels);
+
+
             try
             {
-                for (int i = 0; i < 3; i++) system.Tick(in frame, labels, atlasTexture);
+                for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 Assert.AreEqual(labels.Count, system.LastQuadCount, "every label (incl. the unrenderable icon) must place — the icon is emitted regardless of a missing world material (precondition).");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "the world TEXT slot must be built+presented after warm-up (the branch this tooth measures).");
                 Assert.IsFalse(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Icon), "the world ICON slot has no material — it must stay hidden (not crash, not churn).");
@@ -206,7 +230,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // would churn a Mesh/GameObject/3x NativeList every 60th Tick under the pre-fix bug.
                 Assert.That(() =>
                     {
-                        for (int i = 0; i < 65; i++) system.Tick(in frame, labels, atlasTexture);
+                        for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
                     },
                     Is.Not.AllocatingGCMemory(),
                     "65 steady-state Ticks (crossing the K=60 idle-reclaim boundary) with a real world-built+presented " +
@@ -233,7 +257,11 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             var atlasTexture = BuildTinyAtlasTexture();
             long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5);
@@ -271,15 +299,24 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
+            // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
+            // This is the faithful translation of what the batch path did: SymbolLabelBatchBuilder.Build
+            // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
+            // ticks measured the same memo-hit steady state they measure here.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+            SymbolGatherPlan builtPlan = plan.Build(labels);
+
+
             try
             {
-                for (int i = 0; i < 3; i++) system.Tick(in frame, labels, atlasTexture);
+                for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "the curved label's single glyph must place (precondition).");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "the world TEXT slot must be built+presented (curved routes there since Stage AC).");
 
                 Assert.That(() =>
                     {
-                        for (int i = 0; i < 5; i++) system.Tick(in frame, labels, atlasTexture);
+                        for (int i = 0; i < 5; i++) system.Tick(in frame, builtPlan, atlasTexture);
                     },
                     Is.Not.AllocatingGCMemory(),
                     "steady-state Ticks over a curved-emitting scene must allocate ZERO managed garbage — the " +

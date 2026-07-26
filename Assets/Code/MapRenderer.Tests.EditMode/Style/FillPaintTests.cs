@@ -289,6 +289,19 @@ namespace MapRenderer.Tests
 
         // ── #4: BakeNumbers ≥2 distinct alphas from a data-driven fill-opacity ───
 
+        /// <summary>
+        /// One evaluation per feature, mirroring the tile builders' inner loop. A failed evaluation
+        /// (expression error, wrong type) yields <paramref name="fallback"/> for that feature.
+        /// </summary>
+        private static List<double> BakeNumbers(
+            StyleProperty<float> prop, double zoom, IEnumerable<IFeature> features, double fallback)
+        {
+            var result = new List<double>();
+            foreach (var feature in features)
+                result.Add(prop.TryEvaluate(zoom, feature, out float n) ? n : fallback);
+            return result;
+        }
+
         [Test]
         public void BakeNumbers_DataDrivenOpacity_ProducesDistinctAlphas()
         {
@@ -306,8 +319,7 @@ namespace MapRenderer.Tests
             var mvtLayer = LoadCountries();
             var features = AdaptFeatures(mvtLayer);
 
-            // S60: BakeNumbers now takes StyleProperty<float>
-            List<double> alphas = FeatureColorBaker.BakeNumbers(fp.Opacity, 0.0, features, 1.0);
+            List<double> alphas = BakeNumbers(fp.Opacity, 0.0, features, 1.0);
 
             Assert.AreEqual(features.Count, alphas.Count,
                 "BakeNumbers must return one alpha per feature.");

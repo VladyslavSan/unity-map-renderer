@@ -8,15 +8,16 @@ namespace MapRenderer.Core.View.Camera
     /// S45/S50: Canonical, immutable camera state — the single camera-state type across Core, Unity,
     /// and tests.
     ///
-    /// <para><b>D1 — Zoom is canonical.</b> Distance/altitude are derived from zoom via the
-    /// altitude-from-zoom formula (Web-Mercator perspective framing); see <see cref="CameraPoseMath"/>.</para>
+    /// <para><b>D1 — Zoom is canonical.</b> Altitude is derived from zoom via the altitude-from-zoom
+    /// formula (Web-Mercator perspective framing); see <see cref="CameraPoseMath"/>. There is no camera
+    /// "distance" property — altitude is the one derived scale, and it is never an input.</para>
     ///
     /// <para><b>Field semantics:</b>
     /// <list type="bullet">
     ///   <item><see cref="LookAt"/> — geographic coordinate (WGS-84) the camera orbits around.
     ///     <c>Altitude</c> is reserved for terrain; pass <c>0</c> until S25.</item>
     ///   <item><see cref="Zoom"/> — fractional MapLibre zoom. Higher = more zoomed in (smaller
-    ///     ground footprint). Canonical; drives distance/altitude.</item>
+    ///     ground footprint). Canonical; drives altitude.</item>
     ///   <item><see cref="Heading"/> — camera bearing, degrees CW from north.
     ///     <see cref="ConstrainedAngle"/> Wrap to <c>[0, 360)</c>.</item>
     ///   <item><see cref="Tilt"/> — camera tilt relative to the surface normal at LookAt (§7).
@@ -38,8 +39,8 @@ namespace MapRenderer.Core.View.Camera
 
         // ── Canonical zoom (D1) ───────────────────────────────────────────────────────────────
         /// <summary>
-        /// Fractional MapLibre zoom level. Higher = zoomed in. <b>Canonical</b>; distance/altitude
-        /// are derived. See <see cref="CameraPoseMath.AltitudeForZoom"/> for the derivation.
+        /// Fractional MapLibre zoom level. Higher = zoomed in. <b>Canonical</b>; altitude is derived.
+        /// See <see cref="CameraPoseMath.AltitudeForZoom"/> for the derivation.
         /// </summary>
         public readonly double Zoom;
 

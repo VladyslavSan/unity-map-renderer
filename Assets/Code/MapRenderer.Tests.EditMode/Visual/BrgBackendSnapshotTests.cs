@@ -29,7 +29,6 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
@@ -720,7 +719,7 @@ namespace MapRenderer.Tests.Visual
                     "S49 tooth 5: BRG + every GraphicsBuffer released on teardown.");
 
                 // HasBuffer must be false (GraphicsBuffer released).
-                Assert.IsFalse(brg.HasBuffer,
+                Assert.IsFalse(brg.HasBuffer(),
                     "GraphicsBuffer must be released (HasBuffer=false) after BrgTileRenderer.Dispose. " +
                     "S49 tooth 5: no leaked GraphicsBuffer after teardown.");
 

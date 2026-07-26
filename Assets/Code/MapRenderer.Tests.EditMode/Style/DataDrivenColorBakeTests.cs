@@ -12,8 +12,9 @@ using MapRenderer.Core.Style;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S12 / S60 — <see cref="FeatureColorBaker"/>: bake per-feature colors from the real fixture.
-    /// Updated for S60: <c>DataDrivenPaintEvaluator</c> is replaced by <c>StyleProperty&lt;T&gt;</c>.
+    /// S12 / S60 — data-driven paint evaluation over the real fixture: <see cref="StyleProperty{T}"/>
+    /// resolved once per decoded MVT feature, which is what <c>StyledFillTileBuilder</c> and
+    /// <c>StyledLineTileBuilder</c> do per feature while meshing a tile.
     ///
     /// The fixture (Assets/Fixtures/sample-tile.bytes) contains the "countries" layer with 239 polygon
     /// features and a "CONTINENT" string property (confirmed: 8 distinct values, including "Asia" and
@@ -27,7 +28,7 @@ namespace MapRenderer.Tests
     ///   3. Constant-kind evaluator: bake with a constant expression → all colors identical.
     /// </summary>
     [TestFixture]
-    public class FeatureColorBakerTests
+    public class DataDrivenColorBakeTests
     {
         private static byte[] LoadFixture()
         {
@@ -62,9 +63,31 @@ namespace MapRenderer.Tests
             return features;
         }
 
+        /// <summary>
+        /// One evaluation per feature, mirroring the tile builders' inner loop. A failed evaluation
+        /// (expression error, wrong type) yields <paramref name="fallback"/> for that feature.
+        /// </summary>
+        private static List<Color> BakeColors(
+            StyleProperty<Color> prop, double zoom, IEnumerable<IFeature> features, Color fallback = default)
+        {
+            var result = new List<Color>();
+            foreach (var feature in features)
+                result.Add(prop.TryEvaluate(zoom, feature, out Color c) ? c : fallback);
+            return result;
+        }
+
         private static StyleProperty<Color> ColProp(string json)
             => new StyleProperty<Color>(
                 MapRenderer.Core.Json.JsonParser.Parse(json), new Color(0, 0, 0, 1), v => v.AsColorCoerced());
+
+        private static HashSet<(int r, int g, int b)> DistinctRgb(List<Color> colors)
+        {
+            var distinct = new HashSet<(int r, int g, int b)>();
+            foreach (var c in colors)
+                distinct.Add(
+                    ((int)Math.Round(c.R * 255), (int)Math.Round(c.G * 255), (int)Math.Round(c.B * 255)));
+            return distinct;
+        }
 
         private const string MatchExpr =
             "[\"match\",[\"get\",\"CONTINENT\"]," +
@@ -81,15 +104,12 @@ namespace MapRenderer.Tests
             var features = AdaptFeatures(layer);
             var prop     = ColProp(MatchExpr);
 
-            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
+            List<Color> colors = BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count,
                 "BakeColors must return one color per input feature.");
 
-            var distinct = new HashSet<(int r, int g, int b)>();
-            foreach (var c in colors)
-                distinct.Add(
-                    ((int)Math.Round(c.R * 255), (int)Math.Round(c.G * 255), (int)Math.Round(c.B * 255)));
+            var distinct = DistinctRgb(colors);
 
             Assert.GreaterOrEqual(distinct.Count, 2,
                 $"A match expression on CONTINENT must produce ≥2 distinct colors (got {distinct.Count}).");
@@ -109,14 +129,11 @@ namespace MapRenderer.Tests
             var features = AdaptFeatures(layer);
             var prop     = ColProp(controlExpr);
 
-            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
+            List<Color> colors = BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count, "BakeColors must return one color per feature.");
 
-            var distinct = new HashSet<(int r, int g, int b)>();
-            foreach (var c in colors)
-                distinct.Add(
-                    ((int)Math.Round(c.R * 255), (int)Math.Round(c.G * 255), (int)Math.Round(c.B * 255)));
+            var distinct = DistinctRgb(colors);
 
             Assert.AreEqual(1, distinct.Count,
                 $"Constant-input control must produce exactly 1 distinct color (got {distinct.Count}).");
@@ -131,7 +148,7 @@ namespace MapRenderer.Tests
             var features = AdaptFeatures(layer);
             var prop     = ColProp("\"#3a8f3a\"");
 
-            List<Color> colors = FeatureColorBaker.BakeColors(prop, 0.0, features);
+            List<Color> colors = BakeColors(prop, 0.0, features);
 
             Assert.AreEqual(features.Count, colors.Count);
 

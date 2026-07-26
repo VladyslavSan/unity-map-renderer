@@ -16,11 +16,11 @@ namespace MapRenderer.Tests.Expressions
 
         /// <summary>Parse + evaluate (throws on a spec error) with no feature.</summary>
         public static Value Eval(string json, double zoom = 0.0)
-            => Parse(json).EvaluateOrThrow(new EvaluationContext(zoom));
+            => Parse(json).Evaluate(new EvaluationContext(zoom));
 
         /// <summary>Parse + evaluate with a feature.</summary>
         public static Value Eval(string json, IFeature feature, double zoom = 0.0)
-            => Parse(json).EvaluateOrThrow(new EvaluationContext(zoom, feature));
+            => Parse(json).Evaluate(new EvaluationContext(zoom, feature));
 
         /// <summary>Parse + evaluate via the boundary: returns true on success, false on a spec error.</summary>
         public static bool TryEval(string json, out Value result, out string error, double zoom = 0.0,

@@ -256,23 +256,6 @@ namespace MapRenderer.Core.Geometry
             return math.abs(1.0 / dot) > miterLimit;
         }
 
-        /// <summary>
-        /// Compute the miter factor (1/cos(θ/2)) for the join between two segment left normals.
-        /// Returns 1.0 if the normals are parallel (no turn).
-        /// </summary>
-        public static double MiterFactor(double2 n1, double2 n2)
-        {
-            double mx   = n1.x + n2.x;
-            double my   = n1.y + n2.y;
-            double mLen = Sqrt(mx * mx + my * my);
-            if (mLen < 1e-12) return double.MaxValue;
-            double mux = mx / mLen;
-            double muy = my / mLen;
-            double dot = mux * n1.x + muy * n1.y;
-            if (math.abs(dot) < 1e-12) return double.MaxValue;
-            return 1.0 / dot;
-        }
-
         // ─────────────────────────────────────────────────────────────────────────────────────────
         // Join geometry
         // ─────────────────────────────────────────────────────────────────────────────────────────

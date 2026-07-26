@@ -66,6 +66,7 @@ namespace MapRenderer.Tests.Text.Placement
             public readonly SceneFrame Frame;
             public readonly GlyphAtlasTexture Atlas;
             public readonly double3 Origin;
+            public readonly IProjection Projection;
             private readonly GameObject _go;
 
             public Harness()
@@ -76,7 +77,8 @@ namespace MapRenderer.Tests.Text.Placement
                 var cam = new MapCamera(uCam, new CameraProperties(
                     new GeoCoordinate3D { Latitude = 10.0, Longitude = 10.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
                 Origin = cam.Projection.Project(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 });
-                Frame = new SceneFrame(Origin, float3x3.identity);
+                Projection = cam.Projection;
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 Atlas = BuildTinyAtlasTexture();
                 System = new LabelPlacementSystem(cam, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
@@ -123,23 +125,23 @@ namespace MapRenderer.Tests.Text.Placement
             var b = Point(h.Origin, sortKey: 5f, text: "B", feature: 1, color: blue);
 
             // Tick 1: {A} alone — nothing has been harvested yet (no prior scheduled collision) ⇒ nothing shows.
-            h.System.Tick(in h.Frame, new List<LabelInstance> { a }, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, new List<LabelInstance> { a }, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(0, h.System.LastQuadCount, "tick 1: no pending verdict yet — nothing shows (§2.6).");
 
             // Tick 2: {A} again — harvests tick 1's scheduled collision over {A} ⇒ A shows.
-            h.System.Tick(in h.Frame, new List<LabelInstance> { a }, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, new List<LabelInstance> { a }, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 2: A's own collision has now been harvested.");
             AssertColorMatches(h.System, a, "tick 2 must show A");
 
             // Tick 3: {A, B} — the harvested verdict is still tick 2's, over {A} ALONE (B did not exist when
             // that collision was scheduled) ⇒ A still shows, B does not — the one-Tick verdict latency.
-            h.System.Tick(in h.Frame, new List<LabelInstance> { a, b }, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, new List<LabelInstance> { a, b }, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 3: the deferred verdict is still A-only.");
             AssertColorMatches(h.System, a, "tick 3 must still show A, not B");
 
             // Tick 4: {A, B} again — harvests tick 3's scheduled collision over {A, B}, where B wins ⇒ B shows,
             // A eases toward 0 with deltaTime = +inf (snaps instantly), so only B is emitted.
-            h.System.Tick(in h.Frame, new List<LabelInstance> { a, b }, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, new List<LabelInstance> { a, b }, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "tick 4: B has now won the harvested verdict.");
             AssertColorMatches(h.System, b, "tick 4 must show B, A has snapped to 0");
         }
@@ -153,15 +155,15 @@ namespace MapRenderer.Tests.Text.Placement
             var label = Point(h.Origin, sortKey: 0f, text: "A", feature: 0, color: new float4(1f, 1f, 1f, 1f));
             var labels = new List<LabelInstance> { label };
 
-            h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, labels, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(0, h.System.LastQuadCount, "the first Tick has no prior verdict to harvest.");
 
-            h.System.Tick(in h.Frame, labels, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, labels, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.AreEqual(1, h.System.LastQuadCount, "the second Tick harvests the first Tick's scheduled collision.");
         }
 
         // ── T3 — DoDispose must Complete() a still-pending collision before disposing the buffers it holds
-        //    (_sjCandidates/_sjBoxes/_nSurvivors/_survivorCountOut/the grid lists), or the job safety system
+        //    (_stageCandidates/_stageBoxes/_nSurvivors/_survivorCountOut/the grid lists), or the job safety system
         //    throws (a use-after-free). Tick once (schedules a collision, leaving it pending — HarvestCollision
         //    only runs at the START of the NEXT Tick, which never comes here) then Dispose. ──
         [Test]
@@ -169,7 +171,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var h = new Harness();
             var label = Point(h.Origin, sortKey: 0f, text: "A", feature: 0, color: new float4(1f, 1f, 1f, 1f));
-            h.System.Tick(in h.Frame, new List<LabelInstance> { label }, h.Atlas, deltaTime: float.PositiveInfinity);
+            h.System.TickLabels(in h.Frame, new List<LabelInstance> { label }, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
             Assert.DoesNotThrow(() => h.Dispose(), "Dispose must Complete() a still-pending collision, not tear down under it.");
         }
 
@@ -197,11 +199,6 @@ namespace MapRenderer.Tests.Text.Placement
             using var h = new Harness();
             var label = Point(h.Origin, sortKey: 0f, text: "A", feature: 0, color: new float4(1f, 1f, 1f, 1f));
             var labels = new List<LabelInstance> { label };
-            // symbolLayers is only accepted by the SymbolLabelBatch/SymbolGatherPlan Tick overloads, not the
-            // managed-list demo overload — build the batch explicitly (same pattern as
-            // SymbolLayerOrderSnapshotTests.CollisionCounts_AreIdentical_…).
-            var batch = new SymbolLabelBatch();
-            SymbolLabelBatchBuilder.Build(batch, labels, slotCount: 1, projection: null);
 
             // Camera zoom is 5.0 (Harness). Unbounded layer (no minzoom) is visible throughout.
             var visibleLayer = BuildRenderLayer(minZoom: null, initialZoom: 5.0);
@@ -212,16 +209,16 @@ namespace MapRenderer.Tests.Text.Placement
                 var visibleLayers = new List<SymbolRenderLayer> { visibleLayer };
                 var suppressedLayers = new List<SymbolRenderLayer> { suppressedLayer };
 
-                h.System.Tick(in h.Frame, batch, h.Atlas, deltaTime: float.PositiveInfinity, symbolLayers: visibleLayers);
+                h.System.TickLabels(in h.Frame, labels, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: visibleLayers);
                 Assert.AreEqual(0, h.System.LastQuadCount, "tick 1: no prior verdict yet.");
 
-                h.System.Tick(in h.Frame, batch, h.Atlas, deltaTime: float.PositiveInfinity, symbolLayers: visibleLayers);
+                h.System.TickLabels(in h.Frame, labels, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: visibleLayers);
                 Assert.AreEqual(1, h.System.LastQuadCount, "tick 2: the label has won its harvested verdict and shows.");
 
                 // tick 3: the SAME label, now under a layer whose minzoom excludes the live zoom. Even though
                 // the harvested verdict (from tick 2's scheduled collision) still says "won", Suppressed must
                 // hide it THIS Tick — not one Tick later.
-                h.System.Tick(in h.Frame, batch, h.Atlas, deltaTime: float.PositiveInfinity, symbolLayers: suppressedLayers);
+                h.System.TickLabels(in h.Frame, labels, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity, symbolLayers: suppressedLayers);
                 Assert.AreEqual(0, h.System.LastQuadCount, "tick 3: suppression is a same-frame override, not one-Tick-late.");
             }
             finally

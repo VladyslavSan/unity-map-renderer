@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(1, batch.Count, "one record");
             Assert.AreEqual(1, batch.PointCount, "an icon is point-placement");
-            Assert.AreEqual(SymbolLabelBatch.Kind.Point, batch.Kinds[0]);
+            Assert.AreEqual(LabelRecordKind.Point, batch.Kinds[0]);
             Assert.AreEqual(LabelKind.Icon, batch.Points[0].AtlasKind, "the discriminator must survive the batch build");
             Assert.AreEqual(1, batch.PointQuadCount[0], "a sprite is exactly one quad");
             Assert.AreEqual(IconQuad.UvTopLeft.x, batch.Quads[batch.PointQuadStart[0]].UvTopLeft.x, 1e-6f);

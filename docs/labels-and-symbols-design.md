@@ -133,7 +133,7 @@ Tick(sceneFrame, batch, atlas, dt, materials, version)
  │                             real build → re-submit the cached meshes and RETURN. (Idle map = no work.)
  │
  ├─ PmProject
- │   ├─ PmProjectFill
+ │   ├─ PmProjectPositions
  │   │   ├─ GatherSymbolPoints(...)   : flatten un-culled records' world points; a culled record's offset
  │   │   │                              is set to -1 (B-3 distance cull, then S3 horizon cull — the
  │   │   │                              tile-coverage pre-cull already ran upstream, in CurrentBatch, §1.5)

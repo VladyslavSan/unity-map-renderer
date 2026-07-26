@@ -113,9 +113,11 @@ namespace MapRenderer.Tests.Text.Placement
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 }, zoom: 8.0, heading: 0.0, tilt: 0.0));
 
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
+                Rebase = float3x3.identity,
+            };
 
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
@@ -136,11 +138,12 @@ namespace MapRenderer.Tests.Text.Placement
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
             var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var snap = new SnapshotRenderer(Size, Size);
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, new[] { label }, atlasTexture);
-                system.Tick(in frame, new[] { label }, atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label's anchor must not be culled");
 
                 snap.Render(uCam);

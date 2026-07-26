@@ -4,7 +4,6 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;

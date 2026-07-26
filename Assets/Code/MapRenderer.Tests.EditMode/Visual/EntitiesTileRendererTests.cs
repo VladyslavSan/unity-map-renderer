@@ -15,7 +15,6 @@ using Unity.Entities;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
-using MapRenderer.Core.Imaging;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Tile;
@@ -48,27 +47,27 @@ namespace MapRenderer.Tests.Visual
                 int h0 = r.AddTileLayer(mesh, o, 0, tid);
                 int h1 = r.AddTileLayer(mesh, o, 0, tid);
                 int h2 = r.AddTileLayer(mesh, o, 0, tid);
-                Assert.AreEqual(3, r.DrawItemCount, "Three draw items registered.");
+                Assert.AreEqual(3, r.DrawItemCount(), "Three draw items registered.");
                 Assert.IsTrue(r.EntityExists(h0) && r.EntityExists(h1) && r.EntityExists(h2),
                     "All three entities must be live.");
-                Assert.AreEqual(1, r.TileRootCount, "Three layers of one tile share a single root entity.");
+                Assert.AreEqual(1, r.TileRootCount(), "Three layers of one tile share a single root entity.");
 
                 r.RemoveItem(h1);
-                Assert.AreEqual(2, r.DrawItemCount, "RemoveItem must drop the item.");
+                Assert.AreEqual(2, r.DrawItemCount(), "RemoveItem must drop the item.");
                 Assert.IsFalse(r.EntityExists(h1), "Removed entity must be destroyed.");
                 Assert.IsTrue(r.EntityExists(h0) && r.EntityExists(h2),
                     "Sibling entities must survive a removal.");
                 Assert.IsTrue(r.TileRootExists(tid), "Root survives while the tile still has layers.");
 
                 r.RemoveItem(h1); // idempotent
-                Assert.AreEqual(2, r.DrawItemCount, "Removing an unknown handle is a no-op.");
+                Assert.AreEqual(2, r.DrawItemCount(), "Removing an unknown handle is a no-op.");
 
                 // Removing the last two layers must tear the tile root down (no empty Hierarchy node).
                 r.RemoveItem(h0);
                 r.RemoveItem(h2);
-                Assert.AreEqual(0, r.DrawItemCount, "All layers removed.");
+                Assert.AreEqual(0, r.DrawItemCount(), "All layers removed.");
                 Assert.IsFalse(r.TileRootExists(tid), "Root is destroyed once its last layer is removed.");
-                Assert.AreEqual(0, r.TileRootCount, "No orphan roots remain.");
+                Assert.AreEqual(0, r.TileRootCount(), "No orphan roots remain.");
             }
             finally { r.Dispose(); }
         }
@@ -95,7 +94,7 @@ namespace MapRenderer.Tests.Visual
                     "AddTileLayer must NOT create a per-entity RenderMeshArray (the stall-#3 fix) — still just " +
                     "the prototype's ONE. The old per-entity path would leave this at 3 (the falsifier).");
                 Assert.AreEqual(3, r.RegisteredMeshCount, "one EG mesh registration per AddTileLayer.");
-                Assert.AreEqual(3, r.DrawItemCount);
+                Assert.AreEqual(3, r.DrawItemCount());
 
                 // Batched removal balances every registration (the ID route's leak trap, review #3).
                 r.RemoveItems(new[] { h0, h1, h2 });
@@ -126,8 +125,8 @@ namespace MapRenderer.Tests.Visual
                 int h0 = r.AddTileLayer(mesh, o, 0, tid);
                 int h1 = r.AddTileLayer(mesh, o, 1, tid);
                 int h2 = r.AddTileLayer(mesh, o, 2, tid);
-                Assert.AreEqual(3, r.DrawItemCount);
-                Assert.AreEqual(1, r.TileRootCount);
+                Assert.AreEqual(3, r.DrawItemCount());
+                Assert.AreEqual(1, r.TileRootCount());
 
                 // Remove the whole 3-layer record in ONE call.
                 r.RemoveItems(new[] { h0, h1, h2 });
@@ -137,8 +136,8 @@ namespace MapRenderer.Tests.Visual
                     "change — a shallow loop-over-RemoveItem leaves this 0 (the stall-#2 falsifier).");
                 Assert.AreEqual(4, r.EntitiesDestroyedLastRemove,
                     "3 layer entities + 1 emptied tile root = 4 entities in the batch.");
-                Assert.AreEqual(0, r.DrawItemCount, "all layers removed.");
-                Assert.AreEqual(0, r.TileRootCount, "the emptied root is torn down by the same batch.");
+                Assert.AreEqual(0, r.DrawItemCount(), "all layers removed.");
+                Assert.AreEqual(0, r.TileRootCount(), "the emptied root is torn down by the same batch.");
                 Assert.IsFalse(r.EntityExists(h0) || r.EntityExists(h1) || r.EntityExists(h2),
                     "every layer entity is destroyed.");
 

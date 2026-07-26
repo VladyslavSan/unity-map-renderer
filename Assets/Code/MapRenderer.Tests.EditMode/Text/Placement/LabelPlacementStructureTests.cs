@@ -148,9 +148,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
 
             var atlasTexture = BuildTinyAtlasTexture();
             var twoLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender), MakeLabel(1, frame.SceneOriginRender) };
@@ -169,22 +171,22 @@ namespace MapRenderer.Tests.Text.Placement
                 // NOT because of a fudged expectation, but because it counts Ticks and this fixture now ticks
                 // twice per step. The quad-count expectations (2 / 1 / 2) — the actual subject of this test — do
                 // NOT move.
-                system.Tick(in frame, twoLabels, atlasTexture);
-                system.Tick(in frame, twoLabels, atlasTexture);
+                system.TickLabels(in frame, twoLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, twoLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(2, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount, "2 labels x 1 quad each = 2 placed quads.");
 
                 // Rebuilt from scratch, not accumulated: ticking with FEWER labels must report FEWER quads,
                 // not the sum of every Tick so far (which would prove a cache/append bug).
-                system.Tick(in frame, oneLabel, atlasTexture);
-                system.Tick(in frame, oneLabel, atlasTexture);
+                system.TickLabels(in frame, oneLabel, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, oneLabel, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(4, system.TickCount);
                 Assert.AreEqual(1, system.LastQuadCount,
                     "a Tick with 1 label must report 1 placed quad -- NOT 3 (2 from the prior Tick + 1), " +
                     "which would mean the buffer is cached/appended instead of rebuilt every Tick.");
 
-                system.Tick(in frame, twoLabels, atlasTexture);
-                system.Tick(in frame, twoLabels, atlasTexture);
+                system.TickLabels(in frame, twoLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, twoLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(6, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount);
             }
@@ -207,9 +209,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             // MapLibre text-translate [7,3] = right 7, DOWN 3 → screen (y-up) delta (+7, -3), depth unchanged.
@@ -228,14 +232,14 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
                 // duplicate each candidate-set's Tick call before reading its placement.
-                system.Tick(in frame, baseline, atlasTexture);
-                system.Tick(in frame, baseline, atlasTexture);
+                system.TickLabels(in frame, baseline, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, baseline, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(1, system.LastQuadCount, "one label, one quad");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh0), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh0, out WorldBillboardVertex[] v0, out _);
 
-                system.Tick(in frame, moved, atlasTexture);
-                system.Tick(in frame, moved, atlasTexture);
+                system.TickLabels(in frame, moved, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, moved, atlasTexture, mapCamera.Projection);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh1), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mesh1, out WorldBillboardVertex[] v1, out _);
 
@@ -269,9 +273,11 @@ namespace MapRenderer.Tests.Text.Placement
             // observable with an active bearing.
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 45.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             var viewportLabels = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Viewport) };
@@ -287,14 +293,14 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, viewportLabels, atlasTexture);
-                system.Tick(in frame, viewportLabels, atlasTexture);
+                system.TickLabels(in frame, viewportLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, viewportLabels, atlasTexture, mapCamera.Projection);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh viewportMesh), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(viewportMesh, out WorldBillboardVertex[] vp, out _); // v[0]=TL, v[1]=TR, v[2]=BR, v[3]=BL
                 Assert.AreEqual(4, vp.Length, "one quad → 4 verts");
 
-                system.Tick(in frame, mapLabels, atlasTexture);
-                system.Tick(in frame, mapLabels, atlasTexture);
+                system.TickLabels(in frame, mapLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, mapLabels, atlasTexture, mapCamera.Projection);
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mapMesh), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mapMesh, out WorldBillboardVertex[] mp, out _);
 
@@ -366,9 +372,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             // A straight line along a latitude, projected from real geo endpoints so it spans a WIDE on-screen
@@ -403,8 +411,8 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 var labels = new List<LabelInstance> { lineLabel };
-                system.Tick(in frame, labels, atlasTexture);
-                system.Tick(in frame, labels, atlasTexture);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection);
 
                 Assert.AreEqual(3, system.LastQuadCount, "one quad per curved glyph (line label placed, not dropped)");
 
@@ -445,9 +453,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             // A WIDE constant-latitude line (lon 5→35, centred on the camera's lon 20) → a long on-screen arc,
@@ -481,14 +491,14 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
                 var centerLabels = new List<LabelInstance> { Curved(SymbolPlacement.LineCenter) };
-                system.Tick(in frame, centerLabels, atlasTexture);
-                system.Tick(in frame, centerLabels, atlasTexture);
+                system.TickLabels(in frame, centerLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, centerLabels, atlasTexture, mapCamera.Projection);
                 int centerQuads = system.LastQuadCount;
                 Assert.AreEqual(3, centerQuads, "line-center places exactly ONE label (3 glyphs) on the wide line");
 
                 var lineLabels = new List<LabelInstance> { Curved(SymbolPlacement.Line) };
-                system.Tick(in frame, lineLabels, atlasTexture);
-                system.Tick(in frame, lineLabels, atlasTexture);
+                system.TickLabels(in frame, lineLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, lineLabels, atlasTexture, mapCamera.Projection);
                 int lineQuads = system.LastQuadCount;
 
                 Assert.AreEqual(0, lineQuads % 3, "every placed `line` repeat is a full 3-glyph label");
@@ -516,9 +526,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             double3 a = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 5.0 });
@@ -546,8 +558,8 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 var labels = new List<LabelInstance> { label };
-                system.Tick(in frame, labels, atlasTexture);
-                system.Tick(in frame, labels, atlasTexture);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection);
                 // 300 fitting anchors are clamped to MaxAnchorsPerLine (256) → exactly 256 × 3 glyphs; without
                 // the clamp all 300 would place (900 quads). Mirrors the private cap constant.
                 Assert.AreEqual(256 * 3, system.LastQuadCount, "the per-frame anchor iteration is hard-clamped to 256");
@@ -571,9 +583,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             // An L-shaped line: east (lon 10→20 at lat 20) then north (lat 20→30 at lon 20) — a ~90° screen
@@ -605,13 +619,13 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
                 var permissive = new List<LabelInstance> { Curved(170f) };
-                system.Tick(in frame, permissive, atlasTexture);
-                system.Tick(in frame, permissive, atlasTexture);
+                system.TickLabels(in frame, permissive, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, permissive, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(3, system.LastQuadCount, "a permissive text-max-angle places the label round the corner");
 
                 var strict = new List<LabelInstance> { Curved(40f) };
-                system.Tick(in frame, strict, atlasTexture);
-                system.Tick(in frame, strict, atlasTexture);
+                system.TickLabels(in frame, strict, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, strict, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(0, system.LastQuadCount,
                     "text-max-angle:40 drops the label — the ~90° corner exceeds the allowed adjacent-glyph angle");
             }
@@ -633,9 +647,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             // A right-to-LEFT line (lon 30 → lon 10): its center tangent points west, so keep-upright flips it.
@@ -666,15 +682,15 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
                 var uprightLabels = new List<LabelInstance> { Curved(true) };
-                system.Tick(in frame, uprightLabels, atlasTexture);
-                system.Tick(in frame, uprightLabels, atlasTexture);
+                system.TickLabels(in frame, uprightLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, uprightLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:true still places all 3 glyphs");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh uprightMesh), "the world text slot must exist.");
                 WorldMeshReadback.Read(uprightMesh, out WorldBillboardVertex[] upright, out _);
 
                 var rawLabels = new List<LabelInstance> { Curved(false) };
-                system.Tick(in frame, rawLabels, atlasTexture);
-                system.Tick(in frame, rawLabels, atlasTexture);
+                system.TickLabels(in frame, rawLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, rawLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(3, system.LastQuadCount, "keep-upright:false still places all 3 glyphs");
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh rawMesh), "the world text slot must still exist.");
                 WorldMeshReadback.Read(rawMesh, out WorldBillboardVertex[] raw, out _);
@@ -709,9 +725,11 @@ namespace MapRenderer.Tests.Text.Placement
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(
-                mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
-                float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             double3 a = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 10.0 });
@@ -748,8 +766,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Curved(featureIndex: 0, sortKey: 20f, allowOverlap: false),
                     Curved(featureIndex: 1, sortKey: 10f, allowOverlap: false),
                 };
-                system.Tick(in frame, collidingLabels, atlasTexture);
-                system.Tick(in frame, collidingLabels, atlasTexture);
+                system.TickLabels(in frame, collidingLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, collidingLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(glyphs.Count, system.LastQuadCount,
                     "two overlapping curved labels collide — only the lower-sort-key one places (not both)");
 
@@ -760,8 +778,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Curved(featureIndex: 0, sortKey: 20f, allowOverlap: true),
                     Curved(featureIndex: 1, sortKey: 10f, allowOverlap: true),
                 };
-                system.Tick(in frame, overlapAllowedLabels, atlasTexture);
-                system.Tick(in frame, overlapAllowedLabels, atlasTexture);
+                system.TickLabels(in frame, overlapAllowedLabels, atlasTexture, mapCamera.Projection);
+                system.TickLabels(in frame, overlapAllowedLabels, atlasTexture, mapCamera.Projection);
                 Assert.AreEqual(glyphs.Count * 2, system.LastQuadCount,
                     "with allow-overlap both coincident curved labels place — so the collision was real above");
             }

@@ -58,7 +58,7 @@
     <!-- S4: shared projection-subdivision policy (Core, engine-free) + its tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineCurvatureSubdivision.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Imaging/SnapshotCoverage.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverage.cs" />
 
     <!-- VerifiedDisposable: shared IDisposable base (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Lifetime/VerifiedDisposable.cs" />
@@ -152,6 +152,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Value.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Coercions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/DictionaryFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/EvaluationContext.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Classification.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Expression.cs" />
@@ -253,12 +254,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Mvt/MvtPropertyDecodeTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/PropertyFilterTests.cs" />
 
-    <!-- S12 / S60: DataDrivenPaintEvaluator replaced by StyleProperty<T>; FeatureColorBaker updated -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FeatureColorBaker.cs" />
-
     <!-- S12 / S60: Engine-free tests (shared verbatim; DataDrivenPaintEvaluatorTests rehomed to StyleProperty<T>) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/DataDrivenPaintEvaluatorTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/FeatureColorBakerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/DataDrivenColorBakeTests.cs" />
 
     <!-- S59: per-feature-type Style namespaces (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PropertyNames.cs" />

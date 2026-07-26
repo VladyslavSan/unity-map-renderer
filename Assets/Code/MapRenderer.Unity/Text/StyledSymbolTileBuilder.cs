@@ -168,7 +168,7 @@ namespace MapRenderer.Unity.Text
                             // I5a: an icon is a single pre-laid-out quad (SymbolFeatureExtractor already
                             // resolved sprite + icon-size/-offset/-anchor) — no shaping, just wrap it into the
                             // same TextLayoutResult shape the point-text path emits, so it rides the SAME
-                            // point-placement path downstream (§5.4: Kind.Point + AtlasKind, no parallel path).
+                            // point-placement path downstream (§5.4: LabelRecordKind.Point + AtlasKind, no parallel path).
                             TextLayoutResult iconLayout = IconQuadLayout.ToLayoutResult(s.IconQuad);
                             output.Add(new LabelInstance
                             {

@@ -473,7 +473,7 @@ namespace MapRenderer.Tests
             // 90° left turn: n1=(0,1), n2=(−1,0). Factor = 1/cos(45°) = √2.
             double2 n1 = new double2(0, 1);
             double2 n2 = new double2(-1, 0);
-            double factor = LineTessellator.MiterFactor(n1, n2);
+            double factor = MiterFactor(n1, n2);
             AssertNearlyEqual(Math.Sqrt(2.0), factor, 1e-9,
                 $"90° miter factor should be √2. Got {factor:G10}.");
         }
@@ -713,6 +713,30 @@ namespace MapRenderer.Tests
             Assert.IsTrue(foundEndPivot,
                 "Round end cap must have a pivot vertex at (10,0) with side≈0 and normal≈(0,0). " +
                 "Without it, AA computes edgeDist=0 at the centerline pivot and the cap looks flat.");
+        }
+
+        // ── Test-local oracle ────────────────────────────────────────────────────────────────────
+        /// <summary>
+        /// The miter factor (1/cos(θ/2)) for the join between two segment left normals; double.MaxValue
+        /// when the normals cancel (180° hairpin) or the join is degenerate.
+        ///
+        /// <para>Kept HERE rather than in <see cref="LineTessellator"/>, where it was public with no
+        /// production caller. It is a third statement of math the tessellator already contains twice —
+        /// <c>ComputeMiterNormals</c> derives the same normalised average, and <c>NeedsBevel</c> compares
+        /// the same 1/dot against the miter limit. As a test-local restatement it is an oracle: it fails
+        /// when the tessellator's own version drifts. As a production member it was just a third copy.</para>
+        /// </summary>
+        private static double MiterFactor(double2 n1, double2 n2)
+        {
+            double mx   = n1.x + n2.x;
+            double my   = n1.y + n2.y;
+            double mLen = math.sqrt(mx * mx + my * my);
+            if (mLen < 1e-12) return double.MaxValue;
+            double mux = mx / mLen;
+            double muy = my / mLen;
+            double dot = mux * n1.x + muy * n1.y;
+            if (math.abs(dot) < 1e-12) return double.MaxValue;
+            return 1.0 / dot;
         }
     }
 }

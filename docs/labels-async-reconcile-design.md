@@ -207,7 +207,7 @@ Maintainer Play-mode re-profile after Stages 1–4 landed (`9bf19457`), camera m
 MapRenderer.View.LateUpdate                19.36 ms
   MapRenderer.Symbol.Gather                 5.12 ms   ← GatherIntoMirror (the native compaction)
   MapRenderer.Symbol.LabelTick             12.45 ms
-    …Symbol.Project                         3.64 ms   (…ProjectFill ≈ 1.4, …Stage 2.27)
+    …Symbol.Project                         3.64 ms   (…ProjectPositions ≈ 1.4, …Stage 2.27)
     …Symbol.Collide                         5.03 ms   (JobHandle.Complete 4.06 — LabelCollisionJob 4.05)
     …Symbol.Emit                            3.04 ms
 ```

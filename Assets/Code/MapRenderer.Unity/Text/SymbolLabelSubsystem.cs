@@ -16,6 +16,7 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
@@ -58,7 +59,7 @@ namespace MapRenderer.Unity.Text
     /// trickle at that budget — an accepted, bounded label-appearance-latency tradeoff, never a
     /// label-content change.</para>
     /// </summary>
-    internal sealed class SymbolLabelSubsystem : ISymbolTileWorkerFactory, IDisposable
+    internal sealed class SymbolLabelSubsystem : VerifiedDisposable, ISymbolTileWorkerFactory
     {
         /// <summary>Target atlas edge in px, clamped to the GPU's max texture size. R8, so 4096² ≈ 16 MB.</summary>
         private const int AtlasDimension = 4096;
@@ -133,7 +134,7 @@ namespace MapRenderer.Unity.Text
         // Per-(source, tile) built labels, with the active/cached lifecycle that mirrors the tile MESH cache
         // (Model B) so labels survive a leave-cover → cache-hit → re-enter-cover round trip. Sized to the
         // prepared mesh cache's count cap so a cached tile's labels always outlive its meshes.
-        private readonly SymbolTileLabelStore _store;
+        internal readonly SymbolTileLabelStore _store;
         // A-1: whether the prepared mesh cache is enabled — drives keep-warm-on-release. Enabled ⇒ a released
         // tile can return via a cache HIT (no re-fetch), so keep its labels warm to restore them; disabled ⇒
         // a revisit always re-fetches (→ rebuild), so keeping warm is pointless → drop on release.
@@ -150,7 +151,9 @@ namespace MapRenderer.Unity.Text
         /// (<see cref="RunTailAsync"/>) — the per-layer shape + commit. Readonly fields + ctor: MapRenderer.Unity
         /// has no IsExternalInit polyfill, and this mirrors the local carrier idiom
         /// (<c>TileManager.LoadedKey</c>/<c>SourceKey</c>).</summary>
-        private readonly struct ReadySymbolTail
+        // internal, not private: _readyTails/_handoffQueue are internal for the test-assembly seams (see
+        // SymbolLabelSubsystemTestExtensions), and a field cannot be more accessible than its own type.
+        internal readonly struct ReadySymbolTail
         {
             public readonly SymbolTileLabelStore.Key   Key;
             public readonly int                        Generation;   // BeginBuild's gen — commit guard
@@ -176,11 +179,11 @@ namespace MapRenderer.Unity.Text
         // (SymbolTileWorkerPass.RunWorkerAndHandoff, below); PumpBuilds (MAIN thread) drains it into
         // _readyTails as its first step, every frame. A ConcurrentQueue is the carrier + ordering +
         // safe-publication barrier in one — no volatile flag, no manual pending-list scan (design §Q2).
-        private readonly ConcurrentQueue<ReadySymbolTail> _handoffQueue = new();
+        internal readonly ConcurrentQueue<ReadySymbolTail> _handoffQueue = new();
 
         // Worker-phase-complete builds awaiting their budgeted tail (main-thread only). PumpBuilds' tail-start
         // loop drains this FIFO at most MaxBuildsPerFrame per frame (§D4/§D6).
-        private readonly List<ReadySymbolTail> _readyTails = new();
+        internal readonly List<ReadySymbolTail> _readyTails = new();
         // Cancels in-flight builds on restyle/teardown so a resumed build never touches disposed glyph/atlas
         // state (closes the missing-token + restyle-vs-in-flight-build risks from the review). Recreated per
         // SetStyle so each style has its own cancellation scope.
@@ -193,8 +196,8 @@ namespace MapRenderer.Unity.Text
         public int MaxBuildsPerFrame { get; set; } = 1;
 
         /// <summary>Test seam (dependency-inversion, mirroring <c>IDataSource</c>): the glyph-source factory
-        /// <see cref="SetStyle"/> uses, overridable so an EditMode test can inject a fixture/gated
-        /// <c>TestGlyphSource</c> instead of the production web source. Null ⇒ the production
+        /// <see cref="SetStyle"/> uses, overridable so an EditMode test can inject a fixture-backed or
+        /// gated source instead of the production web source. Null ⇒ the production
         /// <see cref="GlyphSourceFactory.Create"/>.</summary>
         internal Func<StyleDocument, IGlyphSource> GlyphSourceFactoryOverride { get; set; }
 
@@ -209,31 +212,17 @@ namespace MapRenderer.Unity.Text
         internal int CancelledBuildCount   { get; private set; }
         // Forwarded from the shared builder (null-safe — no glyph pipeline ⇒ nothing to skip).
         internal int SkippedLabelCount => _builder?.SkippedLabelCount ?? 0;
-        // A5b: total not-yet-tailed builds — queued in the pool→main handoff (not yet drained) PLUS drained
-        // but not-yet-started tails. The migrated F-7 budget tooth asserts against this total (§Q2/E-2).
-        internal int ReadyTailCount => _readyTails.Count + _handoffQueue.Count;
         // Stage 4b: how many off-main reconciles CurrentBatch SCHEDULED — bumped once per dirty/cold frame that
         // captures a snapshot + kicks a worker, held flat across clean frames. Test telemetry (mirrors the
         // TailsStartedLastPump idiom); proves no schedule on a clean frame and a schedule on a real tile event.
         internal int CollectRecomputeCount { get; private set; }
 
-        /// <summary>Stage 4b test seam (reached via <c>InternalsVisibleTo</c>): the off-main reconcile worker, so an
-        /// EditMode test can gate it in flight (<see cref="SymbolLabelReconciler.GateForTest"/>), assert it ran off
-        /// the main thread (<see cref="SymbolLabelReconciler.LastRunThreadId"/>), or inject a fault
-        /// (<see cref="SymbolLabelReconciler.FaultNextRun"/>). No production caller.</summary>
-        internal SymbolLabelReconciler ReconcilerForTest => _reconciler;
-
-        /// <summary>Stage 4b test seam: whether an off-main reconcile is currently in flight (proves one-in-flight
-        /// coalescing + the drain). No production caller.</summary>
-        internal bool ReconcileInFlightForTest => _reconcileInFlight;
-
-        /// <summary>Stage 4b test seam: the label store, so a production-path parity test can run the store's inline
-        /// <c>CollectInto</c> as an oracle against the async front-buffer result. No production caller.</summary>
-        internal SymbolTileLabelStore StoreForTest => _store;
-
-        /// <summary>Stage 4b test seam: set true when a pickup's <c>GetResult()</c> rethrew a worker fault (i.e. the
-        /// exception was OBSERVED, not swallowed). Proves the fault-observation half of SPEC B. No production caller.</summary>
-        internal bool ReconcileFaultObservedForTest { get; private set; }
+        /// <summary>Set true when a pickup's <c>GetResult()</c> rethrew a worker fault (i.e. the exception was
+        /// OBSERVED, not swallowed) — the fault-observation half of SPEC B. Stays on this class, unlike the
+        /// Stage 4b read-only seams beside it (ReadyTailCount, the reconciler/store/in-flight accessors, now in
+        /// SymbolLabelSubsystemTestExtensions): this class WRITES it, so it is state the subsystem produces
+        /// rather than a query over it.</summary>
+        internal bool ReconcileFaultObserved { get; private set; }
 
         /// <param name="preparedCacheMaxCount">The <c>PreparedTileCache</c>'s entry cap — bounds how many
         /// out-of-cover tiles' labels are kept warm (clamped to a finite hard cap inside the store even when
@@ -246,8 +235,8 @@ namespace MapRenderer.Unity.Text
             _store = new SymbolTileLabelStore(preparedCacheMaxCount);
         }
 
-        /// <summary>True once <see cref="SetStyle"/> found at least one symbol layer — MapView prefers this
-        /// subsystem over the demo <c>LabelInstances</c> seam only when true.</summary>
+        /// <summary>True once <see cref="SetStyle"/> found at least one symbol layer — MapView places labels
+        /// only when true (a style with no symbol layers has nothing to place).</summary>
         public bool HasSymbolLayers => _layersBySource != null && _layersBySource.Count > 0;
 
         /// <summary>The shared SDF atlas texture backing every collected label's UVs (null before the first
@@ -312,7 +301,7 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
             _frontSnapshot.Clear(); _backSnapshot.Clear();
             _frontResult.Clear();   _backResult.Clear();
-            // R1: defense in depth, not the crash-prevention (that is 3.3's plan.WinnerCount == _mCount predicate
+            // R1: defense in depth, not the crash-prevention (that is 3.3's plan.WinnerCount == _mirrorCount predicate
             // term) — every front-content change bumps, so a reader never has to re-derive which sites do.
             _frontSetVersion++;
             _reconcileScheduledGen = -1;
@@ -667,7 +656,7 @@ namespace MapRenderer.Unity.Text
         // ONE worker in flight; a completed reconcile is applied even a few frames stale (apply-stale), and a
         // reschedule fires if the store generation moved during the run. The heavy cross-tile dedup (~11 ms on a
         // tile-event frame) runs on SymbolLabelReconciler.Run on the thread pool, off the render thread.
-        private readonly SymbolLabelReconciler _reconciler = new SymbolLabelReconciler();
+        internal readonly SymbolLabelReconciler _reconciler = new SymbolLabelReconciler();
         // Double-buffer: the FRONT result is consumed every frame (coverage-classify → gather); the worker fills
         // the BACK result. A successful pickup swaps them. The paired snapshots PIN the blocks each result's
         // (blockId → OrderedBlocks) references, so the store cannot free a block the displayed OR in-flight set
@@ -684,7 +673,7 @@ namespace MapRenderer.Unity.Text
         private int _frontSetVersion;
         private SymbolLabelSnapshot        _frontSnapshot = new SymbolLabelSnapshot();
         private SymbolLabelSnapshot        _backSnapshot  = new SymbolLabelSnapshot();
-        private bool           _reconcileInFlight;
+        internal bool          _reconcileInFlight;
         // The store CollectGeneration the in-flight/last-scheduled reconcile captured at (replaces Stage 4a's
         // _collectedAtGeneration). -1 (≠ the store's initial gen 0) is a cold-start sentinel → schedule frame 1.
         private int            _reconcileScheduledGen = -1;
@@ -800,7 +789,7 @@ namespace MapRenderer.Unity.Text
             try { _reconcileTask.GetAwaiter().GetResult(); ok = _reconcileTask.Status == UniTaskStatus.Succeeded; }
             catch (Exception ex) // observe → no unobserved-exception; log once (SPEC B)
             {
-                ReconcileFaultObservedForTest = true; // reached ONLY because GetResult rethrew — proves the fault is observed
+                ReconcileFaultObserved = true; // reached ONLY because GetResult rethrew — proves the fault is observed
                 if (!_loggedReconcileFault)
                 {
                     _loggedReconcileFault = true;
@@ -886,7 +875,7 @@ namespace MapRenderer.Unity.Text
                              $"SkippedLabelCount telemetry.");
         }
 
-        public void Dispose()
+        protected override void DoDispose()
         {
             // Stage 4b (SPEC A): teardown runs the SAME inline-drain protocol as a restyle — cancel, drain the
             // in-flight worker to terminal, release both snapshots' pins, THEN Clear (so no stale worker writes the

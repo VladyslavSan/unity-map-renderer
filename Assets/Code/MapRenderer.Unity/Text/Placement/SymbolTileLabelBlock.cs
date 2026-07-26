@@ -18,14 +18,14 @@ namespace MapRenderer.Unity.Text.Placement
     /// release→cache→restore round trip, dropped only when the labels themselves drop).
     ///
     /// <para><b>Stage 1 scope: purely additive.</b> NOTHING reads this block's arrays yet — the production
-    /// per-frame path (<c>SymbolLabelBatchBuilder.Build</c> + <c>LabelPlacementSystem.RefreshBatchMirror</c>)
+    /// per-frame path (the parity oracle's <c>Build</c> + a per-frame mirror copy)
     /// is unchanged. Stage 1 only proves the bake + native lifetime out; Stage 2 wires a per-frame gather that
     /// compacts winning blocks' slices straight into the placement job's NativeLists.</para>
     ///
     /// <para><b>Null-slot invariant.</b> Indexed by the RAW <c>List&lt;LabelInstance&gt;</c> position the
     /// baker walked, NOT a compacted index — a <c>null</c> label at raw index <c>i</c> (a per-label build
     /// failure — see <c>StyledSymbolTileBuilder</c>'s per-label isolation) bakes an INERT record at
-    /// <see cref="Kinds"/>/<see cref="Detail"/>[i]: <see cref="SymbolLabelBatch.Kind.Point"/>, zero quad/world
+    /// <see cref="Kinds"/>/<see cref="Detail"/>[i]: <see cref="LabelRecordKind.Point"/>, zero quad/world
     /// contribution, zero <see cref="MaxBoxes"/>/<see cref="MaxQuads"/>/<see cref="MaxCandidates"/> share. So
     /// <c>localIndex == i</c> always maps straight back to the source list position and a later real label
     /// never renumbers when an earlier slot is null — the invariant Stage 2's <c>(blockId, localIndex)</c>
@@ -42,19 +42,25 @@ namespace MapRenderer.Unity.Text.Placement
     /// </summary>
     internal sealed class SymbolTileLabelBlock : VerifiedDisposable
     {
+        // Every array below is allocated at its EXACT final size: SymbolTileLabelBlockBaker counts each pool
+        // in a first pass (CountSizes) with the same per-label arithmetic the fill pass then uses, so each
+        // array's own Length IS its element count. There are deliberately no `XXXCount` companion fields —
+        // eight of them existed, duplicated Length exactly, and had zero production readers (SymbolBlockView
+        // omits pool counts by design: the gather indexes only by a winner's LocalIndex/Detail/*Start). A
+        // count that can disagree with Length is a bug waiting to happen; Length cannot disagree with itself.
+
         // ── per-label records, RAW list order (nulls are inert placeholders — see the type doc) ──
+        // Length == the raw labels list length (incl. inert null slots).
         internal NativeArray<byte>    Kinds;
         internal NativeArray<int>     Detail;      // index into Points[] or Curveds[] (by Kinds[i])
         internal NativeArray<int>     WorldStart;  // start of this label's world points in WorldPoints
         internal NativeArray<int>     WorldCount;  // 1 (point anchor) or path length (curved); 0 for an inert null slot
         internal NativeArray<double3> RepAnchor;   // the B-3 distance-cull point (RepresentativeAnchor)
-        internal int Count;                        // == the raw labels list length (incl. inert null slots)
 
         // ── point details ──
         internal NativeArray<PointStageInput> Points; // stable fields; dynamic (screen/depth/incumbency) patched per frame downstream
         internal NativeArray<int> PointQuadStart;      // into Quads
         internal NativeArray<int> PointQuadCount;
-        internal int PointCount;
 
         // ── curved details ──
         internal NativeArray<CurvedStageInput> Curveds;
@@ -63,19 +69,13 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeArray<int> CurvedAnchorStart;   // into Anchors
         internal NativeArray<int> CurvedAnchorCount;
         internal NativeArray<int> CurvedAnchorFadeStart; // into AnchorFadeIds ([count) anchors + 1 fallback)
-        internal int CurvedCount;
 
         // ── flat pools ──
         internal NativeArray<SymbolQuad>  Quads;
-        internal int                      QuadCount;
         internal NativeArray<CurvedGlyph> Glyphs;
-        internal int                      GlyphCount;
         internal NativeArray<LineAnchor>  Anchors;
-        internal int                      AnchorCount;
         internal NativeArray<double3>     WorldPoints; // anchor (point) / path verts (curved) — for projection
-        internal int                      WorldPointCount;
         internal NativeArray<long>        AnchorFadeIds; // per curved anchor + a trailing fallback slot
-        internal int                      AnchorFadeCount;
 
         // ── staging output upper bounds (mirrors SymbolLabelBatch.Max* — independent of the camera) ──
         internal int MaxBoxes;

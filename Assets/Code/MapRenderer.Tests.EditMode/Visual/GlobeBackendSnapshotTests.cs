@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Visual
             double3 tileOriginRender  = TileRenderOrigin.Project(tid, proj);
             double3 sceneOriginRender = proj.Project(lookAt);
             float3x3 rebase           = math.transpose(proj.TangentBasisAt(lookAt));
-            var frame                 = new SceneFrame(sceneOriginRender, rebase);
+            var frame                 = new SceneFrame { SceneOriginRender = sceneOriginRender, Rebase = rebase };
 
             var backend = new GameObjectTileRenderer(new[] { mat });
             GameObject cameraGo = null, lightGo = null;

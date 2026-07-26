@@ -20,36 +20,28 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// SceneOriginRender, Rebase)</c> with orientation <c>Rebase</c>. For Mercator this reduces bit-for-bit to
     /// the pre-S91 translation-only placement (identity rebase ⇒ identity rotation). Passed by <c>in</c>
     /// (readonly struct &gt; 16 bytes) per the large-read-only-struct convention.</para>
+    ///
+    /// <para>A plain data carrier: <c>init</c>-only auto-properties, built with named members per the
+    /// data-carrier convention (<c>docs/conventions-short.md</c>). It carries no positional constructor, so a
+    /// reader never has to remember which of the two <c>double3</c>s comes first.</para>
     /// </summary>
     internal readonly struct SceneFrame
     {
         /// <summary>The look-at projected into render space — the point the camera orbits this frame.</summary>
-        public readonly double3 SceneOriginRender;
+        public double3 SceneOriginRender { get; init; }
 
-        /// <summary>Render→look-at-local-ENU rotation (identity for Mercator); also each tile's orientation.</summary>
-        public readonly float3x3 Rebase;
+        /// <summary>Render→look-at-local-ENU rotation (identity for Mercator); also each tile's orientation.
+        /// <b>Always set it</b> — an object initializer that omits it yields the ZERO matrix, not the identity,
+        /// which collapses every tile to the origin. <see cref="Mercator"/> is the identity-rebase shorthand.</summary>
+        public float3x3 Rebase { get; init; }
 
         /// <summary>
         /// The camera's position relative to this frame's floating origin — <c>MapCamera.CameraRelativePosition</c>
         /// / <c>CameraPoseMath.ComputeRelativePose</c>'s <c>pos</c>; the horizon occluder and the camera share
-        /// this frame. <c>default</c> on frames built without a camera pose (the 2-arg ctor / <see cref="Mercator"/>)
-        /// — they don't feed the label horizon cull.
+        /// this frame. Zero on frames built without a camera pose (the many placement-only call sites, and
+        /// <see cref="Mercator"/>) — they don't feed the label horizon cull, so leaving it unset is correct.
         /// </summary>
-        public readonly double3 CameraRelativePosition;
-
-        public SceneFrame(double3 sceneOriginRender, float3x3 rebase, double3 cameraRelativePosition)
-        {
-            SceneOriginRender      = sceneOriginRender;
-            Rebase                 = rebase;
-            CameraRelativePosition = cameraRelativePosition;
-        }
-
-        /// <summary>Frame without a camera pose (<see cref="CameraRelativePosition"/> defaults to zero) — kept
-        /// for the ~30 call sites that only need placement, not the label horizon cull.</summary>
-        public SceneFrame(double3 sceneOriginRender, float3x3 rebase)
-            : this(sceneOriginRender, rebase, default)
-        {
-        }
+        public double3 CameraRelativePosition { get; init; }
 
         /// <summary>
         /// The identity-rebase frame for a planar Web-Mercator scene origin: render origin
@@ -57,6 +49,10 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// backends' rebased placement collapse to the pre-S91 <c>TileLocalToScene</c> translation.
         /// </summary>
         public static SceneFrame Mercator(double2 sceneOriginMerc)
-            => new SceneFrame(new double3(sceneOriginMerc.x, 0.0, sceneOriginMerc.y), float3x3.identity);
+            => new SceneFrame
+            {
+                SceneOriginRender = new double3(sceneOriginMerc.x, 0.0, sceneOriginMerc.y),
+                Rebase            = float3x3.identity,
+            };
     }
 }

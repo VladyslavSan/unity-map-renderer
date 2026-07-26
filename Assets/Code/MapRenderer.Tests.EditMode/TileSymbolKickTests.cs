@@ -22,6 +22,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using MapRenderer.Unity.Text;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
@@ -174,7 +175,11 @@ namespace MapRenderer.Tests
                 "SymbolLabelSubsystem must contain ZERO OnTileBytesReady occurrences — the push entry is retired.");
             Assert.AreEqual(0, CountOccurrences(subsystemSrc, "_buildQueue"),
                 "SymbolLabelSubsystem must contain ZERO _buildQueue occurrences — the build-start queue is retired.");
-            Assert.IsTrue(subsystemSrc.Contains(": ISymbolTileWorkerFactory"),
+            // Asked of the TYPE SYSTEM, not the source text. The previous form grepped for
+            // ": ISymbolTileWorkerFactory", which pinned the declaration's spelling rather than the
+            // relationship — and C# requires a base class to be listed first, so simply giving the subsystem
+            // a base class broke it while the interface was still very much implemented.
+            Assert.IsTrue(typeof(ISymbolTileWorkerFactory).IsAssignableFrom(typeof(SymbolLabelSubsystem)),
                 "SymbolLabelSubsystem must implement ISymbolTileWorkerFactory.");
         }
 

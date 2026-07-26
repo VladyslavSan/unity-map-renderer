@@ -30,10 +30,25 @@ in-Editor Test Runner if headless licensing is unavailable (see caveats).
 ./Tools/run-tests.sh PlayMode   # PlayMode
 ```
 It is self-locating, finds the Editor binary for this project's Unity version, refuses to run if the
-Editor is open (exit 3), runs the tests, then prints the result summary and any `error CS` lines. Exit
-`0` = compiled AND all tests passed; non-zero = compile error or test failure (don't trust the code
-alone — read the printed summary). **Run it in the background** (`run_in_background`): the first batch
-launch does a full asset import + compile and can take minutes; you'll be notified on completion.
+Editor is open (exit 3), runs the tests, then prints the per-test results, any `error CS` lines, and a
+**`VERDICT:` line last** — read that. **Run it in the background** (`run_in_background`): the first
+batch launch does a full asset import + compile and can take minutes; you'll be notified on completion.
+
+The script's own exit code IS trustworthy — but only because it ignores Unity's. Unity has been observed
+returning both `0` and `1` for the same compile failure, and it does **not** rewrite
+`Logs/test-results.xml` when compilation fails, so the previous run's green summary sits there looking
+current. The script therefore moves any existing results to `Logs/test-results.prev.xml` before
+launching (so the file existing proves *this* run wrote it), greps the log for `error CS`, and reads
+`failed=`/`result=` out of the XML rather than trusting the process code:
+
+| exit | meaning |
+|---|---|
+| `0` | compiled, results written by this run, every test passed |
+| `1` | tests ran and something failed (or the run result isn't `Passed`) |
+| `2` | setup error (not a repo / no editor binary) |
+| `3` | this project's Editor is open — close it |
+| `4` | compilation failed; **no tests ran** |
+| `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
 
 > The script is allowlisted in `.claude/settings.json` (`Bash(./Tools/run-tests.sh:*)`) so it runs
 > without a permission prompt. What it does, expanded, in case you need to invoke a step by hand:
@@ -45,13 +60,17 @@ launch does a full asset import + compile and can take minutes; you'll be notifi
 > [ -x "$UNITY" ] || UNITY="$HOME/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
 > # (Linux: .../Editor/$VERSION/Editor/Unity ; Windows: .../Editor/$VERSION/Editor/Unity.exe)
 > mkdir -p "$ROOT/Logs"
+> # Move any existing results aside FIRST — Unity leaves them untouched when compilation fails, so
+> # without this you cannot tell this run's results from the last one's.
+> [ -f "$ROOT/Logs/test-results.xml" ] && mv -f "$ROOT/Logs/test-results.xml" "$ROOT/Logs/test-results.prev.xml"
 > "$UNITY" -runTests -batchmode -projectPath "$ROOT" -testPlatform EditMode \
 >   -testResults "$ROOT/Logs/test-results.xml" -logFile "$ROOT/Logs/test-run.log"
-> # results (don't trust exit code alone):
+> # Compile errors FIRST — they mean no tests ran, whatever the exit code says:
+> grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u
+> # Then the results. An ABSENT file here means this run produced none — never read the .prev one as current.
 > grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$ROOT/Logs/test-results.xml" | head -1
 > grep -oE '<test-case [^>]*' "$ROOT/Logs/test-results.xml" \
 >   | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
-> grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u   # compile errors prevent tests running at all
 > ```
 
 ### Fast Core tests (no Unity) — prefer these for `MapRenderer.Core` logic

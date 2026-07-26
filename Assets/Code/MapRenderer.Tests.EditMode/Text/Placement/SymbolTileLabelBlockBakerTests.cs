@@ -69,16 +69,16 @@ namespace MapRenderer.Tests.Text.Placement
             SymbolTileLabelBlock block = SymbolTileLabelBlockBaker.Bake(labels, slotCount: 1, tileOriginRender: double3.zero);
             try
             {
-                Assert.AreEqual(3, block.Count, "raw list length, INCLUDING the null slot");
-                Assert.AreEqual(2, block.PointCount, "the real point label + the inert null-slot placeholder");
-                Assert.AreEqual(1, block.CurvedCount);
+                Assert.AreEqual(3, block.Kinds.Length, "raw list length, INCLUDING the null slot");
+                Assert.AreEqual(2, block.Points.Length, "the real point label + the inert null-slot placeholder");
+                Assert.AreEqual(1, block.Curveds.Length);
                 Assert.AreEqual(tileKey, block.TileKey, "every label shares one physical tile");
 
                 // Null-slot invariant: localIndex == raw index for every slot, including AFTER the null.
-                Assert.AreEqual((byte)SymbolLabelBatch.Kind.Point, block.Kinds[0]);
-                Assert.AreEqual((byte)SymbolLabelBatch.Kind.Point, block.Kinds[1], "an inert null slot bakes as Kind=Point");
+                Assert.AreEqual((byte)LabelRecordKind.Point, block.Kinds[0]);
+                Assert.AreEqual((byte)LabelRecordKind.Point, block.Kinds[1], "an inert null slot bakes as Kind=Point");
                 Assert.AreEqual(0, block.WorldCount[1], "…with zero world-point contribution");
-                Assert.AreEqual((byte)SymbolLabelBatch.Kind.Curved, block.Kinds[2]);
+                Assert.AreEqual((byte)LabelRecordKind.Curved, block.Kinds[2]);
 
                 // The inert slot contributes NOTHING to the staging upper bounds — only the two real labels do
                 // (1 point box/quad/candidate + 1 curved placement's worth: (1 anchor + 1 fallback) * 1 glyph).
@@ -95,7 +95,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // The curved label's anchor-fade-ids: one per anchor (1) + the trailing centred fallback.
                 int curvedDetail = block.Detail[2];
                 Assert.AreEqual(1, block.CurvedAnchorCount[curvedDetail]);
-                Assert.AreEqual(2, block.AnchorFadeCount, "1 anchor + 1 fallback");
+                Assert.AreEqual(2, block.AnchorFadeIds.Length, "1 anchor + 1 fallback");
             }
             finally
             {

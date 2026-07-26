@@ -8,10 +8,22 @@
 # full names), e.g. 'MapRenderer.Tests.Visual' runs just the snapshot suites. Startup
 # (asset import + domain reload) still dominates; the filter only trims which tests run.
 #
-# Exit codes: 0 = compiled AND all tests passed; 2 = setup error (no repo / no
-# editor binary); 3 = a live Unity process is running (Editor open, project locked);
-# otherwise Unity's own non-zero exit (compile error or test failure). Prints a result
-# summary and any `error CS` lines regardless of exit code, so don't trust the code alone.
+# Exit codes:
+#   0 = compiled, results were written BY THIS RUN, and every test passed
+#   1 = tests ran and something failed (or the run result is not "Passed")
+#   2 = setup error (no repo / no editor binary)
+#   3 = a live Unity process has this project open (Editor open, project locked)
+#   4 = compilation failed (`error CS` in the log) — no tests ran
+#   5 = Unity produced no results for this run (crashed/died before writing the XML)
+#   otherwise = Unity's own non-zero exit
+#
+# Do not trust Unity's exit code. It has been observed returning BOTH 0 and 1 for the same
+# kind of compile failure, and when compilation fails it does not rewrite
+# Logs/test-results.xml — so a naive reader sees the PREVIOUS run's green summary for code
+# that never built. Two defences, neither relying on the exit code: any existing results are
+# moved aside before launching (see RESULTS_PREV), so "results absent" is unambiguous; and the
+# log is grepped for `error CS`. A VERDICT line is printed last, so `| tail` always shows it.
+#
 # A *stale* lockfile (present but no Unity process — e.g. a prior batch run was killed)
 # is cleared automatically; only a live process makes this refuse.
 set -uo pipefail
@@ -65,7 +77,14 @@ fi
 
 mkdir -p "$ROOT/Logs"
 RESULTS="$ROOT/Logs/test-results.xml"
+RESULTS_PREV="$ROOT/Logs/test-results.prev.xml"
 LOG="$ROOT/Logs/test-run.log"
+
+# THE staleness defence. Unity does not rewrite the results XML when compilation fails (and still
+# exits 0), so an untouched file from an earlier run would be read as this run's result. Move it
+# aside first: afterwards, the file existing means THIS run wrote it. The previous results stay
+# available at test-results.prev.xml for comparison.
+[ -f "$RESULTS" ] && mv -f "$RESULTS" "$RESULTS_PREV"
 
 run_unity() { # $1 = testResults path, $2 = logFile path
   "$UNITY" -runTests -batchmode -projectPath "$ROOT" \
@@ -121,5 +140,48 @@ if [ -f "$RESULTS" ]; then
   grep -oE '<test-case [^>]*' "$RESULTS" \
     | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
 fi
-grep -E 'error CS' "$LOG" 2>/dev/null | sort -u
-exit $CODE
+
+COMPILE_ERRORS="$(grep -E 'error CS' "$LOG" 2>/dev/null | sort -u)"
+[ -n "$COMPILE_ERRORS" ] && printf '%s\n' "$COMPILE_ERRORS"
+
+# ── Verdict — printed LAST so `| tail` always shows it, and independent of Unity's exit code ──
+# Ordered by what makes the rest of the output meaningless: a compile failure means no tests ran,
+# and a missing XML means nothing can be concluded at all.
+if [ -n "$COMPILE_ERRORS" ]; then
+  echo "VERDICT: COMPILE ERROR — no tests ran. (Unity's own exit was $CODE; it is not reliable here —" >&2
+  echo "  0 and 1 have both been observed for the same kind of failure, which is why this greps the log.)" >&2
+  exit 4
+fi
+
+if [ ! -f "$RESULTS" ]; then
+  echo "VERDICT: NO RESULTS — Unity wrote no test-results.xml for this run (crash, or it died before" >&2
+  echo "  writing). Nothing can be concluded; see $LOG. Previous run's results, if any: $RESULTS_PREV" >&2
+  exit 5
+fi
+
+RUN_TAG="$(grep -oE '<test-run [^>]*' "$RESULTS" | head -1)"
+run_attr() { printf '%s' "$RUN_TAG" | grep -oE "(^| )$1=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
+RUN_RESULT="$(run_attr result)"
+RUN_TOTAL="$(run_attr total)"
+RUN_PASSED="$(run_attr passed)"
+RUN_FAILED="$(run_attr failed)"
+
+if [ "${RUN_FAILED:-0}" != "0" ] || [ "$RUN_RESULT" != "Passed" ]; then
+  echo "VERDICT: TESTS FAILED — result=$RUN_RESULT total=$RUN_TOTAL passed=$RUN_PASSED failed=$RUN_FAILED" >&2
+  exit 1
+fi
+
+# A filtered run legitimately matches nothing; an unfiltered one that ran zero tests is a broken setup
+# dressed up as success, which is the same trap as the stale XML.
+if [ -z "$FILTER" ] && [ "${RUN_TOTAL:-0}" = "0" ]; then
+  echo "VERDICT: NO TESTS RAN — the results XML reports total=0 with no -testFilter. Treating as failure." >&2
+  exit 5
+fi
+
+if [ "$CODE" != "0" ]; then
+  echo "VERDICT: all $RUN_TOTAL tests passed, but Unity exited $CODE — investigate $LOG." >&2
+  exit "$CODE"
+fi
+
+echo "VERDICT: PASS — $RUN_PASSED/$RUN_TOTAL tests passed, compiled clean, results written by this run."
+exit 0

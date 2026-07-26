@@ -61,28 +61,57 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     public sealed class MapView
     {
+        /// <summary>Profiler marker name constants (SSOT) for the per-frame view path — referenced by the
+        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            // UMBRELLA over the whole per-frame pipeline. Its self-time (total − the children below) is the
+            // residual unmarked cost: if it is ~0 every per-frame span is mapped.
+            internal const string LateUpdate       = "MapRenderer.View.LateUpdate";
+            internal const string CameraAdvance    = "MapRenderer.Camera.Advance";
+            internal const string ApplyZoom        = "MapRenderer.View.ApplyZoom";
+            internal const string InstancedRebuild = "MapRenderer.View.InstancedRebuild";
+            internal const string ManagerTick      = "MapRenderer.Tile.ManagerTick";
+            internal const string SceneFrame       = "MapRenderer.View.SceneFrame";
+            internal const string SymbolCollect    = "MapRenderer.Symbol.Collect";
+            internal const string SymbolBatch      = "MapRenderer.Symbol.BatchBuild";
+        }
+
         // ── Profiler markers (allocation-free; static readonly = constructed once at type-init) ──
-        //   LateUpdate       — UMBRELLA over the whole per-frame pipeline. Its self-time (total − the children
-        //                      below) is the residual unmarked cost: if it is ~0 every per-frame span is mapped.
-        //   CameraAdvance    — commit this frame's camera pose (SyncToCamera: pose math + transform/clip push).
-        //   ApplyZoom        — push zoom uniforms into every layer material (scales with layer count).
-        //   InstancedRebuild — drive the render backend per frame (on Entities this ticks the EG system groups).
-        //   ManagerTick      — cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
-        //   SceneFrame       — build the per-frame floating-origin scene frame (projection Project + tangent basis).
-        //   SymbolBatch      — aggregate the frame's active labels: A-3 cross-tile dedup (CollectInto) + LabelInstance
-        //                      → SoA batch build. Runs between Symbol.Collect and Labels.Tick — a managed main-thread
-        //                      hot spot in its own right (grows with the on-screen label count at high zoom).
-        private static readonly ProfilerMarker PmLateUpdate       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.LateUpdate");
-        private static readonly ProfilerMarker PmCameraAdvance     = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Camera.Advance");
-        private static readonly ProfilerMarker PmApplyZoom        = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom");
-        private static readonly ProfilerMarker PmInstancedRebuild = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.InstancedRebuild");
-        private static readonly ProfilerMarker PmManagerTick      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Tile.ManagerTick");
-        private static readonly ProfilerMarker PmSceneFrame       = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.SceneFrame");
+        private static readonly ProfilerMarker PmLateUpdate =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.LateUpdate);
+
+        // Commit this frame's camera pose (SyncToCamera: pose math + transform/clip push).
+        private static readonly ProfilerMarker PmCameraAdvance =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.CameraAdvance);
+
+        // Push zoom uniforms into every layer material (scales with layer count).
+        private static readonly ProfilerMarker PmApplyZoom =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoom);
+
+        // Drive the render backend per frame (on Entities this ticks the EG system groups).
+        private static readonly ProfilerMarker PmInstancedRebuild =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.InstancedRebuild);
+
+        // Cover select + request/release + build pump (CoverSelect/FetchPoll nest under it).
+        private static readonly ProfilerMarker PmManagerTick =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ManagerTick);
+
+        // Build the per-frame floating-origin scene frame (projection Project + tangent basis).
+        private static readonly ProfilerMarker PmSceneFrame =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.SceneFrame);
+
         // The symbol reconcile that runs before the label aggregation (A-1 pull/reconcile + PumpBuilds).
-        private static readonly ProfilerMarker PmSymbolCollect    = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.Collect");
-        // The label AGGREGATION (A-3 cross-tile dedup CollectInto + SoA batch build) — its own marker so the
-        // dedup/build cost is not misattributed to the unmarked LateUpdate self-time (it feeds Labels.Tick).
-        private static readonly ProfilerMarker PmSymbolBatch      = new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.Symbol.BatchBuild");
+        private static readonly ProfilerMarker PmSymbolCollect =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolCollect);
+
+        // The label AGGREGATION (A-3 cross-tile dedup CollectInto + LabelInstance → SoA batch build). Its own
+        // marker so the dedup/build cost is not misattributed to the unmarked LateUpdate self-time — it runs
+        // between Symbol.Collect and Labels.Tick and is a managed main-thread hot spot in its own right
+        // (it grows with the on-screen label count at high zoom).
+        private static readonly ProfilerMarker PmSymbolBatch =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolBatch);
 
         // ── Injected collaborators (correct by construction — never null) ────────────────────────
         private readonly MapViewConfig _config;
@@ -106,20 +135,6 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>The dedicated per-frame label renderer. <c>internal</c>: test surface (job-parity /
         /// alloc / structural teeth read it via <c>MapViewTestExtensions</c>-style InternalsVisibleTo).</summary>
         internal LabelPlacementSystem Labels { get; }
-
-        /// <summary>
-        /// Candidate labels for this frame — no collision yet (Slice 1: every label whose anchor projects
-        /// on-screen is placed; Slice 2 adds the greedy sort-key survivor selection). <b>Demo-only seam for
-        /// S20 Slice 1</b> (<c>SyntheticLabelSource</c> sets this from hand-built labels over a real SDF
-        /// atlas); S105 replaces the setter with real data from a parsed <c>Symbol</c> style layer +
-        /// decoded point features — this property's shape does not need to change for that.
-        /// </summary>
-        public IReadOnlyList<LabelInstance> LabelInstances { get; set; }
-
-        /// <summary>The uploaded R8 SDF glyph atlas backing every <see cref="LabelInstances"/> quad's UVs.
-        /// Demo-only seam for S20 Slice 1 (see <see cref="LabelInstances"/>) — MapView does not own this
-        /// texture (it is not disposed by <see cref="Teardown"/>); its owner disposes it.</summary>
-        public GlyphAtlasTexture LabelAtlas { get; set; }
 
         /// <summary>
         /// Builds the view over its <paramref name="config"/> (the Inspector knobs, shared by reference with
@@ -153,8 +168,7 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.SymbolWorkerFactory = _symbols;
         }
 
-        // S105: production symbol labels (real map data), fed to Labels.Tick each frame. The demo
-        // LabelInstances/LabelAtlas seam below is used only when the style has NO symbol layers.
+        // S105: production symbol labels (real map data), fed to Labels.Tick each frame.
         private readonly SymbolLabelSubsystem _symbols;
 
         // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
@@ -370,9 +384,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
 
             // 3. Place the labels against the SAME snapshot the tiles used (never a second BuildSceneFrame).
-            //    Production: the symbol subsystem's real map labels (when the style has symbol layers).
-            //    Fallback: the demo LabelInstances/LabelAtlas seam (SyntheticLabelSource), used only when a
-            //    style has NO symbol layers — so a leftover demo component can't mask the real feature.
+            //    A style with no symbol layers simply has nothing to place.
             if (_symbols.HasSymbolLayers)
             {
                 // ONE wall-clock read shared by ReconcileLoadedTiles' departing-tile grace window and CurrentBatch's
@@ -404,10 +416,6 @@ namespace MapRenderer.Unity.Rendering.Map
                 Labels.Tick(sceneFrame, plan, _symbols.Atlas, Time.deltaTime,
                     _symbolRenderLayers, _symbols.IconTexture);
             }
-            else
-            {
-                Labels.Tick(sceneFrame, LabelInstances, LabelAtlas, Time.deltaTime);
-            }
         }
 
         /// <summary>
@@ -433,8 +441,12 @@ namespace MapRenderer.Unity.Rendering.Map
                 Latitude  = proj.ClampValidLatitude(cam.LookAt.Latitude),
                 Longitude = cam.LookAt.Longitude,
             };
-            return new Backend.SceneFrame(proj.Project(lookAt), math.transpose(proj.TangentBasisAt(lookAt)),
-                Camera.CameraRelativePosition);
+            return new Backend.SceneFrame
+            {
+                SceneOriginRender      = proj.Project(lookAt),
+                Rebase                 = math.transpose(proj.TangentBasisAt(lookAt)),
+                CameraRelativePosition = Camera.CameraRelativePosition,
+            };
         }
 
         // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
@@ -520,10 +532,9 @@ namespace MapRenderer.Unity.Rendering.Map
         /// Order matters TWICE: tiles first — their renderers reference layer materials — and (E2)
         /// <see cref="Layers"/> before <see cref="Labels"/> — a <see cref="Style.SymbolRenderLayer"/>'s
         /// presenter (destroyed by <c>Layers.Dispose()</c>) references a slot <see cref="Mesh"/> owned by
-        /// <see cref="Labels"/>; a MeshRenderer must not outlive the mesh it points at. <see cref="Labels"/>
-        /// is NOT responsible for <see cref="LabelAtlas"/> — that texture is demo/S105-owned, disposed by
-        /// its own owner, never here. Idempotent (every dispose here is). The MonoBehaviour host calls
-        /// this from OnDestroy.
+        /// <see cref="Labels"/>; a MeshRenderer must not outlive the mesh it points at. The glyph atlas
+        /// texture is owned by <see cref="SymbolLabelSubsystem"/> and disposed there, never here.
+        /// Idempotent (every dispose here is). The MonoBehaviour host calls this from OnDestroy.
         /// </summary>
         public void Teardown()
         {

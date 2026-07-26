@@ -84,7 +84,7 @@ namespace MapRenderer.Jobs
                 SymbolBlockView block = BlockViews[BlockId[r]];
                 int li = LocalIndex[r];
                 int detail = block.Detail[li];
-                if (block.Kinds[li] == (byte)SymbolLabelBatch.Kind.Point)
+                if (block.Kinds[li] == (byte)LabelRecordKind.Point)
                 {
                     points++;
                     quads += block.PointQuadCount[detail];
@@ -133,7 +133,7 @@ namespace MapRenderer.Jobs
                 if (worldCount > 0) CopyView(block.WorldPoints, worldStartSrc, dstWorlds, mWorld, worldCount);
                 mWorld += worldCount;
 
-                if (block.Kinds[li] == (byte)SymbolLabelBatch.Kind.Point)
+                if (block.Kinds[li] == (byte)LabelRecordKind.Point)
                 {
                     int quadStartSrc = block.PointQuadStart[detail], quadCount = block.PointQuadCount[detail];
                     int quadStart = mQuad;
@@ -144,7 +144,7 @@ namespace MapRenderer.Jobs
                     MPoints[slot] = block.Points[detail];
                     MPointQuadStart[slot] = quadStart; MPointQuadCount[slot] = quadCount;
 
-                    MKinds[r] = (byte)SymbolLabelBatch.Kind.Point; MDetail[r] = slot;
+                    MKinds[r] = (byte)LabelRecordKind.Point; MDetail[r] = slot;
                     MWorldStart[r] = worldStart; MWorldCount[r] = worldCount; MRepAnchor[r] = block.RepAnchor[li];
 
                     maxBoxes += 1; maxQuads += quadCount; maxCandidates += 1; // mirrors SymbolLabelBatch.AddPoint
@@ -173,7 +173,7 @@ namespace MapRenderer.Jobs
                     MCurvedAnchorStart[slot] = anchorStart; MCurvedAnchorCount[slot] = anchorCount;
                     MCurvedAnchorFadeStart[slot] = fadeStart;
 
-                    MKinds[r] = (byte)SymbolLabelBatch.Kind.Curved; MDetail[r] = slot;
+                    MKinds[r] = (byte)LabelRecordKind.Curved; MDetail[r] = slot;
                     MWorldStart[r] = worldStart; MWorldCount[r] = worldCount; MRepAnchor[r] = block.RepAnchor[li];
 
                     int placements = anchorCount + 1; // mirrors SymbolLabelBatch.AddCurved

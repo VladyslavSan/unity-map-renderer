@@ -2,7 +2,6 @@ using System;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
-using MapRenderer.Core.Imaging;
 using MapRenderer.Core.Style;
 #if UNITY_EDITOR
 using UnityEditor;

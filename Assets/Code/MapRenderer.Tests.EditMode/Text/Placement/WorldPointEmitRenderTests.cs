@@ -85,7 +85,11 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 8.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
@@ -100,11 +104,13 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var snap = new SnapshotRenderer(Size, Size);
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, new[] { label }, atlasTexture);
-                system.Tick(in frame, new[] { label }, atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                Assert.AreEqual(1, plan.CollectedCount, "precondition: the collect must yield the label.");
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label must not be culled.");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "the world presenter must be showing.");
 
@@ -157,11 +163,16 @@ namespace MapRenderer.Tests.Text.Placement
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 8.0, heading: 0.0, tilt: 0.0),
                 projection: projection);
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             byte[] zeroPixels, nonzeroPixels;
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            using var plan = new TestSymbolPlan(projection);
             try
             {
                 var zeroLabel = new LabelInstance
@@ -172,8 +183,8 @@ namespace MapRenderer.Tests.Text.Placement
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, new[] { zeroLabel }, atlasTexture);
-                    system.Tick(in frame, new[] { zeroLabel }, atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { zeroLabel }), atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { zeroLabel }), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
                     snapZero.Render(uCam);
                     zeroPixels = (byte[])snapZero.RawPixels.Clone();
@@ -187,8 +198,8 @@ namespace MapRenderer.Tests.Text.Placement
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, new[] { nonzeroLabel }, atlasTexture);
-                    system.Tick(in frame, new[] { nonzeroLabel }, atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { nonzeroLabel }), atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { nonzeroLabel }), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
                     snapNonzero.Render(uCam);
                     nonzeroPixels = (byte[])snapNonzero.RawPixels.Clone();
@@ -234,11 +245,17 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             int meshesBefore = Resources.FindObjectsOfTypeAll<Mesh>().Length;
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // Native buffers only — TestSymbolPlan creates no Mesh, so it cannot perturb the count either side.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // Three DIFFERENT tiles over three Ticks → three distinct world slots created (one mesh + one
@@ -263,8 +280,8 @@ namespace MapRenderer.Tests.Text.Placement
                     // scheduled job) — a fresh candidate's own Tick shows nothing, so a second, identical Tick is
                     // needed before its placement can be asserted. The duplicate is fade-neutral (deltaTime
                     // defaults to +inf, snapping to target either way) and does not move any expectation.
-                    system.Tick(in frame, new[] { label }, atlasTexture);
-                    system.Tick(in frame, new[] { label }, atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                    system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, $"tick {i} must place its label.");
                 }
 

@@ -208,19 +208,19 @@ namespace MapRenderer.Tests.Text
             // Yield frames WITHOUT pumping — both worker phases run on the pool (fire-and-forget from
             // DriveTileBytesReady, mirroring TileManager's kick task) and land in the handoff queue via the
             // player loop, never via PumpBuilds.
-            for (int f = 0; f < 200 && _subsystem.ReadyTailCount < 2; f++) yield return null;
-            Assert.AreEqual(2, _subsystem.ReadyTailCount, "both worker phases landed in the pool→main handoff");
+            for (int f = 0; f < 200 && _subsystem.ReadyTailCount() < 2; f++) yield return null;
+            Assert.AreEqual(2, _subsystem.ReadyTailCount(), "both worker phases landed in the pool→main handoff");
             Assert.AreEqual(0, _subsystem.TailsStartedLastPump, "no PumpBuilds call has run yet");
 
             // Flip the budget down to 1 and pump: the tail-start loop is gated — only ONE tail starts per pump.
             _subsystem.MaxBuildsPerFrame = 1;
             _subsystem.PumpBuilds();
             Assert.AreEqual(1, _subsystem.TailsStartedLastPump, "only ONE tail started under the budget");
-            Assert.AreEqual(1, _subsystem.ReadyTailCount, "the other stays queued — the backlog drains, not bursts");
+            Assert.AreEqual(1, _subsystem.ReadyTailCount(), "the other stays queued — the backlog drains, not bursts");
 
             _subsystem.PumpBuilds();
             Assert.AreEqual(1, _subsystem.TailsStartedLastPump, "second pump starts the remaining tail");
-            Assert.AreEqual(0, _subsystem.ReadyTailCount, "backlog fully drained");
+            Assert.AreEqual(0, _subsystem.ReadyTailCount(), "backlog fully drained");
         }
 
         // ── F-3(a) + F-4: restyle between the worker phase landing and its tail starting drops the ready
@@ -237,15 +237,15 @@ namespace MapRenderer.Tests.Text
             _subsystem.PumpBuilds(); // starts the worker phase; nothing is ready to tail in this same call
 
             // Yield until the worker phase lands its hop — ready, but NOT started (no further PumpBuilds calls).
-            for (int f = 0; f < 200 && _subsystem.ReadyTailCount < 1; f++) yield return null;
-            Assert.AreEqual(1, _subsystem.ReadyTailCount, "sanity: worker phase landed, tail is ready but not started");
+            for (int f = 0; f < 200 && _subsystem.ReadyTailCount() < 1; f++) yield return null;
+            Assert.AreEqual(1, _subsystem.ReadyTailCount(), "sanity: worker phase landed, tail is ready but not started");
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet");
 
             // Restyle: cancels the build's token, clears the store AND drops the ready tail (E-1.5).
             StyleDocument restyle = StyleParser.Parse(StyleJson);
             _subsystem.SetStyle(restyle, ExtractSymbolLayers(restyle));
 
-            Assert.AreEqual(0, _subsystem.ReadyTailCount, "restyle drops the ready tail — it never gets to commit");
+            Assert.AreEqual(0, _subsystem.ReadyTailCount(), "restyle drops the ready tail — it never gets to commit");
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "no labels committed for the old-style build");
 
             // Pump on — nothing from the old style ever starts.

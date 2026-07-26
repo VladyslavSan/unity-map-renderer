@@ -62,7 +62,7 @@ namespace MapRenderer.Jobs
         // the screen arc walk resolves. Point arm never reads this.
         public NativeArray<double3> WorldPointsRender;
         // A-5 incumbency per global anchor-fade index — JOB-OWNED scratch: filled here (below) from
-        // AnchorFadeIds + Placed, not resolved by the caller. Sized by the caller to _mFadeCount.
+        // AnchorFadeIds + Placed, not resolved by the caller. Sized by the caller to _mirrorFadeCount.
         public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
         public double2 Viewport;

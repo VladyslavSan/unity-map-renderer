@@ -239,7 +239,7 @@ namespace MapRenderer.Tests.Visual
         // ─── #3: ≥2 distinct baked vertex colors (DECISIVE) ──────────────────────────────────────
         //
         // Uses a fill-color match expression on "CONTINENT" — the property that the fixture tile's
-        // countries layer actually encodes (confirmed: FeatureColorBakerTests, 8 distinct values
+        // countries layer actually encodes (confirmed: DataDrivenColorBakeTests, 8 distinct values
         // including "Asia" and "South America"). The demo style uses ADM0_A3 which the z0 fixture
         // tile does NOT encode, so the test uses an inline style targeting the known CONTINENT key.
 

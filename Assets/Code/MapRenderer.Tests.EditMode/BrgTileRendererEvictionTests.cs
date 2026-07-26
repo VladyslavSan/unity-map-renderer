@@ -69,7 +69,7 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(2, brg.ComputeEmitOrder(scratch),
                     "RemoveItem WITHOUT a Rebuild must NOT leave a phantom draw command for the evicted " +
                     "tile — exactly the two surviving items must be emitted (this is the null-mesh bug).");
-                Assert.AreEqual(2, brg.DrawItemCount, "Two items remain registered.");
+                Assert.AreEqual(2, brg.DrawItemCount(), "Two items remain registered.");
 
                 // After a Rebuild the sorted list resyncs and the count is still 2.
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));

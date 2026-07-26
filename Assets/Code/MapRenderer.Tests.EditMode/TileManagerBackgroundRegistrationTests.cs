@@ -98,8 +98,8 @@ namespace MapRenderer.Tests
                         "(its declared DrawIndex/material slot).");
                 }
 
-                Assert.AreEqual(loaded, gor.ContainerCount, "exactly one container per covered tile — no extras.");
-                Assert.AreEqual(loaded, gor.DrawItemCount, "exactly one draw item per covered tile — no extras.");
+                Assert.AreEqual(loaded, gor.ContainerCount(), "exactly one container per covered tile — no extras.");
+                Assert.AreEqual(loaded, gor.DrawItemCount(), "exactly one draw item per covered tile — no extras.");
             }
             finally { view.Teardown(); Object.DestroyImmediate(go); }
         }
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(view.AllTilesSettled(), "DrainMeshBuilds must settle every source-less record.");
                 var gor = view.GameObjectRenderer();
-                Assert.Greater(gor.DrawItemCount, 0,
+                Assert.Greater(gor.DrawItemCount(), 0,
                     "DrainMeshBuilds must have produced a non-empty background mesh + AddTileLayer for the " +
                     "un-kicked record — the un-fixed drain settles with ZERO draws (falls to the no-mesh else).");
             }

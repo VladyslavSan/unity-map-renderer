@@ -19,13 +19,22 @@ namespace MapRenderer.Unity.Rendering.Style
     /// </summary>
     internal sealed class LineRenderLayer : ITileMeshRenderLayer
     {
-        // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + per-line
-        // dash re-eval). LineDash isolates the per-line zoom-step dasharray re-evaluation. Preserved verbatim
-        // from the retired StyledLayerSet so the S46 greppable-marker set is intact.
+        /// <summary>Profiler marker name constants (SSOT) for this layer's telemetry — referenced by the
+        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
+        /// <c>InternalsVisibleTo</c>). Keep the existing hierarchical names so the Profiler flat search groups.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + per-line dash re-eval).
+            // LineDash isolates the per-line zoom-step dasharray re-evaluation. Preserved verbatim from the
+            // retired StyledLayerSet so the S46 greppable-marker set is intact.
+            internal const string ApplyZoomLines    = "MapRenderer.View.ApplyZoom.Lines";
+            internal const string ApplyZoomLineDash = "MapRenderer.View.ApplyZoom.LineDash";
+        }
+
         private static readonly ProfilerMarker PmZoomLines =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.Lines");
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomLines);
         private static readonly ProfilerMarker PmZoomLineDash =
-            new ProfilerMarker(ProfilerCategory.Scripts, "MapRenderer.View.ApplyZoom.LineDash");
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomLineDash);
 
         private readonly Line.PaintProperties  _paint;
         private readonly Line.LayoutProperties _layout;

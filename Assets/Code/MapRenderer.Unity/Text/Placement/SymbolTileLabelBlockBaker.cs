@@ -13,30 +13,90 @@ namespace MapRenderer.Unity.Text.Placement
     /// <summary>
     /// Symbol-label perf Phase 1 / Stage 1 (design doc §4, §5 B): bakes one tile's build-time
     /// <c>List&lt;LabelInstance&gt;</c> into a fresh native <see cref="SymbolTileLabelBlock"/> — reproducing
-    /// EXACTLY the per-label field math <see cref="SymbolLabelBatchBuilder"/>'s <c>AddPoint</c>/<c>AddCurved</c>
-    /// compute for the per-frame oracle, via the shared <see cref="SymbolLabelBatchBuilder.BuildPointInput"/>/
-    /// <see cref="SymbolLabelBatchBuilder.BuildCurvedInput"/> helpers so the two paths cannot drift (the
-    /// drift-guard the design calls for).
+    /// EXACTLY the per-label field math the per-frame oracle computes, because both go through the SAME
+    /// <see cref="BuildPointInput"/>/<see cref="BuildCurvedInput"/> helpers — the drift-guard the design calls
+    /// for. Those helpers live HERE rather than on the oracle: production owns the math, and the oracle
+    /// (<c>SymbolLabelBatchBuilder</c>, test assembly) imports it to check assembly and ordering around it.
     ///
     /// <para>Runs on the MAIN thread, once per tile commit (<c>SymbolLabelSubsystem.RunTailAsync</c>) — glyph
     /// quads / curved glyphs are only materialized there (the per-layer shape tail), so there is nothing left
     /// to bake off it. No <c>IProjection</c> parameter (bake-safety): every label in one build's list belongs
     /// to the SAME physical tile (one <c>(source, tile)</c> build), so the caller's single
     /// <paramref name="tileOriginRender"/> already IS the launch-time <c>TileRenderOrigin.Project</c> result
-    /// folded into every label's <c>AnchorRender</c> — unlike <see cref="SymbolLabelBatchBuilder.Build"/>,
-    /// which walks a multi-tile collected set and so keeps its own per-tile origin cache.</para>
+    /// folded into every label's <c>AnchorRender</c> — unlike the oracle's <c>Build</c>, which
+    /// walks a multi-tile collected set and so keeps its own per-tile origin cache.</para>
     /// </summary>
     internal static class SymbolTileLabelBlockBaker
     {
         /// <summary>Bake <paramref name="labels"/> (one tile's build output — a RAW list that may contain
         /// <c>null</c> slots for a per-label build failure, see <see cref="SymbolTileLabelBlock"/>'s null-slot
         /// invariant) into a fresh <see cref="SymbolTileLabelBlock"/>. <paramref name="slotCount"/> clamps each
-        /// label's material slot (mirrors <see cref="SymbolLabelBatchBuilder.Build"/>'s <c>ClampSlot</c>).
+        /// label's material slot (the same <c>ClampSlot</c> the oracle applies).
         ///
         /// <para>(G) Exception-safety: every array is allocated INTO the returned block; on any exception
         /// mid-bake (allocation or fill), the partially-built block is disposed (frees whatever
         /// <see cref="NativeArray{T}.IsCreated"/>) before the exception is rethrown — never a partial-allocation
         /// leak.</para></summary>
+        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label POINT field math used by
+        /// <see cref="Bake"/> (the production build-time bake) and by the per-frame oracle
+        /// (<c>SymbolLabelBatchBuilder</c>, test assembly) — ONE implementation so the two cannot diverge.
+        /// It lives here, on the production side, because production is what must own it: the oracle checks
+        /// this math, so the oracle importing it is the direction that keeps the check honest. Resolves everything stable about
+        /// <paramref name="label"/> EXCEPT its glyph quads/world anchor (copied by the caller into its own
+        /// pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin — the caller
+        /// resolves it (a per-build cache for the oracle; a single value for the single-tile bake).</summary>
+        internal static PointStageInput BuildPointInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
+        {
+            float4 color  = LabelPlacementSystem.LinearColor(label);
+            // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
+            // is unchanged — PointFadeId's guard-skip fold).
+            long   fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
+
+            // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
+            // FloatingOrigin.TileToSceneRebased's identical narrowing).
+            float3 anchorLocal = new float3(
+                (float)(label.AnchorRender.x - tileOriginRender.x),
+                (float)(label.AnchorRender.y - tileOriginRender.y),
+                (float)(label.AnchorRender.z - tileOriginRender.z));
+
+            return new PointStageInput
+            {
+                // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
+                BoundsMin = label.Layout?.BoundsMin ?? float2.zero,
+                BoundsMax = label.Layout?.BoundsMax ?? float2.zero,
+                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
+                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
+                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
+                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
+                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
+                RotationAlignment = label.RotationAlignment, Color = color,
+                FadeId = fadeId,
+                // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
+                AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
+                AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
+            };
+        }
+
+        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label CURVED field math used by
+        /// <see cref="Bake"/> (the production build-time bake) and by the per-frame oracle
+        /// (<c>SymbolLabelBatchBuilder</c>, test assembly) — ONE implementation so the two cannot diverge.
+        /// It lives here, on the production side, because production is what must own it: the oracle checks
+        /// this math, so the oracle importing it is the direction that keeps the check honest. Resolves everything stable about
+        /// <paramref name="label"/> EXCEPT its glyphs/anchors/anchor-fade-ids/world path (copied by the caller
+        /// into its own pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin —
+        /// the caller resolves it (a per-build cache for the oracle; a single value for the
+        /// single-tile bake).</summary>
+        internal static CurvedStageInput BuildCurvedInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
+            => new CurvedStageInput
+            {
+                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
+                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
+                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
+                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
+                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
+                MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
+                Color = LabelPlacementSystem.LinearColor(label), TileOriginRender = tileOriginRender,
+            };
         internal static SymbolTileLabelBlock Bake(List<LabelInstance> labels, int slotCount, in double3 tileOriginRender)
         {
             var block = new SymbolTileLabelBlock();
@@ -46,7 +106,6 @@ namespace MapRenderer.Unity.Text.Placement
                 CountSizes(labels, rawCount, out int pointCount, out int curvedCount, out int quadCount,
                     out int glyphCount, out int anchorCount, out int anchorFadeCount, out int worldPointCount);
 
-                block.Count = rawCount;
                 block.Kinds = new NativeArray<byte>(rawCount, Allocator.Persistent);
                 block.Detail = new NativeArray<int>(rawCount, Allocator.Persistent);
                 block.WorldStart = new NativeArray<int>(rawCount, Allocator.Persistent);
@@ -111,7 +170,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Second pass: fill every array, running each pool's write cursor forward — the SAME per-label field
-        // math as SymbolLabelBatchBuilder.AddPoint/AddCurved (shared via BuildPointInput/BuildCurvedInput), and
+        // math as the oracle's AddPoint/AddCurved (both call BuildPointInput/BuildCurvedInput here), and
         // the SAME Max*/record bookkeeping, just writing into pre-sized NativeArrays instead of growable arrays.
         private static void Fill(SymbolTileLabelBlock block, List<LabelInstance> labels, int rawCount, int slotCount, in double3 tileOriginRender)
         {
@@ -128,7 +187,7 @@ namespace MapRenderer.Unity.Text.Placement
                     block.Points[slot] = default;
                     block.PointQuadStart[slot] = quadIdx;
                     block.PointQuadCount[slot] = 0;
-                    block.Kinds[i] = (byte)SymbolLabelBatch.Kind.Point;
+                    block.Kinds[i] = (byte)LabelRecordKind.Point;
                     block.Detail[i] = slot;
                     block.WorldStart[i] = worldPointIdx;
                     block.WorldCount[i] = 0;
@@ -144,14 +203,14 @@ namespace MapRenderer.Unity.Text.Placement
                     for (int q = 0; q < quadCount; q++) block.Quads[quadIdx++] = quads[q];
 
                     int slot = pointIdx++;
-                    block.Points[slot] = SymbolLabelBatchBuilder.BuildPointInput(label, slotCount, tileOriginRender);
+                    block.Points[slot] = BuildPointInput(label, slotCount, tileOriginRender);
                     block.PointQuadStart[slot] = quadStart;
                     block.PointQuadCount[slot] = quadCount;
 
                     int worldStart = worldPointIdx;
                     block.WorldPoints[worldPointIdx++] = label.AnchorRender;
 
-                    block.Kinds[i] = (byte)SymbolLabelBatch.Kind.Point;
+                    block.Kinds[i] = (byte)LabelRecordKind.Point;
                     block.Detail[i] = slot;
                     block.WorldStart[i] = worldStart;
                     block.WorldCount[i] = 1;
@@ -180,7 +239,7 @@ namespace MapRenderer.Unity.Text.Placement
                         LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1); // fallback
 
                     int slot = curvedIdx++;
-                    block.Curveds[slot] = SymbolLabelBatchBuilder.BuildCurvedInput(label, slotCount, tileOriginRender);
+                    block.Curveds[slot] = BuildCurvedInput(label, slotCount, tileOriginRender);
                     block.CurvedGlyphStart[slot] = glyphStart; block.CurvedGlyphCount[slot] = glyphCount;
                     block.CurvedAnchorStart[slot] = anchorStart; block.CurvedAnchorCount[slot] = anchorLen;
                     block.CurvedAnchorFadeStart[slot] = anchorFadeStart;
@@ -191,7 +250,7 @@ namespace MapRenderer.Unity.Text.Placement
                     for (int v = 0; v < pathLen; v++) block.WorldPoints[worldPointIdx++] = path[v];
                     double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
 
-                    block.Kinds[i] = (byte)SymbolLabelBatch.Kind.Curved;
+                    block.Kinds[i] = (byte)LabelRecordKind.Curved;
                     block.Detail[i] = slot;
                     block.WorldStart[i] = worldStart;
                     block.WorldCount[i] = pathLen;
@@ -204,9 +263,10 @@ namespace MapRenderer.Unity.Text.Placement
                 }
             }
 
-            block.PointCount = pointIdx; block.CurvedCount = curvedIdx; block.QuadCount = quadIdx;
-            block.GlyphCount = glyphIdx; block.AnchorCount = anchorIdx; block.AnchorFadeCount = anchorFadeIdx;
-            block.WorldPointCount = worldPointIdx;
+            // No count fields to publish: CountSizes sized every array to exactly what this loop just wrote,
+            // so each array's Length already IS its count (see SymbolTileLabelBlock's header). If the two
+            // passes ever disagreed, the write above would have thrown IndexOutOfRange at the divergence
+            // rather than silently leaving a count short of Length — which is the point of not carrying one.
         }
 
         // Every label in one build's list shares the same physical tile (one (source, tile) build) — the

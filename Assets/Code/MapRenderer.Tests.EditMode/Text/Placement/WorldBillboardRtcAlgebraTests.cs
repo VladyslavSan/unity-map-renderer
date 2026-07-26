@@ -79,7 +79,7 @@ namespace MapRenderer.Tests.Text.Placement
                         zoom: 10.0, heading: 0.0, tilt: 0.0), projection: projection);
 
                     double3 sceneOriginRender = mapCamera.Projection.Project(lookAt);
-                    var frame = new SceneFrame(sceneOriginRender, float3x3.identity);
+                    var frame = new SceneFrame { SceneOriginRender = sceneOriginRender, Rebase = float3x3.identity };
 
                     double2 viewportLogicalPx = mapCamera.ViewportPx / mapCamera.DevicePixelRatio;
                     float4x4 viewProj = math.mul(
@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.Text.Placement
                         zoom: 10.0, heading: 0.0, tilt: 0.0), projection: projection);
 
                     double3 sceneOriginRender = mapCamera.Projection.Project(lookAt);
-                    var frame = new SceneFrame(sceneOriginRender, float3x3.identity);
+                    var frame = new SceneFrame { SceneOriginRender = sceneOriginRender, Rebase = float3x3.identity };
 
                     double2 viewportLogicalPx = mapCamera.ViewportPx / mapCamera.DevicePixelRatio;
                     float4x4 viewProj = math.mul(

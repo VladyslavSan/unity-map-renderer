@@ -65,7 +65,7 @@ namespace MapRenderer.Core.Text
         /// I5a — wraps a single laid-out icon <see cref="SymbolQuad"/> into the same
         /// <see cref="TextLayoutResult"/> shape the point-text path produces, so <c>StyledSymbolTileBuilder</c>'s
         /// Pass 2 can emit an icon <see cref="Placement.LabelInstance"/> down the SAME point-placement path
-        /// (§5.4: ride <c>Kind.Point</c> + the <c>AtlasKind</c> discriminator, no parallel icon path). Bounds are
+        /// (§5.4: ride <see cref="Placement.LabelRecordKind.Point"/> + the <c>AtlasKind</c> discriminator, no parallel icon path). Bounds are
         /// the quad's own min/max corner per component — a sprite is exactly one quad, so its bbox IS the block
         /// bbox. <see cref="TextLayoutResult.LineCount"/> is 1 (an icon has no line concept, but every consumer
         /// of <c>LineCount</c> treats "&gt;= 1" as the normal case).

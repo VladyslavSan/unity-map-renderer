@@ -47,6 +47,7 @@ using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Tests.Text.Placement; // TestSymbolPlan
 using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Visual
@@ -119,7 +120,11 @@ namespace MapRenderer.Tests.Visual
             uCam.backgroundColor = BgColor;
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 30.0, Longitude = 30.0, Altitude = 0.0 }, zoom: 8.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }),
+                Rebase = float3x3.identity,
+            };
             return (camGo, uCam, mapCamera, frame);
         }
 
@@ -204,7 +209,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         private static double[] SampleAround(byte[] rgba, int x, int y, int half = 3)
-            => MapRenderer.Core.Imaging.SnapshotCoverage.SampleRegionMeanColor(
+            => SnapshotCoverage.SampleRegionMeanColor(
                 rgba, Size, Size, x - half, y - half, x + half + 1, y + half + 1);
 
         private static void AssertNotGpuContextFailure(SnapshotRenderer snap)
@@ -257,17 +262,17 @@ namespace MapRenderer.Tests.Visual
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.85f, 0.1f, 1f), materialIndex: 0);
-            var batch = new SymbolLabelBatch();
             var layers = new List<SymbolRenderLayer> { renderLayer };
-            SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { label }, 1, mapCamera.Projection);
+            var labelSet = new List<LabelInstance> { label };
 
             Mesh occluderMesh = null; Material occluderMat = null; GameObject occluderGo = null;
             using var snap = new SnapshotRenderer(Size, Size);
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the single 'A' glyph must place (precondition, not the tooth itself).");
 
                 // 1. Solo render (no occluder yet) — find the sample point deep inside the glyph's ink.
@@ -343,20 +348,21 @@ namespace MapRenderer.Tests.Visual
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
 
             using var snap = new SnapshotRenderer(Size, Size);
+            // Solo render of label A alone (layerA only) to find the ink sample point — labelA/labelB share
+            // the identical glyph/anchor/size, so the same footprint applies to both. ONE TestSymbolPlan
+            // instance serves every tick in this test: LabelPlacementSystem skips the native-mirror refresh
+            // unless the source's IDENTITY or version changed, and TestSymbolPlan reuses one SymbolGatherPlan
+            // whose WinnerSetVersion it advances per Build — two independently-constructed plans would each
+            // start at version 1 and could collide on that skip guard.
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // Solo render of label A alone (layerA only) to find the ink sample point — labelA/labelB
-                // share the identical glyph/anchor/size, so the same footprint applies to both. Reuses ONE
-                // SymbolLabelBatch instance for both this solo tick and the two-label tick below:
-                // SymbolLabelBatch.BuildId is per-instance and LabelPlacementSystem skips the native-mirror
-                // refresh when BuildId hasn't advanced since last seen — two independently-constructed
-                // batches can both reach BuildId=1 on their first Build() and collide on that skip guard.
-                var batch = new SymbolLabelBatch();
-                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA }, 1, mapCamera.Projection);
+                var soloSet = new List<LabelInstance> { labelA };
+                var bothSet = new List<LabelInstance> { labelA, labelB };
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 var layerAOnly = new List<SymbolRenderLayer> { layerA };
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Tick(in frame, plan.Build(soloSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Tick(in frame, plan.Build(soloSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
                 Assert.AreEqual(1, system.LastQuadCount, "label A alone must place (precondition).");
                 snap.Render(cam);
                 AssertNotGpuContextFailure(snap);
@@ -365,9 +371,8 @@ namespace MapRenderer.Tests.Visual
 
                 // Both labels, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA, labelB }, 2, mapCamera.Projection);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(2, system.LastQuadCount, "both overlapping labels place (AllowOverlap — the tooth is draw order, not collision).");
 
                 snap.Render(cam);
@@ -382,11 +387,10 @@ namespace MapRenderer.Tests.Visual
                 // material (WorldTextMaterial) synced from Material.renderQueue at Tick/present time (the
                 // PresentIcon precedent) — unlike the OLD path (presenter bound directly to Material, so a
                 // live queue mutation took effect on the very next Render with no re-Tick). A re-Tick here
-                // matches real usage (production always Ticks before every Render); mirrors §7.10-1a's
-                // BuildId-collision-safe pattern by rebuilding the SAME batch reference each time.
-                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { labelA, labelB }, 2, mapCamera.Projection);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // matches real usage (production always Ticks before every Render); rebuilding through the
+                // SAME TestSymbolPlan keeps the mirror-refresh guard satisfied (see its note above).
+                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
                 double[] aFirst = SampleAround(snap.RawPixels, ix, iy);
                 Assert.Greater(aFirst[0], aFirst[2],
@@ -433,18 +437,19 @@ namespace MapRenderer.Tests.Visual
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
-            var batch = new SymbolLabelBatch();
+            var labelSet = new List<LabelInstance> { label };
+            var emptySet = new List<LabelInstance>();
 
             using var snap = new SnapshotRenderer(Size, Size);
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // SHOW half: one Tick with a label, render TWICE with no Tick between — no manual
                 // MeshFilter/MeshRenderer attach anywhere in this test (E2's whole point: the presenter IS
                 // a persistent scene renderer, created/bound entirely inside Tick).
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance> { label }, 1, mapCamera.Projection);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
 
                 snap.Render(cam);
@@ -460,8 +465,7 @@ namespace MapRenderer.Tests.Visual
 
                 // HIDE half (risk #1's mirror-image guard): Tick with an EMPTY set → the presenter must hide,
                 // not keep drawing last frame's label frozen on screen.
-                SymbolLabelBatchBuilder.Build(batch, new List<LabelInstance>(), 1, mapCamera.Projection);
-                system.Tick(in frame, batch, glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(emptySet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(0, system.LastQuadCount, "the empty Tick must place nothing (precondition).");
 
                 snap.Render(cam);
@@ -534,7 +538,11 @@ namespace MapRenderer.Tests.Visual
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
             var atlasTexture = BuildTinyAtlasTexture();
 
             const string StyleJson = @"{
@@ -555,38 +563,47 @@ namespace MapRenderer.Tests.Visual
                 MakeOverlappingLabel(1, frame.SceneOriginRender, sortKey: 10f), // lower key wins the collision
             };
 
-            var demoSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
-            var prodSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // Step 5b: this compared the labels-list overload against the SymbolLabelBatch overload — both demo
+            // seams, so it compared demo against demo while calling one side "prod". Both are gone. The invariant
+            // it actually asserts survives and is now stated directly: supplying per-layer render layers (E2 —
+            // each with its own material + persistent presenter) partitions only the DRAW, and must not perturb
+            // anything upstream of the emit loop. Same plan, same labels, layers vs no layers.
+            var noLayersSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var layeredSystem  = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
+                SymbolGatherPlan built = plan.Build(labels);
+                Assert.AreEqual(labels.Count, plan.CollectedCount,
+                    "precondition: both labels reach the placement path — they share an anchor, so a dedup " +
+                    "merge here would silently turn the comparison into 1-vs-2 and read as a real divergence.");
+
                 // R3: duplicate both systems' ticks — the collision verdict is harvested one Tick late (§2.6).
                 // Without this, a fresh system's single Tick harvests nothing (LastSurvivorCount == 0 on both
-                // sides), and the equality assertion below would pass VACUOUSLY (0 == 0) without ever exercising
-                // a real collision — hence the added Assert.Greater strengthening it against that.
-                demoSystem.Tick(in frame, labels, atlasTexture);
-                demoSystem.Tick(in frame, labels, atlasTexture);
+                // sides), and the equality assertions below would pass VACUOUSLY (0 == 0) without ever exercising
+                // a real collision — hence the Assert.Greater lines strengthening them against that.
+                noLayersSystem.Tick(in frame, built, atlasTexture);
+                noLayersSystem.Tick(in frame, built, atlasTexture);
 
-                var batch = new SymbolLabelBatch();
-                SymbolLabelBatchBuilder.Build(batch, labels, 1, mapCamera.Projection);
                 var symbolLayers = new List<SymbolRenderLayer> { renderLayer };
-                prodSystem.Tick(in frame, batch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
-                prodSystem.Tick(in frame, batch, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                layeredSystem.Tick(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
+                layeredSystem.Tick(in frame, built, atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: symbolLayers);
 
-                Assert.Greater(demoSystem.LastCandidateCount, 0, "sanity: the demo path actually staged candidates.");
-                Assert.AreEqual(demoSystem.LastCandidateCount, prodSystem.LastCandidateCount,
+                Assert.Greater(noLayersSystem.LastCandidateCount, 0, "sanity: candidates were actually staged.");
+                Assert.AreEqual(noLayersSystem.LastCandidateCount, layeredSystem.LastCandidateCount,
                     "collision candidate count must be identical — E2 must not touch anything upstream of the emit loop.");
-                Assert.Greater(demoSystem.LastSurvivorCount, 0,
+                Assert.Greater(noLayersSystem.LastSurvivorCount, 0,
                     "sanity: a real collision actually ran and produced a survivor (otherwise the equality below could pass vacuously on 0 == 0).");
-                Assert.AreEqual(demoSystem.LastSurvivorCount, prodSystem.LastSurvivorCount,
+                Assert.AreEqual(noLayersSystem.LastSurvivorCount, layeredSystem.LastSurvivorCount,
                     "collision survivor count must be identical.");
-                Assert.AreEqual(demoSystem.LastQuadCount, prodSystem.LastQuadCount,
+                Assert.AreEqual(noLayersSystem.LastQuadCount, layeredSystem.LastQuadCount,
                     "emitted quad count must be identical.");
             }
             finally
             {
                 renderLayer.Dispose();
-                demoSystem.Dispose();
-                prodSystem.Dispose();
+                noLayersSystem.Dispose();
+                layeredSystem.Dispose();
                 atlasTexture.Dispose();
                 Object.DestroyImmediate(camGo);
             }

@@ -40,12 +40,12 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeList<byte> CoverageFading;  // per-record: LabelTileCoverageFilter classified this winner Fade
         // D1: per-record Drop decision (LabelTileCoverageFilter.ClassifyActive) — the winner STAYS RESIDENT
         // (WinnerCount counts it) instead of being compacted out; GatherIntoMirror stamps it onto the native
-        // mirror (_mRecordDropped) and GatherSymbolPoints hard-skips it as its first, unconditional check.
+        // mirror (_mirrorRecordDropped) and GatherSymbolPoints hard-skips it as its first, unconditional check.
         internal NativeList<byte> Dropped;
         internal int WinnerCount;
 
         // R1: how many of the WinnerCount records this Build stamped Dropped — counted here, in the loop that
-        // already branches on the decision, so LabelPlacementSystem derives _mNonDroppedCount by subtraction
+        // already branches on the decision, so LabelPlacementSystem derives _mirrorNonDroppedCount by subtraction
         // instead of re-walking every record each frame.
         internal int DroppedCount;
 

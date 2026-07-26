@@ -171,8 +171,8 @@ namespace MapRenderer.Tests.Text.Placement
             // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
             // duplicate the first Tick (same scene content — FadeIds are stable across separate Scene() calls
             // building structurally-identical labels) so the assertions below read a settled state.
-            h.System.Tick(in h.Frame, Scene(), h.Atlas);
-            h.System.Tick(in h.Frame, Scene(), h.Atlas);
+            h.System.TickLabels(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
+            h.System.TickLabels(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
 
             // Epic A / A1 (hardening round C) + Stage AC: the two POINT labels ("A"/"B") draw through the
             // WORLD path since A1, and the curved line ALSO draws through it since Stage AC — so the
@@ -192,7 +192,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Stability: an identical second Tick must reproduce the world mesh bit-for-bit (deterministic
             // fill over the UninitializedMemory buffers + a stable index mapping).
-            h.System.Tick(in h.Frame, Scene(), h.Atlas);
+            h.System.TickLabels(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
 
             Assert.IsTrue(h.System.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh1), "the world text slot must still exist.");
             WorldMeshReadback.Read(worldMesh1, out WorldBillboardVertex[] secondWorldV, out float[] secondWorldOpacity);
@@ -218,7 +218,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Camera = new MapCamera(uCam, new CameraProperties(
                     new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
                 Origin = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 });
-                Frame = new SceneFrame(Origin, float3x3.identity);
+                Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 Atlas = BuildTinyAtlasTexture();
                 // Epic A / A1: point labels now draw through the world path — needs its own world base
                 // material for the stability tooth to observe real world-mesh content.

@@ -1,5 +1,5 @@
-// Engine-free by design (mirrors TestSupport/TestDataSource + TileScheduler's decoupling from
-// UnityWebRequestDataSource): this file references only System/Cysharp.Threading.Tasks/
+// Engine-free by design (mirrors TileScheduler's decoupling from UnityWebRequestDataSource): this
+// file references only System/Cysharp.Threading.Tasks/
 // MapRenderer.Core.Text — NO UnityEngine using. It physically lives under MapRenderer.Unity (the
 // atlas/texture wiring it feeds is Unity-only) but stays compilable standalone so its logic runs in
 // BOTH the Unity EditMode runner and the fast Tools/core-tests project (the matching
@@ -13,6 +13,7 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Text;
+using MapRenderer.Core.Lifetime;
 
 namespace MapRenderer.Unity.Text
 {
@@ -48,7 +49,7 @@ namespace MapRenderer.Unity.Text
     /// thread via its PlayerLoop-bound <c>.ToUniTask()</c>, exactly like <c>UnityWebRequestDataSource</c>).
     /// </para>
     /// </summary>
-    public sealed class GlyphManager : IDisposable
+    public sealed class GlyphManager : VerifiedDisposable
     {
         private readonly IGlyphSource _source;
         private readonly GlyphCache _cache;
@@ -142,6 +143,6 @@ namespace MapRenderer.Unity.Text
             }
         }
 
-        public void Dispose() => _source?.Dispose();
+        protected override void DoDispose() => _source?.Dispose();
     }
 }

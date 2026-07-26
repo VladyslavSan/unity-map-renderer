@@ -22,7 +22,7 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// S105 Slice 3 (A4) — THE decisive test: a parsed symbol layer + the real fixture tile, run through
-    /// <see cref="StyledSymbolTileBuilder"/> (NOT <c>SyntheticLabelSource</c>), produces the expected set of
+    /// <see cref="StyledSymbolTileBuilder"/> produces the expected set of
     /// shaped <see cref="LabelInstance"/>s. Real style + real tile → correct labels, no synthetic stand-in.
     /// </summary>
     [TestFixture]

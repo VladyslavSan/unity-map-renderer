@@ -1,7 +1,7 @@
 using System;
 using Unity.Mathematics;
 
-namespace MapRenderer.Core.Imaging
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Result of analysing a decoded RGBA32 pixel buffer for "map-like" coverage.

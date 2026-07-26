@@ -28,7 +28,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Epic A / A1 (design §3.4, §11 A1 D2): the Level-1 RTC bake for the world-anchored draw
         /// path — <c>(float3)(AnchorRender − TileOriginRender)</c>, computed ONCE by
-        /// <see cref="MapRenderer.Unity.Text.Placement.SymbolLabelBatchBuilder.AddPoint"/> against the SAME
+        /// the parity oracle's <c>AddPoint</c> against the SAME
         /// <see cref="TileOriginRender"/> the world renderer places its presenter with (so the two RTC
         /// terms cancel exactly). Read only by <see cref="LabelStagingMath.StagePoint"/>'s world-carry
         /// (D2/D6) — NOT used by screen projection/collision, which stay on <see cref="ScreenPx"/>.</summary>
@@ -76,7 +76,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Stage AC (curved-world): the render-space tile origin this label's per-glyph
         /// <see cref="PlacedQuad.AnchorLocal"/> bakes are baked against — resolved by
-        /// <see cref="MapRenderer.Unity.Text.Placement.SymbolLabelBatchBuilder.AddCurved"/> via the SAME
+        /// the parity oracle's <c>AddCurved</c> via the SAME
         /// null-safe <c>ResolveTileOrigin</c> helper <see cref="PointStageInput.TileOriginRender"/> uses, so
         /// the bake and the world renderer's per-tile placement cancel exactly (§3.4).</summary>
         public double3 TileOriginRender;

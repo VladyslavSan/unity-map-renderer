@@ -9,8 +9,10 @@
 // SceneTileTree:
 //   • Grouping: two labels (text + icon) on the SAME tile+slot must be SIBLINGS under ONE layer node under
 //     ONE tile container; a THIRD label on a DIFFERENT tile must get its OWN separate container — but the
-//     "Map Labels" root's DIRECT child count must equal the number of DISTINCT TILES (2), never the number
-//     of slots (3), which is exactly what an A1-shaped regression (one root-parented GO per slot) would fail.
+//     LIVE tile-container count must equal the number of DISTINCT TILES (2), never the number of slots (3),
+//     which is exactly what an A1-shaped regression (one root-parented GO per slot) would fail. Asked via
+//     WorldLabelTileCount(), not the root's raw childCount: the root also carries the inactive pool nodes
+//     that recycled leaves and containers park under.
 //   • One transform write per tile, not per slot: a text/icon child's own LOCAL transform must stay at
 //     identity — only its tile container carries the per-frame floating-origin placement, matching the
 //     GameObjects backend's oracle formula (FloatingOrigin.TileToSceneRebased).
@@ -111,7 +113,11 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             // Two DISTINCT tiles (arbitrary — unrelated to the camera's actual view).
             var tileA = new TileId { Z = 12, X = 100, Y = 200 };
@@ -136,8 +142,8 @@ namespace MapRenderer.Tests.Text.Placement
                     MakeTextLabel(frame.SceneOriginRender, tileBKey, featureIndex: 2),
                 };
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
-                system.Tick(in frame, labels, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+                system.TickLabels(in frame, labels, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(labels.Count, system.LastQuadCount, "DIAGNOSTIC precondition: all three labels must place (no cull).");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Text), "tileA's text slot must be built+presented.");
@@ -161,12 +167,12 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreNotSame(containerA, containerB, "tileA and tileB must get SEPARATE tile containers.");
 
                 // ── Root's DIRECT children must be counted per TILE, not per SLOT (the A1 defect) ──
-                Assert.AreSame(system.WorldLabelTreeRoot, containerA.parent, "tileA's container must be a DIRECT child of the \"Map Labels\" root.");
-                Assert.AreSame(system.WorldLabelTreeRoot, containerB.parent, "tileB's container must be a DIRECT child of the \"Map Labels\" root.");
-                Assert.AreEqual(2, system.WorldLabelTreeRoot.childCount,
+                Assert.AreSame(system.WorldLabelTreeRoot(), containerA.parent, "tileA's container must be a DIRECT child of the \"Map Labels\" root.");
+                Assert.AreSame(system.WorldLabelTreeRoot(), containerB.parent, "tileB's container must be a DIRECT child of the \"Map Labels\" root.");
+                Assert.AreEqual(2, system.WorldLabelTileCount(),
                     "the root must have exactly 2 direct children (one per DISTINCT tile) even though 3 slots " +
                     "(text+icon on tileA, text on tileB) are live — under A1's flat dict this would be 3.");
-                Assert.AreEqual("Map Labels", system.WorldLabelTreeRoot.name);
+                Assert.AreEqual("Map Labels", system.WorldLabelTreeRoot().name);
                 Assert.IsTrue(containerA.name.StartsWith("Tile "), $"container name '{containerA.name}' must follow the tile backend's \"Tile z/x/y\" convention.");
 
                 // ── One transform write per tile, not per slot: children sit at LOCAL identity; only the ──
@@ -200,7 +206,7 @@ namespace MapRenderer.Tests.Text.Placement
         // (WorldLabelRenderer.ReleaseChild + SceneTileTree.ReleaseChildFrom) was reached only by reasoning,
         // not exercised. This drives a REAL text+icon pair through reclaim end-to-end.
         [Test]
-        public void IdleReclaim_DestroysChild_ThenLayerNode_ThenTileContainer_AsSlotsGoIdle()
+        public void IdleReclaim_ReleasesChild_ThenLayerNode_ThenTileContainer_AndRecyclesThemOnReEmit()
         {
             var camGo = new GameObject("WorldLabelReclaim_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -208,7 +214,11 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
             var mapCamera = new MapCamera(uCam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var frame = new SceneFrame(mapCamera.Projection.Project(lookAt), float3x3.identity);
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
 
             var tileA = new TileId { Z = 12, X = 110, Y = 200 }; // arbitrary — unrelated to the camera's view
             long tileAKey = SymbolFeatureExtractor.PackTileKey(tileA);
@@ -228,7 +238,7 @@ namespace MapRenderer.Tests.Text.Placement
                     MakeIconLabel(frame.SceneOriginRender, tileAKey, featureIndex: 1),
                 };
                 for (int i = 0; i < 3; i++)
-                    system.Tick(in frame, textAndIcon, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+                    system.TickLabels(in frame, textAndIcon, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.IsTrue(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Text), "precondition: text built+presented.");
                 Assert.IsTrue(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Icon), "precondition: icon built+presented.");
@@ -238,13 +248,13 @@ namespace MapRenderer.Tests.Text.Placement
                 Transform layerNode = textChild.parent;
                 Transform container = layerNode.parent;
                 Assert.AreEqual(2, layerNode.childCount, "precondition: the layer node has 2 children.");
-                Assert.AreEqual(1, system.WorldLabelTreeRoot.childCount, "precondition: 1 live tile container.");
+                Assert.AreEqual(1, system.WorldLabelTileCount(), "precondition: 1 live tile container.");
 
                 // ── Stop emitting the ICON label (keep emitting text) for >IdleReclaimFrames(60) — the icon ──
                 // ── child must be destroyed while text + its layer node + the tile container SURVIVE.       ──
                 var textOnly = new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender, tileAKey, featureIndex: 0) };
                 for (int i = 0; i < 65; i++)
-                    system.Tick(in frame, textOnly, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+                    system.TickLabels(in frame, textOnly, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.IsFalse(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Icon), "the icon slot must go idle once no longer emitted.");
                 Assert.IsNull(system.WorldSlotTransform(tileAKey, 0, LabelKind.Icon),
@@ -255,18 +265,59 @@ namespace MapRenderer.Tests.Text.Placement
                     "the text child's layer node must SURVIVE (only its icon sibling died) — the SAME node instance as before.");
                 Assert.AreEqual(1, layerNode.childCount, "the layer node must have exactly 1 child left (text) after the icon's reclaim.");
                 Assert.AreSame(container, layerNode.parent, "the tile container must SURVIVE — its OTHER child (the layer node) is still alive.");
-                Assert.AreEqual(1, system.WorldLabelTreeRoot.childCount, "the tile container itself must SURVIVE the icon's reclaim.");
+                Assert.AreEqual(1, system.WorldLabelTileCount(), "the tile container itself must SURVIVE the icon's reclaim.");
 
                 // ── Now stop emitting TEXT too — the layer node AND the tile container must be torn down. ──
                 var none = new List<LabelInstance>();
                 for (int i = 0; i < 65; i++)
-                    system.Tick(in frame, none, atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+                    system.TickLabels(in frame, none, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
                 Assert.IsFalse(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Text));
-                Assert.IsNull(system.WorldSlotTransform(tileAKey, 0, LabelKind.Text), "the text child must also be destroyed once idle.");
-                Assert.IsTrue(layerNode == null, "the layer node must be destroyed once its last child (text) is reclaimed — no orphan node (WorldLabelRenderer.ReleaseChild).");
-                Assert.IsTrue(container == null, "the tile container must be destroyed once its last layer node is gone — no orphan container (SceneTileTree.ReleaseChildFrom).");
-                Assert.AreEqual(0, system.WorldLabelTreeRoot.childCount, "the root must have ZERO children once every tile has gone idle.");
+                Assert.IsNull(system.WorldSlotTransform(tileAKey, 0, LabelKind.Text), "the text child must be released from its slot once idle.");
+                Assert.AreEqual(0, system.WorldLabelTileCount(), "ZERO live tile containers once every tile has gone idle.");
+
+                // These nodes are RECYCLED, not destroyed — they park under an INACTIVE pool node that hangs
+                // off the tree root. So `== null` would fail a working pool, and reachability from the root no
+                // longer discriminates either (the pool node is under the root too). What separates parked
+                // from live is precisely that: a parked node is not active in the hierarchy. This still
+                // catches the original ReleaseChild defect — an orphan left under its live container would
+                // remain ACTIVE.
+                Assert.IsFalse(layerNode.gameObject.activeInHierarchy,
+                    "the layer node must leave the LIVE tree once its last child (text) is reclaimed (WorldLabelRenderer.ReleaseChild).");
+                Assert.IsFalse(container.gameObject.activeInHierarchy,
+                    "the tile container must leave the LIVE tree once its last layer node is gone (SceneTileTree.ReleaseChildFrom).");
+
+                // Stated before any re-emit, and before anything DEREFERENCES these: with pooling broken they
+                // are destroyed, and every assertion below would otherwise fail as a MissingReferenceException
+                // from walking `.parent` — red, but saying nothing about why.
+                Assert.IsTrue(textChild  != null, "reclaim must PARK the text leaf for reuse, not destroy it.");
+                Assert.IsTrue(iconChild  != null, "reclaim must PARK the icon leaf for reuse, not destroy it.");
+                Assert.IsTrue(layerNode  != null, "reclaim must PARK the layer node for reuse, not destroy it.");
+                Assert.IsTrue(container  != null, "reclaim must PARK the tile container for reuse, not destroy it.");
+
+                // ── Re-emit the SAME tile+slot: every node must come back as the SAME instance ──
+                // The tooth that fails if pooling silently stops working (a Return that destroys, a Rent that
+                // always creates). Behaviour would still be correct — just as expensive as before pooling —
+                // and nothing else in this fixture would notice.
+                for (int i = 0; i < 3; i++)
+                    system.TickLabels(in frame, textAndIcon, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
+
+                Assert.AreSame(textChild, system.WorldSlotTransform(tileAKey, 0, LabelKind.Text),
+                    "the reclaimed TEXT leaf must be recycled, not rebuilt — its two AddComponent calls are what pooling exists to avoid.");
+                Assert.AreSame(iconChild, system.WorldSlotTransform(tileAKey, 0, LabelKind.Icon),
+                    "the reclaimed ICON leaf must come back from its OWN pool — one shared pool would hand the text leaf to an icon slot.");
+                Assert.AreSame(layerNode, textChild.parent, "the recycled leaf must re-parent under the recycled layer node.");
+                Assert.AreSame(container, layerNode.parent, "…which itself re-parents under the recycled tile container.");
+                Assert.AreEqual(1, system.WorldLabelTileCount(), "exactly one live tile container again.");
+
+                // A recycled leaf must carry NO state from its previous tenancy: that slot's Mesh was destroyed
+                // immediately after the leaf was released, so a leaf that kept the binding would point at a
+                // destroyed Mesh (pink in the Editor) until something rebound it.
+                Assert.IsTrue(system.IsWorldSlotVisible(tileAKey, 0, LabelKind.Text), "the recycled text leaf must draw again.");
+                Assert.IsTrue(system.TryGetWorldSlotMesh(tileAKey, 0, LabelKind.Text, out Mesh reusedMesh) && reusedMesh != null,
+                    "the recycled leaf's slot must hold a live mesh.");
+                Assert.AreSame(reusedMesh, textChild.GetComponent<MeshFilter>().sharedMesh,
+                    "the MeshFilter must point at the slot's CURRENT mesh, not the destroyed one from its previous tenancy.");
             }
             finally
             {
@@ -276,5 +327,6 @@ namespace MapRenderer.Tests.Text.Placement
                 Object.DestroyImmediate(camGo);
             }
         }
+
     }
 }

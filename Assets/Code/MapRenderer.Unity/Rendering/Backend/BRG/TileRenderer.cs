@@ -34,11 +34,13 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // Built once at construction from MapInstanceData. Per-frame pack indexes MaterialEntries[]
         // by index only — no reflection, no boxing, no LINQ, no managed allocation.
 
-        private readonly InstancePropPlan _plan = InstancePropPlan.BuildFromStruct<MapInstanceData>();
+        // internal, not private: the test assembly's observability extensions read it (see
+        // BrgTileRendererTestExtensions) — the sanctioned footprint for test-only accessors.
+        internal readonly InstancePropPlan _plan = InstancePropPlan.BuildFromStruct<MapInstanceData>();
 
         // ── Per-draw-item record ─────────────────────────────────────────────────────────────
 
-        private struct DrawItem
+        internal struct DrawItem
         {
             public BatchMeshID     MeshId;
             public BatchMaterialID MatId;
@@ -50,7 +52,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // ── BRG state ─────────────────────────────────────────────────────────────────────────
 
         private BatchRendererGroup _brg;
-        private GraphicsBuffer     _instanceBuffer;
+        internal GraphicsBuffer    _instanceBuffer;
         private BatchID            _batchId;
         private bool               _batchRegistered;
 
@@ -63,7 +65,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         internal int CullingCallCount;
 
         // Handle → DrawItem  (stable for handle-based removal API).
-        private readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
+        internal readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
         private int _nextHandle;
 
         // Per-layer materials registered with BRG in declared order (index == materialIndex == draw order).
@@ -77,7 +79,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // Sorted draw list (ascending renderQueue) rebuilt in Rebuild. Cleared + filled each call
         // from _items — no allocations in steady state.
-        private readonly List<(int renderQueue, int handle)> _sortedItems
+        internal readonly List<(int renderQueue, int handle)> _sortedItems
             = new List<(int, int)>(64);
 
         // Reusable scratch holding the compacted emit order (indices into _sortedItems that are still live
@@ -85,25 +87,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         private readonly List<int> _emitScratch = new List<int>(64);
 
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
-        private float[] _cpuBuffer = Array.Empty<float>();
+        internal float[] _cpuBuffer = Array.Empty<float>();
 
         // Generous bounds so minimal culling never culls tiles.
         private static readonly Bounds GenBounds = new Bounds(
             Vector3.zero, new Vector3(100_000_000f, 100_000_000f, 100_000_000f));
-
-        // ── Test observability ────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Total floats per instance in the SoA buffer, as derived from <see cref="MapInstanceData"/>.
-        /// Asserted == 76 by the S76 readback tooth.
-        /// </summary>
-        internal int FloatsPerInstance => _plan.FloatsPerInstance;
-
-        /// <summary>
-        /// Total BRG metadata entry count (2 transforms + 31 material props), as derived from
-        /// <see cref="MapInstanceData"/>. Asserted == 33 by the S76 readback tooth.
-        /// </summary>
-        internal int MetadataEntryCount => _plan.MetaCount;
 
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
@@ -131,88 +119,12 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             }
         }
 
-        // ── Test observability ────────────────────────────────────────────────────────────────
-
-        /// <summary>Number of currently registered draw items.</summary>
-        public int DrawItemCount => _items.Count;
-
-        // IsDisposed is inherited from VerifiedDisposable (public there too — no shadow needed).
-
-        /// <summary>True if the instance GraphicsBuffer is allocated.</summary>
-        public bool HasBuffer => _instanceBuffer != null;
-
-        /// <summary>
-        /// Returns the packed translation (X, Z) of the instance <paramref name="handle"/> from the last
-        /// <see cref="Rebuild"/> call. GPU-independent — reads the CPU buffer (SoA layout), not the GPU buffer.
-        /// Returns (NaN, NaN) if the handle is not registered or no Rebuild has run.
-        /// </summary>
-        public (float x, float z) GetInstanceTranslation(int handle)
-        {
-            int count = _sortedItems.Count;
-            if (_cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance || count == 0)
-                return (float.NaN, float.NaN);
-
-            for (int si = 0; si < count; si++)
-            {
-                if (_sortedItems[si].handle == handle)
-                {
-                    // SoA layout: O2W array starts at float 0.
-                    // Instance si's O2W occupies floats [si*12 .. si*12+11].
-                    // Unity BRG packed float3x4 format (see UnityDOTSInstancing.hlsl):
-                    //   p1=[m00,m10,m20,m01], p2=[m11,m21,m02,m12], p3=[m22,m03,m13,m23]
-                    // tx = m03 = float index si*12+9
-                    // ty = m13 = float index si*12+10
-                    // tz = m23 = float index si*12+11
-                    return (_cpuBuffer[si * 12 + 9], _cpuBuffer[si * 12 + 11]);
-                }
-            }
-            return (float.NaN, float.NaN);
-        }
-
-        /// <summary>
-        /// Returns the packed value of the material property <paramref name="propId"/> for the instance
-        /// <paramref name="handle"/> from the last <see cref="Rebuild"/> call.
-        /// GPU-independent — reads the CPU SoA buffer directly.
-        ///
-        /// <para><paramref name="component"/> selects the float within a multi-float property
-        /// (0=x/r, 1=y/g, 2=z/b, 3=w/a). For scalar properties component must be 0.</para>
-        ///
-        /// Returns <c>float.NaN</c> if the handle is not registered, the property is not in the plan,
-        /// or no <see cref="Rebuild"/> has run. NaN (not 0) makes the buggy-build case (no plan entry)
-        /// fail explicitly rather than silently reading 0.
-        /// </summary>
-        internal float GetInstancePropValue(int handle, int propId, int component = 0)
-        {
-            int count = _sortedItems.Count;
-            if (_cpuBuffer == null || _cpuBuffer.Length < count * _plan.FloatsPerInstance || count == 0)
-                return float.NaN;
-
-            int slot = -1;
-            for (int si = 0; si < count; si++)
-            {
-                if (_sortedItems[si].handle == handle) { slot = si; break; }
-            }
-            if (slot < 0) return float.NaN;
-
-            for (int e = 0; e < _plan.MaterialEntries.Length; e++)
-            {
-                InstancePropEntry entry = _plan.MaterialEntries[e];
-                if (entry.PropId == propId)
-                {
-                    int idx = entry.SoaFloatOffset * count + slot * entry.FloatCount + component;
-                    if ((uint)idx >= (uint)_cpuBuffer.Length) return float.NaN;
-                    return _cpuBuffer[idx];
-                }
-            }
-            return float.NaN;
-        }
-
-        /// <summary>
-        /// Returns the SoA float offset (the Pfx_ equivalent) for the material property
-        /// <paramref name="propId"/>, or -1 if not found in the plan.
-        /// Used by tests for the byte-identical-wire spot check (e.g. <c>_Opacity</c> must be 46).
-        /// </summary>
-        internal int GetPropSoaOffset(int propId) => _plan.GetSoaFloatOffset(propId);
+        // Read-only queries over this class's state that only tests ask for — DrawItemCount, HasBuffer,
+        // FloatsPerInstance, MetadataEntryCount, GetInstanceTranslation, GetInstancePropValue,
+        // GetPropSoaOffset, GetEmittedRenderQueues — used to sit here under a "Test observability" banner
+        // with zero production callers. They now live in the test assembly; see BrgTileRendererTestExtensions.
+        // CullingCallCount stays a field above because this class WRITES it, and ComputeEmitOrder stays
+        // because Rebuild calls it.
 
         /// <summary>
         /// Returns the XZ scene-space bounding box that covers all registered tile instances.
@@ -247,21 +159,6 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             float cx = (minX + maxX) * 0.5f;
             float cz = (minZ + maxZ) * 0.5f;
             return new Bounds(new Vector3(cx, 0f, cz), new Vector3(maxX - minX, 1f, maxZ - minZ));
-        }
-
-        ///<summary>
-        /// Returns the renderQueue of each draw command in emission order, as computed by the last
-        /// <see cref="Rebuild"/> call. GPU-independent — reads the sorted items list.
-        /// </summary>
-        public int[] GetEmittedRenderQueues()
-        {
-            var result = new int[_sortedItems.Count];
-            for (int i = 0; i < _sortedItems.Count; i++)
-            {
-                int h = _sortedItems[i].handle;
-                result[i] = _items.TryGetValue(h, out var item) ? item.LayerRenderQueue : -1;
-            }
-            return result;
         }
 
         // ── Draw item registration ────────────────────────────────────────────────────────────

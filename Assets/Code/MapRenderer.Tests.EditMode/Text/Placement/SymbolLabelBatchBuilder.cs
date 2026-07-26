@@ -1,16 +1,31 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header): this file is in MapRenderer.Unity.Text.Placement
-// and uses Unity.Mathematics types — TOP-LEVEL `using Unity.Mathematics;` + unqualified types, never an inline
-// `Unity.Mathematics.X`. Unity-side (not Core) because the byte-parity colour conversion needs UnityEngine.Color.
+// Unity EditMode only — needs UnityEngine.Color for the byte-parity sRGB->linear conversion, and the internal
+// production seams it calls (SymbolTileLabelBlockBaker.BuildPointInput/BuildCurvedInput,
+// LabelPlacementSystem.LinearColor/RepresentativeAnchor) via InternalsVisibleTo. NOT in core-tests.csproj.
+//
+// THE PARITY ORACLE. This used to live in MapRenderer.Unity as production code, which it never was: nothing
+// in Core/Unity/Jobs called Build. It is the independent second implementation the production path is checked
+// against — SymbolGatherParityTests pins the subsystem's plan against it, SymbolPlanMirrorParityTests pins the
+// test helper's. Keeping it in the shipped assembly meant every consumer of the renderer carried the checker
+// for the renderer.
+//
+// It is NOT redundant with SymbolTileLabelBlockBakerTests, which is what the proposal's "or delete" clause
+// hoped: the baker's own teeth cover ONE tile's bake, while this oracle is walked over a whole collected set,
+// so it is what pins cross-tile assembly and ORDERING (a reordered collect, a dedup that ate a label). The
+// per-label field math is shared, not duplicated -- both sides call the baker's BuildPointInput/
+// BuildCurvedInput -- so this checks the assembly around that math, not the math itself.
+//
+// Namespace-collision guard (see GlyphAtlasTexture.cs's header): uses Unity.Mathematics types via a TOP-LEVEL
+// `using Unity.Mathematics;` + unqualified types, never an inline `Unity.Mathematics.X`.
 
 using System.Collections.Generic;
 using Unity.Mathematics;
-using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Text.Placement;
 
-namespace MapRenderer.Unity.Text.Placement
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Converts the managed <see cref="LabelInstance"/> carriers of one collected label set into the blittable
@@ -41,17 +56,10 @@ namespace MapRenderer.Unity.Text.Placement
         //             recording, so the per-label cost in production is negligible.
         // (the per-unique-tile 4-corner coverage-cull projection this Project marker used to bracket moved to
         // the pre-build Core LabelTileCoverageFilter — see SymbolLabelSubsystem.CurrentBatch.)
-        /// <summary>Profiler marker name constants (SSOT) for the SoA build sub-phases — referenced by the
-        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
-        /// <c>InternalsVisibleTo</c>). Hierarchical names so the Profiler flat search reads as a tree.</summary>
-        internal static class ProfilerMarkerNames
-        {
-            internal const string SoAHash = "MapRenderer.Symbol.BatchBuild.SoA.Hash";
-            internal const string SoACopy = "MapRenderer.Symbol.BatchBuild.SoA.Copy";
-        }
-
-        private static readonly ProfilerMarker PmSoAHash = new(ProfilerCategory.Scripts, ProfilerMarkerNames.SoAHash);
-        private static readonly ProfilerMarker PmSoACopy = new(ProfilerCategory.Scripts, ProfilerMarkerNames.SoACopy);
+        // The two SoA.Hash / SoA.Copy profiler markers that used to bracket the loops below are GONE with the
+        // move. A Profiler marker exists to attribute cost in a running map; this code only ever runs inside a
+        // test, so the markers named a cost no profile would meet. ProfilerMarkerTests lost their two entries
+        // with them.
 
         /// <summary>Rebuild <paramref name="batch"/> in place from <paramref name="labels"/> (collected order
         /// preserved so the collision ordinal — and thus the mesh — stays byte-identical). <paramref name="slotCount"/>
@@ -110,58 +118,17 @@ namespace MapRenderer.Unity.Text.Placement
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
             int quadCount = quads?.Count ?? 0;
             int quadStart = batch.QuadCount;
-            using (PmSoACopy.Auto())
-                for (int q = 0; q < quadCount; q++) batch.AddQuad(quads[q]);
+            for (int q = 0; q < quadCount; q++) batch.AddQuad(quads[q]);
 
             // Epic A / A1 D2: the world-anchored Level-1 RTC bake — AnchorLocal = anchorRender − tileOriginRender,
             // the SAME double3 origin ResolveTileOrigin resolves (null-safe) — so the presenter placement and
             // this bake cancel exactly (§3.4).
             double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
-            PointStageInput input;
-            using (PmSoAHash.Auto()) // sRGB→linear color + fade-id string hash — the movable-to-build-time conversion.
-                input = BuildPointInput(label, slotCount, tileOriginRender);
+            PointStageInput input = SymbolTileLabelBlockBaker.BuildPointInput(label, slotCount, tileOriginRender);
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
             int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
-            batch.AddRecord(SymbolLabelBatch.Kind.Point, detail, worldStart, 1, label.AnchorRender, departing, coverageFading);
-        }
-
-        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label POINT field math shared by
-        /// <see cref="AddPoint"/> (the per-frame oracle) and <see cref="SymbolTileLabelBlockBaker.Bake"/> (the
-        /// build-time bake) — factored here so the two paths cannot diverge. Resolves everything stable about
-        /// <paramref name="label"/> EXCEPT its glyph quads/world anchor (copied by the caller into its own
-        /// pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin — the caller
-        /// resolves it (a per-<see cref="Build"/> cache for the oracle; a single value for the single-tile bake).</summary>
-        internal static PointStageInput BuildPointInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
-        {
-            float4 color  = LabelPlacementSystem.LinearColor(label);
-            // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
-            // is unchanged — PointFadeId's guard-skip fold).
-            long   fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
-
-            // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
-            // FloatingOrigin.TileToSceneRebased's identical narrowing).
-            float3 anchorLocal = new float3(
-                (float)(label.AnchorRender.x - tileOriginRender.x),
-                (float)(label.AnchorRender.y - tileOriginRender.y),
-                (float)(label.AnchorRender.z - tileOriginRender.z));
-
-            return new PointStageInput
-            {
-                // dynamic (ScreenPx/Depth/Projected/WasPlacedLastFrame) left default — patched per frame.
-                BoundsMin = label.Layout?.BoundsMin ?? float2.zero,
-                BoundsMax = label.Layout?.BoundsMax ?? float2.zero,
-                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
-                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
-                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
-                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                RotationAlignment = label.RotationAlignment, Color = color,
-                FadeId = fadeId,
-                // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
-                AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
-                AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
-            };
+            batch.AddRecord(LabelRecordKind.Point, detail, worldStart, 1, label.AnchorRender, departing, coverageFading);
         }
 
         private static void AddCurved(SymbolLabelBatch batch, LabelInstance label, int slotCount,
@@ -171,8 +138,7 @@ namespace MapRenderer.Unity.Text.Placement
             IReadOnlyList<CurvedGlyph> glyphs = label.CurvedGlyphs;
             int glyphCount = glyphs?.Count ?? 0;
             int glyphStart = batch.GlyphCount;
-            using (PmSoACopy.Auto())
-                for (int g = 0; g < glyphCount; g++) batch.AddGlyph(glyphs[g]);
+            for (int g = 0; g < glyphCount; g++) batch.AddGlyph(glyphs[g]);
 
             // Copy anchors (capped at the staging cap, which StageCurved re-applies) + pre-resolve their fade ids
             // (one per anchor + a trailing fallback for the centred label). Incumbency stays per-frame (not stored).
@@ -180,8 +146,7 @@ namespace MapRenderer.Unity.Text.Placement
             int anchorLen = anchors?.Length ?? 0;
             int anchorCount = math.min(anchorLen, LabelStagingMath.MaxAnchorsPerLine);
             int anchorStart = batch.AnchorCount;
-            using (PmSoACopy.Auto())
-                for (int a = 0; a < anchorCount; a++) batch.AddAnchor(anchors[a]);
+            for (int a = 0; a < anchorCount; a++) batch.AddAnchor(anchors[a]);
             int anchorFadeStart = batch.AnchorFadeCount;
             // label.MaterialIndex = the symbol layer's slot — the SAME per-layer id PointFadeId folds in. Load-bearing:
             // FeatureIndex restarts per layer, so without it two roads in different layers of one tile collide (the
@@ -190,14 +155,10 @@ namespace MapRenderer.Unity.Text.Placement
             // TileRenderOrigin.Project), so the per-glyph AnchorLocal bake StageCurvedAnchor computes and this
             // tile's render-space origin cancel exactly.
             double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
-            CurvedStageInput input;
-            using (PmSoAHash.Auto())
-            {
-                for (int a = 0; a < anchorCount; a++)
-                    batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
-                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
-                input = BuildCurvedInput(label, slotCount, tileOriginRender);
-            }
+            for (int a = 0; a < anchorCount; a++)
+                batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, a));
+            batch.AddAnchorFadeId(LabelStagingMath.LineFadeId(label.TileKey, label.MaterialIndex, label.FeatureIndex, -1)); // fallback
+            CurvedStageInput input = SymbolTileLabelBlockBaker.BuildCurvedInput(label, slotCount, tileOriginRender);
             int detail = batch.AddCurved(input, glyphStart, glyphCount, anchorStart, anchorCount, anchorFadeStart);
 
             // Path world points, in order (projected + walked per frame). Cull rep = path midpoint, else the anchor
@@ -205,29 +166,9 @@ namespace MapRenderer.Unity.Text.Placement
             double3[] path = label.PathRender;
             int pathLen = path?.Length ?? 0;
             int worldStart = batch.WorldPointCount;
-            using (PmSoACopy.Auto())
-                for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
+            for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
-            batch.AddRecord(SymbolLabelBatch.Kind.Curved, detail, worldStart, pathLen, rep, departing, coverageFading);
+            batch.AddRecord(LabelRecordKind.Curved, detail, worldStart, pathLen, rep, departing, coverageFading);
         }
-
-        /// <summary>Drift-guard (Phase 1 Stage 1 / design §5 B): the per-label CURVED field math shared by
-        /// <see cref="AddCurved"/> (the per-frame oracle) and <see cref="SymbolTileLabelBlockBaker.Bake"/> (the
-        /// build-time bake) — factored here so the two paths cannot diverge. Resolves everything stable about
-        /// <paramref name="label"/> EXCEPT its glyphs/anchors/anchor-fade-ids/world path (copied by the caller
-        /// into its own pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin —
-        /// the caller resolves it (a per-<see cref="Build"/> cache for the oracle; a single value for the
-        /// single-tile bake).</summary>
-        internal static CurvedStageInput BuildCurvedInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
-            => new CurvedStageInput
-            {
-                TextSizePx = label.TextSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
-                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey,
-                Slot = LabelPlacementSystem.ClampSlot(label.MaterialIndex, slotCount),
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
-                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
-                Color = LabelPlacementSystem.LinearColor(label), TileOriginRender = tileOriginRender,
-            };
     }
 }

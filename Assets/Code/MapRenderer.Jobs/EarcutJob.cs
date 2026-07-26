@@ -11,8 +11,8 @@ namespace MapRenderer.Jobs
     /// <c>Earcut.Triangulate</c> from MapRenderer.Core — same algorithm, same tie-breaking,
     /// same bridge/hole logic, same cure → split → clean-drop failure cascade (mesh-triangulation-
     /// robustness Stage 3 — mirrors the Stage 2 managed fix). Produces bit-identical output to the
-    /// managed reference (integer tile-space coords are exact; see <see cref="MapRenderer.Tests.JobifiedPipelineTests"/>'s
-    /// <c>MatchManagedPath</c> tooth).
+    /// managed reference (integer tile-space coords are exact; pinned by
+    /// <c>JobifiedPipelineTests.MatchManagedPath</c>).
     ///
     /// Input: vertices for ONE polygon (outer + bridged holes packed contiguously), ring metadata
     /// from <see cref="RingAssemblyJob"/> output.

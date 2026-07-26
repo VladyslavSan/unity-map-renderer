@@ -4,7 +4,7 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Text.Sprites;
 
-namespace MapRenderer.Unity.Text.Placement
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// I4 test/demo-only <see cref="ISpriteSource"/>: serves the committed fixture sprite sheet at

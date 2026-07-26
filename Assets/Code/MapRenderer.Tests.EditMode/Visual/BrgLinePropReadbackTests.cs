@@ -81,11 +81,11 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // ── Exact plan-count tooth ────────────────────────────────────────────────────
-                Assert.That(brg.FloatsPerInstance, Is.EqualTo(74),
+                Assert.That(brg.FloatsPerInstance(), Is.EqualTo(74),
                     "BrgTileRenderer.FloatsPerInstance must be 74 (MapInstanceData: 24 transform + 50 material floats). " +
                     "An incompletely-generated plan (e.g. missing line props) produces a smaller value.");
 
-                Assert.That(brg.MetadataEntryCount, Is.EqualTo(31),
+                Assert.That(brg.MetadataEntryCount(), Is.EqualTo(31),
                     "BrgTileRenderer.MetadataEntryCount must be 31 (2 transforms + 29 material props). " +
                     "Missing entries mean the BRG batch omits those props from the GPU instancing table.");
 
