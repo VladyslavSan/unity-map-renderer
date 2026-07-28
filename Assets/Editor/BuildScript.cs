@@ -9,9 +9,20 @@ using UnityEngine;
 namespace MapRenderer.Build
 {
     /// <summary>
-    /// Headless player-build entry points for unity-map-renderer, invoked from <c>Tools/build.sh</c> via
-    /// <c>-executeMethod MapRenderer.Build.BuildScript.BuildAndroid|BuildMacOS|BuildLinux</c> (and mirrored
-    /// as <c>Tools ▸ Build ▸ …</c> menu items for in-Editor use).
+    /// Headless player-build entry points for unity-map-renderer: a release and a <c>…Development</c> method per
+    /// platform (Android / macOS / Linux), the release three plus the macOS development player also mirrored as
+    /// <c>Tools ▸ Build ▸ …</c> menu items for in-Editor use.
+    ///
+    /// <para>The method name is the ONLY thing that decides what gets built — platform, variant, and output
+    /// path. That is what lets <c>Tools/build.sh &lt;target&gt; [--dev]</c> be a pure name lookup with no
+    /// side-channel arguments, and what makes the menu items behave identically to the shell.</para>
+    ///
+    /// <para><c>Tools/build.sh</c> drives them through the <c>unity</c> CLI's <c>build</c> command, which
+    /// <i>requires</i> <c>--execute-method</c>: Unity has no built-in command-line build, so these entry points
+    /// are not replaceable by the CLI. The output path is composed HERE, not passed in — the CLI's
+    /// <c>--output-path</c> is deliberately unused, because the menu items have no shell to get a path from and
+    /// one source of truth beats two. <c>build.sh</c>'s header lists the other CLI flags that are inert for the
+    /// same reason.</para>
     ///
     /// <para><b>Which scene ships is Build Settings' job, not this script's.</b> The scene list comes from
     /// <see cref="EditorBuildSettings.scenes"/> (the enabled entries). For a PUBLIC build, enable the
@@ -29,37 +40,66 @@ namespace MapRenderer.Build
         private const string OutputRoot  = "Builds";
         private const string ProductBase = "UnityMapRenderer"; // file-name base (productName without spaces)
 
+        // ── Entry points ─────────────────────────────────────────────────────────────────────────────
+        // Each platform has a release and a DEVELOPMENT entry point, so `Tools/build.sh <target> --dev`
+        // means the same thing on every target rather than being macOS-only. Menu items exist for the
+        // release three plus the macOS development player (the one used for profiling); the other two
+        // development entry points are reached by name from the shell.
+
         [MenuItem("Tools/Build/Android (APK)")]
-        public static void BuildAndroid()
+        public static void BuildAndroid()            => RunAndroid(development: false);
+        public static void BuildAndroidDevelopment() => RunAndroid(development: true);
+
+        [MenuItem("Tools/Build/macOS (.app)")]
+        public static void BuildMacOS()            => RunMacOS(development: false);
+
+        /// <summary>
+        /// The DEVELOPMENT macOS player — the build that makes the map's telemetry readable outside the Editor
+        /// (<c>docs/telemetry-design.md</c> §1.2, the reason the counter consumer exists). See
+        /// <see cref="ApplyDevelopmentSettings"/> for what "development" costs and why the backend is not lowered.
+        /// </summary>
+        [MenuItem("Tools/Build/macOS DEVELOPMENT (.app, profileable)")]
+        public static void BuildMacOSDevelopment() => RunMacOS(development: true);
+
+        [MenuItem("Tools/Build/Linux (x86_64)")]
+        public static void BuildLinux()            => RunLinux(development: false);
+        public static void BuildLinuxDevelopment() => RunLinux(development: true);
+
+        private static void RunAndroid(bool development)
         {
             // APK (sideload/preview), not an AAB. An empty keystore => Unity debug-signs it: installable
             // by sideload, NOT Play-Store-publishable. First Android build is slow (target switch =
             // full reimport + IL2CPP/NDK compile).
             EditorUserBuildSettings.buildAppBundle = false;
             RunBuild(BuildTarget.Android, BuildTargetGroup.Android,
-                     Path.Combine(OutputRoot, "Android", ProductBase + ".apk"));
+                     "Android", ProductBase + ".apk", development);
         }
 
-        [MenuItem("Tools/Build/macOS (.app)")]
-        public static void BuildMacOS()
+        private static void RunMacOS(bool development)
         {
             // Architecture follows Player Settings (Edit ▸ Project Settings ▸ Player ▸ macOS ▸ Architecture).
             // Set it to "Intel 64-bit + Apple silicon" (Universal) if the .app must run on other Macs.
             // NOTE: an unsigned .app is Gatekeeper-blocked elsewhere ("damaged"): recipients right-click ▸
             // Open or `xattr -cr <app>`; a proper fix needs an Apple Developer cert + notarization.
             RunBuild(BuildTarget.StandaloneOSX, BuildTargetGroup.Standalone,
-                     Path.Combine(OutputRoot, "macOS", ProductBase + ".app"));
+                     "macOS", ProductBase + ".app", development);
         }
 
-        [MenuItem("Tools/Build/Linux (x86_64)")]
-        public static void BuildLinux()
+        private static void RunLinux(bool development)
         {
             RunBuild(BuildTarget.StandaloneLinux64, BuildTargetGroup.Standalone,
-                     Path.Combine(OutputRoot, "Linux", ProductBase + ".x86_64"));
+                     "Linux", ProductBase + ".x86_64", development);
         }
 
-        private static void RunBuild(BuildTarget target, BuildTargetGroup group, string locationPathName)
+        /// <param name="platformDir">Output subfolder under <c>Builds/</c>. A development build appends
+        /// <c>-Development</c> to it, so it can never overwrite the release artifact of the same platform —
+        /// the two differ in stripping and profiler content and are not interchangeable.</param>
+        private static void RunBuild(BuildTarget target, BuildTargetGroup group,
+                                     string platformDir, string fileName, bool development)
         {
+            string locationPathName = Path.Combine(
+                OutputRoot, development ? platformDir + "-Development" : platformDir, fileName);
+
             try
             {
                 string[] scenes = EditorBuildSettings.scenes
@@ -77,21 +117,39 @@ namespace MapRenderer.Build
                 Console.WriteLine($"[build] target={target}  product={Application.productName}");
                 Console.WriteLine("[build] scenes to include:\n  " + string.Join("\n  ", scenes));
 
-                ApplyReleaseSettings(group);
+                Action restoreSettings = null;
+                if (development) restoreSettings = ApplyDevelopmentSettings(group);
+                else             ApplyReleaseSettings(group);
 
-                string fullOut = Path.GetFullPath(locationPathName);
-                Directory.CreateDirectory(Path.GetDirectoryName(fullOut));
-
-                var options = new BuildPlayerOptions
+                // EVERYTHING after the settings were applied runs inside this try, so the finally puts them back
+                // however we leave — including a throw from the path setup, which would otherwise reach the outer
+                // catch, Exit the process, and strand ProjectSettings.asset modified.
+                //
+                // The restore CANNOT move to an outer finally: every exit path here calls
+                // EditorApplication.Exit, which never returns, so an enclosing finally would simply not run.
+                BuildSummary summary;
+                try
                 {
-                    scenes           = scenes,
-                    locationPathName = locationPathName,
-                    target           = target,
-                    targetGroup      = group,
-                    options          = BuildOptions.None,
-                };
+                    string fullOut = Path.GetFullPath(locationPathName);
+                    Directory.CreateDirectory(Path.GetDirectoryName(fullOut));
 
-                BuildSummary summary = BuildPipeline.BuildPlayer(options).summary;
+                    var options = new BuildPlayerOptions
+                    {
+                        scenes           = scenes,
+                        locationPathName = locationPathName,
+                        target           = target,
+                        targetGroup      = group,
+                        options          = development
+                            // Development => ENABLE_PROFILER + the player auto-connects, so the Profiler picks it
+                            // up without hunting for it in the target dropdown.
+                            ? BuildOptions.Development | BuildOptions.ConnectWithProfiler
+                            : BuildOptions.None,
+                    };
+
+                    summary = BuildPipeline.BuildPlayer(options).summary;
+                }
+                finally { restoreSettings?.Invoke(); }
+
                 if (summary.result == BuildResult.Succeeded)
                 {
                     // Report the SHIPPABLE payload size — the platform output dir minus the sibling
@@ -152,6 +210,80 @@ namespace MapRenderer.Build
 
             Console.WriteLine($"[build] release config: IL2CPP/Release, managed stripping=High, " +
                               $"engine-code-strip=on, development=off ({nbt})");
+        }
+
+        /// <summary>
+        /// Development counterpart to <see cref="ApplyReleaseSettings"/>: a profileable player, then the committed
+        /// Player Settings put back. Development defines <c>ENABLE_PROFILER</c>, so
+        /// <c>ProfilerCounterTelemetry</c> is compiled in and the <c>MapRenderer.Tiles.*</c> / <c>.Cache.*</c> /
+        /// <c>.Symbols.*</c> counters appear in the Profiler once it attaches.
+        ///
+        /// <para><b>Same scripting backend as release (IL2CPP), deliberately.</b> A Mono development build would
+        /// compile far faster, but this project's perf work is about MANAGED main-thread cost (the label Stage
+        /// loop, the batch build), and Mono and IL2CPP do not generate comparable code for it — a Mono profile
+        /// would produce numbers that do not describe what ships. Building IL2CPP also exercises the reachability
+        /// risk in <c>docs/telemetry-design.md</c> §6: the generic instantiations over
+        /// <c>ProfilerCounterValue&lt;int/long/double&gt;</c> have to be statically reachable, and a build that
+        /// produces working counters is the proof.</para>
+        ///
+        /// <para><b>Stripping is lowered to Minimal for development builds only.</b> Release uses High; that is
+        /// safe there precisely because the counters do not exist in a release player at all (the whole file is
+        /// behind <c>ENABLE_PROFILER</c>), so aggressive stripping cannot remove them wrongly. Here they DO exist
+        /// and are reached only through generic instantiation, so Minimal keeps the question "are the counters
+        /// reachable" separate from "did the stripper eat them".</para>
+        ///
+        /// <para><b>Why the restore matters.</b> <c>EditorUserBuildSettings</c> is per-user state under
+        /// <c>Library/</c>, but the scripting backend and stripping level live in
+        /// <c>ProjectSettings/ProjectSettings.asset</c>, which IS committed — so a development build that simply
+        /// left them lowered would show up as a stray repo diff and, worse, silently weaken the NEXT release build
+        /// if someone ran it from the Editor rather than through <see cref="ApplyReleaseSettings"/>.</para>
+        /// </summary>
+        private static Action ApplyDevelopmentSettings(BuildTargetGroup group)
+        {
+            EditorUserBuildSettings.development     = true;
+            EditorUserBuildSettings.connectProfiler = true;
+            EditorUserBuildSettings.allowDebugging  = false;   // managed debugger not needed to read counters
+
+            NamedBuildTarget nbt = NamedBuildTarget.FromBuildTargetGroup(group);
+
+            // Capture EVERY setting the block below writes — one omission leaks into the committed
+            // ProjectSettings.asset (il2cppCompilerConfiguration did exactly that before it was captured here).
+            ScriptingImplementation      backend     = PlayerSettings.GetScriptingBackend(nbt);
+            Il2CppCompilerConfiguration  compilerCfg = PlayerSettings.GetIl2CppCompilerConfiguration(nbt);
+            ManagedStrippingLevel        stripping   = PlayerSettings.GetManagedStrippingLevel(nbt);
+            bool                         stripEngine = PlayerSettings.stripEngineCode;
+
+            // IL2CPP in the RELEASE compiler configuration — the same one release ships (see
+            // BuildMacOSDevelopment's rationale).
+            //
+            // Do NOT lower this to Debug to save build time. Under IL2CPP the managed code IS the generated C++,
+            // so Debug (C++ optimisations off) de-optimises exactly the managed main-thread work this build
+            // exists to measure — the label Stage loop and batch build — while Burst jobs, which compile
+            // natively on their own path, are untouched. The result is a player several times slower than the
+            // Editor (Mono JIT, optimised) in precisely the code under study: timings that describe nothing that
+            // ships. Development-build overhead is unavoidable; an unoptimised backend is not.
+            PlayerSettings.SetScriptingBackend(nbt, ScriptingImplementation.IL2CPP);
+            PlayerSettings.SetIl2CppCompilerConfiguration(nbt, Il2CppCompilerConfiguration.Release);
+            PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.Minimal);
+            PlayerSettings.stripEngineCode = false;
+
+            Console.WriteLine($"[build] DEVELOPMENT config: IL2CPP/Release, managed stripping=Minimal, " +
+                              $"engine-code-strip=off, development=on, profiler auto-connect=on ({nbt})");
+            Console.WriteLine("[build] ENABLE_PROFILER is defined => ProfilerCounterTelemetry is compiled in; " +
+                              "look for MapRenderer.Tiles.* / .Cache.* / .Symbols.* counters in the Profiler.");
+
+            // Returned rather than hooked onto an editor event: batch mode calls EditorApplication.Exit as soon
+            // as the build finishes, so anything deferred to afterAssemblyReload would never run and would leave
+            // ProjectSettings.asset modified. The caller invokes this in a finally around BuildPlayer.
+            return () =>
+            {
+                PlayerSettings.SetScriptingBackend(nbt, backend);
+                PlayerSettings.SetIl2CppCompilerConfiguration(nbt, compilerCfg);
+                PlayerSettings.SetManagedStrippingLevel(nbt, stripping);
+                PlayerSettings.stripEngineCode = stripEngine;
+                Console.WriteLine("[build] restored committed Player Settings (backend/compiler-config/stripping) " +
+                                  "after the development build.");
+            };
         }
 
         // Scratch dirs Unity drops in the output folder that are NOT part of the shippable player.

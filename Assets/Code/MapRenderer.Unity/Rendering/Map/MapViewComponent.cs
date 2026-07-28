@@ -16,13 +16,21 @@ namespace MapRenderer.Unity.Rendering.Map
     /// camera and its own config. Before that, and in the pre-wire <see cref="Update"/> window, the forwards
     /// no-op; that "not wired yet" state is the MonoBehaviour's to hold, not <see cref="MapView"/>'s.</para>
     /// </summary>
-    public sealed class MapViewComponent : MonoBehaviour
+    public sealed partial class MapViewComponent : MonoBehaviour
     {
         [Tooltip("Inspector-tunable map settings (shared by reference with the MapView — live edits apply).")]
         public MapViewConfig Config = new MapViewConfig();
 
         /// <summary>The map logic. Null until a camera is wired (<see cref="SetCamera"/>). Test surface.</summary>
         internal MapView View { get; private set; }
+
+        // Profiler-counter telemetry hooks, implemented in MapViewComponent.ProfilerCounters.cs — a partial
+        // half that is ENTIRELY inside `#if ENABLE_PROFILER`. With no implementing part (a release player) the
+        // C# compiler erases these calls, so the consumer is stripped structurally rather than by a comment,
+        // and this glue class stays free of conditional compilation. See docs/telemetry-design.md §3.
+        partial void AttachTelemetryCounters();
+        partial void ReleaseTelemetryCounters();
+        partial void MirrorTelemetryCounters();
 
         // ── Production API (Bootstrapper / controllers) ──────────────────────────────────────────
 
@@ -31,8 +39,10 @@ namespace MapRenderer.Unity.Rendering.Map
         /// fresh one (in practice this is called once, by Bootstrapper.Wire over the main camera).</summary>
         public void SetCamera(MapCamera camera)
         {
+            ReleaseTelemetryCounters();
             View?.Teardown();
             View = new MapView(Config, camera);
+            AttachTelemetryCounters();
         }
 
         public UniTask SetStyle(string styleUri, CancellationToken ct = default)
@@ -49,15 +59,26 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // ── Frame / teardown lifecycle (also driven explicitly by tests) ─────────────────────────
 
-        public void Teardown() => View?.Teardown();
+        public void Teardown()
+        {
+            ReleaseTelemetryCounters();
+            View?.Teardown();
+        }
 
         // The whole per-frame pipeline (camera commit -> tiles -> labels) lives in MapView.LateUpdate; this is
         // just the Unity trigger. LateUpdate (not Update) so it runs AFTER the input Controller's Update, which
         // is where the camera props are mutated — so the frame always sees this frame's input. See
         // MapView.LateUpdate for the ordered sequence and why it's one snapshot.
-        public void LateUpdate() => View?.LateUpdate();
+        public void LateUpdate()
+        {
+            View?.LateUpdate();
 
-        private void OnDestroy() => View?.Teardown();
+            // AFTER the frame, not before: the counter consumer PULLS each provider's levels, so it has to run
+            // once every provider has refreshed its own. Reading first would mirror last frame's numbers.
+            MirrorTelemetryCounters();
+        }
+
+        private void OnDestroy() => Teardown();
 
         // ── Internal test reads (forwarded so MapViewTestExtensions stays unchanged) ─────────────
         internal Tile.TileManager     TileManager => View?.TileManager;

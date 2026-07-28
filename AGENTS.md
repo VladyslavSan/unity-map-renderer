@@ -142,7 +142,8 @@ the commit; it does not do the role work itself.
 code-area tag, never a stage id** — `feat(meshing): …`, not `feat(S89 D2): …` (a scope must be
 legible without looking up a stage). Types: `feat` / `fix` / `refactor` / `perf` / `test` / `docs` /
 `chore`. Scope vocabulary (pick from — don't invent ad-hoc): `meshing`, `tile-pipeline`,
-`render-layers`, `style`, `decode`, `backends`, `camera`, `shaders`, `projection`, `backlog`, `docs`.
+`render-layers`, `style`, `decode`, `backends`, `camera`, `shaders`, `projection`, `build`, `backlog`,
+`docs`.
 Subject: imperative, lower-case, no period. A stage-linked commit records it in a **body trailer**
 (`Stage: S89 (render-layer unification)`), not the subject — above the mandated identity/session trailers.
 

@@ -4,21 +4,18 @@
 namespace MapRenderer.Core.View
 {
     /// <summary>
-    /// A pull-based snapshot of the SYMBOL-label subsystem's runtime state — the sibling of
-    /// <see cref="TileTelemetrySnapshot"/> for text labels, produced on demand by
-    /// <c>MapView.CaptureSymbolTelemetry</c> and displayed by <c>MapTelemetryPanel</c>. Every field is an
-    /// instantaneous LEVEL at the instant of capture (a count), never a rate. A plain <c>init</c>-only,
-    /// engine-free carrier so it compiles in the fast core-tests project and the Unity runner alike.
+    /// A snapshot of the label PLACEMENT pass — what the last Tick projected, culled, collided and drew.
+    /// Produced and published by <c>LabelPlacementSystem</c>, which owns every number in it. Its sibling is
+    /// <see cref="SymbolStoreTelemetrySnapshot"/> (what the store is holding); they are separate snapshots
+    /// because they have separate owners, and each publishes when its own pass finishes rather than at one
+    /// shared frame instant (<c>docs/telemetry-design.md</c> §3).
+    ///
+    /// <para>Every field is an instantaneous LEVEL at the instant of capture (a count), never a rate. A plain
+    /// <c>init</c>-only, engine-free carrier so it compiles in the fast core-tests project and the Unity runner
+    /// alike.</para>
     /// </summary>
-    public readonly struct SymbolTelemetrySnapshot
+    public readonly struct LabelPlacementTelemetrySnapshot
     {
-        /// <summary>Active (in-cover) label-tile count — tiles whose labels feed this frame's placement pass.</summary>
-        public int ActiveLabelTiles { get; init; }
-
-        /// <summary>Cached (out-of-cover) label-tile count — labels kept warm so a prepared-cache hit re-shows
-        /// the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.</summary>
-        public int CachedLabelTiles { get; init; }
-
         /// <summary>Labels fed into the last placement <c>Tick</c> (before any projection cull) — the sum of
         /// every active tile's labels.</summary>
         public int InputLabelCount { get; init; }
@@ -31,15 +28,10 @@ namespace MapRenderer.Core.View
         /// bulk (<c>HorizonCull</c>). Always 0 under a planar projection.</summary>
         public int HorizonCulledLabels { get; init; }
 
-        /// <summary>§1.5 tile-coverage pre-cull: labels classified DROP because their tile is steadily below the
-        /// on-screen coverage threshold (never-visible, or the fade-out grace has expired). D1: kept resident in
-        /// the mirror but masked out of placement (never staged) — the per-frame savings. Watch this against
-        /// <c>MapViewConfig.LabelTileCoverageCull</c> to tune it.</summary>
-        public int CoverageDroppedLabels { get; init; }
-
-        /// <summary>§1.5 companion: labels whose tile just crossed below the coverage threshold and finished
-        /// easing out this Tick (the hard-skip after the fade — they FADED rather than popped). The transient
-        /// tail of <see cref="CoverageDroppedLabels"/> as tiles leave coverage.</summary>
+        /// <summary>§1.5 companion to <see cref="SymbolStoreTelemetrySnapshot.CoverageDroppedLabels"/>: labels
+        /// whose tile just crossed below the coverage threshold and finished easing out this Tick (they FADED
+        /// rather than popped) — the transient tail of the store's coverage drop, observed from the placement
+        /// side because the fade is the placement pass's doing.</summary>
         public int CoverageFadingLabels { get; init; }
 
         /// <summary>Collision CANDIDATES on the last Tick — labels that survived projection and entered the

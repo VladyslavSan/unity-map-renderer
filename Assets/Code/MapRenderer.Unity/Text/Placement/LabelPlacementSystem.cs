@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -357,6 +358,32 @@ namespace MapRenderer.Unity.Text.Placement
         /// keeps the R1 memo tests from passing trivially on an unmemoized implementation.</summary>
         internal int MirrorRebuildCount { get; private set; }
 
+        private LabelPlacementTelemetrySnapshot _telemetry;
+
+        /// <summary>
+        /// This provider's own levels, owned as a field and handed out BY REFERENCE — a reader touches the live
+        /// struct with no copy and no boxing (<c>docs/telemetry-design.md</c> §3). Refreshed at the end of
+        /// <see cref="Tick"/>, so the numbers are that pass's, not last frame's.
+        ///
+        /// <para><b>There is nothing to gate.</b> Every field below is a value this pass already stores as it
+        /// runs, so the refresh is a repackage, not a capture.</para>
+        /// </summary>
+        internal ref readonly LabelPlacementTelemetrySnapshot Telemetry => ref _telemetry;
+
+        private void RefreshTelemetry() =>
+            _telemetry = new LabelPlacementTelemetrySnapshot
+            {
+                InputLabelCount         = LastInputLabelCount,
+                DistanceCulledLabels    = LastDistanceCulledCount,
+                HorizonCulledLabels     = LastHorizonCulledCount,
+                CoverageFadingLabels    = LastCoverageFadingCulledCount,
+                CollisionCandidateCount = LastCandidateCount,
+                CollisionSurvivorCount  = LastSurvivorCount,
+                PlacedQuadCount         = LastQuadCount,
+                MirrorRebuildCount      = MirrorRebuildCount,
+                LiveFadeRecordCount     = LiveFadeRecordCount,
+            };
+
         /// <summary>The quad count submitted on the LAST <see cref="Tick"/> (0 if nothing was visible). Test surface.</summary>
         internal int LastQuadCount { get; private set; }
 
@@ -518,6 +545,7 @@ namespace MapRenderer.Unity.Text.Placement
                 GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount (Should-Fix 3:
                                         // WinnerCount includes Dropped records; telemetry/gating must not)
             TickCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
+            RefreshTelemetry();   // after the pass, so the levels are this Tick's
         }
 
 

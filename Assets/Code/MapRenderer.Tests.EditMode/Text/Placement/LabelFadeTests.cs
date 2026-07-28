@@ -8,6 +8,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
@@ -115,6 +116,44 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── The default (infinite) deltaTime SNAPS to full opacity — a single-Tick test renders labels exactly
         //    as before A-4 (byte-parity). ──
+        // ── Telemetry provider (docs/telemetry-design.md §3): the placement system OWNS its results as a struct
+        //    field, refreshes it at the end of Tick, and hands it out BY REFERENCE. ──
+        [Test]
+        public void Tick_RefreshesItsOwnTelemetryStruct_HandedOutByReference()
+        {
+            using var h = new Harness();
+            var labels = new List<LabelInstance> { Point(h.Origin, sortKey: 0f, text: "A", feature: 0) };
+            using var plan = new TestSymbolPlan(h.Projection);
+
+            Assert.AreEqual(0, h.System.Telemetry.PlacedQuadCount,
+                "before any Tick the provider's struct is still default — it reports levels, it does not invent them.");
+
+            // Bind ONCE, by reference, then Tick. This is the tooth for the ref-return itself: `live` aliases the
+            // provider's own field, so a later refresh is visible through it. Were the accessor to return BY VALUE,
+            // `live` would be a snapshot copy taken before the Tick and every assertion below would read 0.
+            ref readonly LabelPlacementTelemetrySnapshot live = ref h.System.Telemetry;
+
+            // TWO ticks before asserting a placed quad: R3 defers the collision verdict by one Tick (§2.6), so the
+            // first pass places nothing. Asserting after one tick reads 0 and says nothing about the ref-return.
+            h.System.Tick(in h.Frame, plan.Build(labels), h.Atlas);
+            h.System.Tick(in h.Frame, plan.Build(labels), h.Atlas);
+
+            Assert.AreEqual(1, h.System.LastQuadCount,
+                "sanity: the label placed, so there is a non-zero level to carry.");
+            Assert.AreEqual(h.System.LastQuadCount, live.PlacedQuadCount,
+                "the struct must carry the pass's own results, seen through the reference taken BEFORE any Tick.");
+            Assert.AreEqual(h.System.MirrorRebuildCount, live.MirrorRebuildCount);
+
+            // And it keeps tracking: a further pass refreshes the same storage, still visible through `live`.
+            int rebuildsSoFar = live.MirrorRebuildCount;
+            h.System.Tick(in h.Frame, plan.Build(labels), h.Atlas);
+
+            Assert.AreEqual(h.System.MirrorRebuildCount, live.MirrorRebuildCount,
+                "every Tick refreshes the provider's own field — the reference never goes stale.");
+            Assert.GreaterOrEqual(live.MirrorRebuildCount, rebuildsSoFar,
+                "MirrorRebuildCount is CUMULATIVE; it must never go backwards.");
+        }
+
         [Test]
         public void Tick_DefaultDeltaTime_SnapsToFullOpacity()
         {

@@ -30,9 +30,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// inspectable/disable-able in the Entities Hierarchy. Value 0 so scenes serialized with the old
         /// default deserialize to Entities.</summary>
         Entities = 0,
+
         /// <summary>S49 BRG path: draw tile meshes via a hand-packed <see cref="Backend.BRG.TileRenderer"/>
         /// BatchRendererGroup. The zero-allocation production path.</summary>
-        Brg      = 1,
+        Brg = 1,
+
         /// <summary>The original per-tile-layer GameObject path (<see cref="Backend.GameObjects.TileRenderer"/>):
         /// one MeshFilter+MeshRenderer child per layer under a <c>"Tile z/x/y"</c> container, drawn by the
         /// SRP Batcher. The simplest, most Inspector-debuggable backend — retired in S53c (the Entities
@@ -144,8 +146,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public MapView(MapViewConfig config, MapCamera camera)
         {
-            _config     = config ?? throw new ArgumentNullException(nameof(config));
-            Camera      = camera ?? throw new ArgumentNullException(nameof(camera));
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+            Camera  = camera ?? throw new ArgumentNullException(nameof(camera));
             // S82: the PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
             // fields (placeholder budget defaults pending in-editor VRAM profiling, stage Risk 3).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
@@ -154,29 +156,31 @@ namespace MapRenderer.Unity.Rendering.Map
             // world-anchored point/icon draw path's base materials — GUID assets, no Shader.Find (S58
             // architecture); the icon base rides alongside the text one, both optional (null → that draw
             // path stays inert, see MapMaterialSet.SymbolIconWorld's doc).
-            Labels      = new LabelPlacementSystem(Camera,
+            Labels = new LabelPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
             // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
             // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
-            // (_symbols implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
+            // (Symbols implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
             // hand it TileManager's loaded set and it reconciles (no release/restore callbacks). cacheEnabled
             // drives keep-warm-on-release so it matches the prepared mesh cache.
-            _symbols    = new SymbolLabelSubsystem(Camera,
+            Symbols = new SymbolLabelSubsystem(Camera,
                 _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
-            TileManager.SymbolWorkerFactory = _symbols;
+            TileManager.SymbolWorkerFactory = Symbols;
         }
 
         // S105: production symbol labels (real map data), fed to Labels.Tick each frame.
-        private readonly SymbolLabelSubsystem _symbols;
+        internal readonly SymbolLabelSubsystem Symbols;
 
         // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
         // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
         private readonly List<Symbol.StyleLayer> _symbolLayerScratch = new List<Symbol.StyleLayer>();
+
         // D11/E2: the SymbolRenderLayer objects themselves (same walk as _symbolLayerScratch, same order) —
         // handed to Labels.Tick each frame so each layer's survivors draw with its own material/presenter.
         private readonly List<Style.SymbolRenderLayer> _symbolRenderLayers = new List<Style.SymbolRenderLayer>();
+
         // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
         private readonly List<Tile.LoadedTileKey> _symbolLoadedScratch = new List<Tile.LoadedTileKey>();
 
@@ -202,9 +206,9 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public async UniTask SetStyle(string styleUri, CancellationToken ct = default)
         {
-            var loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
-            string json = await loader(styleUri, ct);
-            StyleDocument style = StyleParser.Parse(json);
+            var           loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
+            string        json   = await loader(styleUri, ct);
+            StyleDocument style  = StyleParser.Parse(json);
             await SetStyle(style, styleUri, ct);
         }
 
@@ -250,8 +254,14 @@ namespace MapRenderer.Unity.Rendering.Map
             _symbolLayerScratch.Clear();
             _symbolRenderLayers.Clear();
             foreach (var layer in Layers.Layers)
-                if (layer is Style.SymbolRenderLayer s) { _symbolLayerScratch.Add(s.SymbolLayer); _symbolRenderLayers.Add(s); }
-            _symbols.SetStyle(_style, _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
+                if (layer is Style.SymbolRenderLayer s)
+                {
+                    _symbolLayerScratch.Add(s.SymbolLayer);
+                    _symbolRenderLayers.Add(s);
+                }
+
+            Symbols.SetStyle(_style,
+                _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             TileManager.SetSources(specs, _config.Backend);
         }
@@ -302,7 +312,10 @@ namespace MapRenderer.Unity.Rendering.Map
                         string tjText = await loader(def.Url, ct);
                         SourceResolver.Resolve(def, TileJsonParser.Parse(tjText));
                     }
-                    catch (System.OperationCanceledException) { throw; }
+                    catch (System.OperationCanceledException)
+                    {
+                        throw;
+                    }
                     catch (System.Exception ex)
                     {
                         Debug.LogWarning($"[MapView.SetStyle] TileJSON load failed for source '{sid}' " +
@@ -318,12 +331,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 }
 
                 string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
-                var key = Tile.TileManager.SourceKey.From(def);
+                var    key      = Tile.TileManager.SourceKey.From(def);
                 // Epic A / A7: the ONE production site that wraps the byte fetcher into the raised
                 // ITileFeatureSource seam — TileManager never names the byte-level type (F-1).
                 specs.Add(new Tile.TileManager.SourceSpec(
-                    sid, key, def.MinZoom, def.MaxZoom, () => new Tile.Processing.MvtTileFeatureSource(factory(template))));
+                    sid, key, def.MinZoom, def.MaxZoom,
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(template))));
             }
+
             return specs;
         }
 
@@ -344,6 +359,8 @@ namespace MapRenderer.Unity.Rendering.Map
         ///         floating origin;</item>
         ///   <item>place the labels — project their anchors against the SAME snapshot + just-committed camera.</item>
         /// </list>
+        /// Telemetry is not a step here: each provider publishes at the end of its OWN pass (see the facade
+        /// below), so its levels are that pass's rather than a shared end-of-frame instant's.
         /// Allocation-free in steady state.
         /// </summary>
         public void LateUpdate()
@@ -359,7 +376,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 Camera.SyncToCamera();
 
             // ONE snapshot for the rest of the frame — tiles and labels share it, so they can't diverge.
-            CameraProperties cameraProperties = Camera.CurrentProperties;
+            CameraProperties   cameraProperties = Camera.CurrentProperties;
             Backend.SceneFrame sceneFrame;
             using (PmSceneFrame.Auto())
                 sceneFrame = BuildSceneFrame(cameraProperties);
@@ -385,7 +402,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // 3. Place the labels against the SAME snapshot the tiles used (never a second BuildSceneFrame).
             //    A style with no symbol layers simply has nothing to place.
-            if (_symbols.HasSymbolLayers)
+            if (Symbols.HasSymbolLayers)
             {
                 // ONE wall-clock read shared by ReconcileLoadedTiles' departing-tile grace window and CurrentBatch's
                 // coverage-fade grace window (REVISION 2) — same frame, same clock, no double Time.timeAsDouble read.
@@ -397,11 +414,12 @@ namespace MapRenderer.Unity.Rendering.Map
                 using (PmSymbolCollect.Auto())
                 {
                     TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                    _symbols.ReconcileLoadedTiles(_symbolLoadedScratch, now);
+                    Symbols.ReconcileLoadedTiles(_symbolLoadedScratch, now);
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
-                    _symbols.PumpBuilds();
+                    Symbols.PumpBuilds();
                 }
+
                 // Stage-2 (symbol-label native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
                 // the pre-build tile-coverage cull, recording each winner's (blockId, localIndex) against the
                 // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the Labels.Tick
@@ -410,11 +428,11 @@ namespace MapRenderer.Unity.Rendering.Map
                 // cull's projection matches the placement below exactly.
                 SymbolGatherPlan plan;
                 using (PmSymbolBatch.Auto())
-                    plan = _symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
+                    plan = Symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
                 // Then gather the winning blocks' baked slices → project/collide/build the placement, presenting
                 // each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
-                Labels.Tick(sceneFrame, plan, _symbols.Atlas, Time.deltaTime,
-                    _symbolRenderLayers, _symbols.IconTexture);
+                Labels.Tick(sceneFrame, plan, Symbols.Atlas, Time.deltaTime,
+                    _symbolRenderLayers, Symbols.IconTexture);
             }
         }
 
@@ -451,14 +469,14 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
         private (bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
-                 double mercFarCap, double globeFarCap)? _selectorInputs;
+            double mercFarCap, double globeFarCap)? _selectorInputs;
 
         private void EnsureSelector()
         {
-            var tileSelection = _config.TileSelection;
-            bool globe = Camera.Projection is SphericalProjection;
+            var  tileSelection = _config.TileSelection;
+            bool globe         = Camera.Projection is SphericalProjection;
             var key = (globe, tileSelection.LodMode, tileSelection.MinZoom, tileSelection.MaxZoom,
-                       tileSelection.OnScreenTilePx, tileSelection.MercatorFarPlaneCap, tileSelection.GlobeFarPlaneCap);
+                tileSelection.OnScreenTilePx, tileSelection.MercatorFarPlaneCap, tileSelection.GlobeFarPlaneCap);
             if (TileManager.Selector != null && _selectorInputs == key) return;
             _selectorInputs = key;
 
@@ -488,43 +506,13 @@ namespace MapRenderer.Unity.Rendering.Map
         private Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
             => new Tile.TileManager.TileSelectionConfig
             {
-                FramingViewportPx       = Camera.ViewportPx / _config.DevicePixelRatio,
-                Projection              = Camera.Projection,
-                MaxConsumesPerTick        = _config.MaxConsumesPerTick,
+                FramingViewportPx    = Camera.ViewportPx / _config.DevicePixelRatio,
+                Projection           = Camera.Projection,
+                MaxConsumesPerTick   = _config.MaxConsumesPerTick,
                 MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
-                MaxVerticesPerTick      = _config.MaxVerticesPerTick,
-                MaxReleasesPerTick      = _config.MaxReleasesPerTick,
+                MaxVerticesPerTick   = _config.MaxVerticesPerTick,
+                MaxReleasesPerTick   = _config.MaxReleasesPerTick,
             };
-
-        /// <summary>
-        /// S85: pull-based tile/render telemetry (observability only — never referenced from the live tile
-        /// loop). Forwards to <see cref="Tile.TileManager.CaptureTelemetry"/>; <see cref="TileManager"/> is
-        /// never null (built at construction), so there is no "before init" case to special-case here — an
-        /// unstyled view simply reports an empty cover.
-        /// </summary>
-        internal TileTelemetrySnapshot CaptureTelemetry() => TileManager.CaptureTelemetry();
-
-        /// <summary>
-        /// Pull-based SYMBOL-label telemetry (observability only): the label subsystem's active/cached tile
-        /// counts + the placement pass's last-Tick candidate/survivor/quad counts. Composed here because the
-        /// subsystem (<see cref="_symbols"/>) and placement system (<see cref="Labels"/>) are owned by the
-        /// view, not the <see cref="TileManager"/>.
-        /// </summary>
-        internal SymbolTelemetrySnapshot CaptureSymbolTelemetry() => new SymbolTelemetrySnapshot
-        {
-            ActiveLabelTiles        = _symbols.ActiveTileCount,
-            CachedLabelTiles        = _symbols.CachedTileCount,
-            InputLabelCount         = Labels.LastInputLabelCount,
-            DistanceCulledLabels    = Labels.LastDistanceCulledCount,
-            HorizonCulledLabels     = Labels.LastHorizonCulledCount,
-            CoverageDroppedLabels   = _symbols.LastTileCoverageCulledCount,
-            CoverageFadingLabels    = Labels.LastCoverageFadingCulledCount,
-            CollisionCandidateCount = Labels.LastCandidateCount,
-            CollisionSurvivorCount  = Labels.LastSurvivorCount,
-            PlacedQuadCount         = Labels.LastQuadCount,
-            LiveFadeRecordCount     = Labels.LiveFadeRecordCount,
-            MirrorRebuildCount      = Labels.MirrorRebuildCount,
-        };
 
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
@@ -538,10 +526,10 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public void Teardown()
         {
-            TileManager.Dispose();  // tiles first — their renderers reference Layers' materials
+            TileManager.Dispose(); // tiles first — their renderers reference Layers' materials
             Layers.Dispose();
             Labels.Dispose();
-            _symbols.Dispose();     // S105: destroy the shared glyph atlas texture + manager
+            Symbols.Dispose(); // S105: destroy the shared glyph atlas texture + manager
         }
     }
 }

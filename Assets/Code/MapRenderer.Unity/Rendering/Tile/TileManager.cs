@@ -829,6 +829,23 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// comparison and is current on every clean or dirty frame alike (a clean frame's cached value equals
         /// the live one by definition of "clean").
         /// </summary>
+        /// <summary>
+        /// This provider's own levels, owned as a field and handed out BY REFERENCE — no copy, no boxing
+        /// (<c>docs/telemetry-design.md</c> §3). The tile manager owns every number in
+        /// <see cref="TileTelemetrySnapshot"/>, so it produces them itself rather than exposing counters for
+        /// someone else to assemble.
+        ///
+        /// <para>Unlike the two label providers — whose levels their pass already stores, making the refresh a
+        /// repackage — this one derives two of its numbers: the cover-stats pass and the walk of <c>_loaded</c> in
+        /// <see cref="CaptureTelemetry"/>. It does them once per <see cref="Tick"/> regardless of whether anyone
+        /// reads. Both are bounded by the cover plus its pad ring (tens of records) over reused scratch arrays, so
+        /// the cost is not worth a staleness flag to dodge; if it ever shows in a profile, the
+        /// <c>MapRenderer.Tiles.*</c> counters are how you would see it.</para>
+        /// </summary>
+        internal ref readonly TileTelemetrySnapshot Telemetry => ref _telemetry;
+
+        private TileTelemetrySnapshot _telemetry;
+
         internal TileTelemetrySnapshot CaptureTelemetry()
         {
             var (columns, rows, minZ, maxZ) = TileCoverStats.Compute(_cover, _coverStatsX, _coverStatsY);
@@ -977,8 +994,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///
         /// The caller (MapView) runs <see cref="RenderLayerSet.ApplyZoom"/> and refreshes the scene
         /// origin BEFORE this — the origin is passed in so tile placement and camera sync share it.
+        ///
+        /// <para>A thin shell over <see cref="TickCore"/> so telemetry refreshes on EVERY exit path — the
+        /// clean-cover tick returns early, and a level that only updates on dirty frames would be a readout
+        /// that freezes exactly when the map goes still.</para>
         /// </summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
+        {
+            TickCore(cam, cfg);
+            _telemetry = CaptureTelemetry();
+        }
+
+        private void TickCore(CameraProperties cam, TileSelectionConfig cfg)
         {
             if (Selector == null) return;
 

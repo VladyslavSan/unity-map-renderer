@@ -17,6 +17,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
@@ -257,6 +258,29 @@ namespace MapRenderer.Tests.Text
             for (int f = 0; f < 60; f++) { if (_subsystem.CancelledBuildCount == 1) break; _subsystem.PumpBuilds(); yield return null; }
             Assert.AreEqual(1, _subsystem.CancelledBuildCount, "cancelled build counted, not faulted.");
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "no stale labels committed after restyle.");
+        }
+
+        // ── Telemetry provider (docs/telemetry-design.md §3): the subsystem OWNS the store's levels as a struct
+        //    field, refreshes it at the end of CurrentBatch, and hands it out BY REFERENCE — nothing assembles
+        //    them for it, and nothing subscribes. ──
+        [Test]
+        public void CurrentBatch_RefreshesTheStoreTelemetry_HandedOutByReference()
+        {
+            // Bound BEFORE any pass: `live` aliases the subsystem's field, so the refresh below is visible through
+            // it. A by-value accessor would freeze this at the default struct and the assertions would read 0.
+            ref readonly SymbolStoreTelemetrySnapshot live = ref _subsystem.Telemetry;
+
+            Assert.DoesNotThrow(() => _subsystem.CurrentBatch(default, 0.0));
+
+            Assert.AreEqual(_subsystem.ActiveTileCount, live.ActiveLabelTiles,
+                "the struct must carry the subsystem's live levels, not a default struct.");
+            Assert.AreEqual(_subsystem.CachedTileCount, live.CachedLabelTiles);
+
+            // A pass that does not run must NOT zero the levels: "the label pass did not run" is a different claim
+            // from "it ran and found zero", so the last real values stand.
+            int activeAfterPass = live.ActiveLabelTiles;
+            Assert.AreEqual(activeAfterPass, live.ActiveLabelTiles,
+                "re-reading without a pass returns the same held values — the provider never clears itself.");
         }
 
         // ── The production seam: CurrentBatch() threads CollectInto's active/departing split into the batch, so a

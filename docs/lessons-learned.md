@@ -64,19 +64,32 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `LateUpdate` after every `Update`, so it always sees this frame's input with no `DefaultExecutionOrder`
   fragility, and tiles+labels can't diverge. (2026-07-07, S20.)
 
-- **An Editor Play-mode profile can show TWO `PlayerLoop`s and two render loops per captured frame — take perf
-  verdicts from a Development standalone build, not the Editor.** While profiling the symbol-label epic, a
-  "camera moving costs +5 ms" delta appeared that was **absent from the main loop's marker tree entirely**: the
-  main `PlayerLoop` was byte-for-byte the same still vs moving, while a *second* frametime grew. Editor-side
-  repaint (Inspector/Scene view redraw, which scales with mouse activity — i.e. with panning) is the leading
-  explanation. The trap is that repaint and real work are **confounded by the same input**: moving the mouse
-  both pans the camera (real tile churn) and drives Editor repaint, so "it's slower when I move" cannot
-  distinguish them. Two defences: (1) read a delta off the marker TREE, not the frame total — if the sum of
-  your own markers didn't move, the cost isn't yours; (2) instrument a counter that only your code can move
-  (the epic added a mirror-rebuild-rate counter for exactly this — repaint cannot bump it) and check it tracks
-  the delta before believing the delta is yours. A telemetry surface that inflates the thing it measures is
-  worse than no telemetry: the live Inspector panel writing public fields every frame was itself forcing the
-  repaint. See `docs/telemetry-design.md` §1.3 and `docs/symbol-label-perf-design.md` §10.4. (2026-07-25.)
+- **An UNMARKED hot spot looks exactly like an environment artifact — check that the span is marked at all
+  before blaming the Editor.** While profiling the symbol-label epic, a "camera moving costs +5 ms" delta
+  appeared that was **absent from the main loop's marker tree entirely**: the main `PlayerLoop` was
+  byte-for-byte the same still vs moving, while a *second* frametime grew. That was first written up here as
+  Editor-side repaint (Inspector/Scene-view redraw scales with mouse activity, i.e. with panning), which is a
+  tempting fit because repaint and real work are **confounded by the same input** — moving the mouse both pans
+  the camera and drives repaint.
+
+  **It was wrong.** The delta was real, unmarked main-thread work: the all-or-nothing mirror rebuild, which
+  runs on virtually every frame under motion because the memo is structurally dead there. Bursting it closed
+  the gap (13 ms vs 19 ms still-vs-moving became ~identical) — an Editor repaint artifact would not have been
+  fixed by a Burst job. It was invisible in the marker tree because **the hot spot had no marker yet**;
+  `Symbol.BatchBuild` was added afterwards, precisely to surface it.
+
+  So the defence is the inverse of what this entry used to say. "The sum of my markers didn't move, so the cost
+  isn't mine" is only sound if the suspect code is *instrumented* — otherwise absence from the tree is evidence
+  of a missing marker, not of innocence. Mark the span, re-profile, and only then reach for the environment.
+  The second defence stands unchanged: instrument a counter only your code can move (the epic's
+  mirror-rebuild-rate counter — repaint cannot bump it) and check it tracks the delta.
+
+  Two things from the original entry survive: an Editor Play-mode capture really can show two `PlayerLoop`s and
+  two render loops per frame, so take perf verdicts from a Development standalone build — as a **capture
+  caveat**, not as an explanation for any particular delta. And a telemetry surface that inflates the thing it
+  measures is worse than no telemetry: the live Inspector panel writing public fields every frame was itself
+  forcing repaint, which is why the panel is now off by default. See `docs/telemetry-design.md` §1.3 and
+  `docs/symbol-label-perf-design.md` §10.4. (2026-07-25, corrected 2026-07-27.)
 
 ## DOTS / Entities Graphics
 

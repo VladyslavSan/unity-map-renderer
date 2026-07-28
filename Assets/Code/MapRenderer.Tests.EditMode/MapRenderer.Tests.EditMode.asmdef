@@ -14,6 +14,7 @@
         "Unity.Entities.Graphics",
         "Unity.Transforms",
         "Unity.Mathematics.Extensions",
+        "Unity.Profiling.Core",
         "UnityEngine.TestRunner",
         "UnityEditor.TestRunner",
         "UniTask"

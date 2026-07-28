@@ -16,6 +16,7 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Text.Placement;
@@ -260,6 +261,28 @@ namespace MapRenderer.Unity.Text
         /// <summary>Cached (out-of-cover, kept-warm) label-tile count — telemetry (the labels held so a
         /// prepared-cache hit re-shows them without a re-fetch).</summary>
         public int CachedTileCount => _store.CachedTileCount;
+
+        /// <summary>
+        /// This provider's own levels, owned as a field and handed out BY REFERENCE (no copy, no boxing) —
+        /// refreshed by the type that owns them at the end of <see cref="CurrentBatch"/>, which is where the last
+        /// of them (<see cref="LastTileCoverageCulledCount"/>) is decided. <c>docs/telemetry-design.md</c> §3.
+        ///
+        /// <para>A frame with no symbol layers never reaches <see cref="CurrentBatch"/>, so it does not refresh and
+        /// the struct keeps its last real values. Deliberate: the provider does not zero itself, because "the label
+        /// pass did not run" is not the same claim as "it ran and found zero", and neither consumer clears on a
+        /// missing update either (the counters hold their last value too).</para>
+        /// </summary>
+        internal ref readonly SymbolStoreTelemetrySnapshot Telemetry => ref _telemetry;
+
+        private SymbolStoreTelemetrySnapshot _telemetry;
+
+        private void RefreshTelemetry() =>
+            _telemetry = new SymbolStoreTelemetrySnapshot
+            {
+                ActiveLabelTiles      = ActiveTileCount,
+                CachedLabelTiles      = CachedTileCount,
+                CoverageDroppedLabels = LastTileCoverageCulledCount,
+            };
 
         /// <summary>Departing (left cover, still fading out within the grace window) label-tile count — telemetry.</summary>
         public int DepartingTileCount => _store.DepartingTileCount;
@@ -774,6 +797,8 @@ namespace MapRenderer.Unity.Text
             using (PmBatchSoA.Auto())
                 _gatherPlan.Build(_frontResult.BlockId, _frontResult.LocalIndex, _frontResult.Output,
                     _frontResult.IsDeparting, _planDecision, _frontResult.OrderedBlocks, _frontSetVersion);
+
+            RefreshTelemetry();   // the store's levels are final for this frame
             return _gatherPlan;
         }
 

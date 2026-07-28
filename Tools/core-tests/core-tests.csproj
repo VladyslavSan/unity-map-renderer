@@ -89,7 +89,12 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/FrustumTileSelector.cs" />
     <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileTelemetrySnapshot.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolStoreTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/View/LabelPlacementTelemetrySnapshot.cs" />
+    <!-- The three carriers above are all the telemetry Core holds: plain init-only structs with no logic. The
+         publish channel that used to live here (and its shared-verbatim tests) is gone — providers now own their
+         snapshot as a field and hand it out by ref, so the behaviour to test sits with the providers in
+         MapRenderer.Unity and is covered by the EditMode runner instead. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileCoverStats.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileLodStrategy.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/FarPlanePolicy.cs" />

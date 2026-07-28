@@ -4,15 +4,21 @@ using MapRenderer.Core.View;
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// S85: a dev/debug readout surface for <see cref="MapView.CaptureTelemetry"/> — mirrors
-    /// <see cref="CameraControlPanel"/>'s shape (serialized read-only display fields, overwritten every
-    /// frame). Reports only; never a control knob (decision 8) — no field here is ever read back into the
-    /// map.
+    /// S85: a dev/debug readout surface for the map's telemetry — mirrors <see cref="CameraControlPanel"/>'s
+    /// shape (serialized read-only display fields, overwritten every frame). Reports only; never a control
+    /// knob (decision 8) — no field here is ever read back into the map.
+    ///
+    /// <para><b>A telemetry CONSUMER, and off by default</b> (<c>docs/telemetry-design.md</c>): it PULLS each
+    /// provider's levels while enabled and does not <c>Update</c> at all while disabled, so a disabled panel
+    /// costs the frame nothing. That matters because writing these live public fields forces an Editor repaint
+    /// every frame, which is exactly the cost that confounded a real measurement (§1.3). Enable it when you want
+    /// the readout; leave it off while profiling.</para>
     ///
     /// <para><b>Play-mode only:</b> <see cref="MapView"/> is constructed only on the runtime
-    /// <c>Bootstrapper.Wire</c>/<c>Start</c> path, so in edit mode <see cref="MapViewComponent.Camera"/> is
-    /// null. <see cref="Update"/> null-guards <see cref="Map"/>/<see cref="MapViewComponent.Camera"/> and
-    /// no-ops cleanly when unwired (the same guard <see cref="CameraControlPanel"/> uses).</para>
+    /// <c>Bootstrapper.Wire</c>/<c>Start</c> path, so in edit mode there is nothing to read yet.
+    /// <see cref="Pull"/> runs per frame and no-ops cleanly until the view exists — the same guard
+    /// <see cref="CameraControlPanel"/> uses. Nothing has to notice that <c>SetCamera</c> replaced the view,
+    /// because a pull reads whatever <c>Map.View</c> is at that moment.</para>
     /// </summary>
     public sealed class MapTelemetryPanel : MonoBehaviour
     {
@@ -97,7 +103,7 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Cumulative LRU evictions (an entry destroyed because the byte budget or count cap was exceeded).")]
         public int PreparedCacheEvictions;
 
-        [Header("S105: Symbol labels (live — overwritten each frame)")]
+        [Header("S105: Symbol labels — STORE (published by SymbolLabelSubsystem)")]
         [Tooltip("Active (in-cover) label-tile count — tiles whose labels feed this frame's placement pass.")]
         public int SymbolActiveLabelTiles;
 
@@ -105,16 +111,17 @@ namespace MapRenderer.Unity.Rendering.Map
                  "the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.")]
         public int SymbolCachedLabelTiles;
 
+        [Tooltip("§1.5 tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
+                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune LabelTileCoverageCull.")]
+        public int SymbolCoverageDroppedLabels;
+
+        [Header("S105: Symbol labels — PLACEMENT (published by LabelPlacementSystem)")]
         [Tooltip("Labels fed into the last placement Tick (before projection cull) — sum over active tiles.")]
         public int SymbolInputLabelCount;
 
         [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Tick (never projected/" +
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulledLabels;
-
-        [Tooltip("§1.5 tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
-                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune LabelTileCoverageCull.")]
-        public int SymbolCoverageDroppedLabels;
 
         [Tooltip("§1.5 companion: labels whose tile just crossed below coverage and finished fading out this " +
                  "Tick (they faded, not popped) — the transient tail of the coverage drop.")]
@@ -150,20 +157,33 @@ namespace MapRenderer.Unity.Rendering.Map
         private double _rebuildWindowStartTime = double.NegativeInfinity;
         private int    _rebuildWindowStartCount;
 
-        private void Update() => Tick();
+        private void Update() => Pull();
 
         /// <summary>
-        /// One readout refresh. <c>internal</c> so an EditMode test can drive it deterministically (the
-        /// MonoBehaviour game loop does not run under the EditMode test runner). Production calls it from
-        /// <see cref="Update"/>; it is not part of the public surface.
+        /// Copies the live <see cref="MapView"/>'s levels into this component's Inspector fields — the whole of
+        /// what the panel does. <c>internal</c> so an EditMode test can drive it deterministically; the
+        /// MonoBehaviour game loop does not run under the EditMode runner.
+        ///
+        /// <para>Nothing is subscribed or cached: the panel reads each provider's struct by reference on the frame
+        /// it needs it, so there is no attach/detach to keep symmetric and no staleness when <c>SetCamera</c>
+        /// replaces the view wholesale. A DISABLED panel does not <c>Update</c>, which is the entire reason a panel
+        /// nobody is looking at costs nothing.</para>
         /// </summary>
-        internal void Tick()
+        internal void Pull()
         {
-            // Play-mode only: null-guard until the bootstrapper wires the camera (edit mode has no MapCamera).
+            // Play-mode only: no view (or no camera wired yet) means there is nothing to read.
             if (Map == null || Map.Camera == null) return;
 
-            TileTelemetrySnapshot snap = Map.View.CaptureTelemetry();
+            MapView live = Map.View;
 
+            // Straight off each provider — `in` is what keeps the ref-return copy-free all the way to the writes.
+            OnTileTelemetry(in live.TileManager.Telemetry);
+            OnSymbolStoreTelemetry(in live.Symbols.Telemetry);
+            OnLabelPlacementTelemetry(in live.Labels.Telemetry);
+        }
+
+        private void OnTileTelemetry(in TileTelemetrySnapshot snap)
+        {
             VisibleTileCount       = snap.VisibleTileCount;
             CoverColumns           = snap.CoverColumns;
             CoverRows              = snap.CoverRows;
@@ -194,20 +214,26 @@ namespace MapRenderer.Unity.Rendering.Map
             PreparedCacheFillPercent = snap.PreparedCacheByteBudget > 0
                 ? (double)snap.PreparedCacheBytesHeld / snap.PreparedCacheByteBudget * 100.0
                 : 0.0;
+        }
 
-            SymbolTelemetrySnapshot sym = Map.View.CaptureSymbolTelemetry();
-            SymbolActiveLabelTiles    = sym.ActiveLabelTiles;
-            SymbolCachedLabelTiles    = sym.CachedLabelTiles;
-            SymbolInputLabelCount     = sym.InputLabelCount;
-            SymbolDistanceCulledLabels = sym.DistanceCulledLabels;
-            SymbolCoverageDroppedLabels = sym.CoverageDroppedLabels;
-            SymbolCoverageFadingLabels = sym.CoverageFadingLabels;
-            SymbolCollisionCandidates = sym.CollisionCandidateCount;
-            SymbolCollisionSurvivors  = sym.CollisionSurvivorCount;
-            SymbolPlacedQuads         = sym.PlacedQuadCount;
-            SymbolLiveFadeRecords     = sym.LiveFadeRecordCount;
-            SymbolMirrorRebuilds      = sym.MirrorRebuildCount;
-            SampleMirrorRebuildRate(sym.MirrorRebuildCount);
+        private void OnSymbolStoreTelemetry(in SymbolStoreTelemetrySnapshot store)
+        {
+            SymbolActiveLabelTiles      = store.ActiveLabelTiles;
+            SymbolCachedLabelTiles      = store.CachedLabelTiles;
+            SymbolCoverageDroppedLabels = store.CoverageDroppedLabels;
+        }
+
+        private void OnLabelPlacementTelemetry(in LabelPlacementTelemetrySnapshot placement)
+        {
+            SymbolInputLabelCount      = placement.InputLabelCount;
+            SymbolDistanceCulledLabels = placement.DistanceCulledLabels;
+            SymbolCoverageFadingLabels = placement.CoverageFadingLabels;
+            SymbolCollisionCandidates  = placement.CollisionCandidateCount;
+            SymbolCollisionSurvivors   = placement.CollisionSurvivorCount;
+            SymbolPlacedQuads          = placement.PlacedQuadCount;
+            SymbolLiveFadeRecords      = placement.LiveFadeRecordCount;
+            SymbolMirrorRebuilds       = placement.MirrorRebuildCount;
+            SampleMirrorRebuildRate(placement.MirrorRebuildCount);
         }
 
         // Publish the rebuild rate once per RebuildRateWindowSeconds. The first call only opens the window (no

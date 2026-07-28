@@ -402,10 +402,10 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── MapTelemetryPanel forwards the live snapshot ──────────────────────────────────────────
+        // ── MapTelemetryPanel pulls each provider's telemetry ─────────────────────────────────────
 
         [Test]
-        public void MapTelemetryPanel_Tick_PopulatesFieldsFromLiveTelemetry()
+        public void MapTelemetryPanel_Pull_PopulatesFieldsFromProviderTelemetry()
         {
             var src  = TestDataSource.FromBytes(FixtureBytes());
             var go   = new GameObject("MapView_S85_Panel");
@@ -424,7 +424,8 @@ namespace MapRenderer.Tests
                 panelGo = new GameObject("S85_TelemetryPanel");
                 var panel = panelGo.AddComponent<MapTelemetryPanel>();
                 panel.Map = view;
-                panel.Tick();
+                view.LateUpdate();   // the providers refresh their own structs during the frame
+                panel.Pull();        // what the panel's Update does; the EditMode runner has no game loop
 
                 var snap = view.CaptureTelemetry();
                 Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
@@ -455,18 +456,151 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void MapTelemetryPanel_Tick_NoOpsCleanly_WhenUnwired()
+        public void MapTelemetryPanel_Pull_NoOpsCleanly_WhenUnwired()
         {
             var panelGo = new GameObject("S85_TelemetryPanel_Unwired");
             try
             {
                 var panel = panelGo.AddComponent<MapTelemetryPanel>();
                 panel.Map = null;
-                Assert.DoesNotThrow(() => panel.Tick());
+                Assert.DoesNotThrow(() => panel.Pull());
             }
             finally
             {
                 Object.DestroyImmediate(panelGo);
+            }
+        }
+
+        /// <summary>
+        /// docs/telemetry-design.md §2 under the pull model: a panel that is never pulled is never written — which
+        /// is exactly a DISABLED panel, because a disabled MonoBehaviour gets no <c>Update</c>. Pulling once fills
+        /// it (the positive control: without it this would also pass if the pull were simply broken), and a panel
+        /// whose reference is cleared stops updating again.
+        ///
+        /// <para>Note what the pull model makes this test STRONGER at: the old subscription version could only
+        /// assert on <c>HasSubscribers</c> — the state the early-out read — and admitted it could not distinguish
+        /// "did not capture" from "captured and told nobody". Here the panel's own fields ARE the evidence: frames
+        /// pass, the providers refresh, and the panel stays zero because nothing read it.</para>
+        /// </summary>
+        [Test]
+        public void MapTelemetryPanel_NeverPulled_IsNeverWritten_AndPullingFillsIt()
+        {
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_Telemetry_NeverPulled");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            GameObject panelGo = null;
+            try
+            {
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
+                view.WithTestCamera();
+                view.Config.MaxConsumesPerTick   = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+                PumpUntilSettled(view);
+
+                Assert.Greater(view.CaptureTelemetry().VisibleTileCount, 0,
+                    "positive control: there IS a non-zero level to read, so a zero below means 'not written'.");
+
+                panelGo = new GameObject("TelemetryPanel_NeverPulled");
+                var panel = panelGo.AddComponent<MapTelemetryPanel>();
+                panel.Map = view;   // wired, but never pulled — exactly a DISABLED panel's state
+
+                for (int i = 0; i < 8; i++) view.LateUpdate();
+
+                Assert.AreEqual(0, panel.VisibleTileCount,
+                    "eight frames of live providers must leave an unpulled panel untouched — wiring the Inspector " +
+                    "reference is not what makes it cost anything; Update is.");
+                Assert.AreEqual(0, panel.LoadedTileCount);
+                Assert.AreEqual(0, panel.SymbolActiveLabelTiles);
+
+                panel.Pull();
+
+                Assert.AreEqual(view.CaptureTelemetry().VisibleTileCount, panel.VisibleTileCount,
+                    "positive control: one pull fills the panel from the provider's live struct.");
+                Assert.Greater(panel.VisibleTileCount, 0);
+
+                // Clearing the reference is what a panel switched off mid-session looks like to Pull(). Zeroing the
+                // mirror fields by hand first is what gives this teeth: a Pull that ignored the null Map would
+                // write them straight back to the non-zero values above.
+                panel.Map = null;
+                panel.VisibleTileCount = 0;
+                panel.LoadedTileCount  = 0;
+
+                for (int i = 0; i < 4; i++) { view.LateUpdate(); panel.Pull(); }
+
+                Assert.AreEqual(0, panel.VisibleTileCount,
+                    "an unwired panel must stay unwritten even while its Update keeps calling Pull.");
+                Assert.AreEqual(0, panel.LoadedTileCount);
+            }
+            finally
+            {
+                if (panelGo != null) Object.DestroyImmediate(panelGo);
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        // ── Each owner publishes its own telemetry (docs/telemetry-design.md §3) ──────────────────
+        //
+        // The two LABEL providers are tested where they are actually driven — SymbolLabelSubsystemPumpTests
+        // and LabelFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
+        // test can reach CurrentBatch / Labels.Tick at all (see the design doc's §6 note).
+
+        /// <summary>
+        /// A CLEAN tick must not blank the readout. <c>TileManager.Tick</c> returns early when the cover is
+        /// unchanged, so a refresh reached from inside that path would leave the levels reading zero exactly when
+        /// the camera goes still — the state you stare at longest. This is why the refresh sits in a shell around
+        /// <c>TickCore</c> rather than at the end of the work.
+        ///
+        /// <para><b>Weaker than the push-model test it replaces, deliberately, and here is exactly how.</b> The old
+        /// version counted publish CALLBACKS, so it could assert "one publish per tick, including the early-return
+        /// path". A pull has no callback to count, and no captured value can be perturbed from a test without adding
+        /// production surface the no-test-only-members rule forbids — so "the refresh ran" is no longer directly
+        /// observable. What survives IS falsifiable: a clean tick that refreshed from the early-return path would
+        /// produce zeros, and the loop below would fail. "The refresh runs at all" is now guaranteed structurally
+        /// instead — it is one line in <c>Tick</c>, outside <c>TickCore</c>, where the early return cannot reach it.
+        /// Reinstating a per-refresh stamp on the snapshot would make it observable again.</para>
+        /// </summary>
+        [Test]
+        public void TileTelemetry_SurvivesACleanTick_WithoutBlankingTheLevels()
+        {
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_Telemetry_CleanTick");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            try
+            {
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
+                view.WithTestCamera();
+                view.Config.MaxConsumesPerTick   = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.AllTilesSettled(), "the camera must be still and the cover clean before measuring.");
+
+                // Bound by reference: this aliases the provider's own field, so every clean tick below is observed
+                // through the same storage the production readers use.
+                ref readonly TileTelemetrySnapshot live = ref view.View.TileManager.Telemetry;
+
+                int settledVisible = view.CaptureTelemetry().VisibleTileCount;
+                Assert.Greater(settledVisible, 0,
+                    "positive control: the cover is non-empty, so a zero below is a blanked readout, not an empty map.");
+
+                // Nothing moves: no camera change, no config change, so every one of these is a clean tick.
+                for (int i = 0; i < 8; i++)
+                {
+                    view.LateUpdate();
+
+                    Assert.AreEqual(settledVisible, live.VisibleTileCount,
+                        $"clean tick {i} blanked or changed the cover level — a refresh reached from TickCore's " +
+                        "early-return path is how that happens, and it is a readout that dies when the map stills.");
+                }
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
             }
         }
 
@@ -511,6 +645,58 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// The PUBLISH path must be allocation-free too — and this is the boxing tooth of
+        /// docs/telemetry-design.md §6: the provider→reader path must stay copy-free and unboxed. Returning a
+        /// snapshot by value, or erasing one to <c>object</c> / a non-generic interface anywhere on the path,
+        /// shows up here as a per-frame allocation.
+        /// </summary>
+        [Test]
+        public void PullTelemetry_IntoAPanel_IsAllocationFree_AcrossNFrames()
+        {
+            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var go   = new GameObject("MapView_Telemetry_PublishAlloc");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract
+            GameObject panelGo = null;
+            try
+            {
+                view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2;
+                view.WithTestCamera();
+                view.Config.MaxConsumesPerTick   = 64;
+                view.Config.MaxMeshBuildsPerTick = 64;
+
+                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: MinimalStyle());
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.AllTilesSettled(), "all tiles must settle before measuring steady state.");
+
+                panelGo = new GameObject("TelemetryPanel_PublishAlloc");
+                var panel = panelGo.AddComponent<MapTelemetryPanel>();
+                panel.Map = view;
+
+                // Prime the reused capture scratch, and prove the pull actually lands before measuring — otherwise
+                // this would be an allocation test over a read that never happens.
+                view.LateUpdate();
+                panel.Pull();
+                Assert.Greater(panel.VisibleTileCount, 0, "positive control: the panel must be reading real levels.");
+
+                Assert.That(() =>
+                {
+                    for (int i = 0; i < 64; i++) { view.LateUpdate(); panel.Pull(); }
+                },
+                Is.Not.AllocatingGCMemory(),
+                "each provider's refresh + the ref-return read + the panel's field writes must not allocate per " +
+                "frame. A by-value accessor, a boxed snapshot (erased to object / a non-generic interface), or a " +
+                "per-frame closure fails this.");
+            }
+            finally
+            {
+                if (panelGo != null) Object.DestroyImmediate(panelGo);
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }

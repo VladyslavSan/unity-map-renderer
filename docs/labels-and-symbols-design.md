@@ -256,7 +256,7 @@ correction over a first (pop) cut of this stage; matches the rest of the label s
 **Deferred / follow-ups:** a green/red survived-vs-culled debug overlay (tune the threshold by eye);
 tilt-scaling the threshold; explicit hysteresis *on the threshold itself* (distinct from the fade grace);
 culling ahead of the A-3 dedup (would change dedup winners — see above). Telemetry is surfaced through
-`SymbolTelemetrySnapshot.CoverageDroppedLabels` / `CoverageFadingLabels` → the `MapTelemetryPanel` (beside the
+`SymbolStoreTelemetrySnapshot.CoverageDroppedLabels` / `LabelPlacementTelemetrySnapshot.CoverageFadingLabels` → the `MapTelemetryPanel` (beside the
 distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
 viewport are single shared definitions (`LabelPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
 read by both `CurrentBatch` and `Tick`.

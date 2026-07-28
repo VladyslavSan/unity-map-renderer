@@ -36,6 +36,7 @@ Trailers (see below)
 | `camera` | camera model + Unity camera binding, gestures, framing |
 | `shaders` | HLSL / URP materials |
 | `projection` | Web-Mercator / coordinate math |
+| `build` | player-build tooling: `Tools/build.sh`, `Assets/Editor/BuildScript.cs`, build settings |
 | `backlog` | roadmap & planning docs (e.g. the MapLibre parity spec) |
 | `docs` | documentation |
 

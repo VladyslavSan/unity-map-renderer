@@ -848,7 +848,7 @@ precondition (`LastCandidateCount == 2` while `LastQuadCount == 1`, i.e. the los
 **stability across further ticks**, which rejects a periodic-clear implementation that a single sample accepts.
 RED-verified against the real defect (unconditional store).
 
-**Telemetry.** `SymbolLiveFadeRecords` (`SymbolTelemetrySnapshot.LiveFadeRecordCount` → `MapTelemetryPanel`) —
+**Telemetry.** `SymbolLiveFadeRecords` (`LabelPlacementTelemetrySnapshot.LiveFadeRecordCount` → `MapTelemetryPanel`) —
 genuine production instrumentation, not a test seam: it is the exact number whose absence hid this, and it sits
 next to `SymbolCollisionCandidates` so the failure mode is legible at a glance (if it tracks candidates rather
 than placed quads, invisible identities are being retained again).
