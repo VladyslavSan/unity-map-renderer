@@ -14,5 +14,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
         public static readonly int FillTranslate       = Shader.PropertyToID(PropertyNames.FillTranslate);
         public static readonly int FillTranslateAnchor = Shader.PropertyToID(PropertyNames.FillTranslateAnchor);
         public static readonly int FillPattern         = Shader.PropertyToID(PropertyNames.FillPattern);
+        public static readonly int PatternRect         = Shader.PropertyToID(PropertyNames.PatternRect);
+        public static readonly int PatternScale        = Shader.PropertyToID(PropertyNames.PatternScale);
     }
 }

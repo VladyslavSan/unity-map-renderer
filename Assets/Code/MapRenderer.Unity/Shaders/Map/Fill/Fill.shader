@@ -116,12 +116,19 @@ Shader "Map/Fill"
         // _FillAntialias: 1=AA on (default), 0=off.
         // _FillTranslate: xy = pixel offset (world/viewport per _FillTranslateAnchor). zw unused.
         // _FillTranslateAnchor: 0=map world-space, 1=viewport screen-space.
-        // _FillPattern: sprite atlas index or flag for pattern fills. 0=no pattern (default).
+        // _FillPattern: 0=solid, the fill-color path (default); 1=this is a fill-pattern layer.
         _FillOutlineColor ("Fill Outline Color", Color) = (0, 0, 0, 1)
         _FillAntialias ("Fill Antialias", Float) = 1.0
         _FillTranslate ("Fill Translate (xy px)", Vector) = (0, 0, 0, 0)
         _FillTranslateAnchor ("Fill Translate Anchor", Float) = 0.0
         _FillPattern ("Fill Pattern", Float) = 0.0
+
+        // fill-pattern sampling. _PatternRect defaults to a ZERO-AREA rect, which is exactly the
+        // "declared but unresolved" state — so a pattern layer clips until its sheet arrives rather
+        // than painting fill-color's opaque-black default.
+        [NoScaleOffset] _PatternMap ("Fill Pattern Sheet", 2D) = "white" {}
+        _PatternRect ("Fill Pattern Rect (xy=px origin, zw=px size)", Vector) = (0, 0, 0, 0)
+        _PatternScale ("Fill Pattern Repeats Per Tile", Vector) = (1, 1, 0, 0)
     }
 
     SubShader

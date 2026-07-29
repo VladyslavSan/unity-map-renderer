@@ -20,6 +20,7 @@
 // self-contained; Common/ holds only LitInput.Template.hlsl; files renamed to <Layer>_<Pass>).
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -360,6 +361,89 @@ namespace MapRenderer.Tests
                 Assert.That(text, Does.Not.Contain("Common/"),
                     $"{Path.GetFileName(file)} must not reach into Common/ (S66: each layer is self-contained).");
             }
+        }
+
+        // ── Verified duplication of shared blocks ─────────────────────────────
+
+        /// <summary>
+        /// S66 forbids a layer reaching into Common/, so genuinely shared HLSL is DUPLICATED per layer. That
+        /// leaves drift as the failure mode — and it had already happened: the px→world measurement was
+        /// copied from the line into the fill, then the fill's copy was fixed (per-axis, anchor-aware) while
+        /// the line's was not, which is how line-translate ended up applying a screen-pixel offset as raw
+        /// metres. See docs/line-translate-parity-design.md.
+        ///
+        /// <para>So the duplication is verified instead of trusted: each copy is bracketed by
+        /// MAP-SHARED-BEGIN/END sentinels, and the text between them must match character for character.
+        /// Everything outside the sentinels — the per-layer comment explaining the arrangement — is free to
+        /// differ.</para>
+        ///
+        /// <para>Removing the block from BOTH files is the deliberate opt-out (a visible, reviewable act).
+        /// Removing it from only one fails here, so a half-finished divergence cannot pass as intentional.</para>
+        /// </summary>
+        [Test]
+        public void SharedShaderBlocks_AreIdenticalAcrossLayers()
+        {
+            (string dir, string file)[] carriers =
+            {
+                (MapFillDir, "Fill_VertexModify.hlsl"),
+                (MapLineDir, "Line_VertexExtrude.hlsl"),
+            };
+            const string blockName = "PixelsToWorld";
+
+            var found = new List<(string file, string body)>();
+            var missing = new List<string>();
+
+            foreach (var (dir, file) in carriers)
+            {
+                string text = File.ReadAllText(Path.Combine(dir, file), Encoding.UTF8);
+                if (TryExtractSharedBlock(text, blockName, file, out string body))
+                    found.Add((file, body));
+                else
+                    missing.Add(file);
+            }
+
+            if (found.Count == 0)
+                Assert.Ignore(
+                    $"Shared block '{blockName}' is absent from every carrier — treated as the deliberate " +
+                    "opt-out (the layers have diverged on purpose). Delete this test's entry if that is permanent.");
+
+            Assert.That(missing, Is.Empty,
+                $"Shared block '{blockName}' is present in {string.Join(", ", found.ConvertAll(f => f.file))} " +
+                $"but missing from {string.Join(", ", missing)}. A one-sided removal is exactly the drift this " +
+                "test exists to catch: either mirror the block back, or remove it from every carrier to " +
+                "deliberately un-share it.");
+
+            for (int i = 1; i < found.Count; i++)
+                Assert.That(found[i].body, Is.EqualTo(found[0].body),
+                    $"Shared block '{blockName}' has DRIFTED between {found[0].file} and {found[i].file}. " +
+                    "S66 keeps each layer self-contained, so this code is duplicated on purpose — but the " +
+                    "copies must stay character-identical. Paste the edited version into every carrier.");
+        }
+
+        /// <summary>Pulls the text strictly between the sentinel lines. Returns false when the block is
+        /// absent; throws when it is malformed (one sentinel without the other, or reversed), because that
+        /// is a broken marker rather than an intentional opt-out.</summary>
+        private static bool TryExtractSharedBlock(string text, string blockName, string file, out string body)
+        {
+            string begin = $"// MAP-SHARED-BEGIN: {blockName}";
+            string end   = $"// MAP-SHARED-END: {blockName}";
+
+            int b = text.IndexOf(begin, StringComparison.Ordinal);
+            int e = text.IndexOf(end, StringComparison.Ordinal);
+
+            body = null;
+            if (b < 0 && e < 0) return false;
+
+            Assert.That(b, Is.GreaterThanOrEqualTo(0),
+                $"{file}: found '{end}' with no matching '{begin}'.");
+            Assert.That(e, Is.GreaterThan(b),
+                $"{file}: '{end}' must appear after '{begin}'.");
+
+            // Normalize line endings so a CRLF/LF difference between the copies is not reported as drift —
+            // that would be a false positive about whitespace, not about the code.
+            body = text.Substring(b + begin.Length, e - (b + begin.Length))
+                       .Replace("\r\n", "\n");
+            return true;
         }
 
         // ── MapEdgeAA deleted ─────────────────────────────────────────────────

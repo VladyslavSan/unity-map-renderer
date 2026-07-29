@@ -365,12 +365,19 @@ namespace MapRenderer.Unity.Text
                     indices.Add(index);
                 }
             }
-            if (_layersBySource.Count == 0) return; // no symbol layers — stay idle (demo seam still works)
-
             // I5b: kick off the sprite-sheet fetch (fire-and-forget, cancelled via THIS style's _buildCts
             // scope like every other in-flight build). Independent of the `glyphs` URL check below — an
             // icon-only style has no `glyphs` but still needs its sprite sheet, so this must not be gated on it.
+            //
+            // P2: this now runs BEFORE the no-symbol-layers early return, not after. The sheet is no longer
+            // an icons-only resource — fill-pattern layers resolve against the same sheet — so a style with
+            // pattern fills and NO symbol layers must still fetch it. Left below the return, those layers
+            // would never resolve and would clip forever. The fetch never depended on _layersBySource, so
+            // hoisting it changes nothing else; _buildCts is already this style's fresh scope by here, so the
+            // cancellation contract is untouched.
             FetchSpriteSheetAsync(style, _buildCts.Token).Forget();
+
+            if (_layersBySource.Count == 0) return; // no symbol layers — stay idle (demo seam still works)
 
             // D11/E2: per-layer materials (SymbolText clone + text-halo-* bind) are no longer built here —
             // they live on each SymbolRenderLayer, built by RenderLayerSet.Build from this SAME symbolLayers

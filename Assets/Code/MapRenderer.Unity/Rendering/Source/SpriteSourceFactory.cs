@@ -14,7 +14,13 @@ namespace MapRenderer.Unity.Rendering.Source
     /// </summary>
     internal static class SpriteSourceFactory
     {
-        private static bool _warnedMissingUrl;
+        // Process-wide "warn once" latch. INTERNAL rather than private so a test can clear it in setup:
+        // P2 made this reachable from far more styles (the sprite fetch is no longer gated on a style having
+        // symbol layers — fill-pattern resolves against the same sheet), so whether the latch is still unset
+        // by the time any one test runs now depends on test ORDER. Broadening private → internal is the
+        // conventions' sanctioned test footprint; the alternative was a test that passes or fails according
+        // to what ran before it.
+        internal static bool WarnedMissingUrl;
 
         /// <summary>
         /// Builds the sprite source for <paramref name="style"/>'s root <c>sprite</c> URL, or <c>null</c>
@@ -25,9 +31,9 @@ namespace MapRenderer.Unity.Rendering.Source
             string spriteUrl = style?.Sprite;
             if (string.IsNullOrEmpty(spriteUrl))
             {
-                if (!_warnedMissingUrl)
+                if (!WarnedMissingUrl)
                 {
-                    _warnedMissingUrl = true;
+                    WarnedMissingUrl = true;
                     Debug.LogWarning("[SpriteSourceFactory] style has no 'sprite' URL — icons will not render.");
                 }
                 return null;

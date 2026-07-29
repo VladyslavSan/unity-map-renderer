@@ -1023,9 +1023,9 @@ namespace MapRenderer.Tests.Visual
         /// the tile fills the camera equally in both renders. Under per-tile framing, line coverage
         /// scales as (lineWidthPx × metersPerPixel) / tileWidth, which is ~100x larger at zoom=5.
         /// The zoom=5 render should therefore cover FAR MORE pixels than the zoom=1 render.
-        /// This proves S11/S13/S14 (zoom-dependent line width, ZoomStyleApplier wired,
-        /// _MetersPerPixel updated) are intact on the BRG path — falsifiable because a broken
-        /// ApplyZoom or wrong _Width uniform would yield equal (≈ zoom=1) coverage at zoom=5.
+        /// This proves S11/S13/S14 (zoom-dependent line width, ZoomStyleApplier wired, the _Width uniform
+        /// reaching the shader) are intact on the BRG path — falsifiable because a broken ApplyZoom or
+        /// wrong _Width uniform would yield equal (≈ zoom=1) coverage at zoom=5.
         ///
         /// Falls back to Assert.Inconclusive only when GPU context is provably absent.
         /// </summary>
@@ -1241,7 +1241,7 @@ namespace MapRenderer.Tests.Visual
                     "The line-width expression [interpolate, linear, zoom, 1→4px, 5→400px] should " +
                     "produce a 100x wider line at zoom=5 vs zoom=1 in pixel units, translating to " +
                     "~6x more world-space coverage at the same camera framing. " +
-                    "If this fails, ZoomStyleApplier or _MetersPerPixel is not updating on the BRG path " +
+                    "If this fails, ZoomStyleApplier or the _Width uniform is not updating on the BRG path " +
                     "(S11/S13/S14 regression).");
             }
             finally
@@ -1337,8 +1337,9 @@ namespace MapRenderer.Tests.Visual
                         // Entities backend uses GameObjects, so ComputeChildBounds applies — but for
                         // simplicity we use a fixed large orthoSize (tiles are at scene-relative positions).
                         // Render through MapView's OWN camera (production path). A hand-rolled ortho camera is
-                        // an unsupported configuration for the screen-space line width (S104): its scale must
-                        // agree with the _MetersPerPixel the pipeline set, which only MapView's camera does.
+                        // an unsupported configuration for the screen-space line width (S104): the shader
+                        // MEASURES px->world from the live projection matrix and _ScreenParams, so only the
+                        // camera the pipeline actually renders through yields the scale the styling assumed.
                         view.Camera.SyncToCamera();
                         snapEntities.Render(view.Camera.Camera);
                         snapEntities.WritePng("brg-parity-entities.png");

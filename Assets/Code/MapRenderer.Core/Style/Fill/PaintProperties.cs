@@ -63,6 +63,19 @@ namespace MapRenderer.Core.Style.Fill
         /// <summary>The fill-pattern value (sprite name), or null when absent.</summary>
         public string PatternName { get; }
 
+        /// <summary>
+        /// How <see cref="PatternName"/>'s sprite is sized as the map zooms. Defaults to
+        /// <see cref="FillPatternSizing.ScreenRelative"/> — the Style Spec's meaning, and the only thing a
+        /// stock MapLibre style can express. Set to <see cref="FillPatternSizing.WorldAbsolute"/> by the
+        /// <c>x-fill-pattern-metres</c> engine extension.
+        /// </summary>
+        public FillPatternSizing PatternSizing { get; }
+
+        /// <summary>The pattern's TILING PERIOD in world units (Web-Mercator metres) under
+        /// <see cref="FillPatternSizing.WorldAbsolute"/> — the world distance spanned by one full repetition
+        /// of the sprite. 0 otherwise. At a period of 1 the pattern UV advances by 1 per world unit.</summary>
+        public double PatternWorldPeriodMetres { get; }
+
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
         public bool IsInertFallback { get; }
 
@@ -169,6 +182,24 @@ namespace MapRenderer.Core.Style.Fill
             {
                 anyPresent = true;
                 PatternName = patternJson.AsString(null);
+            }
+
+            // x-fill-pattern-metres (ENGINE EXTENSION, not spec): the pattern's tiling period in world
+            // units — the distance one full repetition spans — which switches this layer to world-absolute
+            // sizing. Absent — the normal case, and every stock MapLibre
+            // style — leaves the spec's screen-relative behaviour. A present-but-unusable value (non-numeric,
+            // zero, negative) also falls back rather than throwing, matching this parser's forward-compatible
+            // posture everywhere else: an unreadable extension must never cost you the layer.
+            JsonValue patternPeriodJson = paint?.Get(PropertyNames.FillPatternMetres);
+            if (patternPeriodJson != null)
+            {
+                anyPresent = true;
+                double metres = patternPeriodJson.AsDouble(0.0);
+                if (metres > 0.0)
+                {
+                    PatternSizing          = FillPatternSizing.WorldAbsolute;
+                    PatternWorldPeriodMetres = metres;
+                }
             }
 
             IsInertFallback = !anyPresent;

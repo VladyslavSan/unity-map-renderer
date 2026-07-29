@@ -267,6 +267,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/FillPattern.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/LayoutProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillLayoutTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillPatternTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LayoutProperties.cs" />

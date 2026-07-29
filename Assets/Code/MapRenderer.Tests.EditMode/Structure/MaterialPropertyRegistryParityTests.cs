@@ -5,9 +5,9 @@
 //
 // Validates the four-way set equality:
 //   • sharedCBUFFER (from ShaderProperties/PropertyNames.cs CBUFFER region, 14)
-//   • ShaderProperties/Line/PropertyNames.cs (10 line-only), ShaderProperties/Fill/PropertyNames.cs (5 fill-only)
+//   • ShaderProperties/Line/PropertyNames.cs (10 line-only), ShaderProperties/Fill/PropertyNames.cs (7 fill-only)
 //   • Line_LitInput.hlsl CBUFFER (24 after stripping companions)
-//   • Fill_LitInput.hlsl CBUFFER (19 after stripping companions)
+//   • Fill_LitInput.hlsl CBUFFER (21 after stripping companions)
 //   (line counts dropped by 2 — _MetersPerPixel (S104) + _AaEdgeWidth (line-AA removal) retired)
 //   • Line/Fill DOTS blocks (must equal their respective CBUFFER sets)
 //   • Line.shader / Fill.shader Properties{} blocks (must be supersets of the registry)
@@ -48,12 +48,12 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void FillCbufferCount_IsExactly19()
+        public void FillCbufferCount_IsExactly21()
         {
             var set = ShaderPropertyParser.ParseCbufferMembers(
                 Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
-            Assert.That(set.Count, Is.EqualTo(19),
-                $"Fill_LitInput.hlsl CBUFFER (after companion strip) must have exactly 19 members. " +
+            Assert.That(set.Count, Is.EqualTo(21),
+                $"Fill_LitInput.hlsl CBUFFER (after companion strip) must have exactly 21 members. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
         }
 
@@ -77,12 +77,12 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void FillPropertyNamesCount_IsExactly5()
+        public void FillPropertyNamesCount_IsExactly7()
         {
             var set = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingFillDir, "PropertyNames.cs"));
-            Assert.That(set.Count, Is.EqualTo(5),
-                $"ShaderProperties/Fill/PropertyNames.cs must have exactly 5 const string values. " +
+            Assert.That(set.Count, Is.EqualTo(7),
+                $"ShaderProperties/Fill/PropertyNames.cs must have exactly 7 const string values. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
         }
 

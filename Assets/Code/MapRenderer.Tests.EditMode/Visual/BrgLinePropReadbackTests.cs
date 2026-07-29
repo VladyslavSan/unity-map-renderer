@@ -1,7 +1,7 @@
 // S76 BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
 //
 // Directly constructs a BrgTileRenderer from a line-only RenderLayerSet (no MapView) and asserts that:
-//   1. FloatsPerInstance == 74 and MetadataEntryCount == 31 (exact plan-count tooth).
+//   1. FloatsPerInstance == 82 and MetadataEntryCount == 33 (exact plan-count tooth).
 //   2. _Width packed value == mat.GetFloat(_Width id) == 40 (non-NaN, the direct pack proof).
 //   3. _Opacity SoA float offset == 46 (byte-identical-wire spot check: fill wire layout unchanged).
 //
@@ -81,12 +81,12 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // ── Exact plan-count tooth ────────────────────────────────────────────────────
-                Assert.That(brg.FloatsPerInstance(), Is.EqualTo(74),
-                    "BrgTileRenderer.FloatsPerInstance must be 74 (MapInstanceData: 24 transform + 50 material floats). " +
+                Assert.That(brg.FloatsPerInstance(), Is.EqualTo(82),
+                    "BrgTileRenderer.FloatsPerInstance must be 82 (MapInstanceData: 24 transform + 58 material floats). " +
                     "An incompletely-generated plan (e.g. missing line props) produces a smaller value.");
 
-                Assert.That(brg.MetadataEntryCount(), Is.EqualTo(31),
-                    "BrgTileRenderer.MetadataEntryCount must be 31 (2 transforms + 29 material props). " +
+                Assert.That(brg.MetadataEntryCount(), Is.EqualTo(33),
+                    "BrgTileRenderer.MetadataEntryCount must be 33 (2 transforms + 31 material props). " +
                     "Missing entries mean the BRG batch omits those props from the GPU instancing table.");
 
                 // ── Register and Rebuild ──────────────────────────────────────────────────────

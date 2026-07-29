@@ -102,6 +102,74 @@ namespace MapRenderer.Unity.Rendering.Meshing
             public Vector3 Normal;
         }
 
+        /// <summary>
+        /// Returns <paramref name="features"/> reordered by <c>fill-sort-key</c> ascending, or the SAME
+        /// instance when the layer declares no sort key — the common case, which must stay allocation-free
+        /// and order-identical so every existing snapshot keeps its exact triangle order.
+        ///
+        /// <para>The sort is made STABLE by folding the declared index in as the tiebreak:
+        /// <c>Array.Sort</c> is an introsort and is not stable on its own, and features with equal sort keys
+        /// must keep source order (the spec's implicit ordering). An unevaluable key falls to 0, matching
+        /// <c>TryEvaluate</c>'s contract elsewhere in this builder.</para>
+        /// </summary>
+        private static IReadOnlyList<ITileFeature> OrderBySortKey(
+            IReadOnlyList<ITileFeature> features, Fill.LayoutProperties layout, double zoom)
+        {
+            if (layout == null || layout.SortKeyIsDefault) return features;
+
+            int count = features.Count;
+            var sortKeys      = new float[count];
+            var declaredOrder = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                declaredOrder[i] = i;
+                sortKeys[i] = layout.SortKey.TryEvaluate(zoom, features[i], out float key) ? key : 0f;
+            }
+
+            System.Array.Sort(declaredOrder, (left, right) =>
+            {
+                int byKey = sortKeys[left].CompareTo(sortKeys[right]);
+                return byKey != 0 ? byKey : left.CompareTo(right); // stable: declared order breaks ties
+            });
+
+            var ordered = new ITileFeature[count];
+            for (int i = 0; i < count; i++) ordered[i] = features[declaredOrder[i]];
+            return ordered;
+        }
+
+        /// <summary>
+        /// The tile's span in WORLD UNITS (Web-Mercator metres) at its OWN zoom — not the display zoom.
+        /// This is why the pattern survives overzoom: OpenFreeMap's source stops at z14 while the camera keeps
+        /// going, so a z14 tile is stretched across display zooms 14→18+. Anything derived from the display
+        /// zoom would be up to 16× wrong for those tiles; the tile's own <c>Z</c> is exact for all of them,
+        /// and equally for the coarser far tiles a mixed-zoom cover produces.
+        /// </summary>
+        private static double TileSpanWorldUnits(TileId id)
+            => EarthConstants.EquatorialCircumferenceMetres / math.pow(2.0, id.Z);
+
+        /// <summary>
+        /// Stream 1 for one vertex: its offset from the tile origin in WORLD UNITS, rather than the 0..1 tile
+        /// fraction this used to write.
+        ///
+        /// <para>The change is what makes pattern sizing correct at all. A tile fraction only means something
+        /// once you know the tile's world size, which the per-layer material uniform cannot know — it sees the
+        /// display zoom, and a tile's own zoom differs from it under overzoom and under mixed-zoom cover. In
+        /// world units the shader needs no tile knowledge at all: it multiplies by repeats-per-world-unit,
+        /// which is a function of the display zoom alone.</para>
+        ///
+        /// <para>Precision: values run 0..tileSpan, which is ~2.4 km at z14 — comfortably inside float32
+        /// (~1e-4 there). It degrades toward z0, where a tile spans the world, but a pattern at z0 is far past
+        /// the point of caring.</para>
+        ///
+        /// <para>Non-pattern fills are unaffected: this stream feeds <c>_BaseMap</c>, which is the default
+        /// white texture for every map fill, so its scaling is unobservable.</para>
+        /// </summary>
+        private static Vector2 PatternCoord(double2 tileVertex, double extentInv, double tileSpanWorldUnits)
+        {
+            double perTileUnit = extentInv * tileSpanWorldUnits;
+            return new Vector2((float)(tileVertex.x * perTileUnit), (float)(tileVertex.y * perTileUnit));
+        }
+
         // ── Public API ─────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -124,13 +192,20 @@ namespace MapRenderer.Unity.Rendering.Meshing
             double3                     tileOriginRender,
             out int                     vertexCount,
             out Bounds                  bounds,
-            IProjection                 projection = null) // null ⇒ WebMercator (launch-time config threads this in)
+            IProjection                 projection = null, // null ⇒ WebMercator (launch-time config threads this in)
+            Fill.LayoutProperties       layout     = null) // null ⇒ no fill-sort-key (declared feature order)
         {
             vertexCount = 0;
             bounds      = default;
 
             if (selectedFeatures == null || selectedFeatures.Count == 0)
                 return;
+
+            // fill-sort-key: features draw in ASCENDING key order, so a higher key lands LATER in the index
+            // buffer and therefore ON TOP — this layer's features share one mesh drawn under a
+            // painter's-algorithm ZWrite-Off contract, where triangle order IS draw order for coincident
+            // polygons. Absent key ⇒ no sort at all, keeping the source's declared order byte-for-byte.
+            selectedFeatures = OrderBySortKey(selectedFeatures, layout, zoom);
 
             // The marker string (ProfilerMarkerNames.WriteMeshData) is a telemetry contract asserted by
             // ProfilerMarkerTests + MapViewAsyncMeshBuildTests, which read the same const — rename in one place.
@@ -153,8 +228,21 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 // S13 D2 gamma fix (off main thread): sRGB→linear here. white.linear == white.
                 Color lin = featureColor.linear;
+
+                // P4 — data-driven fill-opacity: bake the per-feature alpha, since one uniform cannot express
+                // a value that varies per feature. Constant/zoom opacity stays on the _Opacity uniform (bound
+                // by MaterialFactory) and is NOT folded in here, or the two would multiply twice; the
+                // data-driven branch is exactly the case MaterialFactory declines to bind. Same split
+                // BindLinePaintToApplier makes for data-driven line-width.
+                //
+                // Alpha is NOT gamma-converted — Color.linear transforms rgb only, and alpha is linear by
+                // definition. Reading it off `lin` would be a silent no-op today but wrong if that changed.
+                float featureAlpha = lin.a;
+                if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
+                    featureAlpha *= opacity;
+
                 geoms.Add(feature.Geometry);
-                featureColors.Add(new Vector4(lin.r, lin.g, lin.b, lin.a));
+                featureColors.Add(new Vector4(lin.r, lin.g, lin.b, featureAlpha));
             }
 
             if (geoms.Count == 0)
@@ -204,6 +292,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 // Phase 3: copy the Burst geometry into the stream views, accumulating the tight AABB.
                 double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
+                double tileSpanWorldUnits = TileSpanWorldUnits(id);
                 float3 bMin      = new float3(float.MaxValue);
                 float3 bMax      = new float3(float.MinValue);
                 for (int i = 0; i < totalVerts; i++)
@@ -222,7 +311,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     };
 
                     double2 tv = buffers.TileVertices[i];
-                    s1[i] = new Vector2((float)(tv.x * extentInv), (float)(tv.y * extentInv));
+                    s1[i] = PatternCoord(tv, extentInv, tileSpanWorldUnits);
                     s2[i] = FlatTangent; // Mercator: constant +X east (globe → subdivided path)
                     s3[i] = featureColors[buffers.VertexFeatureIdx[i]]; // per-feature linear color
                 }
@@ -287,6 +376,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 NativeArray<int> indices = md.GetIndexData<int>();
 
                 double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
+                double tileSpanWorldUnits = TileSpanWorldUnits(id);
                 float3 bMin      = new float3(float.MaxValue);
                 float3 bMax      = new float3(float.MinValue);
                 for (int i = 0; i < n; i++)
@@ -298,7 +388,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     float3 up = (float3)fv.Up;
                     s0[i] = new FillPositionNormal
                         { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
-                    s1[i] = new Vector2((float)(fv.Tile.x * extentInv), (float)(fv.Tile.y * extentInv));
+                    s1[i] = PatternCoord(fv.Tile, extentInv, tileSpanWorldUnits);
                     float3 east = (float3)fv.East;
                     s2[i] = new Vector4(east.x, east.y, east.z, 1f); // w=+1: same TBN handedness as the Mercator path
                     s3[i] = featureColors[fv.Feature];

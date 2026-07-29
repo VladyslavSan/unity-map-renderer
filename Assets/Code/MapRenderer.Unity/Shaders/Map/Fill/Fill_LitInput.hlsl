@@ -63,13 +63,27 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 //                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
 // _FillAntialias  — fill-antialias (S13): 1=AA on (default), 0=off. Used by future MSAA/AA variant.
 // _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
-// _FillPattern    — fill-pattern (S13): sprite atlas index/flag for pattern fills. 0=no pattern.
+// _FillPattern    — fill-pattern: 0 = solid (the fill-color path), 1 = this is a pattern layer.
+// _PatternRect    — xy = sprite top-left in sheet px, zw = sprite size in sheet px. A ZERO-AREA rect
+//                   (zw == 0) means "pattern layer, sprite not resolved" and the fragment clips. That is
+//                   not a sentinel: an unresolvable sprite genuinely has no area. The sheet is fetched
+//                   asynchronously, so every pattern layer starts here and resolves later.
+// _PatternScale   — pattern repeats across one tile edge (xy; a non-square sprite repeats fewer times on
+//                   its longer axis). zw unused; packed as float4 for the same alignment reason as
+//                   _FillTranslate. Tile-space anchored — see docs/fill-parity-design.md §3.2.
 float  _Opacity;
 float4 _FillOutlineColor;
 float4 _FillTranslate;
 float  _FillAntialias;
 float  _FillTranslateAnchor;
 float  _FillPattern;
+float4 _PatternRect;
+float4 _PatternScale;
+// Auto-populated by Unity for the _PatternMap texture property: (1/w, 1/h, w, h). Lives INSIDE
+// UnityPerMaterial like _BaseMap_TexelSize above — a material property declared outside the CBUFFER breaks
+// SRP Batcher compatibility for the whole shader. It is the sheet-size denominator _PatternRect's pixel
+// coordinates normalize against, so no separate sheet-size uniform is needed.
+float4 _PatternMap_TexelSize;
 CBUFFER_END
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
@@ -99,6 +113,8 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _FillAntialias)
     UNITY_DOTS_INSTANCED_PROP(float , _FillTranslateAnchor)
     UNITY_DOTS_INSTANCED_PROP(float , _FillPattern)
+    UNITY_DOTS_INSTANCED_PROP(float4, _PatternRect)
+    UNITY_DOTS_INSTANCED_PROP(float4, _PatternScale)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
 // Cache values in statics to avoid redundant load code per property use (same pattern as
@@ -123,6 +139,8 @@ static float4 unity_DOTS_Sampled_FillTranslate;
 static float  unity_DOTS_Sampled_FillAntialias;
 static float  unity_DOTS_Sampled_FillTranslateAnchor;
 static float  unity_DOTS_Sampled_FillPattern;
+static float4 unity_DOTS_Sampled_PatternRect;
+static float4 unity_DOTS_Sampled_PatternScale;
 
 void SetupDOTSMapLitMaterialPropertyCaches()
 {
@@ -145,6 +163,8 @@ void SetupDOTSMapLitMaterialPropertyCaches()
     unity_DOTS_Sampled_FillAntialias        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillAntialias);
     unity_DOTS_Sampled_FillTranslateAnchor  = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillTranslateAnchor);
     unity_DOTS_Sampled_FillPattern          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillPattern);
+    unity_DOTS_Sampled_PatternRect          = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _PatternRect);
+    unity_DOTS_Sampled_PatternScale         = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _PatternScale);
 }
 
 // Redirect UNITY_SETUP_DOTS_MATERIAL_PROPERTY_CACHES() → our extended function.
@@ -174,6 +194,8 @@ void SetupDOTSMapLitMaterialPropertyCaches()
 #define _FillAntialias          unity_DOTS_Sampled_FillAntialias
 #define _FillTranslateAnchor    unity_DOTS_Sampled_FillTranslateAnchor
 #define _FillPattern            unity_DOTS_Sampled_FillPattern
+#define _PatternRect            unity_DOTS_Sampled_PatternRect
+#define _PatternScale           unity_DOTS_Sampled_PatternScale
 
 #endif // UNITY_DOTS_INSTANCING_ENABLED
 
@@ -186,6 +208,43 @@ TEXTURE2D(_DetailNormalMap);    SAMPLER(sampler_DetailNormalMap);
 TEXTURE2D(_MetallicGlossMap);   SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_SpecGlossMap);       SAMPLER(sampler_SpecGlossMap);
 TEXTURE2D(_ClearCoatMap);       SAMPLER(sampler_ClearCoatMap);
+
+// ── [MAP DELTA] fill-pattern sheet ───────────────────────────────────────────
+// The style's sprite sheet, shared with icons. Its _PatternMap_TexelSize (declared in UnityPerMaterial
+// above, where every material property must live) carries the sheet dimensions.
+TEXTURE2D(_PatternMap);         SAMPLER(sampler_PatternMap);
+
+// Samples the fill-pattern sprite at tile-normalized `uv`, tiling it _PatternScale times across the tile.
+// Returns the sprite texel; `clipped` is true when this is a pattern layer whose sprite did not resolve.
+//
+// Sampled with an EXPLICIT GRADIENT rather than a plain sample. frac() wraps the pattern, and at every wrap
+// seam the implicit derivative jumps by a full repeat — which picks the coarsest mip (a visible seam grid)
+// and, under bilinear filtering, bleeds in whichever neighbouring sprite is packed next door in the sheet.
+// Deriving the gradient from the UNWRAPPED coordinate keeps it continuous across the seam. Same reasoning
+// as resolving line width in screen space instead of trusting interpolation.
+half4 SampleFillPattern(float2 uv, out bool clipped)
+{
+    clipped = false;
+    if (_FillPattern < 0.5)
+        return half4(1.0, 1.0, 1.0, 1.0); // solid layer — identity multiply, the fill-color path
+
+    if (_PatternRect.z <= 0.0 || _PatternRect.w <= 0.0)
+    {
+        // Declared but unresolved: no sheet yet, or a name absent from it. Spec: the layer is NOT painted —
+        // and specifically must not fall back to fill-color, whose default is opaque black.
+        clipped = true;
+        return half4(0.0, 0.0, 0.0, 0.0);
+    }
+
+    float2 sheetSize   = _PatternMap_TexelSize.zw;
+    float2 patternUv   = uv * _PatternScale.xy;
+    float2 spriteUv    = (_PatternRect.xy + frac(patternUv) * _PatternRect.zw) / sheetSize;
+    float2 texelPerUv  = _PatternRect.zw / sheetSize;
+    float2 gradX       = ddx(patternUv) * texelPerUv;
+    float2 gradY       = ddy(patternUv) * texelPerUv;
+
+    return SAMPLE_TEXTURE2D_GRAD(_PatternMap, sampler_PatternMap, spriteUv, gradX, gradY);
+}
 
 #ifdef _SPECULAR_SETUP
     #define SAMPLE_METALLICSPECULAR(uv) SAMPLE_TEXTURE2D(_SpecGlossMap, sampler_SpecGlossMap, uv)

@@ -151,25 +151,32 @@ namespace MapRenderer.Tests.Visual
             Assert.AreEqual(vertexCountAtBuild, mfAfter.sharedMesh.vertexCount,
                 "vertexCount must be unchanged after opacity-only restyle.");
 
-            // Render with opacity=0. Note: in opaque queue, _Opacity=0 drives alpha=0 in surfaceData
-            // but the opaque queue may not produce transparency — we test that the rendered luminance
-            // is at most as bright as the opacity=1 render (it can be equal if alpha isn't blended).
             using var snapTransparent = new SnapshotRenderer(SnapW, SnapH);
             snapTransparent.Render(camera);
             snapTransparent.WritePng("fill-paint-opacity0.png");
 
-            double lumOpaque = SnapshotCoverage.MeanLuminanceOfNonBackground(
+            // STRENGTHENED: this used to assert only "not BRIGHTER at opacity 0" (lum ≤ lum + 0.05), which
+            // passed whether or not opacity did anything — a fill rendering fully solid satisfies it. That
+            // weakness was load-bearing: fill materials were opaque-surface-typed, so URP's
+            // `OutputAlpha(color.a, IsSurfaceTypeTransparent())` forced alpha to 1 and _Opacity had NO visual
+            // effect. The old comment here ("the opaque queue may not produce transparency") documented the
+            // bug rather than the intent. Now that fills declare _SURFACE_TYPE_TRANSPARENT, opacity 0 must be
+            // genuinely INVISIBLE, which is a claim only a working alpha path can satisfy.
+            var opaqueVerdict = SnapshotCoverage.Analyse(
                 snapOpaque.RawPixels, SnapW, SnapH, BgR8, BgG8, BgB8);
-            double lumTransparent = SnapshotCoverage.MeanLuminanceOfNonBackground(
+            var invisibleVerdict = SnapshotCoverage.Analyse(
                 snapTransparent.RawPixels, SnapW, SnapH, BgR8, BgG8, BgB8);
 
-            Debug.Log($"[FillPaintSnapshotTests] Opacity=1 lum={lumOpaque:F4}, Opacity=0 lum={lumTransparent:F4}");
+            Debug.Log($"[FillPaintSnapshotTests] filled: opacity=1 {opaqueVerdict.FilledFraction:P2}, " +
+                      $"opacity=0 {invisibleVerdict.FilledFraction:P2}");
 
-            // Key assertion: mesh must be unchanged (verified above).
-            // luminance at opacity=0 should be ≤ luminance at opacity=1 (no brighter when invisible).
-            Assert.LessOrEqual(lumTransparent, lumOpaque + 0.05,
-                $"Luminance with _Opacity=0 ({lumTransparent:F4}) must be ≤ luminance with " +
-                $"_Opacity=1 ({lumOpaque:F4}). Setting opacity=0 must not brighten the fill.");
+            Assert.Greater(opaqueVerdict.FilledFraction, 0.02f,
+                "precondition: the fill must actually cover the frame at _Opacity=1.");
+            Assert.Greater(invisibleVerdict.BackgroundFraction, 0.99f,
+                $"_Opacity=0 must render NOTHING — background was {invisibleVerdict.BackgroundFraction:P2}, " +
+                $"filled {invisibleVerdict.FilledFraction:P2}. A filled frame here means the fragment's alpha " +
+                "is being discarded (opaque surface type), so fill-opacity, fill-color alpha and fill-pattern " +
+                "alpha masks are all inert.");
 
             UnityEngine.Object.DestroyImmediate(cameraGo);
             UnityEngine.Object.DestroyImmediate(mapGo);

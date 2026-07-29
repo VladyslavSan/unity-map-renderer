@@ -258,5 +258,59 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(fillMat);
             }
         }
+        // ── P4: the _Opacity uniform half of data-driven fill-opacity ─────────────
+
+        /// <summary>
+        /// A CONSTANT fill-opacity rides the <c>_Opacity</c> uniform. Pairs with
+        /// <c>FillSortKeyAndOpacityTests.ConstantOpacity_IsNotBaked</c>, which asserts the other half (that
+        /// it is NOT also baked into vertex alpha) — on its own that test would pass on a build that dropped
+        /// fill-opacity entirely, so this is what makes the pair discriminating.
+        /// </summary>
+        [Test]
+        public void BindFillPaint_ConstantOpacity_LandsOnTheOpacityUniform()
+        {
+            Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            try
+            {
+                var paint = new MapRenderer.Core.Style.Fill.PaintProperties(
+                    JsonParser.Parse(@"{""fill-opacity"": 0.5}"));
+                var applier = new ZoomStyleApplier(fillMat);
+                MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
+                applier.ApplyZoom(0.0);
+
+                Assert.AreEqual(0.5f, fillMat.GetFloat("_Opacity"), 1e-4f,
+                    "a constant fill-opacity must be bound as the _Opacity uniform.");
+            }
+            finally { Object.DestroyImmediate(fillMat); }
+        }
+
+        /// <summary>
+        /// A DATA-DRIVEN fill-opacity is baked per-feature into the COLOR stream, so <c>_Opacity</c> must be
+        /// pinned to 1: the fragment computes <c>alpha *= vColor.a * _Opacity</c>, and leaving the base
+        /// material's inherited value there would multiply the opacity in twice. Mirrors the convention
+        /// <c>BindLinePaintToApplier</c> uses for data-driven line-width.
+        /// </summary>
+        [Test]
+        public void BindFillPaint_DataDrivenOpacity_PinsTheUniformToOneSoItCannotDoubleApply()
+        {
+            Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            try
+            {
+                fillMat.SetFloat("_Opacity", 0.25f); // a stale/inherited value the bind must overwrite
+
+                var paint = new MapRenderer.Core.Style.Fill.PaintProperties(
+                    JsonParser.Parse(@"{""fill-opacity"": [""get"", ""op""]}"));
+                Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: this expression is data-driven");
+
+                var applier = new ZoomStyleApplier(fillMat);
+                MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
+                applier.ApplyZoom(0.0);
+
+                Assert.AreEqual(1f, fillMat.GetFloat("_Opacity"), 1e-4f,
+                    "a data-driven fill-opacity is baked per-feature, so _Opacity must be pinned to 1. " +
+                    "Any other value double-applies the opacity in the fragment.");
+            }
+            finally { Object.DestroyImmediate(fillMat); }
+        }
     }
 }

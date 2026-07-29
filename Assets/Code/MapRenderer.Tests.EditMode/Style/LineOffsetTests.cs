@@ -200,7 +200,8 @@ namespace MapRenderer.Tests
             double mpp1      = 0.25;
             double mpp2      = 2.0;
 
-            // Width conversion (mirrors HLSL: widthM = _Width * _MetersPerPixel when WidthIsPixels=1).
+            // Width conversion (mirrors Line_VertexExtrude.hlsl: widthWorld = _Width * pxToWorld when
+            // WidthIsPixels=1 — pxToWorld is measured per-vertex on the GPU; here it is the zoom scalar).
             double widthM1 = widthPx * mpp1;
             double widthM2 = widthPx * mpp2;
 

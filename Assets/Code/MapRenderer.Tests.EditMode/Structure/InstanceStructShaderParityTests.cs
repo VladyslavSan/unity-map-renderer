@@ -94,12 +94,12 @@ namespace MapRenderer.Tests
         /// A vacuous regex (matches nothing) fails this immediately.
         /// </summary>
         [Test]
-        public void StructMaterialFieldCount_IsExactly29()
+        public void StructMaterialFieldCount_IsExactly31()
         {
             var fields = ParseStructMaterialFields(out _);
-            Assert.That(fields.Count, Is.EqualTo(29),
+            Assert.That(fields.Count, Is.EqualTo(31),
                 $"MapInstanceData must have exactly 29 material-prop fields " +
-                $"(14 common Lit+Opacity + 5 fill-only + 10 line-only). " +
+                $"(14 common Lit+Opacity + 7 fill-only + 10 line-only). " +
                 $"Found {fields.Count}: {string.Join(", ", fields.Keys)}");
         }
 
@@ -113,13 +113,13 @@ namespace MapRenderer.Tests
                 $"(13 common Lit + _Opacity + 10 line-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
         }
 
-        /// <summary>Fill_LitInput.hlsl DOTS block must have exactly 19 props.</summary>
+        /// <summary>Fill_LitInput.hlsl DOTS block must have exactly 21 props.</summary>
         [Test]
-        public void FillDotsPropCount_IsExactly19()
+        public void FillDotsPropCount_IsExactly21()
         {
             var props = ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
-            Assert.That(props.Count, Is.EqualTo(19),
-                $"Fill_LitInput.hlsl DOTS block must have exactly 19 UNITY_DOTS_INSTANCED_PROP entries " +
+            Assert.That(props.Count, Is.EqualTo(21),
+                $"Fill_LitInput.hlsl DOTS block must have exactly 21 UNITY_DOTS_INSTANCED_PROP entries " +
                 $"(13 common Lit + _Opacity + 5 fill-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
         }
 

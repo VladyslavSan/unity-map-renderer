@@ -39,8 +39,16 @@ namespace MapRenderer.Tests.Visual
         public int Height => _height;
 
         /// <summary>
-        /// Raw RGBA32 pixel data from the last <see cref="Render"/> call (row-major, top-left origin).
+        /// Raw RGBA32 pixel data from the last <see cref="Render"/> call. Row-major, <b>BOTTOM-left
+        /// origin</b>: row 0 is the BOTTOM scanline of the image, and row index grows UPWARD on screen.
         /// Null until <see cref="Render"/> has been called.
+        ///
+        /// <para>That is Unity's native convention for <see cref="Texture2D.ReadPixels"/> +
+        /// <see cref="Texture2D.GetRawTextureData"/>, and this class does not flip (unlike
+        /// <c>SpriteSheet</c>, which deliberately does). The doc here said "top-left origin" until P5, which
+        /// is backwards and cost a debugging round on <c>FillTranslateSnapshotTests</c> — any test asserting
+        /// a vertical DIRECTION must read this as bottom-up. Counts, coverage fractions and mean luminance
+        /// are orientation-independent, which is why nothing caught it sooner.</para>
         /// </summary>
         public byte[] RawPixels { get; private set; }
 

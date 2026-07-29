@@ -129,34 +129,53 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── 3. Default material → empty keyword set (behaviour-neutral / parity) ──
+        // ── 3. ValidateMaterial is behaviour-neutral on the committed base (parity) ──
         [Test]
-        public void FillShaderGUI_ValidateMaterial_OnCommittedBase_EnablesNoFeatureKeywords()
+        public void FillShaderGUI_ValidateMaterial_OnCommittedBase_LeavesKeywordStateUnchanged()
         {
-            // Parity tooth: running the editor keyword sync on a clone of the COMMITTED base fill .mat (the
-            // stable baseline — no maps, black emission, EmissiveIsBlack, opaque _Surface=0, m_ValidKeywords:[])
-            // must derive an EMPTY feature-keyword set, proving the derivation is behaviour-neutral (it won't
-            // flip the import-baked keyword state the runtime clone relies on). Uses the committed .mat rather
-            // than `new Material(shader)`, whose float/texture defaults are import-state-dependent (a fresh
-            // material's `= "white"` 2D defaults read as non-null textures once loaded, and its _Surface
-            // default proved unstable across shader reimports).
+            // Parity tooth: running the editor keyword sync on a clone of the COMMITTED base fill .mat must
+            // not FLIP any feature keyword — the runtime clone relies on the import-baked state, so a
+            // derivation that disagreed with the asset would change how production renders.
+            //
+            // Asserted as before == after rather than against a hardcoded expected set. It used to assert
+            // "empty", which was true only while the base happened to be opaque with no maps; when the base
+            // legitimately became transparent (fills need _SURFACE_TYPE_TRANSPARENT or URP's OutputAlpha
+            // discards the fragment alpha), that spelling failed even though the invariant it was named for
+            // still held. Comparing to the asset's own state expresses the intent and survives the base's
+            // look changing again.
+            //
+            // Uses the committed .mat rather than `new Material(shader)`, whose float/texture defaults are
+            // import-state-dependent (a fresh material's `= "white"` 2D defaults read as non-null textures
+            // once loaded, and its _Surface default proved unstable across shader reimports).
+            var feature = new[]
+            {
+                ShaderKeywords.Emission, ShaderKeywords.NormalMap,
+                ShaderKeywords.MetallicSpecGlossMap, ShaderKeywords.OcclusionMap,
+                ShaderKeywords.SurfaceTypeTransparent, ShaderKeywords.AlphaTestOn,
+            };
+
             var m = new Material(MapMaterialSetTestUtil.Load().FillMaterial);
             try
             {
+                var before = new List<string>();
+                foreach (var kw in feature)
+                    if (m.IsKeywordEnabled(kw)) before.Add(kw);
+
                 new FillShaderGUI().ValidateMaterial(m);
 
-                var feature = new[]
-                {
-                    ShaderKeywords.Emission, ShaderKeywords.NormalMap,
-                    ShaderKeywords.MetallicSpecGlossMap, ShaderKeywords.OcclusionMap,
-                    ShaderKeywords.SurfaceTypeTransparent, ShaderKeywords.AlphaTestOn,
-                };
-                var on = new List<string>();
+                var after = new List<string>();
                 foreach (var kw in feature)
-                    if (m.IsKeywordEnabled(kw))
-                        on.Add(kw);
-                Assert.IsEmpty(on, "no-maps/black-emission/opaque baseline must derive an EMPTY feature-keyword " +
-                                   "set, but these were enabled: " + string.Join(", ", on));
+                    if (m.IsKeywordEnabled(kw)) after.Add(kw);
+
+                CollectionAssert.AreEquivalent(before, after,
+                    $"ValidateMaterial must not flip the committed base's feature keywords. " +
+                    $"Before: [{string.Join(", ", before)}] After: [{string.Join(", ", after)}]");
+
+                // The fill base is transparent by design — if this ever reads false, fill alpha (opacity,
+                // fill-color alpha, fill-pattern masks) is silently discarded by OutputAlpha().
+                Assert.Contains(ShaderKeywords.SurfaceTypeTransparent, after,
+                    "the committed fill base must declare _SURFACE_TYPE_TRANSPARENT — without it URP forces " +
+                    "the fragment alpha to 1 and every fill renders solid.");
             }
             finally
             {

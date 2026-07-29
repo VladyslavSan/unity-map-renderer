@@ -400,6 +400,13 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmManagerTick.Auto())
                 TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
 
+            // Hand the style's sprite sheet to the layers that paint from it (fill-pattern today). Pulled per
+            // frame rather than pushed from the fetch because the sheet is owned and fetched by the symbol
+            // subsystem — the same per-frame pull Labels.Tick already does for Symbols.IconTexture below.
+            // RenderLayerSet.SetSprites early-outs on an unchanged pair, so the steady state is one reference
+            // compare; the interesting frames are the one where the sheet lands and the one after a restyle.
+            Layers.SetSprites(Symbols.SpriteAtlas, Symbols.IconTexture);
+
             // 3. Place the labels against the SAME snapshot the tiles used (never a second BuildSceneFrame).
             //    A style with no symbol layers simply has nothing to place.
             if (Symbols.HasSymbolLayers)

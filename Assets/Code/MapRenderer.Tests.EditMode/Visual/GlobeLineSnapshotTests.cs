@@ -50,7 +50,6 @@ namespace MapRenderer.Tests.Visual
             var mat = new Material(shader) { name = "GlobeLineMat" };
             mat.SetFloat("_Width",          120000f); // 120 km
             mat.SetFloat("_WidthIsPixels",  0f);
-            mat.SetFloat("_MetersPerPixel", 1f);
             mat.SetColor("_BaseColor",      new Color(1f, 0.85f, 0.2f, 1f)); // amber borders
             mat.SetFloat("_Opacity",        1f);
             mat.SetFloat("_Cull",           2f); // stock Cull Back: near-side ribbons show, far-side culled

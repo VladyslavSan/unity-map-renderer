@@ -73,7 +73,6 @@ namespace MapRenderer.Tests.Visual
             var mat = new Material(shader) { name = "CyanLineMat" };
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);
-            mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",       Color.white);  // identity → vColor is the signal
             mat.SetFloat("_Opacity",        1f);
             lineGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
@@ -266,7 +265,6 @@ namespace MapRenderer.Tests.Visual
             var mat = new Material(shader) { name = name + "Mat" };
             mat.SetFloat("_Width",          6f);
             mat.SetFloat("_WidthIsPixels",  0f);
-            mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",       new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;

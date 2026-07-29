@@ -56,8 +56,14 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// </summary>
         public static void BindFillPaintToApplier(Fill.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
         {
-            // fill-opacity: bind for Constant/Zoom (data-driven → vertex bake, not supported for fill yet).
-            if (!paint.Opacity.DependsOnFeature)
+            // fill-opacity. Constant/Zoom rides the _Opacity uniform; data-driven is baked per-feature into
+            // the COLOR stream's alpha by StyledFillTileBuilder (P4). In the baked case _Opacity MUST be
+            // pinned to 1: the fragment computes `alpha *= vColor.a * _Opacity`, so leaving the material's
+            // inherited value would multiply the opacity in twice. Same convention as data-driven line-width
+            // below (base = 1, evaluated value baked per-vertex).
+            if (paint.Opacity.DependsOnFeature)
+                mat.SetFloat(ShaderProperties.PropertyId.Opacity, 1f);
+            else
                 applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
             // fill-outline-color: bind only when explicitly set (not a fallback) and non-data-driven.
@@ -75,6 +81,14 @@ namespace MapRenderer.Unity.Rendering.Materials
             // fill-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
                 applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
+
+            // fill-pattern: flag the layer, and start it UNRESOLVED (zero-area rect ⇒ the shader clips).
+            // The sprite sheet is fetched asynchronously and cannot exist yet at material-build time, so
+            // every pattern layer necessarily starts here; FillRenderLayer.SetSprites resolves it once the
+            // sheet lands. Painting nothing until then is the spec behaviour — a pattern layer must NOT fall
+            // back to fill-color, whose default is opaque black.
+            mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, paint.PatternName != null ? 1f : 0f);
+            mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }
 
         /// <summary>Background material: a clone of the FILL base (§3.6 — the fill shader's flat lit path IS
@@ -113,6 +127,12 @@ namespace MapRenderer.Unity.Rendering.Materials
             // Defensive identity — the clone inherits the base .mat's _FillTranslate; assert the spec's
             // "no translate" (background has no fill-translate equivalent).
             mat.SetVector(ShaderProperties.Fill.PropertyId.FillTranslate, Vector4.zero);
+
+            // Same defence for the pattern uniforms, and now load-bearing rather than merely tidy: a base
+            // .mat carrying _FillPattern=1 would make the fill shader clip the ENTIRE background quad
+            // (background-pattern is not implemented — see Background.PaintProperties.PatternName).
+            mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, 0f);
+            mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }
 
         /// <summary>

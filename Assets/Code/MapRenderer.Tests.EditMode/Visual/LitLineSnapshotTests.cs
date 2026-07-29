@@ -106,7 +106,6 @@ namespace MapRenderer.Tests.Visual
             var mat = new Material(shader) { name = "HLineLitMat" };
             mat.SetFloat("_Width",          widthMeters);
             mat.SetFloat("_WidthIsPixels",  0f);
-            mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetColor("_BaseColor",          new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
             go.AddComponent<MeshRenderer>().sharedMaterial = mat;

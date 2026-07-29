@@ -59,6 +59,12 @@ namespace MapRenderer.Tests
         [Test]
         public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
         {
+            // The "warn once" latch is process-wide, and as of P2 the sprite fetch runs for far more styles
+            // (it is no longer gated on a style having symbol layers — fill-pattern resolves against the same
+            // sheet). Any earlier test that applies a sprite-less style consumes the one warning, so clear
+            // the latch here rather than let this assertion depend on test order.
+            SpriteSourceFactory.WarnedMissingUrl = false;
+
             LogAssert.Expect(UnityEngine.LogType.Warning, new Regex("SpriteSourceFactory"));
 
             ISpriteSource source = SpriteSourceFactory.Create(new StyleDocument { Sprite = null });

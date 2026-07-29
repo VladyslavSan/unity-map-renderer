@@ -16,6 +16,55 @@
 #ifndef MAP_LINE_VERTEX_EXTRUDE_INCLUDED
 #define MAP_LINE_VERTEX_EXTRUDE_INCLUDED
 
+// DUPLICATED, deliberately: the fill layer carries a character-identical copy of the block below, in
+// Map/Fill/Fill_VertexModify.hlsl. Sharing it via an include would mean reaching into the shared Common
+// folder (spelled without the trailing slash on purpose — MapLayerFiles_DoNotIncludeCommonFolder greps for
+// that literal substring anywhere in the file, comments included), which S66
+// removed on purpose (every layer folder is self-contained; ShaderStructureTests pins it). The copies are
+// kept honest by a test rather than by hand —
+// ShaderStructureTests.SharedShaderBlocks_AreIdenticalAcrossLayers extracts the text between the
+// MAP-SHARED-BEGIN/END sentinels in each file and requires it to match character for character. Any change
+// here must be pasted verbatim into the fill copy or the gate fails; text OUTSIDE the sentinels (this
+// comment included) is free to differ.
+
+// MAP-SHARED-BEGIN: PixelsToWorld
+// World metres per screen pixel at `centerWS`, measured along the UNIT direction `dirWS`.
+//
+// Method: pick a reference world length that projects to ~2% of NDC height at this depth
+// (worldPerNdcY = |clip.w| / P[1][1] — depth-scaled under perspective, constant under ortho), then measure
+// how many device pixels it actually spans along `dirWS`. Asking the projection matrix instead of modelling
+// it makes this correct under foreshortening, tilt, any latitude, and either projection.
+//
+// Per-vertex AND per-direction, both of which matter: |clip.w| is view depth, so a far vertex probes with a
+// longer ruler; and because the probe steps along `dirWS`, a tilted view measures the hard-foreshortened
+// screen-down axis differently from the barely-foreshortened screen-right one. A single frame-wide
+// metres-per-pixel scalar (the pre-S104 _MetersPerPixel uniform) cannot express either.
+float MapPixelsToWorld(float3 centerWS, float3 dirWS)
+{
+    float4 clipCenter = TransformWorldToHClip(centerWS);
+
+    float projY  = max(abs(UNITY_MATRIX_P._m11), 1e-6);
+    float refMag = (abs(clipCenter.w) / projY) * 0.02;
+
+    float4 clipRef = TransformWorldToHClip(centerWS + dirWS * refMag);
+
+    // Fallback (~the un-foreshortened target) when either point is behind the camera and the perspective
+    // divide would be meaningless.
+    float refPx = 0.01 * _ScreenParams.y;
+    if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
+    {
+        float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
+        refPx = length(ndcDelta * 0.5 * _ScreenParams.xy);
+    }
+
+    // Clamp the measured span so an edge-on direction (refPx → 0) cannot send the scale to infinity. This
+    // is a real limit, not just a NaN guard: for a direction nearly parallel to the view axis (a southward
+    // offset with the camera tilted at the horizon) the offset falls SHORT of the styled pixel count rather
+    // than exploding.
+    return refMag / max(refPx, 0.1);
+}
+// MAP-SHARED-END: PixelsToWorld
+
 // ── Vertex attributes ─────────────────────────────────────────────────────────
 // IMPORTANT: TEXCOORD0/1/2 carry line-specific data (NOT uv/lightmapUV/dynamicLightmapUV
 // as in Fill_LitForwardPass.hlsl Attributes). This is why we cannot reuse that struct.
@@ -26,7 +75,7 @@
 struct LineAttributes
 {
     float4 positionOS   : POSITION;
-    float3 normalOS     : NORMAL;     // constant +Y lighting normal (stream 1)
+    float3 normalOS     : NORMAL;     // per-vertex surface up: +Y for Mercator, geodetic normal on the globe
     float3 extrudeN     : TEXCOORD0;  // 3D across-direction (tangent-plane; Y=0 Mercator); miter factor in |n|
     float2 sideAndDist  : TEXCOORD1;  // (side ∈ {+1,−1}, distanceAlong)
     float  widthScale   : TEXCOORD2;  // per-feature width scale (default=1)
@@ -72,26 +121,14 @@ float3 Line_VertexExtrude(
     float3 upWS = normalize(TransformObjectToWorldNormal(input.normalOS));
     float3 centerWS = TransformObjectToWorld(input.positionOS.xyz);
 
-    // px→world scale. Non-pixel widths are already world metres (×1). Pixel widths measure it:
-    float pxToWorld = 1.0;
-    if (_WidthIsPixels > 0.5)
-    {
-        float4 clipCenter = TransformWorldToHClip(centerWS);
-        // A reference world length that projects to ~2% of NDC height (a few device px) at THIS depth under
-        // ANY projection: worldPerNdcY = |clip.w| / P[1][1] (perspective ⇒ depth-scaled; ortho ⇒ constant).
-        // Then MEASURE its actual on-screen size along `across`, so foreshortening (grazing tiles) is included.
-        float projY  = max(abs(UNITY_MATRIX_P._m11), 1e-6);
-        float refMag = (abs(clipCenter.w) / projY) * 0.02;
-        float4 clipRef = TransformWorldToHClip(centerWS + unitDir_WS * refMag);
-        float refPx = 0.01 * _ScreenParams.y;   // fallback (~the un-foreshortened target) if ref is behind camera
-        if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
-        {
-            float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
-            refPx = length(ndcDelta * 0.5 * _ScreenParams.xy);
-        }
-        // Clamp measured px so an edge-on `across` (refPx → 0) can't send pxToWorld to infinity (guard).
-        pxToWorld = refMag / max(refPx, 0.1);
-    }
+    // px→world scale ALONG THE ACROSS-DIRECTION, for the width-family properties below. Non-pixel widths are
+    // already world metres (×1); pixel widths measure it. This is the S104 measurement, extracted verbatim
+    // into MapPixelsToWorld above — same call, same direction, same result.
+    //
+    // NOTE the scope: this scalar is correct for width/gap/offset, all of which act along `across`. It is NOT
+    // a general metres-per-pixel and must not be reused for an offset in some other direction — that was the
+    // line-translate bug (see below).
+    float pxToWorld = (_WidthIsPixels > 0.5) ? MapPixelsToWorld(centerWS, unitDir_WS) : 1.0;
 
     // Width / gap / outer radius in world metres (widthScale = per-feature; gap is layer-level).
     float widthWorld = _Width * input.widthScale * pxToWorld;
@@ -115,9 +152,58 @@ float3 Line_VertexExtrude(
     // any projection. Applied in every pass via this single helper — the silhouette single-site guarantee.
     offsetWS += upWS * 0.001;
 
-    // ── S14: line-translate ── pixel offset in world XZ. Off-axis, so pxToWorld is an approximation here (as
-    // the old _MetersPerPixel path was); layer-level, not per-feature.
-    offsetWS += float3(_LineTranslate.x * pxToWorld, 0.0, _LineTranslate.y * pxToWorld);
+    // ── line-translate ── a SCREEN-PIXEL offset, converted per-axis. Layer-level, not per-feature.
+    //
+    // Spec: _LineTranslate.xy is in screen pixels and "negatives indicate left and up", so +x is EAST/right
+    // and +y is SOUTH/down. _LineTranslateAnchor: 0 = "map" (the offset rides the map, rotating with it),
+    // 1 = "viewport" (pinned to the screen). Mirrors Fill_VertexModify's MapVertexModify.
+    //
+    // This replaced four defects at once, all invisible to the old top-down / pixel-width tooth: the scale
+    // was skipped entirely unless _WidthIsPixels (so a world-unit width layer offset by raw METRES); it was
+    // measured along `across`, an unrelated direction; the offset was hardcoded into world XZ (a flat-ground
+    // assumption that breaks on the globe); and +y pointed NORTH. See docs/line-translate-parity-design.md.
+    //
+    // The early-out is not merely an optimisation: [0,0] is the spec default, so nearly every layer takes it
+    // and skips two projection round-trips per vertex.
+    if (any(abs(_LineTranslate.xy) > 1e-6))
+    {
+        float3 axisRightWS;
+        float3 axisDownWS;
+        if (_LineTranslateAnchor > 0.5)
+        {
+            // "viewport": camera right/up in world space are the inverse-view matrix's first two basis
+            // columns; screen-down is -up, matching the spec's +y = down. Exact under every projection.
+            axisRightWS =  normalize(UNITY_MATRIX_I_V._m00_m10_m20);
+            axisDownWS  = -normalize(UNITY_MATRIX_I_V._m01_m11_m21);
+        }
+        else
+        {
+            // "map": needs EAST at this vertex. The fill carries real per-vertex geodetic east in its Tangent
+            // stream; the line has no east stream — only its own road-relative across/along axes, and using
+            // THOSE would silently reimplement line-offset, which is a different property.
+            //
+            // So east is approximated from the scene frame: the backend rebases every tile by
+            // transpose(TangentBasisAt(lookAt)) — columns east/up/north — which puts east-at-the-look-at-point
+            // on world +X. One rebase serves all tiles, so the frame is continuous and there is no per-tile
+            // seam. Projecting it onto THIS vertex's true tangent plane (its own geodetic normal) keeps the
+            // offset in-surface, leaving a purely azimuthal residual: meridian convergence over the vertex's
+            // angular distance from the look-at point, ~dLon*sin(lat). That is exactly 0 for Mercator
+            // (identity rebase) and ~0 near screen centre, growing only toward the limb of a zoomed-out
+            // globe. Trading it away costs 8 B on every line vertex — see the design doc's §4.1.
+            float3 eastRefWS   = float3(1.0, 0.0, 0.0);
+            float3 eastInPlane = eastRefWS - upWS * dot(upWS, eastRefWS);
+            float  eastLen     = length(eastInPlane);
+            // Degenerate only where up is parallel to the reference east — ~90° from the look-at point, i.e.
+            // the very limb at z0/z1, where the direction is meaningless anyway. In that case up is
+            // perpendicular to world +Z (north-at-look-at), which is therefore a valid in-plane fallback.
+            float3 eastWS = (eastLen > 1e-4) ? (eastInPlane / eastLen) : float3(0.0, 0.0, 1.0);
+            axisRightWS =  eastWS;
+            axisDownWS  = -cross(eastWS, upWS); // north = cross(east, up); screen-down on a north-up map is south
+        }
+
+        offsetWS += axisRightWS * (_LineTranslate.x * MapPixelsToWorld(centerWS, axisRightWS))
+                  + axisDownWS  * (_LineTranslate.y * MapPixelsToWorld(centerWS, axisDownWS));
+    }
 
     // ── Round-trip to object space ────────────────────────────────────────────
     // Add world-space offset back to object-space position so GetVertexPositionInputs /

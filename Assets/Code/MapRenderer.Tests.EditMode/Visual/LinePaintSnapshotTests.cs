@@ -54,12 +54,16 @@ namespace MapRenderer.Tests.Visual
 
         // ── Camera helper ──────────────────────────────────────────────────────
 
-        private static (GameObject go, Camera camera) BuildCamera()
+        /// <param name="yawDeg">Rotation about world +Y, applied after the 90° pitch — the camera keeps
+        /// looking straight down but its screen axes rotate against the map. 0 leaves screen-up = world +Z
+        /// (north). This is what lets a test tell the "map" and "viewport" translate anchors apart: with the
+        /// default yaw they point the same way, so no assertion can distinguish them.</param>
+        private static (GameObject go, Camera camera) BuildCamera(float yawDeg = 0f)
         {
             var go     = new GameObject("LinePaintSnapCamera");
             var camera = go.AddComponent<Camera>();
             camera.transform.position = new Vector3(0f, CamY, 0f);
-            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            camera.transform.rotation = Quaternion.Euler(90f, yawDeg, 0f);
             camera.orthographic       = true;
             camera.orthographicSize   = OrthoSz;
             camera.farClipPlane       = 1000f;
@@ -81,7 +85,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Build a single horizontal line with the Map/Line shader.
         /// The line runs along world X from -40m to +40m, centered at world origin.
-        /// _WidthIsPixels=1, _MetersPerPixel=MetersPerPx.
+        /// _WidthIsPixels=1, so the shader MEASURES px→world per vertex (there is no _MetersPerPixel uniform
+        /// any more — S104 removed it; this fixture kept setting it into nothing until the line-translate work).
         /// Returns (GameObject, live material). Caller must DestroyImmediate both.
         /// </summary>
         private static (GameObject go, Material mat) BuildHorizontalLine(
@@ -104,7 +109,6 @@ namespace MapRenderer.Tests.Visual
             // Pixel-width mode so widthPx / gapPx map directly to shader pixels.
             mat.SetFloat("_Width",          widthPx);
             mat.SetFloat("_WidthIsPixels",  1f);
-            mat.SetFloat("_MetersPerPixel", MetersPerPx);
             mat.SetFloat("_GapWidth",       gapPx);
             mat.SetColor("_BaseColor",       color ?? new Color(0.9f, 0.5f, 0.1f, 1f));
             mat.SetFloat("_Opacity",        1f);
@@ -273,14 +277,19 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth #4: _LineTranslate shifts ribbon position in image pixels ───
 
         [Test]
-        public void LineTranslate_NonZero_ShiftsRibbonByExpectedPixels()
+        public void LineTranslate_NonZero_ShiftsRibbonSouthByExpectedPixels()
         {
-            // Set _LineTranslate.y = TranslatePx → line ribbon should shift by ≈TranslatePx rows.
-            // The horizontal line is at Z=0 in world space. TranslateY shifts it in world Z,
-            // which maps to a row shift in the top-down orthographic render.
-            // _LineTranslate.y × _MetersPerPixel = meters shift in world Z.
-            // Rows shift = (world-Z meters) / MetersPerPx.
-            // With _LineTranslate.y = TranslatePx, expected row shift = TranslatePx.
+            // DIRECTION IS PART OF THE ASSERTION (it did not used to be — see below).
+            //
+            // Spec: _LineTranslate.y is screen pixels and "negatives indicate up", so +y is SOUTH. The camera
+            // looks straight down with screen-up = world +Z = north, and SnapshotRenderer.RawPixels is
+            // BOTTOM-left origin, so north is INCREASING row. A southward shift therefore DECREASES the row
+            // index: expected delta = −TranslatePx.
+            //
+            // The previous version of this test asserted Math.Abs(shifted − base), i.e. magnitude only, and
+            // so passed against a shader whose +y pointed NORTH. It also justified itself in terms of
+            // _MetersPerPixel, a uniform S104 deleted. Both are why the inverted sign survived so long; see
+            // docs/line-translate-parity-design.md §2.
             const float TranslatePx = 30f; // pixels to shift (large enough to measure clearly)
 
             var prevAmbientMode  = RenderSettings.ambientMode;
@@ -335,22 +344,215 @@ namespace MapRenderer.Tests.Visual
                     return;
                 }
 
-                // Row delta: positive delta = shifted toward top (lower row index in Unity's flipped UV).
-                int rowDelta = Math.Abs(shiftedCenterRow - baseCenterRow);
-                float expectedRowShift = TranslatePx;
+                // SIGNED delta. RawPixels is bottom-left origin, so south (+y) is a DECREASING row.
+                int rowDelta = shiftedCenterRow - baseCenterRow;
+                const float ExpectedRowShift = -TranslatePx;
                 const float Tol = 5f; // ±5px tolerance (AA + discretization)
 
                 Debug.Log($"[LinePaintSnapshotTests] Translate: baseCenterRow={baseCenterRow}, " +
-                          $"shiftedCenterRow={shiftedCenterRow}, |rowDelta|={rowDelta}, " +
-                          $"expected≈{expectedRowShift:F1}px (±{Tol}px)");
+                          $"shiftedCenterRow={shiftedCenterRow}, Δrow={rowDelta} (signed), " +
+                          $"expected≈{ExpectedRowShift:F1}px (±{Tol}px)");
 
                 Assert.That((float)rowDelta,
-                    Is.InRange(expectedRowShift - Tol, expectedRowShift + Tol),
+                    Is.InRange(ExpectedRowShift - Tol, ExpectedRowShift + Tol),
                     $"_LineTranslate.y={TranslatePx}px must shift the ribbon center row by " +
-                    $"≈{expectedRowShift:F1}px (±{Tol}px). Got |Δrow|={rowDelta}px. " +
-                    "Check: _LineTranslate.y * _MetersPerPixel should produce a world-Z offset " +
-                    "equal to the expected pixel shift. Verify translateScale = _MetersPerPixel " +
-                    "in MapLineForwardPass.hlsl.");
+                    $"≈{ExpectedRowShift:F1}px (±{Tol}px) — SOUTH, i.e. toward row 0. Got Δrow={rowDelta}px. " +
+                    $"A delta of ≈+{TranslatePx} means the sign is inverted (+y treated as north); a delta " +
+                    "far larger than this means the screen-pixel→world conversion was skipped.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraGo);
+                UnityEngine.Object.DestroyImmediate(lineGo);
+                UnityEngine.Object.DestroyImmediate(mat);
+                RenderSettings.ambientMode  = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
+            }
+        }
+
+        // ── line-translate is a SCREEN-pixel offset regardless of the width's units ──
+
+        /// <summary>
+        /// The defect this pins: <c>pxToWorld</c> used to be left at 1.0 unless <c>_WidthIsPixels &gt; 0.5</c>,
+        /// so a layer whose <c>line-width</c> is in world metres applied <c>line-translate</c> as raw
+        /// METRES — off by 1/metresPerPixel (≈3.7× here, and zoom-dependent in the real renderer).
+        ///
+        /// <para>No existing test could see it: every fixture in this file sets
+        /// <c>_WidthIsPixels = 1</c>, so the world-width path had never once executed with a translate set.
+        /// The two renders below differ ONLY in the width's units, and the spec says the offset is screen
+        /// pixels either way — so the measured shift must be identical.</para>
+        /// </summary>
+        [Test]
+        public void LineTranslate_IsScreenPixels_WhetherWidthIsPixelsOrMetres()
+        {
+            const float TranslatePx = 30f;
+            const float WidthPx     = 8f;
+            const float Tol         = 5f;
+
+            var prevAmbientMode  = RenderSettings.ambientMode;
+            var prevAmbientLight = RenderSettings.ambientLight;
+            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(1f, 1f, 1f, 1f);
+
+            var (cameraGo, camera) = BuildCamera();
+            var (lineGo, mat)      = BuildHorizontalLine(widthPx: WidthPx, gapPx: 0f);
+
+            using var snapBase   = new SnapshotRenderer(SnapW, SnapH);
+            using var snapPixels = new SnapshotRenderer(SnapW, SnapH);
+            using var snapMetres = new SnapshotRenderer(SnapW, SnapH);
+            try
+            {
+                mat.SetVector("_LineTranslate", Vector4.zero);
+                snapBase.Render(camera);
+
+                if (snapBase.IsAllBlack())
+                {
+                    using var blank = RenderBlank();
+                    if (blank.IsAllBlack())
+                    {
+                        Assert.Inconclusive("No GPU context — line-translate unit test skipped.");
+                        return;
+                    }
+                }
+
+                int baseRow = FindLineCenterRow(snapBase.RawPixels, SnapW, SnapH, SnapW / 2);
+                if (baseRow < 0)
+                {
+                    Assert.Inconclusive("Could not find baseline line band.");
+                    return;
+                }
+
+                // (1) width in PIXELS — the path every other test in this file exercises.
+                mat.SetVector("_LineTranslate", new Vector4(0f, TranslatePx, 0f, 0f));
+                snapPixels.Render(camera);
+                snapPixels.WritePng("line-translate-width-pixels.png");
+                int pixelsRow = FindLineCenterRow(snapPixels.RawPixels, SnapW, SnapH, SnapW / 2);
+
+                // (2) width in world METRES, sized to render the same ribbon thickness. Same translate.
+                mat.SetFloat("_WidthIsPixels", 0f);
+                mat.SetFloat("_Width", WidthPx * MetersPerPx);
+                snapMetres.Render(camera);
+                snapMetres.WritePng("line-translate-width-metres.png");
+                int metresRow = FindLineCenterRow(snapMetres.RawPixels, SnapW, SnapH, SnapW / 2);
+
+                if (pixelsRow < 0 || metresRow < 0)
+                {
+                    Assert.Inconclusive("Could not find a translated line band.");
+                    return;
+                }
+
+                int pixelsDelta = pixelsRow - baseRow;
+                int metresDelta = metresRow - baseRow;
+
+                Debug.Log($"[LinePaintSnapshotTests] translate units: baseRow={baseRow}, " +
+                          $"pxWidthΔ={pixelsDelta}, metreWidthΔ={metresDelta}, expected≈{-TranslatePx}");
+
+                Assert.That((float)metresDelta, Is.InRange(-TranslatePx - Tol, -TranslatePx + Tol),
+                    $"line-translate is defined in SCREEN PIXELS, so a world-metre line-width must shift by " +
+                    $"the same ≈{-TranslatePx}px. Got Δrow={metresDelta}. A delta of MAGNITUDE around " +
+                    $"{TranslatePx / MetersPerPx:F0} (either sign) means the px→world conversion was skipped " +
+                    "and the offset was applied as raw world metres.");
+
+                Assert.That((float)metresDelta, Is.InRange(pixelsDelta - Tol, pixelsDelta + Tol),
+                    $"the width's UNITS must not change where line-translate puts the ribbon: " +
+                    $"pixels-width Δ={pixelsDelta}, metres-width Δ={metresDelta}.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraGo);
+                UnityEngine.Object.DestroyImmediate(lineGo);
+                UnityEngine.Object.DestroyImmediate(mat);
+                RenderSettings.ambientMode  = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
+            }
+        }
+
+        // ── line-translate-anchor: "map" vs "viewport" ────────────────────────
+
+        /// <summary>
+        /// The defect this pins: <c>_LineTranslateAnchor</c> was parsed, bound to the material, and then
+        /// never read by the shader, so <c>"viewport"</c> silently behaved as <c>"map"</c>.
+        ///
+        /// <para>The discriminating setup matters. Under this file's default top-down camera the two anchors
+        /// point the SAME way, so no assertion can separate them — which is why the gap went unnoticed.
+        /// Yawing the camera 180° makes screen-up = world −Z, so a southward (+y) offset moves the ribbon
+        /// UP the image under "map" and DOWN under "viewport": opposite signs, same magnitude.</para>
+        /// </summary>
+        [Test]
+        public void LineTranslateAnchor_MapAndViewport_MoveTheRibbonOppositeWays()
+        {
+            const float TranslatePx = 30f;
+            const float Tol         = 5f;
+
+            var prevAmbientMode  = RenderSettings.ambientMode;
+            var prevAmbientLight = RenderSettings.ambientLight;
+            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(1f, 1f, 1f, 1f);
+
+            // Yaw 180°: still straight down, but screen-up is now world −Z (south) and screen-right world −X.
+            var (cameraGo, camera) = BuildCamera(yawDeg: 180f);
+            var (lineGo, mat)      = BuildHorizontalLine(widthPx: 8f, gapPx: 0f);
+
+            using var snapBase     = new SnapshotRenderer(SnapW, SnapH);
+            using var snapMap      = new SnapshotRenderer(SnapW, SnapH);
+            using var snapViewport = new SnapshotRenderer(SnapW, SnapH);
+            try
+            {
+                mat.SetVector("_LineTranslate", Vector4.zero);
+                snapBase.Render(camera);
+
+                if (snapBase.IsAllBlack())
+                {
+                    using var blank = RenderBlank();
+                    if (blank.IsAllBlack())
+                    {
+                        Assert.Inconclusive("No GPU context — translate-anchor test skipped.");
+                        return;
+                    }
+                }
+
+                int baseRow = FindLineCenterRow(snapBase.RawPixels, SnapW, SnapH, SnapW / 2);
+                if (baseRow < 0)
+                {
+                    Assert.Inconclusive("Could not find baseline line band.");
+                    return;
+                }
+
+                mat.SetVector("_LineTranslate", new Vector4(0f, TranslatePx, 0f, 0f));
+
+                // "map": +y is SOUTH on the map = world −Z. Screen-up IS −Z here, so the row INCREASES.
+                mat.SetFloat("_LineTranslateAnchor", 0f);
+                snapMap.Render(camera);
+                snapMap.WritePng("line-translate-anchor-map.png");
+                int mapRow = FindLineCenterRow(snapMap.RawPixels, SnapW, SnapH, SnapW / 2);
+
+                // "viewport": +y is screen-down regardless of the map, so the row DECREASES.
+                mat.SetFloat("_LineTranslateAnchor", 1f);
+                snapViewport.Render(camera);
+                snapViewport.WritePng("line-translate-anchor-viewport.png");
+                int viewportRow = FindLineCenterRow(snapViewport.RawPixels, SnapW, SnapH, SnapW / 2);
+
+                if (mapRow < 0 || viewportRow < 0)
+                {
+                    Assert.Inconclusive("Could not find a translated line band.");
+                    return;
+                }
+
+                int mapDelta      = mapRow - baseRow;
+                int viewportDelta = viewportRow - baseRow;
+
+                Debug.Log($"[LinePaintSnapshotTests] anchor (yaw 180°): baseRow={baseRow}, " +
+                          $"mapΔ={mapDelta} (expect≈+{TranslatePx}), viewportΔ={viewportDelta} " +
+                          $"(expect≈{-TranslatePx})");
+
+                Assert.That((float)mapDelta, Is.InRange(TranslatePx - Tol, TranslatePx + Tol),
+                    $"anchor \"map\": +y is south on the MAP, which is screen-up under a 180° yaw, so the row " +
+                    $"must increase by ≈{TranslatePx}. Got Δrow={mapDelta}.");
+
+                Assert.That((float)viewportDelta, Is.InRange(-TranslatePx - Tol, -TranslatePx + Tol),
+                    $"anchor \"viewport\": +y is screen-down whatever the map is doing, so the row must " +
+                    $"decrease by ≈{TranslatePx}. Got Δrow={viewportDelta}. A value matching the \"map\" " +
+                    $"delta ({mapDelta}) means _LineTranslateAnchor is being ignored by the shader.");
             }
             finally
             {

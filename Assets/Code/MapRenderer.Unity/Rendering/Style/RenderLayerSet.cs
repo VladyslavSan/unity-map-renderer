@@ -3,6 +3,7 @@ using UnityEngine;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
+using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Common;
 
@@ -41,6 +42,11 @@ namespace MapRenderer.Unity.Rendering.Style
         /// world identity — load-bearing, since the background quad's fill shader and the symbol shader both
         /// assume an identity object-to-world.</summary>
         private GameObject _root;
+
+        /// <summary>Last pair pushed through <see cref="SetSprites"/> — the per-frame no-op memo. Reset by
+        /// <see cref="ClearLayers"/>, since a rebuilt layer starts unresolved and must be re-told.</summary>
+        private SpriteAtlasView _spriteAtlas;
+        private Texture2D       _spriteTexture;
 
         /// <summary>Number of render layers (declared, renderable). <c>index == draw order == material index</c>.</summary>
         public int Count => _layers.Count;
@@ -106,6 +112,30 @@ namespace MapRenderer.Unity.Rendering.Style
                 _layers[i].ApplyZoom(zoom);
         }
 
+        /// <summary>
+        /// Pushes the style's sprite sheet to every layer that paints from it (see
+        /// <see cref="ISpriteConsumerRenderLayer"/>). Called each frame from the map's tick, because the sheet
+        /// is fetched asynchronously and can arrive — or be dropped by a restyle — at any point after
+        /// <see cref="Build"/>.
+        ///
+        /// <para>Early-outs on an unchanged pair, so the steady state is one reference compare per frame
+        /// rather than a walk plus a <c>SetTexture</c> per pattern layer. The comparison is on the CALLER's
+        /// references, which is why it lives here and not in each layer: <see cref="Build"/> replaces every
+        /// layer on a restyle, so the memo must be reset there too (a rebuilt layer starts unresolved and
+        /// would otherwise never be told about a sheet that had already arrived).</para>
+        /// </summary>
+        public void SetSprites(SpriteAtlasView atlas, Texture2D texture)
+        {
+            if (ReferenceEquals(atlas, _spriteAtlas) && ReferenceEquals(texture, _spriteTexture))
+                return;
+            _spriteAtlas   = atlas;
+            _spriteTexture = texture;
+
+            for (int i = 0; i < _layers.Count; i++)
+                if (_layers[i] is ISpriteConsumerRenderLayer consumer)
+                    consumer.SetSprites(atlas, texture);
+        }
+
         /// <summary>Disposes every render layer (each destroys its Material instance) and clears the list.
         /// Reusable afterwards (unlike <see cref="Dispose"/>'s teardown) — called by BOTH <see cref="Build"/>
         /// (every restyle) and <see cref="DoDispose"/> (real teardown), mirroring
@@ -115,6 +145,10 @@ namespace MapRenderer.Unity.Rendering.Style
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].Dispose();
             _layers.Clear();
+            // Drop the memo with the layers it described: the replacements start unresolved, so a sheet that
+            // arrived before this restyle must be pushed again rather than compared away as "unchanged".
+            _spriteAtlas   = null;
+            _spriteTexture = null;
         }
 
         /// <inheritdoc cref="ClearLayers"/>

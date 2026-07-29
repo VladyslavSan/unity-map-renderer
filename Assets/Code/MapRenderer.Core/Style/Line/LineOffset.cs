@@ -69,8 +69,14 @@ namespace MapRenderer.Core.Style.Line
 
         // ── Zoom-coupled px→m conversion ─────────────────────────────────────────────────────
         //
-        // Mirror of the width px→m conversion in MapLineForwardPass.hlsl:
-        //   widthM = (_WidthIsPixels > 0.5) ? _Width * _MetersPerPixel : _Width;
+        // Mirror of the width px→m conversion in Shaders/Map/Line/Line_VertexExtrude.hlsl:
+        //   widthWorld = _Width * ((_WidthIsPixels > 0.5) ? pxToWorld : 1)
+        //
+        // NOTE the asymmetry: on the GPU `pxToWorld` is MEASURED per-vertex through the projection matrix
+        // (S104 deleted the _MetersPerPixel uniform this comment used to name), so it varies with depth and
+        // direction under tilt. This CPU mirror takes a single zoom-derived scalar, which agrees with the
+        // GPU at the view centre and drifts from it toward the edges of a tilted frame. That is fine for
+        // what it is used for — the RATIO between two zooms, which is what tooth 3 pins.
         //
         // Tooth 3 requires that offset and width share the same conversion path. Using the same
         // branch here guarantees that offsetM(z1)/offsetM(z2) == widthM(z1)/widthM(z2) at two

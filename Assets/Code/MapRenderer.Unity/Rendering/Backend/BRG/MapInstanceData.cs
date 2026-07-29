@@ -97,6 +97,12 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         [InstancedProp(PropKind.Float,  1f)]              public float  _FillAntialias;
         [InstancedProp(PropKind.Float,  0f)]              public float  _FillTranslateAnchor;
         [InstancedProp(PropKind.Float,  0f)]              public float  _FillPattern;
+        // fill-pattern sampling (P2). BOTH must be packed: the shader declares them as DOTS-instanced
+        // props, so on this backend an unlisted property is read from instance metadata that nothing wrote
+        // rather than from the material. _PatternRect defaulting to a zero-area rect would then clip every
+        // pattern fill on the BRG path while the MeshRenderer-based snapshot tests stayed green.
+        [InstancedProp(PropKind.Vector)]                  public float4 _PatternRect;
+        [InstancedProp(PropKind.Vector, 1f, 1f, 0f, 0f)]  public float4 _PatternScale;
 
         // ── Line-specific (in Line DOTS block; not in Fill) ───────────────────────────────────
 

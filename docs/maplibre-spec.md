@@ -59,7 +59,7 @@ nothing.
 | Layer type | Status | Notes |
 |---|:---:|---|
 | background | ❌ | recognized; no typed parse, no render (no background quad exists) |
-| fill | ✅ | color data-driven; several paint props constant/zoom-only or parsed-inert |
+| fill | ✅ | color/opacity data-driven; pattern, sort-key, translate(+anchor) all real (with zoom caveats). Only fill-outline-color / fill-antialias remain unimplemented |
 | line | ✅ | color/opacity/width data-driven; caps at 4 dash entries; several props constant/zoom-only |
 | symbol — text | 🟡 | SDF text, halo, collision, BiDi/RTL, Arabic all work; placement/transform features missing |
 | symbol — icon | ❌ | text-only; zero icon support; sprite loader absent |
@@ -98,18 +98,23 @@ not yet selectable from a style.
 background quad in the render path.
 
 ### fill
-Parse: `Style/Fill/PaintProperties.cs`. Consume: `StyledFillTileBuilder`, `MaterialFactory.BindFillPaintToApplier`, `Shaders/Map/Fill/`.
+Parse: `Style/Fill/{PaintProperties,LayoutProperties,FillPattern}.cs`. Consume: `StyledFillTileBuilder`, `MaterialFactory.BindFillPaintToApplier`, `FillRenderLayer.SetSprites`, `Shaders/Map/Fill/`.
 
 | Property | Status | Notes |
 |---|:---:|---|
 | fill-color | ✅ | baked per-feature into COLOR stream; **data-driven** ✔ |
-| fill-opacity | 🟡 | `_Opacity` uniform; **constant/zoom only** — a data-driven value silently reverts to default |
+| fill-opacity | 🟡 | constant/zoom → `_Opacity` uniform (re-pushed per frame); **data-driven** → baked into COLOR alpha with `_Opacity` pinned to 1 so it cannot double-apply. Caveat: a **Composite** (zoom+feature) expression takes the bake branch, so it is frozen at the tile's build zoom — `ApplyZoom` pushes uniforms, it does not re-mesh |
 | fill-outline-color | 🟠 | parsed + bound to `_FillOutlineColor`, but no outline pass/geometry reads it |
-| fill-antialias | 🟠 | parsed + bound to `_FillAntialias`, unused in shader (no fill-edge AA) |
-| fill-translate | 🟡 | applied in `Fill_VertexModify`, but raw px written with no px→world/zoom scaling → magnitude not spec-correct |
-| fill-translate-anchor | 🟠 | only the "map" path exists; anchor value has no effect |
-| fill-pattern | ❌ | only the sprite-name string parsed; no sprite sheet to sample |
-| fill-sort-key | ❌ | not parsed |
+| fill-antialias | 🟠 | parsed + bound to `_FillAntialias`, unused in shader. **Not separable from fill-outline-color** — the spec only draws the outline when this is true, so both wait on the one boundary-geometry epic (`docs/fill-parity-design.md` §P7) |
+| fill-translate | 🟡 | real screen-pixel offset, measured px→world **per axis** in `Fill_VertexModify` (was inert: applied in object units, so it scaled with the tile transform). **Constant only** — parsed as a literal `[x, y]` array, so a zoom expression silently yields `[0, 0]` |
+| fill-translate-anchor | 🟡 | both paths implemented — `map` uses the mesh normal+tangent frame, `viewport` the camera basis. **Constant only** (parsed as a literal string) |
+| fill-pattern | ✅ | resolved against the style sprite sheet and sampled (`SAMPLE_TEXTURE2D_GRAD`, `frac` tiling); an unresolvable pattern **clips** rather than falling back to `fill-color`'s opaque-black default |
+| fill-sort-key | 🟡 | parsed into `Fill/LayoutProperties`; features stably sorted ascending before meshing, so a higher key rasterizes later and lands on top. Evaluated at the tile's **build zoom**, so a zoom-dependent key does not re-sort as the user zooms (no re-mesh on zoom) |
+
+Remaining fill gaps: `fill-outline-color` and `fill-antialias` (each needs new geometry or a new AA path
+rather than plumbing — see `docs/fill-parity-design.md` P6/P7), plus the 🟡 caveats above. The recurring one
+is that anything evaluated per feature at build time is frozen at the tile's build zoom, because `ApplyZoom`
+pushes uniforms and never re-meshes — that is a pipeline-wide property, not a fill one.
 
 ### line
 Parse: `Style/Line/{PaintProperties,LayoutProperties,LineDash}.cs`. Consume: `StyledLineTileBuilder`, `MaterialFactory.BindLinePaintToApplier`, `Shaders/Map/Line/Line_VertexExtrude.hlsl`.
@@ -126,8 +131,8 @@ Parse: `Style/Line/{PaintProperties,LayoutProperties,LineDash}.cs`. Consume: `St
 | line-gap-width | 🟡 | hollow-line inner cut; **constant/zoom only** |
 | line-offset | 🟡 | perpendicular shift; **constant/zoom only** |
 | line-blur | 🟡 | opt-in soft edge; constant/zoom only; explicitly *not* full AA |
-| line-translate | 🟡 | world-XZ offset; off-axis px→world is an approximation |
-| line-translate-anchor | 🟠 | parsed + bound, but shader hardcodes map-space; anchor ignored |
+| line-translate | ✅ | screen-px offset, measured per-axis per-vertex; constant/zoom only (spec allows no expression) |
+| line-translate-anchor | ✅ | both anchors; `"map"` east is exact on Mercator, approximate toward a zoomed-out globe's limb |
 | line-dasharray | 🟡 | zoom-capable, re-evaluated per frame; **capped at 4 entries** — extras truncated |
 | line-pattern | ❌ | sprite-name only; solid fallback, no sampling |
 | line-gradient | ❌ | not parsed |
@@ -169,10 +174,10 @@ Rendering behaviors that **do** work: SDF glyphs, halo, grid collision, greedy s
 wrap, BiDi/RTL (single-run), Arabic joining/shaping.
 
 ### symbol — icon
-**Entirely ❌.** No `icon-*` key is parsed (image, size, rotate, anchor, offset, allow-overlap, ignore-placement,
-optional, padding, keep-upright, pitch/rotation-alignment, text-fit, color, halo-*, opacity, translate).
-**Sprite loading is absent** — the `sprite` root URL is captured as a string but there is no sheet/JSON/PNG
-loader, so icons *and* fill-/line-pattern have nothing to resolve against.
+Sprite loading **exists** (`Core/Text/Sprites/*`, `Unity/Text/SpriteSheet.cs`,
+`Rendering/Source/{SpriteSourceFactory,UnityWebRequestSpriteSource}`) — the sheet is fetched once per style
+and is what `fill-pattern` resolves against. This section's per-`icon-*`-key status was written before that
+landed and has NOT been re-verified key by key; treat the rows below as unaudited rather than current.
 
 ### fill-extrusion / raster / hillshade / heatmap / color-relief
 **All ❌** beyond the `StyleLayerType` enum name. No typed paint/layout model, no property constants, no
