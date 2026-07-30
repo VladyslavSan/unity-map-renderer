@@ -919,7 +919,13 @@ conventions), `Text/Placement/LabelStageInputs` (`CurvedStageInput.AtlasKind`, b
 `Shaders/Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` (the ported tangent branch). Jobs: unchanged —
 `LabelStageJob` passes `CurvedStageInput` through wholesale.
 
-**Maintainer eyeball still owed:** z ≥ 16 on `OpenStreetMapLiberty.unity` — arrows follow the road, and the
-`_opposite` layer's point the other way. Headless teeth cover the emit shape, the atlas routing, the mesh
-geometry and (via A6) the shader's tangent rotation, but not the live sprite sheet's `arrow` entry, which
-is only observable at runtime.
+**Maintainer eyeball DISCHARGED (2026-07-30):** confirmed on `OpenStreetMapLiberty.unity` — road shields
+and road arrows both render. Headless teeth cover the emit shape, the atlas routing, the mesh geometry and
+(via A6) the shader's tangent rotation, but not the live sprite sheet's `arrow` entry, which is only
+observable at runtime — that is what this confirms. It also confirms the `icon-rotate` sign correction
+(§ the 45°-tangent tooth) holds in the real renderer and not merely in the tooth that derived it.
+
+Two things the eyeball did NOT settle, both still open and both cheap to notice next time the scene is up:
+whether arrows DOUBLE at tile seams (along-line icons have no cross-tile dedup, KL-A1), and whether city
+dots appear WITHOUT their names at z10–13 (the non-centred-pairing gap — the answer decides whether that
+epic is worth its snapshot re-bake cost).

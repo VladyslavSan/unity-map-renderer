@@ -400,7 +400,7 @@ otherwise fail looking exactly like a real D6 regression.
 | **Rebuilding tiles on a sprite-atlas change** | D6 makes it unnecessary for the startup race (the only live case: the atlas changes exactly once per style). A general "invalidate these tiles" TileManager API is a separate epic — none exists today. |
 | **`icon-text-fit`** | Not needed by liberty (pre-sized `road_N` sprites) and unrelated to this bug. |
 | **Cross-tile shield dedup along a line** | A road crossing a tile boundary gets independent anchors per tile, so a shield can repeat or gap near the seam. Same class of known limit as the existing cross-tile line-label behaviour. |
-| Maintainer eyeball at z6/z7 (interstate), z10/z11 (non-us) and z13 on `OpenStreetMapLiberty.unity` | Headless teeth cannot see a rasterized shield, and the step-boundary pop (T15) is a *visual* judgement about whether the accepted limit is tolerable. |
+| ~~Maintainer eyeball at z6/z7 (interstate), z10/z11 (non-us) and z13 on `OpenStreetMapLiberty.unity`~~ **DISCHARGED 2026-07-30 — shields render.** | Headless teeth cannot see a rasterized shield, and the step-boundary pop (T15) is a *visual* judgement about whether the accepted limit is tolerable. |
 
 ---
 
