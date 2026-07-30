@@ -35,10 +35,13 @@ namespace MapRenderer.Core.Style.Symbol
         public const string IconImage          = "icon-image";
         public const string IconSize           = "icon-size";
         public const string IconOffset         = "icon-offset";
+        public const string IconRotate         = "icon-rotate";
         public const string IconAnchor         = "icon-anchor";
         public const string IconRotationAlignment = "icon-rotation-alignment";
         public const string IconAllowOverlap   = "icon-allow-overlap";
         public const string IconIgnorePlacement = "icon-ignore-placement";
+        public const string IconOptional       = "icon-optional";
+        public const string TextOptional       = "text-optional";
         public const string IconPadding        = "icon-padding";
 
         // ── paint ──

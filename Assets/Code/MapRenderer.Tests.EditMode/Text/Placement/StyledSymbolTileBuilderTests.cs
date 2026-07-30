@@ -326,6 +326,68 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(LabelKind.Text, output[2].Kind); Assert.AreEqual("Angola", output[2].Text);
         }
 
+        // ── A3 (P-B): a MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
+        //    The point-icon branch above stays byte-identical (its own tooth is the pair above). ──
+        [Test]
+        public async Task Shape_AlongLineIcon_BuildsOneGlyphCurvedInstance_NotAPointInstance()
+        {
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+                throw new InvalidOperationException("an icon-only layer must never request a glyph range"));
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var pathRender = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            var alongLine = new SymbolStyle.SymbolLabel
+            {
+                Kind = LabelKind.Icon,
+                Placement = SymbolPlacement.Line,
+                IconQuad = SampleIconQuad,
+                PathRender = pathRender,
+                LineAnchors = anchors,
+                IconImage = "arrow",
+                PaddingPx = 3f,
+                SortKey = 1.5f,
+                MaxAngleDeg = 45f,
+                KeepUpright = false,
+                IconRotateRadians = math.PI,
+                FeatureIndex = 7,
+                TileKey = 42L,
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(),
+                new List<SymbolStyle.SymbolLabel> { alongLine });
+
+            var output = new List<LabelInstance>();
+            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(1, output.Count);
+            LabelInstance built = output[0];
+            // A point-shaped build (the pre-P-B behaviour) would leave CurvedGlyphs null and Placement Point.
+            Assert.AreEqual(SymbolPlacement.Line, built.Placement, "an along-line icon keeps LINE placement");
+            Assert.IsNotNull(built.CurvedGlyphs, "it must build as a CURVED instance");
+            Assert.AreEqual(1, built.CurvedGlyphs.Count, "exactly ONE glyph — the icon quad IS the whole run");
+            Assert.IsNull(built.Layout, "a curved instance carries no point Layout");
+            Assert.AreEqual(LabelKind.Icon, built.Kind, "still an icon (routes to the sprite atlas)");
+            Assert.AreEqual(0f, built.CurvedGlyphs[0].ArcCenter, 1e-6f, "a lone cell sits at arc 0");
+
+            // Field-for-field: the cell IS the extractor's icon quad, unmodified.
+            SymbolQuad cell = built.CurvedGlyphs[0].Cell;
+            Assert.AreEqual(SampleIconQuad.TopLeft, cell.TopLeft, "cell TopLeft == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.BottomRight, cell.BottomRight, "cell BottomRight == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.UvTopLeft, cell.UvTopLeft, "cell UvTopLeft == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.UvBottomRight, cell.UvBottomRight, "cell UvBottomRight == the icon quad's");
+
+            Assert.AreEqual(TextQuadLayout.OneEm, built.TextSizePx, 1e-6f,
+                "scale 1 — IconQuadLayout already baked icon-size in (matches the point-icon branch)");
+            Assert.AreSame(pathRender, built.PathRender, "the projected path is carried, not rebuilt");
+            Assert.AreSame(anchors, built.LineAnchors, "the build-time anchors are carried, not recomputed");
+            Assert.IsFalse(built.KeepUpright, "icon-keep-upright's spec default is false");
+            Assert.AreEqual("arrow", built.IconImage);
+            Assert.AreEqual(math.PI, built.IconRotateRadians, 1e-6f, "icon-rotate is carried onto the curved instance");
+            Assert.AreEqual(7, built.FeatureIndex);
+            Assert.AreEqual(42L, built.TileKey);
+        }
+
         private static void AssertNamedLabel(List<SymbolStyle.SymbolLabel> extracted, List<LabelInstance> labels,
             string name, int expectedQuads)
         {

@@ -25,7 +25,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <para><b>text-translate-anchor:</b> <see cref="TextTranslateAnchor.Viewport"/> applies the delta
         /// in screen space directly; <see cref="TextTranslateAnchor.Map"/> rotates it by the map bearing so
         /// the offset tracks the map (identical at bearing 0). The bearing sign routes through the single
-        /// <see cref="LabelBearing.MapAlignedSign"/> (the batched visual-verify handoff, #4).</para>
+        /// <see cref="LabelBearing.MapAlignedSign"/>, which is pinned by a rendered tooth on the billboard
+        /// half of that shared constant — see its own doc.</para>
         /// </summary>
         /// <param name="screenPx">The projected screen anchor (logical px, y-up).</param>
         /// <param name="translatePx">The <c>text-translate</c> offset (logical px, y-down as authored).</param>

@@ -71,5 +71,27 @@ namespace MapRenderer.Core.Text.Placement
         /// this record's per-CANDIDATE <see cref="AnchorLocal"/> (which a curved candidate leaves default —
         /// one anchor can't serve every glyph of an along-line label). False (default) on a point candidate.</summary>
         public bool AlongLine;
+
+        /// <summary>
+        /// P-B: a constant CPU-side quad rotation (radians) applied ON TOP of the shader's live tangent
+        /// rotation — read ONLY when <see cref="AlongLine"/> is true, where
+        /// <see cref="PlacedQuad.RotationRadians"/> is deliberately unusable (the renderer forces it to 0 so
+        /// the rotation comes from the projected world <see cref="PlacedQuad.Tangent"/> instead, Stage AC).
+        /// Today's only source is <c>icon-rotate</c> on a map-aligned line icon; curved text leaves it 0, so
+        /// the renderer passes the same <c>0f</c> it used to hardcode.
+        /// <para>A per-CANDIDATE field rather than a per-quad one because an along-line candidate has exactly
+        /// one emit. Deliberately NOT folded into <see cref="PlacedQuad.RotationRadians"/>: curved text writes
+        /// a live tangent angle into that field for the dead screen path, so a future reader composing both
+        /// would double-rotate.</para>
+        /// <para><b>Sign.</b> This value is ALREADY in <c>BillboardMath</c>'s rotation sense
+        /// (positive = counter-clockwise on screen), the same frame the point path's composed
+        /// <see cref="PlacedQuad.RotationRadians"/> is in: <c>StageCurvedAnchor</c> writes it through
+        /// <see cref="LabelBearing.IconRotationRadians"/>, which is the ONE place <c>icon-rotate</c>'s
+        /// clockwise-positive convention is converted. Do not negate here or at the write site — that flip
+        /// point has moved into <see cref="LabelBearing"/>, and doing it twice would restore the bug it
+        /// fixed. The shader's tangent rotation acts on the already-converted offsets, so the two compose
+        /// additively in one frame.</para>
+        /// </summary>
+        public float ExtraRotationRadians;
     }
 }

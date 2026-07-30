@@ -138,6 +138,37 @@ namespace MapRenderer.Tests
             Assert.IsFalse(sym.Paint.IsInertFallback, "an icon-opacity-only paint sub-tree is NOT an inert fallback");
         }
 
+        // ── C1 (stage C) — icon-optional / text-optional parse as plain layout booleans ────────────────────
+        [Test]
+        public void SymbolLayer_IconAndTextOptional_ParseWithSpecDefaultFalse()
+        {
+            var absent = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{ 'text-field':'{NAME}' } } ] }").Layers[0];
+            Assert.IsFalse(absent.Layout.IconOptional, "icon-optional default is false (spec)");
+            Assert.IsFalse(absent.Layout.TextOptional, "text-optional default is false (spec)");
+
+            var set = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','icon-optional':true,'text-optional':true } } ] }").Layers[0];
+            Assert.IsTrue(set.Layout.IconOptional, "icon-optional:true must parse to true");
+            Assert.IsTrue(set.Layout.TextOptional, "text-optional:true must parse to true");
+
+            // Independent, not one flag read twice: liberty's airport sets only text-optional, and its four
+            // label_* layers set only icon-optional.
+            var textOnly = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-optional':true } } ] }").Layers[0];
+            Assert.IsFalse(textOnly.Layout.IconOptional, "text-optional must not set icon-optional");
+            Assert.IsTrue(textOnly.Layout.TextOptional);
+
+            // Malformed (a string, not a bool) degrades to the spec default rather than throwing.
+            var malformed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','icon-optional':'yes','text-optional':7 } } ] }").Layers[0];
+            Assert.IsFalse(malformed.Layout.IconOptional, "a malformed icon-optional degrades to false");
+            Assert.IsFalse(malformed.Layout.TextOptional, "a malformed text-optional degrades to false");
+        }
+
         [Test]
         public void SymbolLayer_Alignment_ParsesMapViewportAndDegradesToAuto()
         {
@@ -183,6 +214,30 @@ namespace MapRenderer.Tests
             Assert.AreEqual(TextAnchor.Center, sym.Layout.TextAnchor, "an unrecognized text-anchor degrades to center");
             Assert.AreEqual(TextJustify.Center, sym.Layout.TextJustify, "an unrecognized text-justify degrades to center");
             Assert.AreEqual(TextTransform.None, sym.Layout.TextTransform, "an unrecognized text-transform degrades to none");
+        }
+
+        // ── B1 (P-B): icon-rotate parses as a zoom-capable float, spec default 0. ──
+        [Test]
+        public void SymbolLayer_IconRotate_ParsesConstantZoomAndDefault()
+        {
+            var bare = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c' } ] }").Layers[0];
+            Assert.AreEqual(0f, bare.Layout.IconRotate.Evaluate(0.0), 1e-6, "icon-rotate default is 0 (spec)");
+
+            var constant = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-rotate':180 } } ] }").Layers[0];
+            Assert.AreEqual(180f, constant.Layout.IconRotate.Evaluate(0.0), 1e-6,
+                "a constant icon-rotate parses in DEGREES (the conversion is the extractor's)");
+            Assert.AreEqual(180f, constant.Layout.IconRotate.Evaluate(18.0), 1e-6, "a constant is zoom-invariant");
+
+            // Zoom-capable: an interpolate expression must be honoured, not collapsed to the default.
+            var zoomed = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'icon-rotate':['interpolate',['linear'],['zoom'],10,0,20,90] } } ] }").Layers[0];
+            Assert.AreEqual(0f, zoomed.Layout.IconRotate.Evaluate(10.0), 1e-6, "z10 -> 0");
+            Assert.AreEqual(45f, zoomed.Layout.IconRotate.Evaluate(15.0), 1e-4, "z15 -> the linear midpoint");
+            Assert.AreEqual(90f, zoomed.Layout.IconRotate.Evaluate(20.0), 1e-6, "z20 -> 90");
         }
 
         [Test]

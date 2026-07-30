@@ -88,12 +88,21 @@ namespace MapRenderer.Core.Text.Placement
         /// non-empty (a text that laid out no glyphs degrades to a lone badge, never a dangling box). Writes
         /// <c>candidates[ordinal]</c> and ONE OR TWO <c>CandidateEmit</c>s starting at <c>emitCount</c>. Returns 1
         /// if staged, or 0 when the owner itself has no quads or culls.
+        ///
+        /// <para>Stage C (<c>icon-optional</c>/<c>text-optional</c>): each half's
+        /// <see cref="PointStageInput.PairOptional"/> becomes its bit in the candidate's
+        /// <see cref="LabelCandidate.OptionalBoxMask"/> (bit 0 = owner, bit 1 = rider), so collision may drop
+        /// that half alone instead of the whole pair. <paramref name="droppedHalvesLastFrame"/> carries the
+        /// PREVIOUS frame's per-half verdict for this pair's <c>FadeId</c> (R3's one-frame verdict latency —
+        /// the emit loop runs before collision), and is masked down to the halves that are actually optional
+        /// and actually staged. Both default to 0, which is the exact pre-Stage-C behaviour.</para>
         /// </summary>
         public static int StagePointPair(in PointStageInput owner, in PointStageInput rider,
             ReadOnlySpan<SymbolQuad> ownerQuads, ReadOnlySpan<SymbolQuad> riderQuads,
             float bearingRadians, double2 viewportLogicalPx, int ordinal,
             Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
-            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
+            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount,
+            byte droppedHalvesLastFrame = 0)
         {
             if (ownerQuads.Length == 0) return 0;
             if (!owner.Projected || !LabelScreenProjection.IsWithinViewportMargin(owner.ScreenPx, viewportLogicalPx))
@@ -107,16 +116,25 @@ namespace MapRenderer.Core.Text.Placement
                 boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
 
             int boxCountForCandidate = 1;
+            // Stage C: bit 0 addresses the owner's box/emit, bit 1 the rider's — the rider's bit is set only
+            // when it actually staged one (an empty rider appends no box, so a bit would address the NEXT
+            // candidate's).
+            byte optionalMask = owner.PairOptional ? (byte)0b01 : (byte)0;
             if (riderQuads.Length > 0)
             {
                 AppendPointHalf(in rider, riderQuads, owner.ScreenPx, bearingRadians, ordinal,
                     boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
                 boxCountForCandidate = 2;
+                if (rider.PairOptional) optionalMask |= 0b10;
             }
 
             candidates[ordinal] = new LabelCandidate
             {
                 BoxStart = boxStart, BoxCount = boxCountForCandidate,
+                OptionalBoxMask = optionalMask,
+                // A carry from a frame whose optional set differed (a re-staged pair, a rider that laid out no
+                // quads this time) must not gate an emit that is no longer droppable — hence the mask.
+                DroppedBoxMask = (byte)(droppedHalvesLastFrame & optionalMask),
                 EmitStart = emitStart, EmitCount = emitCount - emitStart,
                 SortKey = SanitizeSortKey(owner.SortKey), FeatureIndex = owner.FeatureIndex, TileKey = owner.TileKey,
                 // §10 D8: the pair ignores collision only if BOTH halves do, and blocks unless BOTH decline to.
@@ -140,7 +158,13 @@ namespace MapRenderer.Core.Text.Placement
             Span<CandidateEmit> emit, ref int emitCount)
         {
             float2 translatedScreenPx = LabelTranslate.ApplyTranslate(screenPx, s.TranslatePx, s.TranslateAnchor, bearingRadians);
-            float rotationRadians = LabelBearing.BillboardRotationRadians(s.RotationAlignment, bearingRadians);
+            // P-B: icon-rotate is a CONSTANT angular offset composed on top of whatever the alignment
+            // produced — viewport ⇒ icon-rotate alone, map ⇒ bearing + icon-rotate. 2D rotations commute, so
+            // one addition here is the whole composition. 0 for every text label (exact `x + 0f`).
+            // LabelBearing.IconRotationRadians converts MapLibre's clockwise-positive sense into this frame's
+            // counter-clockwise-positive one — the ONE negation, shared with the along-line path below.
+            float rotationRadians = LabelBearing.BillboardRotationRadians(s.RotationAlignment, bearingRadians)
+                                    + LabelBearing.IconRotationRadians(s.IconRotateRadians);
             float sortKey = SanitizeSortKey(s.SortKey); // B1: finite-SortKey invariant (comparator totality)
 
             boxes[boxCount++] = LabelBox.Build(
@@ -387,9 +411,16 @@ namespace MapRenderer.Core.Text.Placement
                 float2.zero, s.TranslatePx, s.TranslateAnchor, bearingRadians);
             emit[emitCount++] = new CandidateEmit
             {
-                QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = LabelKind.Text,
+                QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = s.AtlasKind,
                 TileKey = s.TileKey, TileOriginRender = s.TileOriginRender, TranslateDeltaPx = translateDeltaPx,
                 IsWorld = true, AlongLine = true,
+                // P-B: the along-line path's icon-rotate term. The renderer forces this candidate's per-quad
+                // rotation to 0 (the shader supplies the tangent instead), so the constant rides here — see
+                // CandidateEmit.ExtraRotationRadians for the sign contract. The sense conversion is the SAME
+                // LabelBearing.IconRotationRadians the point path applies (one negation, not one per path);
+                // the shader's tangent rotation acts on the already-converted offsets and cannot change it.
+                // Curved TEXT leaves this 0, so the renderer passes exactly the 0f it used to hardcode.
+                ExtraRotationRadians = LabelBearing.IconRotationRadians(s.IconRotateRadians),
             };
             return true;
         }

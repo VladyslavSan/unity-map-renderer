@@ -799,3 +799,127 @@ the new `IconQuadLayout`), a new `Text/Sprites/SpriteIndex`+`SpriteEntry`. Unity
 `Text/Placement/LabelPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
 (template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolBillboardJob`, `LabelStageJob`, `LabelCollisionJob`
 (unchanged — texture-blind). Style: top-level `"sprite"` in `StyleDocument`/`StyleParser`; `liberty.json:17`.
+
+---
+
+# 6. Map-aligned line icons + `icon-rotate` (P-B)
+
+**Status: LANDED.** Closes the last fence `docs/road-shields-design.md` §6 still carried. Before this,
+liberty's `road_one_way_arrow` and `road_one_way_arrow_opposite` emitted **zero** labels: the extractor
+gated icon resolution on `!isLine || iconAtAnchors`, and `icon-rotation-alignment` is unset on both layers,
+so `AlignmentResolution` resolved `auto → Map` under line placement and fell outside the gate.
+
+## 6.1 Three icon emit shapes, not two
+
+| `symbol-placement` | resolved `icon-rotation-alignment` | shape | since |
+|---|---|---|---|
+| point | any | point icon label | I3 |
+| line / line-center | viewport (explicit, or `auto` under point) | point-shaped icon at each along-line anchor, screen-upright — the road shields | D4 |
+| line / line-center | **map** (explicit, or `auto` under line) | **curved label with exactly ONE glyph = the icon quad**, rotated to the projected tangent by the shader | **P-B** |
+
+**The load-bearing observation: an along-line icon IS a one-glyph curved label.** A `CurvedGlyph.Cell` is a
+`SymbolQuad` horizontally centred on 0, and an `IconQuadLayout` quad with the default `icon-anchor: center`
+is exactly that shape. So the icon reuses the curved machinery wholesale — per-anchor candidates, the
+projected-path arc walk, the per-glyph **rotated** collision box (`LabelBox.BuildRotatedGlyph`), the baked
+world tangent, and the world-anchored emit — for **zero** new record kinds, gather changes or oracle
+changes. Two curved gates go inert at one glyph: `labelSpanPx == 0` so the end-spill test never rejects, and
+the `text-max-angle` check is `g > 0`-guarded so it never fires.
+
+Three alternatives were rejected: a new "point icon + per-frame tangent" record kind (forks
+`LineAnchorPlacement`/the arc walk for a shape the curved path already produces); CPU-baked screen rotation
+with no shader change (reintroduces, for icons, the rotation/anchor drift under motion that Stage AC fixed
+for text); and a `LabelRecordKind.LineIcon` (touches block/gather/mirror/oracle/batch for no gain).
+
+**The shader half was blocker-grade.** `SymbolIconWorld_ForwardPass.hlsl` declared `alignFlags` as
+"WRITTEN, UNREAD" and had no `tangentOS`, so without an HLSL change every arrow would draw unrotated —
+all pointing screen-right. Stage AC's tangent branch is therefore **duplicated verbatim** into the icon
+pass (a `Map/` shader layer may not include another's, by convention — the duplication is deliberate).
+
+**Pairing stays out structurally.** A pair is proposed only in the extractor's `EmitAtAnchor`, on the point
+path; an along-line icon is emitted from the line branch and can never carry a `PairRole`. No guard needed.
+
+## 6.2 `icon-rotate` — a constant composed on top of the alignment
+
+`icon-rotate` is a zoom-capable degrees value, converted to radians **once** at extract (the `Angle`
+single-conversion rule) and composed as one addition on whatever the alignment already produced:
+
+* **Point icons** (and viewport-resolved line icons): one term at `LabelStagingMath.AppendPointHalf` —
+  `BillboardRotationRadians(alignment, bearing) + IconRotationRadians(s.IconRotateRadians)`. Viewport ⇒
+  `icon-rotate` alone; map ⇒ `bearing + icon-rotate`. 2D rotations commute, so one addition is the whole
+  composition.
+* **Along-line icons**: the renderer forces an along-line candidate's per-quad rotation to 0 (the shader
+  supplies the tangent instead), so the constant rides on `CandidateEmit.ExtraRotationRadians`, written by
+  `StageCurvedAnchor` and read at `WorldLabelRenderer`. Curved text leaves it 0, so the renderer passes
+  exactly the `0f` it used to hardcode. *Rejected:* reusing `PlacedQuad.RotationRadians`, because curved
+  text writes a live tangent angle there and a future reader would double-rotate.
+
+**Sign — measured, and the paper derivation that preceded it was wrong.** The staging frame's rotation is
+**counter-clockwise-positive on screen**, while `icon-rotate` is clockwise-positive, so the two senses are
+opposite and exactly one negation reconciles them: `LabelBearing.IconRotationRadians`, called by *both*
+`AppendPointHalf` and `StageCurvedAnchor`. `icon-rotate` keeps MapLibre's own sense on every carrier
+(`SymbolLabel` → `LabelInstance` → the stage inputs) and flips only there, at the boundary where it becomes
+a staging rotation.
+
+The frame itself: `BillboardMath.BuildWorldQuad` rotates corners in the quad's **y-up local** frame and then
+negates Y, which lands `OffsetPx` in a **y-DOWN screen** frame — a rotation read through a mirrored axis
+reverses, so a positive `rotationRadians` appears counter-clockwise on screen. P-B originally argued the
+opposite on paper (`N·R(θ)·N = R(-θ)` ⇒ clockwise), which was self-contradictory: it read the negation as
+supplying the clockwise sense *and* left `OffsetPx` y-up, when the negation is precisely what makes
+`OffsetPx` y-down. **Do not re-derive this on paper.** What settled it is a rendered tooth,
+`SymbolIconRenderSnapshotTests.AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen`: it measures ink
+*centroid* (not a bounding box) at a **45° road**, calibrating the buffer's sense against a rotation whose
+physical direction is known — the road swinging counter-clockwise on the map, which a map-aligned icon
+follows. It found `icon-rotate: 90` rendering at exactly +90° instead of −90°, a full inversion that every
+other tooth was blind to: **90° is the smallest angle at which +φ and −φ differ**, and 180° — liberty's only
+live value, its own inverse — can never show it. `LabelStagingMathTests` part (d) pins the same sense on the
+point path at the `OffsetPx` level, stated in the true (y-down) frame.
+
+Related and still open: `LabelBearing.MapAlignedSign` is the *other* sign on this composition and remains
+**chosen, not derived**, deferred to an eyeball pass. It is the same class of risk this finding realised.
+
+**`icon-keep-upright` — ruled out on purpose, not overlooked.** Its spec default is `false` (unlike
+`text-keep-upright`, which defaults `true`), and for a one-way arrow that default is the **only correct**
+behaviour: the arrow encodes the road's direction of travel, so flipping it to stay "upright" would point
+it the wrong way. Arrows on westward roads therefore point left, and an asymmetric arrow sprite reads
+mirrored end-to-end — that is what MapLibre draws, not a defect this stage introduces. Along-line icons
+hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`'s default.**
+
+## 6.3 Known limits (accepted)
+
+* **KL-A1 — no cross-tile dedup for along-line icons.** Curved labels are excluded from dedup, and the
+  point path's `[0, extent)` single-world anchor clip does not apply to them, so an arrow on a road
+  crossing a tile seam can be emitted by both tiles. This is the *existing* curved-text behaviour inherited
+  unchanged, not a new class of defect.
+* **KL-A2 — new per-frame collision/stage work.** At z16 each `oneway` road emits one candidate per
+  `symbol-spacing` (250 px default) per tile, in the profiled hot path
+  (`docs/symbol-label-perf-design.md`). Both layers are `minzoom: 16` and filtered, so this is not expected
+  to matter — but `LastCandidateCount` at z16 is worth re-checking at the eyeball.
+* **KL-A3 — mixed per-side alignment on one line layer is unpaired (NOT triggered today).** A style setting
+  `text-rotation-alignment: viewport` *and* `icon-rotation-alignment: map` on the same line layer would get
+  independent, unpaired text (at-anchors) and icon (along-line) candidates from the two branches. liberty
+  never does this — the shields set both to viewport, the arrows are icon-only, the name layers are
+  text-only. Recorded so the next reader knows it was considered, not missed. Not built for.
+* **KL-B1 — `icon-rotate` does not rotate the point collision box.** The point path's box is the unrotated
+  `BoundsMin/BoundsMax` AABB even under a live map bearing, so rotating it for `icon-rotate` alone would
+  make the convention inconsistent with the case it must match. (The *along-line* box IS rotated — by the
+  tangent, via `BuildRotatedGlyph` — it simply does not include the extra constant.)
+* Out of scope, no liberty consumer: `icon-keep-upright` (§6.2), `icon-translate`/`-anchor`,
+  `icon-text-fit`, `icon-color`, `icon-halo-*`, `icon-pitch-alignment`.
+
+## 6.4 Grounding (touch points)
+
+Core: `Style/Symbol/PropertyNames` (`icon-rotate`), `Style/Symbol/LayoutProperties` (`IconRotate`),
+`Style/Symbol/SymbolFeatureExtractor` (`iconAlongLine`, `AlongLineIconContext`, `EmitAlongLineIcon`),
+`Style/Symbol/SymbolLabel` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
+conventions), `Text/Placement/LabelStageInputs` (`CurvedStageInput.AtlasKind`, both `IconRotateRadians`),
+`Text/Placement/CandidateEmit` (`ExtraRotationRadians`), `Text/Placement/LabelStagingMath`
+(`AppendPointHalf`'s one addition; `StageCurvedAnchor`'s emit), `Text/Placement/LabelInstance`. Unity:
+`Text/StyledSymbolTileBuilder` (the point/curved icon split), `Text/Placement/SymbolTileLabelBlockBaker`
+(both inputs), `Text/Placement/WorldLabelRenderer` (the along-line rotation arm),
+`Shaders/Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` (the ported tangent branch). Jobs: unchanged —
+`LabelStageJob` passes `CurvedStageInput` through wholesale.
+
+**Maintainer eyeball still owed:** z ≥ 16 on `OpenStreetMapLiberty.unity` — arrows follow the road, and the
+`_opposite` layer's point the other way. Headless teeth cover the emit shape, the atlas routing, the mesh
+geometry and (via A6) the shader's tangent rotation, but not the live sprite sheet's `arrow` entry, which
+is only observable at runtime.

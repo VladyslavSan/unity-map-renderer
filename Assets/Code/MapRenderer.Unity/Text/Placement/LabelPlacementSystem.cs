@@ -227,6 +227,16 @@ namespace MapRenderer.Unity.Text.Placement
         private const int PlacedSetInitialCapacity = 16384;
         private NativeHashSet<long> _placedLastFrame; // NOT readonly — allocated in the ctor
 
+        // ── Stage C: per-half collision verdict for optional pairs (icon-optional / text-optional) ───────────
+        // FadeId -> LabelCandidate.DroppedBoxMask, for the survivors whose mask was non-zero. Carries last
+        // frame's verdict across R3's one-frame gap exactly as _placedLastFrame carries the whole-candidate one:
+        // the emit loop runs BEFORE collision, so a dropped half can only be skipped on the following frame.
+        // ONLY a pair whose style sets one of the two properties ever gets an entry, so on every shipped style
+        // today this map is allocated, cleared and read as empty — a probe the stage job also skips outright.
+        // Small initial capacity for the same reason. Native so LabelStageJob can read it from Burst.
+        private const int DroppedHalvesInitialCapacity = 64;
+        private NativeHashMap<long, byte> _droppedHalvesLastFrame; // NOT readonly — allocated in the ctor
+
         // ── B-2: parallel symbol projection ─────────────────────────────────────────────────────────────────
         // Every visible symbol's screen geometry this frame — a point symbol's anchor, a line symbol's path
         // vertices — is projected UP FRONT in one pass by the Burst SymbolProjectionJob, and the staging pass reads
@@ -499,6 +509,7 @@ namespace MapRenderer.Unity.Text.Placement
             _stagePointOffset = new NativeList<int>(Allocator.Persistent);
             _stageAnchorWasPlaced = new NativeList<byte>(Allocator.Persistent);
             _placedLastFrame = new NativeHashSet<long>(PlacedSetInitialCapacity, Allocator.Persistent);
+            _droppedHalvesLastFrame = new NativeHashMap<long, byte>(DroppedHalvesInitialCapacity, Allocator.Persistent);
             // _debugFadeIdSeen is NOT allocated here — see its field doc: AssertFadeIdsUnique allocates it
             // lazily on first use, so a release build (where that [Conditional] method never runs) never pays for it.
             _stageBoxes = new NativeList<LabelBox>(Allocator.Persistent);
@@ -708,8 +719,15 @@ namespace MapRenderer.Unity.Text.Placement
                                 // centred icon+text pair has EmitCount == 2 (its icon and text, each with its
                                 // own (Slot, AtlasKind)) — both draw at this ONE opacity (one EaseFade above),
                                 // which is the point: the pair fades as a single unit.
+                                // Stage C: skip the emit of a half LAST Tick's collision dropped (icon-optional /
+                                // text-optional) — its partner still draws. The mask is seeded onto the candidate
+                                // by staging from _droppedHalvesLastFrame, since the verdict for THIS Tick's
+                                // collision does not exist yet (R3). Zero for every other candidate, so the added
+                                // test short-circuits on the first term everywhere else.
+                                byte droppedHalves = cand.DroppedBoxMask;
                                 for (int e = cand.EmitStart, eEnd = cand.EmitStart + cand.EmitCount; e < eEnd; e++)
                                 {
+                                    if (droppedHalves != 0 && (droppedHalves & (1 << (e - cand.EmitStart))) != 0) continue;
                                     CandidateEmit emit = _stageEmit[e];
                                     totalQuads += WorldRenderer.Emit(in emit, _stageQuads.AsArray(), opacity);
                                 }
@@ -876,6 +894,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // No collision was in flight ⇒ last Tick produced no verdict (no candidates / no atlas / no labels)
                 // ⇒ no incumbents and nothing to show — the same state the pre-R3 !didBuild clear produced.
                 _placedLastFrame.Clear();
+                _droppedHalvesLastFrame.Clear();
                 LastSurvivorCount = 0;
                 return;
             }
@@ -884,12 +903,18 @@ namespace MapRenderer.Unity.Text.Placement
             _collisionHandle = null;
 
             _placedLastFrame.Clear();
+            _droppedHalvesLastFrame.Clear();
             for (int s = 0; s < _pendingCandidateCount; s++)
             {
                 if (_nSurvivors[s] == 0) continue;
-                long fadeId = _stageCandidates[s].FadeId;
+                LabelCandidate candidate = _stageCandidates[s];
+                long fadeId = candidate.FadeId;
                 if (_forceFadeOut.Contains(fadeId)) continue;
                 _placedLastFrame.Add(fadeId);
+                // Stage C: a survivor that placed WITHOUT one of its optional halves records which — read by
+                // next Tick's staging, which seeds it back onto the re-staged candidate for the emit gate.
+                // Non-zero only for an icon-optional/text-optional pair, so this stays untaken everywhere else.
+                if (candidate.DroppedBoxMask != 0) _droppedHalvesLastFrame[fadeId] = candidate.DroppedBoxMask;
             }
             LastSurvivorCount = _survivorCountOut[0];
         }
@@ -1372,6 +1397,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // (_symbolPoints persists across the synchronous .Run() call below — see its own field doc).
                 WorldPointsRender = _symbolPoints.AsArray(),
                 AnchorWasPlaced = _stageAnchorWasPlaced.AsArray(), Placed = _placedLastFrame.AsReadOnly(),
+                DroppedHalves = _droppedHalvesLastFrame.AsReadOnly(),
                 Bearing = bearingRadians, Viewport = viewportLogicalPx,
                 PathScratch = _stagePath.AsArray(), CumScratch = _stageCumulativeLength.AsArray(),
                 Boxes = _stageBoxes.AsArray(), StagedQuads = _stageQuads.AsArray(),
@@ -1566,6 +1592,7 @@ namespace MapRenderer.Unity.Text.Placement
             _stageBoxes.Dispose(); _stageQuads.Dispose(); _stageCandidates.Dispose(); _stageEmit.Dispose();
             _stageCounts.Dispose(); _stagePath.Dispose(); _stageCumulativeLength.Dispose();
             _placedLastFrame.Dispose(); // R2: native set, ctor-allocated alongside the other persistent containers
+            _droppedHalvesLastFrame.Dispose(); // Stage C: same lifetime as _placedLastFrame
             // R3: AssertFadeIdsUnique's persistent scratch set (see its field doc) — lazily allocated, so a
             // release build (or an Editor instance that never staged a candidate) may never have created it.
             if (_debugFadeIdSeen.IsCreated) _debugFadeIdSeen.Dispose();

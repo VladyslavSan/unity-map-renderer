@@ -9,8 +9,11 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// #4 — the alignment→billboard-rotation mapping. The mode selection (Map → bearing; Viewport/Auto → 0)
-    /// is fully testable; the bearing SIGN is the single visual-verify constant (LabelBearing.MapAlignedSign),
-    /// so these assert the selection and the ×sign relation, not a hand-picked "correct" sign.
+    /// is fully testable here; these assert the selection and the ×sign relation, and deliberately do NOT
+    /// pin LabelBearing.MapAlignedSign itself — multiplying by the constant under test can only restate it.
+    /// The sign is pinned where a sign can actually be observed, by the rendered tooth
+    /// SymbolIconRenderSnapshotTests.MapAlignedPointIcon_TurnsWithTheMap_UnderAnActiveBearing; every case
+    /// below stays green against a fully inverted constant, which is exactly why that tooth exists.
     /// </summary>
     [TestFixture]
     public class LabelBearingTests

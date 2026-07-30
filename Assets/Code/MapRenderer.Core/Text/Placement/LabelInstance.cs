@@ -117,6 +117,13 @@ namespace MapRenderer.Core.Text.Placement
         /// consumed by the draw side (I5b).</summary>
         public LabelKind Kind { get; init; }
 
+        /// <summary>P-B <c>icon-rotate</c> in RADIANS, in MapLibre's own sense (positive = clockwise on
+        /// screen — the staging frame's opposite sense is entered once, at
+        /// <c>LabelBearing.IconRotationRadians</c>), threaded from
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.IconRotateRadians"/>. Default 0 — every text
+        /// label and every un-rotated icon leaves the composition an exact <c>x + 0f</c>.</summary>
+        public float IconRotateRadians { get; init; }
+
         /// <summary>I6 icon identity, threaded from <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.IconImage"/>;
         /// null for text. Folded into <see cref="CrossTileLabelKey"/> (guard-skip — a null value leaves a text
         /// key's hash/equality unchanged) so distinct co-located icons no longer collide in cross-tile dedup
@@ -132,5 +139,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="Placement.LabelPairing"/>'s <c>LabelInstance</c> overload also matches
         /// <see cref="TileKey"/>/<see cref="MaterialIndex"/>.</summary>
         public int PairId { get; init; }
+
+        /// <summary>Stage C, threaded from <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.PairOptional"/>:
+        /// this half may be dropped while its partner places. Default false ⇒ the spec default (both
+        /// required), which is what every pre-Stage-C label carries.</summary>
+        public bool PairOptional { get; init; }
     }
 }

@@ -25,18 +25,32 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class LabelCollisionJobTests
     {
-        private static HashSet<int> ManagedSurvivors(LabelCandidate[] cands, int candCount, LabelBox[] boxes, int boxCount)
+        // Stage C: the comparable verdict is no longer just "who survived" — it is, per candidate identity,
+        // (placed, DroppedBoxMask). Rendered as a sorted "label:placed:mask" list so an asymmetry in either
+        // field shows up as a readable diff.
+        private static List<string> Verdicts(LabelCandidate[] cands, int candCount, bool[] flags)
+        {
+            var rows = new List<string>(candCount);
+            for (int i = 0; i < candCount; i++)
+                rows.Add($"{cands[i].LabelIndex}:{(flags[i] ? 1 : 0)}:{cands[i].DroppedBoxMask}");
+            rows.Sort(System.StringComparer.Ordinal);
+            return rows;
+        }
+
+        private static List<string> ManagedVerdicts(LabelCandidate[] cands, int candCount, LabelBox[] boxes,
+            int boxCount, out List<int> survivorIds)
         {
             var work = (LabelCandidate[])cands.Clone(); // SelectSurvivors sorts in place
             var flags = new bool[candCount];
             var grid = new LabelCollisionGrid();
             LabelCollision.SelectSurvivors(work, candCount, boxes, boxCount, flags, grid);
-            var set = new HashSet<int>();
-            for (int i = 0; i < candCount; i++) if (flags[i]) set.Add(work[i].LabelIndex);
-            return set;
+            survivorIds = new List<int>();
+            for (int i = 0; i < candCount; i++) if (flags[i]) survivorIds.Add(work[i].LabelIndex);
+            return Verdicts(work, candCount, flags);
         }
 
-        private static HashSet<int> NativeSurvivors(LabelCandidate[] cands, int candCount, LabelBox[] boxes, int boxCount)
+        private static List<string> NativeVerdicts(LabelCandidate[] cands, int candCount, LabelBox[] boxes,
+            int boxCount, out List<int> survivorIds)
         {
             var nc = new NativeArray<LabelCandidate>(candCount, Allocator.TempJob);
             var nb = new NativeArray<LabelBox>(boxCount, Allocator.TempJob);
@@ -65,10 +79,17 @@ namespace MapRenderer.Tests.Text.Placement
                         GridW = dims.W, GridH = dims.H,
                     }.Schedule().Complete();
 
-                    var set = new HashSet<int>();
-                    for (int i = 0; i < candCount; i++) if (ns[i] != 0) set.Add(nc[i].LabelIndex);
-                    Assert.AreEqual(set.Count, outCount[0], "OutSurvivorCount must match the flags");
-                    return set;
+                    var sorted = new LabelCandidate[candCount];
+                    var flags = new bool[candCount];
+                    survivorIds = new List<int>();
+                    for (int i = 0; i < candCount; i++)
+                    {
+                        sorted[i] = nc[i];
+                        flags[i] = ns[i] != 0;
+                        if (flags[i]) survivorIds.Add(nc[i].LabelIndex);
+                    }
+                    Assert.AreEqual(survivorIds.Count, outCount[0], "OutSurvivorCount must match the flags");
+                    return Verdicts(sorted, candCount, flags);
                 }
                 finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
             }
@@ -77,10 +98,14 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static void AssertSame(LabelCandidate[] cands, LabelBox[] boxes, string what)
         {
-            CollectionAssert.AreEquivalent(
-                ManagedSurvivors(cands, cands.Length, boxes, boxes.Length),
-                NativeSurvivors(cands, cands.Length, boxes, boxes.Length),
+            List<string> managed = ManagedVerdicts(cands, cands.Length, boxes, boxes.Length, out List<int> managedIds);
+            List<string> native = NativeVerdicts(cands, cands.Length, boxes, boxes.Length, out List<int> nativeIds);
+            CollectionAssert.AreEquivalent(managedIds, nativeIds,
                 $"native LabelCollisionJob survivor set must equal the managed reference ({what})");
+            // Stage C: and the per-half DroppedBoxMask verdict too — the survivor set alone cannot see an
+            // asymmetry in WHICH optional half each implementation dropped.
+            CollectionAssert.AreEqual(managed, native,
+                $"native LabelCollisionJob (placed, DroppedBoxMask) verdicts must equal the managed reference ({what})");
         }
 
         // 1-box candidates (point-like) — fully exercises the grid, which is the B-4a risk. Box size range is a
@@ -169,6 +194,112 @@ namespace MapRenderer.Tests.Text.Placement
             Add(3, 25f, (205, 2, 215, 10));                                   // point over curved-2 glyph 1
             Add(4, 30f, (1000, 1000, 1020, 1012));                            // point, far away (always places)
             AssertSame(cands.ToArray(), boxes.ToArray(), "multi-box + point candidates");
+        }
+
+        // ── C6 (stage C) ──────────────────────────────────────────────────────────────────────────────────
+        // Two-box PAIR candidates whose halves OVERLAP BY CONSTRUCTION (what a centred icon+text pair is),
+        // each carrying a random OptionalBoxMask, interleaved with ordinary single-box candidates in a
+        // congested region so most halves actually contend. The differential now compares the per-half
+        // DroppedBoxMask as well as the survivor set, so any divergence between LabelCollision.SelectSurvivors
+        // and this job's mirrored loop — a different bit, a different insert-skip — fails here. The overlapping
+        // halves are also the self-block tripwire: an implementation that inserted one half before testing the
+        // other would drop every pair, in one runner or both.
+        private static (LabelCandidate[], LabelBox[]) RandomMaskedPairScene(int pairCount, int singleCount, int seed)
+        {
+            var rng = new System.Random(seed);
+            var boxes = new List<LabelBox>();
+            var cands = new List<LabelCandidate>();
+            int label = 0;
+
+            // A DETERMINISTIC contended pair, off in its own region, so "at least one half is dropped" holds for
+            // every (count, seed) rather than depending on the random draw: a rider-optional pair whose rider box
+            // is covered by a higher-priority single, and whose owner box is free.
+            boxes.Add(new LabelBox { Min = new float2(980, 980), Max = new float2(1020, 1020),
+                SortKey = 5f, FeatureIndex = label, TileKey = 2, LabelIndex = label });
+            boxes.Add(new LabelBox { Min = new float2(1030, 992), Max = new float2(1070, 1008),
+                SortKey = 5f, FeatureIndex = label, TileKey = 2, LabelIndex = label });
+            cands.Add(new LabelCandidate
+            {
+                BoxStart = 0, BoxCount = 2, EmitStart = 0, EmitCount = 2,
+                SortKey = 5f, FeatureIndex = label, TileKey = 2, LabelIndex = label,
+                OptionalBoxMask = 0b10,
+            });
+            label++;
+            boxes.Add(new LabelBox { Min = new float2(1035, 995), Max = new float2(1065, 1005),
+                SortKey = -1f, FeatureIndex = label, TileKey = 2, LabelIndex = label });
+            cands.Add(new LabelCandidate
+            {
+                BoxStart = boxes.Count - 1, BoxCount = 1, EmitStart = boxes.Count - 1, EmitCount = 1,
+                SortKey = -1f, FeatureIndex = label, TileKey = 2, LabelIndex = label,
+            });
+            label++;
+
+            for (int i = 0; i < pairCount; i++)
+            {
+                float x = (float)(rng.NextDouble() * 260.0);
+                float y = (float)(rng.NextDouble() * 180.0);
+                float sortKey = rng.Next(0, 5);
+                int start = boxes.Count;
+                // Owner box and rider box share the anchor and overlap — the pair geometry that makes
+                // test-all-then-insert load-bearing. The world is deliberately small so these actually contend.
+                boxes.Add(new LabelBox { Min = new float2(x - 20, y - 20), Max = new float2(x + 20, y + 20),
+                    SortKey = sortKey, FeatureIndex = label, TileKey = 0, LabelIndex = label });
+                boxes.Add(new LabelBox { Min = new float2(x - 12, y - 8), Max = new float2(x + 34, y + 8),
+                    SortKey = sortKey, FeatureIndex = label, TileKey = 0, LabelIndex = label });
+                cands.Add(new LabelCandidate
+                {
+                    BoxStart = start, BoxCount = 2, EmitStart = start, EmitCount = 2,
+                    SortKey = sortKey, FeatureIndex = label, TileKey = 0, LabelIndex = label,
+                    OptionalBoxMask = (byte)rng.Next(0, 4), // 0 = today's all-or-nothing, 1/2 = one half, 3 = both
+                });
+                label++;
+            }
+            for (int i = 0; i < singleCount; i++)
+            {
+                float x = (float)(rng.NextDouble() * 260.0);
+                float y = (float)(rng.NextDouble() * 180.0);
+                float sortKey = rng.Next(0, 5);
+                boxes.Add(new LabelBox { Min = new float2(x, y), Max = new float2(x + 30, y + 14),
+                    SortKey = sortKey, FeatureIndex = label, TileKey = 1, LabelIndex = label });
+                cands.Add(new LabelCandidate
+                {
+                    BoxStart = boxes.Count - 1, BoxCount = 1, EmitStart = boxes.Count - 1, EmitCount = 1,
+                    SortKey = sortKey, FeatureIndex = label, TileKey = 1, LabelIndex = label,
+                });
+                label++;
+            }
+            return (cands.ToArray(), boxes.ToArray());
+        }
+
+        [Test]
+        public void NativeCollision_MatchesManaged_OptionalMaskedPairs(
+            [Values(4, 30, 120)] int pairCount, [Values(11, 404)] int seed)
+        {
+            var (cands, boxes) = RandomMaskedPairScene(pairCount, pairCount, seed);
+            AssertSame(cands, boxes, $"masked pairs pairs={pairCount} seed={seed}");
+
+            // A masked scene must actually EXERCISE the new branch — otherwise this tooth could pass on a
+            // no-op. At least one candidate has to place while dropping a half.
+            List<string> managed = ManagedVerdicts(cands, cands.Length, boxes, boxes.Length, out _);
+            bool anyPartial = managed.Exists(row => row.EndsWith(":1") || row.EndsWith(":2") || row.EndsWith(":3"));
+            Assert.IsTrue(anyPartial,
+                "precondition: this scene must produce at least one partially-placed pair, or the differential " +
+                "is only re-checking the mask-0 path");
+        }
+
+        // Mask 0 everywhere must be byte-identical to the pre-stage-C behaviour: an all-or-nothing pair scene
+        // records NO per-half verdict, and one blocked box still drops the whole candidate.
+        [Test]
+        public void UnmaskedPairs_StayAllOrNothing_AndRecordNoDroppedMask()
+        {
+            var (cands, boxes) = RandomMaskedPairScene(40, 40, 7);
+            for (int i = 0; i < cands.Length; i++) cands[i].OptionalBoxMask = 0;
+            AssertSame(cands, boxes, "unmasked pairs (the pre-stage-C reference shape)");
+
+            List<string> managed = ManagedVerdicts(cands, cands.Length, boxes, boxes.Length, out List<int> survivors);
+            Assert.IsTrue(managed.TrueForAll(row => row.EndsWith(":0")),
+                "a candidate with no optional half must never record a DroppedBoxMask");
+            Assert.Greater(survivors.Count, 0, "sanity: the scene is not degenerate — something placed");
         }
 
         // Regression (live-demo crash at a dense scene): the node pool is pre-sized on the MAIN thread

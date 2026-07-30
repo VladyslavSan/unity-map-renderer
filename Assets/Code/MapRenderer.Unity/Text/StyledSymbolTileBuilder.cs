@@ -163,7 +163,7 @@ namespace MapRenderer.Unity.Text
                     try
                     {
                         SymbolLabel s = extracted[i];
-                        if (s.Kind == LabelKind.Icon)
+                        if (s.Kind == LabelKind.Icon && s.Placement == SymbolPlacement.Point)
                         {
                             // I5a: an icon is a single pre-laid-out quad (SymbolFeatureExtractor already
                             // resolved sprite + icon-size/-offset/-anchor) — no shaping, just wrap it into the
@@ -187,8 +187,43 @@ namespace MapRenderer.Unity.Text
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
                                 RotationAlignment = s.RotationAlignment,
+                                IconRotateRadians = s.IconRotateRadians,
                                 PairRole = s.PairRole,
                                 PairId = s.PairId,
+                                PairOptional = s.PairOptional,
+                            });
+                            continue;
+                        }
+
+                        if (s.Kind == LabelKind.Icon)
+                        {
+                            // P-B: a map-resolved LINE icon is the same pre-laid-out quad, but shaped as a
+                            // ONE-GLYPH CURVED label — the icon cell is already horizontally centred on 0
+                            // (icon-anchor: center), which is exactly the CurvedGlyph.Cell contract, so the
+                            // whole curved machinery (per-anchor candidates, the arc walk, the rotated
+                            // collision box, the baked world tangent) applies with no new record kind.
+                            // TextSizePx = OneEm ⇒ the curved path's cell scale is 1, matching the point-icon
+                            // branch above (IconQuadLayout already baked icon-size in).
+                            output.Add(new LabelInstance
+                            {
+                                Placement = s.Placement,
+                                Kind = LabelKind.Icon,
+                                PathRender = s.PathRender,
+                                LineAnchors = s.LineAnchors,
+                                CurvedGlyphs = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad } },
+                                IconImage = s.IconImage, // I6: cross-tile icon identity
+                                Paint = s.Paint,
+                                TextSizePx = TextQuadLayout.OneEm,
+                                PaddingPx = s.PaddingPx,
+                                SortKey = s.SortKey,
+                                MaxAngleDeg = s.MaxAngleDeg,
+                                KeepUpright = false, // icon-keep-upright's spec default — see SymbolLabel.KeepUpright
+                                FeatureIndex = s.FeatureIndex,
+                                TileKey = s.TileKey,
+                                AllowOverlap = s.AllowOverlap,
+                                IgnorePlacement = s.IgnorePlacement,
+                                MaterialIndex = materialIndex,
+                                IconRotateRadians = s.IconRotateRadians,
                             });
                             continue;
                         }
@@ -225,6 +260,7 @@ namespace MapRenderer.Unity.Text
                                 RotationAlignment = s.RotationAlignment,
                                 PairRole = s.PairRole,
                                 PairId = s.PairId,
+                                PairOptional = s.PairOptional,
                             });
                         }
                         else

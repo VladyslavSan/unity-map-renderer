@@ -37,6 +37,29 @@ namespace MapRenderer.Core.Text.Placement
         /// is unchanged — it covers BOXES only, and a pair's two boxes are appended contiguously by one call.</summary>
         public int EmitCount;
 
+        /// <summary>Stage C (`icon-optional` / `text-optional`) — INPUT: bit <c>b</c> set ⇒ box
+        /// <c>BoxStart + b</c> (and, 1:1, emit <c>EmitStart + b</c>) may be DROPPED rather than dropping the
+        /// whole candidate when it overlaps a placed blocker. The box↔emit correspondence holds because
+        /// <c>LabelStagingMath.AppendPointHalf</c> appends a box and its emit together, one per pair half —
+        /// which is also why only a POINT PAIR (<c>BoxCount &lt;= 2</c>) may carry a non-zero mask; a curved
+        /// label's N glyph boxes share ONE emit, so bits would not address them.
+        ///
+        /// <para>0 on every lone point label, every icon-only/text-only label and every curved label ⇒ the
+        /// collision loop is byte-identical to the pre-Stage-C all-or-nothing rule for all of them, and for a
+        /// pair whose style leaves both properties at their <c>false</c> spec default.</para></summary>
+        public byte OptionalBoxMask;
+
+        /// <summary>Stage C — VERDICT: bit <c>b</c> set ⇒ box <c>BoxStart + b</c> overlapped a placed blocker
+        /// and was dropped, so it was neither reserved in the grid nor drawn; always a subset of
+        /// <see cref="OptionalBoxMask"/>, and always 0 on a candidate that did not place at all.
+        /// Two writers, one frame apart and deliberately aliased:
+        /// <c>LabelStagingMath.StagePointPair</c> SEEDS it with last frame's verdict (carried by
+        /// <c>LabelPlacementSystem</c>'s dropped-halves map, keyed by <see cref="FadeId"/>) so the emit loop
+        /// can skip the dropped half's quads, and the collision pass OVERWRITES it with this frame's verdict.
+        /// The aliasing is safe because the emit loop reads the candidate BEFORE the collision job is
+        /// scheduled (R3's one-frame verdict carry — the same latency <see cref="WasPlacedLastFrame"/> rides).</summary>
+        public byte DroppedBoxMask;
+
         /// <summary>`symbol-sort-key` — greedy placement order. LOWER is placed FIRST (MapLibre priority).</summary>
         public float SortKey;
 

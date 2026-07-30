@@ -74,6 +74,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 RotationAlignment = label.RotationAlignment, Color = color,
+                IconRotateRadians = label.IconRotateRadians,
                 FadeId = fadeId,
                 // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
@@ -81,6 +82,9 @@ namespace MapRenderer.Unity.Text.Placement
                 // §10 D8/D10: RESOLVED role (LabelPairing already decided whether the proposal holds) — the
                 // stage job needs nothing else; a paired owner's rider is the next point record.
                 PairRole = pairRole,
+                // Stage C: read by StagePointPair only — a half whose role did not resolve carries it
+                // harmlessly (nothing outside the pair arm looks at it).
+                PairOptional = label.PairOptional,
             };
         }
 
@@ -103,6 +107,10 @@ namespace MapRenderer.Unity.Text.Placement
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 MaxAngleDeg = label.MaxAngleDeg, KeepUpright = label.KeepUpright,
                 Color = LabelPlacementSystem.LinearColor(label), TileOriginRender = tileOriginRender,
+                // P-B: the icon/text discriminator, textually identical to BuildPointInput's above — a
+                // map-aligned line icon is a one-glyph curved label sampling the SPRITE sheet.
+                AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
+                IconRotateRadians = label.IconRotateRadians,
             };
         internal static SymbolTileLabelBlock Bake(List<LabelInstance> labels, int slotCount, in double3 tileOriginRender)
         {

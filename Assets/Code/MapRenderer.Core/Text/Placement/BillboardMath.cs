@@ -15,9 +15,18 @@ namespace MapRenderer.Core.Text.Placement
     /// `text-offset`/`text-radial-offset` into the quad's baked-px corners, so there is no second screen-space
     /// offset here (double-apply would be a bug).
     ///
-    /// <para>A <c>rotationRadians</c> spins the quad about its anchor in the (y-up) screen frame — 0 for the
-    /// default upright/viewport billboard, the map bearing for <c>text-rotation-alignment:map</c> (#4). The
-    /// same per-corner rotation is what along-line text (#5) reuses per glyph.</para>
+    /// <para>A <c>rotationRadians</c> spins the quad about its anchor — 0 for the default upright/viewport
+    /// billboard, the map bearing for <c>text-rotation-alignment:map</c> (#4). The same per-corner rotation is
+    /// what along-line text (#5) reuses per glyph.</para>
+    ///
+    /// <para><b>Which way it turns on screen: COUNTER-clockwise for a positive angle</b> — the corners are
+    /// rotated in the quad's y-up LOCAL frame and then Y is negated (A0-F2, below), which lands
+    /// <see cref="WorldBillboardVertex.OffsetPx"/> in a y-DOWN screen frame, and a rotation read through a
+    /// mirrored axis reverses sense. MEASURED through the real GPU path, not derived — see
+    /// <see cref="LabelBearing.IconRotationRadians"/>, which is where a style value whose own convention is
+    /// clockwise-positive (<c>icon-rotate</c>) is flipped into this frame. Do not re-derive this on paper:
+    /// the previous paper reading had the negation supplying a clockwise sense while also treating
+    /// <c>OffsetPx</c> as y-up, which cannot both hold.</para>
     /// </summary>
     public static class BillboardMath
     {

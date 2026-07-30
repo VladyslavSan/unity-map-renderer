@@ -13,13 +13,15 @@ namespace MapRenderer.Core.Style.Symbol
     /// <para>Zoom-capable numeric properties (<see cref="TextSize"/>, <see cref="SymbolSortKey"/>,
     /// <see cref="TextPadding"/>, <see cref="TextMaxWidth"/>, <see cref="TextLineHeight"/>,
     /// <see cref="TextLetterSpacing"/>, <see cref="TextRadialOffset"/>, <see cref="IconSize"/>,
-    /// <see cref="IconPadding"/>) are <see cref="StyleProperty{T}"/> so they can be re-evaluated per frame;
+    /// <see cref="IconRotate"/>, <see cref="IconPadding"/>) are <see cref="StyleProperty{T}"/> so they can be
+    /// re-evaluated per frame;
     /// <see cref="SymbolPlacement"/> is also a <see cref="StyleProperty{T}"/> but is BUILD-ZOOM-evaluated
     /// (evaluated once by the extractor, never per frame — see its own doc); the small enum/flag knobs
     /// (<see cref="TextAllowOverlap"/>,
     /// <see cref="TextAnchor"/>, <see cref="TextJustify"/>, <see cref="TextOffset"/>, <see cref="TextFont"/>,
     /// <see cref="IconAnchor"/>, <see cref="IconOffset"/>, <see cref="IconRotationAlignment"/>,
-    /// <see cref="IconAllowOverlap"/>, <see cref="IconIgnorePlacement"/>) are parsed once as plain typed
+    /// <see cref="IconAllowOverlap"/>, <see cref="IconIgnorePlacement"/>, <see cref="IconOptional"/>,
+    /// <see cref="TextOptional"/>) are parsed once as plain typed
     /// values (mirroring <c>Line.LayoutProperties</c>'s Join/Cap-as-enum convention — the codebase encodes
     /// constant layout flags directly, not as <c>StyleProperty&lt;bool&gt;</c>). <see cref="TextField"/> and
     /// <see cref="IconImage"/> stay raw <see cref="JsonValue"/> — <c>TextField</c> is per-feature-resolved by
@@ -134,6 +136,11 @@ namespace MapRenderer.Core.Style.Symbol
         /// Default [0, 0]. <b>Constant only</b> (parsed as a plain <see cref="float2"/>, not zoom/data-driven).</summary>
         public float2 IconOffset { get; }
 
+        /// <summary>icon-rotate: clockwise rotation in DEGREES, composed on top of whatever the icon's
+        /// rotation-alignment already produced (the map bearing under <c>map</c>, the line tangent under line
+        /// placement, nothing under <c>viewport</c>). Default 0. Zoom-capable.</summary>
+        public StyleProperty<float> IconRotate { get; }
+
         /// <summary>icon-anchor: anchor position for the icon. Default <see cref="Text.TextAnchor.Center"/>.
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
         public TextAnchor IconAnchor { get; }
@@ -147,6 +154,16 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>icon-ignore-placement: place but don't block others. Default false.</summary>
         public bool IconIgnorePlacement { get; }
+
+        /// <summary>icon-optional: when true, the TEXT half of an icon+text pair may place even if the icon
+        /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol
+        /// (see <c>SymbolFeatureExtractor</c>'s centred-pair predicate); ignored on a lone icon.</summary>
+        public bool IconOptional { get; }
+
+        /// <summary>text-optional: when true, the ICON half of an icon+text pair may place even if the text
+        /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol;
+        /// ignored on a lone text label.</summary>
+        public bool TextOptional { get; }
 
         /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
         public StyleProperty<float> IconPadding { get; }
@@ -233,6 +250,11 @@ namespace MapRenderer.Core.Style.Symbol
                 ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
+            JsonValue iconRotateJson = layout?.Get(PropertyNames.IconRotate);
+            IconRotate = iconRotateJson != null
+                ? new StyleProperty<float>(iconRotateJson, 0f, v => (float)v.AsNumber())
+                : new StyleProperty<float>(0f);
+
             IconOffset = ParseOffset(layout?.Get(PropertyNames.IconOffset));
 
             IconAnchor = ParseAnchor(layout?.Get(PropertyNames.IconAnchor)?.AsString(null));
@@ -240,6 +262,8 @@ namespace MapRenderer.Core.Style.Symbol
 
             IconAllowOverlap = layout?.Get(PropertyNames.IconAllowOverlap)?.AsBool(false) ?? false;
             IconIgnorePlacement = layout?.Get(PropertyNames.IconIgnorePlacement)?.AsBool(false) ?? false;
+            IconOptional = layout?.Get(PropertyNames.IconOptional)?.AsBool(false) ?? false;
+            TextOptional = layout?.Get(PropertyNames.TextOptional)?.AsBool(false) ?? false;
 
             JsonValue iconPaddingJson = layout?.Get(PropertyNames.IconPadding);
             IconPadding = iconPaddingJson != null

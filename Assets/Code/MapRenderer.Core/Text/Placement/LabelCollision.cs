@@ -172,6 +172,15 @@ namespace MapRenderer.Core.Text.Placement
         /// only THEN inserted, so a curved label's adjacent glyph boxes — which naturally overlap — never
         /// block one another. One colliding glyph drops the WHOLE label; a placed label blocks across its
         /// whole run.</para>
+        ///
+        /// <para><b>Stage C — optional halves.</b> <see cref="LabelCandidate.OptionalBoxMask"/> relaxes
+        /// all-or-nothing per BOX (<c>icon-optional</c>/<c>text-optional</c>): a masked box that overlaps is
+        /// recorded in <see cref="LabelCandidate.DroppedBoxMask"/> and neither inserted nor drawn, while the
+        /// candidate still places on its remaining boxes; an unmasked overlap still drops everything. The
+        /// test-all-then-insert SHAPE is untouched, and that is load-bearing: a centred pair's two boxes
+        /// overlap by construction, so any formulation that inserted one half before testing the other would
+        /// make the pair block itself. Mask 0 (every lone label, every curved label, every pair whose style
+        /// leaves both properties at their <c>false</c> default) takes the identical branches it did before.</para>
         /// </summary>
         /// <param name="candidates">The candidates; reordered in place into placement order.</param>
         /// <param name="candidateCount">Number of valid entries in <paramref name="candidates"/>.</param>
@@ -212,15 +221,24 @@ namespace MapRenderer.Core.Text.Placement
                 // wins nor blocks the genuine winner while it eases to 0. It is still emitted (fading) by the caller.
                 if (c.Suppressed) { survivor[i] = false; continue; }
 
-                // Place if it ignores collision, OR none of its boxes overlaps an already-placed blocker.
-                // Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate wins.
+                // Place if it ignores collision, OR none of its REQUIRED boxes overlaps an already-placed
+                // blocker. Test ALL boxes first (all-or-nothing) — no box is inserted until the whole
+                // candidate wins.
                 bool place = c.AllowOverlap;
+                byte dropped = 0;
                 if (!place)
                 {
                     place = true;
                     for (int b = start; b < end; b++)
                     {
-                        if (grid.OverlapsAny(in boxes[b], boxes)) { place = false; break; }
+                        if (!grid.OverlapsAny(in boxes[b], boxes)) continue;
+                        // Stage C: a REQUIRED box's overlap drops the candidate (the pre-Stage-C rule, and the
+                        // only branch a zero mask can take — `mask & anything` is 0, whatever the shift
+                        // produced for a long curved range). An OPTIONAL one records its bit and the scan
+                        // CONTINUES: the half is dropped, the candidate lives.
+                        int bit = 1 << (b - start);
+                        if ((c.OptionalBoxMask & bit) == 0) { place = false; break; }
+                        dropped |= (byte)bit;
                     }
                 }
 
@@ -228,10 +246,21 @@ namespace MapRenderer.Core.Text.Placement
                 if (place)
                 {
                     survivors++;
-                    // A placed candidate blocks later ones across its WHOLE run — unless it ignores placement.
+                    // A placed candidate blocks later ones across its WHOLE run — unless it ignores placement,
+                    // or the box is a dropped optional half (not placed ⇒ reserves nothing).
                     if (!c.IgnorePlacement)
-                        for (int b = start; b < end; b++) grid.Insert(b, in boxes[b]);
+                        for (int b = start; b < end; b++)
+                        {
+                            if (dropped != 0 && (dropped & (1 << (b - start))) != 0) continue;
+                            grid.Insert(b, in boxes[b]);
+                        }
                 }
+
+                // Written back only for a candidate that HAS optional halves, so every other candidate's
+                // stored verdict — and this loop's memory traffic — is exactly what it was pre-Stage-C. A
+                // DROPPED candidate records nothing: the scan may already have banked an optional bit before a
+                // later required box vetoed it, and that bit describes no placement.
+                if (c.OptionalBoxMask != 0) candidates[i].DroppedBoxMask = place ? dropped : (byte)0;
             }
             return survivors;
         }

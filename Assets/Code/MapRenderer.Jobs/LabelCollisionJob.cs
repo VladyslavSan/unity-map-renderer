@@ -57,14 +57,22 @@ namespace MapRenderer.Jobs
                 // while it eases to 0 (still emitted, fading, by the caller). Mirrors LabelCollision.SelectSurvivors.
                 if (c.Suppressed) { Survivors[i] = 0; continue; }
 
-                // Place if it ignores collision, OR none of its boxes overlaps an already-placed blocker. Test ALL
-                // boxes first (all-or-nothing) — no box is inserted until the whole candidate wins (no self-block).
+                // Place if it ignores collision, OR none of its REQUIRED boxes overlaps an already-placed
+                // blocker. Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate
+                // wins (no self-block). Stage C's per-box optional mask mirrors LabelCollision.SelectSurvivors
+                // branch for branch (the differential test locks the two together).
                 bool place = c.AllowOverlap;
+                byte dropped = 0;
                 if (!place)
                 {
                     place = true;
                     for (int b = start; b < end; b++)
-                        if (OverlapsAny(b)) { place = false; break; }
+                    {
+                        if (!OverlapsAny(b)) continue;
+                        int bit = 1 << (b - start);
+                        if ((c.OptionalBoxMask & bit) == 0) { place = false; break; }
+                        dropped |= (byte)bit;
+                    }
                 }
 
                 Survivors[i] = (byte)(place ? 1 : 0);
@@ -72,7 +80,17 @@ namespace MapRenderer.Jobs
                 {
                     survivors++;
                     if (!c.IgnorePlacement)
-                        for (int b = start; b < end; b++) nodeCount = Insert(b, nodeCount);
+                        for (int b = start; b < end; b++)
+                        {
+                            if (dropped != 0 && (dropped & (1 << (b - start))) != 0) continue;
+                            nodeCount = Insert(b, nodeCount);
+                        }
+                }
+
+                if (c.OptionalBoxMask != 0)
+                {
+                    c.DroppedBoxMask = place ? dropped : (byte)0; // a dropped candidate records no per-half verdict
+                    Candidates[i] = c; // NativeArray indexer returns by value — write the mutated copy back
                 }
             }
             OutSurvivorCount[0] = survivors;

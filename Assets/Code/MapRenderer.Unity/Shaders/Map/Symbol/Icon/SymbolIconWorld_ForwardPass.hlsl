@@ -8,6 +8,12 @@
 // Same A0-F2 OffsetPx.y convention as SymbolTextWorld (baked in BillboardMath.BuildWorldQuad,
 // not here — the vertex stage just consumes it).
 //
+// P-B: the along-line tangent branch (Stage AC's, ported VERBATIM from SymbolTextWorld_ForwardPass.hlsl —
+// the duplication is the convention: a Map/ shader layer may not include another's pass, see
+// docs/meshing-design.md §"Folder layout" — pinned by ShaderStructureTests.MapLayerFiles_DoNotIncludeCommonFolder).
+// Without it a map-aligned line icon
+// (road_one_way_arrow*) would draw unrotated — every arrow pointing screen-right regardless of the road.
+//
 // FRAGMENT: was DUPLICATED from the retired screen-space icon shader (delta (a): plain sprite sample x
 // vertex color, no SDF/halo) — not factored out at the time, same A4 dedupe-fence rationale as
 // SymbolTextWorld_ForwardPass.hlsl's header. Now the only surviving copy.
@@ -24,8 +30,10 @@ struct SymbolIconWorldAttributes
     float3 colorRGB   : COLOR;     // icon color, verbatim (no sRGB conversion — see WorldBillboardVertex)
     float2 uv         : TEXCOORD0;
     float2 offsetPx   : TEXCOORD2; // unrotated glyph-corner offset, logical px
-    float  alignFlags : TEXCOORD3; // bit0: map(1)/viewport(0) rotation-alignment — WRITTEN, UNREAD in A1
+    float  alignFlags : TEXCOORD3; // bit0: map(1)/viewport(0) rotation-alignment — WRITTEN, UNREAD;
+                                   // bit1: along-line (P-B) — READ below
     float  opacity    : TEXCOORD4; // stream 1 — the A-4 fade
+    float3 tangentOS  : TEXCOORD5; // P-B: tile-local WORLD tangent along the line; zero/unread for a point icon
 };
 
 struct SymbolIconWorldVaryings
@@ -35,12 +43,57 @@ struct SymbolIconWorldVaryings
     float4 color      : COLOR;
 };
 
+// Stage AC D-E (ported for P-B): rotates a 2D vector CCW (y-up logical-px frame) by `ang` — the SAME
+// convention BillboardMath.Rotate uses on the CPU side.
+float2 RotateOffsetPx(float2 p, float ang)
+{
+    float s, c;
+    sincos(ang, s, c);
+    return float2(c * p.x - s * p.y, s * p.x + c * p.y);
+}
+
 SymbolIconWorldVaryings SymbolIconWorldPassVertex(SymbolIconWorldAttributes input)
 {
     SymbolIconWorldVaryings output = (SymbolIconWorldVaryings)0;
 
     float4 clip = TransformObjectToHClip(input.anchorOS);    // stock URP MVP; floating origin in unity_ObjectToWorld
-    float2 off  = input.offsetPx;                             // A1: no bearing rotation (north-up; AlignFlags deferred)
+    float2 off  = input.offsetPx;                             // corner as staged (a point icon: no bearing rotation)
+
+    // P-B: bit1 set ⇒ along-line (a map-aligned line icon) — rotate `off` by the LIVE projected screen angle
+    // of the baked world Tangent, ignoring bit0 (MapLibre line placement ignores rotation-alignment). A POINT
+    // icon never sets bit1, so this branch is never taken for it (byte-identical render, unread tangentOS).
+    // `off` may already carry a CONSTANT icon-rotate baked in on the CPU (CandidateEmit.ExtraRotationRadians);
+    // 2D rotations commute, so rotating it here by the tangent composes the two correctly.
+    if (input.alignFlags >= 1.5)
+    {
+        // D-E (primary form, magnitude-robust over a finite-difference second point): project the world
+        // tangent as a DIRECTION (w=0) through the SAME object→world→clip transform TransformObjectToHClip
+        // composes — the Jacobian only holds if clipT and clipA share that transform. UNITY_MATRIX_MVP is
+        // used NOWHERE in this codebase and may not resolve under URP; GetWorldToHClipMatrix/
+        // GetObjectToWorldMatrix are the codebase's object-space convention (Line_VertexExtrude.hlsl).
+        float4 clipT = mul(GetWorldToHClipMatrix(), mul(GetObjectToWorldMatrix(), float4(input.tangentOS, 0.0)));
+
+        // Screen-space direction of the world tangent (quotient rule d(clip.xy/clip.w)); only the DIRECTION
+        // matters, so this is invariant to the tangent's (unit) magnitude and never blows up near w=0 the
+        // way a finite-difference second point would.
+        float2 sdir = clipT.xy * clip.w - clip.xy * clipT.w;
+        sdir *= _ScreenParamsLogical.xy;             // ndc→px aspect correction (x,y px-per-ndc differ)
+        // D-H (RESOLVED — empirically, per WorldCurvedAbRenderSnapshotTests' 45°/90° diagonal+vertical sweep
+        // on the TEXT pass this is copied from): NO extra Y-frame flip here. The A0-F2 OffsetPx.y negation
+        // (baked in BillboardMath.BuildWorldQuad) reconciles the OLD path's on-screen calibration flip for
+        // the STATIC corner offset — a separate concern from this Jacobian's angle, which already lands in
+        // the SAME sense as BillboardMath's Y-up screen rotation (`atan2(sdir.y, sdir.x)` directly,
+        // unnegated). Flipping sdir.y here rotates every glyph to the mirrored angle (confirmed RED there:
+        // it passed the 0° horizontal case — which cannot discriminate a sign error — and failed 45° and 90°).
+
+        // D-J: a degenerate projected tangent (edge-on to the camera under tilt) OR an anchor behind the
+        // camera (the ndc division feeding sdir is undefined there) falls back to angle 0 (upright) — rare,
+        // graceful; the near-pin below still keeps the icon drawn.
+        bool degenerate = dot(sdir, sdir) < 1e-8 || clip.w <= 1e-6;
+        float ang = degenerate ? 0.0 : atan2(sdir.y, sdir.x);
+        off = RotateOffsetPx(off, ang);
+    }
+
     clip.xy += off / _ScreenParamsLogical.xy * 2.0 * clip.w;  // LOGICAL viewport (not physical — DPR bug), constant-px size
     clip.z   = UNITY_NEAR_CLIP_VALUE * clip.w;                 // near-pin; MUST be * clip.w (NOT the old w=1 form)
 

@@ -237,12 +237,15 @@ namespace MapRenderer.Unity.Text.Placement
                 PlacedQuad q = quads[emit.QuadStart + k];
                 // Stage AC D2/D6: a curved candidate's world anchor/tangent are PER-GLYPH (on the quad
                 // itself), not per-candidate (emit.AnchorLocal is a point label's single shared anchor) —
-                // and its corners are UNROTATED (rotationRadians: 0f), rotated instead by the shader from
-                // the projected Tangent (D-E). Point/icon keep the existing per-candidate anchor + baked
-                // screen rotation + tangentLocal=0/alignFlags=0 (byte-identical — the shader's tangent
-                // branch is never taken for them).
+                // and its corners carry no per-quad screen rotation, being rotated instead by the shader
+                // from the projected Tangent (D-E). Point/icon keep the existing per-candidate anchor +
+                // baked screen rotation + tangentLocal=0/alignFlags=0 (byte-identical — the shader's
+                // tangent branch is never taken for them).
+                // P-B: the along-line arm is no longer a hardcoded 0 — it carries icon-rotate, the one
+                // constant the shader's tangent rotation must compose ON TOP of. Curved text leaves
+                // ExtraRotationRadians at 0, which is exactly the value that used to be written here.
                 float3 anchorLocal     = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
-                float  rotationRadians = emit.AlongLine ? 0f : q.RotationRadians;
+                float  rotationRadians = emit.AlongLine ? emit.ExtraRotationRadians : q.RotationRadians;
                 float3 tangentLocal    = emit.AlongLine ? q.Tangent : float3.zero;
                 float  alignFlags      = emit.AlongLine ? AlongLineAlignFlag : 0f;
 

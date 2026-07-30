@@ -189,11 +189,14 @@ Consequences, all of them wins:
 - The anchors are the same `LineAnchorPlacement` topology the curved path already computes, so
   `symbol-spacing` keeps its meaning. This is why D2 keeps anchors on the buffered path.
 
-**Fence: map-aligned line icons stay unbuilt.** `road_one_way_arrow` / `road_one_way_arrow_opposite`
-(icon-only, `symbol-placement: line`, alignment `auto` → **map**, minzoom 16) need icons *rotated to the line
-tangent* — a genuinely new staging path. Unfencing icons wholesale would emit unrotated arrows all pointing
-the same way. G3 is lifted **only** for the viewport-resolved case; the map-aligned case keeps the fence and
-is deferred (§6).
+**~~Fence: map-aligned line icons stay unbuilt.~~ LIFTED by P-B** (see
+`docs/labels-and-symbols-design.md` §6). `road_one_way_arrow` / `road_one_way_arrow_opposite` (icon-only,
+`symbol-placement: line`, alignment `auto` → **map**, minzoom 16) are now emitted as **one-glyph curved
+labels** — the icon quad rides the curved path's per-anchor staging and is rotated to the line tangent by
+the icon shader's ported Stage-AC branch. The fence's premise ("a genuinely new staging path") turned out
+to be false: an `icon-anchor: center` quad IS a `CurvedGlyph.Cell`, so no new record kind, no new gather,
+no new oracle. T8's "a map-aligned line icon never emits" assertion is REVERSED there (tooth A2), not
+re-baked. The viewport-resolved case (D4, below) is untouched.
 
 ### D5 — the centred pair: the icon owns the collision, the text is a **non-blocking passenger** (mitigates G5)
 
@@ -390,7 +393,7 @@ otherwise fail looking exactly like a real D6 regression.
 | Item | Why it is out of scope |
 |---|---|
 | ~~**True symbol-instance pairing**~~ | **NO LONGER DEFERRED — this is §10 (stage 3).** The row's original reasoning (an instance link *or* a per-quad `AtlasKind` split emit) turned out to be a false dilemma: the pair is one `LabelCandidate` spanning both halves' boxes with a per-candidate EMIT RANGE, so `WorldLabelRenderer.Emit` is not touched at all. D5/T12's accepted bare number is **reversed** there. |
-| **Map-aligned line icons** (`road_one_way_arrow*`) | Icons rotated to the line tangent — a new staging path. Fence held in D4, pinned by T8. |
+| ~~**Map-aligned line icons** (`road_one_way_arrow*`)~~ | **NO LONGER DEFERRED — built as P-B** (`docs/labels-and-symbols-design.md` §6). Emitted as one-glyph curved labels + `icon-rotate`; D4's fence is lifted and T8 is reversed into tooth A2. |
 | **Point placement on Polygon** (centroid / pole of inaccessibility) | Would add labels to unguarded `place` / `airport` / `poi_transit` layers. Deliberate gap (D2). |
 | **Display-zoom re-evaluation of `symbol-placement`** | The D1 known limit — the visible step-boundary pop, pinned by T15. Belongs with the wider "camera-property re-evaluation" epic. |
 | **Mid-arc anchors over the tile-clipped path** | Would recover the buffer-dominated short paths T14 pins as lost, but needs a polyline clip and would desync D4's anchors from the curved path's. |

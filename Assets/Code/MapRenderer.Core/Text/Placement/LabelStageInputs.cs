@@ -59,6 +59,18 @@ namespace MapRenderer.Core.Text.Placement
         /// paired owner's rider is the NEXT point record (the reconciler emits owner→rider adjacently, the
         /// gather compacts point records in winner order). Default <see cref="LabelPairRole.None"/>.</summary>
         public LabelPairRole PairRole;
+
+        /// <summary>Stage C, threaded from <see cref="LabelInstance.PairOptional"/>: this half may be dropped
+        /// while its partner places (<c>icon-optional</c> on the owner, <c>text-optional</c> on the rider).
+        /// <see cref="LabelStagingMath.StagePointPair"/> folds the two halves' values into the candidate's
+        /// <see cref="LabelCandidate.OptionalBoxMask"/>. Default false ⇒ the spec default (both required).</summary>
+        public bool PairOptional;
+
+        /// <summary>P-B <c>icon-rotate</c> in radians, in MapLibre's own sense (positive = clockwise on
+        /// screen) — <see cref="LabelBearing.IconRotationRadians"/> converts it into the staging frame's
+        /// opposite sense as it is added to the alignment's own billboard rotation. Default 0 ⇒ an exact
+        /// <c>x + 0f</c> for every text label and every un-rotated icon.</summary>
+        public float IconRotateRadians;
     }
 
     /// <summary>
@@ -86,5 +98,19 @@ namespace MapRenderer.Core.Text.Placement
         /// null-safe <c>ResolveTileOrigin</c> helper <see cref="PointStageInput.TileOriginRender"/> uses, so
         /// the bake and the world renderer's per-tile placement cancel exactly (§3.4).</summary>
         public double3 TileOriginRender;
+
+        /// <summary>P-B — the mirror of <see cref="PointStageInput.AtlasKind"/>: the texture this curved
+        /// label's staged quads sample from. Default <see cref="LabelKind.Text"/> (blittable enum, zero
+        /// value), so every curved TEXT label is unchanged; a map-aligned line icon carries
+        /// <see cref="LabelKind.Icon"/> and routes to the sprite sheet instead of the glyph atlas.</summary>
+        public LabelKind AtlasKind;
+
+        /// <summary>P-B <c>icon-rotate</c> in radians, in MapLibre's own sense (positive = clockwise on
+        /// screen) — the same carrier convention as <see cref="PointStageInput.IconRotateRadians"/>, converted
+        /// by the same <see cref="LabelBearing.IconRotationRadians"/>. The along-line path cannot use
+        /// <see cref="PlacedQuad.RotationRadians"/> for it (the renderer forces that to 0 and lets the shader
+        /// rotate by the projected tangent instead), so the converted value rides out on
+        /// <see cref="CandidateEmit.ExtraRotationRadians"/>. Default 0 ⇒ curved TEXT is byte-identical.</summary>
+        public float IconRotateRadians;
     }
 }

@@ -439,11 +439,13 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "highway-name-major must stay curved");
         }
 
-        // ── T8 ─────────────────────────────────────────────────────────────────────────────────────────
-        [Test]
-        public void MapAlignedLineIconLayer_EmitsNoIcons()
-        {
-            var handBuilt = new SymbolStyle.StyleLayer
+        // ── A2 (P-B; REVERSES T8) ──────────────────────────────────────────────────────────────────────
+        // T8 pinned the D4 fence — "a map-aligned line icon never emits, even with an atlas supplied".
+        // P-B LIFTS that fence: a map-resolved line icon is now emitted as a ONE-GLYPH CURVED label (the
+        // road_one_way_arrow* shape). The assertion below is T8's inverse, not a re-bake: the old zero-icon
+        // expectation described a deliberate gap, and this stage closes it.
+        private static SymbolStyle.StyleLayer MapAlignedIconProbeLayer(string extraLayoutJson = "")
+            => new SymbolStyle.StyleLayer
             {
                 Id = "shield-map-aligned-icon-probe",
                 LayerType = StyleLayerType.Symbol,
@@ -451,26 +453,232 @@ namespace MapRenderer.Tests
                 SourceLayer = "transportation_name",
                 Filter = MapRenderer.Core.Json.JsonParser.Parse(
                     "[\"all\",[\"<=\",[\"get\",\"ref_length\"],6],[\"match\",[\"geometry-type\"],[\"LineString\",\"MultiLineString\"],true,false]]"),
-                // No rotation-alignment declared -> auto -> resolves MAP under line placement (D3) -> the fence
-                // (D4) must hold: a map-aligned line icon never emits, even with an atlas supplied.
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\"}"),
+                    "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\"" + extraLayoutJson + "}"),
             };
+
+        /// <summary>Decoded paths of <paramref name="layer"/>'s selected features that can carry a label
+        /// (>= 2 points) — the along-line emit shape produces exactly one curved label per one of these.
+        /// Same count the curved-text tooth above derives inline, over the same fixture.</summary>
+        private static int EligiblePathCount(SymbolStyle.StyleLayer layer)
+        {
+            int eligible = 0;
+            foreach (ITileFeature f in MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 13.0))
+                foreach (List<double2> path in MvtGeometry.Decode(f.Geometry))
+                    if (path.Count >= 2) eligible++;
+            Assert.Greater(eligible, 0, "precondition: > 0 eligible (>=2 point) decoded paths");
+            return eligible;
+        }
+
+        [Test]
+        public void MapAlignedLineIconLayer_EmitsAlongLineIconLabels()
+        {
             var atlas = SyntheticShieldAtlas();
             var projection = new WebMercatorProjection();
 
-            IReadOnlyList<ITileFeature> selected = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(handBuilt, BerlinFixtureTile(), 13.0);
+            // No rotation-alignment declared -> auto -> resolves MAP under line placement (D3).
+            SymbolStyle.StyleLayer mapAligned = MapAlignedIconProbeLayer();
+            IReadOnlyList<ITileFeature> selected =
+                MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
             Assert.Greater(selected.Count, 0, "precondition: > 0 features selected");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(handBuilt, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            // Precondition that the fixture is genuinely ICON-BEARING: the SAME layer with an explicit
+            // viewport alignment takes the shipped D4 at-anchors path and emits POINT-shaped icons. Without
+            // this, a zero-icon map arm could pass for the wrong reason (an unresolvable sprite).
+            var viewportLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(
+                MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
+            Assert.Greater(CountIcons(viewportLabels), 0,
+                "precondition: the viewport-resolved arm must emit icons (the sprite resolves)");
+            foreach (SymbolStyle.SymbolLabel l in viewportLabels)
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement,
+                    "precondition: a viewport-resolved line icon stays point-shaped (the unchanged D4 path)");
 
-            Assert.AreEqual(0, CountIcons(labels), "a map-aligned line icon must never emit (the surviving fence)");
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(mapAligned, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+
+            int icons = CountIcons(labels);
+            Assert.Greater(icons, 0, "a map-aligned line icon must now emit (the D4 fence is lifted by P-B)");
+
+            foreach (SymbolStyle.SymbolLabel l in labels)
+            {
+                if (l.Kind != LabelKind.Icon) continue;
+                // A point-shaped icon here would mean the shallow "emit it at the anchors" impl, not the
+                // one-glyph curved label this stage specifies.
+                Assert.AreEqual(SymbolPlacement.Line, l.Placement, "an along-line icon carries LINE placement");
+                Assert.IsNotNull(l.PathRender, "an along-line icon carries the projected path it rides");
+                Assert.Greater(l.PathRender.Length, 1, "the projected path must have >= 1 segment");
+                Assert.IsNotNull(l.LineAnchors, "an along-line icon carries the build-time anchors");
+                Assert.GreaterOrEqual(l.LineAnchors.Length, 1, "at least one along-line anchor");
+                Assert.IsFalse(l.KeepUpright,
+                    "icon-keep-upright's spec default is false — an arrow must never flip to stay upright");
+                Assert.IsNotNull(l.IconImage, "the resolved sprite name is the icon's cross-tile identity");
+                Assert.AreEqual(LabelPairRole.None, l.PairRole, "a curved label is never half of a centred pair");
+            }
+        }
+
+        // ── A1 (P-B): the three-way alignment classification the icon emit shape now branches on. ──
+        [Test]
+        public void IconRotationAlignment_ResolvesToThreeDistinctEmitShapes()
+        {
+            var atlas = SyntheticShieldAtlas();
+            var projection = new WebMercatorProjection();
+
+            // The resolver itself: unset (Auto) under LINE placement is what makes road_one_way_arrow*
+            // map-aligned in the first place — the whole reason this stage exists.
+            Assert.AreEqual(AlignmentMode.Map, AlignmentResolution.Resolve(AlignmentMode.Auto, SymbolPlacement.Line),
+                "auto resolves to map under line placement (D3)");
+            Assert.AreEqual(AlignmentMode.Viewport, AlignmentResolution.Resolve(AlignmentMode.Auto, SymbolPlacement.Point),
+                "auto resolves to viewport under point placement (D3)");
+
+            // (a) line + map-resolved -> ALONG-LINE icon (one curved label per path).
+            var mapLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(),
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, mapLabels, atlas);
+            Assert.Greater(CountIcons(mapLabels), 0, "line + map must emit icons");
+            foreach (SymbolStyle.SymbolLabel l in mapLabels)
+                Assert.AreEqual(SymbolPlacement.Line, l.Placement, "line + map -> along-line (curved) icon");
+
+            // (b) line + viewport -> the shipped D4 at-anchors icon (point-shaped), UNCHANGED by this stage.
+            var viewportLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(
+                MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
+            Assert.Greater(CountIcons(viewportLabels), 0, "line + viewport must emit icons");
+            foreach (SymbolStyle.SymbolLabel l in viewportLabels)
+            {
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "line + viewport -> point-shaped icon at each anchor");
+                Assert.IsNull(l.PathRender, "an at-anchors icon carries no path");
+            }
+            // The two shapes are genuinely different, not the same emit relabelled: the viewport arm produces
+            // one label PER ANCHOR, the map arm one per PATH. The map arm's count is pinned EXACTLY — that is
+            // the claim, and it needs no premise. The strict inequality does need one the exact count does
+            // not: that at least one decoded path is longer than a symbol-spacing (250 px default) and so
+            // carries >= 2 anchors. True of this committed fixture, and asserted rather than assumed.
+            int eligiblePaths = EligiblePathCount(MapAlignedIconProbeLayer());
+            Assert.AreEqual(eligiblePaths, CountIcons(mapLabels),
+                "the along-line arm emits exactly one curved icon per eligible decoded path");
+            Assert.Greater(CountIcons(viewportLabels), eligiblePaths,
+                "the at-anchors arm emits per ANCHOR, so with at least one multi-anchor path it must emit " +
+                "strictly more icons than there are paths");
+
+            // (c) point placement -> the point icon path, regardless of alignment.
+            var pointLabels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(
+                MapAlignedIconProbeLayer(",\"symbol-placement\":\"point\""),
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, pointLabels, atlas);
+            Assert.Greater(CountIcons(pointLabels), 0, "point placement must emit icons");
+            foreach (SymbolStyle.SymbolLabel l in pointLabels)
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "point placement -> point icon");
+        }
+
+        // ── P-B review NIT 2: the centred-pair predicate is computed from the UN-suppressed `hasIcon`, so on
+        //    the line branch it must be re-gated on the fence that decides whether an icon reaches the
+        //    at-anchors emit at all. P-B widened that gap: before it, `hasIcon` on a line layer implied
+        //    `iconAtAnchors`; now the icon can leave for the along-line shape instead, and a centred text
+        //    would be stamped Rider against a PairId no emitted label owns. LabelPairing dissolves such an
+        //    orphan, so this is about the pairing site telling the truth, not about a visible defect. ──
+        [Test]
+        public void ViewportTextWithAlongLineIcon_StampsNoPairRole()
+        {
+            // Text resolves VIEWPORT (explicit) -> at-anchors; the icon's alignment is unset -> auto -> MAP
+            // under line placement -> the along-line shape. Anchors/offsets are left at their defaults, which
+            // is exactly what makes the centred-pair predicate fire.
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(
+                MapAlignedIconProbeLayer(
+                    ",\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"viewport\""),
+                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+
+            int atAnchorTexts = 0, alongLineIcons = 0;
+            foreach (SymbolStyle.SymbolLabel l in labels)
+            {
+                if (l.Kind == LabelKind.Text && l.Placement == SymbolPlacement.Point) atAnchorTexts++;
+                if (l.Kind == LabelKind.Icon && l.Placement == SymbolPlacement.Line) alongLineIcons++;
+                Assert.AreEqual(LabelPairRole.None, l.PairRole,
+                    "no half of this feature may claim a pair role: the icon left for the along-line shape, " +
+                    "so the at-anchors emit has no owner for a rider to point at");
+                Assert.AreEqual(0, l.PairId, "PairId must stay at its unpaired default");
+            }
+
+            // Both preconditions matter: without the icons the predicate never fires (vacuous pass), and
+            // without the texts there is no half left to mis-stamp.
+            Assert.Greater(alongLineIcons, 0,
+                "precondition: the icon must resolve AND take the along-line shape — this is what makes " +
+                "`hasIcon` true while `iconAtAnchors` is false");
+            Assert.Greater(atAnchorTexts, 0, "precondition: the viewport-aligned text must emit at the anchors");
+        }
+
+        // ── B2 (P-B): icon-rotate is converted ONCE (degrees -> radians) and stamped on the ICON half only. ──
+        private static List<SymbolStyle.SymbolLabel> ExtractPointPairWithLayout(string layoutJson)
+        {
+            var feature = new DictionaryFeature(
+                properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
+                geometryType: TileGeometryType.Point,
+                geometry: SinglePointGeometry(new double2(2000, 2000)));
+            var tile = new FixtureDecodedTile(new FixtureTileLayer
+            {
+                Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature },
+            });
+            var styleLayer = new SymbolStyle.StyleLayer
+            {
+                Id = "icon-rotate-probe",
+                LayerType = StyleLayerType.Symbol,
+                Source = "s",
+                SourceLayer = "points",
+                LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(layoutJson),
+            };
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
+                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+            return labels;
+        }
+
+        [Test]
+        public void IconRotate_IsConvertedToRadiansOnce_AndStampedOnTheIconHalfOnly()
+        {
+            List<SymbolStyle.SymbolLabel> labels = ExtractPointPairWithLayout(
+                "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"icon-rotate\":90}");
+            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
+            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            Assert.IsNotNull(icon, "precondition: an icon label must be present");
+            Assert.IsNotNull(text, "precondition: a text label must be present");
+
+            // Radians, not degrees — a stamped-degrees impl reads 90, three orders of magnitude off.
+            Assert.AreEqual(math.PI / 2f, icon.IconRotateRadians, 1e-5f, "icon-rotate: 90 -> pi/2 radians");
+            Assert.AreEqual(0f, text.IconRotateRadians, 1e-6f, "icon-rotate never rotates text");
+
+            // Absent -> 0 (the spec default), so every un-rotated icon composes an exact `x + 0f`.
+            List<SymbolStyle.SymbolLabel> bare = ExtractPointPairWithLayout(
+                "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"}");
+            Assert.AreEqual(0f, FindByKind(bare, LabelKind.Icon).IconRotateRadians, 1e-6f,
+                "absent icon-rotate -> 0 radians");
+        }
+
+        [Test]
+        public void IconRotate_180_IsStampedOnAnAlongLineIcon()
+        {
+            // The road_one_way_arrow_opposite shape: a map-resolved line icon layer with icon-rotate: 180.
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(",\"icon-rotate\":180"),
+                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+
+            int icons = 0;
+            foreach (SymbolStyle.SymbolLabel l in labels)
+            {
+                if (l.Kind != LabelKind.Icon) continue;
+                icons++;
+                Assert.AreEqual(SymbolPlacement.Line, l.Placement, "precondition: the along-line emit shape");
+                Assert.AreEqual(math.PI, l.IconRotateRadians, 1e-5f, "icon-rotate: 180 -> pi radians");
+            }
+            Assert.Greater(icons, 0, "precondition: the layer must emit along-line icons");
         }
 
         // ── Shared centred-pair synthetic fixture for T9/T12 (isolates G5/D5 from G1-G4: literal "point"
-        //    placement, default centred anchors — unaffected by the step-expression/anchor-emit machinery). ──
-        private static List<SymbolStyle.SymbolLabel> ExtractCentredPairLabels()
+        //    placement, default centred anchors — unaffected by the step-expression/anchor-emit machinery).
+        //    <paramref name="extraLayout"/> appends further layout members (stage C's optional flags). ──
+        private static List<SymbolStyle.SymbolLabel> ExtractCentredPairLabels(string extraLayout = null)
         {
             var feature = new DictionaryFeature(
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
@@ -490,7 +698,8 @@ namespace MapRenderer.Tests
                 Source = "s",
                 SourceLayer = "points",
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"}"), // symbol-placement default = point
+                    "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"" // symbol-placement default = point
+                    + (extraLayout == null ? "" : "," + extraLayout) + "}"),
             };
             var labels = new List<SymbolStyle.SymbolLabel>();
             SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
@@ -523,6 +732,7 @@ namespace MapRenderer.Tests
                 TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
                 RotationAlignment = label.RotationAlignment, Color = new float4(1, 1, 1, 1),
                 AtlasKind = atlasKind,
+                PairOptional = label.PairOptional, // stage C — mirrors BuildPointInput's own carry
             };
 
         // A single synthetic quad standing in for a shaped text run (SymbolLabel carries no Layout — shaping is
@@ -680,6 +890,193 @@ namespace MapRenderer.Tests
             Assert.AreEqual(1, staged);
             Assert.AreEqual(2, emitCount, "sanity: two emits were staged"); // guards the next line's premise
             Assert.AreEqual(42L, candidates[0].FadeId, "the pair's ONE FadeId must be the OWNER's — the text contributes no candidate/fade record of its own");
+        }
+
+        // ── C2 (stage C) — the flags land on the right HALF, and the pair still FORMS in every case ───────
+        [Test]
+        public void IconAndTextOptional_StampTheMatchingHalf_AndThePairStillForms()
+        {
+            void AssertPair(string extraLayout, bool expectIconOptional, bool expectTextOptional, string what)
+            {
+                List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels(extraLayout);
+                Assert.AreEqual(2, labels.Count, $"{what}: the centred-pair feature must still emit exactly 2 labels");
+                SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
+                SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+                Assert.IsNotNull(icon, what); Assert.IsNotNull(text, what);
+
+                // The ANTI-D11 assertion: optionality must NOT un-pair the halves. D11's recorded "pair only
+                // when both flags are false" would leave these None — and, because a centred pair's boxes
+                // overlap by construction, make the two halves mutually exclusive (the bare-number defect).
+                Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, $"{what}: the icon must STILL be the pair Owner");
+                Assert.AreEqual(LabelPairRole.Rider, text.PairRole, $"{what}: the text must STILL be the pair Rider");
+                Assert.AreEqual(icon.PairId, text.PairId, $"{what}: both halves must still share one PairId");
+
+                // icon-optional makes the ICON droppable; text-optional makes the TEXT droppable.
+                Assert.AreEqual(expectIconOptional, icon.PairOptional, $"{what}: icon half's PairOptional");
+                Assert.AreEqual(expectTextOptional, text.PairOptional, $"{what}: text half's PairOptional");
+            }
+
+            AssertPair(null, false, false, "neither property");
+            AssertPair("\"text-optional\":true", false, true, "text-optional only (the airport shape)");
+            AssertPair("\"icon-optional\":true", true, false, "icon-optional only (the label_* shape)");
+            AssertPair("\"icon-optional\":true,\"text-optional\":true", true, true, "both");
+        }
+
+        // ── Stage C shared harness (C3/C4/C5) ─────────────────────────────────────────────────────────────
+        // The REAL extractor → REAL StagePointPair → REAL SelectSurvivors, with the rider translated clear of
+        // the owner so a blocker can address exactly ONE half's box (a centred pair's boxes overlap by
+        // construction — the reason the mask is consulted inside test-all-then-insert rather than by
+        // un-pairing). Two low-priority PROBES, one over each half and both disjoint from the blocker, then
+        // report which boxes the pair actually RESERVED: a probe that places proves its half's box was never
+        // inserted.
+        private struct OptionalPairOutcome
+        {
+            public bool PairPlaced;
+            public byte OptionalBoxMask;
+            public byte DroppedBoxMask;
+            public bool ProbeOverIconPlaced;
+            public bool ProbeOverTextPlaced;
+        }
+
+        private static OptionalPairOutcome RunOptionalPairScene(string extraLayout, LabelKind blockedHalf)
+        {
+            List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels(extraLayout);
+            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
+            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            Assert.IsNotNull(icon, "precondition: an icon label must be present");
+            Assert.IsNotNull(text, "precondition: a text label must be present");
+            Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, "precondition: the pair must form regardless of the flags");
+            Assert.AreEqual(LabelPairRole.Rider, text.PairRole, "precondition: the pair must form regardless of the flags");
+
+            var ownerInput = StageInputFor(icon, LabelKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
+            var riderInput = StageInputFor(text, LabelKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
+            riderInput.TranslatePx = new float2(200f, 0f);
+            riderInput.TranslateAnchor = TextTranslateAnchor.Viewport;
+
+            var boxes = new LabelBox[8];
+            var quads = new PlacedQuad[8];
+            var candidates = new LabelCandidate[4];
+            var emit = new CandidateEmit[4];
+            int boxCount = 0, quadCount = 0, emitCount = 0;
+
+            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+                new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
+                bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
+                boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
+            Assert.AreEqual(1, staged, "precondition: the pair stages as exactly one candidate");
+            Assert.AreEqual(2, candidates[0].BoxCount, "precondition: the candidate must span BOTH halves' boxes");
+
+            LabelBox iconBox = boxes[0];
+            LabelBox textBox = boxes[1];
+            Assert.IsFalse(LabelCollision.Overlaps(in iconBox, in textBox),
+                "precondition: the halves' boxes must be disjoint here, or a blocker cannot address one alone");
+
+            LabelBox target = blockedHalf == LabelKind.Icon ? iconBox : textBox;
+            LabelBox spared = blockedHalf == LabelKind.Icon ? textBox : iconBox;
+            var blockerBox = new LabelBox
+            {
+                Min = new float2(target.Min.x - 5f, target.Min.y), Max = new float2(target.Min.x + 2f, target.Max.y),
+            };
+            Assert.IsTrue(LabelCollision.Overlaps(in blockerBox, in target),
+                "precondition: the blocker must overlap the targeted half's box");
+            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in spared),
+                "precondition: the blocker must NOT overlap the other half's box");
+
+            var iconProbeBox = new LabelBox
+            {
+                Min = new float2(iconBox.Max.x - 2f, iconBox.Min.y), Max = new float2(iconBox.Max.x + 5f, iconBox.Max.y),
+            };
+            var textProbeBox = new LabelBox
+            {
+                Min = new float2(textBox.Max.x - 2f, textBox.Min.y), Max = new float2(textBox.Max.x + 5f, textBox.Max.y),
+            };
+            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in iconProbeBox),
+                "precondition: the icon probe must be clear of the blocker, so only the PAIR can block it");
+            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in textProbeBox),
+                "precondition: the text probe must be clear of the blocker");
+            Assert.IsFalse(LabelCollision.Overlaps(in iconProbeBox, in textProbeBox),
+                "precondition: the two probes must not block one another");
+            Assert.IsFalse(LabelCollision.Overlaps(in iconProbeBox, in textBox),
+                "precondition: the icon probe must address the ICON box only");
+            Assert.IsFalse(LabelCollision.Overlaps(in textProbeBox, in iconBox),
+                "precondition: the text probe must address the TEXT box only");
+
+            LabelCandidate Probe(int boxIndex, float sortKey, int labelIndex) => new LabelCandidate
+            {
+                BoxStart = boxIndex, BoxCount = 1, EmitStart = emitCount, EmitCount = 0,
+                SortKey = sortKey, FeatureIndex = 900 + labelIndex, TileKey = 900 + labelIndex, LabelIndex = labelIndex,
+            };
+
+            boxes[boxCount] = blockerBox;   candidates[1] = Probe(boxCount, -1f, 1); boxCount++;
+            boxes[boxCount] = iconProbeBox; candidates[2] = Probe(boxCount, 1f, 2);  boxCount++;
+            boxes[boxCount] = textProbeBox; candidates[3] = Probe(boxCount, 2f, 3);  boxCount++;
+
+            var survivor = new bool[4];
+            var grid = new LabelCollisionGrid();
+            LabelCollision.SelectSurvivors(candidates, 4, boxes, boxCount, survivor, grid);
+
+            var outcome = new OptionalPairOutcome();
+            bool blockerPlaced = false;
+            for (int k = 0; k < 4; k++)
+            {
+                switch (candidates[k].LabelIndex)
+                {
+                    case 0:
+                        outcome.PairPlaced = survivor[k];
+                        outcome.OptionalBoxMask = candidates[k].OptionalBoxMask;
+                        outcome.DroppedBoxMask = candidates[k].DroppedBoxMask;
+                        break;
+                    case 1: blockerPlaced = survivor[k]; break;
+                    case 2: outcome.ProbeOverIconPlaced = survivor[k]; break;
+                    case 3: outcome.ProbeOverTextPlaced = survivor[k]; break;
+                }
+            }
+            Assert.IsTrue(blockerPlaced, "precondition: the highest-priority blocker must place");
+            return outcome;
+        }
+
+        // ── C3 (stage C) — text-optional: the ICON places without its text ────────────────────────────────
+        [Test]
+        public void TextOptional_TextBoxBlocked_IconStillPlaces_AndTheTextBoxReservesNothing()
+        {
+            OptionalPairOutcome o = RunOptionalPairScene("\"text-optional\":true", LabelKind.Text);
+
+            Assert.AreEqual(0b10, o.OptionalBoxMask, "text-optional marks the RIDER (bit 1) droppable, not the owner");
+            Assert.IsTrue(o.PairPlaced,
+                "the pair must SURVIVE on its icon alone — un-fixed, all-or-nothing drops the whole candidate");
+            Assert.AreEqual(0b10, o.DroppedBoxMask, "exactly the text half was dropped");
+            Assert.IsTrue(o.ProbeOverTextPlaced,
+                "a later label over the DROPPED text box must place — a dropped half reserves nothing");
+            Assert.IsFalse(o.ProbeOverIconPlaced,
+                "the surviving icon half must still block: only the dropped box is released");
+        }
+
+        // ── C4 (stage C) — icon-optional: the TEXT places without its icon (the mirror of C3) ─────────────
+        [Test]
+        public void IconOptional_IconBoxBlocked_TextStillPlaces_AndTheIconBoxReservesNothing()
+        {
+            OptionalPairOutcome o = RunOptionalPairScene("\"icon-optional\":true", LabelKind.Icon);
+
+            Assert.AreEqual(0b01, o.OptionalBoxMask, "icon-optional marks the OWNER (bit 0) droppable, not the rider");
+            Assert.IsTrue(o.PairPlaced, "the pair must SURVIVE on its text alone");
+            Assert.AreEqual(0b01, o.DroppedBoxMask, "exactly the icon half was dropped");
+            Assert.IsTrue(o.ProbeOverIconPlaced,
+                "a later label over the DROPPED icon box must place — a dropped half reserves nothing");
+            Assert.IsFalse(o.ProbeOverTextPlaced, "the surviving text half must still block");
+        }
+
+        // ── C5 (stage C) — the both-false regression: §10 P3's all-or-nothing is UNCHANGED ────────────────
+        [Test]
+        public void NeitherOptional_TextBoxBlocked_TheWholePairDrops_AndReservesNothing()
+        {
+            OptionalPairOutcome o = RunOptionalPairScene(null, LabelKind.Text);
+
+            Assert.AreEqual(0, o.OptionalBoxMask, "the spec default leaves NEITHER half optional");
+            Assert.IsFalse(o.PairPlaced,
+                "with both properties defaulted the pair must still drop TOGETHER (§10 P3) — no bare badge");
+            Assert.AreEqual(0, o.DroppedBoxMask, "a dropped candidate records no per-half verdict");
+            Assert.IsTrue(o.ProbeOverIconPlaced, "a dropped pair reserves NO box, so both probes place");
+            Assert.IsTrue(o.ProbeOverTextPlaced);
         }
 
         // ── T13 ────────────────────────────────────────────────────────────────────────────────────────

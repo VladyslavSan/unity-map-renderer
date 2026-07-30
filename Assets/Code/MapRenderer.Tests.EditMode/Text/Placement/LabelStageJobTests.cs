@@ -73,6 +73,10 @@ namespace MapRenderer.Tests.Text.Placement
             var awp = new NativeArray<byte>(fadeIds.Length, alloc);
             var placed = new NativeHashSet<long>(math.max(1, fadeIds.Length), alloc);
             for (int i = 0; i < fadeIds.Length; i++) if (wasPlaced[i] != 0) placed.Add(fadeIds[i]);
+            // Stage C: the job's per-half drop carry. This harness stages a CURVED label, which never reads it —
+            // but every NativeContainer field on a job must be constructed at schedule time, so it is allocated
+            // empty rather than left default.
+            var droppedHalves = new NativeHashMap<long, byte>(1, alloc);
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<LabelBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
             var oCands = new NativeArray<LabelCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
@@ -86,7 +90,8 @@ namespace MapRenderer.Tests.Text.Placement
                 CurvedAnchorStart = cas, CurvedAnchorCount = cac, CurvedAnchorFadeStart = cafs,
                 Quads = nQuads, Glyphs = nGlyphs, Anchors = nAnchors, AnchorFadeIds = nFade,
                 PointOffset = pointOffset, Screen = nScreen, Depth = nDepth, Valid = nValid, WorldPointsRender = nWorld,
-                AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), Bearing = bearing, Viewport = new double2(1920, 1080),
+                AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), DroppedHalves = droppedHalves.AsReadOnly(),
+                Bearing = bearing, Viewport = new double2(1920, 1080),
                 PathScratch = path, CumScratch = cum,
                 Boxes = oBoxes, StagedQuads = oQuads, Candidates = oCands, Emit = oEmit, OutCounts = counts,
             }.Run();
@@ -99,7 +104,7 @@ namespace MapRenderer.Tests.Text.Placement
             kinds.Dispose(); detail.Dispose(); worldCount.Dispose(); points.Dispose(); pqs.Dispose(); pqc.Dispose();
             curveds.Dispose(); cgs.Dispose(); cgc.Dispose(); cas.Dispose(); cac.Dispose(); cafs.Dispose();
             nQuads.Dispose(); nGlyphs.Dispose(); nAnchors.Dispose(); nFade.Dispose();
-            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); awp.Dispose(); placed.Dispose();
+            pointOffset.Dispose(); nScreen.Dispose(); nDepth.Dispose(); nValid.Dispose(); nWorld.Dispose(); awp.Dispose(); placed.Dispose(); droppedHalves.Dispose();
             path.Dispose(); cum.Dispose(); oBoxes.Dispose(); oQuads.Dispose(); oCands.Dispose(); oEmit.Dispose(); counts.Dispose();
             return r;
         }

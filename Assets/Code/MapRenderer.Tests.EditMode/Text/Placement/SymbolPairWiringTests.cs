@@ -67,7 +67,11 @@ namespace MapRenderer.Tests.Text.Placement
 
         // A centred icon+text pair: Owner (icon) immediately followed by its Rider (text) — the adjacency
         // contract §10 D10 relies on (SymbolTileLabelBlockBaker/TestSymbolPlan preserve list order per tile).
-        private static (LabelInstance icon, LabelInstance text) MakePairLabels(double3 sceneOriginRender)
+        // Stage C: <paramref name="textOptional"/> stamps text-optional on the RIDER, and
+        // <paramref name="textTranslatePx"/> pushes the text's box clear of the icon's so a blocker can
+        // address one half alone (at a shared anchor the two boxes overlap by construction).
+        private static (LabelInstance icon, LabelInstance text) MakePairLabels(double3 sceneOriginRender,
+            bool textOptional = false, float textTranslatePx = 0f)
         {
             var iconQuads = new List<SymbolQuad>
             {
@@ -113,6 +117,9 @@ namespace MapRenderer.Tests.Text.Placement
                 TileKey = 0L,
                 PairRole = LabelPairRole.Rider,
                 PairId = 0,
+                PairOptional = textOptional,
+                TranslatePx = new float2(textTranslatePx, 0f),
+                TranslateAnchor = TextTranslateAnchor.Viewport,
             };
             return (icon, text);
         }
@@ -174,6 +181,97 @@ namespace MapRenderer.Tests.Text.Placement
                     "the text mesh must have built non-zero vertices — the bare-number bug is a MISSING icon, not a missing text");
                 Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text),
                     "the text presenter must be showing — BOTH halves survive together");
+            }
+            finally
+            {
+                renderLayer.Dispose();
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(spriteTexture);
+                Object.DestroyImmediate(settings.SymbolTextWorld);
+                Object.DestroyImmediate(settings.SymbolIconWorld);
+                Object.DestroyImmediate(settings);
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
+        // ── C8 (stage C) at the Tick level: text-optional lets the ICON survive its text's collision loss ────
+        //    The two runs differ ONLY by the property, so anything else that could explain a missing text mesh
+        //    (the blocker, the translate, the tile split) is held constant.
+        [Test]
+        public void TextOptional_Tick_TextLosesCollision_IconMeshStillBuilds_TextMeshDoesNot(
+            [Values(false, true)] bool textOptional)
+        {
+            var (camGo, mapCamera, frame) = BuildScene();
+            var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = BuildSpriteTexture();
+            var settings = BuildSettings();
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+                new Material(Shader.Find("Map/Symbol/IconWorld")));
+            var layers = new List<SymbolRenderLayer> { renderLayer };
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+
+            try
+            {
+                const float TextOffsetPx = 200f;
+                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender, textOptional, TextOffsetPx);
+
+                // A higher-priority blocker sitting on the TEXT half's translated box and nowhere near the
+                // icon's (±40 px around +200, vs. the icon's ±8 around 0). It lives on its OWN tile key so its
+                // (Kind=Text) quads land in a different world slot than the pair's text half — otherwise a
+                // non-empty text mesh could not be attributed.
+                long blockerTileKey = Symbol.SymbolFeatureExtractor.PackTileKey(new TileId { Z = 1, X = 1, Y = 0 });
+                var blockerQuads = new List<SymbolQuad>
+                {
+                    new SymbolQuad
+                    {
+                        TopLeft = new float2(-40f, 40f), BottomRight = new float2(40f, -40f),
+                        UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
+                    },
+                };
+                var blocker = new LabelInstance
+                {
+                    AnchorRender = frame.SceneOriginRender,
+                    Layout = new TextLayoutResult { Quads = blockerQuads, BoundsMin = new float2(-40f, -40f), BoundsMax = new float2(40f, 40f), LineCount = 1 },
+                    Paint = LabelPaint.Default,
+                    TextSizePx = 24f,
+                    Text = "blocker",
+                    SortKey = -1f,
+                    FeatureIndex = 99,
+                    TileKey = blockerTileKey,
+                    TranslatePx = new float2(TextOffsetPx, 0f),
+                    TranslateAnchor = TextTranslateAnchor.Viewport,
+                };
+
+                var mixedLabels = new List<LabelInstance> { icon, text, blocker };
+
+                // Two Ticks: the first schedules the collision, the second harvests its verdict (R3) — and,
+                // for the optional case, seeds the per-half drop mask the emit loop reads.
+                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+
+                Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair (one candidate each)");
+
+                bool iconShows = system.IsWorldSlotVisible(0L, 0, LabelKind.Icon);
+                bool textShows = system.IsWorldSlotVisible(0L, 0, LabelKind.Text);
+                if (textOptional)
+                {
+                    Assert.AreEqual(2, system.LastQuadCount,
+                        "text-optional: the blocker's quad AND the pair's ICON quad place — the text half alone drops");
+                    Assert.IsTrue(iconShows, "the icon must survive its text half losing collision");
+                    Assert.IsFalse(textShows, "the pair's text half lost collision, so its mesh must stay empty");
+                }
+                else
+                {
+                    Assert.AreEqual(1, system.LastQuadCount,
+                        "without text-optional only the blocker places — the pair drops all-or-nothing (§10 P3)");
+                    Assert.IsFalse(iconShows, "un-optional: the icon drops WITH its text");
+                    Assert.IsFalse(textShows, "un-optional: the text drops too");
+                }
             }
             finally
             {

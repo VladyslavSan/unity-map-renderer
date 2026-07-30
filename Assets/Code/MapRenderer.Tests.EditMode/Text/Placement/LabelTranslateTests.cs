@@ -11,9 +11,11 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// Slice C / #4 — the pure <c>text-translate</c> screen-delta math (the engine-free half; the
     /// <c>LabelPlacementSystem.Tick</c> integration is proven separately in EditMode). Viewport-anchor and
-    /// map-anchor-at-bearing-0 are fully testable; the map-under-bearing SIGN is a visual-verify handoff
-    /// (LabelBearing.MapAlignedSign), so the bearing tests assert structure (magnitude, ≠ viewport), not the
-    /// exact rotated coordinates.
+    /// map-anchor-at-bearing-0 are fully testable here; the bearing tests assert structure (magnitude,
+    /// ≠ viewport) rather than the exact rotated coordinates, because the map-under-bearing SIGN is
+    /// LabelBearing.MapAlignedSign — pinned on the billboard half of that shared constant by the rendered
+    /// tooth SymbolIconRenderSnapshotTests.MapAlignedPointIcon_TurnsWithTheMap_UnderAnActiveBearing, since
+    /// a sign is only observable in something drawn.
     /// </summary>
     [TestFixture]
     public class LabelTranslateTests

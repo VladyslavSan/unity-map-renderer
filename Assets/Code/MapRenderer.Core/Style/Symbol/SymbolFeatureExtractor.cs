@@ -24,6 +24,8 @@ namespace MapRenderer.Core.Style.Symbol
     /// point placement, and at along-line anchors under a viewport-resolved line placement — see
     /// <see cref="AlignmentResolution"/>); Polygon is never accepted. One label per anchor (a MultiPoint
     /// feature emits one label per point; a viewport-resolved line emits one label per along-line anchor).
+    /// A MAP-resolved line ICON (P-B) instead emits ONE curved label per path, whose single glyph is the icon
+    /// quad — the anchors ride inside it rather than each becoming their own label.
     /// Engine-free / clean-room — the shaping step is Unity-side (Slice 3).
     /// </summary>
     public static class SymbolFeatureExtractor
@@ -46,10 +48,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// <param name="spriteAtlas">
         /// I3 — the sprite sheet <c>icon-image</c> resolves against; <c>null</c> (the default) yields NO icon
         /// labels regardless of the layer's <c>icon-*</c> properties, so every pre-I3 caller (which omits this
-        /// argument) is byte-identical to before I3. Icons resolve under point placement, AND under line
-        /// placement when <c>icon-rotation-alignment</c> resolves to <c>viewport</c> (road-shields D4 — the
-        /// upright-at-anchor case); a MAP-aligned line icon (e.g. <c>road_one_way_arrow*</c>) still never
-        /// emits even when an atlas is supplied (the surviving fence, pinned by T8).
+        /// argument) is byte-identical to before I3. Icons resolve at EVERY placement now: point, line with
+        /// <c>icon-rotation-alignment</c> resolving to <c>viewport</c> (road-shields D4 — the upright-at-anchor
+        /// case), and line with it resolving to <c>map</c> (P-B — the along-line case, emitted as a one-glyph
+        /// curved label; <c>road_one_way_arrow*</c>). D4's map-aligned fence is LIFTED, not surviving.
         /// </param>
         public static void Extract(
             MapRenderer.Core.Style.StyleLayer layer,
@@ -103,6 +105,9 @@ namespace MapRenderer.Core.Style.Symbol
             AlignmentMode iconAlign    = AlignmentResolution.Resolve(layout.IconRotationAlignment, placement);
             bool          textAtAnchors = isLine && textAlign != AlignmentMode.Map;
             bool          iconAtAnchors = isLine && iconAlign != AlignmentMode.Map;
+            // P-B: the third icon mode. A MAP-resolved line icon rides the along-line anchors AND rotates to
+            // the local line tangent — emitted as a one-glyph curved label (see EmitAlongLineIcon).
+            bool          iconAlongLine = isLine && iconAlign == AlignmentMode.Map;
 
             for (int f = 0; f < features.Count; f++)
             {
@@ -127,18 +132,19 @@ namespace MapRenderer.Core.Style.Symbol
                     text = layout.TextTransform.Apply(text);
                 }
 
-                // I3/D4: icons resolve under point placement OR a viewport-resolved line placement
-                // (iconAtAnchors, below) — a map-aligned line stays fenced. Only resolved when the caller
-                // supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
+                // I3/D4/P-B: icons resolve at every placement — point, a viewport-resolved line
+                // (iconAtAnchors) and, since P-B, a map-resolved line (iconAlongLine). Only resolved when the
+                // caller supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
                 bool        hasIcon   = false;
                 SpriteEntry iconEntry = default;
                 // I6: hoisted to feature scope (was block-local + discarded) — the resolved sprite name is the
                 // icon's cross-tile identity, needed at the icon-emit site below (SymbolLabel.IconImage).
                 string iconImage = null;
-                // G3+G4 (D4): the icon fence lifts for the viewport-resolved line case (upright-at-anchor
-                // icons are the existing point-icon path at a different anchor) — the map-aligned line case
-                // (road_one_way_arrow*) stays fenced; see the D4 doc above.
-                if ((!isLine || iconAtAnchors) && spriteAtlas != null)
+                // P-B: D4's map-aligned fence (which this gate used to express as `!isLine || iconAtAnchors`)
+                // is LIFTED. What replaced it is a third emit SHAPE, not a third fence: `iconAlongLine` routes
+                // to EmitAlongLineIcon below, where the icon rides the same along-line anchors as the
+                // viewport case but rotates to the projected tangent instead of staying screen-upright.
+                if ((!isLine || iconAtAnchors || iconAlongLine) && spriteAtlas != null)
                 {
                     iconImage = IconImageResolver.Resolve(layout.IconImage, feature);
                     if (iconImage != null)
@@ -151,6 +157,14 @@ namespace MapRenderer.Core.Style.Symbol
                 // feature's anchor, no offset) is the PAIRING predicate — the two halves are stamped ONE
                 // instance downstream (LabelPairing / StagePointPair), not the old D5 icon-owns-collision
                 // approximation (the forced overlap flags below were D5's mechanism; D5 is retired — see §10).
+                //
+                // Stage C CORRECTS D11: icon-optional/text-optional deliberately do NOT appear here. D11's
+                // recorded shape ("pair only when both are false") is refuted — a centred pair's two boxes
+                // OVERLAP BY CONSTRUCTION, so un-pairing does not make the halves independent, it makes them
+                // mutually exclusive: the earlier-ordinal half inserts its box and the later half collides
+                // with its own former partner, every frame (the bare-number defect §10 was built to kill).
+                // The pair forms regardless of the flags; optionality is a per-BOX verdict inside the
+                // test-all-then-insert collision loop (LabelCandidate.OptionalBoxMask).
                 bool centredPair = hasIcon && text != null
                     && layout.TextAnchor == TextAnchor.Center
                     && layout.TextOffset.Equals(float2.zero)
@@ -171,10 +185,18 @@ namespace MapRenderer.Core.Style.Symbol
                 SymbolQuad iconQuad    = default;
                 LabelPaint iconPaint   = default;
                 float      iconPadding = 0f;
+                float      iconRotateRadians = 0f;
                 if (hasIcon)
                 {
                     float iconSize = layout.IconSize.Evaluate(zoom, feature);
                     iconPadding = layout.IconPadding.Evaluate(zoom, feature);
+                    // P-B: degrees→radians ONCE, here — every downstream site reads radians. Build-zoom
+                    // frozen for this tile's lifetime, the same accepted limit as every other icon property.
+                    // Unit conversion only: the value keeps MapLibre's clockwise-positive SENSE all the way
+                    // down, and enters the staging frame's opposite sense once, at
+                    // LabelBearing.IconRotationRadians (which is below both icon emit shapes, so one flip
+                    // covers the point path and the along-line path alike).
+                    iconRotateRadians = math.radians(layout.IconRotate.Evaluate(zoom, feature));
                     float iconOpacity = paint.IconOpacity.Evaluate(zoom, feature);
                     iconQuad = IconQuadLayout.Layout(iconEntry, spriteAtlas.Size, iconSize, layout.IconAnchor,
                         layout.IconOffset);
@@ -203,6 +225,26 @@ namespace MapRenderer.Core.Style.Symbol
 
                 if (isLine)
                 {
+                    // P-B: the along-line icon's per-FEATURE values, built ONCE and read once per path below.
+                    // Built here (not hoisted above the branch — the NIT-4 precedent): only a map-resolved
+                    // line icon reads it, so a text-only or viewport-resolved line constructs nothing.
+                    AlongLineIconContext alongLineIconCtx = iconAlongLine && hasIcon
+                        ? new AlongLineIconContext
+                        {
+                            IconQuad = iconQuad,
+                            IconImage = iconImage,
+                            PaddingPx = iconPadding,
+                            Paint = iconPaint,
+                            AllowOverlap = layout.IconAllowOverlap,
+                            IgnorePlacement = layout.IconIgnorePlacement,
+                            RotationAlignment = layout.IconRotationAlignment,
+                            SortKey = sortKey,
+                            SpacingPx = spacing,
+                            MaxAngleDeg = maxAngle,
+                            IconRotateRadians = iconRotateRadians,
+                        }
+                        : default;
+
                     for (int p = 0; p < paths.Count; p++)
                     {
                         List<double2> path = paths[p];
@@ -272,6 +314,15 @@ namespace MapRenderer.Core.Style.Symbol
                             });
                         }
 
+                        // P-B: a MAP-resolved line icon is a ONE-GLYPH CURVED label, riding the SAME anchors
+                        // the curved text above uses. Its own ProjectPath call (rather than sharing the text
+                        // branch's array) keeps each label the sole owner of its path; the only cost is a
+                        // second projection on a layer carrying map-aligned text AND a map-aligned icon,
+                        // which no shipped style does.
+                        if (iconAlongLine && hasIcon)
+                            EmitAlongLineIcon(placement, ProjectPath(densePath, tileId, extent, projection),
+                                anchors, in alongLineIconCtx, tileKey, ref ordinal, output);
+
                         // D4: upright-at-anchors — text and/or icon emitted as ordinary POINT labels at each
                         // along-line anchor (the road-shield look). Suppress whichever side didn't resolve to
                         // viewport (Map-aligned text/icon on the SAME feature keeps its OWN emit path/fence).
@@ -297,10 +348,20 @@ namespace MapRenderer.Core.Style.Symbol
                                 IconAllowOverlap = layout.IconAllowOverlap,
                                 IconIgnorePlacement = layout.IconIgnorePlacement,
                                 IconRotationAlignment = layout.IconRotationAlignment,
+                                IconRotateRadians = iconRotateRadians,
+                                IconOptional = layout.IconOptional,
+                                TextOptional = layout.TextOptional,
                                 SortKey = sortKey,
                                 TranslatePx = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
-                                CentredPair = centredPair,
+                                // `centredPair` is computed from the UN-suppressed hasIcon, so on this branch
+                                // it must be re-gated on the same fence HasIcon is: P-B made `hasIcon` true
+                                // with `iconAtAnchors` false (the along-line case), and without this a
+                                // viewport-aligned text on such a layer would be stamped Rider against a
+                                // PairId no emitted label owns. Restores EmitAtAnchor's documented
+                                // "CentredPair implies both halves". Byte-identical wherever iconAtAnchors
+                                // holds — which is every shipped shield layer.
+                                CentredPair = centredPair && iconAtAnchors,
                             };
                             for (int a = 0; a < anchors.Length; a++)
                             {
@@ -333,6 +394,9 @@ namespace MapRenderer.Core.Style.Symbol
                         IconAllowOverlap = layout.IconAllowOverlap,
                         IconIgnorePlacement = layout.IconIgnorePlacement,
                         IconRotationAlignment = layout.IconRotationAlignment,
+                        IconRotateRadians = iconRotateRadians,
+                        IconOptional = layout.IconOptional,
+                        TextOptional = layout.TextOptional,
                         SortKey = sortKey,
                         TranslatePx = translatePx,
                         TranslateAnchor = paint.TranslateAnchor,
@@ -392,6 +456,17 @@ namespace MapRenderer.Core.Style.Symbol
             public bool               IconAllowOverlap { get; init; }
             public bool               IconIgnorePlacement { get; init; }
             public AlignmentMode      IconRotationAlignment { get; init; }
+            /// <summary>P-B <c>icon-rotate</c> in radians — stamped on the ICON half only; text is never
+            /// rotated by it.</summary>
+            public float              IconRotateRadians { get; init; }
+            /// <summary>Stage C <c>icon-optional</c> — stamped on the ICON half's
+            /// <see cref="SymbolLabel.PairOptional"/>: the icon is the droppable one, so its text partner can
+            /// place without it.</summary>
+            public bool               IconOptional { get; init; }
+            /// <summary>Stage C <c>text-optional</c> — stamped on the TEXT half's
+            /// <see cref="SymbolLabel.PairOptional"/>: the text is the droppable one, so its icon partner can
+            /// place without it.</summary>
+            public bool               TextOptional { get; init; }
             // shared
             public float              SortKey { get; init; }
             public float2             TranslatePx { get; init; }
@@ -403,6 +478,72 @@ namespace MapRenderer.Core.Style.Symbol
             /// Otherwise the pre-pairing order (text then icon) is unchanged and both halves carry
             /// <see cref="LabelPairRole.None"/>.</summary>
             public bool               CentredPair { get; init; }
+        }
+
+        /// <summary>P-B: the per-FEATURE icon values every along-line icon label of that feature stamps —
+        /// evaluated once in <see cref="Extract"/>'s feature loop, read once per decoded path by
+        /// <see cref="EmitAlongLineIcon"/>. The icon-side analogue of <see cref="AnchorEmitContext"/>, kept
+        /// separate because the two describe different emit SHAPES: that one carries a point block's
+        /// text+icon halves, this one a single curved glyph. readonly struct + <c>in</c> per
+        /// docs/conventions-short.md.</summary>
+        private readonly struct AlongLineIconContext
+        {
+            public SymbolQuad    IconQuad { get; init; }
+            public string        IconImage { get; init; }
+            public float         PaddingPx { get; init; }
+            public LabelPaint    Paint { get; init; }
+            public bool          AllowOverlap { get; init; }
+            public bool          IgnorePlacement { get; init; }
+            public AlignmentMode RotationAlignment { get; init; }
+            public float         SortKey { get; init; }
+            public float         SpacingPx { get; init; }
+            public float         MaxAngleDeg { get; init; }
+            /// <summary>P-B <c>icon-rotate</c> in radians, composed on top of the along-line tangent.</summary>
+            public float         IconRotateRadians { get; init; }
+        }
+
+        /// <summary>P-B: emits ONE along-line icon label for a decoded path — a curved label whose single
+        /// glyph is the icon quad, riding <paramref name="anchors"/> (the SAME array the curved-text branch
+        /// walks) and rotated per-frame to the projected line tangent.
+        ///
+        /// <para><c>KeepUpright</c> is hard-false, not threaded: <c>icon-keep-upright</c>'s spec default is
+        /// <c>false</c> (unlike <c>text-keep-upright</c>), and for a one-way arrow that default is the only
+        /// correct behaviour — the arrow encodes the road's direction of travel, so flipping it to read
+        /// "upright" would point it the wrong way. See docs/labels-and-symbols-design.md.</para>
+        ///
+        /// <para>Never paired: a pair is proposed only in <see cref="EmitAtAnchor"/>, on the point path, so
+        /// this label's <c>PairRole</c> stays <see cref="LabelPairRole.None"/> structurally — §10's "a curved
+        /// label is never paired" fence holds with no guard here.</para></summary>
+        private static void EmitAlongLineIcon(
+            SymbolPlacement placement, double3[] pathRender, LineAnchor[] anchors,
+            in AlongLineIconContext ctx, long tileKey, ref int ordinal, List<SymbolLabel> output)
+        {
+            output.Add(new SymbolLabel
+            {
+                Placement         = placement,
+                Kind              = LabelKind.Icon,
+                PathRender        = pathRender,
+                LineAnchors       = anchors,
+                IconQuad          = ctx.IconQuad,
+                IconImage         = ctx.IconImage,
+                PaddingPx         = ctx.PaddingPx,
+                SortKey           = ctx.SortKey,
+                SpacingPx         = ctx.SpacingPx,
+                // Structurally inert at one glyph (the max-angle gate is `g > 0`-guarded), carried rather
+                // than replaced by a sentinel so the field means the same thing on every curved label.
+                MaxAngleDeg       = ctx.MaxAngleDeg,
+                KeepUpright       = false,
+                AllowOverlap      = ctx.AllowOverlap,
+                IgnorePlacement   = ctx.IgnorePlacement,
+                // Recorded for record fidelity, NOT consumed: the curved path takes its orientation from the
+                // line tangent, so — exactly like the curved-text emit above — the builder does not forward
+                // this onto the LabelInstance. It says what the style asked for, nothing downstream reads it.
+                RotationAlignment = ctx.RotationAlignment,
+                IconRotateRadians = ctx.IconRotateRadians,
+                Paint             = ctx.Paint,
+                FeatureIndex      = ordinal++,
+                TileKey           = tileKey,
+            });
         }
 
         /// <summary>D2+D4: resolves one tile-space anchor point to a label anchor and emits its text/icon
@@ -421,8 +562,9 @@ namespace MapRenderer.Core.Style.Symbol
             if (ctx.CentredPair)
             {
                 // §10 D10: the pair's PairId is the OWNER's (icon's) FeatureIndex, captured before either
-                // emitter advances `ordinal`. CentredPair implies both HasIcon and Text != null (the
-                // predicate that computed it), so both emitters below always run together here.
+                // emitter advances `ordinal`. CentredPair implies both HasIcon and Text != null — every
+                // caller re-gates the centred predicate on the same fences that suppress a half (the line
+                // branch on `iconAtAnchors`) — so both emitters below always run together here.
                 int pairId = ordinal;
                 if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Owner, pairId);
                 if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Rider, pairId);
@@ -457,6 +599,7 @@ namespace MapRenderer.Core.Style.Symbol
                 RotationAlignment = ctx.TextRotationAlignment,
                 PairRole          = pairRole,
                 PairId            = pairId,
+                PairOptional      = ctx.TextOptional,
             });
         }
 
@@ -476,11 +619,13 @@ namespace MapRenderer.Core.Style.Symbol
                 AllowOverlap      = ctx.IconAllowOverlap,
                 IgnorePlacement   = ctx.IconIgnorePlacement,
                 RotationAlignment = ctx.IconRotationAlignment,
+                IconRotateRadians = ctx.IconRotateRadians,
                 Paint             = ctx.IconPaint,
                 FeatureIndex      = ordinal++,
                 TileKey           = tileKey,
                 PairRole          = pairRole,
                 PairId            = pairId,
+                PairOptional      = ctx.IconOptional,
             });
         }
 

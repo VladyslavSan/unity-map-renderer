@@ -72,6 +72,11 @@ namespace MapRenderer.Jobs
         // caller (see LabelPlacementSystem.RunStageJob).
         public NativeHashSet<long>.ReadOnly Placed;
 
+        // Stage C: last frame's per-half collision verdict for optional pairs, keyed by the pair's FadeId
+        // (LabelPlacementSystem._droppedHalvesLastFrame). Probed ONLY when a pair actually declares an optional
+        // half, so a style that sets neither property never touches it — the map is empty in that case anyway.
+        public NativeHashMap<long, byte>.ReadOnly DroppedHalves;
+
         // ── caller-owned scratch (>= max WorldCount) ──
         public NativeArray<float2> PathScratch;
         public NativeArray<float>  CumScratch;
@@ -131,9 +136,15 @@ namespace MapRenderer.Jobs
                     {
                         PointStageInput rider = Points[d + 1];
                         ReadOnlySpan<SymbolQuad> riderQuadSpan = Quads.AsSpan().Slice(PointQuadStart[d + 1], PointQuadCount[d + 1]);
+                        // Stage C: only an optional pair can have a per-half verdict to carry, so the hash probe
+                        // is gated on the flags rather than run for every pair.
+                        byte droppedHalvesLastFrame = 0;
+                        if (s.PairOptional || rider.PairOptional)
+                            DroppedHalves.TryGetValue(s.FadeId, out droppedHalvesLastFrame);
                         candidateCount += LabelStagingMath.StagePointPair(in s, in rider, quadSpan, riderQuadSpan,
                             Bearing, Viewport, candidateCount,
-                            boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
+                            boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount,
+                            droppedHalvesLastFrame);
                     }
                     else
                     {

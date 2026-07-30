@@ -145,6 +145,118 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(tiltRad, p.Quads[q].RotationRadians, Tol);
         }
 
+        // ── A8 (P-B non-regression): curved TEXT must be untouched by the icon work — it leaves
+        //    CurvedStageInput.AtlasKind/IconRotateRadians at their defaults, so the emit is the same Text /
+        //    zero-rotation record it always was. This is the tooth that goes RED if a future change routes
+        //    curved text through the icon arm (or defaults AtlasKind the wrong way). ──
+        [Test]
+        public void StageCurved_Text_LeavesTheEmitOnTheGlyphAtlas_WithNoExtraRotation()
+        {
+            var screenPath = new[] { float2.zero, new float2(400f, 0f) };
+            var worldPath = new[] { double3.zero, new double3(400, 0, 0) };
+            var glyphs = new[]
+            {
+                new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
+                new CurvedGlyph { ArcCenter = 60f, Cell = Cell(10f) },
+            };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            // Every icon-specific field left DEFAULT — exactly what BuildCurvedInput produces for a text label.
+            var s = new CurvedStageInput
+            {
+                TextSizePx = TextQuadLayout.OneEm, PaddingPx = 0f, SortKey = 0f,
+                FeatureIndex = 4, TileKey = 1, Slot = 0,
+                TranslatePx = float2.zero, TranslateAnchor = TextTranslateAnchor.Viewport,
+                MaxAngleDeg = 90f, KeepUpright = true, Color = new float4(1, 1, 1, 1),
+            };
+            var fadeIds = new[] { LabelStagingMath.LineFadeId(1, 0, 4, 0), LabelStagingMath.LineFadeId(1, 0, 4, -1) };
+            var p = Pools.New();
+            int boxCountBefore = p.BoxCount;
+
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, new[] { 0f, 0f }, new byte[] { 1, 1 },
+                worldPath, glyphs, anchors, fadeIds, new byte[] { 0, 0 }, new float2[2], new float[2],
+                bearingRadians: 0f, ordinal: 0,
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
+
+            Assert.AreEqual(1, staged);
+            Assert.AreEqual(LabelKind.Text, p.Emit[0].AtlasKind, "curved text must still sample the GLYPH atlas");
+            Assert.AreEqual(0f, p.Emit[0].ExtraRotationRadians, 1e-9f,
+                "curved text carries no icon-rotate — the renderer must see the same 0f it used to hardcode");
+            Assert.AreEqual(glyphs.Length, p.BoxCount - boxCountBefore, "one box per glyph, unchanged");
+        }
+
+        // ── A4 (P-B): a ONE-GLYPH curved ICON stages one candidate per anchor, routed to the SPRITE atlas
+        //    and rotated to the projected tangent — the whole point of reusing the curved path for icons. ──
+        [Test]
+        public void StageCurved_OneGlyphIcon_StagesPerAnchor_IntoTheIconAtlas_WithARotatedBox()
+        {
+            // A 45° line, so the staged box is genuinely ROTATED (an axis-aligned line could not discriminate).
+            float angle = math.radians(45f);
+            float2 dir = new float2(math.cos(angle), math.sin(angle));
+            var screenPath = new[] { float2.zero, dir * 600f };
+            var depthPath = new[] { 0f, 0f };
+            var validPath = new byte[] { 1, 1 };
+            var worldPath = new[] { double3.zero, new double3(dir.x, 0, dir.y) * 600.0 };
+
+            // A deliberately WIDE cell (24 x 12) so the rotated box is measurably wider in x than the cell.
+            var iconCell = new SymbolQuad
+            {
+                TopLeft = new float2(-12f, 6f), BottomRight = new float2(12f, -6f),
+                UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
+            };
+            var glyphs = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = iconCell } };
+            var anchors = new[] { new LineAnchor(0, 0.25f), new LineAnchor(0, 0.75f) };
+            var s = new CurvedStageInput
+            {
+                TextSizePx = TextQuadLayout.OneEm, PaddingPx = 0f, SortKey = 0f,
+                FeatureIndex = 9, TileKey = 5, Slot = 0,
+                TranslatePx = float2.zero, TranslateAnchor = TextTranslateAnchor.Viewport,
+                MaxAngleDeg = 45f, KeepUpright = false, Color = new float4(1, 1, 1, 1),
+                AtlasKind = LabelKind.Icon,
+            };
+            var fadeIds = new[]
+            {
+                LabelStagingMath.LineFadeId(5, 0, 9, 0), LabelStagingMath.LineFadeId(5, 0, 9, 1),
+                LabelStagingMath.LineFadeId(5, 0, 9, -1),
+            };
+            var wasPlaced = new byte[] { 0, 0, 0 };
+            var p = Pools.New();
+
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs,
+                anchors, fadeIds, wasPlaced, new float2[2], new float[2], bearingRadians: 0f, ordinal: 0,
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
+
+            Assert.AreEqual(anchors.Length, staged, "one candidate per along-line anchor");
+            Assert.AreEqual(anchors.Length, p.EmitCount, "one emit per candidate");
+            for (int c = 0; c < staged; c++)
+            {
+                Assert.AreEqual(1, p.Candidates[c].BoxCount, "a one-glyph label has exactly one box");
+                Assert.AreEqual(1, p.Candidates[c].EmitCount, "…and exactly one emit");
+                // An impl that forgot AtlasKind would route these quads to the GLYPH texture and draw garbage.
+                Assert.AreEqual(LabelKind.Icon, p.Emit[c].AtlasKind, "the emit must sample the SPRITE atlas");
+                // An impl that routed icons through StagePoint would leave AlongLine false and lose the tangent.
+                Assert.IsTrue(p.Emit[c].AlongLine, "an along-line icon must take the curved/world emit branch");
+                Assert.IsTrue(p.Emit[c].IsWorld, "…and the world-anchored draw sink");
+            }
+
+            // The staged box IS the rotated-glyph box, not the axis-aligned cell: assert against
+            // LabelBox.BuildRotatedGlyph over the same inputs, with the unrotated width as the precondition
+            // that the 45° case is non-degenerate.
+            LabelBox actual = p.Boxes[0];
+            var expected = LabelBox.BuildRotatedGlyph(p.Quads[0].AnchorScreenPx, iconCell,
+                s.TextSizePx, p.Quads[0].RotationRadians, s.PaddingPx);
+            Assert.AreEqual(expected.Min.x, actual.Min.x, Tol, "box Min.x");
+            Assert.AreEqual(expected.Min.y, actual.Min.y, Tol, "box Min.y");
+            Assert.AreEqual(expected.Max.x, actual.Max.x, Tol, "box Max.x");
+            Assert.AreEqual(expected.Max.y, actual.Max.y, Tol, "box Max.y");
+
+            float unrotatedWidth = iconCell.BottomRight.x - iconCell.TopLeft.x;
+            Assert.AreEqual(24f, unrotatedWidth, Tol, "precondition: the cell is 24 px wide unrotated");
+            Assert.Greater(actual.Max.x - actual.Min.x, unrotatedWidth + 1f,
+                "a 45°-rotated wide cell must bound STRICTLY wider in x than the cell itself");
+            Assert.AreEqual(math.radians(45f), p.Quads[0].RotationRadians, Tol,
+                "the quad rotates to the 45° line tangent");
+        }
+
         [Test]
         public void StageCurved_TextTranslate_IsCarriedOntoTheWorldEmitDelta()
         {

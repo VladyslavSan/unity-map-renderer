@@ -58,7 +58,9 @@ namespace MapRenderer.Core.Style.Symbol
         public float MaxAngleDeg { get; init; }
 
         /// <summary><c>text-keep-upright</c> — flip a right-to-left curved label so it reads left-to-right
-        /// (default true; line placement only). #6.</summary>
+        /// (default true; line placement only). #6. On an ICON curved label (P-B) this is always
+        /// <c>false</c>: <c>icon-keep-upright</c>'s spec default is false, and a one-way arrow that flipped
+        /// to stay upright would point against the road's direction of travel.</summary>
         public bool KeepUpright { get; init; }
 
         /// <summary><c>text-allow-overlap</c>.</summary>
@@ -113,6 +115,15 @@ namespace MapRenderer.Core.Style.Symbol
         /// <see cref="Kind"/> is <see cref="LabelKind.Icon"/>; default (all-zero) otherwise.</summary>
         public SymbolQuad IconQuad { get; init; }
 
+        /// <summary>P-B: <c>icon-rotate</c> in RADIANS, positive = clockwise on screen (MapLibre's sense, kept
+        /// verbatim on every carrier — the staging frame's opposite sense is entered once, far downstream, at
+        /// <c>LabelBearing.IconRotationRadians</c>) — the degrees→radians
+        /// conversion happens ONCE here, at extract (the <see cref="MapRenderer.Core.Geo.Angle"/> rule). A
+        /// constant angular offset composed ON TOP of whatever the icon's alignment produced; 0 (the default)
+        /// on every text label and every un-rotated icon. Meaningful only when <see cref="Kind"/> is
+        /// <see cref="LabelKind.Icon"/> — <c>icon-rotate</c> never rotates text.</summary>
+        public float IconRotateRadians { get; init; }
+
         /// <summary>I6: the resolved sprite name — the icon's cross-tile identity; null for text. Threaded
         /// into <see cref="LabelInstance"/> and folded into <see cref="CrossTileLabelKey"/> so distinct
         /// co-located icons no longer collide (I5b's deferred gap).</summary>
@@ -131,5 +142,12 @@ namespace MapRenderer.Core.Style.Symbol
         /// <c>TileKey</c>/<c>MaterialIndex</c> on the downstream <see cref="LabelInstance"/> carrier for that
         /// reason. Meaningless when <see cref="PairRole"/> is <see cref="LabelPairRole.None"/>.</summary>
         public int PairId { get; init; }
+
+        /// <summary>Stage C: this half may be DROPPED while its partner places — <c>icon-optional</c> on an icon
+        /// label, <c>text-optional</c> on a text label (each property names the half it makes droppable). The
+        /// pair still forms and still stages as ONE candidate; only the collision verdict gains per-half
+        /// granularity (<see cref="Placement.LabelCandidate.OptionalBoxMask"/>). Meaningless unless
+        /// <see cref="PairRole"/> is set; default false ⇒ MapLibre's spec default, both halves required.</summary>
+        public bool PairOptional { get; init; }
     }
 }
