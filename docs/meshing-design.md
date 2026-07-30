@@ -97,6 +97,13 @@ cancellation contract" and the mesh-ownership rule in [`conventions-short.md`](c
 
 # 2. Line antialiasing
 
+> **The active epic lives in [`line-antialiasing-design.md`](line-antialiasing-design.md)** — the chosen
+> direction (a strict ±0.5 px analytical straddle, still alpha-blended), the acceptance teeth and the stage
+> sequence. Note that the two "ways forward" sketched at the end of this section are both **closed**: fusion
+> regresses junction draw order on real styles, and replace-compositing is ruled out by the no-depth and
+> no-MSAA decisions recorded there. This section stays the record of *why* the removed AA failed; that doc
+> is where the rebuild is designed.
+
 **State:** line edge antialiasing is **removed** (commit `0b910c7`). Lines render with a **hard edge**, the
 configured width drawn **solid**, thin lines held at ≥ 1 px by a **min-width floor**. `line-blur` (`_Blur`) is
 kept as an opt-in soft edge; dashing is unchanged. This section is the SSOT for *why* there is no edge AA and
@@ -117,7 +124,13 @@ projection measurement, `_MetersPerPixel` retired). `LineCoverage`:
 The **only** thin-line safeguard is the min-width floor: half-width `≥ 0.5 px`, so a sub-pixel line renders a
 stable 1 px hairline instead of dropping out.
 
-## Why edge AA was removed — the trilemma
+## Why edge AA was removed, and how it came back — the trilemma, resolved
+
+> **Superseded as a verdict, kept as history.** Edge AA was removed in `0b910c7` for the reasons below, and
+> **restored** by the line-AA epic as a strict one-device-pixel straddle behind `_EDGE_ANTIALIASING_OFF`
+> (`docs/line-antialiasing-design.md`, SHIPPED). The analysis of why the *removed* model failed is accurate
+> and worth keeping; the conclusion that no shader fade can work is not. What follows is the original
+> argument, with the resolution marked.
 
 A shader-space alpha fade (inset / straddle / outset) cannot satisfy all three at once:
 
@@ -134,6 +147,15 @@ Antialiasing a hard edge *means* placing partial-alpha pixels near it, and those
 | **inset** (fade inward) | ❌ | ✅ | ✅ | edge/core dims, reads thinner |
 | **straddle** (50 % at the edge) | ~ (outer ½ px dims) | ✅ | ✅ | balanced, but a thin line goes soft |
 
+**The trilemma is what the shipped model resolves, and the table's "straddle" row is where it does it.** The
+row is right that the outer half-pixel dims — but that is the *definition* of an antialiased edge, not a
+failure of the solid core. The shipped straddle makes the ribbon `a == 1` everywhere from the centreline out
+to half a pixel inside the styled edge, ramps 1 → 0 across the one pixel centred on that edge, and so keeps
+the 50 % contour exactly on the styled width: **solid core ✅, apparent width unchanged ✅, antialiased ✅**.
+Measured, both in pixel-width and world-unit-width mode: a styled 6.0 px line renders a coverage integral of
+6.003 px. The "thin line goes soft" caveat is real and is handled by the pre-existing min-width floor, which
+floors the *styled* half-width — the thing the ramp centres on.
+
 Two corollaries:
 
 - **A fade-*width* knob is not a quality dial.** Correct coverage-AA is a ~1 px transition. Widening the fade
@@ -144,7 +166,7 @@ Two corollaries:
   it is the same test at the same point → the identical staircase. Only **more samples per pixel** (MSAA/SSAA) or
   a **coverage gradient** (the fade) put intermediate values on a diagonal.
 
-## The real blocker — cased lines are two stacked *transparent* draws
+## The cased-line objection — answered by an `a == 1` interior
 
 A cased road (e.g. `road_motorway_casing` + `road_motorway`) is **two separate transparent draws**: the casing
 (wider, drawn under) and the fill (narrower, drawn over), both `Queue=Transparent`, `ZWrite Off`,
@@ -153,13 +175,27 @@ one:
 
 - The fill's AA edge is a skirt that ramps to **transparent**. "Transparent" over the casing means **the casing
   colour bleeds through the fill's edge pixels** → the crisp fill↔casing boundary becomes a muddy blend band.
-- The general form: **alpha-fade AA does not compose when transparent layers stack.** Every fade skirt blends
-  whatever is beneath it, and a cased line is two layers by construction. No fade width — inset, outset, or
-  straddle — escapes it.
+- The general form as originally stated: *"alpha-fade AA does not compose when transparent layers stack.
+  No fade width — inset, outset, or straddle — escapes it."*
 
 **MSAA does not fix this.** MSAA anti-aliases geometry *coverage*, but the fill and casing are still blended (not
 replaced), so 4× samples just give a slightly cleaner version of the same mush. The problem was never coverage;
 it is the compositing model.
+
+> **[RESOLVED] The generalisation was too strong — it is true of an INSET fade, not of a straddle.** The
+> removed model faded *inward from the styled edge*, so the fill's own styled band contained partially
+> transparent pixels, and those sat over the casing's interior and bled it. A strict straddle confines the
+> ramp to the one pixel centred on the edge and is `a == 1` everywhere inside that: there is no transparent
+> region within the fill's band for the casing to show through. What ramps to transparent is the outer half
+> pixel, which lies over the *casing's interior* — and blending a colour into `a == 1` casing at the
+> boundary pixel is exactly what a correct antialiased boundary looks like.
+>
+> Pinned by tooth T2 (`CasedPair_InternalBoundary_StaysCrisp`): zero casing contribution anywhere ≥ 1 px
+> inside the fill band, and at most one blended pixel per flank. RED-verified against a re-added inset fade,
+> which bleeds **77.3 %** casing colour 3.75 px inside a 5 px half-width fill.
+>
+> The single-pass cased line below remains the better architecture and is still not built; it is no longer a
+> prerequisite for antialiased lines.
 
 ## The way forward — single-pass cased line (not yet built)
 

@@ -52,8 +52,10 @@
 // keep this file in sync with Line_LitGBufferPass.hlsl
 struct LineVaryings
 {
-    // LINE DELTA: float3 uv = (dashU [along, width-units], side [signed cross ∈ -1..1], innerFrac [gap]).
-    float3 uv                       : TEXCOORD0;
+    // LINE DELTA: float4 uv = (dashU [along, width-units], side [signed cross ∈ -1..1], innerFrac [gap],
+    // hairlineScale [_HAIRLINE_SOLID_CORE energy compensation; 1 otherwise]). w is FORWARD-ONLY — the other
+    // four passes clip on an uncompensated coverage and keep float3.
+    float4 uv                       : TEXCOORD0;
 
 #if defined(REQUIRES_WORLD_SPACE_POS_INTERPOLATOR)
     float3 positionWS               : TEXCOORD1;
@@ -204,7 +206,8 @@ LineVaryings LinePassVertex(LineAttributes input)
     // LINE DELTA: world-space ribbon extrusion (the one helper every line pass shares → identical silhouettes).
     float side, innerFrac, dashU;
     float4 tangentOS;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS);
+    float hairlineScale;
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
 
@@ -220,7 +223,7 @@ LineVaryings LinePassVertex(LineAttributes input)
     #endif
 
     // LINE DELTA: uv carries the line parameterization, NOT TRANSFORM_TEX'd (coverage needs raw dashU).
-    output.uv     = float3(dashU, side, innerFrac);
+    output.uv     = float4(dashU, side, innerFrac, hairlineScale);
     output.vColor = input.color;
 
     // already normalized from normal transform to WS.
@@ -275,7 +278,7 @@ void LinePassFragment(
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-    float2 baseUV = input.uv.xy;   // LINE DELTA: uv is float3 (z = gap) → sample maps at xy
+    float2 baseUV = input.uv.xy;   // LINE DELTA: uv is float4 (z = gap, w = hairline scale) → maps at xy
 
 #if defined(_PARALLAXMAP)
 #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
@@ -311,6 +314,11 @@ void LinePassFragment(
 
     // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × per-feature alpha (S05).
     float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
+#if defined(_HAIRLINE_SOLID_CORE)
+    // Energy compensation for the vertex-stage band clamp (see Line_VertexExtrude). 1.0 on every other
+    // path, so this multiply is compiled out.
+    coverage *= input.uv.w;
+#endif
     color.a = coverage * _Opacity * input.vColor.a;
 
     outColor = color;

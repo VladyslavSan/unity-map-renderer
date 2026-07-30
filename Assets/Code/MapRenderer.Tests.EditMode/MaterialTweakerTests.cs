@@ -129,6 +129,126 @@ namespace MapRenderer.Tests
             }
         }
 
+        // ── 2b. The line's own keyword: _EdgeAntialiasing → _EDGE_ANTIALIASING_OFF ──
+        [Test]
+        public void LineShaderGUI_ValidateMaterial_SyncsEdgeAntialiasingKeyword()
+        {
+            // _EdgeAntialiasing is declared [ToggleUI], which is UI-only and attaches NO keyword.
+            // LineShaderGUI.ValidateMaterial is the ONLY thing that turns the float into
+            // _EDGE_ANTIALIASING_OFF — delete that override and the shipped AA toggle is completely inert
+            // while every other test in the repo stays green. This is its only guard.
+            var m = NewLine();
+            try
+            {
+                m.SetFloat(ShaderProperties.Line.PropertyNames.EdgeAntialiasing, 0f);
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
+                    "_EdgeAntialiasing = 0 → _EDGE_ANTIALIASING_OFF must be set.");
+
+                // The POLARITY tooth. _OFF polarity is a build-correctness requirement, not a style choice:
+                // a shader_feature_local variant is stripped from a player build unless some material in the
+                // build declares the keyword, so the SHIPPING (AA-on) state must carry no keyword. An
+                // inverted sync would satisfy the clause above, look right in the Editor, and silently drop
+                // antialiasing from the player build.
+                m.SetFloat(ShaderProperties.Line.PropertyNames.EdgeAntialiasing, 1f);
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
+                    "_EdgeAntialiasing = 1 (the shipping default) → _EDGE_ANTIALIASING_OFF must be CLEAR.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
+        [Test]
+        public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesAntialiasingOn()
+        {
+            // The committed MapLine.mat carries `_EdgeAntialiasing: 1` and no m_ShaderKeywords entry, and
+            // every per-layer material is a new Material(base) copy that inherits the keyword set. So the
+            // shipped state — and therefore every line the map draws — must survive the sync with AA ON.
+            var m = new Material(MapMaterialSetTestUtil.Load().LineMaterial);
+            try
+            {
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.EdgeAntialiasingOff),
+                    "the committed line base must render AA-ON: _EDGE_ANTIALIASING_OFF must be clear " +
+                    "after the editor keyword sync.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
+        // ── 2c. The hairline strategy selector → _HAIRLINE_HARD ──
+        [Test]
+        public void LineShaderGUI_ValidateMaterial_SyncsHairlineStrategyKeyword()
+        {
+            // _HairlineStrategy is declared [Enum(...)], a UI-only drawer that attaches NO keyword — exactly
+            // like [ToggleUI] on _EdgeAntialiasing. LineShaderGUI.ValidateMaterial is the only thing that
+            // turns the selector into _HAIRLINE_HARD; without it the whole selector is inert and every other
+            // test in the repo stays green.
+            var m = NewLine();
+            try
+            {
+                m.SetFloat(ShaderProperties.Line.PropertyNames.HairlineStrategy, 1f);
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
+                    "_HairlineStrategy = 1 (Hard) → _HAIRLINE_HARD must be set.");
+
+                // Back to Default. This direction is the strip-safety one: `_` is the shipping member of the
+                // keyword set, so the variant every player build compiles is the one carrying NO keyword.
+                // A sync that latched would ship a variant that can be stripped.
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineSolidCore),
+                    "strategy 1 must not also set _HAIRLINE_SOLID_CORE — a material carrying both keywords " +
+                    "compiles a variant nobody reasoned about.");
+
+                m.SetFloat(ShaderProperties.Line.PropertyNames.HairlineStrategy, 2f);
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.HairlineSolidCore),
+                    "_HairlineStrategy = 2 (SolidCore) → _HAIRLINE_SOLID_CORE must be set.");
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
+                    "strategy 2 must CLEAR _HAIRLINE_HARD — the two are mutually exclusive.");
+
+                // Back to Default. This direction is the strip-safety one: `_` is the shipping member of the
+                // keyword set, so the variant every player build compiles is the one carrying NO keyword.
+                m.SetFloat(ShaderProperties.Line.PropertyNames.HairlineStrategy, 0f);
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
+                    "_HairlineStrategy = 0 (Default, the shipping state) → _HAIRLINE_HARD must be CLEAR.");
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineSolidCore),
+                    "_HairlineStrategy = 0 → _HAIRLINE_SOLID_CORE must be CLEAR.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
+        [Test]
+        public void LineShaderGUI_ValidateMaterial_OnCommittedBase_LeavesHairlineDefault()
+        {
+            // Every per-layer material is a new Material(base) copy and Unity's copy ctor carries the keyword
+            // set, so whatever the committed base declares propagates to every line the map draws. This fails
+            // the moment someone saves a strategy into MapLine.mat.
+            var m = new Material(MapMaterialSetTestUtil.Load().LineMaterial);
+            try
+            {
+                new LineShaderGUI().ValidateMaterial(m);
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineHard),
+                    "the committed line base must ship the Default strategy: _HAIRLINE_HARD must be clear " +
+                    "after the editor keyword sync.");
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.HairlineSolidCore),
+                    "the committed line base must ship the Default strategy: _HAIRLINE_SOLID_CORE must be " +
+                    "clear after the editor keyword sync.");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
         // ── 3. ValidateMaterial is behaviour-neutral on the committed base (parity) ──
         [Test]
         public void FillShaderGUI_ValidateMaterial_OnCommittedBase_LeavesKeywordStateUnchanged()

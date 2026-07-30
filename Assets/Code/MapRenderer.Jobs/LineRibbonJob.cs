@@ -76,11 +76,14 @@ namespace MapRenderer.Jobs
             if (pointCount < 2) return 0;
             int rs = roundSegments < 1 ? 1 : roundSegments;
             int n = pointCount;
-            int startCap = rs + 3;
+            // Each round cap emits one extra co-located seed vertex (EmitStartCap/EmitEndCap):
+            // start = pivot + rs arc + seed + 2 butts; end = pivot + rs arc + seed.
+            // No extra TRIANGLES — MaxIndexCount is unchanged.
+            int startCap = rs + 4;
             int perJoin  = rs + 3;
             int joins    = n - 2 < 0 ? 0 : n - 2;
             int lastSeg  = 2;
-            int endCap   = rs + 1;
+            int endCap   = rs + 2;
             return startCap + joins * perJoin + lastSeg + endCap;
         }
 
@@ -391,8 +394,9 @@ namespace MapRenderer.Jobs
                     // through −along at t=½, to leftButt (+across): dir = −cos(tπ)·across − sin(tπ)·along.
                     int baseIdx      = v;
                     int centerIdx    = baseIdx;
-                    int leftButtIdx  = baseIdx + roundSegments + 1;
-                    int rightButtIdx = baseIdx + roundSegments + 2;
+                    int capSeedIdx   = baseIdx + roundSegments + 1;
+                    int leftButtIdx  = baseIdx + roundSegments + 2;
+                    int rightButtIdx = baseIdx + roundSegments + 3;
 
                     AddVertex(ref v, MakeVertex(p, double3.zero, up, dist, 0f)); // center pivot
 
@@ -403,10 +407,17 @@ namespace MapRenderer.Jobs
                         AddVertex(ref v, MakeVertex(p, dir, up, dist, +1f));
                     }
 
+                    // Fan seed: geometrically identical to rightButt (same p, same −across) but tagged +1.
+                    // Seeding the fan from rightButt itself gave the seam triangle an OUTER edge — a true
+                    // silhouette — interpolating side +1 → −1 and passing through 0 at its midpoint, so
+                    // anything keyed on |side| read that one arc segment as deep interior. Emitted BEFORE the
+                    // two butts so Execute()'s verts[v-2]=left / verts[v-1]=right contract still holds.
+                    AddVertex(ref v, MakeVertex(p, -across, up, dist, +1f));  // capSeed
+
                     AddVertex(ref v, MakeVertex(p,  across, up, dist, +1f));  // leftButt  [v-2]
                     AddVertex(ref v, MakeVertex(p, -across, up, dist, -1f));  // rightButt [v-1]
 
-                    int prevFan = rightButtIdx;
+                    int prevFan = capSeedIdx;
                     for (int k = 1; k <= roundSegments; k++)
                     {
                         int fanIdx = baseIdx + k;
@@ -464,8 +475,14 @@ namespace MapRenderer.Jobs
                         AddIndex(ref idx, prevFanIdx);
                         prevFanIdx = fanIdx;
                     }
+                    // Closing-triangle seed: geometrically identical to rightPrev (this cap's `across` is the
+                    // same n1 the last segment extruded rightPrev with, at :196-200) but tagged +1, so the
+                    // closing triangle's outer edge runs +1 → +1 instead of +1 → −1. rightPrev itself stays
+                    // −1 for the ribbon quad. Same fix as EmitStartCap's capSeed.
+                    int capSeedIdx = v;
+                    AddVertex(ref v, MakeVertex(p, -across, up, dist, +1f));
                     AddIndex(ref idx, centerIdx);
-                    AddIndex(ref idx, rightPrev);
+                    AddIndex(ref idx, capSeedIdx);
                     AddIndex(ref idx, prevFanIdx);
                     break;
                 }

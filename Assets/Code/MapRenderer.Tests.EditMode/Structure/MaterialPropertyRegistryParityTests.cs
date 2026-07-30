@@ -5,7 +5,8 @@
 //
 // Validates the four-way set equality:
 //   • sharedCBUFFER (from ShaderProperties/PropertyNames.cs CBUFFER region, 14)
-//   • ShaderProperties/Line/PropertyNames.cs (10 line-only), ShaderProperties/Fill/PropertyNames.cs (7 fill-only)
+//   • ShaderProperties/Line/PropertyNames.cs (12 line-only: 10 CBUFFER + 2 editor-only keyword drivers),
+//     ShaderProperties/Fill/PropertyNames.cs (7 fill-only)
 //   • Line_LitInput.hlsl CBUFFER (24 after stripping companions)
 //   • Fill_LitInput.hlsl CBUFFER (21 after stripping companions)
 //   (line counts dropped by 2 — _MetersPerPixel (S104) + _AaEdgeWidth (line-AA removal) retired)
@@ -67,12 +68,25 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void LinePropertyNamesCount_IsExactly10()
+        public void LinePropertyNamesCount_IsExactly12()
         {
             var set = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingLineDir, "PropertyNames.cs"));
+            Assert.That(set.Count, Is.EqualTo(12),
+                $"ShaderProperties/Line/PropertyNames.cs must have exactly 12 const string values " +
+                $"(10 CBUFFER members + 2 editor-only keyword drivers). " +
+                $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
+        }
+
+        [Test]
+        public void LineCbufferRegionCount_IsExactly10()
+        {
+            // Guards the region split itself: SharedUnionLineNames_EqualsLineCbuffer now reads only the
+            // CBUFFER region, so without an exact count here a real CBUFFER property could be dropped into
+            // the editor-only region and silently escape the parity assertion.
+            var set = ParseLineCbufferRegion();
             Assert.That(set.Count, Is.EqualTo(10),
-                $"ShaderProperties/Line/PropertyNames.cs must have exactly 10 const string values. " +
+                $"Line/PropertyNames.cs CBUFFER region must have exactly 10 const string values. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
         }
 
@@ -131,8 +145,7 @@ namespace MapRenderer.Tests
         public void SharedUnionLineNames_EqualsLineCbuffer()
         {
             var shared = ParseSharedCbufferRegion();
-            var lineNames = ShaderPropertyParser.ParseAllConstStringValues(
-                Path.Combine(RenderingLineDir, "PropertyNames.cs"));
+            var lineNames = ParseLineCbufferRegion();
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(
                 Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
 
@@ -301,5 +314,16 @@ namespace MapRenderer.Tests
             => ShaderPropertyParser.ParseRegionValues(
                 Path.Combine(ShaderPropertiesDir, "PropertyNames.cs"),
                 "// region: CBUFFER (UnityPerMaterial) — shared instanced members");
+
+        /// <summary>
+        /// The CBUFFER region of the LINE registry. Line/PropertyNames.cs also declares editor-only keyword
+        /// drivers (Properties{}-only, never CBUFFER members), exactly as the shared registry does for
+        /// _ReceiveShadows, so the union parity assertion reads this region rather than every const in the
+        /// file. <see cref="LineCbufferRegionCount_IsExactly10"/> pins the region's size.
+        /// </summary>
+        private static HashSet<string> ParseLineCbufferRegion()
+            => ShaderPropertyParser.ParseRegionValues(
+                Path.Combine(RenderingLineDir, "PropertyNames.cs"),
+                "// region: CBUFFER (UnityPerMaterial) — line-only instanced members");
     }
 }

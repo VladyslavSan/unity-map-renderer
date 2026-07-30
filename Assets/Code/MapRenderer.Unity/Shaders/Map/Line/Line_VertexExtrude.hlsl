@@ -83,14 +83,24 @@ struct LineAttributes
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
+// ── Hairline strategy constants (compile-time; deliberately NOT material properties) ──────────
+// At a styled width of one device pixel the straddle's solid core vanishes: the profile is a tent peaking
+// at 1.0 only where a pixel centre lands on the centreline, so a hairline reads as one bright pixel or two
+// half-bright ones depending on sub-pixel phase, and shimmers under motion. There is no tunable knob and no
+// successor to _AaEdgeWidth — widening a fade blurs, it never adds resolution.
+#define HAIRLINE_CRISP_WIDTH_PX 1.0   // at or below this band width: effectively a step edge
+#define HAIRLINE_FULL_WIDTH_PX  2.0   // at or above this: the ramp is algebraically today's
+#define HAIRLINE_MIN_RAMP_PX    0.05  // narrowest ramp; 0 would divide by zero
+#define HAIRLINE_MIN_WIDTH_PX   2.0   // _HAIRLINE_SOLID_CORE: floor for the RENDERED band, device px
+
 // ── Line_VertexExtrude ────────────────────────────────────────────────────────
 // Performs the S05 world-space extrusion. Called by the vertex entry point of EVERY line pass
 // so all five passes (ForwardLit, ShadowCaster, DepthOnly, DepthNormals, GBuffer) share exactly
 // one extrusion site — silhouette divergence is impossible by construction.
 //
 // Returns: extruded OBJECT-SPACE position (ready for GetVertexPositionInputs or TransformObjectToHClip).
-// Out params: the three per-vertex coverage inputs that must be interpolated across every pass's
-//             Varyings (required by LineCoverage, which uses fwidth — a fragment-stage function).
+// Out params: the per-vertex coverage inputs that must be interpolated across every pass's Varyings
+//             (LineCoverage takes screen-space derivatives of them), plus the hairline energy scalar.
 //
 // Signature intentionally does NOT follow MapVertexModify(inout float3) — the line must emit
 // three additional per-vertex outputs that a simple inout-position hook cannot express.
@@ -99,7 +109,8 @@ float3 Line_VertexExtrude(
     out float side,
     out float innerFrac,
     out float dashU,
-    out float4 tangentOS)
+    out float4 tangentOS,
+    out float hairlineScale)
 {
     // ── Miter / unit extrusion direction ─────────────────────────────────────
     // extrudeN: 3D across-direction in the surface tangent plane (Y=0 for the flat Mercator frame;
@@ -114,8 +125,16 @@ float3 Line_VertexExtrude(
     // CPU uniform. width, gap, line-offset and line-translate all convert through it.
 
     // World-space frame. NORMALIZE strips parent scale (the S05 fix) so extrusion is scale-invariant.
+    //
+    // The degenerate case has to be carried through the NORMALIZE too, not just the divide above:
+    // normalize(float3(0,0,0)) is NaN, a NaN position discards every triangle referencing the vertex, and
+    // every round-cap fan triangle references the zero-extrudeN pivot — so the entire cap silently vanished
+    // and `line-cap: round` rendered identical to butt. Zero is the right value here: it keeps the pivot on
+    // the centerline, because both places it is consumed (the lateral extrusion below and the line-offset
+    // shift) multiply by it.
     float3x3 objectToWorld = (float3x3)GetObjectToWorldMatrix();
-    float3 unitDir_WS = normalize(mul(objectToWorld, unitDir_OS));
+    float3 acrossWS   = mul(objectToWorld, unitDir_OS);
+    float3 unitDir_WS = (miter > 1e-6) ? normalize(acrossWS) : float3(0, 0, 0);
     // Per-vertex surface up from the mesh NORMAL stream (+Y for Mercator, radial for a globe) — no
     // flat-ground assumption.
     float3 upWS = normalize(TransformObjectToWorldNormal(input.normalOS));
@@ -130,16 +149,65 @@ float3 Line_VertexExtrude(
     // line-translate bug (see below).
     float pxToWorld = (_WidthIsPixels > 0.5) ? MapPixelsToWorld(centerWS, unitDir_WS) : 1.0;
 
+#if !defined(_EDGE_ANTIALIASING_OFF)
+    // ── AA straddle pad ───────────────────────────────────────────────────────
+    // HALF A DEVICE PIXEL, in world metres, ALWAYS MEASURED. `pxToWorld` above is a unit-CONVERSION
+    // factor — a literal 1.0 when the width is already in world metres — not a metres-per-pixel scale,
+    // so `0.5 * pxToWorld` would pad a world-unit layer by half a METRE (~1.8 px at the test camera)
+    // while looking correct on a pixel-width one. For a pixel-width layer the measurement is exactly what
+    // pxToWorld already holds, so it is reused rather than taken a second time.
+    float aaPadWorld = 0.5 * ((_WidthIsPixels > 0.5) ? pxToWorld
+                                                     : MapPixelsToWorld(centerWS, unitDir_WS));
+#endif
+
     // Width / gap / outer radius in world metres (widthScale = per-feature; gap is layer-level).
+    // widthWorld stays the STYLED width — dashU keys on it, so a clamp must not reach it.
     float widthWorld = _Width * input.widthScale * pxToWorld;
+
+    float renderWidthWorld = widthWorld;
+    hairlineScale          = 1.0;
+#if defined(_HAIRLINE_SOLID_CORE) && !defined(_EDGE_ANTIALIASING_OFF)
+    // ── Hairline strategy: clamp the band, pay it back in alpha ───────────────────────────────
+    // Floor the rendered band at HAIRLINE_MIN_WIDTH_PX device pixels so a hairline always has a solid
+    // core, then scale coverage by the true width over the clamped width so the coverage INTEGRAL is
+    // still the styled width. BOTH HALVES OR NEITHER: the clamp alone renders a 1 px road twice as
+    // prominent as the style asked for (tooth T8), and the compensation alone leaves the phase-dependent
+    // tent it was meant to remove (tooth T7).
+    //
+    // aaPadWorld is half a device pixel in world metres, so 2·aaPadWorld is one device pixel — which is
+    // why the pad block above had to move ahead of this one. It is measured in BOTH width modes, so
+    // unlike the min-width floor this works for world-unit widths too.
+    float minWidthWorld = HAIRLINE_MIN_WIDTH_PX * (2.0 * aaPadWorld);
+    renderWidthWorld    = max(widthWorld, minWidthWorld);
+    hairlineScale       = saturate(widthWorld / max(renderWidthWorld, 1e-9));
+#endif
+
+    // Clamping the BAND rather than outerWorld is what keeps a hollow line's gap the size the style asked
+    // for; the gap term below is untouched.
     float gapWorld   = _GapWidth * pxToWorld;
-    float outerWorld = (gapWorld > 1e-6) ? (0.5 * gapWorld + widthWorld) : (0.5 * widthWorld);
+    float outerWorld = (gapWorld > 1e-6) ? (0.5 * gapWorld + renderWidthWorld) : (0.5 * renderWidthWorld);
 
     // Min-width floor (pixel widths only): half-width never below 0.5 px ⇒ a stable 1 px hairline.
-    // This is the sole thin-line safeguard now that edge AA is removed — the geometry IS the styled width
-    // and LineCoverage draws it with a hard edge, so a sub-pixel line would vanish without this floor.
+    // Still needed with the straddle: it floors the STYLED half-width, which is what the ramp's 50%
+    // contour sits on.
+    //
+    // NOTE it cannot bind under _HAIRLINE_SOLID_CORE: that clamp already forces the extruded half-width to
+    // at least HAIRLINE_MIN_WIDTH_PX/2 + 0.5 = 1.5 px, above this floor's 1.0 px, so the max() below always
+    // takes the miter branch. That is deliberate — proportionality below 1 px is exactly what SolidCore
+    // buys with it — but it means a sub-pixel line genuinely fades there instead of holding a 1 px
+    // hairline. Recorded in the shader README's strategy comparison; do not "fix" it here.
     float minHalfWorld = (_WidthIsPixels > 0.5) ? (0.5 * pxToWorld) : 0.0;
+#if defined(_EDGE_ANTIALIASING_OFF)
     float3 lateralWS = unitDir_WS * max(miter * outerWorld, minHalfWorld);
+#else
+    // The pad goes INSIDE the miter multiply. The miter factor is 1/cos(θ/2)
+    // (LineRibbonJob.ComputeMiterNormals), defined so the PERPENDICULAR distance equals the multiplied
+    // value — so miter*(outer + pad) holds the perpendicular pad at exactly 0.5 px at any corner. Padding
+    // AFTER the multiply would give a perpendicular pad of pad*cos(θ/2), which SHRINKS toward zero as the
+    // corner sharpens; the ramp would then have nowhere to land precisely where geometry is tightest.
+    // The min-width-floor branch takes the pad un-miter'd, matching how that branch already ignores miter.
+    float3 lateralWS = unitDir_WS * max(miter * (outerWorld + aaPadWorld), minHalfWorld + aaPadWorld);
+#endif
     float3 offsetWS  = lateralWS;
 
     // ── S44: line-offset ──────────────────────────────────────────────────────
@@ -212,11 +280,16 @@ float3 Line_VertexExtrude(
     float3 posOS = input.positionOS.xyz + mul(worldToObject, offsetWS);
 
     // ── S14: innerFrac for gap-width fragment clipping ────────────────────────
-    // innerFrac = fraction of [0,outerWorld] that is the inner (gap) hole, in [side]-space.
+    // innerFrac = fraction of the extruded half-width that is the inner (gap) hole, in [side]-space.
     // When gap=0, innerFrac=0 → no clipping in fragment (solid line path, unchanged).
-    // Inner hole: |side| < innerFrac (in normalized side-space). |side| spans the styled width now (no
-    // outset pad), so the raw gap/outer ratio is already in the right |side|-space.
+    // Inner hole: |side| < innerFrac (in normalized side-space). |side| == 1 is the PADDED edge, not the
+    // styled one, so the ratio is taken against the padded outer — otherwise the gap hole would be sized
+    // against a half-width the ribbon no longer has.
+#if defined(_EDGE_ANTIALIASING_OFF)
     innerFrac = (gapWorld > 1e-6) ? (0.5 * gapWorld / outerWorld) : 0.0;
+#else
+    innerFrac = (gapWorld > 1e-6) ? (0.5 * gapWorld / (outerWorld + aaPadWorld)) : 0.0;
+#endif
 
     // ── Out parameters ────────────────────────────────────────────────────────
     side  = input.sideAndDist.x;  // ∈ {+1,−1}, interpolated for AA
@@ -238,27 +311,96 @@ float3 Line_VertexExtrude(
 }
 
 // ── LineCoverage ──────────────────────────────────────────────────────────────
-// Computes the ribbon alpha from the three interpolated coverage inputs: a HARD outer edge, a hard gap-hole
-// cut, opt-in line-blur, and dash coverage. Used as the alpha multiplier in the forward pass and as the
-// binary clip threshold (clip(LineCoverage(...) - 0.5)) in every depth-writing pass.
+// Computes the ribbon alpha from the three interpolated coverage inputs: a one-pixel STRADDLE on the outer
+// edge, a matching straddle on the gap-hole cut, opt-in line-blur, and dash coverage. Used as the alpha
+// multiplier in the forward pass and as the binary clip threshold (clip(LineCoverage(...) - 0.5)) in every
+// depth-writing pass.
 //
-// FRAGMENT-STAGE function: uses fwidth(dashU) (and fwidth(side) only when _Blur > 0). The three inputs MUST
-// be interpolated Varyings in every pass that calls this (not by-value constants).
+// FRAGMENT-STAGE function: takes screen-space derivatives of `side` and `dashU`. This is WHY all three
+// inputs MUST be interpolated Varyings in every pass that calls this, never by-value constants — a constant
+// has a zero derivative and the ramps would collapse to a hard edge.
+//
+// The two AA coverage ramps use the EUCLIDEAN gradient of `side`; `_Blur` and dash keep `fwidth`, which is
+// their own features' business and not antialiasing.
 float LineCoverage(float side, float innerFrac, float dashU)
 {
-    // ── Outer + inner edges: HARD edges + opt-in line-blur (AA removed) ─────────────────────────────────────
-    // Edge antialiasing was removed: the styled edge is the HARD triangle silhouette (aliased). Thin lines
-    // stay visible via the vertex MIN-WIDTH FLOOR (half-width ≥ 0.5 px), not an AA feather buffer. `_Blur`
-    // (MapLibre line-blur) is a SEPARATE, opt-in soft edge (default 0 ⇒ hard) — it is NOT antialiasing, so
-    // it is kept. When AA returns it will be a different mechanism (single-pass cased-line compositing).
+    // ── Outer + inner edges: a strict one-pixel STRADDLE + opt-in line-blur ─────────────────────────────
+    // Coverage ramps linearly 1 → 0 across exactly one device pixel CENTRED on the styled edge: half a
+    // pixel inside, half a pixel outside. The vertex stage extrudes that outer half-pixel (aaPadWorld), so
+    // |side| == 1 is the padded edge and the styled edge sits at 1 − 0.5·|∇side|, where the ramp below
+    // reads exactly 0.5. Apparent width is therefore unchanged, and the interior is a == 1 — which is what
+    // lets a cased road's fill sit on its casing without bleeding it (the failure that got the previous,
+    // INSET, fade removed). The ramp width is a compile-time constant; there is nothing bindable to widen.
+    //
+    // `_Blur` (MapLibre line-blur) stays a SEPARATE, opt-in soft edge (default 0 ⇒ no-op) — it is a style
+    // property, not antialiasing, and it multiplies on top of this.
     float absSide = abs(side);
 
-    // Outer edge: the ribbon spans |side| ≤ 1, so coverage is solid up to the rasterized silhouette.
-    float coverage = 1.0;
+#if !defined(_EDGE_ANTIALIASING_OFF)
+    // ── How wide "one device pixel" is, in side-units — the EUCLIDEAN (L2) gradient, NOT fwidth ────
+    // `side` spans ±1 over the padded half-width H, so the true gradient magnitude is exactly 1/H and a
+    // ramp divided by it is exactly one device pixel wide, whatever the silhouette's screen angle.
+    //
+    // fwidth(x) is abs(ddx(x)) + abs(ddy(x)) — the L1/MANHATTAN length — which over-reads the true length
+    // by |cos θ| + |sin θ| ∈ [1, √2]. Dividing by that stretches the ramp to 1.41 px on a 45° diagonal
+    // while an axis-aligned line keeps 1.00 px, so the same road renders softer AND thinner where it runs
+    // diagonally: the integral is W + 1 − c, i.e. it loses 0.41 px of ink at 45°. Direction-dependent
+    // antialiasing quality is invisible to a horizontal-fixture tooth and very visible to the eye — it is
+    // the second, never-diagnosed defect of the AA removed in 0b910c7, and it survived into the rebuild.
+    //
+    // Computed once and shared by both ramps below. `_Blur` and dash deliberately keep fwidth: they are
+    // separate style features, not antialiasing.
+    float sideGrad = max(length(float2(ddx(side), ddy(side))), 1e-6);
+#endif
 
-    // S14 inner edge (gap hole): HARD cut — drop the inner |side| < innerFrac region for cased/hollow lines.
+#if defined(_HAIRLINE_HARD) && !defined(_EDGE_ANTIALIASING_OFF)
+    // ── Styled band width, from the gradient above — no new vertex data ───────────────────────
+    // |side| = 1 at the padded lateral edge, so 1/|∇side| IS the padded half-width in device pixels and
+    // the styled half-width is that minus the fixed 0.5 px pad.
+    float halfPadPx    = 1.0 / sideGrad;
+    float halfStyledPx = max(halfPadPx - 0.5, 0.0);
+    // Thickness of what is actually PAINTED. Solid line: the full styled width. Hollow/cased line
+    // (line-gap-width): the ring runs from |side| = innerFrac out to the styled edge, so measure THAT —
+    // the outer radius would badly over-read a thin casing ring. innerFrac = 0 reduces to 2·halfStyledPx.
+    float bandPx = (innerFrac > 1e-6) ? max(halfStyledPx - innerFrac * halfPadPx, 0.0)
+                                      : 2.0 * halfStyledPx;
+    // 1 ⇒ today's ramp exactly; → 0 ⇒ a step. smoothstep returns exactly 1 above its upper edge, so the
+    // transition band is closed rather than asymptotic and wide lines are untouched.
+    float rampPx = lerp(HAIRLINE_MIN_RAMP_PX, 1.0,
+                        smoothstep(HAIRLINE_CRISP_WIDTH_PX, HAIRLINE_FULL_WIDTH_PX, bandPx));
+#endif
+
+    // Outer edge.
+#if defined(_EDGE_ANTIALIASING_OFF)
+    float coverage = 1.0;
+#elif defined(_HAIRLINE_HARD)
+    // Narrowed, but still CENTRED on the styled edge at |side| = 1 − 0.5·|∇side| — the same centring the
+    // gap-hole cut below uses. Narrowing without re-centring leaves the hard edge half a pixel out and
+    // renders the line a pixel fat: the S70 outset artefact, which tooth T6b catches. rampPx = 1 reduces
+    // this to saturate((1 − |side|)/sideGrad), the default expression, algebraically.
+    float coverage = saturate(((1.0 - 0.5 * sideGrad) - absSide) / (sideGrad * rampPx) + 0.5);
+#else
+    float coverage = saturate((1.0 - absSide) / sideGrad);
+#endif
+
+    // S14 inner edge (gap hole) for cased/hollow lines: drop the inner |side| < innerFrac region.
     if (innerFrac > 1e-6)
+    {
+#if defined(_EDGE_ANTIALIASING_OFF)
         coverage *= step(innerFrac, absSide);
+#elif defined(_HAIRLINE_HARD)
+        // Same rampPx as the outer edge. Hardening only the outer silhouette would leave a hairline-thin
+        // casing ring crisp outside and still shimmering inside — on the same ring — which is worse than
+        // either consistent choice, and cased roads are exactly where a thin ring occurs.
+        coverage *= saturate((absSide - innerFrac) / (sideGrad * rampPx) + 0.5);
+#else
+        // NOT the outer formula. The outer edge needs the geometric pad because no triangle exists beyond
+        // |side| = 1; the inner edge has ribbon on BOTH sides of it, so a symmetric ±0.5 px straddle centred
+        // on |side| = innerFrac is reachable directly — and `+ 0.5` is exactly what centres it. Dropping it
+        // shifts the gap hole half a pixel outward.
+        coverage *= saturate((absSide - innerFrac) / sideGrad + 0.5);
+#endif
+    }
 
     // line-blur (MapLibre line-blur; opt-in soft edge): feathers the outer _Blur px inward. 0 ⇒ no-op (hard).
     if (_Blur > 1e-6)

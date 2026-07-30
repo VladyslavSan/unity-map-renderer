@@ -153,7 +153,8 @@ LineGBufferVaryings LineGBufferPassVertex(LineAttributes input)
     // LINE DELTA: world-space ribbon extrusion + derived tangent (real tangent frame).
     float side, innerFrac, dashU;
     float4 tangentOS;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS);
+    float hairlineScale_unused;
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS, hairlineScale_unused);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(posOS);
     VertexNormalInputs normalInput = GetVertexNormalInputs(input.normalOS, tangentOS);

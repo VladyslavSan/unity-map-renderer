@@ -35,19 +35,43 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `PaintProperties.cs`; reserve style-derived names for real bindings, and give internal params clearly
   non-style names (cf. `_WidthIsPixels`, `_MetersPerPixel`). Keep the two kinds in **separate, labeled
   groups** in the CBUFFER / Properties block so the boundary is visible. *(Update 2026-07-06: line edge AA and
-  `_AaEdgeWidth` were later removed — lines render a hard edge now, `docs/meshing-design.md` §2. The naming
-  rule above is unaffected and still binding.)*
+  `_AaEdgeWidth` were removed — lines rendered a hard edge. **Superseded 2026-07-30:** AA is back as a strict
+  one-pixel straddle, `docs/line-antialiasing-design.md`. `_AaEdgeWidth` did **not** come back and must not —
+  the ramp width is a compile-time constant precisely because a bindable AA width is how the removed model
+  went wrong. The naming rule above is unaffected and still binding.)*
 
-- **Per-line transparent-fade AA cannot render a crisp *cased* line — it's a compositing problem, not a
-  coverage one, and MSAA doesn't fix it.** A cased road is two stacked transparent draws (casing under, fill
-  over; `Queue=Transparent`, `ZWrite Off`). Any shader-space alpha fade on the fill's edge ramps to
-  *transparent*, which over the casing **bleeds the casing colour through** → the fill↔casing boundary blurs.
-  Inset / outset / straddle all bleed (fade = transparency = show-through); MSAA only cleans geometry
-  coverage while the two layers still *blend*, so it gives the same mush at higher cost. There is also a
-  hard trilemma for any shader fade: {solid core, unchanged apparent width, antialiased} — pick two. After a
-  long exploration this is why edge AA was removed entirely (hard edge + min-width floor kept); the real fix
-  is architectural — a **single-pass cased line** (one draw, colour-by-signed-distance, AA only the outer
-  silhouette). Full write-up + the parked outset-AA stash: **`docs/meshing-design.md` §2 (line antialiasing)**.
+- **A fade *inside* the styled band cannot render a crisp *cased* line — it's a compositing problem, not a
+  coverage one, and MSAA doesn't fix it. A fade that stays *at* the edge is fine.** A cased road is two
+  stacked transparent draws (casing under, fill over; `Queue=Transparent`, `ZWrite Off`). A shader-space
+  alpha fade that eats **inward** from the fill's edge ramps to transparent over the casing and **bleeds the
+  casing colour through** → the fill↔casing boundary blurs. MSAA only cleans geometry coverage while the two
+  layers still *blend*, so it gives the same mush at higher cost — measured here to **16× with no meaningful
+  gain**, which also rules out alpha-to-coverage (it needs MSAA to do anything).
+  *(Corrected 2026-07-30 — an earlier revision of this entry was too strong and is why AA stayed removed
+  longer than it needed to.)* It claimed "inset / outset / straddle all bleed" and stated a hard trilemma
+  {solid core, unchanged apparent width, antialiased} — pick two. **A strict ±0.5 px straddle breaks both
+  claims:** with the ramp centred on the styled edge, half in and half out, everywhere the fill is meant to
+  be opaque has `a == 1`, and `dst = src·a + dst·(1−a)` cannot show anything through at `a == 1`. The
+  trilemma is escaped by buying the third property with **geometry** — a fixed 0.5 px pad on the ribbon,
+  added *before* the miter multiply — rather than with the fade. That is what ships now, behind
+  `_EdgeAntialiasing`. The architectural **single-pass cased line** remains the better long-term answer for
+  same-layer *junction* under-coverage, but it is no longer required for crispness. Full write-up:
+  **`docs/line-antialiasing-design.md`**; mechanism notes in
+  `Assets/Code/MapRenderer.Unity/Shaders/Map/Line/README.md`.
+  *(Second correction, A6.0 — this entry still described only ONE of the removed AA's two defects; see the
+  next bullet for the other.)*
+
+- **`fwidth` is the WRONG length for an AA ramp — it is Manhattan, and it makes antialiasing quality depend
+  on a line's screen direction.** `fwidth(x) = abs(ddx(x)) + abs(ddy(x))`, the L1 length of the screen-space
+  gradient; the true length is L2, and the ratio is `|cos θ| + |sin θ| ∈ [1, √2]`. A ramp divided by it is
+  1.00 px on an axis-aligned edge and **1.41 px on a 45° diagonal**, which also costs the diagonal 0.41 px of
+  ink (the profile integral is `W + 1 − c`). Measured on a styled 12 px line: horizontal **12.003 px**,
+  diagonal **11.586 px** — dead on the √2 prediction. Use `length(float2(ddx(x), ddy(x)))` wherever "one
+  device pixel" must mean the same thing in every direction. This was the **second, never-diagnosed** defect
+  of the AA removed in `0b910c7`: the write-up blamed the compositing bleed alone, so when the rebuild reused
+  the same expression the defect shipped again and was caught only in A6.0. Two lessons for the price of one
+  — a horizontal-fixture tooth cannot see it (`fwidth` is exact when one derivative is zero), and **"we
+  already know why that failed" deserves re-checking when the fix reuses the failed code.**
 
 ## Rendering loop & camera
 

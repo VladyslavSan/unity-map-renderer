@@ -102,11 +102,13 @@ Material:
     - _DetailNormalMapScale: 1
     - _DstBlend: 10
     - _DstBlendAlpha: 10
+    - _EdgeAntialiasing: 1
     - _EnvironmentReflections: 1
     - _GapWidth: 0
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1
+    - _HairlineStrategy: 0
     - _LineOffset: 0
     - _LinePattern: 0
     - _LineTranslateAnchor: 0

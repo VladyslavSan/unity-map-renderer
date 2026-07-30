@@ -43,7 +43,8 @@ LineDepthOnlyVaryings LineDepthOnlyVertex(LineAttributes input)
     // LINE DELTA: world-space ribbon extrusion replaces the direct position transform.
     float side, innerFrac, dashU;
     float4 tangentOS_unused;
-    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused);
+    float hairlineScale_unused;
+    float3 posOS = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused);
 
     output.positionCS = TransformObjectToHClip(posOS);
     output.uv = float3(dashU, side, innerFrac);

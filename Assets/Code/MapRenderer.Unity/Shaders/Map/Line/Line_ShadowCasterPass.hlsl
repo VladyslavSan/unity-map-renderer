@@ -43,7 +43,8 @@ struct LineShadowVaryings
 float4 LineShadowGetPositionHClip(LineAttributes input, out float side, out float innerFrac, out float dashU)
 {
     float4 tangentOS_unused;
-    float3 posOS      = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused);
+    float hairlineScale_unused;
+    float3 posOS      = Line_VertexExtrude(input, side, innerFrac, dashU, tangentOS_unused, hairlineScale_unused);
     float3 positionWS = TransformObjectToWorld(posOS);
     float3 normalWS   = TransformObjectToWorldNormal(input.normalOS);
 

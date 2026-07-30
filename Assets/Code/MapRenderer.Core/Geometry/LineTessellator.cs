@@ -469,11 +469,12 @@ namespace MapRenderer.Core.Geometry
                     // Emission order (so verts[count-2]=leftButt, verts[count-1]=rightButt):
                     //   [baseIdx + 0]                = center pivot
                     //   [baseIdx + 1 .. roundSegs]   = arc intermediates
-                    //   [baseIdx + roundSegs + 1]    = leftButt (side=+1)   ← count-2
-                    //   [baseIdx + roundSegs + 2]    = rightButt (side=−1)  ← count-1
+                    //   [baseIdx + roundSegs + 1]    = capSeed (side=+1)    ← fan seed, co-located w/ rightButt
+                    //   [baseIdx + roundSegs + 2]    = leftButt (side=+1)   ← count-2
+                    //   [baseIdx + roundSegs + 3]    = rightButt (side=−1)  ← count-1
                     //
                     // Fan triangles (CCW, verified by signed-area): center, intermediate[k], intermediate[k-1]
-                    //   where intermediate[0] = rightButt.
+                    //   where intermediate[0] = capSeed.
 
                     double a0 = math.atan2(-segNormal.y, -segNormal.x); // rightButt direction
                     double a1 = math.atan2( segNormal.y,  segNormal.x); // leftButt direction
@@ -482,8 +483,9 @@ namespace MapRenderer.Core.Geometry
 
                     int baseIdx      = verts.Count;
                     int centerIdx    = baseIdx;
-                    int leftButtIdx  = baseIdx + roundSegments + 1;
-                    int rightButtIdx = baseIdx + roundSegments + 2;
+                    int capSeedIdx   = baseIdx + roundSegments + 1;
+                    int leftButtIdx  = baseIdx + roundSegments + 2;
+                    int rightButtIdx = baseIdx + roundSegments + 3;
 
                     // Emit center pivot.
                     verts.Add(MakeVertex(p, new double2(0.0, 0.0), dist, 0f));
@@ -496,13 +498,20 @@ namespace MapRenderer.Core.Geometry
                         verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
                     }
 
+                    // Fan seed: geometrically identical to rightButt (same p, same −segNormal) but tagged +1.
+                    // Seeding the fan from rightButt itself gave the seam triangle an OUTER edge — a true
+                    // silhouette — interpolating side +1 → −1 and passing through 0 at its midpoint, so anything
+                    // keyed on |side| read that one arc segment as deep interior. Emitted BEFORE the two butts
+                    // so the [count-2]=left / [count-1]=right contract still holds.
+                    verts.Add(MakeVertex(p, Neg(segNormal), dist, +1f));  // capSeed
+
                     // Emit leftButt and rightButt LAST to satisfy the [count-2]=left,[count-1]=right contract.
                     verts.Add(MakeVertex(p,  segNormal,    dist, +1f));   // leftButt  [count-2]
                     verts.Add(MakeVertex(p, Neg(segNormal), dist, -1f));  // rightButt [count-1]
 
-                    // Fan triangles: center + (rightButt→intermediates→leftButt) arc, CCW.
-                    // "prevFanIdx" starts at rightButtIdx; each new intermediate continues the arc.
-                    int prevFan = rightButtIdx;
+                    // Fan triangles: center + (capSeed→intermediates→leftButt) arc, CCW.
+                    // "prevFanIdx" starts at capSeedIdx; each new intermediate continues the arc.
+                    int prevFan = capSeedIdx;
                     for (int k = 1; k <= roundSegments; k++)
                     {
                         int fanIdx = baseIdx + k; // intermediate k
@@ -589,9 +598,16 @@ namespace MapRenderer.Core.Geometry
                         indices.Add(prevFanIdx);
                         prevFanIdx = fanIdx;
                     }
-                    // Final triangle: center → rightPrev → lastIntermediate.
+                    // Closing-triangle seed: geometrically identical to rightPrev (this cap is called with the
+                    // same segNormal the last segment extruded rightPrev with) but tagged +1, so the closing
+                    // triangle's outer edge runs +1 → +1 instead of +1 → −1. rightPrev itself stays −1 for the
+                    // ribbon quad. Same fix as EmitStartCap's capSeed.
+                    int capSeedIdx = verts.Count;
+                    verts.Add(MakeVertex(p, Neg(segNormal), dist, +1f));
+
+                    // Final triangle: center → capSeed → lastIntermediate.
                     indices.Add(centerIdx);
-                    indices.Add(rightPrev);
+                    indices.Add(capSeedIdx);
                     indices.Add(prevFanIdx);
                     break;
                 }

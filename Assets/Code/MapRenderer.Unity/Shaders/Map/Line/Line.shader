@@ -136,6 +136,16 @@ Shader "Map/Line"
         // (B) Internal render params — NOT style properties (the styler never writes these):
         [Toggle]
         _WidthIsPixels  ("Width In Pixels", Float)    = 0.0
+        // Edge antialiasing (internal): 1 = on (default), 0 = off ⇒ _EDGE_ANTIALIASING_OFF.
+        // [ToggleUI] is UI-only and attaches NO keyword — LineShaderGUI.ValidateMaterial syncs it in code,
+        // mirroring _ReceiveShadows (:96). NOT a CBUFFER member.
+        [ToggleUI] _EdgeAntialiasing ("Edge Antialiasing", Float) = 1.0
+        // Hairline strategy (internal): 0 = Default (today's straddle, no keyword); 1 = Hard
+        // (_HAIRLINE_HARD — the ramp narrows toward a step below ~2 px band); 2 = SolidCore
+        // (_HAIRLINE_SOLID_CORE — the band is clamped to 2 px and coverage scaled back down).
+        // [Enum] is a UI-only drawer and attaches NO keyword; LineShaderGUI.ValidateMaterial syncs it in
+        // code, exactly as _EdgeAntialiasing above. NOT a CBUFFER member.
+        [Enum(Default, 0, Hard, 1, SolidCore, 2)] _HairlineStrategy ("Hairline Strategy", Float) = 0
     }
 
     SubShader
@@ -181,6 +191,14 @@ Shader "Map/Line"
             #pragma shader_feature_local _NORMALMAP
             #pragma shader_feature_local _PARALLAXMAP
             #pragma shader_feature_local _RECEIVE_SHADOWS_OFF
+            // Straddle-AA off switch. PLAIN shader_feature_local (never _fragment): the pad is a
+            // vertex-stage change, so stripping the keyword from the vertex stage would desync the
+            // silhouette across passes.
+            #pragma shader_feature_local _EDGE_ANTIALIASING_OFF
+            // Hairline strategy. `_` (no keyword) is the shipping default and can never be stripped.
+            // Plain shader_feature_local, not _fragment: A6a is fragment-only, but a keyword SET cannot be
+            // half-fragment and A6b extends this same set with a vertex-stage member.
+            #pragma shader_feature_local _ _HAIRLINE_SOLID_CORE _HAIRLINE_HARD
             #pragma shader_feature_local _ _DETAIL_MULX2 _DETAIL_SCALED
             #pragma shader_feature_local_fragment _SURFACE_TYPE_TRANSPARENT
             #pragma shader_feature_local_fragment _ALPHATEST_ON
@@ -271,6 +289,8 @@ Shader "Map/Line"
             #pragma fragment LineShadowPassFragment
 
             #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local _EDGE_ANTIALIASING_OFF // shared extrusion silhouette (see ForwardLit)
+            #pragma shader_feature_local _ _HAIRLINE_SOLID_CORE _HAIRLINE_HARD // shared coverage model (see ForwardLit)
 
             #pragma multi_compile_instancing
             #pragma multi_compile _ LOD_FADE_CROSSFADE
@@ -302,6 +322,8 @@ Shader "Map/Line"
             #pragma fragment LineDepthOnlyFragment
 
             #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local _EDGE_ANTIALIASING_OFF // shared extrusion silhouette (see ForwardLit)
+            #pragma shader_feature_local _ _HAIRLINE_SOLID_CORE _HAIRLINE_HARD // shared coverage model (see ForwardLit)
 
             #pragma multi_compile_instancing
             #pragma multi_compile _ LOD_FADE_CROSSFADE
@@ -331,6 +353,8 @@ Shader "Map/Line"
             #pragma fragment LineDepthNormalsFragment
 
             #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma shader_feature_local _EDGE_ANTIALIASING_OFF // shared extrusion silhouette (see ForwardLit)
+            #pragma shader_feature_local _ _HAIRLINE_SOLID_CORE _HAIRLINE_HARD // shared coverage model (see ForwardLit)
 
             #pragma multi_compile_instancing
             #pragma multi_compile _ LOD_FADE_CROSSFADE
@@ -373,6 +397,8 @@ Shader "Map/Line"
             #pragma shader_feature_local_fragment _ENVIRONMENTREFLECTIONS_OFF
             #pragma shader_feature_local_fragment _SPECULAR_SETUP
             #pragma shader_feature_local _RECEIVE_SHADOWS_OFF
+            #pragma shader_feature_local _EDGE_ANTIALIASING_OFF // shared extrusion silhouette (see ForwardLit)
+            #pragma shader_feature_local _ _HAIRLINE_SOLID_CORE _HAIRLINE_HARD // shared coverage model (see ForwardLit)
 
             // ── Universal Pipeline keywords ──────────────────────────────────
             #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN

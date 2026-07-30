@@ -411,17 +411,22 @@ namespace MapRenderer.Tests
             // Round start cap (roundSegments=4) — center-pivot structure:
             //   1 center pivot (side=0, normal=(0,0)) +
             //   4 arc intermediates (side=+1, rim) +
-            //   1 leftButt (side=+1) + 1 rightButt (side=−1) = 7 verts.
+            //   1 capSeed (side=+1, co-located with rightButt — the fan seed) +
+            //   1 leftButt (side=+1) + 1 rightButt (side=−1) = 8 verts.
             //   Fan triangles: 4 (one per roundSegments) + 1 final = 5 triangles → 15 indices.
             //
             // Last segment emit (butt): 2 verts + quad(6 indices).
             //
             // Round end cap (roundSegments=4):
-            //   1 center pivot + 4 arc intermediates = 5 verts.
+            //   1 center pivot + 4 arc intermediates + 1 capSeed (co-located with rightPrev) = 6 verts.
             //   Triangles: 4 + 1 final = 5 triangles → 15 indices.
             //
-            // Total verts: 7 (start cap) + 2 (terminal butt) + 5 (end cap) = 14.
+            // Total verts: 8 (start cap) + 2 (terminal butt) + 6 (end cap) = 16.
             // Total indices: 15 (start fan) + 6 (first quad) + 15 (end fan) = 36.
+            //
+            // The two capSeeds are the +1-per-round-capped-end the |side| tagging fix adds. They are pure
+            // re-tags — same position, same normal as the vertex they shadow — so the INDEX count is
+            // unchanged: no new triangles, only a different vertex referenced by one existing triangle.
             //
             // Note: this count is a supplementary pin. The geometric correctness check
             // (winding, extent, no degenerate/duplicate-index triangles) lives in
@@ -430,10 +435,58 @@ namespace MapRenderer.Tests
                 new[] { Pt(0, 0), Pt(10, 0) },
                 JoinType.Miter, CapType.Round, roundSegments: 4);
 
-            Assert.AreEqual(14, r.Vertices.Length,
-                $"2-pt round caps (roundSegments=4) → 14 verts. Got {r.Vertices.Length}.");
+            Assert.AreEqual(16, r.Vertices.Length,
+                $"2-pt round caps (roundSegments=4) → 16 verts. Got {r.Vertices.Length}.");
             Assert.AreEqual(36, r.Indices.Length,
                 $"2-pt round caps (roundSegments=4) → 36 indices. Got {r.Indices.Length}.");
+        }
+
+        /// <summary>
+        /// Every cap-fan triangle must carry both of its RIM vertices at the same <c>Side</c> SIGN.
+        ///
+        /// <para>This is the semantic the capSeed vertex exists for, and the only assertion in the tree that
+        /// reads the seed's sign — vertex/index counts, positions and winding are all identical whichever way
+        /// it is tagged. Seeding the fan from the ribbon's <c>rightButt</c>/<c>rightPrev</c> (which the
+        /// adjoining quad needs tagged −1) gives one triangle per capped end a <c>+1 → −1</c> outer edge.
+        /// That edge is a true silhouette, but <c>|side|</c> passes through 0 at its midpoint, so anything
+        /// keyed on <c>|side|</c> — line-blur today, the AA coverage ramp later — reads it as deep interior
+        /// and leaves that arc segment hard.</para>
+        ///
+        /// <para>Pinned on the managed side only, deliberately: <c>LineRibbonJobTests.AssertParity</c> holds
+        /// the Burst <c>LineRibbonJob</c> to this tessellator on EXACT <c>Side</c> for
+        /// <c>RoundCap_Parity</c> and <c>RoundCap_And_RoundJoin_Parity</c>, so the job inherits the guarantee
+        /// differentially. Do not add a redundant copy on the job side.</para>
+        /// </summary>
+        [Test]
+        public void RoundCap_FanTriangles_HaveUniformRimSide()
+        {
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0) },
+                JoinType.Miter, CapType.Round, roundSegments: 4);
+
+            int fanTrianglesChecked = 0;
+            for (int t = 0; t < r.Indices.Length / 3; t++)
+            {
+                LineVertex a = r.Vertices[r.Indices[t * 3]];
+                LineVertex b = r.Vertices[r.Indices[t * 3 + 1]];
+                LineVertex c = r.Vertices[r.Indices[t * 3 + 2]];
+
+                // The pivot (side=0, normal=(0,0)) leads every cap-fan triangle and appears in no other
+                // triangle, so it is what identifies one.
+                if (Math.Abs(a.Side) > 1e-6f) continue;
+                fanTrianglesChecked++;
+
+                Assert.AreEqual(Math.Sign(b.Side), Math.Sign(c.Side),
+                    $"Cap-fan tri[{t}] rim sides are {b.Side} and {c.Side}: its outer edge is a true " +
+                    "silhouette but |side| dips to 0 at the midpoint, so the cap renders that arc segment " +
+                    "as deep interior.");
+            }
+
+            // Precondition, not a bonus assertion: without it the loop asserts nothing the moment the cap
+            // topology changes shape.
+            Assert.AreEqual(10, fanTrianglesChecked,
+                "Both round caps must contribute 5 pivot-rooted fan triangles (roundSegments=4 ⇒ 4 arc " +
+                $"triangles + 1 closing triangle each). Found {fanTrianglesChecked}.");
         }
 
         // ─── NeedsBevel static accessor ────────────────────────────────────────────────────

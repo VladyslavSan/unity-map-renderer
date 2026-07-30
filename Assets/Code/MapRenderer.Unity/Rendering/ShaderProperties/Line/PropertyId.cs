@@ -22,5 +22,9 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
 
         // ── Internal render params ──
         public static readonly int WidthIsPixels  = Shader.PropertyToID(PropertyNames.WidthIsPixels);
+
+        // ── Editor-only keyword drivers (Properties{} only, not CBUFFER members) ──
+        public static readonly int EdgeAntialiasing = Shader.PropertyToID(PropertyNames.EdgeAntialiasing);
+        public static readonly int HairlineStrategy = Shader.PropertyToID(PropertyNames.HairlineStrategy);
     }
 }
