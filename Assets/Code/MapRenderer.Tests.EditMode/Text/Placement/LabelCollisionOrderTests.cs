@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Text.Placement
             var quads = new PlacedQuad[n];
             var candidates = new LabelCandidate[n];
             var emit = new CandidateEmit[n];
-            int boxCount = 0, quadCount = 0;
+            int boxCount = 0, quadCount = 0, emitCount = 0;
             var quad = new[] { UnitCell() };
 
             for (int i = 0; i < n; i++)
@@ -72,7 +72,7 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 int staged = LabelStagingMath.StagePoint(in s, quad, bearingRadians: 0f,
                     viewportLogicalPx: new double2(1920, 1080), ordinal: i,
-                    boxes, ref boxCount, quads, ref quadCount, candidates, emit);
+                    boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
                 Assert.AreEqual(1, staged, "each fully-in-view point label must stage");
             }
 

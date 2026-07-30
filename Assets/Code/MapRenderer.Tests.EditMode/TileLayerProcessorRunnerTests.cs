@@ -9,6 +9,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Style;
@@ -103,6 +104,7 @@ namespace MapRenderer.Tests
             public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
             public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
+            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors a tile-mesh layer (G7/D7)
             public Material Material => null;
             public void ApplyZoom(double zoom) { }
             public void Dispose() { }

@@ -20,28 +20,36 @@ namespace MapRenderer.Core.Style.Symbol
     /// layer. Reuses the existing seams: <see cref="FeatureSelector.SelectFeatures"/> (source-layer resolve
     /// + filter), <see cref="MvtGeometry.Decode"/> (command stream → tile-local points), and
     /// <see cref="TileId.ToLonLat"/> → <see cref="IProjection.Project"/> (tile → geo → render space, PRE-RTC).
-    /// POINT geometry only (S20 is point-placement); one label per point (a MultiPoint feature emits one
-    /// label per point). Engine-free / clean-room — the shaping step is Unity-side (Slice 3).
+    /// Point AND LineString geometry (road-shields D2/D4: a LineString anchors at its mid arc-length under
+    /// point placement, and at along-line anchors under a viewport-resolved line placement — see
+    /// <see cref="AlignmentResolution"/>); Polygon is never accepted. One label per anchor (a MultiPoint
+    /// feature emits one label per point; a viewport-resolved line emits one label per along-line anchor).
+    /// Engine-free / clean-room — the shaping step is Unity-side (Slice 3).
     /// </summary>
     public static class SymbolFeatureExtractor
     {
         /// <summary>
-        /// Append every point label of <paramref name="layer"/> over <paramref name="tile"/> to
-        /// <paramref name="output"/>. Features whose <c>text-field</c> resolves to null/empty are skipped;
-        /// non-point features are ignored. <paramref name="output"/> is caller-owned (cleared? no — appended,
-        /// mirroring the tile-accumulation lifecycle in F5).
+        /// Append every extracted label of <paramref name="layer"/> over <paramref name="tile"/> to
+        /// <paramref name="output"/>. Features whose <c>text-field</c> resolves to null/empty AND whose
+        /// <c>icon-image</c> resolves to nothing are skipped; Polygon features are always ignored (road-shields
+        /// D2's fence — LineString is now accepted, see the class doc). <paramref name="output"/> is
+        /// caller-owned (cleared? no — appended, mirroring the tile-accumulation lifecycle in F5).
         /// </summary>
         /// <param name="layer">The symbol style layer (a non-symbol layer is a no-op).</param>
         /// <param name="tile">The decoded tile.</param>
         /// <param name="tileId">The tile's slippy address (drives tile→geo + the <c>TileKey</c> tiebreak).</param>
-        /// <param name="zoom">Current zoom, for evaluating zoom-dependent text-size/sort-key/paint.</param>
+        /// <param name="zoom">Current zoom, for evaluating zoom-dependent text-size/sort-key/paint AND the
+        /// build-zoom-evaluated <c>symbol-placement</c> (road-shields D1 — frozen for this tile's lifetime,
+        /// never re-evaluated per frame).</param>
         /// <param name="projection">Geo → render-space projection.</param>
         /// <param name="output">Caller-owned list the extracted labels are appended to.</param>
         /// <param name="spriteAtlas">
         /// I3 — the sprite sheet <c>icon-image</c> resolves against; <c>null</c> (the default) yields NO icon
         /// labels regardless of the layer's <c>icon-*</c> properties, so every pre-I3 caller (which omits this
-        /// argument) is byte-identical to before I3. Point placement only — a line-placement layer never emits
-        /// icons even when an atlas is supplied.
+        /// argument) is byte-identical to before I3. Icons resolve under point placement, AND under line
+        /// placement when <c>icon-rotation-alignment</c> resolves to <c>viewport</c> (road-shields D4 — the
+        /// upright-at-anchor case); a MAP-aligned line icon (e.g. <c>road_one_way_arrow*</c>) still never
+        /// emits even when an atlas is supplied (the surviving fence, pinned by T8).
         /// </param>
         public static void Extract(
             MapRenderer.Core.Style.StyleLayer layer,
@@ -77,14 +85,36 @@ namespace MapRenderer.Core.Style.Symbol
             // Stored y-down (as authored); the y-flip happens at placement.
             float2 translatePx = paint.Translate;
 
-            SymbolPlacement  placement    = layout.SymbolPlacement;
-            bool             isLine       = placement != SymbolPlacement.Point;
-            TileGeometryType wantGeometry = isLine ? TileGeometryType.LineString : TileGeometryType.Point;
+            // D1 (road-shields): symbol-placement is now expression-capable but evaluated ONCE here, at the
+            // tile's build zoom — never per frame, never re-evaluated as the camera crosses a step boundary
+            // (the accepted D1 known limit). TryEvaluate degrades to Point on a malformed/data-driven
+            // expression rather than throwing (symbol-placement is never data-driven in a real style).
+            SymbolPlacement placement = layout.SymbolPlacement.TryEvaluate(zoom, null, out SymbolPlacement evaluatedPlacement)
+                ? evaluatedPlacement : SymbolPlacement.Point;
+            bool isLine = placement != SymbolPlacement.Point;
+
+            // D3/D4 (road-shields): resolve rotation-alignment against placement ONCE per layer (both are
+            // plain parsed enums, not feature-dependent — MapLibre's alignment keys are never data-driven).
+            // D4's reframe of G3/G4: under LINE placement, a label whose alignment resolves AWAY from Map is
+            // NOT curved — MapLibre lays it out as an ordinary upright (viewport) block at each along-line
+            // anchor, exactly the road-shield look. Map-aligned line labels (the pre-shields behaviour) are
+            // untouched — this only lifts the icon fence / switches emit shape for the viewport-resolved case.
+            AlignmentMode textAlign    = AlignmentResolution.Resolve(layout.TextRotationAlignment, placement);
+            AlignmentMode iconAlign    = AlignmentResolution.Resolve(layout.IconRotationAlignment, placement);
+            bool          textAtAnchors = isLine && textAlign != AlignmentMode.Map;
+            bool          iconAtAnchors = isLine && iconAlign != AlignmentMode.Map;
 
             for (int f = 0; f < features.Count; f++)
             {
                 ITileFeature feature = features[f];
-                if (feature.GeometryType != wantGeometry) continue; // point layer skips lines and vice-versa
+                // D2 (road-shields): point placement now ALSO accepts a LineString feature (one anchor at
+                // its mid arc-length, below) — the shields' "point" step branch runs over LineString road
+                // geometry. Polygon stays unaccepted at every placement (the D2 fence).
+                if (isLine
+                        ? feature.GeometryType != TileGeometryType.LineString
+                        : (feature.GeometryType != TileGeometryType.Point &&
+                           feature.GeometryType != TileGeometryType.LineString))
+                    continue;
 
                 // A6: the feature IS an IFeature (the neutral carrier implements it directly) — no adapter alloc.
                 // I3: text and icon are INDEPENDENT — a feature may resolve either, both, or neither. Only
@@ -97,14 +127,18 @@ namespace MapRenderer.Core.Style.Symbol
                     text = layout.TextTransform.Apply(text);
                 }
 
-                // I3: icons are point-placement only (isLine skips them entirely) and only resolved when the
-                // caller supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
+                // I3/D4: icons resolve under point placement OR a viewport-resolved line placement
+                // (iconAtAnchors, below) — a map-aligned line stays fenced. Only resolved when the caller
+                // supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
                 bool        hasIcon   = false;
                 SpriteEntry iconEntry = default;
                 // I6: hoisted to feature scope (was block-local + discarded) — the resolved sprite name is the
                 // icon's cross-tile identity, needed at the icon-emit site below (SymbolLabel.IconImage).
                 string iconImage = null;
-                if (!isLine && spriteAtlas != null)
+                // G3+G4 (D4): the icon fence lifts for the viewport-resolved line case (upright-at-anchor
+                // icons are the existing point-icon path at a different anchor) — the map-aligned line case
+                // (road_one_way_arrow*) stays fenced; see the D4 doc above.
+                if ((!isLine || iconAtAnchors) && spriteAtlas != null)
                 {
                     iconImage = IconImageResolver.Resolve(layout.IconImage, feature);
                     if (iconImage != null)
@@ -112,6 +146,17 @@ namespace MapRenderer.Core.Style.Symbol
                 }
 
                 if (text == null && !hasIcon) continue; // neither a text label nor an icon → nothing to emit
+
+                // §10 D8/D9 (road-shields, road-shields-design.md): a centred icon+text pair (both at the
+                // feature's anchor, no offset) is the PAIRING predicate — the two halves are stamped ONE
+                // instance downstream (LabelPairing / StagePointPair), not the old D5 icon-owns-collision
+                // approximation (the forced overlap flags below were D5's mechanism; D5 is retired — see §10).
+                bool centredPair = hasIcon && text != null
+                    && layout.TextAnchor == TextAnchor.Center
+                    && layout.TextOffset.Equals(float2.zero)
+                    && layout.TextRadialOffset.Evaluate(zoom, feature) == 0f
+                    && layout.IconAnchor == TextAnchor.Center
+                    && layout.IconOffset.Equals(float2.zero);
 
                 // Per-feature evaluated style (zoom + feature — safe for constant/zoom/data-driven).
                 float      textSize   = layout.TextSize.Evaluate(zoom, feature);
@@ -145,10 +190,19 @@ namespace MapRenderer.Core.Style.Symbol
 
                 List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
 
+                // D4/NIT: LayoutOptions is only built when a point-style text label can actually be emitted
+                // (point placement, or a viewport-resolved line — the curved branch never uses it).
+                // AnchorEmitContext itself is built INSIDE each branch below (review NIT 4) rather than once
+                // here — the two branches' contexts differ in two fields (Text/HasIcon suppression under the
+                // line branch's map-aligned fence) and building them separately removes both the line
+                // branch's dead construction (a curved-only feature never reads a context at all) and the
+                // silent-divergence hazard of two hand-maintained initializers that must agree.
+                TextLayoutOptions layoutOptions = !isLine || textAtAnchors
+                    ? TextLayoutOptionsBuilder.Build(layout, zoom, feature)
+                    : default;
+
                 if (isLine)
                 {
-                    // One curved label per line string (#5). Orientation comes from the projected line tangent,
-                    // so the point-layout options (anchor/justify/offset) and rotation-alignment don't apply.
                     for (int p = 0; p < paths.Count; p++)
                     {
                         List<double2> path = paths[p];
@@ -159,12 +213,13 @@ namespace MapRenderer.Core.Style.Symbol
                         // extent + the 512 convention, no projection scale.
                         double spacingTileUnits = spacing * extent / WebMercator.TilePixelSize;
 
-                        // S4: subdivide the tile-local path ONCE so ProjectPath and LineAnchorPlacement.Compute
-                        // both index against the SAME finer sequence — never subdivide only one of the two, or
-                        // LineAnchor.Segment silently desyncs from PathRender (docs/labels-and-symbols-design.md
-                        // §4). On a flat projection (MaxRefineAngleRad == ∞, e.g. Mercator) this bypasses
-                        // LineCurvatureSubdivision.Subdivide entirely and passes the ORIGINAL path straight
-                        // through — the live Mercator byte-identity guarantee (zero-alloc, unchanged behaviour).
+                        // S4: subdivide the tile-local path ONCE so ProjectPath/anchor-resolve and
+                        // LineAnchorPlacement.Compute both index against the SAME finer sequence — never
+                        // subdivide only one of the two, or LineAnchor.Segment silently desyncs from
+                        // PathRender (docs/labels-and-symbols-design.md §4). On a flat projection
+                        // (MaxRefineAngleRad == ∞, e.g. Mercator) this bypasses LineCurvatureSubdivision.Subdivide
+                        // entirely and passes the ORIGINAL path straight through — the live Mercator
+                        // byte-identity guarantee (zero-alloc, unchanged behaviour).
                         double                 maxRefineAngleRad = projection.MaxRefineAngleRad;
                         IReadOnlyList<double2> densePath;
                         if (double.IsPositiveInfinity(maxRefineAngleRad))
@@ -187,96 +242,246 @@ namespace MapRenderer.Core.Style.Symbol
                             densePath = LineCurvatureSubdivision.Subdivide(path, ups, maxRefineAngleRad);
                         }
 
-                        output.Add(new SymbolLabel
-                        {
-                            Placement       = placement,
-                            PathRender      = ProjectPath(densePath, tileId, extent, projection),
-                            LineAnchors     = LineAnchorPlacement.Compute(densePath, spacingTileUnits, placement),
-                            Text            = text,
-                            TextSizePx      = textSize,
-                            PaddingPx       = padding,
-                            SortKey         = sortKey,
-                            SpacingPx       = spacing,
-                            MaxAngleDeg     = maxAngle,
-                            KeepUpright     = layout.TextKeepUpright,
-                            AllowOverlap    = layout.TextAllowOverlap,
-                            IgnorePlacement = layout.TextIgnorePlacement,
-                            FeatureIndex    = ordinal++,
-                            TileKey         = tileKey,
-                            Paint           = labelPaint,
-                            TranslatePx     = translatePx,
-                            TranslateAnchor = paint.TranslateAnchor,
-                        });
-                    }
-                }
-                else
-                {
-                    // Layout options are per-feature (zoom + feature evaluated), constant across the feature's
-                    // points — build once here, stamp onto every point label below.
-                    TextLayoutOptions layoutOptions = TextLayoutOptionsBuilder.Build(layout, zoom, feature);
-                    for (int p = 0; p < paths.Count; p++)
-                    {
-                        List<double2> path = paths[p];
-                        for (int i = 0; i < path.Count; i++)
-                        {
-                            double2 tp = path[i];
-                            // Single-world clip: a point anchor outside this tile's [0, extent) bounds is a
-                            // source world-copy / buffer duplicate (low-zoom tiles carry ±360° label copies).
-                            // Drop it — the tile that owns the anchor emits it exactly once. (The mesh path
-                            // is clipped by the source; symbols were not, which is why labels repeated ±360°
-                            // while fill/line stayed single.)
-                            if (tp.x < 0.0 || tp.x >= extent || tp.y < 0.0 || tp.y >= extent) continue;
-                            double2 lonLat = tileId.ToLonLat(tp.x, tp.y, extent);
-                            double3 anchor = projection.Project(
-                                new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                        // D4/A-2: anchors computed once, shared by BOTH sub-branches below (today computed
+                        // inline with identical arguments — byte-identical).
+                        LineAnchor[] anchors = LineAnchorPlacement.Compute(densePath, spacingTileUnits, placement);
 
-                            // I3: text and icon are independent labels over the SAME anchor — text first,
-                            // then icon, so a feature with both emits two labels in a stable order.
-                            if (text != null)
+                        // Curved text — the pre-shields path, unchanged, but only when this label is NOT
+                        // upright-at-anchors (map-aligned, or line-center's textAlign resolves Map by D3).
+                        if (text != null && !textAtAnchors)
+                        {
+                            output.Add(new SymbolLabel
                             {
-                                output.Add(new SymbolLabel
-                                {
-                                    AnchorRender      = anchor,
-                                    Placement         = SymbolPlacement.Point,
-                                    Text              = text,
-                                    TextSizePx        = textSize,
-                                    PaddingPx         = padding,
-                                    SortKey           = sortKey,
-                                    AllowOverlap      = layout.TextAllowOverlap,
-                                    IgnorePlacement   = layout.TextIgnorePlacement,
-                                    FeatureIndex      = ordinal++,
-                                    TileKey           = tileKey,
-                                    Paint             = labelPaint,
-                                    LayoutOptions     = layoutOptions,
-                                    TranslatePx       = translatePx,
-                                    TranslateAnchor   = paint.TranslateAnchor,
-                                    RotationAlignment = layout.TextRotationAlignment,
-                                });
-                            }
+                                Placement       = placement,
+                                PathRender      = ProjectPath(densePath, tileId, extent, projection),
+                                LineAnchors     = anchors,
+                                Text            = text,
+                                TextSizePx      = textSize,
+                                PaddingPx       = padding,
+                                SortKey         = sortKey,
+                                SpacingPx       = spacing,
+                                MaxAngleDeg     = maxAngle,
+                                KeepUpright     = layout.TextKeepUpright,
+                                AllowOverlap    = layout.TextAllowOverlap,
+                                IgnorePlacement = layout.TextIgnorePlacement,
+                                FeatureIndex    = ordinal++,
+                                TileKey         = tileKey,
+                                Paint           = labelPaint,
+                                TranslatePx     = translatePx,
+                                TranslateAnchor = paint.TranslateAnchor,
+                            });
+                        }
 
-                            if (hasIcon)
+                        // D4: upright-at-anchors — text and/or icon emitted as ordinary POINT labels at each
+                        // along-line anchor (the road-shield look). Suppress whichever side didn't resolve to
+                        // viewport (Map-aligned text/icon on the SAME feature keeps its OWN emit path/fence).
+                        if (textAtAnchors || iconAtAnchors)
+                        {
+                            // Built here (not hoisted — NIT 4): the side that did NOT resolve to viewport is
+                            // suppressed (the map-aligned fence, D4).
+                            var anchorCtx = new AnchorEmitContext
                             {
-                                output.Add(new SymbolLabel
-                                {
-                                    AnchorRender      = anchor,
-                                    Placement         = SymbolPlacement.Point,
-                                    Kind              = LabelKind.Icon,
-                                    IconQuad          = iconQuad,
-                                    IconImage         = iconImage,
-                                    PaddingPx         = iconPadding,
-                                    SortKey           = sortKey,
-                                    AllowOverlap      = layout.IconAllowOverlap,
-                                    IgnorePlacement   = layout.IconIgnorePlacement,
-                                    RotationAlignment = layout.IconRotationAlignment,
-                                    Paint             = iconPaint,
-                                    FeatureIndex      = ordinal++,
-                                    TileKey           = tileKey,
-                                });
+                                Text = textAtAnchors ? text : null,
+                                TextSizePx = textSize,
+                                PaddingPx = padding,
+                                LayoutOptions = layoutOptions,
+                                Paint = labelPaint,
+                                TextAllowOverlap = layout.TextAllowOverlap,
+                                TextIgnorePlacement = layout.TextIgnorePlacement,
+                                TextRotationAlignment = layout.TextRotationAlignment,
+                                HasIcon = iconAtAnchors && hasIcon,
+                                IconQuad = iconQuad,
+                                IconImage = iconImage,
+                                IconPaddingPx = iconPadding,
+                                IconPaint = iconPaint,
+                                IconAllowOverlap = layout.IconAllowOverlap,
+                                IconIgnorePlacement = layout.IconIgnorePlacement,
+                                IconRotationAlignment = layout.IconRotationAlignment,
+                                SortKey = sortKey,
+                                TranslatePx = translatePx,
+                                TranslateAnchor = paint.TranslateAnchor,
+                                CentredPair = centredPair,
+                            };
+                            for (int a = 0; a < anchors.Length; a++)
+                            {
+                                LineAnchor lineAnchor = anchors[a];
+                                double2 tp = math.lerp(densePath[lineAnchor.Segment], densePath[lineAnchor.Segment + 1], lineAnchor.T);
+                                EmitAtAnchor(tp, tileId, extent, projection, in anchorCtx, tileKey, ref ordinal, output);
                             }
                         }
                     }
                 }
+                else
+                {
+                    // Built ONCE per feature, read once per anchor by EmitAtAnchor (NIT 4 — was hoisted above
+                    // both branches; moved here since only the point branch reads it).
+                    var ctx = new AnchorEmitContext
+                    {
+                        Text = text,
+                        TextSizePx = textSize,
+                        PaddingPx = padding,
+                        LayoutOptions = layoutOptions,
+                        Paint = labelPaint,
+                        TextAllowOverlap = layout.TextAllowOverlap,
+                        TextIgnorePlacement = layout.TextIgnorePlacement,
+                        TextRotationAlignment = layout.TextRotationAlignment,
+                        HasIcon = hasIcon,
+                        IconQuad = iconQuad,
+                        IconImage = iconImage,
+                        IconPaddingPx = iconPadding,
+                        IconPaint = iconPaint,
+                        IconAllowOverlap = layout.IconAllowOverlap,
+                        IconIgnorePlacement = layout.IconIgnorePlacement,
+                        IconRotationAlignment = layout.IconRotationAlignment,
+                        SortKey = sortKey,
+                        TranslatePx = translatePx,
+                        TranslateAnchor = paint.TranslateAnchor,
+                        CentredPair = centredPair,
+                    };
+                    for (int p = 0; p < paths.Count; p++)
+                    {
+                        List<double2> path = paths[p];
+                        // D2 (road-shields): a Point feature anchors at every vertex (unchanged); a LineString
+                        // feature under POINT placement anchors ONCE, at the path's mid arc-length — reusing
+                        // LineAnchorPlacement.Compute(_, _, LineCenter), the same "middle of this tile-space
+                        // path" topology the LINE branch above already computes. Anchors are resolved on the
+                        // BUFFERED DECODED path (unclipped — the same input the curved branch uses); the
+                        // existing [0, extent) single-world clip is then applied to the RESOLVED anchor point,
+                        // unchanged (docs/road-shields-design.md §3 D2 — the clip contract).
+                        IReadOnlyList<double2> anchorPoints;
+                        if (feature.GeometryType == TileGeometryType.LineString)
+                        {
+                            LineAnchor[] midArc = LineAnchorPlacement.Compute(path, 0.0, SymbolPlacement.LineCenter);
+                            if (midArc.Length == 0) continue; // degenerate (< 2 points / zero-length) — no anchor
+                            LineAnchor a = midArc[0];
+                            anchorPoints = new[] { math.lerp(path[a.Segment], path[a.Segment + 1], a.T) };
+                        }
+                        else
+                        {
+                            anchorPoints = path;
+                        }
+
+                        for (int i = 0; i < anchorPoints.Count; i++)
+                            EmitAtAnchor(anchorPoints[i], tileId, extent, projection, in ctx, tileKey, ref ordinal, output);
+                    }
+                }
             }
+        }
+
+        /// <summary>D4 (road-shields): the per-FEATURE values every anchor of that feature stamps onto its
+        /// labels — evaluated once in <see cref="Extract"/>'s feature loop, read once per anchor by
+        /// <see cref="EmitAtAnchor"/>. readonly struct + <c>in</c> per docs/conventions-short.md (bigger than
+        /// ~16 bytes, read-only at the call site).</summary>
+        private readonly struct AnchorEmitContext
+        {
+            // text side (Text == null ⇒ emit no text label)
+            public string             Text { get; init; }
+            public float              TextSizePx { get; init; }
+            public float              PaddingPx { get; init; }
+            public TextLayoutOptions  LayoutOptions { get; init; }
+            public LabelPaint         Paint { get; init; }
+            public bool               TextAllowOverlap { get; init; }
+            public bool               TextIgnorePlacement { get; init; }
+            public AlignmentMode      TextRotationAlignment { get; init; }
+            // icon side (HasIcon == false ⇒ emit no icon label)
+            public bool               HasIcon { get; init; }
+            public SymbolQuad         IconQuad { get; init; }
+            public string             IconImage { get; init; }
+            public float              IconPaddingPx { get; init; }
+            public LabelPaint         IconPaint { get; init; }
+            public bool               IconAllowOverlap { get; init; }
+            public bool               IconIgnorePlacement { get; init; }
+            public AlignmentMode      IconRotationAlignment { get; init; }
+            // shared
+            public float              SortKey { get; init; }
+            public float2             TranslatePx { get; init; }
+            public TextTranslateAnchor TranslateAnchor { get; init; }
+            /// <summary>§10 D8/D10: true when this feature's text+icon are a centred pair — the two halves
+            /// are ONE placement instance. The icon is stamped <see cref="LabelPairRole.Owner"/> (emitted
+            /// first) and the text <see cref="LabelPairRole.Rider"/>, sharing a <c>PairId</c>; whether the
+            /// proposed pair actually holds is decided downstream by <see cref="Placement.LabelPairing"/>.
+            /// Otherwise the pre-pairing order (text then icon) is unchanged and both halves carry
+            /// <see cref="LabelPairRole.None"/>.</summary>
+            public bool               CentredPair { get; init; }
+        }
+
+        /// <summary>D2+D4: resolves one tile-space anchor point to a label anchor and emits its text/icon
+        /// labels per <paramref name="ctx"/> — the single emit site shared by point-placement anchors AND
+        /// line-placement upright-at-anchor labels. Applies the single-world <c>[0, extent)</c> clip (D2) —
+        /// an anchor outside the tile is a source world-copy/buffer duplicate, dropped so the owning tile
+        /// emits it exactly once.</summary>
+        private static void EmitAtAnchor(
+            double2 tilePoint, TileId tileId, double extent, IProjection projection,
+            in AnchorEmitContext ctx, long tileKey, ref int ordinal, List<SymbolLabel> output)
+        {
+            if (tilePoint.x < 0.0 || tilePoint.x >= extent || tilePoint.y < 0.0 || tilePoint.y >= extent) return;
+            double2 lonLat = tileId.ToLonLat(tilePoint.x, tilePoint.y, extent);
+            double3 anchor = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+
+            if (ctx.CentredPair)
+            {
+                // §10 D10: the pair's PairId is the OWNER's (icon's) FeatureIndex, captured before either
+                // emitter advances `ordinal`. CentredPair implies both HasIcon and Text != null (the
+                // predicate that computed it), so both emitters below always run together here.
+                int pairId = ordinal;
+                if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Owner, pairId);
+                if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Rider, pairId);
+            }
+            else
+            {
+                if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
+                if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
+            }
+        }
+
+        private static void EmitTextLabel(
+            double3 anchor, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
+            LabelPairRole pairRole, int pairId)
+        {
+            output.Add(new SymbolLabel
+            {
+                AnchorRender      = anchor,
+                Placement         = SymbolPlacement.Point,
+                Text              = ctx.Text,
+                TextSizePx        = ctx.TextSizePx,
+                PaddingPx         = ctx.PaddingPx,
+                SortKey           = ctx.SortKey,
+                AllowOverlap      = ctx.TextAllowOverlap,
+                IgnorePlacement   = ctx.TextIgnorePlacement,
+                FeatureIndex      = ordinal++,
+                TileKey           = tileKey,
+                Paint             = ctx.Paint,
+                LayoutOptions     = ctx.LayoutOptions,
+                TranslatePx       = ctx.TranslatePx,
+                TranslateAnchor   = ctx.TranslateAnchor,
+                RotationAlignment = ctx.TextRotationAlignment,
+                PairRole          = pairRole,
+                PairId            = pairId,
+            });
+        }
+
+        private static void EmitIconLabel(
+            double3 anchor, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
+            LabelPairRole pairRole, int pairId)
+        {
+            output.Add(new SymbolLabel
+            {
+                AnchorRender      = anchor,
+                Placement         = SymbolPlacement.Point,
+                Kind              = LabelKind.Icon,
+                IconQuad          = ctx.IconQuad,
+                IconImage         = ctx.IconImage,
+                PaddingPx         = ctx.IconPaddingPx,
+                SortKey           = ctx.SortKey,
+                AllowOverlap      = ctx.IconAllowOverlap,
+                IgnorePlacement   = ctx.IconIgnorePlacement,
+                RotationAlignment = ctx.IconRotationAlignment,
+                Paint             = ctx.IconPaint,
+                FeatureIndex      = ordinal++,
+                TileKey           = tileKey,
+                PairRole          = pairRole,
+                PairId            = pairId,
+            });
         }
 
         // Project a tile-local line string to render-space (PRE-RTC) vertices.

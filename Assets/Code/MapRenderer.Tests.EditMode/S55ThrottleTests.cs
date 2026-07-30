@@ -44,6 +44,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.TestTools.Constraints;
+using Unity.Mathematics;
 using Unity.Profiling;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
@@ -62,6 +63,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class S55ThrottleTests
     {
+        /// <summary>
+        /// Ring capacity requested from every <see cref="ProfilerRecorder"/> here, and therefore the only
+        /// safe upper bound when reading samples back — <c>Count</c> is NOT one once the ring has wrapped.
+        /// </summary>
+        private const int RecorderCapacity = 64;
+
         // ── Helpers ─────────────────────────────────────────────────────────────────────────
 
         private static byte[] FixtureBytes()
@@ -455,11 +462,11 @@ namespace MapRenderer.Tests
                 // the main thread, so PmAddTileLayer / PmMeshUpload register here; background mesh build
                 // (SetupBlockedBacklog, already done) does not.
                 using var addLayerRecorder = ProfilerRecorder.StartNew(
-                    ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer", capacity: 64,
+                    ProfilerCategory.Scripts, "MapRenderer.Tile.AddLayer", capacity: RecorderCapacity,
                     options: ProfilerRecorderOptions.SumAllSamplesInFrame |
                              ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
                 using var uploadRecorder = ProfilerRecorder.StartNew(
-                    ProfilerCategory.Scripts, "MapRenderer.Mesh.Upload", capacity: 64,
+                    ProfilerCategory.Scripts, "MapRenderer.Mesh.Upload", capacity: RecorderCapacity,
                     options: ProfilerRecorderOptions.SumAllSamplesInFrame |
                              ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
 
@@ -479,11 +486,14 @@ namespace MapRenderer.Tests
                 yield return null;
                 yield return null;
 
+                // Clamp to the ring's CAPACITY, not Count: ProfilerRecorder is a fixed-size ring, and the
+                // pump above runs far more frames than that, so once it wraps `Count` stops being a valid
+                // index bound and GetSample() throws IndexOutOfRange (intermittently, on slow machines).
                 long addLayerHits = 0;
-                for (int i = 0; i < addLayerRecorder.Count; i++)
+                for (int i = 0; i < math.min(addLayerRecorder.Count, RecorderCapacity); i++)
                     addLayerHits += addLayerRecorder.GetSample(i).Count;
                 long uploadHits = 0;
-                for (int i = 0; i < uploadRecorder.Count; i++)
+                for (int i = 0; i < math.min(uploadRecorder.Count, RecorderCapacity); i++)
                     uploadHits += uploadRecorder.GetSample(i).Count;
 
                 // AddLayer fires once per CONSUMED (non-null) mesh — exact, per-mesh.

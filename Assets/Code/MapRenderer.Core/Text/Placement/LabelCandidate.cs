@@ -25,6 +25,18 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Number of boxes in this candidate's range (1 for a point label, N glyphs for a curved one).</summary>
         public int BoxCount;
 
+        /// <summary>Road-shields §10 D8: index of this candidate's FIRST <see cref="CandidateEmit"/> in the
+        /// staged emit pool — mirrors <see cref="BoxStart"/>. Emits are no longer keyed by <see cref="LabelIndex"/>:
+        /// that member keeps ONLY its survivor-identity role (<c>LabelCollision.cs:169</c>, <c>LabelCollisionJob.cs:34</c>).</summary>
+        public int EmitStart;
+
+        /// <summary>Road-shields §10 D8: number of emits in this candidate's range — 1 for an ordinary label,
+        /// 2 for a centred icon+text pair (its icon and text each keep their own <c>(Slot, AtlasKind)</c>
+        /// <see cref="CandidateEmit"/>). An ordinary candidate satisfies <c>EmitCount == 1 &amp;&amp;
+        /// EmitStart == LabelIndex</c> (asserted by tooth, not enforced by code). <see cref="TryFindRangeTilingViolation"/>
+        /// is unchanged — it covers BOXES only, and a pair's two boxes are appended contiguously by one call.</summary>
+        public int EmitCount;
+
         /// <summary>`symbol-sort-key` — greedy placement order. LOWER is placed FIRST (MapLibre priority).</summary>
         public float SortKey;
 

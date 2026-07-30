@@ -66,10 +66,14 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// Builds the render layers from <paramref name="style"/>. Draw order IS the style's declared layer
-        /// order (MapLibre painter's algorithm): walk <c>style.Layers</c> ONCE and assign a single monotonic
-        /// <c>renderQueue</c> across ALL painted layers by their position (D7), so an interleaved
-        /// fill-over-symbol or line-over-fill composites exactly as declared (they share one transparent
-        /// band, ZWrite off, so the renderQueue offset alone decides order — see <see cref="LayerDrawOrder"/>).
+        /// order (MapLibre painter's algorithm): walk <c>style.Layers</c> ONCE and assign each a queue BAND
+        /// via <see cref="LayerDrawOrder"/> (D7) — one band per declared layer, monotonic across bands — so
+        /// an interleaved fill-over-symbol or line-over-fill composites exactly as declared (they share one
+        /// transparent band, ZWrite off, so the renderQueue offset alone decides order). A layer's own
+        /// <see cref="IRenderLayer.MaterialSubSlot"/> selects WHICH sub-slot of its band this write targets —
+        /// <see cref="LayerSubSlot.Base"/> for fill/line/background, <see cref="LayerSubSlot.Above"/> for a
+        /// symbol layer's text, so it draws over that same layer's icon (G7/D7 — written separately by
+        /// <see cref="SymbolRenderLayer.Create"/>, since the icon has no Build-time free ride).
         /// The list contains ALL painted layers — fill, line, symbol, background — with
         /// <c>index == DrawIndex == draw order == material index</c>; every slot is material-bearing when
         /// its base material is configured (symbol as of E2/D11, background as of E3). Only genuinely
@@ -94,7 +98,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 if (layer == null) continue; // genuinely unpainted, or unconfigured material — no slot
 
                 if (layer.Material != null) // null only when that slot's own base material is unconfigured — skip the queue write
-                    layer.Material.renderQueue = LayerDrawOrder.QueueFor(drawIndex);
+                    layer.Material.renderQueue = LayerDrawOrder.QueueFor(drawIndex, layer.MaterialSubSlot);
                 _layers.Add(layer);
                 drawIndex++;
             }

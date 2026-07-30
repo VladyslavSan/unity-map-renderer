@@ -44,6 +44,12 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolLabelSubsystemPumpTests
     {
+        /// <summary>
+        /// Ring capacity requested from every <see cref="ProfilerRecorder"/> here, and therefore the only
+        /// safe upper bound when reading samples back — <c>Count</c> is NOT one once the ring has wrapped.
+        /// </summary>
+        private const int ProfilerSampleCapacity = 64;
+
         private const string FontName = "LatinFont";
         private const string SourceId = "s";
 
@@ -197,9 +203,9 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
             using var mainOnly  = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode",
-                64, ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+                ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
             using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode",
-                64, ProfilerRecorderOptions.SumAllSamplesInFrame);
+                ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame);
 
             DriveTileBytesReady(tile);
             for (int f = 0; f < 200; f++)
@@ -211,9 +217,15 @@ namespace MapRenderer.Tests.Text
             }
             yield return null; yield return null; // let the profiler commit accumulated samples
 
+            // ProfilerRecorder is a fixed-capacity RING (64 above). Once more than `capacity` frames have
+            // been sampled the ring wraps and `Count` is no longer a safe index bound — GetSample(capacity)
+            // throws IndexOutOfRange. The 200-frame drive loop above reaches that on a slow/loaded machine,
+            // which is what made this test fail intermittently while the product was fine. Clamp to the
+            // capacity we asked for; the samples we drop are the oldest, and both recorders sum the SAME
+            // marker, so the main-vs-any comparison stays apples-to-apples.
             long mainHits = 0, anyHits = 0;
-            for (int i = 0; i < mainOnly.Count;  i++) mainHits += mainOnly.GetSample(i).Count;
-            for (int i = 0; i < anyThread.Count; i++) anyHits += anyThread.GetSample(i).Count;
+            for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
+            for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits += anyThread.GetSample(i).Count;
 
             Assert.Greater(anyHits, 0, "sanity: the symbol decode marker fired at all (the async build ran to completion).");
             Assert.AreEqual(0, mainHits,

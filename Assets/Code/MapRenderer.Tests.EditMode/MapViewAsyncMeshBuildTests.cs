@@ -51,6 +51,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class MapViewAsyncMeshBuildTests
     {
+        /// <summary>
+        /// Ring capacity requested from every <see cref="ProfilerRecorder"/> here, and therefore the only
+        /// safe upper bound when reading samples back — <c>Count</c> is NOT one once the ring has wrapped.
+        /// </summary>
+        private const int RecorderCapacity = 64;
+
         // ── Helpers ────────────────────────────────────────────────────────────────────────────
 
         private static byte[] FixtureBytes()
@@ -309,11 +315,11 @@ namespace MapRenderer.Tests
             // main (test) thread — so Task.Run background samples for PmBuildMesh are NOT counted.
             // SumAllSamplesInFrame accumulates sample hits per frame (not just durations).
             using var tessRecorder = ProfilerRecorder.StartNew(
-                ProfilerCategory.Scripts, buildMarkerName, capacity: 64,
+                ProfilerCategory.Scripts, buildMarkerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame |
                          ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
             using var uploadRecorder = ProfilerRecorder.StartNew(
-                ProfilerCategory.Scripts, uploadMarkerName, capacity: 64,
+                ProfilerCategory.Scripts, uploadMarkerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame |
                          ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
 
@@ -335,12 +341,15 @@ namespace MapRenderer.Tests
                 // Sum marker invocations across all recorded frames.
                 // ProfilerRecorderSample.Count = number of Begin/End marker firings in that frame
                 // (correct hit-count metric — recorder.Count alone counts frame-buffer entries, not firings).
+                // Clamp to the ring's CAPACITY, not Count: ProfilerRecorder is a fixed-size ring, and the
+                // pump above runs far more frames than that, so once it wraps `Count` stops being a valid
+                // index bound and GetSample() throws IndexOutOfRange (intermittently, on slow machines).
                 long tessMainHits = 0L;
-                for (int i = 0; i < tessRecorder.Count; i++)
+                for (int i = 0; i < math.min(tessRecorder.Count, RecorderCapacity); i++)
                     tessMainHits += tessRecorder.GetSample(i).Count;
 
                 long uploadMainHits = 0L;
-                for (int i = 0; i < uploadRecorder.Count; i++)
+                for (int i = 0; i < math.min(uploadRecorder.Count, RecorderCapacity); i++)
                     uploadMainHits += uploadRecorder.GetSample(i).Count;
 
                 // ── Positive control: PmMeshUpload fired on the main thread (consume did run here) ──

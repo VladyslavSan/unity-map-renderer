@@ -81,7 +81,7 @@ namespace MapRenderer.Jobs
         public NativeArray<PlacedQuad>     StagedQuads;
         public NativeArray<LabelCandidate> Candidates;
         public NativeArray<CandidateEmit>  Emit;
-        public NativeArray<int>            OutCounts; // [0]=candidateCount [1]=boxCount [2]=quadCount
+        public NativeArray<int>            OutCounts; // [0]=candidateCount [1]=boxCount [2]=quadCount [3]=emitCount
 
         public void Execute()
         {
@@ -98,7 +98,7 @@ namespace MapRenderer.Jobs
             for (int i = 0; i < AnchorWasPlaced.Length; i++)
                 AnchorWasPlaced[i] = (byte)(Placed.Contains(AnchorFadeIds[i]) ? 1 : 0);
 
-            int candidateCount = 0, boxCount = 0, quadCount = 0;
+            int candidateCount = 0, boxCount = 0, quadCount = 0, emitCount = 0;
             for (int r = 0; r < Count; r++)
             {
                 int off = PointOffset[r];
@@ -108,14 +108,38 @@ namespace MapRenderer.Jobs
                 if (Kinds[r] == 0)
                 {
                     PointStageInput s = Points[d];
+
+                    // §10 D8/D10: a resolved RIDER stages nothing on its own — its box/quads/emit are staged
+                    // BY its owner (below), so the pair cannot self-block. It still costs its gather/projection
+                    // slot (deliberate — no gather change); if its owner culled first, the rider's iteration
+                    // simply drops here too, which is the pair's atomic cull (StagePointPair gates once, on
+                    // the owner).
+                    if (s.PairRole == LabelPairRole.Rider) continue;
+
                     s.ScreenPx = Screen[off];
                     s.Depth = Depth[off];
                     s.Projected = Valid[off] != 0;
                     s.WasPlacedLastFrame = Placed.Contains(s.FadeId); // s is the Points[d] copy; FadeId is never patched
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
-                    candidateCount += LabelStagingMath.StagePoint(in s, quadSpan, Bearing, Viewport, candidateCount,
-                        boxes, ref boxCount, quads, ref quadCount, cands, emit);
+
+                    // §10 D8/D10: an owner whose rider is the NEXT point record (the reconciler emits them
+                    // adjacently, the gather compacts point records in winner order) stages as ONE pair
+                    // candidate. A broken adjacency (rider missing/moved) degrades to a lone badge via the
+                    // ordinary StagePoint arm below — never a stranger, never a bare number.
+                    if (s.PairRole == LabelPairRole.Owner && d + 1 < Points.Length && Points[d + 1].PairRole == LabelPairRole.Rider)
+                    {
+                        PointStageInput rider = Points[d + 1];
+                        ReadOnlySpan<SymbolQuad> riderQuadSpan = Quads.AsSpan().Slice(PointQuadStart[d + 1], PointQuadCount[d + 1]);
+                        candidateCount += LabelStagingMath.StagePointPair(in s, in rider, quadSpan, riderQuadSpan,
+                            Bearing, Viewport, candidateCount,
+                            boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
+                    }
+                    else
+                    {
+                        candidateCount += LabelStagingMath.StagePoint(in s, quadSpan, Bearing, Viewport, candidateCount,
+                            boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
+                    }
                 }
                 else
                 {
@@ -135,13 +159,14 @@ namespace MapRenderer.Jobs
 
                     candidateCount += LabelStagingMath.StageCurved(in s, screen, depth, valid, world, glyphs, anchors,
                         fadeIds, wasPlaced, path.Slice(0, wc), cum.Slice(0, wc), Bearing, candidateCount,
-                        boxes, ref boxCount, quads, ref quadCount, cands, emit);
+                        boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
                 }
             }
 
             OutCounts[0] = candidateCount;
             OutCounts[1] = boxCount;
             OutCounts[2] = quadCount;
+            OutCounts[3] = emitCount;
         }
     }
 }

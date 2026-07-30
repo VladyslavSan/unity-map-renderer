@@ -1,4 +1,5 @@
 using UnityEngine;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Unity.Common;
 using Background = MapRenderer.Core.Style.Background;
 
@@ -32,6 +33,7 @@ namespace MapRenderer.Unity.Rendering.Style
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
+        public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public Material                          Material    { get; } // owned fill-base clone; null iff FillMaterial unassigned (slot kept, never shows)
 
         private readonly ZoomStyleApplier _applier; // null iff Material null

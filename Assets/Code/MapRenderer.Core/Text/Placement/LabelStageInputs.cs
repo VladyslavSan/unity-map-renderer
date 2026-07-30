@@ -53,6 +53,12 @@ namespace MapRenderer.Core.Text.Placement
         /// zero value, crosses the Burst boundary like every other field here). NOT YET consumed by the
         /// draw side — this is I5a's data-only thread; I5b partitions the draw by it.</summary>
         public LabelKind AtlasKind;
+
+        /// <summary>Road-shields §10 D8/D10, threaded from <see cref="LabelInstance.PairRole"/> — ALREADY
+        /// resolved by the baker/oracle (<see cref="LabelPairing"/>). The stage job needs nothing else: a
+        /// paired owner's rider is the NEXT point record (the reconciler emits owner→rider adjacently, the
+        /// gather compacts point records in winner order). Default <see cref="LabelPairRole.None"/>.</summary>
+        public LabelPairRole PairRole;
     }
 
     /// <summary>

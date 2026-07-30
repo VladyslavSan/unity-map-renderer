@@ -406,6 +406,16 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/IconQuadLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorIconTests.cs" />
 
+    <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
+         NOT added here (Text/SymbolSpriteReadinessTests.cs, TestSupport/GatedSpriteSource.cs). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentResolution.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolShieldExtractionTests.cs" />
+
+    <!-- Road shields §10 (symbol pairing, D8-D11): the pair resolver — engine-free. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelPairRole.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelPairing.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelPairingTests.cs" />
+
     <!-- S19: symbol layout (text-only) — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextAnchor.cs" />
@@ -423,6 +433,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextQuadLayoutTests.cs" />
     <!-- S19 Slice 2: anchor/offset/justify tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextAnchorOffsetJustifyTests.cs" />
+    <!-- Stage 4 (§11 G8/D12): vertical-centring teeth (shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs" />
     <!-- S19 Slice 3: word-wrap tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextWrapTests.cs" />
     <!-- S19 Slice 4: RTL layout tests (shared verbatim) -->

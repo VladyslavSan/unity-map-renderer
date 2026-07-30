@@ -14,7 +14,9 @@ namespace MapRenderer.Core.Style.Symbol
     /// <see cref="TextPadding"/>, <see cref="TextMaxWidth"/>, <see cref="TextLineHeight"/>,
     /// <see cref="TextLetterSpacing"/>, <see cref="TextRadialOffset"/>, <see cref="IconSize"/>,
     /// <see cref="IconPadding"/>) are <see cref="StyleProperty{T}"/> so they can be re-evaluated per frame;
-    /// the small enum/flag knobs (<see cref="SymbolPlacement"/>, <see cref="TextAllowOverlap"/>,
+    /// <see cref="SymbolPlacement"/> is also a <see cref="StyleProperty{T}"/> but is BUILD-ZOOM-evaluated
+    /// (evaluated once by the extractor, never per frame — see its own doc); the small enum/flag knobs
+    /// (<see cref="TextAllowOverlap"/>,
     /// <see cref="TextAnchor"/>, <see cref="TextJustify"/>, <see cref="TextOffset"/>, <see cref="TextFont"/>,
     /// <see cref="IconAnchor"/>, <see cref="IconOffset"/>, <see cref="IconRotationAlignment"/>,
     /// <see cref="IconAllowOverlap"/>, <see cref="IconIgnorePlacement"/>) are parsed once as plain typed
@@ -53,9 +55,16 @@ namespace MapRenderer.Core.Style.Symbol
         public StyleProperty<float> TextRadialOffset { get; }
 
         /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
-        /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>. An
-        /// unrecognized value degrades to point.</summary>
-        public SymbolPlacement SymbolPlacement { get; }
+        /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>.
+        /// BUILD-ZOOM-evaluated (road-shields D1): the extractor evaluates this ONCE, at the tile's build
+        /// zoom, and the result is frozen into that tile's labels for its lifetime — it is never
+        /// re-evaluated as the camera crosses a step boundary (the accepted, pinned known limit; see
+        /// docs/road-shields-design.md §3 D1). An absent property degrades to point at CONSTRUCTION; a
+        /// present-but-non-string EXPRESSION RESULT degrades to point at EVALUATION (the extractor's
+        /// <c>TryEvaluate</c> call). A structurally MALFORMED expression (invalid JSON shape) still throws
+        /// from <see cref="ExpressionParser.Parse"/> here at construction — consistent with every
+        /// other <see cref="StyleProperty{T}"/> in this file, not a degrade-on-parse-failure contract.</summary>
+        public StyleProperty<SymbolPlacement> SymbolPlacement { get; }
 
         /// <summary>symbol-sort-key: greedy placement priority (lower placed first). Default 0. Zoom-capable.</summary>
         public StyleProperty<float> SymbolSortKey { get; }
@@ -179,7 +188,11 @@ namespace MapRenderer.Core.Style.Symbol
                 ? new StyleProperty<float>(radialOffsetJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
-            SymbolPlacement = ParsePlacement(layout?.Get(PropertyNames.SymbolPlacement)?.AsString(null));
+            JsonValue placementJson = layout?.Get(PropertyNames.SymbolPlacement);
+            SymbolPlacement = placementJson != null
+                ? new StyleProperty<SymbolPlacement>(placementJson, Text.SymbolPlacement.Point,
+                    v => ParsePlacement(v.ToDisplayString()))
+                : new StyleProperty<SymbolPlacement>(Text.SymbolPlacement.Point);
 
             JsonValue sortKeyJson = layout?.Get(PropertyNames.SymbolSortKey);
             SymbolSortKey = sortKeyJson != null

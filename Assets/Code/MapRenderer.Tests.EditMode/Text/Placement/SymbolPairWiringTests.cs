@@ -1,0 +1,257 @@
+// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (LabelSlotPresenter creates one,
+// SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
+//
+// Road-shields §10 D8/D9 (docs/road-shields-design.md) P10 — the Tick()-level wiring tooth for a centred
+// icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE LabelCandidate (LastCandidateCount) yet
+// still place BOTH halves' quads (LastQuadCount) and build BOTH the world text AND world icon meshes at the
+// same (tileKey, slot) — the direct fix for "only the number, no badge". A second test drives the pair
+// through a real collision loss and asserts BOTH halves drop together (no bare number).
+
+using System.Collections.Generic;
+using NUnit.Framework;
+using Unity.Mathematics;
+using UnityEngine;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style;
+using MapRenderer.Core.Text;
+using MapRenderer.Core.Text.Placement;
+using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Backend;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using Symbol = MapRenderer.Core.Style.Symbol;
+
+namespace MapRenderer.Tests.Text.Placement
+{
+    [TestFixture]
+    public class SymbolPairWiringTests
+    {
+        private const string StyleJson = @"{
+            ""version"": 8,
+            ""layers"": [
+                { ""id"": ""shield"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
+                  ""layout"": { ""icon-image"": ""shield"" } }
+            ]
+        }";
+
+        private static MapMaterialSet BuildSettings()
+        {
+            var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
+            settings.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
+            settings.SymbolIconWorld = new Material(Shader.Find("Map/Symbol/IconWorld"));
+            return settings;
+        }
+
+        private static Texture2D BuildSpriteTexture()
+        {
+            var tex = new Texture2D(4, 4, TextureFormat.RGBA32, mipChain: false);
+            var pixels = new Color32[16];
+            for (int i = 0; i < pixels.Length; i++) pixels[i] = new Color32(200, 50, 50, 255);
+            tex.SetPixels32(pixels);
+            tex.Apply(updateMipmaps: false);
+            return tex;
+        }
+
+        private static GlyphAtlasTexture BuildTinyAtlasTexture()
+        {
+            var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
+            var atlas = new GlyphAtlas();
+            atlas.Append(glyph);
+            var texture = new GlyphAtlasTexture();
+            texture.Upload(atlas);
+            return texture;
+        }
+
+        // A centred icon+text pair: Owner (icon) immediately followed by its Rider (text) — the adjacency
+        // contract §10 D10 relies on (SymbolTileLabelBlockBaker/TestSymbolPlan preserve list order per tile).
+        private static (LabelInstance icon, LabelInstance text) MakePairLabels(double3 sceneOriginRender)
+        {
+            var iconQuads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-8f, 8f), BottomRight = new float2(8f, -8f),
+                    UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
+                },
+            };
+            var icon = new LabelInstance
+            {
+                AnchorRender = sceneOriginRender,
+                Layout = new TextLayoutResult { Quads = iconQuads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1 },
+                Kind = LabelKind.Icon,
+                IconImage = "shield", // a REAL identity — a null one would dedup-collide with any other
+                                      // null-identity label sharing this anchor (e.g. a hand-built blocker).
+                Paint = LabelPaint.Default,
+                TextSizePx = TextQuadLayout.OneEm,
+                SortKey = 0f,
+                FeatureIndex = 0,
+                TileKey = 0L,
+                PairRole = LabelPairRole.Owner,
+                PairId = 0,
+            };
+
+            var textQuads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-6f, 6f), BottomRight = new float2(6f, -6f),
+                    UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
+                },
+            };
+            var text = new LabelInstance
+            {
+                AnchorRender = sceneOriginRender,
+                Layout = new TextLayoutResult { Quads = textQuads, BoundsMin = new float2(-6f, -6f), BoundsMax = new float2(6f, 6f), LineCount = 1 },
+                Paint = LabelPaint.Default,
+                TextSizePx = 24f,
+                Text = "42", // a REAL identity — see the icon's IconImage comment above
+                SortKey = 0f,
+                FeatureIndex = 1,
+                TileKey = 0L,
+                PairRole = LabelPairRole.Rider,
+                PairId = 0,
+            };
+            return (icon, text);
+        }
+
+        private static (GameObject camGo, MapCamera mapCamera, SceneFrame frame) BuildScene()
+        {
+            var camGo = new GameObject("PairWiring_TestCamera");
+            var uCam = camGo.AddComponent<Camera>();
+            uCam.targetTexture = new RenderTexture(320, 240, 0);
+            var mapCamera = new MapCamera(uCam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 20.0, Longitude = 20.0, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 }),
+                Rebase = float3x3.identity,
+            };
+            return (camGo, mapCamera, frame);
+        }
+
+        // ── P10 (§10) ──────────────────────────────────────────────────────────────────────────────────────
+        [Test]
+        public void CentredPair_Tick_DrawsBothTextAndIconMeshes_OneCandidateBothHalves()
+        {
+            var (camGo, mapCamera, frame) = BuildScene();
+            var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = BuildSpriteTexture();
+            var settings = BuildSettings();
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+                new Material(Shader.Find("Map/Symbol/IconWorld")));
+            var layers = new List<SymbolRenderLayer> { renderLayer };
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+
+            try
+            {
+                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender);
+                var pairLabels = new List<LabelInstance> { icon, text };
+
+                // R3: duplicate — the collision verdict is harvested one Tick late.
+                system.Tick(in frame, plan.Build(pairLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+                system.Tick(in frame, plan.Build(pairLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+
+                // §10 D8: TWO labels (icon+text), ONE candidate — the whole point of the pairing fix (fewer
+                // sort/grid/fade operations than the pre-fix two-independent-candidates shape).
+                Assert.AreEqual(1, system.LastCandidateCount, "a centred pair must stage as exactly ONE candidate");
+                Assert.AreEqual(2, system.LastQuadCount, "both halves' quads must still be placed (icon quad + text quad)");
+
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh worldIconMesh),
+                    "the world icon slot mesh must exist");
+                Assert.Greater(worldIconMesh.vertexCount, 0, "the icon mesh must have built non-zero vertices");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon), "the icon presenter must be showing");
+
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldTextMesh),
+                    "the world text slot mesh must exist");
+                Assert.Greater(worldTextMesh.vertexCount, 0,
+                    "the text mesh must have built non-zero vertices — the bare-number bug is a MISSING icon, not a missing text");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text),
+                    "the text presenter must be showing — BOTH halves survive together");
+            }
+            finally
+            {
+                renderLayer.Dispose();
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(spriteTexture);
+                Object.DestroyImmediate(settings.SymbolTextWorld);
+                Object.DestroyImmediate(settings.SymbolIconWorld);
+                Object.DestroyImmediate(settings);
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
+        // ── P3/P4 at the Tick level: a real collision loss drops BOTH halves, not just the icon ──────────────
+        [Test]
+        public void CentredPair_Tick_BlockedByHigherPriorityLabel_BothHalvesDropTogether_NoBareNumber()
+        {
+            var (camGo, mapCamera, frame) = BuildScene();
+            var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = BuildSpriteTexture();
+            var settings = BuildSettings();
+            var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
+
+            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+                new Material(Shader.Find("Map/Symbol/IconWorld")));
+            var layers = new List<SymbolRenderLayer> { renderLayer };
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+
+            try
+            {
+                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender);
+
+                // A higher-priority (lower SortKey) blocker at the SAME anchor, big enough to overlap the icon's box.
+                var blockerQuads = new List<SymbolQuad>
+                {
+                    new SymbolQuad
+                    {
+                        TopLeft = new float2(-40f, 40f), BottomRight = new float2(40f, -40f),
+                        UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
+                    },
+                };
+                var blocker = new LabelInstance
+                {
+                    AnchorRender = frame.SceneOriginRender,
+                    Layout = new TextLayoutResult { Quads = blockerQuads, BoundsMin = new float2(-40f, -40f), BoundsMax = new float2(40f, 40f), LineCount = 1 },
+                    Paint = LabelPaint.Default,
+                    TextSizePx = 24f,
+                    SortKey = -1f,
+                    FeatureIndex = 99,
+                    TileKey = 0L,
+                };
+
+                var mixedLabels = new List<LabelInstance> { blocker, icon, text };
+
+                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                    symbolLayers: layers, spriteTexture: spriteTexture);
+
+                Assert.AreEqual(2, system.LastCandidateCount, "the blocker + the pair (one candidate each)");
+                // The blocker is itself Kind=Text (default), sharing the SAME (tileKey, slot, Text) mesh as the
+                // pair's text half, so IsWorldSlotVisible can't distinguish "blocker shows" from "pair's text
+                // shows" — LastQuadCount is the falsifiable count: only the blocker's ONE quad may place.
+                Assert.AreEqual(1, system.LastQuadCount,
+                    "only the blocker's quad places — the pair (icon+text) drops TOGETHER, not just the icon (no bare number)");
+            }
+            finally
+            {
+                renderLayer.Dispose();
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(spriteTexture);
+                Object.DestroyImmediate(settings.SymbolTextWorld);
+                Object.DestroyImmediate(settings.SymbolIconWorld);
+                Object.DestroyImmediate(settings);
+                Object.DestroyImmediate(camGo);
+            }
+        }
+    }
+}

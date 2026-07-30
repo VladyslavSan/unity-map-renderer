@@ -187,6 +187,8 @@ namespace MapRenderer.Unity.Text
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
                                 RotationAlignment = s.RotationAlignment,
+                                PairRole = s.PairRole,
+                                PairId = s.PairId,
                             });
                             continue;
                         }
@@ -221,6 +223,8 @@ namespace MapRenderer.Unity.Text
                                 TranslatePx = s.TranslatePx,
                                 TranslateAnchor = s.TranslateAnchor,
                                 RotationAlignment = s.RotationAlignment,
+                                PairRole = s.PairRole,
+                                PairId = s.PairId,
                             });
                         }
                         else

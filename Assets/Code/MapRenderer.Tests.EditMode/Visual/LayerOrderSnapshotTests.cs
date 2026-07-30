@@ -121,7 +121,9 @@ namespace MapRenderer.Tests.Visual
                     return;
                 }
 
-                // ── Non-vacuous guard (§7.11): the TOP layer (red fill, queue 3002) must win the composite. ──
+                // ── Non-vacuous guard (§7.11): the TOP layer (red fill, queue 3004 under the G7/D7 sub-slot
+                // band stride — comment-only fix, see road-shields-design.md §9; this file's assertions stay
+                // purely relational and are otherwise UNTOUCHED) must win the composite. ──
                 // Before the winding fix the fill quads rendered NOTHING (front-facing under _Cull:1), so only
                 // the blue line drew — this region read BLUE and the variance tooth below passed vacuously.
                 // Requiring red-dominance proves all three layers render AND that painter order (fill-on-top-

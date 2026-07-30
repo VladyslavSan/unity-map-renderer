@@ -10,8 +10,13 @@
 // (fixture atlas, CodepointTextShaper, real LabelPlacementSystem) and the queue/composite scene from
 // LayerOrderSnapshotTests (QualitySettings/ambient/light setup, the GPU-context Inconclusive guard).
 // SymbolRenderLayers are built directly via SymbolRenderLayer.Create, bypassing RenderLayerSet.Build — so
-// each test writes the renderQueue itself (`TransparentQueue + drawIndex`), mirroring exactly what
-// RenderLayerSet.Build does in production.
+// each test writes the renderQueue itself (`TransparentQueue + drawIndex`, one sub-slot's worth — these
+// tests order two TEXT materials against each other / against an occluding line, never a layer's own
+// icon-vs-text pair, so the G7/D7 sub-slot band is inert here and the hand-written values stay valid),
+// mirroring exactly what RenderLayerSet.Build does in production for a single sub-slot. EVERY Create call
+// below additionally writes its own WorldIconMaterial queue at QueueFor(drawIndex, Base), which can sit
+// ABOVE the text queue the test hand-writes — inert in all of them for the reason above; the first such
+// site carries the worked example.
 //
 // Tooth 1's occluder is a wide LINE ribbon, not a fill quad: a hand-built Vector3[]/Vector2[] quad (the
 // technique LayerOrderSnapshotTests.BuildFillQuad uses) carries only the generic Lit vertex streams, not
@@ -254,6 +259,12 @@ namespace MapRenderer.Tests.Visual
             var greenLabelColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
+            // G7/D7 note: Create(drawIndex: 1) now also writes WorldIconMaterial.renderQueue itself, at
+            // QueueFor(1, Base) = 3002 — ABOVE the TransparentQueue + 1 = 3001 this test hand-writes to
+            // Material (the text) next. That is inert here: this test never stages or renders an icon quad,
+            // only the text glyph, so the icon material's queue is set but never composited against
+            // anything. Left as-is per the Phase 4 fence — rewriting this scene's hand-written queues to
+            // QueueFor(...) is the riskiest available edit for zero contract gain.
             var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0, drawIndex: 1);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned (asserted by MapMaterialSetTestUtil.Load).");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;

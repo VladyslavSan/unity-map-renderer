@@ -117,23 +117,37 @@ namespace MapRenderer.Tests
         {
             using var set = Build(InterleavedStyleJson);
 
-            // D7: renderQueue = TransparentQueue + DrawIndex, and DrawIndex == the slot's own declared-order
-            // index — uniformly for EVERY slot, material-bearing or not (RenderLayerSet.Build increments
-            // drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that slot's own base
-            // material is unconfigured). E3 made background material-bearing too, so slot 0 (bg) now carries
-            // its own queue same as every other slot — the last E1/E2 null-material slot is gone.
-            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 0, set[0].Material.renderQueue,
-                "bg — slot 0, material-bearing as of E3 so it gets a queue like every other slot.");
-            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 1, set[1].Material.renderQueue, "fill-a — slot 1.");
-            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 2, set[2].Material.renderQueue,
-                "symbol-b — slot 2, material-bearing (E2, D11) so it gets a queue like every other slot.");
-            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 3, set[3].Material.renderQueue, "line-c — slot 3.");
-            Assert.AreEqual(LayerDrawOrder.TransparentQueue + 4, set[4].Material.renderQueue, "fill-d — slot 4.");
+            // Pin WHICH sub-slot each kind's Material occupies — independent of the queue-value assertions
+            // below, so a wrongly-defaulted MaterialSubSlot can't hide behind a coincidentally-matching queue.
+            Assert.AreEqual(LayerSubSlot.Base,  set[0].MaterialSubSlot, "background — Base.");
+            Assert.AreEqual(LayerSubSlot.Base,  set[1].MaterialSubSlot, "fill — Base.");
+            Assert.AreEqual(LayerSubSlot.Above, set[2].MaterialSubSlot, "symbol — Above (its Material is WorldTextMaterial).");
+            Assert.AreEqual(LayerSubSlot.Base,  set[3].MaterialSubSlot, "line — Base.");
+            Assert.AreEqual(LayerSubSlot.Base,  set[4].MaterialSubSlot, "fill — Base.");
+
+            // G7/D7 (Stage 2): renderQueue = LayerDrawOrder.QueueFor(DrawIndex, MaterialSubSlot) — DrawIndex
+            // == the slot's own declared-order index, uniformly for EVERY slot (RenderLayerSet.Build
+            // increments drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that
+            // slot's own base material is unconfigured); MaterialSubSlot is Base for background/fill/line and
+            // Above for symbol-b's Material (its WorldTextMaterial), since a symbol layer's text must draw
+            // over its own icon. E3 made background material-bearing too, so slot 0 (bg) now carries its own
+            // queue same as every other slot — the last E1/E2 null-material slot is gone.
+            Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue,
+                "bg — slot 0, Base, material-bearing as of E3 so it gets a queue like every other slot.");
+            Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue, "fill-a — slot 1, Base.");
+            Assert.AreEqual(LayerDrawOrder.QueueFor(2, set[2].MaterialSubSlot), set[2].Material.renderQueue,
+                "symbol-b — slot 2, Above (its Material IS WorldTextMaterial), material-bearing (E2, D11) so it gets a queue like every other slot.");
+            Assert.AreEqual(LayerDrawOrder.QueueFor(3, set[3].MaterialSubSlot), set[3].Material.renderQueue, "line-c — slot 3, Base.");
+            Assert.AreEqual(LayerDrawOrder.QueueFor(4, set[4].MaterialSubSlot), set[4].Material.renderQueue, "fill-d — slot 4, Base.");
 
             // Monotonic over EVERY material-bearing slot (background, fill, symbol, line, fill), in declared order.
             Assert.Less(set[0].Material.renderQueue, set[1].Material.renderQueue);
             Assert.Less(set[1].Material.renderQueue, set[2].Material.renderQueue);
-            Assert.Less(set[2].Material.renderQueue, set[3].Material.renderQueue);
+            // U3: symbol-b's TEXT queue (slot 2, Above — its own layer's higher sub-slot) must still be
+            // strictly below slot 3's Base — the next layer's band must not be reachable from inside this one.
+            Assert.Less(set[2].Material.renderQueue, set[3].Material.renderQueue,
+                "symbol-b's text (Above sub-slot) must stay strictly below line-c's Base sub-slot — a symbol " +
+                "layer's own band must never escape into the next layer's.");
             Assert.Less(set[3].Material.renderQueue, set[4].Material.renderQueue);
         }
 
@@ -172,6 +186,13 @@ namespace MapRenderer.Tests
     ]
 }";
 
+        // U1 — G7/D7 contract correction, NOT a re-bake. The version this replaces asserted BOTH materials
+        // equal LayerDrawOrder.QueueFor(i) — i.e. it PINNED the G7 bug (icon and text sharing one queue,
+        // coplanar + ZWrite off ⇒ no tiebreak ⇒ the badge can paint over its own number). The "Build-time,
+        // no Tick" intent survives verbatim; what changes is the asserted VALUE — icon at its own layer's
+        // Base sub-slot, text at Above, and (the strict inequality below) icon < text ASSERTED EXPLICITLY,
+        // not merely implied by two equalities. A re-bake could restate equality at new numbers and still
+        // pass with the icon on top of the text; this cannot.
         [Test]
         public void Build_SymbolLayers_WorldTextAndIconQueues_SetAtBuildTime_NoTickNeeded()
         {
@@ -186,12 +207,44 @@ namespace MapRenderer.Tests
             for (int i = 0; i < set.Count; i++)
             {
                 var symbolLayer = (SymbolRenderLayer)set[i];
-                Assert.AreEqual(LayerDrawOrder.QueueFor(i), symbolLayer.WorldTextMaterial.renderQueue,
-                    $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material, §0.2), with NO Tick.");
-                Assert.AreEqual(LayerDrawOrder.QueueFor(i), symbolLayer.WorldIconMaterial.renderQueue,
-                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create (§0.1), with NO Tick — " +
-                    "the per-frame WorldLabelRenderer.ResolveMaterial sync that used to write this is now DELETED.");
+                int iconQueue = symbolLayer.WorldIconMaterial.renderQueue;
+                int textQueue = symbolLayer.WorldTextMaterial.renderQueue;
+                int bandBase  = LayerDrawOrder.QueueFor(i, LayerSubSlot.Base);
+                int bandTop   = bandBase + LayerDrawOrder.SubSlotsPerLayer - 1;
+
+                Assert.AreEqual(bandBase, iconQueue,
+                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create (§0.1), " +
+                    "with NO Tick, at its own layer's Base sub-slot.");
+                Assert.AreEqual(LayerDrawOrder.QueueFor(i, LayerSubSlot.Above), textQueue,
+                    $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material, §0.2), " +
+                    "with NO Tick, at its own layer's Above sub-slot.");
+
+                // The tooth a re-bake cannot fake: icon strictly below its own layer's text (G7/D7).
+                Assert.Less(iconQueue, textQueue,
+                    $"slot {i}: the icon must draw strictly BEFORE (below) its own text — otherwise the badge " +
+                    "can paint over the number it frames, the exact bug this stage fixes.");
+                Assert.That(iconQueue, Is.InRange(bandBase, bandTop), $"slot {i}'s icon queue must lie inside its own layer's band.");
+                Assert.That(textQueue, Is.InRange(bandBase, bandTop), $"slot {i}'s text queue must lie inside its own layer's band.");
             }
+        }
+
+        // U2 — cross-layer: every sub-slot of layer 0's band must sit strictly below every sub-slot of
+        // layer 1's band. This is the tooth a "text = queue + 1" naive fix fails: under SubSlotsPerLayer = 1
+        // (keeping Above = 1), layer 0's text and layer 1's icon collide at the same value.
+        [Test]
+        public void Build_SymbolLayers_Layer0Band_IsStrictlyBelow_Layer1Band()
+        {
+            var settings = MapMaterialSetTestUtil.Load();
+            using var set = new RenderLayerSet();
+            set.Build(StyleParser.Parse(TwoSymbolLayersStyleJson), 0.0, settings);
+
+            var layer0 = (SymbolRenderLayer)set[0];
+            var layer1 = (SymbolRenderLayer)set[1];
+
+            Assert.Less(layer0.WorldTextMaterial.renderQueue, layer1.WorldIconMaterial.renderQueue,
+                "layer 0's text (its own band's Above sub-slot — the highest queue it owns) must be strictly " +
+                "below layer 1's icon (its own band's Base sub-slot — the lowest queue it owns): a symbol " +
+                "layer's text must never escape into the next layer's band.");
         }
 
         [Test]

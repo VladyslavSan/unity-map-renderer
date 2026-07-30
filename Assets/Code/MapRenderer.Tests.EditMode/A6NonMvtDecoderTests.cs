@@ -12,6 +12,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
@@ -72,6 +73,7 @@ namespace MapRenderer.Tests
             public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
             public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
+            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors FillRenderLayer (G7/D7)
             public Material Material => null;
 
             public FakeFillTileMeshRenderLayer(StyleLayer styleLayer, Fill.PaintProperties paint)

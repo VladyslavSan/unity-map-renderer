@@ -208,10 +208,17 @@ namespace MapRenderer.Tests
             double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
             Assert.AreEqual(expected.x, first.PathRender[0].x, 1e-6, "path vertex is the real projection, not a stub");
 
-            // Teeth: a POINT-placement layer over the SAME line layer yields NOTHING — the geometry fork is real.
+            // D2 (road-shields): a POINT-placement layer over the SAME line layer now anchors each path at its
+            // mid arc-length (one label per path) instead of skipping it outright — the G2 fix. (Superseded the
+            // pre-shields "point placement skips LineString features" assertion, which was the very bug D2 fixes.)
             var pointOverLines = new List<SymbolStyle.SymbolLabel>();
             SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
-            Assert.AreEqual(0, pointOverLines.Count, "point placement skips LineString features");
+            Assert.Greater(pointOverLines.Count, 0, "D2: point placement now anchors a LineString path at its mid arc-length");
+            foreach (SymbolStyle.SymbolLabel l in pointOverLines)
+            {
+                Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.Point, l.Placement, "a mid-arc anchor is Point-placed");
+                Assert.IsNull(l.PathRender, "a point-placed (mid-arc) label carries no curved path");
+            }
         }
 
         // ── S4-T5: Mercator extractor length-identity — the engine-free half of the byte-identity invariant ──

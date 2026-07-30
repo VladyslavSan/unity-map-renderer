@@ -122,5 +122,15 @@ namespace MapRenderer.Core.Text.Placement
         /// key's hash/equality unchanged) so distinct co-located icons no longer collide in cross-tile dedup
         /// / the A-4 point fade id.</summary>
         public string IconImage { get; init; }
+
+        /// <summary>Road-shields §10 D8/D10, threaded from <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.PairRole"/>.
+        /// Default <see cref="LabelPairRole.None"/> so every pre-pairing label is unaffected.</summary>
+        public LabelPairRole PairRole { get; init; }
+
+        /// <summary>Road-shields §10 D10, threaded from <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.PairId"/> —
+        /// the owner's <c>FeatureIndex</c>, stamped on both halves. Only unique per layer/tile, so
+        /// <see cref="Placement.LabelPairing"/>'s <c>LabelInstance</c> overload also matches
+        /// <see cref="TileKey"/>/<see cref="MaterialIndex"/>.</summary>
+        public int PairId { get; init; }
     }
 }

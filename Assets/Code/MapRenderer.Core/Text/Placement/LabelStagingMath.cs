@@ -49,55 +49,124 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// Stages one POINT label: its whole-label AABB collision box + glyph quads at the projected anchor
         /// (rotated by the #4 bearing under <c>text-rotation-alignment:map</c>). Writes
-        /// <c>candidates[ordinal]</c>/<c>emit[ordinal]</c>. Returns 1 if staged, or 0 (appending nothing) when it
-        /// has no quads, projected behind the camera, or culls outside the viewport margin.
+        /// <c>candidates[ordinal]</c> and ONE <c>CandidateEmit</c> at <c>emitCount</c>. Returns 1 if staged, or 0
+        /// (appending nothing) when it has no quads, projected behind the camera, or culls outside the viewport
+        /// margin.
         /// </summary>
         public static int StagePoint(in PointStageInput s, ReadOnlySpan<SymbolQuad> quads,
             float bearingRadians, double2 viewportLogicalPx, int ordinal,
             Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
-            Span<LabelCandidate> candidates, Span<CandidateEmit> emit)
+            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
         {
             if (quads.Length == 0) return 0;
             if (!s.Projected || !LabelScreenProjection.IsWithinViewportMargin(s.ScreenPx, viewportLogicalPx))
                 return 0;
 
-            float2 screenPx = LabelTranslate.ApplyTranslate(s.ScreenPx, s.TranslatePx, s.TranslateAnchor, bearingRadians);
+            int boxStart  = boxCount;
+            int emitStart = emitCount;
+            AppendPointHalf(in s, quads, s.ScreenPx, bearingRadians, ordinal,
+                boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
+
+            candidates[ordinal] = new LabelCandidate
+            {
+                BoxStart = boxStart, BoxCount = 1,
+                EmitStart = emitStart, EmitCount = 1,
+                SortKey = SanitizeSortKey(s.SortKey), FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
+                AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
+                FadeId = s.FadeId, WasPlacedLastFrame = s.WasPlacedLastFrame,
+            };
+            return 1;
+        }
+
+        /// <summary>
+        /// Road-shields §10 D8: stages a centred icon+text PAIR as ONE candidate spanning both halves' boxes —
+        /// the existing all-or-nothing multi-box machinery (<see cref="LabelCollision.SelectSurvivors(LabelCandidate[],int,LabelBox[],int,bool[],LabelCollisionGrid)"/>)
+        /// curved labels already run on, so the pair cannot self-block. The projection/viewport gate runs ONCE,
+        /// on <paramref name="owner"/> — the halves share an anchor by construction (both emitted from the
+        /// extractor's same <c>EmitAtAnchor</c> anchor), which is what makes the pair atomic at the cull too.
+        /// <paramref name="rider"/>'s box/quads/emit are appended only when <paramref name="riderQuads"/> is
+        /// non-empty (a text that laid out no glyphs degrades to a lone badge, never a dangling box). Writes
+        /// <c>candidates[ordinal]</c> and ONE OR TWO <c>CandidateEmit</c>s starting at <c>emitCount</c>. Returns 1
+        /// if staged, or 0 when the owner itself has no quads or culls.
+        /// </summary>
+        public static int StagePointPair(in PointStageInput owner, in PointStageInput rider,
+            ReadOnlySpan<SymbolQuad> ownerQuads, ReadOnlySpan<SymbolQuad> riderQuads,
+            float bearingRadians, double2 viewportLogicalPx, int ordinal,
+            Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
+            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
+        {
+            if (ownerQuads.Length == 0) return 0;
+            if (!owner.Projected || !LabelScreenProjection.IsWithinViewportMargin(owner.ScreenPx, viewportLogicalPx))
+                return 0;
+
+            int boxStart  = boxCount;
+            int emitStart = emitCount;
+            // Both halves are appended at the OWNER's raw projected anchor — AppendPointHalf applies each
+            // half's OWN translate on top of it, so a text-translate (icon has none) still resolves correctly.
+            AppendPointHalf(in owner, ownerQuads, owner.ScreenPx, bearingRadians, ordinal,
+                boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
+
+            int boxCountForCandidate = 1;
+            if (riderQuads.Length > 0)
+            {
+                AppendPointHalf(in rider, riderQuads, owner.ScreenPx, bearingRadians, ordinal,
+                    boxes, ref boxCount, quadsOut, ref quadCount, emit, ref emitCount);
+                boxCountForCandidate = 2;
+            }
+
+            candidates[ordinal] = new LabelCandidate
+            {
+                BoxStart = boxStart, BoxCount = boxCountForCandidate,
+                EmitStart = emitStart, EmitCount = emitCount - emitStart,
+                SortKey = SanitizeSortKey(owner.SortKey), FeatureIndex = owner.FeatureIndex, TileKey = owner.TileKey,
+                // §10 D8: the pair ignores collision only if BOTH halves do, and blocks unless BOTH decline to.
+                AllowOverlap = owner.AllowOverlap && rider.AllowOverlap,
+                IgnorePlacement = owner.IgnorePlacement && rider.IgnorePlacement,
+                LabelIndex = ordinal,
+                FadeId = owner.FadeId, WasPlacedLastFrame = owner.WasPlacedLastFrame,
+            };
+            return 1;
+        }
+
+        // Appends ONE half of a point label (a lone label, or one side of a §10 D8 pair): its collision box,
+        // glyph quads, and its own CandidateEmit — applying THIS half's own translate/rotation. `screenPx` is
+        // the shared, UN-translated projected anchor (StagePoint's own s.ScreenPx, or a pair's owner.ScreenPx
+        // for both halves — the gate/projection already ran once on the owner). Factored out of the pre-§10
+        // StagePoint body so a lone label and a pair's two halves cannot drift: ONE implementation appends a
+        // box + quads + emit, whether called once (StagePoint) or twice (StagePointPair).
+        private static void AppendPointHalf(in PointStageInput s, ReadOnlySpan<SymbolQuad> quads,
+            float2 screenPx, float bearingRadians, int candidateOrdinal,
+            Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
+            Span<CandidateEmit> emit, ref int emitCount)
+        {
+            float2 translatedScreenPx = LabelTranslate.ApplyTranslate(screenPx, s.TranslatePx, s.TranslateAnchor, bearingRadians);
             float rotationRadians = LabelBearing.BillboardRotationRadians(s.RotationAlignment, bearingRadians);
             float sortKey = SanitizeSortKey(s.SortKey); // B1: finite-SortKey invariant (comparator totality)
 
-            int boxStart = boxCount;
             boxes[boxCount++] = LabelBox.Build(
-                screenPx, s.BoundsMin, s.BoundsMax, s.TextSizePx, s.PaddingPx,
-                sortKey, s.FeatureIndex, s.TileKey, ordinal, s.AllowOverlap, s.IgnorePlacement);
+                translatedScreenPx, s.BoundsMin, s.BoundsMax, s.TextSizePx, s.PaddingPx,
+                sortKey, s.FeatureIndex, s.TileKey, candidateOrdinal, s.AllowOverlap, s.IgnorePlacement);
 
             int quadStart = quadCount;
             for (int q = 0; q < quads.Length; q++)
                 quadsOut[quadCount++] = new PlacedQuad
                 {
-                    Quad = quads[q], AnchorScreenPx = screenPx, TextSizePx = s.TextSizePx,
+                    Quad = quads[q], AnchorScreenPx = translatedScreenPx, TextSizePx = s.TextSizePx,
                     Depth = s.Depth, Color = s.Color, RotationRadians = rotationRadians,
                 };
 
-            candidates[ordinal] = new LabelCandidate
-            {
-                BoxStart = boxStart, BoxCount = 1,
-                SortKey = sortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
-                AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
-                FadeId = s.FadeId, WasPlacedLastFrame = s.WasPlacedLastFrame,
-            };
             // Epic A / A1 (design §11 A1 D2/D6): carry the world-anchored draw payload alongside the
-            // (unchanged) screen candidate/box/quad above — IsWorld=true marks this candidate for
-            // WorldLabelRenderer's emit branch (D2/D6), never a curved one (StageCurvedAnchor leaves these
-            // fields default). TranslateDeltaPx is the SAME translate already folded into screenPx above,
-            // expressed as a delta from the untranslated anchor (D4) — the world path adds it to OffsetPx
-            // instead of the (unavailable, un-projected) anchor.
-            emit[ordinal] = new CandidateEmit
+            // (unchanged) screen box/quad above — IsWorld=true marks this emit for WorldLabelRenderer's emit
+            // branch (D2/D6), never a curved one (StageCurvedAnchor leaves these fields default).
+            // TranslateDeltaPx is the SAME translate already folded into translatedScreenPx above, expressed
+            // as a delta from the untranslated anchor (D4) — the world path adds it to OffsetPx instead of
+            // the (unavailable, un-projected) anchor.
+            emit[emitCount++] = new CandidateEmit
             {
                 QuadStart = quadStart, QuadCount = quads.Length, Slot = s.Slot, AtlasKind = s.AtlasKind,
                 AnchorLocal = s.AnchorLocal, TileOriginRender = s.TileOriginRender, TileKey = s.TileKey,
-                TranslateDeltaPx = screenPx - s.ScreenPx, IsWorld = true,
+                TranslateDeltaPx = translatedScreenPx - screenPx, IsWorld = true,
             };
-            return 1;
         }
 
         /// <summary>
@@ -120,7 +189,7 @@ namespace MapRenderer.Core.Text.Placement
             Span<float2> pathScratch, Span<float> cumulativeScratch,
             float bearingRadians, int ordinal,
             Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
-            Span<LabelCandidate> candidates, Span<CandidateEmit> emit)
+            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
         {
             int pathLen = screenPath.Length;
             if (pathLen < 2 || glyphs.Length == 0 || anchors.Length == 0) return 0;
@@ -156,7 +225,7 @@ namespace MapRenderer.Core.Text.Placement
                 if (StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, glyphs, ref cursor,
                         ordinal + staged, anchorFadeIds[a], anchorWasPlaced[a] != 0,
                         centerArc, labelCenterBaked, scale, pathDepth, bearingRadians,
-                        boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit))
+                        boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit, ref emitCount))
                     staged++;
             }
 
@@ -165,7 +234,7 @@ namespace MapRenderer.Core.Text.Placement
                 StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, glyphs, ref cursor,
                     ordinal, anchorFadeIds[anchorCount], anchorWasPlaced[anchorCount] != 0,
                     total * 0.5f, labelCenterBaked, scale, pathDepth, bearingRadians,
-                    boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit))
+                    boxes, ref boxCount, quadsOut, ref quadCount, candidates, emit, ref emitCount))
                 staged = 1;
 
             return staged;
@@ -207,7 +276,7 @@ namespace MapRenderer.Core.Text.Placement
             int ordinal, long fadeId, bool wasPlaced,
             float centerArc, float labelCenterBaked, float scale, float pathDepth, float bearingRadians,
             Span<LabelBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
-            Span<LabelCandidate> candidates, Span<CandidateEmit> emit)
+            Span<LabelCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
         {
             // keep-upright: a centre tangent pointing leftward reads right-to-left; walk the arc reversed and flip
             // each glyph +pi so it still reads left-to-right (each anchor decides its own flip — a line can bend back).
@@ -297,9 +366,11 @@ namespace MapRenderer.Core.Text.Placement
                 };
             }
 
+            int emitStart = emitCount;
             candidates[ordinal] = new LabelCandidate
             {
                 BoxStart = boxStart, BoxCount = glyphs.Length,
+                EmitStart = emitStart, EmitCount = 1,
                 SortKey = sortKey, FeatureIndex = s.FeatureIndex, TileKey = s.TileKey,
                 AllowOverlap = s.AllowOverlap, IgnorePlacement = s.IgnorePlacement, LabelIndex = ordinal,
                 FadeId = fadeId, WasPlacedLastFrame = wasPlaced,
@@ -314,7 +385,7 @@ namespace MapRenderer.Core.Text.Placement
             // the dead screen/A-B path; this carries the SAME translate into the live world path.
             float2 translateDeltaPx = LabelTranslate.ApplyTranslate(
                 float2.zero, s.TranslatePx, s.TranslateAnchor, bearingRadians);
-            emit[ordinal] = new CandidateEmit
+            emit[emitCount++] = new CandidateEmit
             {
                 QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = LabelKind.Text,
                 TileKey = s.TileKey, TileOriginRender = s.TileOriginRender, TranslateDeltaPx = translateDeltaPx,

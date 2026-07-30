@@ -330,6 +330,108 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
+        // ── §10 D8 P11: a centred icon+text pair's steady-state Tick allocates ZERO. The pair collapses two
+        //    records into ONE LabelCandidate/emit-range pair, which is fewer sort/grid/fade operations than
+        //    before, not more — LabelPairing is a stateless O(1) helper and AppendPointHalf reuses the existing
+        //    emit NativeArray, so nothing here should allocate any differently than the lone-icon tooth above. ──
+        [Test]
+        public void Tick_SteadyState_CentredPair_AllocatesNoGCMemory()
+        {
+            var camGo = new GameObject("LabelAllocPair_TestCamera");
+            var uCam = camGo.AddComponent<Camera>();
+            uCam.targetTexture = new RenderTexture(320, 240, 0);
+            var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
+            var mapCamera = new MapCamera(uCam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = lookAt.Latitude, Longitude = lookAt.Longitude, Altitude = 0.0 }, zoom: 5.0, heading: 0.0, tilt: 0.0));
+            var frame = new SceneFrame
+            {
+                SceneOriginRender = mapCamera.Projection.Project(lookAt),
+                Rebase = float3x3.identity,
+            };
+
+            var atlasTexture = BuildTinyAtlasTexture();
+            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5);
+
+            var iconQuads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-8f, 8f), BottomRight = new float2(8f, -8f),
+                    UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
+                },
+            };
+            var iconLayout = new TextLayoutResult { Quads = iconQuads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1 };
+            var icon = new LabelInstance
+            {
+                AnchorRender = frame.SceneOriginRender,
+                Layout = iconLayout,
+                Kind = LabelKind.Icon,
+                IconImage = "shield",
+                Paint = LabelPaint.Default,
+                TextSizePx = TextQuadLayout.OneEm,
+                SortKey = 0f,
+                FeatureIndex = 0,
+                TileKey = tileKey,
+                PairRole = LabelPairRole.Owner,
+                PairId = 0,
+            };
+
+            var textQuads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                    UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
+                },
+            };
+            var textLayout = new TextLayoutResult { Quads = textQuads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
+            var text = new LabelInstance
+            {
+                AnchorRender = frame.SceneOriginRender,
+                Layout = textLayout,
+                Paint = LabelPaint.Default,
+                TextSizePx = 24f,
+                Text = "42",
+                SortKey = 0f,
+                FeatureIndex = 1,
+                TileKey = tileKey,
+                PairRole = LabelPairRole.Rider,
+                PairId = 0,
+            };
+            // Owner immediately followed by its Rider — the adjacency contract TestSymbolPlan/the baker preserve.
+            var labels = new List<LabelInstance> { icon, text };
+
+            var system = new LabelPlacementSystem(mapCamera,
+                worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
+                worldIconBase: new Material(Shader.Find("Map/Symbol/IconWorld")));
+
+            using var plan = new TestSymbolPlan(mapCamera.Projection);
+            SymbolGatherPlan builtPlan = plan.Build(labels);
+
+            try
+            {
+                for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                Assert.AreEqual(1, system.LastCandidateCount, "precondition: the pair must stage as ONE candidate.");
+                Assert.AreEqual(2, system.LastQuadCount, "precondition: both halves' quads must place.");
+                Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Icon), "precondition: the icon presenter must show.");
+                Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "precondition: the text presenter must show.");
+
+                Assert.That(() =>
+                    {
+                        for (int i = 0; i < 65; i++) system.Tick(in frame, builtPlan, atlasTexture);
+                    },
+                    Is.Not.AllocatingGCMemory(),
+                    "65 steady-state Ticks over a centred icon+text pair (crossing the K=60 idle-reclaim boundary) " +
+                    "must allocate ZERO managed garbage.");
+            }
+            finally
+            {
+                system.Dispose();
+                atlasTexture.Dispose();
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
         // ── Stage 2 (labels-async-reconcile) T-ALLOC: a WARM per-frame cross-tile dedup allocates ZERO. The
         //    interning happens ONCE at CompleteBuild, so the per-frame CollectInto does no string work; and the
         //    integer DedupKey (a `readonly struct : IEquatable<DedupKey>`) does NOT box in the reused _dedup.

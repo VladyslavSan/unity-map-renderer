@@ -9,9 +9,14 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The draw-side payload of one collision candidate: the contiguous range of staged
     /// <see cref="PlacedQuad"/>s to emit if it survives, and the material/mesh slot to emit them into.
-    /// Kept parallel to the <see cref="LabelCandidate"/> array (keyed by its <see cref="LabelCandidate.LabelIndex"/>)
-    /// so collision can sort the candidates without disturbing the quad ranges. Blittable (all ints) so the
-    /// staging math can fill it in a Burst job (Lever C).
+    /// <para><b>NOT keyed by <see cref="LabelCandidate.LabelIndex"/>.</b> Since §10 (D8) a candidate owns a
+    /// RANGE of emits — <see cref="LabelCandidate.EmitStart"/>/<see cref="LabelCandidate.EmitCount"/>, mirroring
+    /// <see cref="LabelCandidate.BoxStart"/>/<see cref="LabelCandidate.BoxCount"/> — because a centred icon+text
+    /// pair is ONE candidate emitting TWO of these (the halves live in different atlases, so they cannot share
+    /// one emit). Indexing this pool by <c>LabelIndex</c> reads the wrong emit for every candidate after the
+    /// first pair; always go through the owning candidate's range. Collision may still sort the candidates
+    /// freely — the ranges point INTO this pool and are unaffected.</para>
+    /// Blittable (all ints) so the staging math can fill it in a Burst job (Lever C).
     /// </summary>
     public struct CandidateEmit
     {

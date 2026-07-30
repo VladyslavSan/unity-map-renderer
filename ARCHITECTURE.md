@@ -168,7 +168,11 @@ The style is an **ordered list of layers**, composited in order (painter's algor
 - **Flat layers (fills, lines — the bulk):** painter's algorithm — **ZWrite off**, draw in style order.
   Implemented via a **custom URP `ScriptableRenderPass` / `BatchRendererGroup`** that issues draws in layer
   order with `SortingCriteria.None` (owns the order; scales past the integer-queue trick). Simple interim
-  fallback: `material.renderQueue = base + layerIndex`, ZWrite off.
+  fallback: each declared layer owns a small contiguous **band** of queue values
+  (`material.renderQueue = base + layerIndex * SubSlotsPerLayer + subSlot`), ZWrite off — a symbol layer's
+  icon and text occupy two sub-slots of their own band so the icon always draws under its own text (G7/D7,
+  road-shields Stage 2); every other kind uses one sub-slot. Widening the stride from 1 to 2 halves the
+  interim's layer-count runway (~2000 → ~1000; realistic styles stay far below either).
 - **3D layers (fill-extrusion, terrain, globe):** ZWrite on + depth test; give each layer a **depth
   range/slice** so the depth buffer enforces *both* layer order *and* 3D occlusion (MapLibre's approach).
 - Order *within* a layer across tiles is irrelevant (disjoint regions); order *across* layers is strict.

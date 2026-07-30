@@ -15,9 +15,14 @@ namespace MapRenderer.Core.Text
     /// (<c>symbol-placement: line</c> is a follow-up, S19 stage doc §2.3).
     ///
     /// <para>
-    /// <b>Baseline convention:</b> y-up; line 0's baseline is at y=0, line n's baseline is at
-    /// <c>-n * LineHeightEm * OneEm</c>. The unanchored block spans <c>y ∈ [-blockHeight, 0]</c> before
-    /// <see cref="TextLayoutOptions.Anchor"/>/<see cref="TextLayoutOptions.Offset"/> translate it.
+    /// <b>Baseline convention:</b> y-up; line 0's origin is at y=0, line n's origin is at
+    /// <c>-n * LineHeightEm * OneEm</c>. That origin is the font's ASCENT reference, not its baseline —
+    /// the glyph-PBF <c>top</c> metric is top-referenced and negative, so the actual typographic baseline
+    /// sits <see cref="GlyphSdf.BaselineBelowReferencePx"/> below it (see <see cref="PlaceGlyph"/>). The
+    /// unanchored block spans <c>y ∈ [-blockHeight, 0]</c> as a LAYOUT BOX before
+    /// <see cref="TextLayoutOptions.Anchor"/>/<see cref="TextLayoutOptions.Offset"/> translate it:
+    /// <c>Top</c>/<c>Bottom</c> anchor that box's edges, while <c>Centre</c> positions the block's OPTICAL
+    /// centre, which is deliberately not the box midpoint (<c>docs/road-shields-design.md</c> §11 D12).
     /// </para>
     ///
     /// <para>
@@ -41,6 +46,36 @@ namespace MapRenderer.Core.Text
 
         /// <summary><see cref="TextLayoutOptions.LineHeightEm"/> fallback for a non-positive (e.g. zero-valued <see cref="TextLayoutOptions"/>) value.</summary>
         private const float DefaultLineHeightEm = 1.2f;
+
+        /// <summary>
+        /// How far below a line's reference origin that line's OPTICAL centre sits — the baseline
+        /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>), less half a cap height
+        /// (<see cref="GlyphSdf.NominalCapHeightEm"/>) — used only by <see cref="VerticalAnchorShiftPx"/>'s
+        /// <see cref="VerticalAnchor.Centre"/> case (<c>docs/road-shields-design.md</c> §11 D12). Not the
+        /// midpoint of the line box: the box's top edge carries the font's ascent slack, so the box
+        /// midpoint sits noticeably above the ink's actual optical centre.
+        /// <para>
+        /// The em conversion cancels exactly: the cap height is <c>17/24</c> em and <see cref="OneEm"/> is
+        /// 24, so the half-cap term is <c>0.5 · (17/24) · 24 = 8.5</c> baked px and the whole constant is
+        /// <c>26 − 8.5 = 17.5</c> — an exact value rather than an approximation, which is why the teeth can
+        /// pin it as a clean hand-derived literal.
+        /// </para>
+        /// </summary>
+        private const float OpticalCentreBelowReferencePx = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * OneEm;
+
+        /// <summary>
+        /// The three cases <see cref="TextAnchor"/>'s vertical component ever resolves to. Kept as a
+        /// dedicated enum rather than a bare 0/0.5/1 <c>float</c> (which the old code used) precisely
+        /// because <see cref="VerticalAnchor.Centre"/> is deliberately NOT the midpoint of
+        /// <see cref="VerticalAnchor.Top"/> and <see cref="VerticalAnchor.Bottom"/> (§11 D12) — a bare
+        /// lerp factor would invite exactly the interpolation bug this stage removes.
+        /// </summary>
+        private enum VerticalAnchor
+        {
+            Top,
+            Centre,
+            Bottom,
+        }
 
         /// <summary>Allocating overload: lays out <paramref name="run"/> and returns a new <see cref="TextLayoutResult"/> (quads + block bbox + line count).</summary>
         public static TextLayoutResult Layout(ShapedRun run, IGlyphAtlasView atlas, in TextLayoutOptions options)
@@ -78,7 +113,7 @@ namespace MapRenderer.Core.Text
             float lineHeightPx = lineHeightEm * OneEm;
             float letterPx = options.LetterSpacingEm * OneEm;
 
-            (float hAlign, float vAlign) = ResolveAlignFactors(options.Anchor);
+            (float hAlign, VerticalAnchor vertical) = ResolveAlignFactors(options.Anchor);
             TextJustify resolvedJustify = ResolveJustify(options.Justify, options.Anchor);
             float justifyFactor = resolvedJustify switch
             {
@@ -176,10 +211,9 @@ namespace MapRenderer.Core.Text
             ApplyJustifyToLine(output, lineOutputStart, currentLineWidth, justifyFactor);
             blockWidth = math.max(blockWidth, currentLineWidth);
             int lineCount = lineIndex + 1;
-            float blockHeight = lineCount * lineHeightPx;
 
             float2 offsetShiftEm = options.RadialOffset != 0f
-                ? ComputeRadialOffset(hAlign, vAlign, options.RadialOffset)
+                ? ComputeRadialOffset(hAlign, vertical, options.RadialOffset)
                 : options.Offset;
             float2 offsetShift = offsetShiftEm * OneEm;
 
@@ -187,7 +221,7 @@ namespace MapRenderer.Core.Text
             // width was known) plus this single block-wide constant reproduces the full
             // anchor+justify+offset shift for every quad — see the class doc's algorithm-shape note.
             float globalX = blockWidth * (justifyFactor - hAlign) + offsetShift.x;
-            float globalY = vAlign * blockHeight + offsetShift.y;
+            float globalY = VerticalAnchorShiftPx(vertical, lineCount, lineHeightPx) + offsetShift.y;
 
             float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
             bool any = false;
@@ -311,8 +345,8 @@ namespace MapRenderer.Core.Text
             }
         }
 
-        /// <summary>hAlign: Left*=0, Right*=1, else .5. vAlign: Top*=0, Bottom*=1, else .5 (plan (b)).</summary>
-        private static (float hAlign, float vAlign) ResolveAlignFactors(TextAnchor anchor)
+        /// <summary>hAlign: Left*=0, Right*=1, else .5. vertical: Top*-&gt;Top, Bottom*-&gt;Bottom, else Centre (plan (b)).</summary>
+        private static (float hAlign, VerticalAnchor vertical) ResolveAlignFactors(TextAnchor anchor)
         {
             float hAlign = anchor switch
             {
@@ -320,14 +354,30 @@ namespace MapRenderer.Core.Text
                 TextAnchor.Right or TextAnchor.TopRight or TextAnchor.BottomRight => 1f,
                 _ => 0.5f,
             };
-            float vAlign = anchor switch
+            VerticalAnchor vertical = anchor switch
             {
-                TextAnchor.Top or TextAnchor.TopLeft or TextAnchor.TopRight => 0f,
-                TextAnchor.Bottom or TextAnchor.BottomLeft or TextAnchor.BottomRight => 1f,
-                _ => 0.5f,
+                TextAnchor.Top or TextAnchor.TopLeft or TextAnchor.TopRight => VerticalAnchor.Top,
+                TextAnchor.Bottom or TextAnchor.BottomLeft or TextAnchor.BottomRight => VerticalAnchor.Bottom,
+                _ => VerticalAnchor.Centre,
             };
-            return (hAlign, vAlign);
+            return (hAlign, vertical);
         }
+
+        /// <summary>
+        /// The whole vertical anchoring rule in one place (§11 D12). <see cref="VerticalAnchor.Top"/> and
+        /// <see cref="VerticalAnchor.Bottom"/> anchor the block's LAYOUT-BOX edges (unchanged from before
+        /// this stage); <see cref="VerticalAnchor.Centre"/> anchors the block's OPTICAL centre — the
+        /// midpoint between the FIRST line's optical centre and the LAST line's, which is why it scales by
+        /// <c>(lineCount - 1)</c> rather than <c>lineCount</c>: line spacing is untouched, and the whole
+        /// block simply moves by one constant (<see cref="OpticalCentreBelowReferencePx"/>) regardless of
+        /// line count.
+        /// </summary>
+        private static float VerticalAnchorShiftPx(VerticalAnchor vertical, int lineCount, float lineHeightPx) => vertical switch
+        {
+            VerticalAnchor.Top => 0f,
+            VerticalAnchor.Bottom => lineCount * lineHeightPx,
+            _ => OpticalCentreBelowReferencePx + (lineCount - 1) * lineHeightPx * 0.5f,
+        };
 
         /// <summary>Auto resolves from anchor (plan (d)): Left*-&gt;Left, Right*-&gt;Right, else Center.</summary>
         private static TextJustify ResolveJustify(TextJustify justify, TextAnchor anchor)
@@ -350,10 +400,10 @@ namespace MapRenderer.Core.Text
         /// further -y. Self-pinned by the T3 golden (no MapLibre source consulted); flagged for the
         /// S20 visual reconcile.
         /// </summary>
-        private static float2 ComputeRadialOffset(float hAlign, float vAlign, float radialOffsetEm)
+        private static float2 ComputeRadialOffset(float hAlign, VerticalAnchor vertical, float radialOffsetEm)
         {
             float xSign = hAlign == 0f ? 1f : (hAlign == 1f ? -1f : 0f);
-            float ySign = vAlign == 0f ? -1f : (vAlign == 1f ? 1f : 0f);
+            float ySign = vertical == VerticalAnchor.Top ? -1f : (vertical == VerticalAnchor.Bottom ? 1f : 0f);
 
             if (xSign != 0f && ySign != 0f)
             {

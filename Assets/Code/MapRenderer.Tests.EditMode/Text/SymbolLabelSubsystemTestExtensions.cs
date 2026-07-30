@@ -45,5 +45,11 @@ namespace MapRenderer.Tests
         /// as an oracle against the async front-buffer result.</summary>
         internal static SymbolTileLabelStore Store(this SymbolLabelSubsystem subsystem)
             => subsystem._store;
+
+        /// <summary>D6 (road-shields): builds parked awaiting the sprite fetch to settle — proves the
+        /// deadline fallback actually DRAINS the queue once tripped, rather than merely letting one build
+        /// commit while the backlog keeps growing.</summary>
+        internal static int PendingSpriteCount(this SymbolLabelSubsystem subsystem)
+            => subsystem._pendingSpriteQueue.Count;
     }
 }

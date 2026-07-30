@@ -339,14 +339,16 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<PlacedQuad>     _stageQuads;
         private NativeList<LabelCandidate> _stageCandidates;
         private NativeList<CandidateEmit>  _stageEmit;
-        private NativeArray<int>           _stageCounts;          // [candidateCount, boxCount, quadCount]
+        private NativeArray<int>           _stageCounts;          // [candidateCount, boxCount, quadCount, emitCount]
         private NativeList<float2>         _stagePath;            // arc-walk scratch (>= max path length)
         private NativeList<float>          _stageCumulativeLength;
 
         // Where a surviving candidate's already-built quads live in _stageQuads + which material slot they draw
-        // in (Core.Text.Placement.CandidateEmit) — keyed by the candidate's creation ordinal
-        // (LabelCandidate.LabelIndex) so it is stable across the in-place candidate sort; emission just copies the
-        // [QuadStart, QuadStart+QuadCount) range. Filled by LabelStagingMath alongside the candidates.
+        // in (Core.Text.Placement.CandidateEmit). §10 D8: NOT keyed by LabelCandidate.LabelIndex — a candidate
+        // owns a RANGE (EmitStart/EmitCount), since a centred icon+text pair is ONE candidate emitting TWO emits
+        // (different atlases). Emission walks that range and copies each emit's [QuadStart, QuadStart+QuadCount).
+        // The ranges point INTO this pool, so the in-place candidate sort still cannot disturb them.
+        // Filled by LabelStagingMath alongside the candidates.
 
         /// <summary>Number of <see cref="Tick"/> calls so far — T5 structural guard (the vertex buffer is
         /// rebuilt every Tick, not once at tile consume). Test surface.</summary>
@@ -503,7 +505,7 @@ namespace MapRenderer.Unity.Text.Placement
             _stageQuads = new NativeList<PlacedQuad>(Allocator.Persistent);
             _stageCandidates = new NativeList<LabelCandidate>(Allocator.Persistent);
             _stageEmit = new NativeList<CandidateEmit>(Allocator.Persistent);
-            _stageCounts = new NativeArray<int>(3, Allocator.Persistent);
+            _stageCounts = new NativeArray<int>(4, Allocator.Persistent); // §10 D8: [3]=emitCount
             _stagePath = new NativeList<float2>(Allocator.Persistent);
             _stageCumulativeLength = new NativeList<float>(Allocator.Persistent);
 
@@ -701,8 +703,16 @@ namespace MapRenderer.Unity.Text.Placement
                                 // world renderer — StagePoint and, since Stage AC, StageCurved both set
                                 // CandidateEmit.IsWorld unconditionally (the old screen _slotQuads/_slotIconQuads
                                 // bucket routing was retired with the dead render path it fed).
-                                CandidateEmit emit = _stageEmit[cand.LabelIndex];
-                                totalQuads += WorldRenderer.Emit(in emit, _stageQuads.AsArray(), opacity);
+                                // §10 D8: a candidate's emits are no longer keyed by LabelIndex alone — an
+                                // ordinary candidate has EmitCount == 1 (one iteration, unchanged cost), and a
+                                // centred icon+text pair has EmitCount == 2 (its icon and text, each with its
+                                // own (Slot, AtlasKind)) — both draw at this ONE opacity (one EaseFade above),
+                                // which is the point: the pair fades as a single unit.
+                                for (int e = cand.EmitStart, eEnd = cand.EmitStart + cand.EmitCount; e < eEnd; e++)
+                                {
+                                    CandidateEmit emit = _stageEmit[e];
+                                    totalQuads += WorldRenderer.Emit(in emit, _stageQuads.AsArray(), opacity);
+                                }
                             }
                         }
 
@@ -1010,6 +1020,38 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
+        // §10 D10: debug-only (compiled out of release, costs a live build nothing — no field, no allocation).
+        // Walks the mirror's compacted POINT pool: every Owner must be immediately followed by its Rider
+        // (Points[d+1]) and every Rider immediately preceded by its Owner — LabelStageJob.Execute's own
+        // adjacency check (SAME shape), surfaced here loudly instead of silently degrading to a lone badge.
+        [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
+        private void AssertPairAdjacency()
+        {
+            NativeArray<PointStageInput> points = _mirrorPoints.AsArray();
+            for (int d = 0; d < _mirrorPointCount; d++)
+            {
+                LabelPairRole role = points[d].PairRole;
+                if (role == LabelPairRole.Owner)
+                {
+                    bool riderFollows = d + 1 < _mirrorPointCount && points[d + 1].PairRole == LabelPairRole.Rider;
+                    if (!riderFollows)
+                        UnityEngine.Debug.LogAssertion(
+                            $"[LabelPlacementSystem] mirror point[{d}] is a §10 pair Owner with no Rider immediately " +
+                            "after it — LabelStageJob degrades it to a lone badge (safe), but the reconciler's " +
+                            "owner->rider adjacency contract was broken upstream; capture this frame.");
+                }
+                else if (role == LabelPairRole.Rider)
+                {
+                    bool ownerPrecedes = d > 0 && points[d - 1].PairRole == LabelPairRole.Owner;
+                    if (!ownerPrecedes)
+                        UnityEngine.Debug.LogAssertion(
+                            $"[LabelPlacementSystem] mirror point[{d}] is a §10 pair Rider with no Owner immediately " +
+                            "before it — an orphan rider; LabelStageJob skips staging it (safe), but the reconciler's " +
+                            "adjacency contract was broken upstream; capture this frame.");
+                }
+            }
+        }
+
         // The label's text-color, sRGB→linear + folded text-opacity — the vertex color the shader emits
         // directly (mirrors StyledFill/LineTileBuilder's Color.linear; without it a dark #333 uploads as
         // linear ~0.2 and displays washed-out). Alpha is not gamma-encoded — carried straight.
@@ -1122,6 +1164,15 @@ namespace MapRenderer.Unity.Text.Placement
                 _mirrorMaxBoxes = _gatherCounts[SymbolGatherJob.CountMaxBoxes];
                 _mirrorMaxQuads = _gatherCounts[SymbolGatherJob.CountMaxQuads];
                 _mirrorMaxCandidates = _gatherCounts[SymbolGatherJob.CountMaxCandidates];
+
+                // §10 D10: debug-only sanity check on the REBUILD path (never the memo hit above — a held
+                // mirror's adjacency was already checked the frame it was built). By the time a record reaches
+                // here its PairRole is no longer a proposal — SymbolTileLabelBlockBaker/SymbolLabelReconciler
+                // both already resolved it via LabelPairing — so a stamped Owner/Rider SHOULD always have its
+                // partner immediately adjacent; a miss here means something between bake and gather broke the
+                // adjacency contract (SymbolGatherJob compacts point records in WINNER order — the property
+                // this checks).
+                AssertPairAdjacency();
             }
 
             _mirrorCount = winners; // set BEFORE WritePerFrameMasks — it bounds its copies on THIS frame's count, not
@@ -1388,7 +1439,9 @@ namespace MapRenderer.Unity.Text.Placement
             for (int s = 0; s < candidateCount; s++)
             {
                 LabelCandidate c = _stageCandidates[s];
-                int slot = _stageEmit[c.LabelIndex].Slot;
+                // §10 D8: EmitStart, not LabelIndex — a pair's icon and text share one layer/slot, so either
+                // half's emit record answers this; EmitStart is always valid (EmitCount >= 1).
+                int slot = _stageEmit[c.EmitStart].Slot;
                 bool suppress = slot >= 0 && slot < symbolLayers.Count && symbolLayers[slot]?.StyleLayer != null
                     && !symbolLayers[slot].StyleLayer.IsVisibleAtZoom(zoom);
                 if (c.Suppressed != suppress) { c.Suppressed = suppress; _stageCandidates[s] = c; }

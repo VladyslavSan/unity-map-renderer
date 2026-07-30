@@ -33,9 +33,14 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly SymbolStyle.StyleLayer[] _layerWrapper;
         private readonly int[]                    _materialIndexWrapper;
         private readonly List<LabelInstance>      _sharedOutput;
-        // I5b: forwarded verbatim to ExtractLayers' spriteAtlas param — null (fetch not resolved yet, or no
-        // 'sprite' URL) means this build extracts no icon labels; a tile kicked before the fetch resolves
-        // self-heals on its next rebuild once SymbolLabelSubsystem's sheet is set (§I5b plan).
+        // I5b/D6: forwarded verbatim to ExtractLayers' spriteAtlas param. D6 (docs/road-shields-design.md §3
+        // D6): a build's worker step (this class) only ever runs once SymbolLabelSubsystem.SpritesSettled is
+        // true — TryBeginBuild PARKS a build kicked before the sprite fetch settles instead of constructing
+        // this processor at all. `_spriteAtlas` is non-null here whenever the style actually resolved a
+        // sheet; it is null (and stays inert — every icon draw/extract path downstream already guards on it)
+        // for a style with no 'sprite' URL, an absent (404/204) sheet, OR a fetch that never resolved before
+        // SpriteFetchDeadlineSeconds elapsed (the bounded fallback for a hung endpoint with no HTTP timeout —
+        // "settled" then means "gave up waiting", not "the atlas is ready").
         private readonly SpriteAtlasView _spriteAtlas;
 
         // Set by ProcessOnWorker; null if the worker step never ran (an earlier processor in the same

@@ -75,7 +75,7 @@ namespace MapRenderer.Tests
                 "text-padding default is 2 (the resolver applies the spec default; LabelInstance's carrier default is 0)");
             Assert.IsFalse(sym.Layout.TextAllowOverlap, "text-allow-overlap default is false");
             Assert.IsFalse(sym.Layout.TextIgnorePlacement, "text-ignore-placement default is false");
-            Assert.AreEqual(SymbolPlacement.Point, sym.Layout.SymbolPlacement, "symbol-placement default is point");
+            Assert.AreEqual(SymbolPlacement.Point, sym.Layout.SymbolPlacement.Evaluate(0.0), "symbol-placement default is point");
             Assert.AreEqual(250f, sym.Layout.SymbolSpacing.Evaluate(0.0), 1e-6, "symbol-spacing default is 250");
             Assert.AreEqual(45f, sym.Layout.TextMaxAngle.Evaluate(0.0), 1e-6, "text-max-angle default is 45");
             Assert.IsTrue(sym.Layout.TextKeepUpright, "text-keep-upright default is true");

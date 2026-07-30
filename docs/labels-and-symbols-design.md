@@ -452,6 +452,11 @@ The reuse that makes this tractable: `PlacedQuad` already carries **per-quad** `
 `RotationRadians`, so the Burst billboard job needs **no change** — a curved label is just N `PlacedQuad`s with N
 different anchors/rotations instead of N sharing one. New work is two pure Core helpers plus the per-frame walk.
 
+> **Road shields (docs/road-shields-design.md).** `symbol-placement: line` no longer always curves: when the
+> layer's resolved rotation-alignment is `viewport` (an explicit style choice, not the `auto`→map default this
+> section describes), MapLibre lays symbols out **upright at each along-line anchor** instead — the road-shield
+> look. See that doc's D3/D4 for the reframe; every `auto`-aligned line layer covered above is unaffected.
+
 **New Core pieces (engine-free, headless-tested):**
 - **`PolylineArcWalker`** — over a screen-space `float2` polyline: `TotalLength` and
   `At(arcDistance) → (float2 point, float tangentRadians)` by walking cumulative segment lengths and lerping
@@ -700,7 +705,11 @@ a stage plan may not quietly cross one.
   - **SDF / recolorable sprites** — the `"sdf": true` sprite variant + `icon-color`/`icon-halo-*`. Deferring
     these is *exactly* what keeps the icon shader trivial (a straight `tex2D` sample, no SDF median-distance,
     no halo). `icon-color`/`icon-halo-*` parse-and-carry is allowed but stays inert until the SDF path lands.
-  - `icon-line-placement` (icons along a line / `symbol-placement: line` with an icon), `icon-keep-upright`,
+  - `icon-line-placement` (icons along a line / `symbol-placement: line` with an icon) — **partially lifted**
+    by the road-shields epic (docs/road-shields-design.md D4): a `viewport`-resolved line icon now emits as
+    an upright point-icon at each along-line anchor (the existing point-icon path, a different anchor). A
+    **map-aligned** line icon (`icon-rotation-alignment` resolving `map`, e.g. `road_one_way_arrow*`) stays
+    fenced — that needs icons rotated to the line tangent, a genuinely new staging path. `icon-keep-upright`,
     `icon-pitch-alignment`, `icon-translate`, `icon-image` **stretchable** (`content`/`stretchX/Y`). Icons on
     line features are dropped in v1 (text still places along the line as today).
 

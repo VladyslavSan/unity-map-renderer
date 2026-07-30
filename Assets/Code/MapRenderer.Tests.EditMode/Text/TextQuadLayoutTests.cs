@@ -88,12 +88,12 @@ namespace MapRenderer.Tests.Text
             float cellTopYLowerA = 0f + entryLowerA.Top + GlyphSdf.Buffer;
             float lineWidth = penXAfterA + entryLowerA.Advance; // == blockWidth (single line)
 
-            float lineHeightPx = 1.2f * TextQuadLayout.OneEm; // default line-height
-            float blockHeight = lineHeightPx; // lineCount == 1
-
-            // Center anchor: hAlign = vAlign = .5; justify auto -> Center (factor .5), which cancels
-            // for a single line (lineWidth == blockWidth) -- see TextQuadLayout's class doc.
-            float2 anchorShift = new float2(-0.5f * lineWidth, 0.5f * blockHeight);
+            // Center anchor: hAlign = .5; justify auto -> Center (factor .5), which cancels for a
+            // single line (lineWidth == blockWidth) -- see TextQuadLayout's class doc. The y term is
+            // the hand-derived optical-centre shift (§11 D12), NOT read back from the production
+            // constants it exists to check: GlyphSdf.BaselineBelowReferencePx (26) minus half a
+            // cap height (0.5 * (17/24)em * 24 = 8.5) = 17.5.
+            float2 anchorShift = new float2(-0.5f * lineWidth, 17.5f);
 
             // TopLeft = (leftX, cellTopY); BottomRight = (leftX + CellSize.x, cellTopY - CellSize.y).
             float2 expectedTopLeftA = new float2(leftXA, cellTopYA) + anchorShift;

@@ -93,14 +93,32 @@ namespace MapRenderer.Unity.Text
                     if (label.Placement != SymbolPlacement.Point)
                     {
                         // Curved (line) labels emit DURING the scan, in scan order — the plan entry rides in lockstep.
+                        // (A curved label is never paired — §10's fence — so it needs no rider check.)
                         result.Output.Add(label); result.BlockId.Add(blockId); result.LocalIndex.Add(i); result.IsDeparting.Add(0);
                         continue;
                     }
+                    // §10 D9: a resolved RIDER gets no DedupKey of its own — its identity IS its owner's. It
+                    // rides along with its winning owner below (DedupEntry.RiderLabel), so it is never looked
+                    // up here independently.
+                    if (LabelPairing.IsRider(labels, i)) continue;
+
                     var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, slice.TextIds[i], slice.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
                     int z = (int)(label.TileKey >> 44); // PackTileKey: z in the high bits (finest zoom wins)
                     if (!_dedup.TryGetValue(key, out DedupEntry cur)
                         || z > cur.Z || (z == cur.Z && label.TileKey < cur.TileKey))
-                        _dedup[key] = new DedupEntry { Label = label, Z = z, TileKey = label.TileKey, BlockId = blockId, LocalIndex = i };
+                    {
+                        // §10 D9: resolve the pair's rider (if any) HERE, from the SAME tile list `label` came
+                        // from, so it swaps ATOMICALLY with the winner — never a stale rider against a fresh
+                        // owner. A rider has no key of its own; it is carried purely as the owner's passenger.
+                        LabelInstance riderLabel = null;
+                        int riderLocalIndex = -1;
+                        if (LabelPairing.TryGetRider(labels, i, out int ri)) { riderLabel = labels[ri]; riderLocalIndex = ri; }
+                        _dedup[key] = new DedupEntry
+                        {
+                            Label = label, Z = z, TileKey = label.TileKey, BlockId = blockId, LocalIndex = i,
+                            RiderLabel = riderLabel, RiderLocalIndex = riderLocalIndex,
+                        };
+                    }
                 }
             }
             // Point winners emit AFTER the scan, in _dedup first-insertion order — the second active segment.
@@ -108,6 +126,14 @@ namespace MapRenderer.Unity.Text
             {
                 result.Output.Add(kv.Value.Label); result.BlockId.Add(kv.Value.BlockId); result.LocalIndex.Add(kv.Value.LocalIndex);
                 result.IsDeparting.Add(0);
+                // §10 D9: the winning owner's rider (if any) rides immediately after it — same block, same
+                // IsDeparting — so "the rider is the next point record" holds downstream (SymbolGatherJob
+                // compacts point records in winner order, LabelStageJob reads Points[d+1]).
+                if (kv.Value.RiderLabel != null)
+                {
+                    result.Output.Add(kv.Value.RiderLabel); result.BlockId.Add(kv.Value.BlockId); result.LocalIndex.Add(kv.Value.RiderLocalIndex);
+                    result.IsDeparting.Add(0);
+                }
             }
             result.ActiveCount = result.Output.Count;
 
@@ -121,17 +147,40 @@ namespace MapRenderer.Unity.Text
                 if (labels == null) continue;
                 int blockId = result.OrderedBlocks.Count;
                 result.OrderedBlocks.Add(slice.Block);
+                // §10 D9: carries the PREVIOUS iteration's emit decision — a rider is emitted iff its owner
+                // (always the immediately preceding record in this SAME tile list) was. A claim-skipped owner
+                // therefore takes its rider with it, so no orphan rider ever reaches the plan (P13). Reset per
+                // slice: a rider's owner always lives in the SAME departing tile's list.
+                bool previousEmitted = false;
                 for (int i = 0; i < labels.Count; i++)
                 {
                     LabelInstance label = labels[i];
-                    if (label == null) continue;
-                    if (label.Placement == SymbolPlacement.Point)
+                    if (label == null) { previousEmitted = false; continue; }
+
+                    bool emit;
+                    if (LabelPairing.IsRider(labels, i))
                     {
-                        var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, slice.TextIds[i], slice.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
-                        if (_dedup.ContainsKey(key)) continue;                 // active/earlier copy already shows it
-                        _dedup[key] = new DedupEntry { Label = label, Z = 0, TileKey = label.TileKey, BlockId = blockId, LocalIndex = i }; // claim
+                        // A rider computes no claim key of its own — it inherits its owner's decision.
+                        emit = previousEmitted;
                     }
-                    result.Output.Add(label); result.BlockId.Add(blockId); result.LocalIndex.Add(i); result.IsDeparting.Add(1);
+                    else
+                    {
+                        emit = true;
+                        if (label.Placement == SymbolPlacement.Point)
+                        {
+                            var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, slice.TextIds[i], slice.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
+                            if (_dedup.ContainsKey(key))
+                                emit = false; // active/earlier copy already shows it
+                            else
+                                _dedup[key] = new DedupEntry { Label = label, Z = 0, TileKey = label.TileKey, BlockId = blockId, LocalIndex = i }; // claim
+                        }
+                    }
+
+                    if (emit)
+                    {
+                        result.Output.Add(label); result.BlockId.Add(blockId); result.LocalIndex.Add(i); result.IsDeparting.Add(1);
+                    }
+                    previousEmitted = emit;
                 }
             }
         }
@@ -197,5 +246,12 @@ namespace MapRenderer.Unity.Text
     // Stage-2 (symbol-label native gather): BlockId/LocalIndex ride ATOMICALLY with the winner so a finest-zoom
     // overwrite swaps all fields together (never a stale block ref against a fresh label). Moved here alongside
     // DedupKey (Stage 4b) — the store's legacy plain overloads leave BlockId/LocalIndex at 0 (never read there).
-    internal struct DedupEntry { public LabelInstance Label; public int Z; public long TileKey; public int BlockId; public int LocalIndex; }
+    // §10 D9: RiderLabel/RiderLocalIndex ride ATOMICALLY too — a null RiderLabel means "no rider", never a
+    // sentinel LocalIndex alone (RiderLocalIndex is meaningless without RiderLabel; the pair is resolved
+    // together at write time from the SAME tile list `Label` came from).
+    internal struct DedupEntry
+    {
+        public LabelInstance Label; public int Z; public long TileKey; public int BlockId; public int LocalIndex;
+        public LabelInstance RiderLabel; public int RiderLocalIndex;
+    }
 }

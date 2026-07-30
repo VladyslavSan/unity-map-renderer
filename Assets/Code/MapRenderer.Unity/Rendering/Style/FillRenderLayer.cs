@@ -3,6 +3,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -46,6 +47,7 @@ namespace MapRenderer.Unity.Rendering.Style
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
+        public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public Material                          Material    { get; }
 
         private FillRenderLayer(

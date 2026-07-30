@@ -464,8 +464,9 @@ internal interface IRenderLayer : IDisposable
     StyleLayer       StyleLayer  { get; }
     RenderLayerBuild Build       { get; }   // lifetime class — which loop feeds it
     DrawPersistence  Persistence { get; }   // who re-draws it each render
-    int              DrawIndex   { get; }   // set once by RenderLayerSet.Build; renderQueue = TransparentQueue + DrawIndex
-    Material         Material    { get; }   // owned by the layer, queue encodes DrawIndex
+    int              DrawIndex   { get; }   // set once by RenderLayerSet.Build; band = LayerDrawOrder.QueueFor(DrawIndex, subSlot)
+    LayerSubSlot     MaterialSubSlot { get; } // which sub-slot of the band Material occupies (Base, or Above for symbol text over its own icon — G7/D7)
+    Material         Material    { get; }   // owned by the layer, queue encodes DrawIndex + MaterialSubSlot
     void ApplyZoom(double zoom);
 }
 
@@ -485,11 +486,14 @@ not the concrete types).
 ## Locked decisions
 
 - **One global draw-order index over ALL painted layers.** `RenderLayerSet.Build` walks `style.Layers` once and
-  numbers every painted layer — fill, line, symbol, background (raster, fill-extrusion when they land) —
-  `renderQueue = LayerDrawOrder.TransparentQueue + drawIndex`. `index == draw order == material index` holds; the
+  numbers every painted layer — fill, line, symbol, background (raster, fill-extrusion when they land) — each
+  owning a queue BAND (`LayerDrawOrder.QueueFor(drawIndex, subSlot)`, G7/D7): fill/line/background use only
+  `LayerSubSlot.Base`; a symbol layer's icon takes `Base` and its own text `Above`, so the badge always draws
+  under the number it frames. `index == draw order == material index` holds; the
   list simply contains all painted layers now. Only genuinely unpainted kinds (unknown, unsupported) and
   unconfigured-material layers take no slot. `LayerDrawOrder`'s monotonic-queue + 5000-ceiling contract is
-  unchanged (a >2000-painted-layer style throws rather than saturating; realistic styles stay far below).
+  unchanged in KIND (a too-large style throws rather than saturating); the 2-sub-slot band halves the
+  layer-count runway (~2000 → ~1000 painted layers; realistic styles stay far below either).
 - **Backends get the full-width material list aligned to the global index, with null at non-tile slots** (those
   slots never receive `AddTileLayer`). Two backend touch points: BRG's ctor `RegisterMaterial` loop must skip
   nulls; the Entities prototype seed must use the **first non-null** entry (slot 0 may be a background layer).
@@ -499,8 +503,9 @@ not the concrete types).
   (`LabelCollisionJob` over all candidates — a road name and a city name keep competing in one greedy pass); each
   symbol layer draws its own survivors at its own queue via its per-slot mesh/material. `LabelPlacementSystem`
   partitions survivor quads by `LabelInstance.MaterialIndex` into per-slot meshes; slot `g` IS the g-th declared
-  symbol layer. Each `SymbolRenderLayer`'s material gets `renderQueue = TransparentQueue + DrawIndex` like every
-  other layer, so two symbol layers on one feature draw in style order.
+  symbol layer. `SymbolRenderLayer`'s icon material gets `QueueFor(DrawIndex, Base)` and its text material
+  `QueueFor(DrawIndex, Above)` (G7/D7 — the icon always draws under its own layer's text), so two symbol layers
+  on one feature still draw in style order, band before band.
 - **Per-layer materials live on the layer object, one owner.** `SymbolRenderLayer` owns its material clone (halo
   bind included); the label subsystem consumes the layer set's materials instead of cloning its own. Fill/line
   already work this way.

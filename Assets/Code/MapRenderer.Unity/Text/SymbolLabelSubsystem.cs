@@ -78,6 +78,45 @@ namespace MapRenderer.Unity.Text
         // guarded on IconTexture being non-null, so a still-loading or absent sheet is inert, not a fault.
         private SpriteSheet _spriteSheet;
         private SpriteAtlasView _spriteAtlas;
+        // D6 (road-shields, docs/road-shields-design.md §3 D6): the sprite fetch this style kicked off
+        // (SetStyle), `.Preserve()`d so its Status can be polled across frames — mirrors this class's own
+        // `_reconcileTask.Status == UniTaskStatus.Pending` polling. Readiness is "reached a TERMINAL state
+        // OR gave up waiting" (see SpriteFetchDeadlineSeconds below), NOT "the atlas is non-null": a style
+        // with no `sprite` URL, a 404/204, a fault, or a cancellation are all terminal too —
+        // `default(UniTask).Status` is `Succeeded`, so a subsystem with no style set (or a style whose fetch
+        // never awaits — see FetchSpriteSheetAsync's no-source fast path) never parks.
+        private UniTask _spriteFetchTask;
+        // D6 review follow-up (REQUIRED): `UnityWebRequestSpriteSource` sets no HTTP timeout, so a genuinely
+        // hung endpoint (TCP connects, never responds — NOT the 404/204 path, which already reaches a
+        // terminal Status) leaves `_spriteFetchTask` Pending forever. Without a bound, parking becomes
+        // PERMANENT: zero symbol labels of any kind ever commit for the style (strictly worse than the
+        // pre-D6 degradation, which at least showed bare text), and `_pendingSpriteQueue` grows without
+        // bound as the user pans — every parked build retains its `IDecodedTileHandle` (SharedTileDecode's
+        // contract is plain GC reachability, no lifetime cap of its own). `SpriteFetchDeadlineSeconds` bounds
+        // this: once elapsed, SpritesSettled goes true regardless of the fetch's own status, so PumpBuilds'
+        // existing pending-drain (which already tolerates a null `_spriteAtlas` — the T11 absent-sheet path)
+        // dispatches every parked build with whatever atlas state exists. This restores the PRE-D6 floor
+        // (possibly icon-starved, never self-healing) as a bounded FALLBACK, not a permanent stall — never
+        // relaxes "settled ≠ non-null" for the normal terminal paths, which resolve long before this bound.
+        internal const double SpriteFetchDeadlineSeconds = 8.0;
+        // Wall-clock timestamp (NowSeconds) the in-flight sprite fetch started at — read only by
+        // SpritesSettled's deadline check.
+        private double _spriteFetchStartedAtSeconds;
+        // Test seam (mirrors GlyphSourceFactoryOverride/SpriteSourceFactoryOverride, below): the wall-clock
+        // source SpritesSettled's deadline reads. Null (production) → UnityEngine.Time.realtimeSinceStartup —
+        // deliberately UNSCALED real time, not MapView's simulated `Time.timeAsDouble` (used for
+        // ReconcileLoadedTiles/CurrentBatch's `now`): an HTTP fetch keeps running in real seconds regardless
+        // of Unity's timeScale, so a paused/slow-motion scene must not make the network deadline take longer
+        // (or shorter) than it actually does. A test overrides this to a controllable clock so the deadline
+        // can be crossed deterministically, with no real wait and no dependency on `[UnityTest]` frame-pump
+        // cadence.
+        internal Func<double> NowSecondsOverride { get; set; }
+        private double NowSeconds => (NowSecondsOverride ?? DefaultNowSeconds)();
+        private static double DefaultNowSeconds() => Time.realtimeSinceStartup;
+
+        private bool SpritesSettled =>
+            _spriteFetchTask.Status != UniTaskStatus.Pending ||
+            NowSeconds - _spriteFetchStartedAtSeconds >= SpriteFetchDeadlineSeconds;
 
         // Flat symbol-layer list (index == LabelInstance.MaterialIndex) and a source id → its layers'
         // GLOBAL indices map (only sources with symbol layers are observed). D11/E2: per-layer MATERIALS
@@ -182,6 +221,38 @@ namespace MapRenderer.Unity.Text
         // safe-publication barrier in one — no volatile flag, no manual pending-list scan (design §Q2).
         internal readonly ConcurrentQueue<ReadySymbolTail> _handoffQueue = new();
 
+        /// <summary>D6: a build kicked while <see cref="SpritesSettled"/> was false — parked on the pool
+        /// thread (its worker step never ran) instead of committing icon-starved. Carries everything the
+        /// worker step needs to run LATER, once the sprite fetch resolves: the raw <c>layerIndices</c> (NOT
+        /// yet turned into <see cref="TileSymbolLayerProcessor"/>[] — the atlas is a ctor arg) and the held
+        /// tile decode. `MapRenderer.Unity` has no <c>IsExternalInit</c> polyfill, so ctor + readonly fields
+        /// (mirrors <see cref="ReadySymbolTail"/>).</summary>
+        internal readonly struct PendingSymbolBuild
+        {
+            public readonly SymbolTileLabelStore.Key Key;
+            public readonly int                      Generation;
+            public readonly List<int>                LayerIndices;
+            public readonly List<LabelInstance>      Labels;
+            public readonly TileLayerProcessContext  Context;
+            public readonly IDecodedTileHandle       Decode;
+            public readonly CancellationToken        Ct;
+            public readonly string                   SourceId;
+            public readonly TileId                   Tile;
+            public PendingSymbolBuild(SymbolTileLabelStore.Key key, int generation, List<int> layerIndices,
+                List<LabelInstance> labels, TileLayerProcessContext context, IDecodedTileHandle decode,
+                CancellationToken ct, string sourceId, TileId tile)
+            {
+                Key = key; Generation = generation; LayerIndices = layerIndices; Labels = labels;
+                Context = context; Decode = decode; Ct = ct; SourceId = sourceId; Tile = tile;
+            }
+        }
+
+        /// <summary>D6: parked builds awaiting the sprite fetch to settle (pool thread enqueues from
+        /// <see cref="SymbolTileWorkerPass.RunWorkerAndHandoff"/> in park mode; <see cref="PumpBuilds"/>
+        /// drains it once <see cref="SpritesSettled"/>). Same safe-publication carrier as
+        /// <see cref="_handoffQueue"/>.</summary>
+        internal readonly ConcurrentQueue<PendingSymbolBuild> _pendingSpriteQueue = new();
+
         // Worker-phase-complete builds awaiting their budgeted tail (main-thread only). PumpBuilds' tail-start
         // loop drains this FIFO at most MaxBuildsPerFrame per frame (§D4/§D6).
         internal readonly List<ReadySymbolTail> _readyTails = new();
@@ -251,8 +322,9 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>I5b: the parsed sprite index + sheet dimensions <see cref="TileSymbolLayerProcessor"/>
         /// forwards to <c>SymbolFeatureExtractor.Extract</c> to resolve <c>icon-image</c> names. Null until the
-        /// sprite fetch resolves — a tile kicked before then extracts no icon labels and self-heals on its
-        /// next rebuild once this is set (the same null→real flip <c>TileSymbolLayerProcessor</c> documents).</summary>
+        /// sprite fetch resolves. D6: this is no longer a race a caller needs to worry about — a build kicked
+        /// before the fetch settles PARKS (<see cref="SpritesSettled"/>) instead of committing icon-starved, so
+        /// no tile ever needs a rebuild/self-heal once this becomes non-null.</summary>
         public SpriteAtlasView SpriteAtlas => _spriteAtlas;
 
         /// <summary>Active (in-cover) label-tile count — telemetry.</summary>
@@ -340,6 +412,7 @@ namespace MapRenderer.Unity.Text
             _buildCts.Dispose();
             _buildCts = new CancellationTokenSource();
             while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
+            while (_pendingSpriteQueue.TryDequeue(out _)) { } // D6: parked builds die with the old style scope
             _readyTails.Clear();
             DisposePipeline();
 
@@ -375,7 +448,14 @@ namespace MapRenderer.Unity.Text
             // would never resolve and would clip forever. The fetch never depended on _layersBySource, so
             // hoisting it changes nothing else; _buildCts is already this style's fresh scope by here, so the
             // cancellation contract is untouched.
-            FetchSpriteSheetAsync(style, _buildCts.Token).Forget();
+            //
+            // D6: `.Preserve()`d (not `.Forget()`) so SpritesSettled can poll its terminal status — a build
+            // kicked before this resolves PARKS instead of committing icon-starved (see TryBeginBuild).
+            // Stamp the deadline clock's start HERE, at the same moment the fetch itself starts, so
+            // SpritesSettled's bound (SpriteFetchDeadlineSeconds) measures from the real fetch start on
+            // every restyle, not just the first one.
+            _spriteFetchStartedAtSeconds = NowSeconds;
+            _spriteFetchTask = FetchSpriteSheetAsync(style, _buildCts.Token).Preserve();
 
             if (_layersBySource.Count == 0) return; // no symbol layers — stay idle (demo seam still works)
 
@@ -425,21 +505,15 @@ namespace MapRenderer.Unity.Text
             double                  zoom       = _camera.CurrentProperties.Zoom;
             var                     projection = _camera.Projection;
 
-            // I5b: read _spriteAtlas HERE, at kick time (main thread) — the same "capture Unity-adjacent
-            // inputs before the pool-side worker step" rule as zoom/projection above. Null if the sprite
-            // fetch hasn't resolved yet; the processor forwards it as-is (see ExtractLayers's spriteAtlas
-            // param) — a tile kicked before the fetch resolves extracts no icon labels this round and
-            // self-heals on its next rebuild once this is set (TileSymbolLayerProcessor's doc).
-            SpriteAtlasView spriteAtlas = _spriteAtlas;
+            // I5b/D6: read _spriteAtlas HERE, at kick time (main thread) — the same "capture Unity-adjacent
+            // inputs before the pool-side worker step" rule as zoom/projection above. D6: readiness is read
+            // alongside it — "settled" means the fetch reached a TERMINAL state (resolved with a sheet,
+            // resolved absent, faulted, or cancelled) OR SpriteFetchDeadlineSeconds elapsed waiting on a
+            // fetch that never terminates (a hung endpoint) — NOT "the atlas is non-null" (see SpritesSettled's doc).
+            SpriteAtlasView spriteAtlas     = _spriteAtlas;
+            bool            spritesSettled  = SpritesSettled;
 
             var labels = new List<LabelInstance>();
-            var processors = new TileSymbolLayerProcessor[layerIndices.Count];
-            for (int k = 0; k < layerIndices.Count; k++)
-            {
-                int globalIndex = layerIndices[k];
-                processors[k] = new TileSymbolLayerProcessor(builder, _allSymbolLayers[globalIndex], globalIndex, labels, spriteAtlas);
-            }
-
             var context = new TileLayerProcessContext
             {
                 Tile             = tile,
@@ -448,7 +522,22 @@ namespace MapRenderer.Unity.Text
                 Projection       = projection,
             };
 
-            return new SymbolTileWorkerPass(key, gen, processors, labels, context, _buildCts.Token, sourceId, tile, _handoffQueue);
+            if (spritesSettled)
+            {
+                var processors = new TileSymbolLayerProcessor[layerIndices.Count];
+                for (int k = 0; k < layerIndices.Count; k++)
+                {
+                    int globalIndex = layerIndices[k];
+                    processors[k] = new TileSymbolLayerProcessor(builder, _allSymbolLayers[globalIndex], globalIndex, labels, spriteAtlas);
+                }
+                return new SymbolTileWorkerPass(key, gen, processors, labels, context, _buildCts.Token, sourceId, tile, this);
+            }
+
+            // D6: NOT settled — park. The atlas is a TileSymbolLayerProcessor ctor arg, so processors cannot
+            // be built yet; carry the raw layerIndices instead and construct them once PumpBuilds' pending
+            // drain sees SpritesSettled. Everything else (BeginBuild's reserved slot, the zoom/projection
+            // capture) is unchanged — only the worker step is deferred.
+            return new SymbolTileWorkerPass(key, gen, layerIndices, labels, context, _buildCts.Token, sourceId, tile, _pendingSpriteQueue);
         }
 
         /// <summary>Epic A / A5b <see cref="Processing.ISymbolTileWorkerPass"/> implementor — the captured
@@ -459,41 +548,93 @@ namespace MapRenderer.Unity.Text
         {
             private readonly SymbolTileLabelStore.Key         _key;
             private readonly int                              _generation;
-            private readonly TileSymbolLayerProcessor[]       _processors;
+            private readonly TileSymbolLayerProcessor[]       _processors;  // null in park mode
             private readonly List<LabelInstance>              _labels;
             private readonly TileLayerProcessContext           _context;
             private readonly CancellationToken                _ct;
             private readonly string                           _sourceId;
             private readonly TileId                            _tile;
-            private readonly ConcurrentQueue<ReadySymbolTail>  _handoffQueue;
+            // non-park mode only — the structure-test invariant (TileProcessingStructureTests) pins
+            // TileLayerProcessorRunner.RunSymbolWorkerPass to exactly ONE call site in this whole class, so
+            // the actual run+enqueue lives on the OWNER (SymbolLabelSubsystem.RunSymbolWorkerAndHandoff),
+            // shared with PumpBuilds' D6 pending-drain — this class just delegates to it.
+            private readonly SymbolLabelSubsystem             _owner;
+            // D6: park mode — the sprite fetch had not settled at kick time (TryBeginBuild), so the atlas-
+            // dependent TileSymbolLayerProcessor[] cannot be built yet. RunWorkerAndHandoff enqueues the raw
+            // inputs instead of running the extract; PumpBuilds' pending drain finishes the job once settled.
+            private readonly bool                                 _parked;
+            private readonly List<int>                            _layerIndices; // park mode only
+            private readonly ConcurrentQueue<PendingSymbolBuild>  _pendingQueue;  // park mode only
 
             public SymbolTileWorkerPass(SymbolTileLabelStore.Key key, int generation, TileSymbolLayerProcessor[] processors,
                 List<LabelInstance> labels, TileLayerProcessContext context, CancellationToken ct, string sourceId, TileId tile,
-                ConcurrentQueue<ReadySymbolTail> handoffQueue)
+                SymbolLabelSubsystem owner)
             {
                 _key = key; _generation = generation; _processors = processors; _labels = labels;
-                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile; _handoffQueue = handoffQueue;
+                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile; _owner = owner;
+                _parked = false;
+            }
+
+            /// <summary>D6 park-mode ctor — see the field docs above.</summary>
+            public SymbolTileWorkerPass(SymbolTileLabelStore.Key key, int generation, List<int> layerIndices,
+                List<LabelInstance> labels, TileLayerProcessContext context, CancellationToken ct, string sourceId, TileId tile,
+                ConcurrentQueue<PendingSymbolBuild> pendingQueue)
+            {
+                _key = key; _generation = generation; _labels = labels;
+                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile;
+                _layerIndices = layerIndices; _pendingQueue = pendingQueue; _parked = true;
             }
 
             /// <summary>POOL THREAD (inside TileManager's mesh kick task, after the mesh pass): run this
             /// build's symbol worker pass over the SAME shared decode, then enqueue the completed worker
             /// phase for <see cref="PumpBuilds"/>' main-thread drain. A cancelled token (restyle/teardown
             /// raced ahead of this pool task) is a cheap early-out — never enqueued, so a stale build never
-            /// reaches the tail (mirrors the drain-side ct-drop, §Q2 belt-and-braces).</summary>
+            /// reaches the tail (mirrors the drain-side ct-drop, §Q2 belt-and-braces). D6: in park mode, the
+            /// extract does NOT run here — the decode is retained (legal: <c>SharedTileDecode</c>'s own
+            /// contract is plain GC reachability) and handed to the PENDING queue instead, for
+            /// <see cref="PumpBuilds"/>' drain to finish once the sprite fetch settles.</summary>
             public void RunWorkerAndHandoff(IDecodedTileHandle decode)
             {
                 try
                 {
                     if (_ct.IsCancellationRequested) return;
-                    using (PmTileDecode.Auto())
-                        TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in _context, _processors);
-                    _handoffQueue.Enqueue(new ReadySymbolTail(_key, _generation, _processors, _labels, _ct, _sourceId, _tile,
-                        _context.TileOriginRender));
+                    if (_parked)
+                    {
+                        _pendingQueue.Enqueue(new PendingSymbolBuild(
+                            _key, _generation, _layerIndices, _labels, _context, decode, _ct, _sourceId, _tile));
+                        return;
+                    }
+                    _owner.RunSymbolWorkerAndHandoff(decode, in _context, _processors, _key, _generation, _labels,
+                        _ct, _sourceId, _tile);
                 }
                 catch (Exception ex)
                 {
                     Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {_tile} (source '{_sourceId}'): {ex.Message}");
                 }
+            }
+        }
+
+        /// <summary>The SOLE call site of <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> in this
+        /// class (a structure-test-pinned invariant, TileProcessingStructureTests) — POOL THREAD: run one
+        /// build's symbol worker pass over the shared decode, then enqueue the completed phase for
+        /// <see cref="PumpBuilds"/>' main-thread tail-start drain. Shared by <see cref="SymbolTileWorkerPass"/>
+        /// (the un-parked kick path) and <see cref="PumpBuilds"/>' D6 pending-drain (the parked path, once the
+        /// sprite fetch settles) — the two call SAME code, not two copies of it.</summary>
+        private void RunSymbolWorkerAndHandoff(
+            IDecodedTileHandle decode, in TileLayerProcessContext context, TileSymbolLayerProcessor[] processors,
+            SymbolTileLabelStore.Key key, int generation, List<LabelInstance> labels, CancellationToken ct,
+            string sourceId, TileId tile)
+        {
+            try
+            {
+                using (PmTileDecode.Auto())
+                    TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in context, processors);
+                _handoffQueue.Enqueue(new ReadySymbolTail(key, generation, processors, labels, ct, sourceId, tile,
+                    context.TileOriginRender));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {tile} (source '{sourceId}'): {ex.Message}");
             }
         }
 
@@ -526,6 +667,43 @@ namespace MapRenderer.Unity.Text
             {
                 if (ready.Ct.IsCancellationRequested) { CancelledBuildCount++; continue; } // never starts (F-4)
                 _readyTails.Add(ready);
+            }
+
+            // D6: drain the parked (pre-atlas) pending queue once the sprite fetch has settled — construct
+            // each build's TileSymbolLayerProcessor[] NOW with the live _spriteAtlas, then dispatch the
+            // worker phase (decode + extract) to the pool exactly as the kick would have, landing in
+            // _handoffQueue on completion. The extract stays off-main; no new budget knob — the tails still
+            // trickle at MaxBuildsPerFrame below. Not settled ⇒ leave the queue alone (checked every pump).
+            if (SpritesSettled)
+            {
+                while (_pendingSpriteQueue.TryDequeue(out PendingSymbolBuild pending))
+                {
+                    if (pending.Ct.IsCancellationRequested) { CancelledBuildCount++; continue; } // mirrors the _handoffQueue drain above (F-4)
+                    // Reads _builder/_allSymbolLayers LIVE rather than capturing them in PendingSymbolBuild
+                    // (unlike the kick path's `builder` local) — safe only because the ct check above already
+                    // dropped any entry from a stale style scope, and SetStyle/DoDispose drain this queue
+                    // BEFORE DisposePipeline nulls _builder / _allSymbolLayers is rebuilt, so a surviving
+                    // entry's style is still the live one by construction.
+                    var processors = new TileSymbolLayerProcessor[pending.LayerIndices.Count];
+                    for (int k = 0; k < pending.LayerIndices.Count; k++)
+                    {
+                        int globalIndex = pending.LayerIndices[k];
+                        processors[k] = new TileSymbolLayerProcessor(_builder, _allSymbolLayers[globalIndex], globalIndex,
+                            pending.Labels, _spriteAtlas);
+                    }
+                    PendingSymbolBuild captured = pending;
+                    // Dispatches through the SAME RunSymbolWorkerAndHandoff the un-parked kick path uses —
+                    // the structure-test invariant (TileProcessingStructureTests) pins
+                    // TileLayerProcessorRunner.RunSymbolWorkerPass to exactly one call site in this class.
+                    UniTask.RunOnThreadPool(
+                        () =>
+                        {
+                            if (captured.Ct.IsCancellationRequested) return;
+                            RunSymbolWorkerAndHandoff(captured.Decode, in captured.Context, processors,
+                                captured.Key, captured.Generation, captured.Labels, captured.Ct, captured.SourceId, captured.Tile);
+                        },
+                        configureAwait: false, cancellationToken: captured.Ct).Forget();
+                }
             }
 
             // A5a: start ≤ MaxBuildsPerFrame tails whose worker phase has already landed (FIFO — index 0;
@@ -629,7 +807,7 @@ namespace MapRenderer.Unity.Text
         /// <paramref name="ct"/> (this style's <c>_buildCts</c> scope) exactly like every other in-flight
         /// build — a restyle/teardown racing ahead of the fetch never touches the (possibly disposed) next
         /// style's state.</summary>
-        private async UniTaskVoid FetchSpriteSheetAsync(StyleDocument style, CancellationToken ct)
+        private async UniTask FetchSpriteSheetAsync(StyleDocument style, CancellationToken ct)
         {
             ISpriteSource source = null;
             try
@@ -919,6 +1097,7 @@ namespace MapRenderer.Unity.Text
             _store.ReleasePins(_backSnapshot);
             _buildCts.Dispose();
             while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
+            while (_pendingSpriteQueue.TryDequeue(out _)) { } // D6: parked builds die with teardown too
             _readyTails.Clear(); // A5a: ready-but-untailed builds die with the store slot cleared below
             _store.Clear();
             _frontSnapshot.Clear(); _backSnapshot.Clear();

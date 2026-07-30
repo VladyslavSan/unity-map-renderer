@@ -20,6 +20,7 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
+using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
@@ -45,6 +46,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class ProfilerMarkerTests
     {
+        /// <summary>
+        /// Ring capacity requested from every <see cref="ProfilerRecorder"/> here, and therefore the only
+        /// safe upper bound when reading samples back — <c>Count</c> is NOT one once the ring has wrapped.
+        /// </summary>
+        private const int RecorderCapacity = 64;
+
         // ── Helpers (mirrors MapViewLiveLoopTests; duplicated to keep test file self-contained) ──
 
         private static byte[] FixtureBytes()
@@ -201,10 +208,10 @@ namespace MapRenderer.Tests
             // Negative control (bogus name) verifies the count metric discriminates real hits from frames.
             // S47: use Default (not CollectOnlyOnCurrentThread) — build marker fires on ThreadPool.
             using var recorder      = ProfilerRecorder.StartNew(
-                ProfilerCategory.Scripts, markerName, capacity: 64,
+                ProfilerCategory.Scripts, markerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame);
             using var bogusRecorder = ProfilerRecorder.StartNew(
-                ProfilerCategory.Scripts, bogusName, capacity: 64,
+                ProfilerCategory.Scripts, bogusName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame);
 
             try
@@ -226,12 +233,15 @@ namespace MapRenderer.Tests
                 // ProfilerRecorderSample.Count is the number of times the marker Begin/End fired that frame.
                 // This is the correct hit-count metric — recorder.Count alone is the buffer entry count (frames),
                 // which would be non-zero even if the marker were never called.
+                // Clamp to the ring's CAPACITY, not Count: ProfilerRecorder is a fixed-size ring, and the
+                // pump above runs far more frames than that, so once it wraps `Count` stops being a valid
+                // index bound and GetSample() throws IndexOutOfRange (intermittently, on slow machines).
                 long realHits  = 0;
-                for (int i = 0; i < recorder.Count; i++)
+                for (int i = 0; i < math.min(recorder.Count, RecorderCapacity); i++)
                     realHits += recorder.GetSample(i).Count;
 
                 long bogusHits = 0;
-                for (int i = 0; i < bogusRecorder.Count; i++)
+                for (int i = 0; i < math.min(bogusRecorder.Count, RecorderCapacity); i++)
                     bogusHits += bogusRecorder.GetSample(i).Count;
 
                 // Negative control: a non-existent marker must read 0 invocations.

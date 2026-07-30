@@ -22,6 +22,17 @@
 // and (2) a rendered on-screen diagonal-label eyeball — a COMMIT PRECONDITION on this stage (design §14
 // "SEQUENCING GATE"), which the maintainer confirmed before the conversion landed.
 //
+// GOLDEN RE-MINT (Stage 4, §11 D12): all five goldens moved, by a measured PURE TRANSLATION of ~21.33
+// screen px — a baseline move, not a re-bake over a drift. Why a CURVED tooth is sensitive to a change in
+// POINT-block anchoring at all: production routes curved labels through CurvedTextLayout, which takes no
+// options and no anchor, so no curved label on the map moved; but this fixture borrows the point layout as
+// a quad factory (see BuildGlyphF), so its cell inherits TextLayoutOptions.Default's Center anchor —
+// precisely the branch D12 redefined. Shape and orientation were verified preserved (every bbox dimension
+// identical to the pixel, ink within 1.2%) and the delta was attributed to D12 alone by re-running against
+// the pre-D12 formula, which reproduced the old goldens digit-for-digit. So the property this tooth exists
+// to guard — rotation sense and glyph shape, which a translation cannot affect — is untouched, and neither
+// tolerance was loosened. Full numbers and the four checks: docs/road-shields-design.md §11.
+//
 // 'F' (a fully asymmetric glyph — no mirror symmetry in x or y) is used so a wrong rotation sense renders
 // visibly different ink (not an aliased 'F'-looking mirror) — a real discriminator, not a tautology against
 // its own mint: a future sign regression moves the bounding box/centroid far outside the tight per-run
@@ -90,6 +101,11 @@ namespace MapRenderer.Tests.Text.Placement
             texture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "F", Metrics = new AtlasMetrics(atlas) });
+            // NB: this fixture uses the POINT layout purely as a quad factory, so the cell it hands back
+            // inherits point-block anchoring — TextLayoutOptions.Default.Anchor is Center. Production
+            // curved labels never take this path (CurvedTextLayout has no block anchor at all), so a
+            // change to vertical anchoring moves THIS tooth's goldens while moving no curved label on the
+            // map. Expect a re-mint here, and only here, whenever the centre anchor is redefined (§11 D12).
             TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
             Assert.AreEqual(1, layout.Quads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
             return (texture, layout.Quads[0]);
@@ -125,14 +141,15 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     byte[] newPixels = RenderNewWorldPath(uCam, mapCamera, in frame, pathA, pathB, quad, atlasTexture, tileKey);
 
-                    // Golden values minted from this render at conversion time (commit f3e8d81c's real GPU
-                    // output, byte-identical NEW-path behaviour before/after the old-path deletion).
+                    // Golden values re-minted at Stage 4 (§11 D12) — a pure ~21.33 px translation of the
+                    // conversion-time goldens, shape and orientation unchanged; see the RE-MINT block in
+                    // this file's header for the proof.
                     if (lineAngleDeg == 0f)
-                        AssertGolden(newPixels, "0°", centroidRow: 256.1f, centroidCol: 250.9f, minRow: 210, maxRow: 323, minCol: 231, maxCol: 294);
+                        AssertGolden(newPixels, "0°", centroidRow: 234.9f, centroidCol: 250.9f, minRow: 189, maxRow: 302, minCol: 231, maxCol: 294);
                     else if (lineAngleDeg == 45f)
-                        AssertGolden(newPixels, "45°", centroidRow: 255.6f, centroidCol: 259.0f, minRow: 195, maxRow: 316, minCol: 215, maxCol: 300);
+                        AssertGolden(newPixels, "45°", centroidRow: 240.9f, centroidCol: 244.0f, minRow: 180, maxRow: 301, minCol: 200, maxCol: 285);
                     else
-                        AssertGolden(newPixels, "90°", centroidRow: 251.1f, centroidCol: 265.0f, minRow: 208, maxRow: 271, minCol: 219, maxCol: 332);
+                        AssertGolden(newPixels, "90°", centroidRow: 251.3f, centroidCol: 243.6f, minRow: 208, maxRow: 271, minCol: 198, maxCol: 311);
                 }
                 finally
                 {
@@ -179,7 +196,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     byte[] newPixels = RenderNewWorldPath(uCam, mapCamera, in frame, pathA, pathB, quad, atlasTexture, tileKey);
 
-                    AssertGolden(newPixels, "NonzeroAnchorLocal", centroidRow: 255.6f, centroidCol: 259.0f, minRow: 195, maxRow: 316, minCol: 215, maxCol: 300);
+                    AssertGolden(newPixels, "NonzeroAnchorLocal", centroidRow: 240.9f, centroidCol: 244.0f, minRow: 180, maxRow: 301, minCol: 200, maxCol: 285);
                 }
                 finally
                 {
@@ -222,7 +239,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     byte[] newPixels = RenderNewWorldPath(uCam, mapCamera, in frame, pathA, pathB, quad, atlasTexture, tileKey);
 
-                    AssertGolden(newPixels, "GlobeRebase", centroidRow: 258.6f, centroidCol: 252.9f, minRow: 221, maxRow: 302, minCol: 186, maxCol: 312);
+                    AssertGolden(newPixels, "GlobeRebase", centroidRow: 248.1f, centroidCol: 271.6f, minRow: 210, maxRow: 291, minCol: 205, maxCol: 331);
                 }
                 finally
                 {

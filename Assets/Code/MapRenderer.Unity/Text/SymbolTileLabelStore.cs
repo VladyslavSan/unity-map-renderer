@@ -129,7 +129,7 @@ namespace MapRenderer.Unity.Text
 
         // Stage 4a: bump the collect generation — a coarse "something collect-relevant changed, recompute" signal (one
         // bump per mutating call covers all state changes within it). CollectInto never calls this (it only reads
-        // _active/_departing/_cachedIndex and writes its output/_dedup/_orderedBlocks), so the bumps never self-trigger.
+        // _active/_departing/_cachedIndex and writes its output/_orderedBlocks), so the bumps never self-trigger.
         private void MarkCollectDirty() => _collectGeneration++;
 
         /// <summary>
@@ -233,15 +233,12 @@ namespace MapRenderer.Unity.Text
             if (RemoveCached(key, out Entry e)) { _active[key] = e; MarkCollectDirty(); }
         }
 
-        // A-3: reused cross-tile dedup index (main-thread CollectInto only; not reentrant) — keyed by the
-        // stable (quantized-anchor, layer, text-id, icon-id) identity, value = the winning label + its tile
-        // zoom/key for the finest-zoom-wins tiebreak. Reused so the per-frame dedup is allocation-free at capacity.
-        private readonly Dictionary<DedupKey, DedupEntry> _dedup =
-            new Dictionary<DedupKey, DedupEntry>();
-
         // Stage 4b: DedupKey + DedupEntry moved to SymbolLabelReconciler.cs (internal top-level, same namespace)
         // so the off-main reconciler and these legacy plain overloads share ONE definition — the relocation is
         // textual only (GetHashCode/Equals unchanged ⇒ the dedup partition, and every byte-identity oracle, holds).
+        // §10 D8/D9: the store's OWN `_dedup` field (A-3's per-collect index) was deleted here — its last user
+        // (the plain > 0 CollectInto overload) now routes through SymbolLabelReconciler.Run's reused index
+        // instead of hand-keeping a third copy of the dedup rules. See CollectInto below.
 
         // Stage-2: the per-collect ORDERED block list — one entry per scanned tile (with non-null Labels), in the
         // exact deterministic order the plan's BlockId indexes into: the _active scan FIRST, then the departing
@@ -291,49 +288,33 @@ namespace MapRenderer.Unity.Text
                 foreach (KeyValuePair<Key, Entry> kv in _active)
                     if (kv.Value.Labels != null) output.AddRange(kv.Value.Labels);
                 activeCount = output.Count;
-                AppendDeparting(output, quantizeMeters, claims: null);
+                AppendDeparting(output);
                 return;
             }
 
-            _dedup.Clear();
-            foreach (KeyValuePair<Key, Entry> kv in _active)
-            {
-                List<LabelInstance> labels = kv.Value.Labels;
-                if (labels == null) continue;
-                for (int i = 0; i < labels.Count; i++)
-                {
-                    LabelInstance label = labels[i];
-                    if (label == null) continue;
-                    // Only point labels carry a cross-tile identity in v1; line labels emit as-is.
-                    if (label.Placement != SymbolPlacement.Point) { output.Add(label); continue; }
+            // §10 D9 (routed, not re-derived a third time): this overload used to hand-duplicate the active
+            // dedup scan AND AppendDeparting's claim-skip path — a THIRD hand-kept copy of the same rules the
+            // plan-aware CollectInto below already delegates to SymbolLabelReconciler.Run (the ONE dedup impl
+            // the production off-main path also runs). Routing here means pairing (D8/D9), cross-tile dedup and
+            // the departing claim-skip hold by CONSTRUCTION for every entry point, not by hand-sync. Same
+            // CaptureSnapshot/try/finally net-zero-pin discipline as the plan-aware shim; only Output/ActiveCount
+            // are taken — the plan arrays (BlockId/LocalIndex/IsDeparting/OrderedBlocks) are this overload's
+            // caller's business, not this one's.
+            CaptureSnapshot(_oracleSnapshot);
+            try { _oracleReconciler.Run(_oracleSnapshot, _oracleResult); }
+            finally { ReleasePins(_oracleSnapshot); }
 
-                    // Stage 2: key on the interned text/icon ids (parallel to Labels, so index i lines up) — an
-                    // int equality partition byte-identical to the old string one, minus the per-frame hash.
-                    // Stage 3: dedup grid = the fixed CrossTileLabelKey.CanonicalGridMeters (no parent/child overlap
-                    // today, design §1.2) — NOT quantizeMeters, which now only GATES dedup on/off (see CollectInto
-                    // doc). FUTURE (parent/child overlap, design §6): the same feature reprojects a few metres apart
-                    // across bands → a fixed grid can miss the merge; go back to a zoom-scaled grid — pick the COARSER
-                    // band's grid for both candidates + finest-zoom-wins (already implemented: DedupEntry.Z / TileKey
-                    // tiebreak). Change THIS grid input only.
-                    var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, kv.Value.TextIds[i], kv.Value.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
-                    int z = (int)(label.TileKey >> 44); // PackTileKey: z in the high bits (finest zoom wins)
-                    if (!_dedup.TryGetValue(key, out DedupEntry cur)
-                        || z > cur.Z || (z == cur.Z && label.TileKey < cur.TileKey))
-                        _dedup[key] = new DedupEntry { Label = label, Z = z, TileKey = label.TileKey };
-                }
-            }
-            foreach (KeyValuePair<DedupKey, DedupEntry> kv in _dedup) output.Add(kv.Value.Label);
-            activeCount = output.Count;
-            AppendDeparting(output, quantizeMeters, claims: _dedup);
+            output.AddRange(_oracleResult.Output);
+            activeCount = _oracleResult.ActiveCount;
         }
 
-        // Append departing labels (retained past release) AFTER the active split. When deduping (claims != null), a
-        // departing POINT label whose cross-tile identity is already CLAIMED — by an active label, or by an earlier
-        // departing copy — is skipped (the claimed copy shows / fades; no double-draw). Line labels carry no
-        // cross-tile identity → always appended. Iterates _departing (not mutated here); labels come from the warm
-        // cached entries (departing ⊆ cached, but guard the lookup defensively).
-        private void AppendDeparting(List<LabelInstance> output, double quantizeMeters,
-            Dictionary<DedupKey, DedupEntry> claims)
+        // Append departing labels (retained past release) AFTER the active split, unconditionally — the
+        // no-dedup (quantizeMeters <= 0) path's only caller, so there is no cross-tile identity to claim/skip
+        // here (every departing label is appended, order-preserving; see CollectInto's ≤0 branch). The
+        // claim-skip variant lives ONLY in SymbolLabelReconciler.Run now (§10 D9) — do not re-add it here.
+        // Iterates _departing (not mutated here); labels come from the warm cached entries (departing ⊆ cached,
+        // but guard the lookup defensively).
+        private void AppendDeparting(List<LabelInstance> output)
         {
             if (_departing.Count == 0) return;
             foreach (KeyValuePair<Key, double> dep in _departing)
@@ -346,17 +327,6 @@ namespace MapRenderer.Unity.Text
                 {
                     LabelInstance label = labels[i];
                     if (label == null) continue;
-                    if (claims != null && label.Placement == SymbolPlacement.Point)
-                    {
-                        // Stage 2: key on the departing entry's own interned ids (index-aligned with its Labels,
-                        // both set together in CompleteBuild), so a departing winner keys identically to an active one.
-                        // Stage 3: same FIXED CanonicalGridMeters as the active scan — so a co-located feature's
-                        // departing (old-band) copy and its active (new-band) copy land in the SAME cell across a zoom
-                        // step → this claim-skip fires and the tile swap is a seamless hold, not a fade duplicate.
-                        var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, entry.TextIds[i], entry.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
-                        if (claims.ContainsKey(key)) continue;                 // active/earlier copy already shows it
-                        claims[key] = new DedupEntry { Label = label, Z = 0, TileKey = label.TileKey }; // claim (ContainsKey only)
-                    }
                     output.Add(label);
                 }
             }

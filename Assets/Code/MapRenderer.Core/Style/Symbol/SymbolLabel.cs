@@ -117,5 +117,19 @@ namespace MapRenderer.Core.Style.Symbol
         /// into <see cref="LabelInstance"/> and folded into <see cref="CrossTileLabelKey"/> so distinct
         /// co-located icons no longer collide (I5b's deferred gap).</summary>
         public string IconImage { get; init; }
+
+        /// <summary>Road-shields §10 D8/D10: whether this label is one half of a centred icon+text pair —
+        /// <see cref="LabelPairRole.Owner"/> (the icon) or <see cref="LabelPairRole.Rider"/> (the text), or
+        /// <see cref="LabelPairRole.None"/> for every ordinary label. A PROPOSAL: <see cref="Placement.LabelPairing"/>
+        /// resolves whether it actually holds. Default <see cref="LabelPairRole.None"/> so every pre-pairing
+        /// label is unaffected.</summary>
+        public LabelPairRole PairRole { get; init; }
+
+        /// <summary>Road-shields §10 D10: the OWNER's <see cref="FeatureIndex"/>, stamped on BOTH halves of a
+        /// proposed pair so <see cref="Placement.LabelPairing"/> can match them. Only unique within one
+        /// <see cref="SymbolFeatureExtractor.Extract"/> call (per layer, per tile) — the resolver also matches
+        /// <c>TileKey</c>/<c>MaterialIndex</c> on the downstream <see cref="LabelInstance"/> carrier for that
+        /// reason. Meaningless when <see cref="PairRole"/> is <see cref="LabelPairRole.None"/>.</summary>
+        public int PairId { get; init; }
     }
 }

@@ -445,5 +445,70 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); blockA.Dispose(); blockB.Dispose(); }
         }
 
+        // ── §10 D8/D9 P12: bake/gather parity holds on a pair-bearing fixture — the baker resolves PairRole
+        //    over the TILE list (SymbolTileLabelBlockBaker.Fill), the oracle over the WINNER list
+        //    (SymbolLabelBatchBuilder.Build); both intact here, so they must agree field-for-field. ──
+        [Test]
+        public void Gather_MatchesBuildOracle_FieldByField_CentredPair()
+        {
+            var a = new TileId { Z = 5, X = 22, Y = 16 };
+            double3 originA = TileRenderOrigin.Project(a, P);
+            long tkA = Tk(a);
+
+            var iconQuads = new List<SymbolQuad>
+            {
+                new SymbolQuad
+                {
+                    TopLeft = new float2(-8f, 8f), BottomRight = new float2(8f, -8f),
+                    UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
+                },
+            };
+            var icon = new LabelInstance
+            {
+                AnchorRender = new double3(70, 0, 70), Placement = SymbolPlacement.Point,
+                Layout = new TextLayoutResult { Quads = iconQuads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1 },
+                Kind = LabelKind.Icon, IconImage = "shield", Paint = LabelPaint.Default, TextSizePx = TextQuadLayout.OneEm,
+                SortKey = 0f, FeatureIndex = 20, TileKey = tkA,
+                PairRole = LabelPairRole.Owner, PairId = 20,
+            };
+            var text = new LabelInstance
+            {
+                AnchorRender = new double3(70, 0, 70), Placement = SymbolPlacement.Point, Layout = OneQuad(0.9f),
+                Paint = LabelPaint.Default, TextSizePx = 20f, PaddingPx = 2f, SortKey = 0f, Text = "42",
+                FeatureIndex = 21, TileKey = tkA,
+                PairRole = LabelPairRole.Rider, PairId = 20,
+            };
+
+            var labels = new List<LabelInstance> { icon, text };
+            SymbolTileLabelBlock block = SymbolTileLabelBlockBaker.Bake(labels, slotCount: 1, originA);
+
+            var harness = new LpsHarness();
+            var plan = new SymbolGatherPlan();
+            try
+            {
+                var blockId = new List<int> { 0, 0 };
+                var localIndex = new List<int> { 0, 1 };
+                var collected = new List<LabelInstance> { icon, text };
+                var isDeparting = new List<byte> { 0, 0 };
+                var decisions = new List<byte> { LabelTileCoverageFilter.Keep, LabelTileCoverageFilter.Keep };
+                var orderedBlocks = new List<IDisposable> { block };
+
+                plan.Build(blockId, localIndex, collected, isDeparting, decisions, orderedBlocks, winnerSetVersion: 0);
+                harness.Lps.GatherIntoMirror(plan);
+                var gathered = new SymbolLabelBatch();
+                harness.Lps.CopyMirrorInto(gathered);
+
+                var oracle = new SymbolLabelBatch();
+                SymbolLabelBatchBuilder.Build(oracle, collected, slotCount: 1, P, activeCount: collected.Count, coverageFadingTiles: null);
+
+                Assert.AreEqual(2, oracle.PointCount, "precondition: icon + text, both point-placement");
+                Assert.AreEqual(LabelPairRole.Owner, oracle.Points[0].PairRole, "precondition: the icon resolves as Owner in the oracle");
+                Assert.AreEqual(LabelPairRole.Rider, oracle.Points[1].PairRole, "precondition: the text resolves as Rider in the oracle");
+
+                string diff = SymbolLabelBatchDiff.FirstDifference(oracle, gathered);
+                Assert.IsNull(diff, $"gather must be byte-identical to the Build oracle on a pair-bearing fixture — first difference: {diff}");
+            }
+            finally { plan.Dispose(); harness.Dispose(); block.Dispose(); }
+        }
     }
 }

@@ -74,12 +74,12 @@ namespace MapRenderer.Tests.Text.Placement
             var quads = new PlacedQuad[4];
             var candidates = new LabelCandidate[4];
             var emit = new CandidateEmit[4];
-            int boxCount = 0, quadCount = 0;
+            int boxCount = 0, quadCount = 0, emitCount = 0;
 
             var quadSpan = new System.ReadOnlySpan<SymbolQuad>(batch.Quads, batch.PointQuadStart[0], batch.PointQuadCount[0]);
             int staged = LabelStagingMath.StagePoint(in input, quadSpan, bearingRadians: 0f,
                 viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
-                boxes, ref boxCount, quads, ref quadCount, candidates, emit);
+                boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
 
             Assert.AreEqual(1, staged);
             Assert.AreEqual(1, boxCount, "an icon is a single-box point candidate");

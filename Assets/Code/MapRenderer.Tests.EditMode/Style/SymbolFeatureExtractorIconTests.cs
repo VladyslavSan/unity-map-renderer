@@ -140,8 +140,14 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void Extract_TextAndIcon_YieldsTwoLabels_TextFirstThenIcon()
+        public void Extract_TextAndIcon_YieldsTwoLabels_CentredPair_IconFirstThenText()
         {
+            // §10 D8/D10 (road-shields, road-shields-design.md — supersedes D5): default text-anchor/icon-anchor
+            // (both center) + zero offsets/radial-offset is the CENTRED PAIR predicate — this is not
+            // shield-specific, it fires for ANY feature whose text sits centred on its icon. The icon
+            // (collision owner) is emitted first, the text rides as its Rider — ONE placement instance
+            // downstream (LabelPairing / StagePointPair), so neither half's overlap flags are forced anymore;
+            // both carry their AUTHORED text-allow-overlap/text-ignore-placement (default false, unset here).
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
@@ -150,11 +156,19 @@ namespace MapRenderer.Tests
             SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
 
             Assert.AreEqual(2, labels.Count, "a feature with both text-field and icon-image yields two labels");
-            Assert.AreEqual(LabelKind.Text, labels[0].Kind, "text is emitted first");
-            Assert.AreEqual("L", labels[0].Text);
+            Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "the icon (pair owner) is emitted first");
             Assert.AreEqual(0, labels[0].FeatureIndex);
-            Assert.AreEqual(LabelKind.Icon, labels[1].Kind, "icon is emitted second");
-            Assert.AreEqual(1, labels[1].FeatureIndex, "the icon label continues the SAME ordinal sequence");
+            Assert.IsFalse(labels[0].AllowOverlap); Assert.IsFalse(labels[0].IgnorePlacement);
+            Assert.AreEqual(LabelKind.Text, labels[1].Kind, "the rider text is emitted second");
+            Assert.AreEqual("L", labels[1].Text);
+            Assert.AreEqual(1, labels[1].FeatureIndex, "the text label continues the SAME ordinal sequence");
+            Assert.IsFalse(labels[1].AllowOverlap, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
+            Assert.IsFalse(labels[1].IgnorePlacement, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
+            // §10 D10: the pair is stamped Owner/Rider sharing one PairId (the owner's own FeatureIndex).
+            Assert.AreEqual(MapRenderer.Core.Text.LabelPairRole.Owner, labels[0].PairRole);
+            Assert.AreEqual(MapRenderer.Core.Text.LabelPairRole.Rider, labels[1].PairRole);
+            Assert.AreEqual(labels[0].FeatureIndex, labels[0].PairId);
+            Assert.AreEqual(labels[0].PairId, labels[1].PairId);
             // Both labels share the same anchor (same point).
             Assert.AreEqual(labels[0].AnchorRender.x, labels[1].AnchorRender.x, 1e-9);
             Assert.AreEqual(labels[0].AnchorRender.y, labels[1].AnchorRender.y, 1e-9);

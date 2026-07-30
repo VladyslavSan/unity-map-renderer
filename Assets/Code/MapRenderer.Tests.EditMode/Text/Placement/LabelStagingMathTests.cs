@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             public LabelBox[] Boxes; public int BoxCount;
             public PlacedQuad[] Quads; public int QuadCount;
-            public LabelCandidate[] Candidates; public CandidateEmit[] Emit;
+            public LabelCandidate[] Candidates; public CandidateEmit[] Emit; public int EmitCount;
             public static Pools New(int maxBoxes = 64, int maxQuads = 256, int maxCandidates = 64) => new Pools
             {
                 Boxes = new LabelBox[maxBoxes], Quads = new PlacedQuad[maxQuads],
@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StagePoint(in s, quads, bearingRadians: 0f,
                 viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             Assert.AreEqual(1, p.BoxCount);
@@ -72,6 +72,10 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, c.FeatureIndex); Assert.AreEqual(7, c.TileKey);
             Assert.AreEqual(0, c.LabelIndex); Assert.AreEqual(123, c.FadeId);
             Assert.IsFalse(c.WasPlacedLastFrame);
+            // §10 P7: an ORDINARY (unpaired) label's candidate satisfies EmitCount == 1, EmitStart == LabelIndex —
+            // byte-identical to the pre-§10 shape (one record, one candidate, one emit).
+            Assert.AreEqual(1, c.EmitCount, "an ordinary point label has exactly one emit");
+            Assert.AreEqual(c.LabelIndex, c.EmitStart, "EmitStart == LabelIndex for an unpaired candidate");
 
             Assert.AreEqual(0, p.Emit[0].QuadStart); Assert.AreEqual(1, p.Emit[0].QuadCount);
             Assert.AreEqual(new float2(100, 50).x, p.Quads[0].AnchorScreenPx.x, Tol);
@@ -104,7 +108,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StagePoint(in s, quads, bearingRadians: 0f,
                 viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             Assert.AreEqual(LabelKind.Icon, p.Emit[0].AtlasKind, "emit must carry the icon discriminator");
@@ -128,7 +132,7 @@ namespace MapRenderer.Tests.Text.Placement
             var p = Pools.New();
 
             LabelStagingMath.StagePoint(in s, quads, 0f, new double2(1920, 1080), 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(LabelKind.Text, p.Emit[0].AtlasKind, "default AtlasKind must be Text (zero value)");
         }
@@ -140,7 +144,7 @@ namespace MapRenderer.Tests.Text.Placement
             var quads = new[] { Cell(6f) };
             var p = Pools.New();
             int staged = LabelStagingMath.StagePoint(in s, quads, 0f, new double2(1920, 1080), 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
             Assert.AreEqual(0, staged);
             Assert.AreEqual(0, p.BoxCount);
             Assert.AreEqual(0, p.QuadCount);
@@ -173,7 +177,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             Assert.AreEqual(1, p.BoxCount);
@@ -184,6 +188,9 @@ namespace MapRenderer.Tests.Text.Placement
 
             LabelCandidate c = p.Candidates[0];
             Assert.AreEqual(1, c.BoxCount); Assert.AreEqual(fid, c.FadeId);
+            // §10 P7: a curved label is never paired — EmitCount == 1, EmitStart == LabelIndex, unchanged.
+            Assert.AreEqual(1, c.EmitCount, "a curved label has exactly one emit");
+            Assert.AreEqual(c.LabelIndex, c.EmitStart, "EmitStart == LabelIndex for a curved candidate");
             Assert.AreEqual(new float2(50, 0).x, p.Quads[0].AnchorScreenPx.x, Tol);
             Assert.AreEqual(0f, p.Quads[0].AnchorScreenPx.y, Tol);
             Assert.AreEqual(0.7f, p.Quads[0].Depth, Tol);
@@ -215,7 +222,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, new float2[2], new float[2], 0f, 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(0, staged);
             Assert.AreEqual(0, p.BoxCount);

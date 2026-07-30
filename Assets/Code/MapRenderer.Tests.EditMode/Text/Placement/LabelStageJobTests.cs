@@ -39,10 +39,10 @@ namespace MapRenderer.Tests.Text.Placement
             int maxBoxes = (anchors.Length + 1) * glyphs.Length + 1;
             var boxes = new LabelBox[maxBoxes]; var quads = new PlacedQuad[maxBoxes];
             var cands = new LabelCandidate[anchors.Length + 1]; var emit = new CandidateEmit[anchors.Length + 1];
-            int bc = 0, qc = 0;
+            int bc = 0, qc = 0, ec = 0;
             int staged = LabelStagingMath.StageCurved(in s, screen, depth, valid, world, glyphs, anchors, fadeIds, wasPlaced,
                 new float2[screen.Length], new float[screen.Length], bearing, 0,
-                boxes, ref bc, quads, ref qc, cands, emit);
+                boxes, ref bc, quads, ref qc, cands, emit, ref ec);
             return new Result { Staged = staged, BoxCount = bc, QuadCount = qc, Boxes = boxes, Quads = quads, Candidates = cands };
         }
 
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Text.Placement
             var path = new NativeArray<float2>(pathLen, alloc); var cum = new NativeArray<float>(pathLen, alloc);
             var oBoxes = new NativeArray<LabelBox>(maxBoxes, alloc); var oQuads = new NativeArray<PlacedQuad>(maxBoxes, alloc);
             var oCands = new NativeArray<LabelCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
-            var counts = new NativeArray<int>(3, alloc);
+            var counts = new NativeArray<int>(4, alloc);
 
             new LabelStageJob
             {

@@ -91,7 +91,15 @@ namespace MapRenderer.Tests
                 bool departing = i >= activeCount; // collected-order split: departing labels come last (see CollectInto)
                 bool coverageFading = coverageFadingTiles?.Contains(label.TileKey) ?? false;
                 if (label.Placement == SymbolPlacement.Point)
-                    AddPoint(batch, label, slotCount, departing, coverageFading, projection, worldOriginByKey);
+                {
+                    // §10 D10: resolved over the WINNER list (this `labels` — the reconciler keeps owner→rider
+                    // adjacent here), matching what the production baker resolves over the TILE list — both
+                    // intact, so they agree.
+                    LabelPairRole pairRole = LabelPairRole.None;
+                    if (LabelPairing.TryGetRider(labels, i, out _)) pairRole = LabelPairRole.Owner;
+                    else if (LabelPairing.IsRider(labels, i)) pairRole = LabelPairRole.Rider;
+                    AddPoint(batch, label, slotCount, departing, coverageFading, projection, worldOriginByKey, pairRole);
+                }
                 else
                     AddCurved(batch, label, slotCount, departing, coverageFading, projection, worldOriginByKey);
             }
@@ -112,7 +120,8 @@ namespace MapRenderer.Tests
         }
 
         private static void AddPoint(SymbolLabelBatch batch, LabelInstance label, int slotCount,
-            bool departing, bool coverageFading, IProjection projection, Dictionary<long, double3> worldOriginByKey)
+            bool departing, bool coverageFading, IProjection projection, Dictionary<long, double3> worldOriginByKey,
+            LabelPairRole pairRole)
         {
             // Copy this label's glyph quads into the flat pool (empty/absent layout → 0 quads, stages nothing later).
             IReadOnlyList<SymbolQuad> quads = label.Layout?.Quads;
@@ -124,7 +133,7 @@ namespace MapRenderer.Tests
             // the SAME double3 origin ResolveTileOrigin resolves (null-safe) — so the presenter placement and
             // this bake cancel exactly (§3.4).
             double3 tileOriginRender = ResolveTileOrigin(label.TileKey, projection, worldOriginByKey);
-            PointStageInput input = SymbolTileLabelBlockBaker.BuildPointInput(label, slotCount, tileOriginRender);
+            PointStageInput input = SymbolTileLabelBlockBaker.BuildPointInput(label, slotCount, tileOriginRender, pairRole);
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
             int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point

@@ -3,6 +3,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Expressions;
 using Line = MapRenderer.Core.Style.Line;
@@ -44,6 +45,7 @@ namespace MapRenderer.Unity.Rendering.Style
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
+        public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public Material                          Material    { get; }
 
         private LineRenderLayer(

@@ -25,7 +25,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             public LabelBox[] Boxes; public int BoxCount;
             public PlacedQuad[] Quads; public int QuadCount;
-            public LabelCandidate[] Candidates; public CandidateEmit[] Emit;
+            public LabelCandidate[] Candidates; public CandidateEmit[] Emit; public int EmitCount;
             public static Pools New(int maxBoxes = 64, int maxQuads = 256, int maxCandidates = 64) => new Pools
             {
                 Boxes = new LabelBox[maxBoxes], Quads = new PlacedQuad[maxQuads],
@@ -85,7 +85,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             Assert.AreEqual(3, p.QuadCount);
@@ -138,7 +138,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             for (int q = 0; q < p.QuadCount; q++)
@@ -179,7 +179,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
                 fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
-                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit);
+                p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
             Assert.IsTrue(p.Emit[0].IsWorld && p.Emit[0].AlongLine, "curved must route to the world sink");

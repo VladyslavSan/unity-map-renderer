@@ -96,10 +96,12 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // T2a — single line: TopLeft/Center/BottomRight differ by exactly the (hAlign,vAlign)*(blockWidth,blockHeight) delta.
+        // T2a — single line: TopLeft/Center/BottomRight differ by exactly the anchor delta. BottomRight
+        // uses the block's bbox height (unchanged); Center uses the optical-centre shift (§11 D12) --
+        // NOT the arithmetic midpoint of Top and BottomRight, which is the point of this stage.
         // =========================================================================================
         [Test]
-        public void Anchor_SingleLine_ShiftsByExactBlockBboxDelta()
+        public void Anchor_SingleLine_BottomShiftsByBlockHeight_CentreByOpticalCentre()
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
@@ -114,20 +116,26 @@ namespace MapRenderer.Tests.Text
             TextLayoutResult center = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center));
             TextLayoutResult bottomRight = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight));
 
-            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * lineWidth, 0.5f * lineHeightPx), "Center - TopLeft");
+            // Optical-centre shift (§11 D12): GlyphSdf.BaselineBelowReferencePx (26) minus half a
+            // cap height (0.5 * (17/24)em * 24 = 8.5) = 17.5 -- a hand-derived literal, not read
+            // back from the production constants it exists to check.
+            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * lineWidth, 17.5f), "Center - TopLeft");
             AssertConstantDelta(topLeft.Quads, bottomRight.Quads, new float2(-lineWidth, lineHeightPx), "BottomRight - TopLeft");
 
             TextLayoutOptions Opt(TextAnchor a) => MakeOptions(anchor: a);
         }
 
         // =========================================================================================
-        // T2b — a 2-line run: the vertical anchor delta uses lineCount * lineHeight*24, NOT a single
-        // line's height. Justify held constant (Center) across variants so the pure anchor delta is
-        // isolated (see TextQuadLayout's class doc: the per-line justify term cancels in a delta
-        // between two Layout() calls that share options except Anchor).
+        // T2b — a 2-line run: BottomRight's vertical delta uses lineCount * lineHeight*24 (unchanged);
+        // Center's uses the line-span midpoint (§11 D12) -- the midpoint between the FIRST line's
+        // optical centre and the LAST line's, i.e. one line's span (0.5*lineHeightPx) above the
+        // single-line optical-centre shift, NOT half of lineCount*lineHeight. Justify held constant
+        // (Center) across variants so the pure anchor delta is isolated (see TextQuadLayout's class
+        // doc: the per-line justify term cancels in a delta between two Layout() calls that share
+        // options except Anchor).
         // =========================================================================================
         [Test]
-        public void Anchor_TwoLineRun_VerticalDeltaUsesLineCountTimesLineHeight()
+        public void Anchor_TwoLineRun_BottomUsesLineCountTimesLineHeight_CentreUsesLineSpanMidpoint()
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
@@ -144,6 +152,11 @@ namespace MapRenderer.Tests.Text
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
             float blockHeight = 2 * lineHeightPx;
 
+            // 17.5 is the single-line optical-centre shift derived in
+            // Anchor_SingleLine_BottomShiftsByBlockHeight_CentreByOpticalCentre above; a 2-line block's
+            // centre sits one line's span (0.5*lineHeightPx) above it.
+            float deltaYCenterExpected = 17.5f + 0.5f * lineHeightPx;
+
             TextLayoutResult topLeft = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.TopLeft));
             TextLayoutResult center = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center));
             TextLayoutResult bottomRight = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight));
@@ -153,15 +166,17 @@ namespace MapRenderer.Tests.Text
             float deltaYCenter = center.Quads[0].TopLeft.y - topLeft.Quads[0].TopLeft.y;
             float deltaYBottomRight = bottomRight.Quads[0].TopLeft.y - topLeft.Quads[0].TopLeft.y;
 
-            Assert.AreEqual(0.5f * blockHeight, deltaYCenter, Tolerance, "Center's vertical delta must use lineCount*lineHeight, not a single line's height");
+            Assert.AreEqual(deltaYCenterExpected, deltaYCenter, Tolerance, "Center's vertical delta must be the line-span midpoint, not half of lineCount*lineHeight");
             Assert.AreEqual(blockHeight, deltaYBottomRight, Tolerance, "BottomRight's vertical delta must use lineCount*lineHeight");
 
-            // Teeth: a per-line (not block-bbox) vertical anchor would use just ONE lineHeightPx --
-            // a different, smaller number that must NOT match.
-            Assert.AreNotEqual(0.5f * lineHeightPx, deltaYCenter, "a per-line vertical anchor would use a single line's height, not the block's");
+            // Teeth: a per-line (not block-bbox) vertical anchor would use just ONE lineHeightPx for
+            // BottomRight, and the OLD (rejected) box-midpoint formula would give 0.5*blockHeight for
+            // Center -- both different, smaller/larger numbers that must NOT match.
+            Assert.AreNotEqual(0.5f * lineHeightPx, deltaYCenter, "a per-line vertical anchor would use a single line's height, not the line-span midpoint");
+            Assert.AreNotEqual(0.5f * blockHeight, deltaYCenter, "the old box-midpoint formula (0.5*blockHeight) must not match the optical-centre formula");
             Assert.AreNotEqual(lineHeightPx, deltaYBottomRight, "a per-line vertical anchor would use a single line's height, not the block's");
 
-            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * blockWidth, 0.5f * blockHeight), "Center - TopLeft (2-line)");
+            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * blockWidth, deltaYCenterExpected), "Center - TopLeft (2-line)");
             AssertConstantDelta(topLeft.Quads, bottomRight.Quads, new float2(-blockWidth, blockHeight), "BottomRight - TopLeft (2-line)");
 
             TextLayoutOptions Opt(TextAnchor a) => MakeOptions(anchor: a, justify: TextJustify.Center, maxWidthEm: maxWidthEm);

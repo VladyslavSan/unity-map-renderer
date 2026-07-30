@@ -225,7 +225,8 @@ namespace MapRenderer.Tests.Visual
         /// structural/mechanical assertion that does not require GPU readback.
         ///
         /// With one fill layer, the single draw command's renderQueue must equal the material's
-        /// renderQueue (TransparentQueue + drawIndex). No re-ordering must occur.
+        /// renderQueue (LayerDrawOrder.QueueFor(drawIndex) — fill uses LayerSubSlot.Base only, G7/D7).
+        /// No re-ordering must occur.
         /// </summary>
         [Test]
         public void BrgBackend_EmitsDraw_InAscendingRenderQueueOrder()

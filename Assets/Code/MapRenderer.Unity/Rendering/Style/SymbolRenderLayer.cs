@@ -24,6 +24,13 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <see cref="Create"/> writes it directly. Collision stays global (D8) — only the DRAW is per-layer,
     /// via the material <see cref="Placement.WorldLabelRenderer.EndFrame"/> resolves for this layer's
     /// slot.</para>
+    ///
+    /// <para><b>G7/D7 (Stage 2, road-shields):</b> the icon and text are coplanar at the same anchor
+    /// (D5 centres the shield's number on its sprite) and both shaders are <c>ZWrite Off</c> /
+    /// <c>ZTest Always</c> — there is no depth arbitration, only submission order via <c>renderQueue</c>.
+    /// So the icon owns this layer's <see cref="LayerSubSlot.Base"/> sub-slot and the text owns
+    /// <see cref="LayerSubSlot.Above"/> — the badge always draws under the number it frames, never over
+    /// it.</para>
     /// </summary>
     internal sealed class SymbolRenderLayer : IRenderLayer
     {
@@ -36,10 +43,17 @@ namespace MapRenderer.Unity.Rendering.Style
         public DrawPersistence                   Persistence  => DrawPersistence.Persistent;
         public int                               DrawIndex    { get; }
 
+        /// <summary>The text sits at <see cref="LayerSubSlot.Above"/>: <see cref="Material"/> IS
+        /// <see cref="WorldTextMaterial"/>, and it must draw over this layer's own
+        /// <see cref="WorldIconMaterial"/> (at <see cref="LayerSubSlot.Base"/>) — otherwise the badge paints
+        /// out the number it frames (G7/D7).</summary>
+        public LayerSubSlot MaterialSubSlot => LayerSubSlot.Above;
+
         /// <summary>The layer's primary drawn material — <see cref="WorldTextMaterial"/>. <c>null</c> iff
         /// <c>MapMaterialSet.SymbolTextWorld</c> is unassigned (the slot↔subsystem-ordinal 1:1 mapping still
         /// requires the layer to take its slot, §3.5; it just never presents). Its <c>renderQueue</c> is
-        /// written by <see cref="RenderLayerSet.Build"/> like every other layer's <see cref="Material"/>.</summary>
+        /// written by <see cref="RenderLayerSet.Build"/> like every other layer's <see cref="Material"/>, at
+        /// this layer's <see cref="LayerSubSlot.Above"/> sub-slot (G7/D7).</summary>
         public Material Material => WorldTextMaterial;
 
         /// <summary>Epic A / A1 (design §11 A1 D5): the owned <c>Map/Symbol/TextWorld</c> clone of
@@ -55,7 +69,9 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <c>MapMaterialSet.SymbolIconWorld</c> is unassigned (optional-with-warn) — world icons stay
         /// hidden, text is unaffected. Its <c>renderQueue</c> is written directly by <see cref="Create"/> —
         /// unlike <see cref="WorldTextMaterial"/>, nothing reads a symbol layer's icon material at
-        /// <see cref="RenderLayerSet.Build"/> time, so it has no free ride.</summary>
+        /// <see cref="RenderLayerSet.Build"/> time, so it has no free ride. It owns this layer's
+        /// <see cref="LayerSubSlot.Base"/> sub-slot, strictly below <see cref="WorldTextMaterial"/>'s
+        /// <see cref="LayerSubSlot.Above"/> (G7/D7).</summary>
         public Material WorldIconMaterial { get; }
 
         /// <summary>The typed parsed symbol layer — MapView's D10 source-fetch derivation reads this
@@ -102,7 +118,10 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 worldIconMat = baseWorldIconMat.CloneWithParent();
                 worldIconMat.name = $"MapSymbolIconWorld_{layer.Id}";
-                worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex); // §0.1: no Build-time free ride like WorldTextMaterial/Material
+                // §0.1: no Build-time free ride like WorldTextMaterial/Material. Base explicitly (not the
+                // default arg) so the pairing with the text's Above sub-slot is visible at the call site —
+                // G7/D7: the icon must draw strictly below its own layer's text.
+                worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex, LayerSubSlot.Base);
             }
 
             return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, parent);

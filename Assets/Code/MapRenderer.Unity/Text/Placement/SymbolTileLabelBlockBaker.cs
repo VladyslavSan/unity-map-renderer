@@ -45,11 +45,15 @@ namespace MapRenderer.Unity.Text.Placement
         /// <paramref name="label"/> EXCEPT its glyph quads/world anchor (copied by the caller into its own
         /// pool). <paramref name="tileOriginRender"/> is the label's tile's render-space origin — the caller
         /// resolves it (a per-build cache for the oracle; a single value for the single-tile bake).</summary>
-        internal static PointStageInput BuildPointInput(LabelInstance label, int slotCount, in double3 tileOriginRender)
+        internal static PointStageInput BuildPointInput(LabelInstance label, int slotCount, in double3 tileOriginRender,
+            LabelPairRole pairRole)
         {
             float4 color  = LabelPlacementSystem.LinearColor(label);
             // I6: icon FadeId identity now rides label.IconImage (null for text, so a text label's FadeId
-            // is unchanged — PointFadeId's guard-skip fold).
+            // is unchanged — PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
+            // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
+            // (LabelStageJob skips staging a Rider record entirely) but is left correctly resolved so
+            // LabelPlacementSystem.MarkFadeOutIfAlive's per-record probe stays well-defined.
             long   fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
 
             // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
@@ -74,6 +78,9 @@ namespace MapRenderer.Unity.Text.Placement
                 // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
                 AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
+                // §10 D8/D10: RESOLVED role (LabelPairing already decided whether the proposal holds) — the
+                // stage job needs nothing else; a paired owner's rider is the next point record.
+                PairRole = pairRole,
             };
         }
 
@@ -202,8 +209,15 @@ namespace MapRenderer.Unity.Text.Placement
                     int quadStart = quadIdx;
                     for (int q = 0; q < quadCount; q++) block.Quads[quadIdx++] = quads[q];
 
+                    // §10 D10: LabelPairing resolves the PROPOSAL (a rider can go missing to per-label
+                    // shaping isolation) against the TILE list — this loop's own `labels` — so a half-built
+                    // pair dissolves back into two None-role labels.
+                    LabelPairRole pairRole = LabelPairRole.None;
+                    if (LabelPairing.TryGetRider(labels, i, out _)) pairRole = LabelPairRole.Owner;
+                    else if (LabelPairing.IsRider(labels, i)) pairRole = LabelPairRole.Rider;
+
                     int slot = pointIdx++;
-                    block.Points[slot] = BuildPointInput(label, slotCount, tileOriginRender);
+                    block.Points[slot] = BuildPointInput(label, slotCount, tileOriginRender, pairRole);
                     block.PointQuadStart[slot] = quadStart;
                     block.PointQuadCount[slot] = quadCount;
 
@@ -217,6 +231,12 @@ namespace MapRenderer.Unity.Text.Placement
                     block.RepAnchor[i] = label.AnchorRender;
 
                     // Mirrors SymbolLabelBatch.AddPoint: one AABB box + its quads, one candidate.
+                    // §10 D8: UNCHANGED even for a paired half. A pair still spans TWO records here (icon +
+                    // text), each contributing 1 to MaxBoxes/MaxCandidates as before — but at stage time it
+                    // collapses to ONE real LabelCandidate with BoxCount/EmitCount up to 2. So MaxBoxes covers
+                    // a pair's two boxes EXACTLY, and MaxCandidates (the emit pool's size, LabelPlacementSystem
+                    // PreSizeStageOutputs) covers its two emits EXACTLY too, with one candidate slot of slack.
+                    // This is the proof PreSizeStageOutputs needs no change for pairing.
                     block.MaxBoxes += 1; block.MaxQuads += quadCount; block.MaxCandidates += 1;
                 }
                 else

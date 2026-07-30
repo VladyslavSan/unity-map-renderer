@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 
 namespace MapRenderer.Unity.Rendering.Style
@@ -32,8 +33,15 @@ namespace MapRenderer.Unity.Rendering.Style
         DrawPersistence Persistence { get; }
 
         /// <summary>The global draw slot, set once by <see cref="RenderLayerSet.Build"/>; immutable
-        /// afterwards. <c>renderQueue = LayerDrawOrder.TransparentQueue + DrawIndex</c>.</summary>
+        /// afterwards. This layer's queue band is <c>LayerDrawOrder.QueueFor(DrawIndex, subSlot)</c> for each
+        /// sub-slot it uses (G7/D7) — NOT a bare <c>TransparentQueue + DrawIndex</c> any more.</summary>
         int DrawIndex { get; }
+
+        /// <summary>Which sub-slot of this layer's queue band (see <see cref="DrawIndex"/>) its primary
+        /// <see cref="Material"/> occupies — <see cref="LayerSubSlot.Base"/> for a single-material layer
+        /// (fill, line, background), <see cref="LayerSubSlot.Above"/> for a layer whose <see cref="Material"/>
+        /// must draw over another material it owns (the symbol layer's text, over its own icon).</summary>
+        LayerSubSlot MaterialSubSlot { get; }
 
         /// <summary>The per-layer GPU <see cref="Material"/> instance; its <c>renderQueue</c> encodes the
         /// declared draw order. Owned by this layer (destroyed on <see cref="IDisposable.Dispose"/>),
