@@ -1,5 +1,6 @@
 using UnityEngine;
 using MapRenderer.Core.Rendering;
+using MapRenderer.Core.View;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Text.Placement;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
@@ -78,14 +79,26 @@ namespace MapRenderer.Unity.Rendering.Style
         /// without re-walking <c>style.Layers</c>.</summary>
         public SymbolStyle.StyleLayer SymbolLayer { get; }
 
+        /// <summary>The zoom <see cref="BindHalo"/> was evaluated at, frozen at <see cref="Create"/>. A
+        /// dpr-driven re-bind re-evaluates HERE, not at the live zoom — re-evaluating at the live zoom would
+        /// silently implement the zoom-expression halo that is a documented follow-up (design §7 risk 9),
+        /// which could move a render at dpr 1 and break the stage invariant while looking like a feature.</summary>
+        private readonly double _haloZoom;
+
+        /// <summary>The device-pixel ratio the halo uniforms currently carry. Seeded to 1 (which is what
+        /// <see cref="Create"/> binds at), so the re-bind branch is dead at dpr 1 — byte-identical.</summary>
+        private double _haloDpr = 1.0;
+
         private SymbolRenderLayer(SymbolStyle.StyleLayer layer,
-            Material worldTextMaterial, Material worldIconMaterial, int drawIndex, Transform parent)
+            Material worldTextMaterial, Material worldIconMaterial, int drawIndex, Transform parent,
+            double haloZoom)
         {
             StyleLayer        = layer;
             SymbolLayer       = layer;
             WorldTextMaterial = worldTextMaterial;
             WorldIconMaterial = worldIconMaterial;
             DrawIndex         = drawIndex;
+            _haloZoom         = haloZoom;
         }
 
         /// <summary>Never returns null (unlike Fill/Line's <c>TryCreate</c>): the slot↔subsystem-ordinal 1:1
@@ -107,7 +120,10 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 worldTextMat = baseWorldTextMat.CloneWithParent();
                 worldTextMat.name = $"MapSymbolTextWorld_{layer.Id}";
-                BindHalo(worldTextMat, layer.Paint, initialZoom);
+                // Seeded at dpr 1, like every other layer kind's bind-time seed. Unlike fill/line this layer
+                // has no applier to re-run, so the live ratio arrives via the first ApplyZoom — which
+                // MapView issues immediately after RenderLayerSet.Build, before any frame draws.
+                BindHalo(worldTextMat, layer.Paint, initialZoom, 1.0);
             }
 
             Material baseWorldIconMat = settings != null ? settings.SymbolIconWorld : null;
@@ -124,10 +140,11 @@ namespace MapRenderer.Unity.Rendering.Style
                 worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex, LayerSubSlot.Base);
             }
 
-            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, parent);
+            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, parent, initialZoom);
         }
 
-        private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom)
+        private static void BindHalo(Material material, SymbolStyle.PaintProperties paint, double zoom,
+            double devicePixelRatio)
         {
             // Constant/zoom halo only (the locked first-cut scope). A data-driven (Feature/Composite) halo
             // would throw from Evaluate(zoom) — leave the material's inherited base halo rather than fault
@@ -140,8 +157,13 @@ namespace MapRenderer.Unity.Rendering.Style
                 // in LabelPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
                 material.SetColor(HaloColorId,
                     new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A).linear);
-                material.SetFloat(HaloWidthId, paint.HaloWidth.Evaluate(zoom));
-                material.SetFloat(HaloBlurId, paint.HaloBlur.Evaluate(zoom));
+                // S107: both halo terms are added to a signed distance the SDF shader carries in DEVICE px
+                // (screenDist, from an fwidth-derived screen scale), so both take the px→device conversion.
+                // The pair scales TOGETHER — splitting it would render the halo inconsistently at dpr ≠ 1.
+                material.SetFloat(HaloWidthId,
+                    (float)DeviceScaling.LogicalToDevicePx(paint.HaloWidth.Evaluate(zoom), PixelSpace.Device, devicePixelRatio));
+                material.SetFloat(HaloBlurId,
+                    (float)DeviceScaling.LogicalToDevicePx(paint.HaloBlur.Evaluate(zoom), PixelSpace.Device, devicePixelRatio));
             }
             catch (System.ArgumentException)
             {
@@ -149,7 +171,16 @@ namespace MapRenderer.Unity.Rendering.Style
             }
         }
 
-        public void ApplyZoom(double zoom) { } // no-op — zoom-expression halo is a documented follow-up (§7 risk 9)
+        /// <summary>Re-binds the halo ONLY when the device-pixel ratio changed, and re-evaluates at the
+        /// frozen <see cref="_haloZoom"/> — see that field for why the live zoom must not be used. The
+        /// zoom-expression halo remains a documented follow-up (design §7 risk 9); at a steady ratio this
+        /// stays the no-op it has always been.</summary>
+        public void ApplyZoom(double zoom, double devicePixelRatio)
+        {
+            if (devicePixelRatio == _haloDpr || WorldTextMaterial == null) return;
+            _haloDpr = devicePixelRatio;
+            BindHalo(WorldTextMaterial, SymbolLayer.Paint, _haloZoom, devicePixelRatio);
+        }
 
         public void Dispose()
         {

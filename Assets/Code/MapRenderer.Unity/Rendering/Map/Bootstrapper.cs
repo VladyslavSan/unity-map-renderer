@@ -126,10 +126,17 @@ namespace MapRenderer.Unity.Rendering.Map
             var mapView = GetComponent<MapViewComponent>();
             if (mapView != null)
             {
-                // Device-independent on-screen tile size: derive the device-pixel ratio from the real panel
-                // (dpr = Screen.dpi / 160, the mdpi golden standard) so a selection tile is a constant physical
-                // size across densities. Start runs only at runtime over a real display, so Screen.dpi is a
-                // measured density; tests drive Wire (not Start) and keep the serialized DevicePixelRatio.
+                // Device-independent on-screen tile size: derive the device-pixel ratio from the reported
+                // panel density (dpr = Screen.dpi / 160, the mdpi golden standard) so a selection tile is a
+                // constant physical size across densities. Two caveats, both real: Start runs in PLAY MODE
+                // as well, where Screen.dpi has been OBSERVED to report the density of whichever monitor the
+                // Editor window sits on — so play-testing a mobile build takes this machine's density, not
+                // the device's — and that is an observation rather than a contract, because Screen.dpi's
+                // Editor behaviour is undocumented (Unity documents the divergence for Screen.width/height
+                // and says nothing for dpi). Whether the mdpi derivation is right at all
+                // is Stage 4b's open question: mdpi is an Android convention, and no runtime API exposes the
+                // platform's own scale factor to managed user code (docs/device-pixel-ratio-design.md §4b).
+                // Tests drive Wire (not Start) and keep the serialized ratio.
                 mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
             }
             string styleUri = ResolveStyleUri(StyleUri);

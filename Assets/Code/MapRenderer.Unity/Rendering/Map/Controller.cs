@@ -114,15 +114,20 @@ namespace MapRenderer.Unity.Rendering.Map
             // Resolve the active projection once per frame.
             IProjection projection = Map.Camera.Projection;
 
-            // The camera-interaction seam runs entirely in LOGICAL pixels (S92 D3): divide BOTH the viewport
-            // and the cursor by DPR at their single read sites, so everything downstream — the ViewContext,
-            // the gesture anchors, ScreenToGround/GroundToScreen — shares the render camera's logical basis
-            // (MapCamera D1 frames vp/DPR). Config.DevicePixelRatio is the SAME source the render reads, so
-            // reconstruction and render can't diverge → the anchored-pan pin holds under DPR≠1. Guard ≤0 → 1.
-            double dpr = Map.Config.DevicePixelRatio > 0.0 ? Map.Config.DevicePixelRatio : 1.0;
-            double2 vp = new double2(
+            // The camera-interaction seam runs entirely in LOGICAL pixels (S92 D3): convert BOTH the viewport
+            // and the cursor at their single read sites, so everything downstream — the ViewContext, the
+            // gesture anchors, ScreenToGround/GroundToScreen — shares the render camera's logical basis
+            // (MapCamera D1 frames vp/DPR). Since S108 the division and its unusable-ratio fallback live in
+            // DeviceScaling.DeviceToLogicalPx, the same definition MapCamera.ViewportLogicalPx frames from —
+            // so "reconstruction and render can't diverge" is structural rather than a claim about two call
+            // sites reading the same config field.
+            // The viewport is deliberately NOT MapCamera.ViewportPx: this component's own serialized Camera
+            // may be null (Map.Camera, already null-checked above, is a different reference), and that
+            // Screen.width/height fallback has no counterpart on MapCamera, which wraps a non-null camera.
+            double dpr = Map.Config.DevicePixelRatio;
+            double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(
                 Camera != null ? Camera.pixelWidth  : Screen.width,
-                Camera != null ? Camera.pixelHeight : Screen.height) / dpr;
+                Camera != null ? Camera.pixelHeight : Screen.height), dpr);
 
             // Device-derived MIN-zoom floor from the (now logical) viewport (S92 D2): the most-zoomed-out level
             // frames the whole world with breathing room instead of shrinking to a useless world-square grape.
@@ -150,7 +155,7 @@ namespace MapRenderer.Unity.Rendering.Map
             {
                 // Read cursor position once (used by both scroll-zoom and drag).
                 Vector2 mousePos = mouse.position.ReadValue();
-                double2 cursor   = new double2(mousePos.x, mousePos.y) / dpr; // logical px (S92 D3 seam)
+                double2 cursor   = DeviceScaling.DeviceToLogicalPx(new double2(mousePos.x, mousePos.y), dpr); // logical px (S92 D3 seam)
 
                 // Gate camera input to the Game View. The new Input System reads the OS-level mouse even when the
                 // pointer is over another Editor panel (or another app), so scrolling the Inspector would zoom the

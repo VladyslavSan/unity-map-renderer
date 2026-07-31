@@ -350,6 +350,191 @@ namespace MapRenderer.Tests
                 "arbitrary dpi divides by 160.");
         }
 
+        // ── The px→consumer-space conversion (S107 Stage 1) ────────────────────────────────────
+
+        [Test]
+        public void LogicalToDevicePx_LogicalTargetIsTheIdentity_DeviceTargetScalesByDpr()
+        {
+            // Logical: the consumer already divides by dpr, so the conversion must not touch the value —
+            // at ANY ratio, including the ones no other test in the suite runs at.
+            foreach (double dpr in new[] { 0.5, 1.0, 1.56, 2.0, 3.0 })
+                Assert.AreEqual(7.0, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Logical, dpr), 1e-12,
+                    $"PixelSpace.Logical must be the identity (dpr {dpr}).");
+
+            // Device: the consumer measures against the physical framebuffer ⇒ × dpr, exactly.
+            Assert.AreEqual(7.0,  DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, 1.0),  1e-12,
+                "dpr 1 is the identity in BOTH spaces — the stage invariant.");
+            Assert.AreEqual(14.0, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, 2.0),  1e-12,
+                "dpr 2 doubles a device-space px value.");
+            Assert.AreEqual(10.92, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, 1.56), 1e-12,
+                "the ratio is applied linearly, not rounded to a whole-pixel step.");
+        }
+
+        [Test]
+        public void NonPositiveDpr_FallsBackToOne_InBOTHDirections_SoTheGuardsCannotDiverge()
+        {
+            // S108 T3-2. Both directions in ONE test on purpose: the fallback has a single home
+            // (DeviceScaling's private ratio guard), and asserting the pair together is what makes it
+            // impossible to change one direction's behaviour without the other's going red. An unconfigured
+            // ratio that framed the camera at 1 but scaled the paint by 0 would blank every line; one that
+            // divided the viewport by 0 would send the framing viewport to +∞.
+            //
+            // NaN and the infinities are not swept HERE — since S109 the guard is a two-sided plausibility
+            // band, so they fall back by decision rather than by accident, and the test below is where that
+            // decision is recorded (it closes §6.1 finding 6). This one keeps its original scope: the
+            // non-positive ratios that were the whole of the guard before the band existed.
+            foreach (double dpr in new[] { 0.0, -0.0, -1.0, -2.0 })
+            {
+                Assert.AreEqual(7.0, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
+                    $"logical→device at a non-positive ratio ({dpr}) must fall back to 1 " +
+                    "(never a zero-width or mirrored paint).");
+                Assert.AreEqual(7.0, DeviceScaling.DeviceToLogicalPx(7.0, dpr), 0.0,
+                    $"device→logical at a non-positive ratio ({dpr}) must fall back to 1 " +
+                    "(never ±∞, which NaN-poisons the frustum planes downstream).");
+
+                double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(1920.0, 1080.0), dpr);
+                Assert.IsFalse(double.IsInfinity(vp.x) || double.IsNaN(vp.x)
+                            || double.IsInfinity(vp.y) || double.IsNaN(vp.y),
+                    $"the double2 overload must be finite at a non-positive ratio ({dpr}).");
+                Assert.AreEqual(1920.0, vp.x, 0.0, "x falls back to 1 component-wise.");
+                Assert.AreEqual(1080.0, vp.y, 0.0, "y falls back to 1 component-wise.");
+            }
+        }
+
+        [Test]
+        public void ImplausibleDpr_FallsBackToExactlyOne_InBOTHDirections()
+        {
+            // S109 T4-1. Both directions in ONE test for the same reason as T3-2 above: the fallback has a
+            // single home, and asserting the pair together is what stops one direction growing a behaviour
+            // the other does not have.
+            //
+            // The expected value is LITERALLY 1.0 at tolerance 0, and that exactness is the tooth. It is
+            // what discriminates a fallback from a clamp: `clamp(d, 0.25, 8)` returns 0.25 for 0.1 and 8.0
+            // for 1e6 — both perfectly plausible-looking ratios that would satisfy any tolerant, "is
+            // finite", or "is in range" assertion while silently rebasing the entire map by 4× or 8×.
+            //
+            // Only +∞ is a BEHAVIOUR change: it satisfied the old positivity test and propagated, taking
+            // logical→device to +∞ and device→logical to 0. NaN and -∞ already fell back (every comparison
+            // against them is false either way) — they are swept to RECORD that an unusable ratio is one
+            // thing rather than to catch a regression, which is how §6.1 finding 6 ("NaN maps to 1 by
+            // accident, not by decision") closes by a tooth instead of by prose.
+            foreach (double dpr in new[]
+                     {
+                         0.1, 1e-9,                                     // below any plausible floor
+                         100.0, 1e6,                                    // above any plausible ceiling
+                         double.PositiveInfinity,                       // the one behaviour change
+                         double.NegativeInfinity, double.NaN,           // decision-recording: already fell back
+                     })
+            {
+                Assert.AreEqual(1.0, DeviceScaling.LogicalToDevicePx(1.0, PixelSpace.Device, dpr), 0.0,
+                    $"logical→device at an implausible ratio ({dpr}) must fall back to EXACTLY 1 — a clamp " +
+                    "to the nearest bound would substitute a plausible-looking ratio and hide the bad value.");
+                Assert.AreEqual(1.0, DeviceScaling.DeviceToLogicalPx(1.0, dpr), 0.0,
+                    $"device→logical at an implausible ratio ({dpr}) must fall back to EXACTLY 1 — at +∞ " +
+                    "this returned 0, which collapses the logical viewport the whole cover is framed from.");
+
+                double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(1920.0, 1080.0), dpr);
+                Assert.AreEqual(1920.0, vp.x, 0.0, $"x falls back to 1 component-wise at {dpr}.");
+                Assert.AreEqual(1080.0, vp.y, 0.0, $"y falls back to 1 component-wise at {dpr}.");
+            }
+
+            // The composition Bootstrapper.Start actually performs — SafeRatio(DevicePixelRatioFromDpi(dpi)) —
+            // which nothing else pins. An absurd reported panel density cannot escape the band. Only the large
+            // end is testable: a dpi of 0 trips DevicePixelRatioFromDpi's own positive-density precondition.
+            Assert.AreEqual(1080.0,
+                DeviceScaling.DeviceToLogicalPx(1080.0, DeviceScaling.DevicePixelRatioFromDpi(1e9)), 0.0,
+                "an absurd panel density must land outside the band and degrade to 1, not divide the " +
+                "framing viewport by 6.25 million.");
+        }
+
+        [Test]
+        public void PlausibleDpr_PassesThroughUnchanged_AndTheBandIsInclusiveAtBothBounds()
+        {
+            // S109 T4-2. Kept apart from T4-1 on purpose: this test pins a policy CONSTANT that a later
+            // maintainer may legitimately want to move, so moving the band stays a one-test edit.
+            //
+            // The DISCRIMINATING rows are the straddles — 0.24/0.26 and 7.99/8.01. Neither half of a pair
+            // pins anything alone: 0.24 → 1 only says the floor is above 0.24, and 0.26 → 0.26 only says it
+            // is at or below 0.26; together they trap it in (0.24, 0.26]. The exact-bound rows (0.25, 8.0)
+            // are the WEAKEST in the set — they distinguish >= from > and nothing else.
+            foreach (double dpr in new[] { 0.25, 0.26, 0.5, 0.625, 1.0, 1.56, 2.0, 3.0, 4.0, 7.99, 8.0 })
+            {
+                Assert.AreEqual(7.0 * dpr, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
+                    $"a plausible ratio ({dpr}) must scale the paint bit-identically — sub-1 ratios are " +
+                    "legitimate (a ~100-dpi panel is 0.625, Android ldpi is 0.75), which is why the floor " +
+                    "is not 1, and 4.0 is a real flagship (xxxhdpi, 640 dpi), which is why the ceiling is " +
+                    "not 4.");
+                Assert.AreEqual(7.0 / dpr, DeviceScaling.DeviceToLogicalPx(7.0, dpr), 0.0,
+                    $"a plausible ratio ({dpr}) must divide the measurement bit-identically.");
+            }
+
+            foreach (double dpr in new[] { 0.24, 8.01 })
+            {
+                Assert.AreEqual(7.0, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
+                    $"a ratio just outside the band ({dpr}) must fall back — with its in-band twin above, " +
+                    "this brackets the bound rather than merely sampling one side of it.");
+                Assert.AreEqual(7.0, DeviceScaling.DeviceToLogicalPx(7.0, dpr), 0.0,
+                    $"a ratio just outside the band ({dpr}) must fall back in the device→logical direction too.");
+            }
+        }
+
+        // ── The device→logical conversion (S108 Stage 3) ───────────────────────────────────────
+
+        /// <summary>
+        /// S108 T3-1: <see cref="DeviceScaling.DeviceToLogicalPx(double,double)"/> is DIVISION, exactly —
+        /// never <c>v * (1/d)</c>. The witness values matter: at dpr 1 and dpr 2 the reciprocal is a power of
+        /// two and therefore exact, so those ratios cannot discriminate at all, and at 1.56 / 3.0 the sizes a
+        /// test naturally reaches for (512, 1024, 1920, 1080) happen to agree too. The sweep below is wide
+        /// enough that an unlucky literal cannot defeat it; 1440 at 1.56 and 640 at 3.0 are the verified
+        /// last-bit witnesses. Tolerance is 0 — a tolerant comparison passes the very implementation this
+        /// exists to reject, and reciprocal drift at a non-dyadic ratio like 1.56 would break the stage's
+        /// byte-identity invariant everywhere the conversion is now shared.
+        /// </summary>
+        [Test]
+        public void DeviceToLogicalPx_IsExactDivision_NotReciprocalMultiplication()
+        {
+            double[] measurements =
+            {
+                1440.0, 640.0, 2560.0, 1920.0, 1080.0, 512.0, 1024.0, 480.0, 256.0, 128.0,
+                64.0, 32.0, 16.0, 8.0, 4.0, 2.0, 1.0, 3.0, 7.0, 10.0,
+                13.0, 100.0, 333.0, 777.0, 999.0, 1000.0, 1234.5, 1600.0, 900.0, 4096.0,
+            };
+
+            foreach (double dpr in new[] { 1.0, 2.0, 1.56, 3.0 })
+                foreach (double devicePx in measurements)
+                {
+                    Assert.AreEqual(devicePx / dpr, DeviceScaling.DeviceToLogicalPx(devicePx, dpr), 0.0,
+                        $"device→logical must be exactly {devicePx} / {dpr} — a reciprocal multiply differs " +
+                        "in the last bit at the ratios a real panel reports.");
+
+                    double2 pair = DeviceScaling.DeviceToLogicalPx(new double2(devicePx, devicePx * 0.5), dpr);
+                    Assert.AreEqual(devicePx / dpr,       pair.x, 0.0, "the double2 overload divides x exactly.");
+                    Assert.AreEqual(devicePx * 0.5 / dpr, pair.y, 0.0, "the double2 overload divides y exactly.");
+                }
+
+            // dpr 1 is bit-identical to the input — the identity every existing test in the suite runs at,
+            // and the reason a defect here is invisible to all 1915 of them.
+            foreach (double devicePx in measurements)
+                Assert.AreEqual(devicePx, DeviceScaling.DeviceToLogicalPx(devicePx, 1.0), 0.0,
+                    "dpr 1 must be bit-identical, not merely close.");
+        }
+
+        /// <summary>
+        /// S108: the two directions are exact inverses at the ratios where the round trip is representable
+        /// (powers of two), so a sign or reciprocal slip in either one shows up as a round-trip drift.
+        /// </summary>
+        [Test]
+        public void DeviceToLogicalPx_InvertsLogicalToDevicePx_AtPowerOfTwoRatios()
+        {
+            foreach (double dpr in new[] { 1.0, 2.0, 4.0, 0.5 })
+                foreach (double logicalPx in new[] { 7.0, 512.0, 1080.0, 1440.0 })
+                {
+                    double device = DeviceScaling.LogicalToDevicePx(logicalPx, PixelSpace.Device, dpr);
+                    Assert.AreEqual(logicalPx, DeviceScaling.DeviceToLogicalPx(device, dpr), 0.0,
+                        $"logical→device→logical must round-trip exactly at dpr {dpr}.");
+                }
+        }
+
         // ── S88 T-DENSITY — 512 selects exactly one level coarser than 256, over the SAME span ───
 
         [Test]

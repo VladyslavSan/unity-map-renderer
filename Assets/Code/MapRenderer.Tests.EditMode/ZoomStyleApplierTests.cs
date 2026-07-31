@@ -91,9 +91,9 @@ namespace MapRenderer.Tests
                 var applier = new ZoomStyleApplier(lineMat);
                 applier.BindFloat(widthSp, ShaderProperties.Line.PropertyId.Width);
 
-                applier.ApplyZoom(5.0);
+                applier.ApplyZoom(5.0, 1.0);
                 float widthAtZ5 = lineMat.GetFloat("_Width");
-                applier.ApplyZoom(15.0);
+                applier.ApplyZoom(15.0, 1.0);
                 float widthAtZ15 = lineMat.GetFloat("_Width");
 
                 // Mesh must be the SAME reference after multiple ApplyZoom calls.
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests
                 applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
 
                 // Apply at zoom=0.5 (t=0.5 between stops 0 and 1).
-                applier.ApplyZoom(0.5);
+                applier.ApplyZoom(0.5, 1.0);
                 Color unity = fillMat.GetColor("_BaseColor");
 
                 // Derive the expected value from the Core evaluator with the SAME converter.
@@ -207,7 +207,7 @@ namespace MapRenderer.Tests
 
                 // Warm up: ensure JIT compilation and shader reflection are done before measuring.
                 for (int w = 0; w < 20; w++)
-                    applier.ApplyZoom(5.0 + (w % 10) * 1.0);
+                    applier.ApplyZoom(5.0 + (w % 10) * 1.0, 1.0);
 
                 // ── Measure: swept zoom, must be alloc-free. ──
                 double sweepZoom = 5.0;
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests
                     // Use a closure-captured local that changes each call so the sweep is genuinely variable.
                     sweepZoom += 0.1;
                     if (sweepZoom > 15.0) sweepZoom = 5.0;
-                    applier.ApplyZoom(sweepZoom);
+                    applier.ApplyZoom(sweepZoom, 1.0);
                 }, Is.Not.AllocatingGCMemory(),
                     "ZoomStyleApplier.ApplyZoom (float binding, sweeping zoom) must not allocate GC memory. " +
                     "A failure indicates a Value[], boxing, or per-frame allocation escaped the hot path.");
@@ -241,14 +241,14 @@ namespace MapRenderer.Tests
                 applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
 
                 for (int w = 0; w < 20; w++)
-                    applier.ApplyZoom(5.0 + (w % 10) * 1.0);
+                    applier.ApplyZoom(5.0 + (w % 10) * 1.0, 1.0);
 
                 double sweepZoom = 5.0;
                 Assert.That(() =>
                 {
                     sweepZoom += 0.1;
                     if (sweepZoom > 15.0) sweepZoom = 5.0;
-                    applier.ApplyZoom(sweepZoom);
+                    applier.ApplyZoom(sweepZoom, 1.0);
                 }, Is.Not.AllocatingGCMemory(),
                     "ZoomStyleApplier.ApplyZoom (color binding, sweeping zoom) must not allocate GC memory. " +
                     "A failure means rgb() stop outputs were not constant-folded to LiteralExpression.");
@@ -276,7 +276,7 @@ namespace MapRenderer.Tests
                     JsonParser.Parse(@"{""fill-opacity"": 0.5}"));
                 var applier = new ZoomStyleApplier(fillMat);
                 MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
-                applier.ApplyZoom(0.0);
+                applier.ApplyZoom(0.0, 1.0);
 
                 Assert.AreEqual(0.5f, fillMat.GetFloat("_Opacity"), 1e-4f,
                     "a constant fill-opacity must be bound as the _Opacity uniform.");
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests
 
                 var applier = new ZoomStyleApplier(fillMat);
                 MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
-                applier.ApplyZoom(0.0);
+                applier.ApplyZoom(0.0, 1.0);
 
                 Assert.AreEqual(1f, fillMat.GetFloat("_Opacity"), 1e-4f,
                     "a data-driven fill-opacity is baked per-feature, so _Opacity must be pinned to 1. " +

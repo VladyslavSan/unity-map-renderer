@@ -51,9 +51,13 @@ namespace MapRenderer.Unity.Rendering.Style
         /// ever receives an <c>AddTileLayer</c> for it.</summary>
         Material Material { get; }
 
-        /// <summary>Push this layer's zoom-dependent uniforms for the frame. Called once per layer per frame
-        /// from <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). Line width is resolved in
-        /// screen space (S104) — no metersPerPixel is threaded through any more.</summary>
-        void ApplyZoom(double zoom);
+        /// <summary>Push this layer's per-frame uniforms. Called once per layer per frame from
+        /// <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). Line width is resolved in
+        /// screen space by the shader (S104) — no metersPerPixel is threaded through — but that screen space
+        /// is the PHYSICAL framebuffer, so <paramref name="devicePixelRatio"/> is what converts the style's
+        /// logical px into it (S107; see <see cref="ZoomStyleApplier.BindDevicePixelFloat"/>).</summary>
+        /// <param name="zoom">The current map zoom level.</param>
+        /// <param name="devicePixelRatio">Physical ÷ logical px for this frame's panel.</param>
+        void ApplyZoom(double zoom, double devicePixelRatio);
     }
 }

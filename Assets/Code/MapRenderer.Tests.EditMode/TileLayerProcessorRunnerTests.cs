@@ -106,7 +106,7 @@ namespace MapRenderer.Tests
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors a tile-mesh layer (G7/D7)
             public Material Material => null;
-            public void ApplyZoom(double zoom) { }
+            public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
             public ThrowingTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;

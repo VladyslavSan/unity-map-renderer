@@ -2,6 +2,7 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Unity.Rendering.Map
@@ -56,10 +57,21 @@ namespace MapRenderer.Unity.Rendering.Map
         /// a high-DPI panel, matching the tile selector's logical framing. Default 1; refreshed live from
         /// <c>MapViewComponent.Config.DevicePixelRatio</c> each frame before <see cref="SyncToCamera"/>.
         ///
-        /// <para><b>PAINT is NOT DPI-scaled</b> (this is the crux — S92 D1): only the altitude term divides by
-        /// DPR. A <c>stylePx</c>-wide line still renders <c>stylePx</c> logical px because the DPI-normalized
-        /// camera makes ground-per-physical-pixel <c>mpp/DPR</c>. Never <c>÷DPR</c> the paint path — that
-        /// double-applies (the <c>GroundResolution</c>/<c>MetersPerPixel</c> freeze).</para>
+        /// <para><b>The camera normalizes the WORLD, not the paint.</b> Dividing the altitude here is what
+        /// makes ground geometry DPR-independent. A style's <c>px</c> values are LOGICAL px and are converted
+        /// to their consumer's space exactly once, at <c>ZoomStyleApplier</c> via
+        /// <see cref="MapRenderer.Core.View.DeviceScaling.LogicalToDevicePx"/> — never here, and never twice.</para>
+        ///
+        /// <para><b>Correction (S107) — the previous text was right when it was written.</b> This comment used
+        /// to read <i>"PAINT is NOT DPI-scaled … never ÷DPR the paint path"</i>, and under S92 D1 that was
+        /// TRUE: line width reached the shader through the <c>_MetersPerPixel</c> uniform, fed from
+        /// <c>CameraPoseMath.MetersPerPixel(zoom)</c> — metres per LOGICAL pixel — so the altitude
+        /// normalization alone carried the whole convention and a second division really would have
+        /// double-applied. <c>d5406d40</c> deleted that uniform and resolved width against
+        /// <c>_ScreenParams</c>, the PHYSICAL framebuffer, which silently rebased the entire line family from
+        /// logical to device px. The claim outlived the code path it described, and stayed green because
+        /// every test runs at DPR 1. Read it as a lesson about comments that name a mechanism, not a
+        /// reversal of judgement.</para>
         /// </summary>
         public double DevicePixelRatio;
 
@@ -95,8 +107,12 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>Logical (DPR-normalized) viewport size — <see cref="ViewportPx"/> ÷ <see cref="DevicePixelRatio"/>,
         /// the screen-space unit the label placement + coverage-cull passes measure in. One definition shared by
-        /// both consumers (<c>SymbolLabelSubsystem.CurrentBatch</c> and <c>LabelPlacementSystem.Tick</c>).</summary>
-        public double2 ViewportLogicalPx => ViewportPx / DevicePixelRatio;
+        /// its consumers (<c>SymbolLabelSubsystem.CurrentBatch</c>, <c>LabelPlacementSystem.Tick</c>, the altitude
+        /// framing below, and <c>MapView.BuildTileSelectionConfig</c>'s framing viewport).
+        /// <para>The division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>, shared with the
+        /// paint conversion — so an unconfigured ratio cannot frame the camera and scale the paint differently
+        /// (S108 D9; before it, this member had no fallback at all and returned ±∞).</para></summary>
+        public double2 ViewportLogicalPx => DeviceScaling.DeviceToLogicalPx(ViewportPx, DevicePixelRatio);
 
         /// <summary>
         /// Merge <paramref name="update"/> over the current properties. Updates <see cref="CurrentProperties"/>
@@ -127,9 +143,10 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             // Frame from the LOGICAL viewport height (S92 D1): ÷DPR brings the camera ~DPR× closer on a
             // high-DPI panel so the map is the right size and DPR-independent. ViewportPx stays physical
-            // (raw from the camera); only this altitude term is normalized. Guard a non-positive DPR → 1.
-            double dpr      = DevicePixelRatio > 0.0 ? DevicePixelRatio : 1.0;
-            double altitude = CameraPoseMath.AltitudeForZoom(CurrentProperties.Zoom, ViewportPx.y / dpr, CurrentProperties.VerticalFovDeg)
+            // (raw from the camera); only this altitude term is normalized — and it reads the shared
+            // ViewportLogicalPx rather than re-deriving it, so the altitude framing and the tile-cover
+            // framing are one quantity (S108) and the unusable-ratio fallback is inherited, not repeated.
+            double altitude = CameraPoseMath.AltitudeForZoom(CurrentProperties.Zoom, ViewportLogicalPx.y, CurrentProperties.VerticalFovDeg)
                               * AltitudeMultiplier;
             if (altitude < 0.1) altitude = 0.1;
 

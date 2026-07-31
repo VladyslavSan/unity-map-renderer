@@ -194,8 +194,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 }
 
                 // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
-                // width depends on the feature, _Width is set to 1.0 by BindLinePaintToApplier, so WidthScale
-                // carries the full evaluated pixel width; otherwise WidthScale stays the ribbon's factor.
+                // width depends on the feature, BindLinePaintToApplier binds _Width as a device-px constant
+                // of 1 — so _Width == the device-pixel ratio (1.0 at dpr 1) and WidthScale carries the full
+                // evaluated LOGICAL pixel width; otherwise WidthScale stays the ribbon's factor. The bake is
+                // deliberately dpr-free (S107): scaling it would put the ratio inside the geometry, so a live
+                // ratio change would need a full mesh rebuild and PreparedTileCache would serve it stale.
                 float featureWidthScale = 1f;
                 if (paint.Width.DependsOnFeature)
                 {

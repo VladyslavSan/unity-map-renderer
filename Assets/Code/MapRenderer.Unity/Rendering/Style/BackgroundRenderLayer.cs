@@ -63,12 +63,16 @@ namespace MapRenderer.Unity.Rendering.Style
             Background.PaintProperties paint = layer.Paint;
             var applier = new ZoomStyleApplier(mat);
             Materials.MaterialFactory.BindBackgroundPaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(initialZoom);
+            // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
+            // (RenderLayerSet.ApplyZoom's contract). Background has no px-valued paint, so the ratio is
+            // inert here; it is threaded for interface uniformity.
+            applier.ApplyZoom(initialZoom, 1.0);
 
             return new BackgroundRenderLayer(layer, mat, applier, drawIndex);
         }
 
-        public void ApplyZoom(double zoom) => _applier?.ApplyZoom(zoom); // zoom-expression background-color/opacity
+        // zoom-expression background-color/opacity; no px-valued paint, so the ratio is inert.
+        public void ApplyZoom(double zoom, double devicePixelRatio) => _applier?.ApplyZoom(zoom, devicePixelRatio);
 
         /// <summary>A2: no GameObject/Mesh to destroy — background owns only its material.</summary>
         public void Dispose()

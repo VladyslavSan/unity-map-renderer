@@ -133,14 +133,18 @@ namespace MapRenderer.Unity.Rendering.Map
             if (Map == null || Map.Camera == null) return;
 
             // Build per-frame view context (same pattern as Controller.Update). The interaction seam runs in
-            // LOGICAL pixels (S92 D3): divide the viewport AND every touch contact by DPR so anchors and the
-            // render camera (MapCamera D1 frames vp/DPR) share one basis — else pinch/pan drifts off the
-            // fingers on a high-DPI panel. Density normalization lives ONLY here now; the recognizer's
-            // thresholds are plain logical px, mirroring the mouse seam. Guard ≤0 → 1.
-            double dpr = Map.Config.DevicePixelRatio > 0.0 ? Map.Config.DevicePixelRatio : 1.0;
-            double2 vp = new double2(
+            // LOGICAL pixels (S92 D3): convert the viewport AND every touch contact so anchors and the render
+            // camera (MapCamera D1 frames vp/DPR) share one basis — else pinch/pan drifts off the fingers on a
+            // high-DPI panel. Density normalization lives ONLY here now; the recognizer's thresholds are plain
+            // logical px, mirroring the mouse seam. Since S108 the division and its unusable-ratio fallback
+            // live in DeviceScaling.DeviceToLogicalPx, the same definition MapCamera.ViewportLogicalPx frames
+            // from — one definition, so the touch basis and the render basis cannot diverge.
+            // As on the mouse seam, the viewport is this component's own serialized camera (nullable, hence
+            // the Screen.width/height fallback), NOT MapCamera's ctor-enforced non-null one.
+            double dpr = Map.Config.DevicePixelRatio;
+            double2 vp = DeviceScaling.DeviceToLogicalPx(new double2(
                 camera != null ? camera.pixelWidth  : Screen.width,
-                camera != null ? camera.pixelHeight : Screen.height) / dpr;
+                camera != null ? camera.pixelHeight : Screen.height), dpr);
 
             // Touch pinch-floor parity with the desktop Controller: the floor must track the live
             // viewport/projection, else touch pinch still floors at the stale OnEnable-baked value.
@@ -173,7 +177,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 _samples.Add(new TouchSample
                 {
                     FingerId   = t.finger.index,
-                    PositionPx = new double2(pos.x, pos.y) / dpr, // logical px (S92 D3 seam)
+                    PositionPx = DeviceScaling.DeviceToLogicalPx(new double2(pos.x, pos.y), dpr), // logical px (S92 D3 seam)
                     Phase      = corePh,
                 });
             }

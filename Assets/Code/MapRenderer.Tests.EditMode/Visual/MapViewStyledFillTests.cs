@@ -487,11 +487,11 @@ namespace MapRenderer.Tests.Visual
                 applier.BindFloat(paint.Opacity, Shader.PropertyToID("_MyZoomOpacity"));
 
                 // Apply at zoom=0.
-                applier.ApplyZoom(0.0);
+                applier.ApplyZoom(0.0, 1.0);
                 float valAtZoom0 = mat.GetFloat("_MyZoomOpacity");
 
                 // Apply at zoom=6.
-                applier.ApplyZoom(6.0);
+                applier.ApplyZoom(6.0, 1.0);
                 float valAtZoom6 = mat.GetFloat("_MyZoomOpacity");
 
                 Debug.Log($"[StyledFillTests] ZoomStyleApplier: zoom=0 → {valAtZoom0:F4}, zoom=6 → {valAtZoom6:F4}");

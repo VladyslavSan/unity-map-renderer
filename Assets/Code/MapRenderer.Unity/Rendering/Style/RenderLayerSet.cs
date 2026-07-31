@@ -105,15 +105,23 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Pushes per-frame zoom-dependent uniforms to every layer (fill/line zoom paint, zoom-step
-        /// dasharrays). Line width is resolved in screen space by the shader (S104), so no ground resolution
-        /// is threaded through. Alloc-free: a plain <c>for</c> over the list (struct enumerator-free),
-        /// each layer's <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
+        /// Pushes per-frame uniforms to every layer (fill/line zoom paint, zoom-step dasharrays, and the
+        /// px→device conversion for the px-valued paint family). Line width is resolved in screen space by
+        /// the shader (S104), so no ground resolution is threaded through — but that screen space is the
+        /// physical framebuffer, hence <paramref name="devicePixelRatio"/> (S107). Alloc-free: a plain
+        /// <c>for</c> over the list (struct enumerator-free), each layer's
+        /// <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
+        ///
+        /// <para><see cref="Build"/> deliberately takes no ratio: its per-layer seeds run at dpr 1, and the
+        /// caller re-applies at the live ratio immediately afterwards (<c>MapView.SetStyle</c>) so no frame
+        /// is ever drawn from a seeded value. Threading an initial ratio through
+        /// <see cref="RenderLayerFactory"/>'s four Create/TryCreate overloads would churn 8 call sites for
+        /// the same guarantee.</para>
         /// </summary>
-        public void ApplyZoom(double zoom)
+        public void ApplyZoom(double zoom, double devicePixelRatio)
         {
             for (int i = 0; i < _layers.Count; i++)
-                _layers[i].ApplyZoom(zoom);
+                _layers[i].ApplyZoom(zoom, devicePixelRatio);
         }
 
         /// <summary>

@@ -9,6 +9,7 @@
 
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View.Camera;
 using MapController = MapRenderer.Unity.Rendering.Map.Controller;
@@ -82,6 +83,55 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(expected1, y1, expected1 * 1e-5, "DPR=1 altitude == raw AltitudeForZoom(vp)");
                 Assert.AreEqual(expected2, y2, expected2 * 1e-5, "DPR=2 altitude == AltitudeForZoom(vp/2)");
                 Assert.AreEqual(y1 / 2.0, y2, y1 * 1e-4, "DPR=2 altitude is HALF the DPR=1 altitude");
+            }
+            finally
+            {
+                Object.DestroyImmediate(camGo);
+            }
+        }
+
+        /// <summary>
+        /// S108 T3-3 (the ONE named behaviour change of Stage 3): at a non-positive
+        /// <c>DevicePixelRatio</c>, <see cref="MapCamera.ViewportLogicalPx"/> must fall back to the dpr-1
+        /// value instead of returning ±∞.
+        ///
+        /// <para>Reachable without any platform claim: <c>MapViewConfig.DevicePixelRatio</c> is a plain
+        /// serialized field whose tooltip says "must be positive" with nothing enforcing it, so any Inspector
+        /// edit or scene asset carrying 0 lands here. The altitude was already guarded, so the camera framed
+        /// normally while the logical viewport went infinite — which then feeds the label collision viewport
+        /// (rejecting nothing) and the tile selector's framing (NaN-poisoned frustum planes: every tile
+        /// intersects, the LOD stop never fires, and the planar cover enumerates the whole quadtree).</para>
+        ///
+        /// <para>RED against the pre-S108 body <c>ViewportPx / DevicePixelRatio</c>.</para>
+        /// </summary>
+        [Test]
+        public void MapCamera_ViewportLogicalPx_IsFiniteAtNonPositiveDevicePixelRatio()
+        {
+            var camGo = new GameObject("Camera_DprGuardTest");
+            var cam   = camGo.AddComponent<Camera>();
+            cam.targetTexture = new RenderTexture((int)TestViewportHeight, (int)TestViewportHeight, 0);
+            try
+            {
+                var view = Cam(0.0, 0.0, 8.0);
+                foreach (double ratio in new[] { 0.0, -2.0 })
+                {
+                    var mapCamera = new MapCamera(cam, view, 1f, null, ratio);
+                    double2 logical = mapCamera.ViewportLogicalPx;
+
+                    Assert.IsFalse(double.IsInfinity(logical.x) || double.IsNaN(logical.x)
+                                || double.IsInfinity(logical.y) || double.IsNaN(logical.y),
+                        $"ViewportLogicalPx must stay finite at a ratio of {ratio} — an infinite logical " +
+                        "viewport makes label collision reject nothing and NaN-poisons the tile selector.");
+                    Assert.AreEqual(mapCamera.ViewportPx.x, logical.x, 0.0,
+                        $"a ratio of {ratio} degrades to 1, so the logical viewport IS the physical one.");
+                    Assert.AreEqual(mapCamera.ViewportPx.y, logical.y, 0.0,
+                        $"a ratio of {ratio} degrades to 1, so the logical viewport IS the physical one.");
+                }
+
+                // The positive control: the guard must not have flattened the real ratios.
+                var dpr2 = new MapCamera(cam, view, 1f, null, 2.0);
+                Assert.AreEqual(dpr2.ViewportPx.y / 2.0, dpr2.ViewportLogicalPx.y, 0.0,
+                    "a usable ratio still divides — exactly, not via a reciprocal.");
             }
             finally
             {

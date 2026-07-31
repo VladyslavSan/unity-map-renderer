@@ -19,7 +19,8 @@ namespace MapRenderer.Unity.Rendering.Materials
     ///
     /// <para>S60: all bindings now take <see cref="StyleProperty{T}"/> (replaces <c>PaintPropertyEvaluator</c>).
     /// Data-driven guard: was <c>!= null</c>; now <c>!prop.DependsOnFeature</c>. Translate: was
-    /// TranslateX/Y pair; now <c>Translate.Evaluate(0.0)</c> returning <c>double2</c>.</para>
+    /// TranslateX/Y pair; now <c>Translate</c> as a <c>StyleProperty&lt;double2&gt;</c>, bound through the
+    /// applier (S107) rather than evaluated at bind time.</para>
     /// </summary>
     internal static class MaterialFactory
     {
@@ -52,7 +53,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// <summary>
         /// Binds constant/zoom paint properties from <paramref name="paint"/> to the material.
         /// S60: StyleProperty&lt;T&gt; replaces old PaintPropertyEvaluator pairs; null-guard →
-        /// <c>!prop.DependsOnFeature</c>; TranslateX/Y → <c>Translate.Evaluate(0.0)</c>.
+        /// <c>!prop.DependsOnFeature</c>; TranslateX/Y → a single <c>StyleProperty&lt;double2&gt;</c>.
         /// </summary>
         public static void BindFillPaintToApplier(Fill.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
         {
@@ -60,7 +61,9 @@ namespace MapRenderer.Unity.Rendering.Materials
             // the COLOR stream's alpha by StyledFillTileBuilder (P4). In the baked case _Opacity MUST be
             // pinned to 1: the fragment computes `alpha *= vColor.a * _Opacity`, so leaving the material's
             // inherited value would multiply the opacity in twice. Same convention as data-driven line-width
-            // below (base = 1, evaluated value baked per-vertex).
+            // below (a constant base, evaluated value baked per-vertex) — except that opacity is unitless, so
+            // its base is a literal 1, while line-width's base is a px value and therefore carries the
+            // device-pixel ratio (S107).
             if (paint.Opacity.DependsOnFeature)
                 mat.SetFloat(ShaderProperties.PropertyId.Opacity, 1f);
             else
@@ -74,9 +77,11 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Antialias.DependsOnFeature)
                 applier.BindFloat(paint.Antialias, ShaderProperties.Fill.PropertyId.FillAntialias);
 
-            // fill-translate: collapsed to double2 — extract x/y and set as Vector4.
-            var t = paint.Translate.Evaluate(0.0);
-            mat.SetVector(ShaderProperties.Fill.PropertyId.FillTranslate, new Vector4((float)t.x, (float)t.y, 0f, 0f));
+            // fill-translate: a px offset consumed through Fill_VertexModify's MapPixelsToWorld — the same
+            // device-px space line-translate lives in (S107), so it takes the same conversion. Also parsed
+            // as always-Constant, so — as with line-translate — moving it from a bind-time Evaluate(0.0)
+            // to the per-frame applier cannot animate it or throw where it previously could not.
+            applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Fill.PropertyId.FillTranslate);
 
             // fill-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
@@ -180,35 +185,52 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Opacity.DependsOnFeature)
                 applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
+            // ── The device-px family (S107) ───────────────────────────────────────────────────────
+            // Every line paint property below is a LOGICAL px value whose shader consumer measures against
+            // _ScreenParams — the PHYSICAL framebuffer — via MapPixelsToWorld. BindDevicePixelFloat is the
+            // one conversion; naming the space at the binding site is what stops a newly-added px property
+            // from silently inheriting the wrong basis (the defect that cost the whole line family).
+            //
+            // The conversion stays on the CPU deliberately: MapPixelsToWorld must keep returning metres per
+            // DEVICE pixel, because the AA straddle pad and the hairline floor derived from it are genuinely
+            // sampling-grid quantities (half a physical pixel is half a physical pixel at any density) and
+            // must NOT scale. line-dasharray inherits the fix for free — dashU keys on widthWorld, so the
+            // dash period scales with the road it belongs to and needs no edit.
+
             // line-width (in pixels per MapLibre spec).
-            // Convention (data-driven width): when Width depends on feature, the evaluated width
-            // is baked into WidthScale (stream 3) by StyledLineTileBuilder. Set _Width = 1.0 so
-            // the shader formula (_Width × WidthScale) yields the full baked width directly.
-            // For Constant/Zoom kind, bind normally as a uniform.
+            // Convention (data-driven width): when Width depends on feature, the evaluated width is baked
+            // into WidthScale (stream 3) by StyledLineTileBuilder, and the shader computes
+            // _Width × WidthScale × pxToWorld — so the uniform carries the BASE only. Binding that base as a
+            // device-px constant of 1 makes _Width == dpr, i.e. widthWorld = dpr × bakedPx × pxToWorld.
+            // Scaling the mesh bake instead would put the ratio inside the geometry, where a live ratio
+            // change could not reach it and PreparedTileCache would serve it stale.
             if (paint.Width.DependsOnFeature)
-                mat.SetFloat(ShaderProperties.Line.PropertyId.Width, 1f); // base = 1; evaluated width baked into WidthScale per feature
+                applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Line.PropertyId.Width);
             else
-                applier.BindFloat(paint.Width, ShaderProperties.Line.PropertyId.Width);
-            // Ensure WidthIsPixels=1 so the shader interprets width as pixels.
+                applier.BindDevicePixelFloat(paint.Width, ShaderProperties.Line.PropertyId.Width);
+            // Ensure WidthIsPixels=1 so the shader interprets width as pixels. A MODE FLAG, not a px value —
+            // it does not go through the conversion.
             mat.SetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels, 1f);
 
             // line-blur (MapLibre paint, spec default 0) → _Blur: an OPT-IN soft edge (default 0 = hard).
             // NOT antialiasing — edge AA was removed; the shader draws a hard edge and floors thin-line width.
+            // Device px: the ramp's upper edge is fwidth(side) × _Blur, a band exactly _Blur device px wide.
             if (!paint.Blur.DependsOnFeature)
-                applier.BindFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
+                applier.BindDevicePixelFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
 
             // line-gap-width.
             if (!paint.GapWidth.DependsOnFeature)
-                applier.BindFloat(paint.GapWidth, ShaderProperties.Line.PropertyId.GapWidth);
+                applier.BindDevicePixelFloat(paint.GapWidth, ShaderProperties.Line.PropertyId.GapWidth);
 
             // line-offset (S44).
             if (!paint.Offset.DependsOnFeature)
-                applier.BindFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
+                applier.BindDevicePixelFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
 
-            // line-translate: collapsed to double2 — extract x/y and set as Vector4.
-            // Unity boundary cast: double2 → (float)x/(float)y then pack into Vector4.
-            var t = paint.Translate.Evaluate(0.0);
-            mat.SetVector(ShaderProperties.Line.PropertyId.LineTranslate, new Vector4((float)t.x, (float)t.y, 0f, 0f));
+            // line-translate: a px offset applied through the SAME MapPixelsToWorld call as the widths, so it
+            // sits in the identical device space. Parsed as always-Constant (the array components are
+            // scalars, not expressions), so moving it from a bind-time Evaluate(0.0) to the per-frame applier
+            // cannot animate it. Unity boundary cast (double2 → Vector4) happens inside the applier.
+            applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Line.PropertyId.LineTranslate);
 
             // line-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)

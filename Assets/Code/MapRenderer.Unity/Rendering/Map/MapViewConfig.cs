@@ -21,10 +21,15 @@ namespace MapRenderer.Unity.Rendering.Map
         [Header("Display Scaling")]
         [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
-                 "same PHYSICAL size across panel densities. At runtime the Bootstrapper OVERWRITES this from " +
-                 "the real panel — dpr = Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi). This " +
-                 "serialized value is the deterministic one used in tests/headless (which drive Wire, not " +
-                 "Start). Must be positive. Default 1.")]
+                 "same PHYSICAL size across panel densities. Bootstrapper.Start OVERWRITES this with " +
+                 "Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi) — including in Play mode, " +
+                 "where Screen.dpi has been OBSERVED to report the density of whichever monitor the Editor " +
+                 "window is on rather than the target device's (its Editor behaviour is undocumented, so " +
+                 "that is an observation, not a contract). Whether that derivation is the right one is " +
+                 "Stage 4b's open question (docs/device-pixel-ratio-design.md). This serialized value is " +
+                 "the deterministic one used in tests/headless (which drive Wire, not Start). A value " +
+                 "outside the plausible band (roughly a quarter to eight) degrades to 1 at the conversion. " +
+                 "Default 1.")]
         public double DevicePixelRatio = 1.0;
 
         [Header("Performance Budgets")]

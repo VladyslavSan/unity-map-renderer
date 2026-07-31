@@ -76,15 +76,17 @@ namespace MapRenderer.Unity.Rendering.Style
             Line.LayoutProperties layout = layer.Layout;
             var applier = new ZoomStyleApplier(mat);
             Materials.MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(initialZoom);
+            // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
+            // (RenderLayerSet.ApplyZoom's contract).
+            applier.ApplyZoom(initialZoom, 1.0);
             return new LineRenderLayer(layer, mat, paint, layout, applier, drawIndex);
         }
 
-        public void ApplyZoom(double zoom)
+        public void ApplyZoom(double zoom, double devicePixelRatio)
         {
             using (PmZoomLines.Auto())
             {
-                _applier.ApplyZoom(zoom);
+                _applier.ApplyZoom(zoom, devicePixelRatio);
 
                 // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom (the engine's
                 // classification). A constant dash (the common case) is set once at bind time and skipped

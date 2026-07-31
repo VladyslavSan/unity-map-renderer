@@ -82,15 +82,17 @@ namespace MapRenderer.Unity.Rendering.Style
             Fill.PaintProperties paint = layer.Paint;
             var applier = new ZoomStyleApplier(mat);
             Materials.MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(initialZoom);
+            // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
+            // (RenderLayerSet.ApplyZoom's contract).
+            applier.ApplyZoom(initialZoom, 1.0);
             return new FillRenderLayer(layer, mat, paint, layer.Layout, applier, drawIndex, initialZoom);
         }
 
-        public void ApplyZoom(double zoom)
+        public void ApplyZoom(double zoom, double devicePixelRatio)
         {
             using (PmZoomFills.Auto())
             {
-                _applier.ApplyZoom(zoom);
+                _applier.ApplyZoom(zoom, devicePixelRatio);
                 _lastZoom = zoom;
                 PushPatternScale();
             }

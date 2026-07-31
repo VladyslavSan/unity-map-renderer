@@ -151,27 +151,30 @@ namespace MapRenderer.Tests
         // ── S92 touch-DPI closure — the seam runs in LOGICAL px ──────────────────────────────────
 
         /// <summary>
-        /// S92 (touch-DPI closure): the touch interaction seam must be DPI-normalized like the mouse seam —
-        /// <see cref="TouchController"/> divides the viewport + finger positions by
-        /// <c>DevicePixelRatio</c> so anchors share the render camera's logical basis (no retina pan/pinch
-        /// drift). This is the one regression point the headless gate can't exercise (DPR=1, no synthetic
-        /// touches), so guard it structurally — mirroring <c>MapControllerInputTests</c> for the mouse seam.
+        /// S92 (touch-DPI closure) / S108 T3-5: the touch interaction seam must be DPI-normalized like the
+        /// mouse seam — <see cref="TouchController"/> converts the viewport + finger positions with
+        /// <c>DeviceScaling.DeviceToLogicalPx</c> so anchors share the render camera's logical basis (no
+        /// retina pan/pinch drift). This is the one regression point the headless gate can't exercise (DPR=1,
+        /// no synthetic touches), so guard it structurally. Its twin for the mouse seam lives in
+        /// <c>MapControllerInputTests</c> — added in S108, which is when this comment's claim to mirror it
+        /// first became true.
         /// </summary>
         [Test]
-        public void TouchController_DividesSeamByDevicePixelRatio()
+        public void TouchController_ConvertsSeamThroughTheDeviceToLogicalConversion()
         {
             string src = TouchControllerSource;
             Assert.IsTrue(src.Contains("DevicePixelRatio"),
                 "TouchController.cs must read Config.DevicePixelRatio to run the interaction seam in logical px " +
                 "(S92 touch-DPI closure — else retina pan/pinch drifts off the fingers).");
-            // BOTH the viewport AND the finger positions must be divided (two '/ dpr' sites). A partial fix
-            // that normalizes only one still drifts the anchor — and this structural guard is the only durable
-            // protection (the functional path is DPR=1 / no-synthetic-touch and can't be exercised headless).
-            int dprDivisions = System.Text.RegularExpressions.Regex.Matches(src, "/ dpr").Count;
-            Assert.GreaterOrEqual(dprDivisions, 2,
-                $"TouchController.cs must divide BOTH the viewport AND the finger positions by dpr — found " +
-                $"{dprDivisions} '/ dpr' site(s), expected ≥2 (S92 touch-DPI closure).");
+            // BOTH the viewport AND the finger positions must be converted. A partial fix that normalizes only
+            // one still drifts the anchor — and this structural guard is the only durable protection (the
+            // functional path is DPR=1 / no-synthetic-touch and can't be exercised headless).
+            int conversions = DeviceScalingSeam.ConversionCallCount(src);
+            Assert.GreaterOrEqual(conversions, 2,
+                $"TouchController.cs must convert BOTH the viewport AND the finger positions — found " +
+                $"{conversions} DeviceToLogicalPx call(s), expected ≥2 (S92 touch-DPI closure / S108 T3-5).");
         }
+
 
         /// <summary>
         /// S92: density normalization lives ONCE, at the position basis — NOT re-applied in the recognizer.
@@ -184,6 +187,30 @@ namespace MapRenderer.Tests
             Assert.IsFalse(TouchControllerSource.Contains("DpiScale"),
                 "TouchController.cs must not set DpiScale — density is normalized once by the ÷DevicePixelRatio " +
                 "seam; a DpiScale multiply would double-apply it (S92 touch-DPI closure).");
+        }
+    }
+
+    /// <summary>
+    /// Shared by the two S108 T3-5 teeth — the touch seam's (above) and the mouse seam's twin in
+    /// <see cref="MapControllerInputTests"/>. One helper so the two can only be weakened together.
+    /// </summary>
+    internal static class DeviceScalingSeam
+    {
+        /// <summary>
+        /// Counts CALL sites of the device→logical conversion in <paramref name="source"/>, ignoring
+        /// <c>//</c> comment lines. Both defences are load-bearing: each seam's own comments name the
+        /// conversion, so a naive substring count would read 2 for a half-fix that converted the viewport and
+        /// left the cursor/finger positions raw — exactly the partial fix these teeth exist to catch.
+        /// </summary>
+        internal static int ConversionCallCount(string source)
+        {
+            int count = 0;
+            foreach (string line in source.Split('\n'))
+            {
+                if (line.TrimStart().StartsWith("//")) continue;
+                count += System.Text.RegularExpressions.Regex.Matches(line, @"DeviceToLogicalPx\(").Count;
+            }
+            return count;
         }
     }
 }

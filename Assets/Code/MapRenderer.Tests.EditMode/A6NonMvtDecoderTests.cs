@@ -82,7 +82,7 @@ namespace MapRenderer.Tests
                 _paint = paint;
             }
 
-            public void ApplyZoom(double zoom) { }
+            public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
             public void WriteInto(

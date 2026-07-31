@@ -114,7 +114,10 @@ namespace MapRenderer.Core.Geo
             double mpp = WebMercator.GroundResolution(camera.Zoom);
 
             // Mercator offset divided by mpp gives the (east, north) pixel offset.
-            // Use * (1/mpp) because the shim's double2 does not expose operator/(double2, double).
+            // Reciprocal multiply, NOT `/ mpp`. Originally because the core-tests shim lacked
+            // operator/(double2, double); S108 added it, so this now LOOKS like an obvious cleanup — it is
+            // not. `v * (1/m)` and `v / m` differ in the last bit for about a third of all values, and every
+            // GroundToScreen golden was baked against this expression. Leave it.
             double2 d     = (groundMerc - centreMerc) * (1.0 / mpp);
             double  e     = d.x;
             double  n     = d.y;

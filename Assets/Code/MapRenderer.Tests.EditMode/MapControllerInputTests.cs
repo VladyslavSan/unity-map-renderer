@@ -179,5 +179,33 @@ namespace MapRenderer.Tests
             Assert.IsFalse(src.Contains("WebMercator."),
                 "Controller.cs must not call WebMercator.* directly — projection math lives in Core (S73 T-ADAPTER).");
         }
+
+        // ── S108 T3-5 — the mouse seam runs in LOGICAL px ────────────────────────────────────────
+
+        /// <summary>
+        /// S108 T3-5, the twin of <c>TouchInputStackTests</c>' touch-seam tooth. That fixture has claimed
+        /// since S92 to be "mirroring MapControllerInputTests for the mouse seam" — the claim was false for
+        /// the whole of its life: this file had no dpr coverage at all, so the mouse seam was the only one
+        /// of the two that was structurally unguarded.
+        ///
+        /// <para><see cref="MapController"/> must convert BOTH the viewport AND the cursor through
+        /// <c>DeviceScaling.DeviceToLogicalPx</c>, so the gesture anchors and <c>ScreenToGround</c> share the
+        /// render camera's logical basis. Structural because the functional path cannot be exercised headless
+        /// (dpr 1, no synthetic mouse) — the same reason the touch tooth is written this way.</para>
+        /// </summary>
+        [Test]
+        public void MapController_ConvertsSeamThroughTheDeviceToLogicalConversion()
+        {
+            string src = MapControllerSource;
+            Assert.IsTrue(src.Contains("DevicePixelRatio"),
+                "Controller.cs must read Config.DevicePixelRatio to run the interaction seam in logical px " +
+                "(S92 D3 — else retina anchored pan and zoom-to-cursor drift off the pointer).");
+
+            int conversions = DeviceScalingSeam.ConversionCallCount(src);
+            Assert.GreaterOrEqual(conversions, 2,
+                $"Controller.cs must convert BOTH the viewport AND the cursor — found {conversions} " +
+                "DeviceToLogicalPx call(s), expected ≥2. Converting only one still drifts the anchor " +
+                "(S108 T3-5).");
+        }
     }
 }

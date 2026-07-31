@@ -245,6 +245,12 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
+            // S107: Build seeds every layer's px uniforms at dpr 1. SetStyle is async — its continuation can
+            // resume AFTER this frame's LateUpdate has already run — and on a RESTYLE the previous tiles are
+            // still loaded, so the newly-built layers would draw them once at the seeded ratio (roads and
+            // halos ~36 % too thin at a ratio of 1.56). One line closes that window for every layer kind,
+            // including the symbol halo, which has no seed of its own at all.
+            Layers.ApplyZoom(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio);
             // D10: derive the symbol layers from the just-built set (RenderLayerFactory is the sole
             // registry) instead of re-walking style.Layers with an is-check (kills §1.6). One walk, two
             // lists (D11/E2): the typed StyleLayer for the subsystem, the owning SymbolRenderLayer (its
@@ -369,8 +375,10 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
             //    rebase and the label projection below both read the just-committed pose. DPI is refreshed from
-            //    the live config before the commit (it feeds the altitude framing). This ordering is also what
-            //    keeps Camera.CameraRelativePosition fresh for BuildSceneFrame one line below.
+            //    the live config before the commit, and it now feeds TWO consumers, not one: the altitude
+            //    framing here, and the selector's framing viewport built at BuildTileSelectionConfig() below
+            //    (both are Camera.ViewportLogicalPx since S108). This ordering is also what keeps
+            //    Camera.CameraRelativePosition fresh for BuildSceneFrame one line below.
             Camera.DevicePixelRatio = _config.DevicePixelRatio;
             using (PmCameraAdvance.Auto())
                 Camera.SyncToCamera();
@@ -382,9 +390,13 @@ namespace MapRenderer.Unity.Rendering.Map
                 sceneFrame = BuildSceneFrame(cameraProperties);
 
             // 2. Move the tiles. ApplyZoom first — so a fractional-zoom-only change always pushes uniforms
-            //    (fill/line zoom paint, zoom-step dasharrays for pixel line width).
+            //    (fill/line zoom paint, zoom-step dasharrays for pixel line width). The applier also carries
+            //    the px→device basis (S107): the style's logical px meet the device-pixel ratio here and
+            //    nowhere else. Read from _config, which OWNS the ratio — Camera.DevicePixelRatio is the same
+            //    value (copied one step above) but going through the camera would imply the camera owns the
+            //    paint basis, which is the confusion MapCamera's own doc-comment records.
             using (PmApplyZoom.Auto())
-                Layers.ApplyZoom(cameraProperties.Zoom);
+                Layers.ApplyZoom(cameraProperties.Zoom, _config.DevicePixelRatio);
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it — best float precision, no threshold/rebase machinery.
@@ -504,16 +516,17 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>
-        /// The per-frame view inputs the selector consumes. The camera IS the viewport: the framing viewport
-        /// is the wrapped Unity camera's live pixel size (<see cref="MapCamera.ViewportPx"/>), normalised to
-        /// LOGICAL pixels by <see cref="MapViewConfig.DevicePixelRatio"/> (S86 DPI slice) so an on-screen tile
-        /// is the same physical size across panel densities; the projection is the pixel↔ground service the
-        /// camera owns (Web-Mercator today).
+        /// The per-frame view inputs the selector consumes. The camera IS the viewport, and the framing
+        /// viewport is literally <see cref="MapCamera.ViewportLogicalPx"/> — the SAME definition the camera
+        /// altitude frames from, not a second derivation of it. That is what makes "render far == selection
+        /// far" (S86/S92) structural: an on-screen tile stays the same physical size across panel densities
+        /// because one quantity, not two, decides it. The projection is the pixel↔ground service the camera
+        /// owns (Web-Mercator today).
         /// </summary>
-        private Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
+        internal Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
             => new Tile.TileManager.TileSelectionConfig
             {
-                FramingViewportPx    = Camera.ViewportPx / _config.DevicePixelRatio,
+                FramingViewportPx    = Camera.ViewportLogicalPx,
                 Projection           = Camera.Projection,
                 MaxConsumesPerTick   = _config.MaxConsumesPerTick,
                 MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
