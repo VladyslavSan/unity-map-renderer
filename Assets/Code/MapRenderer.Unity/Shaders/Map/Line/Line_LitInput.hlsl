@@ -92,6 +92,30 @@ float  _LineOffset;
 float  _WidthIsPixels;
 CBUFFER_END
 
+// ── Frame globals — NOT UnityPerMaterial, NOT a ShaderLab Property ────────────────────────────
+// _MapFrameMetersPerDevicePixel — world metres per DEVICE pixel for this frame, pushed once per frame
+// by RenderLayerSet.ApplyZoom via Shader.SetGlobalFloat.
+//
+// OUTSIDE the CBUFFER on purpose: this declaration does not change the UnityPerMaterial layout, which is
+// what SRP Batcher keys on. Inside it, the value would become per-material and would need a DOTS-instancing
+// slot and a BRG SoA field for a number identical on every layer. Absent from Line.shader's Properties{}
+// on purpose too: a ShaderLab property serialises a value into MapLine.mat that silently shadows the global.
+//
+// SCOPE, load-bearing: it exists so the dash parameterisation is VIEW-INDEPENDENT. Width, gap, line-offset
+// and line-translate must keep using the per-vertex MapPixelsToWorld measurement — a frame scalar cannot
+// express those under tilt/foreshortening (S104).
+//
+// UNSET it reads 0, so the divisor is 0, so the guard sets dashU = 0 — which renders a UNIFORM
+// HALF-COVERAGE line (smoothstep(-dfw,+dfw,0) == 0.5 exactly), not a solid one. No dash edges, never a
+// moving pattern: fail-safe and visible, never corrupt.
+//
+// LIMITATION, stated: Shader.SetGlobalFloat is PROCESS state. Two live MapViews would each write it from
+// their own LateUpdate in an order Unity does not define, so one map would get the other's dash ruler.
+// Nothing instantiates two MapViews today (one production `new MapView(`, in MapViewComponent). If that
+// changes, the escape hatch is a per-material instanced property — at the CBUFFER/DOTS/BRG-SoA cost this
+// declaration exists to avoid.
+float _MapFrameMetersPerDevicePixel;
+
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────
 #ifdef UNITY_DOTS_INSTANCING_ENABLED
 

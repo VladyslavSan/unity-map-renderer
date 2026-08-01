@@ -106,7 +106,7 @@ antialiased boundary looks like.** Tooth T2 (§7) permits ≤ 1 px for exactly t
 | Per-layer materials are `new Material(source)` clones (+ `parent` in Editor) — the copy ctor carries the source's keyword set | `Rendering/Materials/MaterialExtensions.cs:23-30` |
 | A tweaker enabling a `shader_feature_local` keyword at runtime on a cloned per-layer material is **existing, load-bearing practice** | `Rendering/Materials/FillTweaker.cs:43` (`_SURFACE_TYPE_TRANSPARENT`) |
 | Both mesh backends register **whole `Material` objects**; the BRG SoA carries per-instance *properties*, never keywords | `Backend/BRG/TileRenderer.cs:117`, `Backend/Entities/TileRenderer.cs:187` |
-| px→world scale is measured per-vertex, per-direction, foreshortening-correct | `Line_VertexExtrude.hlsl:42-65` (`MapPixelsToWorld`) |
+| px→world scale is measured per-vertex, per-direction, foreshortening-correct | `Line_VertexExtrude.hlsl:80-104` (`MapPixelsToWorld`) |
 | `LineRibbonVertex.Position` is the raw centerline point — the entire styled width is applied in the vertex shader, never in mesh positions | `Jobs/LineRibbonJob.cs:489-498` |
 | Line geometry is **not clipped to the tile boundary** — a decoded feature is ribboned as-is | `Rendering/Meshing/StyledLineTileBuilder.cs:206-308` (no clip step) |
 | The Burst job and the managed `LineTessellator` are held to **exact differential parity**, `Side` included | `Tests.EditMode/LineRibbonJobTests.cs:94-112` (`AssertParity`) |
@@ -307,7 +307,7 @@ local, so no global closed form is needed.
 
 #### Confirmed non-hazards
 
-- **Grazing angles / globe.** `MapPixelsToWorld`'s `max(refPx, 0.1)` clamp (`:64`) is a documented real limit
+- **Grazing angles / globe.** `MapPixelsToWorld`'s `max(refPx, 0.1)` clamp (`:103`) is a documented real limit
   ("the offset falls SHORT of the styled pixel count"), **pre-existing** — it already affects styled width
   today. Because the ramp is `fwidth`-driven rather than computed from a baked CPU ratio, its *shape*
   self-corrects to whatever `pxToWorld` the fragment actually sees; it does not compound the pre-existing

@@ -324,8 +324,10 @@ namespace MapRenderer.Tests
 
         // ── Tooth 4 (GREPPABLE): Shader consumes per-vertex sideAndDist.y as dashU ────────────
 
-        [Test]
-        public void ShaderStructure_LineLitForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
+        /// <summary>Resolves a repo-relative path by walking up from the test runner's working directory —
+        /// the runner's cwd differs between the Unity EditMode runner and <c>Tools/core-tests</c>, and
+        /// neither is the repo root. Returns null when no ancestor contains it.</summary>
+        private static string FindRepoFile(params string[] segments)
         {
             string[] starts = new[]
             {
@@ -333,19 +335,24 @@ namespace MapRenderer.Tests
                 AppContext.BaseDirectory,
             };
 
-            string hlslPath = null;
             foreach (string start in starts)
             {
                 string dir = start;
                 for (int i = 0; i < 16 && dir != null; i++)
                 {
-                    string candidate = Path.Combine(dir,
-                        "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_LitForwardPass.hlsl");
-                    if (File.Exists(candidate)) { hlslPath = candidate; break; }
+                    string candidate = Path.Combine(dir, Path.Combine(segments));
+                    if (File.Exists(candidate)) return candidate;
                     dir = Directory.GetParent(dir)?.FullName;
                 }
-                if (hlslPath != null) break;
             }
+            return null;
+        }
+
+        [Test]
+        public void ShaderStructure_LineLitForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
+        {
+            string hlslPath = FindRepoFile(
+                "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_LitForwardPass.hlsl");
 
             Assert.That(hlslPath, Is.Not.Null,
                 $"Line_LitForwardPass.hlsl not found. Tried walking up 16 levels from " +
@@ -365,19 +372,8 @@ namespace MapRenderer.Tests
 
             // _DashCount: S67 factored the dash logic into Line_VertexExtrude.hlsl (shared by all passes).
             // Assert the guard is present there — still a single-site check, just in the helper.
-            string extrudePath = null;
-            foreach (string start in starts)
-            {
-                string dir2 = start;
-                for (int i = 0; i < 16 && dir2 != null; i++)
-                {
-                    string candidate2 = Path.Combine(dir2,
-                        "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_VertexExtrude.hlsl");
-                    if (File.Exists(candidate2)) { extrudePath = candidate2; break; }
-                    dir2 = Directory.GetParent(dir2)?.FullName;
-                }
-                if (extrudePath != null) break;
-            }
+            string extrudePath = FindRepoFile(
+                "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_VertexExtrude.hlsl");
             Assert.That(extrudePath, Is.Not.Null,
                 "Line_VertexExtrude.hlsl not found (S67 shared extrusion helper).");
             string extrudeText = File.ReadAllText(extrudePath);
@@ -387,6 +383,79 @@ namespace MapRenderer.Tests
                 "Line_VertexExtrude.hlsl must emit the dashU dash coordinate.");
             Assert.That(extrudeText, Does.Contain("_DashCount"),
                 "Line_VertexExtrude.hlsl must have _DashCount guard for solid identity (S67: dash logic lives in shared helper).");
+        }
+
+        // ── S110 T6: the CPU mirror's pointer to its HLSL twin must name a file that exists ──────
+
+        /// <summary>Resolves a repo-relative DIRECTORY the same way <see cref="FindRepoFile"/> resolves a
+        /// file. Returns null when no ancestor contains it.</summary>
+        private static string FindRepoDir(params string[] segments)
+        {
+            string[] starts = new[]
+            {
+                Directory.GetCurrentDirectory(),
+                AppContext.BaseDirectory,
+            };
+
+            foreach (string start in starts)
+            {
+                string dir = start;
+                for (int i = 0; i < 16 && dir != null; i++)
+                {
+                    string candidate = Path.Combine(dir, Path.Combine(segments));
+                    if (Directory.Exists(candidate)) return candidate;
+                    dir = Directory.GetParent(dir)?.FullName;
+                }
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// <b>S110 T6.</b> <see cref="Line.LineDash"/> is the declared single source of truth for the dash
+        /// function and points at its HLSL mirror by name. Those pointers must name the file that actually
+        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c>, where S67 moved it — and not the
+        /// <c>MapLineForwardPass.hlsl</c> that has not existed for several stages.
+        ///
+        /// <para>The second half is what stops this from rotting: every <c>*.hlsl</c> token in the file is
+        /// resolved on disk. <c>MapLineForwardPass.hlsl</c> was a CORRECT pointer once; without a
+        /// resolve-on-disk clause, a name-only assertion is one rename away from being green and wrong
+        /// again. Distinct from the greppable tooth above, which reads the SHADER files rather than this
+        /// one.</para>
+        /// </summary>
+        [Test]
+        public void ShaderPointers_InLineDashSource_ResolveOnDisk()
+        {
+            string sourcePath = FindRepoFile(
+                "Assets", "Code", "MapRenderer.Core", "Style", "Line", "LineDash.cs");
+            Assert.That(sourcePath, Is.Not.Null,
+                $"LineDash.cs not found. Tried walking up 16 levels from " +
+                $"cwd={Directory.GetCurrentDirectory()} and AppContext.BaseDirectory={AppContext.BaseDirectory}");
+            string text = File.ReadAllText(sourcePath);
+
+            Assert.That(text, Does.Contain("Line_VertexExtrude.hlsl"),
+                "LineDash.cs must point at Line_VertexExtrude.hlsl — the file that carries the HLSL mirror " +
+                "of DashCoverage since S67, and the file S110 changed the dash divisor in.");
+            Assert.That(text, Does.Not.Contain("MapLineForwardPass"),
+                "LineDash.cs still points at MapLineForwardPass.hlsl, which no longer exists. A reader " +
+                "asked to 'keep both in sync on any arithmetic change' cannot find the other half.");
+
+            string shadersDir = FindRepoDir("Assets", "Code", "MapRenderer.Unity", "Shaders");
+            Assert.That(shadersDir, Is.Not.Null, "Shaders directory not found from the test working directory.");
+
+            var referenced = new System.Collections.Generic.HashSet<string>();
+            foreach (System.Text.RegularExpressions.Match m in
+                     System.Text.RegularExpressions.Regex.Matches(text, @"[\w\.]+\.hlsl"))
+                referenced.Add(Path.GetFileName(m.Value));
+
+            Assert.That(referenced, Is.Not.Empty,
+                "LineDash.cs names no .hlsl file at all — the mirror pointer has been deleted rather than " +
+                "corrected, and the two halves of the dash function are no longer linked in either direction.");
+
+            foreach (string name in referenced)
+                Assert.That(Directory.GetFiles(shadersDir, name, SearchOption.AllDirectories), Is.Not.Empty,
+                    $"LineDash.cs points at '{name}', which does not exist anywhere under " +
+                    $"Assets/Code/MapRenderer.Unity/Shaders. Every shader pointer in the CPU mirror must " +
+                    "resolve, or the 'keep both in sync' instruction is unfollowable.");
         }
 
         // ── LinePaint.HasDashArray parse integration ──────────────────────────────────────────

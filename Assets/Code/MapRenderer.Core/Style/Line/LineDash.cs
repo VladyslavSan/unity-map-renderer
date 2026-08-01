@@ -12,12 +12,16 @@ namespace MapRenderer.Core.Style.Line
     /// for simple patterns; no LUT/SDF texture needed. AA is handled in the fragment shader via
     /// fwidth feather on the on/off transition edges. Round dash-caps deferred to a follow-up.
     ///
-    /// Design decision D2: dash lengths are line-width units (distanceAlong / widthM), so dashes
-    /// scale automatically with line-width and remain zoom-stable. The CPU mirror in this file
-    /// returns the same ratio formula that the HLSL fragment uses.
+    /// Design decision D2 (restated at S110): dash lengths are line-width units
+    /// (distanceAlong / metersPerDashUnit), so dashes scale automatically with line-width and remain
+    /// zoom-stable. The unit is FIXED FOR THE FRAME — it is the styled width measured with the frame's
+    /// ground resolution, not with each vertex's own screen measurement — so the pattern is anchored to the
+    /// ground and foreshortens with the road instead of sliding along it as the camera moves. The CPU
+    /// mirror in this file returns the same ratio formula that the HLSL fragment uses.
     ///
     /// This file is the single source of truth for the dash function. The HLSL mirror lives in
-    /// MapLineForwardPass.hlsl (search "S43 dash" to find the corresponding fragment code).
+    /// Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl (search "S43 dash" to find
+    /// the corresponding fragment code).
     ///
     /// Engine-free: no UnityEngine references. Runs in both dotnet core-tests and Unity EditMode.
     /// Clean-room: dash semantics from the public MapLibre Style Spec. No MapLibre source read.
@@ -32,18 +36,22 @@ namespace MapRenderer.Core.Style.Line
         //
         // Returns 1.0 when the fragment is on a "dash-on" region, 0.0 on a "dash-off" gap.
         // This is the hard (non-AA) binary step; the GPU fragment adds fwidth feather around
-        // the same transition edges (see MapLineForwardPass.hlsl, "S43 dash: fwidth feather").
+        // the same transition edges (see Line_VertexExtrude.hlsl, "S43 dash: fwidth feather").
         //
         // Parameters:
-        //   distanceAlong — cumulative arc length along the line in world meters.
-        //   widthM        — line width in world meters (same px→m conversion used for extrusion).
+        //   distanceAlong    — cumulative arc length along the line in world meters.
+        //   metersPerDashUnit — metres of road per dash unit: the styled line width in world metres,
+        //                   measured with the FRAME-CONSTANT ruler (MetersPerPixel(zoom)/dpr × the styled
+        //                   device-px width). Deliberately NOT "the line's width in world metres at this
+        //                   point on screen" — since S110 that is a different, per-vertex quantity, and
+        //                   using it here is what made dashes crawl, skew and depend on tessellation.
         //   pattern       — on/off alternating lengths in line-width units (same units as dashU).
         //                   pattern[0] = first on-length, pattern[1] = first off-length, ...
         //                   Odd-length arrays → treat as solid (documented below).
         //
         // Returns 1.0 for solid identity when:
         //   • pattern is null or empty           → no dasharray set, render solid.
-        //   • widthM ≤ 0                         → degenerate, render solid.
+        //   • metersPerDashUnit ≤ 0              → degenerate, render solid.
         //   • pattern has odd length / length==1 → ambiguous spec; render solid.
         //   • all pattern entries are <= 0       → degenerate, render solid.
         //
@@ -52,14 +60,15 @@ namespace MapRenderer.Core.Style.Line
         // A single entry cannot define both an on and an off span, so solid is the correct fallback.
         //
         // Mirror note: this function must produce the same on/off result as the HLSL fragment
-        // (MapLineForwardPass.hlsl). Keep both in sync on any arithmetic change.
-        public static float DashCoverage(double distanceAlong, double widthM, float[] pattern)
+        // (Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl). Keep both in sync on
+        // any arithmetic change.
+        public static float DashCoverage(double distanceAlong, double metersPerDashUnit, float[] pattern)
         {
             if (pattern == null || pattern.Length == 0)
                 return 1.0f;   // solid identity: no dasharray
 
-            if (widthM <= 0.0)
-                return 1.0f;   // degenerate width → solid
+            if (metersPerDashUnit <= 0.0)
+                return 1.0f;   // degenerate dash unit → solid
 
             int count = pattern.Length > MaxEntries ? MaxEntries : pattern.Length;
 
@@ -76,8 +85,8 @@ namespace MapRenderer.Core.Style.Line
                 return 1.0f;   // degenerate pattern → solid
 
             // u = dimensionless position along the line in line-width units.
-            // Mirror of: float dashU = distanceAlong / widthM; in the vertex shader.
-            double u = distanceAlong / widthM;
+            // Mirror of: float dashU = distanceAlong / dashMetersPerUnit; in the vertex shader.
+            double u = distanceAlong / metersPerDashUnit;
 
             // Phase = u mod period (always in [0, period)).
             double phase = u % period;

@@ -106,10 +106,13 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// Pushes per-frame uniforms to every layer (fill/line zoom paint, zoom-step dasharrays, and the
-        /// px→device conversion for the px-valued paint family). Line width is resolved in screen space by
-        /// the shader (S104), so no ground resolution is threaded through — but that screen space is the
-        /// physical framebuffer, hence <paramref name="devicePixelRatio"/> (S107). Alloc-free: a plain
-        /// <c>for</c> over the list (struct enumerator-free), each layer's
+        /// px→device conversion for the px-valued paint family), plus the frame's ground-resolution GLOBAL.
+        /// Line WIDTH is still resolved in screen space by the shader (S104) and needs no ground resolution —
+        /// but that screen space is the physical framebuffer, hence <paramref name="devicePixelRatio"/>
+        /// (S107). The line's DASH parameterisation is the half that is not: a per-vertex screen measurement
+        /// varies with depth, direction and the sign of the direction, and <c>dashU</c> integrates that along
+        /// the road, so since S110 the dash divisor takes the frame constant pushed below. Alloc-free: a
+        /// plain <c>for</c> over the list (struct enumerator-free), each layer's
         /// <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
         ///
         /// <para><see cref="Build"/> deliberately takes no ratio: its per-layer seeds run at dpr 1, and the
@@ -120,6 +123,16 @@ namespace MapRenderer.Unity.Rendering.Style
         /// </summary>
         public void ApplyZoom(double zoom, double devicePixelRatio)
         {
+            // The frame's view-independent ruler, pushed ONCE for the frame rather than per layer: it is a
+            // camera quantity, identical for every layer and every instance. Consumed only by the line
+            // shader's dash parameterisation — see the scope note on the declaration in Line_LitInput.hlsl.
+            // Fully qualified rather than `using MapRenderer.Core.View;`: that would put the namespace
+            // segment `Camera` and the type `UnityEngine.Camera` in the same lookup (CS0118).
+            Shader.SetGlobalFloat(
+                ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
+                (float)MapRenderer.Core.View.DeviceScaling.PerLogicalPxToPerDevicePx(
+                    CameraPoseMath.MetersPerPixel(zoom), devicePixelRatio));
+
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].ApplyZoom(zoom, devicePixelRatio);
         }

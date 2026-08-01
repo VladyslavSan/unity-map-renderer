@@ -56,6 +56,103 @@ identical by construction. It emits the line's native parameterization in the st
 `clip()`. The four non-forward line passes are **capability-only** — inert for transparent lines
 (URP skips Queue ≥ 2501), present so S69 can flip lines opaque without adding passes.
 
+### Two rulers, on purpose (S110, S111)
+
+The line shader converts pixels to world metres with **two different rulers**, and neither can do the
+other's job.
+
+| ruler | who reads it | why it must be that one |
+|---|---|---|
+| `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | `widthWorld`, the AA pad, `line-gap-width`, `line-offset`, `line-translate` | width under tilt is genuinely a screen quantity: a road must stay N px wide however the projection foreshortens it there (S104) |
+| `_MapFrameMetersPerDevicePixel` — a **frame constant**, `MetersPerPixel(zoom) / dpr`, pushed by `RenderLayerSet.ApplyZoom` | the dash divisor `dashMetersPerUnit` only | a dash pattern is welded to the ground; its unit must not depend on where on screen you look |
+
+**The failure surface — one root, four visible symptoms.** `MapPixelsToWorld` is a *measurement*, and
+`dashU` was the one consumer that **integrated** it along the road while every other consumer is bounded
+by the styled width. It varies:
+
+1. **with depth** (`refMag ∝ |clip.w|`) — the world period grew with distance and the pattern crawled as
+   the camera tilted;
+2. **with direction** — the probe steps along `across` while dashes run `along`, so two roads at equal
+   depth with perpendicular bearings got different periods;
+3. **with the *sign* of the direction** — *historical: S111 removed this term at source, so the
+   measurement no longer varies this way at all.* The two ribbon vertices of a station share one centreline
+   point and carry opposite `extrudeN`, so they probed the projection in opposite directions and got rulers
+   differing by exactly `(1+e)/(1−e)`, `e = 0.02·tan(fov/2)·(across·fwd)` (1.91 % at fov 60 / tilt 55°;
+   the exact fov-60 ceiling is **2.336 %** — the `2.31 %` quoted before S111 is the first-order `2e` —
+   **exactly 0** when `across ⊥ fwd`). Every dash boundary tilted off perpendicular, by an
+   angle growing linearly with accumulated `dashU` — **the diagonal parallelograms**;
+4. **because it is sampled per vertex and interpolated** — `dashU` is a plain varying, so the GPU renders
+   the perspective-correct *chord* of a hyperbola: the period stepped at every road vertex and depended on
+   the road's tessellation density (1.12× between a 2 km and a 30 km mesh). A flat/Mercator projection
+   never subdivides, so the sparse case is the normal one.
+
+A frame constant has no depth term, no direction, no sign, and is identical at every vertex so any
+interpolant is exact. All four go in one move.
+
+**What S110 left, and S111 fixed.** S110 moved only the dash parameterisation off the measurement; the
+measurement itself kept all four dependencies for width / gap / offset / translate. **S111 removed the
+*sign* dependence at source**: the helper now multiplies the measured pixel span by
+`clipRef.w / clipCenter.w`, dividing out the foreshortening the probe itself picked up. Because `clip.w`
+is affine in world position, that cancels *identically and to all orders* for either sign of `dirWS` —
+and under an orthographic projection `wRef == w0` bitwise, so the factor is exactly `1.0` and the helper
+is **bit-identical** to its pre-S111 self. Depth and direction dependence stay, deliberately: they are
+what keeps a road N px wide under tilt.
+
+What the sign asymmetry actually cost — **the pre-S111 text here was wrong in both halves**, quoting the
+*ratio* `(1+e)/(1−e)` where an *absolute* `(1±e)` deviation belongs:
+
+- the band's two edges sat at world offsets `+H·k(1+e)` and `−H·k(1−e)`, so their **world separation was
+  already exactly `2Hk`** — the errors cancel *before* the perspective divide — while the band's **centre**
+  sat `e·h` = **0.0757 px** off the centreline on a 16 px road (0.95 % of the *half*-width). The
+  often-quoted **0.15 px** is `2·e·h`, the difference between the two half-widths: true, but mislabelled;
+- the AA pad rendered **0.5047 / 0.4953 px**, i.e. `0.5·(1±e)` — *not* the `0.4905 px` this file used to
+  claim, which is `0.5·(1−e)/(1+e)`;
+- the **rendered screen width was never exactly invariant** either, because screen position is *rational*
+  in world offset: correcting the geometry moves it by **+0.008 px** on a 16 px band and **+0.478 px** on a
+  120 px one. A screen-width measurement is therefore *not* a null for this defect — which is why S111's
+  teeth (`LineProbeSymmetrySnapshotTests`) measure **world** offsets and assert their ratio;
+- `line-offset` was the one consumer **not** bounded by the styled width: both station vertices take a
+  *common* offset, each measured with its own ruler, so `L` device px of offset leaked `e·L` into the
+  **half-width** — **12.1 %** at `L = 160` on a 24 px line, and unbounded in `L`.
+
+**Still open after S111, and NEEDS A DECISION — `refPx` measures the wrong span for the width family.**
+`refPx` is the *length* of a 2D NDC delta. For a vertex whose screen-x is `sx` px off centre, the probe's
+step along `dirWS` changes that vertex's depth, so the projected point slides **radially** as well as along
+the intended screen direction — contributing a component ≈ `|sx|·e` px, which adds **in quadrature**: at
+`sx = 100` a 0.946 px component grows a 2.91 px span to 3.06 px, i.e. **+5.1 %**.
+
+That is not a harmless refinement, because **the width family does not want the 2D magnitude — it wants the
+component perpendicular to the line.** The radial component points away from the screen centre; whatever
+part of it runs *along* the line contributes nothing to the band's perpendicular thickness, yet inflates
+`refPx` and so shrinks `pxToWorld`. In the S111 fixture (east–west road, heading 0) the radial component is
+entirely along the road, so **all** of it is spurious: the band is ~5 % too narrow at `sx = 100`, measured
+as a **2.8–3.0 px** inward bow of the silhouettes across the central 200 columns of a 120 px band at
+fov 60 / tilt 55.
+
+**That is larger than the 1.910 % sign asymmetry S111 just removed.** It is unchanged by S111 — the
+`w`-ratio scales both signs alike — and it is why the S111 teeth measure within ±10 columns of the screen
+centre. Whether to project the NDC delta onto the perpendicular screen direction instead of taking its
+magnitude is an open call, not a settled one; it is deliberately **not** fixed here.
+
+**Expected new behaviour, so it is not misfiled as a regression.** Before S110 the on-screen dash period
+was *constant everywhere* — which is precisely the incoherent "screen-constant dashes" the world-anchored
+semantic rejects. After it, the period falls as `depth⁻²`: 55.06 px at the look-at → 19.87 px at 110 km in
+the T1 fixture, and ~16× smaller near a `4·altitude` far plane. At a ~3 px period the fragment walk
+degrades (once `fwidth(dashU)` exceeds a run length the `k = 0` branch produces a `lerp` ramp instead of a
+correct average) and far dashes go mushy. This is inherent to the semantic — a pattern welded to the road
+*must* foreshorten, and MapLibre behaves the same way. The feather itself is fine: `fwidth(dashU)`
+self-calibrates to the true local screen gradient, so the ramp stays ≈2 device px before and after.
+
+**Fail-safe.** The global is not a ShaderLab property and is not in `UnityPerMaterial`, so an unset frame
+reads `0`; the divisor is 0 and the guard sets `dashU = 0`. That renders a **uniform half-coverage line**
+(`smoothstep(−dfw, +dfw, 0) == 0.5` exactly) — **not** a solid one. No dash edges, never a moving pattern:
+visible and inert, never corrupt.
+
+**Also note** `dashU` is the surface `u` fed to `InitializeStandardLitSurfaceData` (`uv.xy`, above), so
+S110 moved the axis `_BaseMap`/`_BumpMap`/detail maps would sample on. Inert today — `MapLine.mat` binds
+no texture and the uv-dependent shader features are gated off — and it is the axis S17 `line-pattern`
+wants, but a stage that binds a uv-dependent line texture must know this moved.
+
 ## Layout
 
 ```

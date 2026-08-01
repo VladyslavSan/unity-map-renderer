@@ -142,11 +142,17 @@ namespace MapRenderer.Tests
             //   • .SetFloat("   .SetColor("   .SetVector("   .SetInt("   .SetTexture("
             //   • .GetFloat("   .GetColor("   .GetVector("   .GetInt("   .GetTexture("
             //   • .HasProperty("
+            // …and their Shader.Set/GetGlobal* counterparts (S110). The global forms went uncovered until
+            // this stage simply because nothing wrote a shader global; the frame constant
+            // _MapFrameMetersPerDevicePixel is the first, and S17's line-pattern will add a second. A
+            // global's name is exactly as easy to typo as a material property's, and a typo'd global reads
+            // back 0 in silence.
             // After S79 migration every call site uses a cached int id from ShaderProperties.PropertyId /
-            // ShaderProperties.Line.PropertyId / ShaderProperties.Fill.PropertyId, so there should be
-            // ZERO matching lines. No whole-file exclusions (BaseShaderGUI is fully migrated in S79).
+            // ShaderProperties.Line.PropertyId / ShaderProperties.Fill.PropertyId (or, for globals,
+            // ShaderProperties.FrameGlobalIds), so there should be ZERO matching lines. No whole-file
+            // exclusions (BaseShaderGUI is fully migrated in S79).
             var badPattern = new Regex(
-                @"\.(Set|Get)(Float|Color|Vector|Int|Texture)\s*\(\s*""|\.HasProperty\s*\(\s*""");
+                @"\.(Set|Get)(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""|\.HasProperty\s*\(\s*""");
 
             var offenders = new List<string>();
             foreach (string file in Directory.GetFiles(UnityDir, "*.cs", SearchOption.AllDirectories))

@@ -106,6 +106,24 @@ namespace MapRenderer.Core.View
         public static double2 DeviceToLogicalPx(double2 devicePx, double devicePixelRatio)
             => devicePx / SafeRatio(devicePixelRatio);
 
+        /// <summary>
+        /// Restate a RATE expressed per LOGICAL pixel as the same rate per DEVICE pixel:
+        /// <c>perDevicePx = perLogicalPx / dpr</c>. The dash parameterisation's ruler
+        /// (<c>CameraPoseMath.MetersPerPixel(zoom)</c> is metres per logical px) meets a <c>_Width</c> that
+        /// reached the shader in DEVICE px, so the two must share a basis.
+        ///
+        /// <para>Deliberately NOT <see cref="DeviceToLogicalPx(double,double)"/>, whose doc is explicit that its
+        /// input is a physical <b>measurement</b> — a framebuffer size, a cursor coordinate. This input is a
+        /// per-pixel RATE and so is the output; the arithmetic coincides, the meaning does not. Same reason the
+        /// two existing directions were kept as separate named members rather than unified (S108).</para>
+        ///
+        /// <para>Routed through <see cref="SafeRatio"/> because that is the plausibility-band guard: a raw
+        /// <c>/ devicePixelRatio</c> sends the ruler to <c>+∞</c> at dpr 0 and propagates NaN into every dashed
+        /// layer.</para>
+        /// </summary>
+        public static double PerLogicalPxToPerDevicePx(double perLogicalPx, double devicePixelRatio)
+            => perLogicalPx / SafeRatio(devicePixelRatio);
+
         /// <summary>The floor of the plausible band — 40 dpi. Deliberately far below anything that ships:
         /// Android's sparsest bucket (<c>ldpi</c>, 120 dpi) is 0.75 and a ~100-dpi desktop panel is 0.625.
         /// It is NOT 1, because sub-1 ratios are legitimate — a floor of 1 would silently rebase the map on

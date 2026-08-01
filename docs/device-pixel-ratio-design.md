@@ -118,8 +118,9 @@ family — `text-size` is logical while `text-halo-width`, on the same material,
 |---|---|---|
 | CPU: `px × WebMercator.GroundResolution(zoom)` (`Coordinates/WebMercator.cs:102`) | **logical** — the camera altitude already divides by dpr | ✅ |
 | GPU: `off / _ScreenParamsLogical.xy` (`SymbolTextWorld_ForwardPass.hlsl:99`, `SymbolIconWorld_ForwardPass.hlsl:97`) | **logical** | ✅ |
-| GPU: `MapPixelsToWorld()` — spans against `_ScreenParams.xy` (`Line_VertexExtrude.hlsl:42-65`, char-identical copy in `Fill_VertexModify.hlsl:54-70`) | **device** | ❌ |
+| GPU: `MapPixelsToWorld()` — spans against `_ScreenParams.xy` (`Line_VertexExtrude.hlsl:80-104`, char-identical copy in `Fill_VertexModify.hlsl:91-115`) | **device** | ❌ |
 | GPU: compare against an `fwidth`-derived screen scale (`SymbolTextWorld_ForwardPass.hlsl:119-128`) | **device** | ❌ |
+| GPU: `_MapFrameMetersPerDevicePixel` — the frame constant `MetersPerPixel(zoom) / dpr`, pushed by `RenderLayerSet.ApplyZoom` and read only by the line dash divisor (S110) | **device** | ✅ correct by construction — it is the only mechanism whose basis is chosen at the push site rather than inherited from a shader's screen reference |
 
 **Root cause, from the history.** `d5406d40` ("S104 P4 — resolve line width from the projection, delete
 `_MetersPerPixel`") removed the uniform fed by `CameraPoseMath.MetersPerPixel(zoom)`. That was metres per
@@ -148,6 +149,15 @@ is deliberately left alone.)
 | `text-halo-width` / `text-halo-blur` | `SymbolTextWorld_ForwardPass.hlsl:128`, added to a `screenDist` in device px | device | × dpr |
 | `text-size` | `SymbolTextWorld_ForwardPass.hlsl:99`, divided by `_ScreenParamsLogical` | **logical** | factor 1 |
 | `text-padding` / `icon-padding` | `LabelStagingMath.cs:171`/`:384`, collided against `SymbolProjectionJob.ViewportLogicalPx` anchors | **logical** | factor 1 |
+| `line-dasharray` | `Line_VertexExtrude.hlsl` `dashMetersPerUnit` — `_Width × _MapFrameMetersPerDevicePixel` (S110) | device (**both halves**) | × dpr, **cancelling** |
+
+**`line-dasharray` is the row that shows why a CPU round-trip cannot prove a basis.** Its period in world
+metres is `(w_logical · dpr) × (mpp_logical / dpr) × Σ` — **the dpr cancels**. A Core helper written as
+`widthLogicalPx × MetersPerPixel(zoom) × Σ` is therefore *correct and mentions no ratio at all*, and would
+round-trip green at every dpr while the shader was off by exactly `dpr`. The error can only exist because
+the two halves are owned by different files: `ZoomStyleApplier` multiplies the width by dpr, and
+`RenderLayerSet.ApplyZoom` must divide the ruler by it. Only a rendered tooth at dpr ≠ 1 (S110 T2) plus a
+direct read of the pushed global (T3) can see it.
 
 **The collision grid is not a third space.** `LabelStagingMath` mixes padding with `BoundsMin/Max`,
 `TextSizePx` and a `ViewportLogicalPx`-projected anchor in one expression — the same quantities the shader

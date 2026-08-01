@@ -43,14 +43,51 @@
 // World metres per screen pixel at `centerWS`, measured along the UNIT direction `dirWS`.
 //
 // Method: pick a reference world length that projects to ~2% of NDC height at this depth
-// (worldPerNdcY = |clip.w| / P[1][1] — depth-scaled under perspective, constant under ortho), then measure
-// how many device pixels it actually spans along `dirWS`. Asking the projection matrix instead of modelling
-// it makes this correct under foreshortening, tilt, any latitude, and either projection.
+// (worldPerNdcY = |clip.w| / P[1][1] — depth-scaled under perspective, constant under ortho), measure how
+// many device pixels it spans along `dirWS`, and divide out the foreshortening the PROBE ITSELF picked up
+// (the w-ratio below). Asking the projection matrix instead of modelling it makes this correct under
+// foreshortening, tilt, any latitude, and either projection.
 //
 // Per-vertex AND per-direction, both of which matter: |clip.w| is view depth, so a far vertex probes with a
 // longer ruler; and because the probe steps along `dirWS`, a tilted view measures the hard-foreshortened
 // screen-down axis differently from the barely-foreshortened screen-right one. A single frame-wide
 // metres-per-pixel scalar (the pre-S104 _MetersPerPixel uniform) cannot express either.
+//
+// ── The w-ratio is CORRECTNESS, not a refinement (S111). Derivation, because it is not obvious ──────
+// clip.w is AFFINE in world position under any projective transform, so along the probe w(t) = w0 + t*g for
+// some constant g, and clip.xy is affine too. The perspective divide therefore gives
+//
+//     ndc(t) - ndc(0) = t*B / (1 + t*g/w0) = t*B * (w0 / w(t))
+//
+// where B is the TRUE (differential) NDC-per-metre at centerWS — the thing we actually want. So the span we
+// measure is the true one scaled by exactly w0/wRef: the probe travels into a different depth and shrinks
+// there. Multiplying the measured span by wRef/w0 removes that factor IDENTICALLY, to all orders, for
+// either sign of dirWS — and the projection hands us both w's for free, so this needs no fov, no view axis,
+// and no knowledge of which projection is bound.
+//
+// Uncorrected, the helper returned the true scale times wRef/w0 = 1 + e, with
+// e = 0.02*tan(fov/2)*dot(dirWS,fwd), while -dirWS returned it times (1 - e): TWO DIFFERENT RULERS FOR ONE
+// PHYSICAL AXIS, 1.910% apart at fov 60 / tilt 55, 2.336% at the fov-60 ceiling, exactly 0 when dirWS is
+// perpendicular to the view axis. The ribbon's two vertices at a station carry opposite extrudeN and hit
+// exactly that. What it cost, all of it removed here:
+//   - WIDTH: the band's two edges were sized with different rulers. Their WORLD separation stayed
+//     2*halfWidth — the errors cancel before the perspective divide — but the band's centre sat
+//     e*halfWidth off the centreline, and because screen position is rational in world offset the RENDERED
+//     width moved too: 0.008 px on a 16 px band, 0.48 px on a 120 px one.
+//   - LINE-OFFSET: also paired, but the two vertices take a COMMON offset each with its own ruler, so an
+//     offset of L pixels leaked e*L into the HALF-WIDTH — 12.1% at L = 160 on a 24 px line, and unbounded
+//     in L, because nothing bounds it by the styled width.
+//   - LINE-TRANSLATE / FILL-TRANSLATE: one direction, so a flat ~0.95% error on the offset magnitude, and
+//     only under anchor "map" — the viewport anchor's axes are perpendicular to the view axis.
+// Two properties follow and are worth knowing: the result no longer depends on the 0.02 probe length at all
+// (it cancels exactly), so that constant is a floating-point PRECISION choice and not an accuracy one; and
+// under an orthographic projection wRef == w0 bitwise, so the factor is exactly 1.0 and this function is
+// bit-identical to its pre-S111 self.
+//
+// ORDER IS DELIBERATE: the correction multiplies the PIXEL SPAN, before the clamp. refPx then means what it
+// always meant — the device-pixel span of refMag world metres at this vertex's own depth — so the floor
+// below keeps its exact meaning. Correcting the RETURNED value instead would scale the cap by 1/(1+e),
+// moving it by up to ~1.2%.
 float MapPixelsToWorld(float3 centerWS, float3 dirWS)
 {
     float4 clipCenter = TransformWorldToHClip(centerWS);
@@ -61,12 +98,13 @@ float MapPixelsToWorld(float3 centerWS, float3 dirWS)
     float4 clipRef = TransformWorldToHClip(centerWS + dirWS * refMag);
 
     // Fallback (~the un-foreshortened target) when either point is behind the camera and the perspective
-    // divide would be meaningless.
+    // divide would be meaningless. The same test guards the division by clipCenter.w, which is why the
+    // w-ratio lives INSIDE this branch: the fallback is an approximation with no probe to correct.
     float refPx = 0.01 * _ScreenParams.y;
     if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
     {
         float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
-        refPx = length(ndcDelta * 0.5 * _ScreenParams.xy);
+        refPx = length(ndcDelta * 0.5 * _ScreenParams.xy) * (clipRef.w / clipCenter.w);
     }
 
     // Clamp the measured span so an edge-on direction (refPx → 0) cannot send the scale to infinity. This
