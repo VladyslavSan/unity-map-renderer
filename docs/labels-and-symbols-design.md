@@ -925,7 +925,23 @@ and road arrows both render. Headless teeth cover the emit shape, the atlas rout
 observable at runtime — that is what this confirms. It also confirms the `icon-rotate` sign correction
 (§ the 45°-tangent tooth) holds in the real renderer and not merely in the tooth that derived it.
 
-Two things the eyeball did NOT settle, both still open and both cheap to notice next time the scene is up:
-whether arrows DOUBLE at tile seams (along-line icons have no cross-tile dedup, KL-A1), and whether city
-dots appear WITHOUT their names at z10–13 (the non-centred-pairing gap — the answer decides whether that
-epic is worth its snapshot re-bake cost).
+Two things the eyeball did NOT settle. **One has since been settled; one is still open.**
+
+**SETTLED (2026-08-01) — the non-centred-pairing gate is DISCHARGED.** Maintainer confirmation: *"dots are
+still visible without text."* Orphan dots are a real on-screen artefact, not a theoretical gap, which is
+exactly what the gate asked for — so **P-A is worth its snapshot re-bake cost** and is unblocked.
+
+The cause is `Style/Symbol/SymbolFeatureExtractor.cs:168-173`: `centredPair` requires `TextAnchor.Center`
+**and** zero `TextOffset` **and** zero radial offset **and** `IconAnchor.Center` **and** zero `IconOffset`.
+Every non-centred symbol — `airport`, `label_village` / `_town` / `_city` / `_city_capital`, `poi_*` — fails
+that test and so never pairs, which is why a dot can place while its name is collision-culled independently.
+MapLibre's model is an *instance* of icon + text placed together, not two symbols that happen to coincide.
+
+Its prerequisite has landed: `icon-optional` / `text-optional` shipped in `ddd71367` (parity Stage C), so
+the pair-flag machinery P-A needs already exists. What remains is relaxing `centredPair` to the instance
+model, re-placing `poi_*` / `label_*` / `airport`, and re-baking the affected snapshots. **Not yet planned —
+no code, tests or design section exists for it.** One detail the confirmation did not pin down: the zoom
+range. The gate named z10–13; if P-A is planned, sample the range rather than assuming it.
+
+**STILL OPEN:** whether arrows DOUBLE at tile seams (along-line icons have no cross-tile dedup, KL-A1) —
+cheap to notice next time the scene is up.
