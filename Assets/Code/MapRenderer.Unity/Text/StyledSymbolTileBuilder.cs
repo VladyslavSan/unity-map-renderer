@@ -169,7 +169,10 @@ namespace MapRenderer.Unity.Text
                             // resolved sprite + icon-size/-offset/-anchor) — no shaping, just wrap it into the
                             // same TextLayoutResult shape the point-text path emits, so it rides the SAME
                             // point-placement path downstream (§5.4: LabelRecordKind.Point + AtlasKind, no parallel path).
-                            TextLayoutResult iconLayout = IconQuadLayout.ToLayoutResult(s.IconQuad);
+                            // The quad carries the transparent border; the LAYOUT (i.e. the collision box)
+                            // must not — placement runs on the ink, not on the skirt.
+                            TextLayoutResult iconLayout =
+                                IconQuadLayout.ToLayoutResult(s.IconQuad, s.IconSkirtPx);
                             output.Add(new LabelInstance
                             {
                                 AnchorRender = s.AnchorRender,
@@ -210,7 +213,13 @@ namespace MapRenderer.Unity.Text
                                 Kind = LabelKind.Icon,
                                 PathRender = s.PathRender,
                                 LineAnchors = s.LineAnchors,
-                                CurvedGlyphs = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad } },
+                                CurvedGlyphs = new[]
+                                {
+                                    // CellSkirt carries the icon's transparent border into the curved path,
+                                    // which insets by it for the collision box and the chord probe while the
+                                    // DRAWN cell keeps it. Every text glyph leaves it 0.
+                                    new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad, CellSkirt = s.IconSkirtPx },
+                                },
                                 IconImage = s.IconImage, // I6: cross-tile icon identity
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm,

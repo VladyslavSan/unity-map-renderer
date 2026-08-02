@@ -344,7 +344,11 @@ namespace MapRenderer.Core.Text.Placement
                 // blends the two segment angles in proportion to how much of the footprint sits on each
                 // side of the vertex, so consecutive glyphs tile edge-to-edge (MapLibre's fix). This is
                 // purely a RENDER-orientation choice — it does not feed the cull gate above.
-                float halfWidthPx = (cg.Cell.BottomRight.x - cg.Cell.TopLeft.x) * scale * 0.5f;
+                // The CONTENT width: an icon cell carries a transparent border (CellSkirt) that is drawn but
+                // is not ink, and the chord probe must straddle the ink's footprint, not the skirt's. Text
+                // has CellSkirt == 0, so this is an exact `x - 0f` there.
+                float halfWidthPx =
+                    (cg.Cell.BottomRight.x - cg.Cell.TopLeft.x - 2f * cg.CellSkirt) * scale * 0.5f;
                 float tangent = centerTangentAtGlyph;
                 double3 chordDirWorld = segDirWorld; // fallback: raw segment direction (degenerate/no-chord case)
                 if (halfWidthPx > 1e-4f)
@@ -381,7 +385,8 @@ namespace MapRenderer.Core.Text.Placement
                 pt = LabelTranslate.ApplyTranslate(pt, s.TranslatePx, s.TranslateAnchor, bearingRadians);
                 float rotation = tangent + flip; // tangent ONLY — not the label bearing (would double-rotate)
 
-                boxes[boxCount++] = LabelBox.BuildRotatedGlyph(pt, cg.Cell, s.TextSizePx, rotation, s.PaddingPx);
+                boxes[boxCount++] =
+                    LabelBox.BuildRotatedGlyph(pt, cg.Cell, s.TextSizePx, rotation, s.PaddingPx, cg.CellSkirt);
                 quadsOut[quadCount++] = new PlacedQuad
                 {
                     Quad = cg.Cell, AnchorScreenPx = pt, TextSizePx = s.TextSizePx,

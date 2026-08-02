@@ -36,6 +36,8 @@ namespace MapRenderer.Core.Text
             float drawnWidth = logicalWidth * iconSize;
             float drawnHeight = logicalHeight * iconSize;
 
+            float skirtPx = SkirtPx(entry, iconSize);
+
             (float hAlign, float vAlign) = ResolveAlignFactors(iconAnchor);
 
             float minX = -hAlign * drawnWidth;
@@ -51,26 +53,41 @@ namespace MapRenderer.Core.Text
             minY += offsetPx.y;
             maxY += offsetPx.y;
 
-            // UVs use the RAW sheet rect — pixelRatio only divides the logical SIZE, never the UV rect —
-            // INSET BY HALF A TEXEL on every side, so the quad's edges land on the outermost texels' CENTRES
-            // rather than on their outer edges.
+            // The SKIRT: the quad grows by the drawn size of the sprite's transparent border, symmetrically,
+            // AFTER the align/offset block above has placed the CONTENT box. Adding it symmetrically is what
+            // keeps every icon-anchor exact — `icon-anchor: left` still puts the CONTENT's left edge on the
+            // anchor — and what keeps the collision box (IconQuadLayout.ToLayoutResult, which insets by the
+            // same skirt) on the ink rather than on the border.
+            minX -= skirtPx; maxX += skirtPx;
+            minY -= skirtPx; maxY += skirtPx;
+
+            // UVs span the sprite's PADDED rect — its content plus the transparent border SpriteSheet's
+            // repack laid around it — with NO inset. pixelRatio only divides the logical SIZE, never the UV
+            // rect.
             //
-            // The inset is what makes bilinear filtering safe here (SpriteSheet binds the sheet
-            // FilterMode.Bilinear — see its note for why). The sprite-sheet format does not reserve any
-            // inter-sprite padding, and real sheets have none: the shipped liberty style's sheet was
-            // measured at 371 ABUTTING sprite pairs and not one separated by even a single pixel. So an
-            // edge-to-edge rect puts the quad's boundary exactly on the seam between this sprite and its
-            // neighbour, where a bilinear tap blends the two 50/50. Pinned by
-            // SymbolIconResamplingTests.IconSampling_NeverBleedsTheNeighbouringSprite.
+            // The border is the whole fix. A published sheet is full-bleed and abutting (the shipped style's
+            // sheet: 228 of 264 sprites with ink on the rect edge, 371 abutting pairs), so before the repack
+            // a sprite's silhouette WAS the quad's polygon edge — and with MSAA off that edge gets one binary
+            // coverage sample per pixel, so it flipped whole pixels in and out as the quad slid sub-pixel.
+            // Drawing the border makes the silhouette a texture ALPHA edge with a one-texel ramp, which
+            // bilinear filtering antialiases. Drawing it also keeps the sampler off the neighbouring sprite,
+            // which is what the retired half-texel inset used to do — at the cost of never drawing the
+            // sprite's outer half-texel, so its content rendered W/(W-1) too LARGE (+4.8 % at a 22px rect,
+            // +14.3 % at an 8px one). That magnification is now gone: icon ink draws at its nominal size.
+            // Measured against what SHIPPED, that is a shrink of 1 - (W-1)/W == 1/W — 4.5 % at 22px, 12.5 %
+            // at 8px. (Do not restate the magnification figures as the shrink: they are the same ratio read
+            // from opposite ends, and they differ.)
             //
-            // The cost is that the sprite's outer half-texel band is not drawn, so its content renders
-            // W/(W-1) larger than the quad implies, and that grows as sprites shrink: ~4.8% for a typical
-            // 22px sheet rect, ~14% for an 8px one. It lands on the transparent margin any normally-authored
-            // icon carries, so it reads as a slightly fatter glyph rather than a crop. The alternative that
-            // avoids both (clamping the sample to the rect in the shader) needs the rect passed per-vertex.
-            float2 halfTexel = new float2(0.5f, 0.5f) / sheetSize;
-            float2 uvTopLeft = new float2(entry.X, entry.Y) / sheetSize + halfTexel;
-            float2 uvBottomRight = new float2(entry.X + entry.Width, entry.Y + entry.Height) / sheetSize - halfTexel;
+            // The identity that holds both halves together, for every sprite and every icon-size:
+            //     uvWidth * sheetWidth / quadWidth == PixelRatio / iconSize
+            // i.e. texels-per-drawn-pixel is the SAME for the border and for the content. Pad the atlas but
+            // leave the quad nominal and the skirt is never rasterized AND the padded rect is squeezed into
+            // the nominal quad, so the ink SHRINKS; grow the quad but leave the UV rect on the content and
+            // the content is stretched across the padded quad, so the ink GROWS by (W+2P)/W. Pinned by
+            // IconQuadLayoutTests and by SymbolIconResamplingTests' silhouette + nominal-ink teeth.
+            float2 uvTopLeft = new float2(entry.X - entry.Padding, entry.Y - entry.Padding) / sheetSize;
+            float2 uvBottomRight =
+                new float2(entry.X + entry.Width + entry.Padding, entry.Y + entry.Height + entry.Padding) / sheetSize;
 
             return new SymbolQuad
             {
@@ -84,6 +101,27 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
+        /// The drawn width, in label-local (baked) px, of the transparent border around
+        /// <paramref name="entry"/>'s content — per side. Divides out the sheet's device pixel ratio and
+        /// applies <c>icon-size</c>, exactly as the content's own logical size does, so the border and the
+        /// content are drawn at the same texels-per-pixel.
+        ///
+        /// <para>ONE formula with TWO entry points that must never drift: <see cref="Layout"/> calls it to
+        /// grow the quad, and every consumer that needs the CONTENT box back out of a laid-out quad
+        /// (<see cref="ToLayoutResult"/>, <c>CurvedGlyph.CellSkirt</c>) calls it to inset by the same amount.
+        /// <c>0</c> whenever the sprite reports no border.</para>
+        ///
+        /// <para>The <c>pixelRatio</c> divisor is guarded exactly as <c>FillPattern.TryResolve</c> guards its
+        /// own: <see cref="SpriteIndex"/> defaults the field to 1, but a malformed sheet declaring an explicit
+        /// <c>"pixelRatio": 0</c> parses straight through. At <c>Padding == 0</c> that would make the skirt
+        /// <c>0/0f</c> — <b>NaN</b>, not the infinity the surrounding size maths produces — and a NaN carried
+        /// into <c>SymbolLabel.IconSkirtPx</c> and out into a collision box compares false against everything,
+        /// which is a different (and quieter) failure than an infinite box.</para>
+        /// </summary>
+        public static float SkirtPx(in SpriteEntry entry, float iconSize)
+            => entry.Padding / (entry.PixelRatio > 0f ? entry.PixelRatio : 1f) * iconSize;
+
+        /// <summary>
         /// I5a — wraps a single laid-out icon <see cref="SymbolQuad"/> into the same
         /// <see cref="TextLayoutResult"/> shape the point-text path produces, so <c>StyledSymbolTileBuilder</c>'s
         /// Pass 2 can emit an icon <see cref="Placement.LabelInstance"/> down the SAME point-placement path
@@ -91,11 +129,20 @@ namespace MapRenderer.Core.Text
         /// the quad's own min/max corner per component — a sprite is exactly one quad, so its bbox IS the block
         /// bbox. <see cref="TextLayoutResult.LineCount"/> is 1 (an icon has no line concept, but every consumer
         /// of <c>LineCount</c> treats "&gt;= 1" as the normal case).
+        ///
+        /// <para><paramref name="skirtPx"/> — <see cref="SkirtPx"/> for the same entry and <c>icon-size</c> —
+        /// is REMOVED from the bounds again, so the reported box is the icon's CONTENT, not its padded quad.
+        /// Placement and collision must run on the ink: a padded box would grow every icon's collision
+        /// footprint by ~1 logical px per side (up to ~9 % of a 22 px icon's area), silently changing which
+        /// labels win and which fade — a behaviour change the transparent border has no business causing.
+        /// The render half keeps the padded quad; the two representations part company here, and only here.
+        /// No default value on purpose: every call site must state which of the two it wants.</para>
         /// </summary>
-        public static TextLayoutResult ToLayoutResult(in SymbolQuad iconQuad)
+        public static TextLayoutResult ToLayoutResult(in SymbolQuad iconQuad, float skirtPx)
         {
-            float2 min = math.min(iconQuad.TopLeft, iconQuad.BottomRight);
-            float2 max = math.max(iconQuad.TopLeft, iconQuad.BottomRight);
+            float2 skirt = new float2(skirtPx, skirtPx);
+            float2 min = math.min(iconQuad.TopLeft, iconQuad.BottomRight) + skirt;
+            float2 max = math.max(iconQuad.TopLeft, iconQuad.BottomRight) - skirt;
             return new TextLayoutResult
             {
                 Quads = new[] { iconQuad },

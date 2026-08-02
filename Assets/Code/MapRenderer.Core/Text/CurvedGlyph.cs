@@ -23,5 +23,15 @@ namespace MapRenderer.Core.Text
         /// (<c>icon-anchor: center</c>). Placement depends on neither — the arc walk, rotation and world-quad
         /// bake are geometrically correct for any vertical placement of the cell about its anchor.</summary>
         public SymbolQuad Cell { get; init; }
+
+        /// <summary>
+        /// Baked-px transparent border baked into <see cref="Cell"/>, per side — <c>0</c> for every TEXT
+        /// glyph (a glyph cell has no border), non-zero only for the lone icon cell an along-line icon emits.
+        /// The cell is DRAWN with the border (that is what antialiases the icon's silhouette); everything
+        /// that reasons about where the ink IS — the rotated collision box and the tangent chord probe —
+        /// subtracts it first. Text is therefore byte-identical by construction: every new term is an exact
+        /// <c>x - 0f</c>.
+        /// </summary>
+        public float CellSkirt { get; init; }
     }
 }

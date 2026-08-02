@@ -15,12 +15,16 @@ namespace MapRenderer.Tests
     /// <see cref="SpriteEntry.PixelRatio"/>) is caught by a literal mismatch. Engine-free; runs in both
     /// runners.
     ///
-    /// <para>Every UV expectation below is the raw sheet rect INSET BY HALF A TEXEL on each side —
-    /// <c>0.5/64 == 0.0078125</c> exactly, so the literals stay exact. The inset is what makes the sheet's
-    /// bilinear filtering safe (see <see cref="IconQuadLayout"/> and <c>SpriteSheet</c>); each expectation
-    /// carries its own derivation in a trailing comment. They remain hand-written literals ON PURPOSE:
-    /// re-deriving them from <c>entry.X / sheetSize + halfTexel</c> would just restate the implementation
-    /// and could not fail.</para>
+    /// <para>Every UV expectation below is the sprite's PADDED rect — its content rect grown by
+    /// <see cref="SpriteEntry.Padding"/> texels on each side — divided by the sheet size, with NO inset.
+    /// The half-texel inset the earlier expectations carried is retired: what keeps the sheet's bilinear
+    /// filtering off the neighbouring sprite is now the one-texel transparent border <c>SpriteSheet</c>'s
+    /// repack lays down, and DRAWING that border is what antialiases the icon's silhouette (see
+    /// <see cref="IconQuadLayout"/>). The fixture entries below carry <c>Padding = 0</c> — they mirror the
+    /// committed sprite JSON, which is a RAW parsed index — so their UVs are the plain rect; the padded
+    /// cases live in the teeth at the bottom of this file. Each expectation carries its own derivation in a
+    /// trailing comment, and they remain hand-written literals ON PURPOSE: re-deriving them from
+    /// <c>entry.X / sheetSize</c> would just restate the implementation and could not fail.</para>
     /// </summary>
     [TestFixture]
     public class IconQuadLayoutTests
@@ -39,9 +43,9 @@ namespace MapRenderer.Tests
         {
             // The UV/pixelRatio RED tooth: star is @2x, so logical size (24/2=12) and the UV rect (spanning
             // the raw 24px extent, NEVER divided by pixelRatio) must diverge from each other — asserting
-            // both in one test catches an implementation that mistakenly divides the UV rect too. The
-            // half-texel inset does not blunt this: the UV extent below is 23/64, i.e. (Width-1) texels of
-            // a 24px sprite, still nowhere near the 12px a pixelRatio division would produce.
+            // both in one test catches an implementation that mistakenly divides the UV rect too. The UV
+            // extent below is 24/64, the sprite's full 24 texels, nowhere near the 12px a pixelRatio
+            // division would produce.
             SymbolQuad quad = IconQuadLayout.Layout(Star, SheetSize, 1f, TextAnchor.Center, float2.zero);
 
             Assert.AreEqual(-6f, quad.TopLeft.x, Eps);
@@ -49,14 +53,14 @@ namespace MapRenderer.Tests
             Assert.AreEqual(6f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-6f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0.2578125f, quad.UvTopLeft.x, Eps);     // 16/64 + 0.5/64
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.6171875f, quad.UvBottomRight.x, Eps); // 40/64 - 0.5/64
-            Assert.AreEqual(0.3671875f, quad.UvBottomRight.y, Eps); // 24/64 - 0.5/64
+            Assert.AreEqual(0.25f,   quad.UvTopLeft.x, Eps);     // 16/64
+            Assert.AreEqual(0f,      quad.UvTopLeft.y, Eps);     //  0/64
+            Assert.AreEqual(0.625f,  quad.UvBottomRight.x, Eps); // 40/64
+            Assert.AreEqual(0.375f,  quad.UvBottomRight.y, Eps); // 24/64
         }
 
         [Test]
-        public void Marker_CenterAnchor_IconSize1_UvIsTheRawRectInsetByHalfATexel()
+        public void Marker_CenterAnchor_IconSize1_UvIsTheRawRect()
         {
             SymbolQuad quad = IconQuadLayout.Layout(Marker, SheetSize, 1f, TextAnchor.Center, float2.zero);
 
@@ -65,10 +69,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(8f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-8f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.2421875f, quad.UvBottomRight.x, Eps); // 16/64 - 0.5/64
-            Assert.AreEqual(0.2421875f, quad.UvBottomRight.y, Eps); // 16/64 - 0.5/64
+            Assert.AreEqual(0f,    quad.UvTopLeft.x, Eps);     //  0/64
+            Assert.AreEqual(0f,    quad.UvTopLeft.y, Eps);     //  0/64
+            Assert.AreEqual(0.25f, quad.UvBottomRight.x, Eps); // 16/64
+            Assert.AreEqual(0.25f, quad.UvBottomRight.y, Eps); // 16/64
         }
 
         [Test]
@@ -82,10 +86,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(8f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-8f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.5078125f, quad.UvTopLeft.y, Eps);     // 32/64 + 0.5/64
-            Assert.AreEqual(0.1171875f, quad.UvBottomRight.x, Eps); //  8/64 - 0.5/64
-            Assert.AreEqual(0.6171875f, quad.UvBottomRight.y, Eps); // 40/64 - 0.5/64
+            Assert.AreEqual(0f,      quad.UvTopLeft.x, Eps);     //  0/64
+            Assert.AreEqual(0.5f,    quad.UvTopLeft.y, Eps);     // 32/64
+            Assert.AreEqual(0.125f,  quad.UvBottomRight.x, Eps); //  8/64
+            Assert.AreEqual(0.625f,  quad.UvBottomRight.y, Eps); // 40/64
         }
 
         [Test]
@@ -100,10 +104,10 @@ namespace MapRenderer.Tests
 
             // UV is unaffected by icon-size — it indexes the sheet, not the drawn extent. Byte-identical to
             // the iconSize-1 case above, which is the whole point of this test.
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
-            Assert.AreEqual(0.2421875f, quad.UvBottomRight.x, Eps); // 16/64 - 0.5/64
-            Assert.AreEqual(0.2421875f, quad.UvBottomRight.y, Eps); // 16/64 - 0.5/64
+            Assert.AreEqual(0f,    quad.UvTopLeft.x, Eps);     //  0/64
+            Assert.AreEqual(0f,    quad.UvTopLeft.y, Eps);     //  0/64
+            Assert.AreEqual(0.25f, quad.UvBottomRight.x, Eps); // 16/64
+            Assert.AreEqual(0.25f, quad.UvBottomRight.y, Eps); // 16/64
         }
 
         [Test]
@@ -162,7 +166,7 @@ namespace MapRenderer.Tests
         {
             SymbolQuad quad = IconQuadLayout.Layout(Star, SheetSize, 1f, TextAnchor.TopLeft, new float2(3f, -1f));
 
-            TextLayoutResult result = IconQuadLayout.ToLayoutResult(quad);
+            TextLayoutResult result = IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(Star, 1f));
 
             Assert.AreEqual(1, result.Quads.Count, "a sprite is exactly one quad");
             AssertQuadEqual(quad, result.Quads[0]);
@@ -171,6 +175,152 @@ namespace MapRenderer.Tests
             Assert.AreEqual(math.min(quad.TopLeft.y, quad.BottomRight.y), result.BoundsMin.y, Eps);
             Assert.AreEqual(math.max(quad.TopLeft.x, quad.BottomRight.x), result.BoundsMax.x, Eps);
             Assert.AreEqual(math.max(quad.TopLeft.y, quad.BottomRight.y), result.BoundsMax.y, Eps);
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+        // The padded-repack teeth. SpriteSheet hands every drawable sprite a one-texel transparent border
+        // and reports it as SpriteEntry.Padding; IconQuadLayout draws that border (which is what gives the
+        // silhouette a ramp bilinear can antialias) and grows the quad by exactly its drawn size.
+        //
+        // Padded twins of the fixture sprites — SAME rect, Padding = 1.
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+        private static readonly SpriteEntry PaddedMarker = new SpriteEntry { X = 5, Y = 5, Width = 16, Height = 16, PixelRatio = 1f, Padding = 1 };
+        private static readonly SpriteEntry PaddedStar = new SpriteEntry { X = 30, Y = 7, Width = 24, Height = 24, PixelRatio = 2f, Padding = 1 };
+        private static readonly SpriteEntry PaddedDot = new SpriteEntry { X = 1, Y = 40, Width = 8, Height = 8, PixelRatio = 1f, Padding = 1 };
+
+        /// <summary>
+        /// C1 — the CONTENT box is exactly what it was before the border existed, for every anchor. The
+        /// literals are the same nine rows the un-padded <see cref="AnchorSweep_MatchesHAlignVAlignConvention"/>
+        /// pins for a 16×16 @1x marker at icon-size 1, which is the point: adding a border must not move or
+        /// resize a single anchor's box. This is the ink-size invariant AND the collision-box invariant in
+        /// one, and it is what makes "icons cannot silently grow" checkable rather than merely intended.
+        /// </summary>
+        [TestCase(TextAnchor.Center, -8f, 8f, 8f, -8f)]
+        [TestCase(TextAnchor.Left, 0f, 8f, 16f, -8f)]
+        [TestCase(TextAnchor.Right, -16f, 8f, 0f, -8f)]
+        [TestCase(TextAnchor.Top, -8f, 0f, 8f, -16f)]
+        [TestCase(TextAnchor.Bottom, -8f, 16f, 8f, 0f)]
+        [TestCase(TextAnchor.TopLeft, 0f, 0f, 16f, -16f)]
+        [TestCase(TextAnchor.TopRight, -16f, 0f, 0f, -16f)]
+        [TestCase(TextAnchor.BottomLeft, 0f, 16f, 16f, 0f)]
+        [TestCase(TextAnchor.BottomRight, -16f, 16f, 0f, 0f)]
+        public void PaddedAnchorSweep_ContentBoxIsUnchangedByTheBorder(
+            TextAnchor anchor, float expectedTopLeftX, float expectedTopLeftY,
+            float expectedBottomRightX, float expectedBottomRightY)
+        {
+            SymbolQuad quad = IconQuadLayout.Layout(PaddedMarker, SheetSize, 1f, anchor, float2.zero);
+            TextLayoutResult content =
+                IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(PaddedMarker, 1f));
+
+            Assert.AreEqual(math.min(expectedTopLeftX, expectedBottomRightX), content.BoundsMin.x, Eps, $"anchor {anchor}: BoundsMin.x");
+            Assert.AreEqual(math.min(expectedTopLeftY, expectedBottomRightY), content.BoundsMin.y, Eps, $"anchor {anchor}: BoundsMin.y");
+            Assert.AreEqual(math.max(expectedTopLeftX, expectedBottomRightX), content.BoundsMax.x, Eps, $"anchor {anchor}: BoundsMax.x");
+            Assert.AreEqual(math.max(expectedTopLeftY, expectedBottomRightY), content.BoundsMax.y, Eps, $"anchor {anchor}: BoundsMax.y");
+        }
+
+        /// <summary>C1, the general case: for every fixture sprite × icon-size × anchor × offset, the padded
+        /// entry's CONTENT box equals the un-padded entry's quad exactly. A single formula error anywhere in
+        /// the grow/un-grow pair shows up here.</summary>
+        [TestCase(0.5f)]
+        [TestCase(1f)]
+        [TestCase(2f)]
+        public void PaddedContentBox_EqualsTheUnpaddedQuad_ForEverySpriteAndAnchor(float iconSize)
+        {
+            var pairs = new[] { (Marker, PaddedMarker), (Star, PaddedStar), (Dot, PaddedDot) };
+            var anchors = new[]
+            {
+                TextAnchor.Center, TextAnchor.Left, TextAnchor.Right, TextAnchor.Top, TextAnchor.Bottom,
+                TextAnchor.TopLeft, TextAnchor.TopRight, TextAnchor.BottomLeft, TextAnchor.BottomRight,
+            };
+            var offset = new float2(3f, -2f);
+
+            foreach ((SpriteEntry bare, SpriteEntry padded) in pairs)
+            {
+                foreach (TextAnchor anchor in anchors)
+                {
+                    SymbolQuad bareQuad = IconQuadLayout.Layout(bare, SheetSize, iconSize, anchor, offset);
+                    SymbolQuad paddedQuad = IconQuadLayout.Layout(padded, SheetSize, iconSize, anchor, offset);
+                    TextLayoutResult content =
+                        IconQuadLayout.ToLayoutResult(paddedQuad, IconQuadLayout.SkirtPx(padded, iconSize));
+
+                    string what = $"{bare.Width}x{bare.Height}@{bare.PixelRatio} {anchor} size {iconSize}";
+                    Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), content.BoundsMin.x, Eps, $"{what}: min.x");
+                    Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), content.BoundsMin.y, Eps, $"{what}: min.y");
+                    Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), content.BoundsMax.x, Eps, $"{what}: max.x");
+                    Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), content.BoundsMax.y, Eps, $"{what}: max.y");
+                }
+            }
+        }
+
+        /// <summary>C2 — the UV rect covers the sprite's PADDED rect exactly (no inset, no half-texel), and
+        /// the quad's extent is the padded rect's own logical size. "Pad the atlas but leave the quad
+        /// nominal" fails the second half; "grow the quad but leave the UV on the content" fails the
+        /// first.</summary>
+        [Test]
+        public void PaddedSprite_UvRectAndQuadExtentBothSpanTheWholeCell()
+        {
+            const float iconSize = 1.5f;
+            SymbolQuad quad = IconQuadLayout.Layout(PaddedStar, SheetSize, iconSize, TextAnchor.Center, float2.zero);
+
+            float uvTexelsX = (quad.UvBottomRight.x - quad.UvTopLeft.x) * SheetSize.x;
+            float uvTexelsY = (quad.UvBottomRight.y - quad.UvTopLeft.y) * SheetSize.y;
+            Assert.AreEqual(PaddedStar.Width + 2 * PaddedStar.Padding, uvTexelsX, Eps, "UV must span the padded width");
+            Assert.AreEqual(PaddedStar.Height + 2 * PaddedStar.Padding, uvTexelsY, Eps, "UV must span the padded height");
+
+            float quadWidth = quad.BottomRight.x - quad.TopLeft.x;
+            float quadHeight = quad.TopLeft.y - quad.BottomRight.y;
+            Assert.AreEqual((PaddedStar.Width + 2 * PaddedStar.Padding) / PaddedStar.PixelRatio * iconSize, quadWidth, Eps);
+            Assert.AreEqual((PaddedStar.Height + 2 * PaddedStar.Padding) / PaddedStar.PixelRatio * iconSize, quadHeight, Eps);
+        }
+
+        /// <summary>
+        /// C3 — the identity the whole design hangs on: <b>texels-per-drawn-pixel is the same for the border
+        /// as for the content</b>, i.e. <c>uvWidth × sheetWidth / quadWidth == PixelRatio / iconSize</c>,
+        /// independent of the sprite and of the padding. It catches BOTH shallow implementations in one
+        /// assertion — a quad grown without widening the UV rect makes the ratio too small (fewer texels per
+        /// drawn pixel: the content is stretched across the padded quad, so the icon <b>grew</b>), a UV rect
+        /// widened without growing the quad makes it too large (more texels per drawn pixel: the padded rect
+        /// is squeezed into the nominal quad, so the icon <b>shrank</b>).
+        /// </summary>
+        [TestCase(0.75f)]
+        [TestCase(3f)]
+        public void TexelsPerDrawnPixel_IsTheSameForBorderAndContent(float iconSize)
+        {
+            foreach (SpriteEntry entry in new[] { PaddedMarker, PaddedStar, PaddedDot, Marker, Dot })
+            {
+                SymbolQuad quad = IconQuadLayout.Layout(entry, SheetSize, iconSize, TextAnchor.Center, float2.zero);
+                float uvTexels = (quad.UvBottomRight.x - quad.UvTopLeft.x) * SheetSize.x;
+                float quadWidth = quad.BottomRight.x - quad.TopLeft.x;
+
+                Assert.AreEqual(entry.PixelRatio / iconSize, uvTexels / quadWidth, Eps,
+                    $"{entry.Width}x{entry.Height}@{entry.PixelRatio} pad {entry.Padding}, size {iconSize}: " +
+                    $"a drawn pixel must cover PixelRatio/iconSize texels — the SAME rate inside the border " +
+                    $"as inside the content, or the ink is being scaled by the padding.");
+            }
+        }
+
+        /// <summary>
+        /// A malformed sheet may declare an explicit <c>"pixelRatio": 0</c>, which parses straight through
+        /// (<c>SpriteIndex</c> only DEFAULTS the field to 1). Unguarded, an unpadded such entry makes the
+        /// skirt <c>0 / 0f</c> — NaN, not the infinity the size maths produces — and NaN bounds compare false
+        /// against every collision test rather than swallowing the screen. Mirrors the identical guard
+        /// <c>FillPattern.TryResolve</c> already carries for the same malformed field.
+        /// </summary>
+        [TestCase(0)]
+        [TestCase(1)]
+        public void SkirtPx_WithAMalformedZeroPixelRatio_IsFinite(int padding)
+        {
+            var malformed = new SpriteEntry
+            {
+                X = 0, Y = 0, Width = 8, Height = 8, PixelRatio = 0f, Padding = padding,
+            };
+
+            float skirt = IconQuadLayout.SkirtPx(malformed, 2f);
+
+            Assert.IsFalse(float.IsNaN(skirt), $"padding {padding}: the skirt must never be NaN");
+            Assert.IsFalse(float.IsInfinity(skirt), $"padding {padding}: nor infinite");
+            Assert.AreEqual(padding * 2f, skirt, Eps, "a zero pixelRatio falls back to 1, exactly as FillPattern's does");
         }
 
         private static void AssertQuadEqual(in SymbolQuad expected, in SymbolQuad actual)

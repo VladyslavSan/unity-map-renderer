@@ -13,9 +13,10 @@ using MapRenderer.Unity.Text;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// I4 acceptance: <see cref="SpriteSheet"/> decodes the fixture sprite PNG and flips its rows so a
-    /// top-left-origin sprite-JSON coord <c>(x,y)</c> reads back at <c>Texture2D.GetPixel(x,y)</c> — the
-    /// SAME contract <see cref="GlyphAtlasTexture"/> establishes for the glyph atlas (see
+    /// I4 acceptance: <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel
+    /// transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord
+    /// <c>(x,y)</c> — of the <b>repacked</b> index — reads back at <c>Texture2D.GetPixel(x,y)</c>. That is
+    /// the SAME contract <see cref="GlyphAtlasTexture"/> establishes for the glyph atlas (see
     /// <see cref="SpriteSheet"/>'s orientation-contract doc). The color pins below are the ultimate check:
     /// if the flip direction is wrong, they read transparent/black instead of the fixture's marker/star/dot
     /// colors.
@@ -70,25 +71,36 @@ namespace MapRenderer.Tests
             try
             {
                 Texture2D texture = sheet.Texture;
+                SpriteIndex index = sheet.View.Index;
 
-                // marker (x0,y0,16x16) -- opaque red -- sample well inside the sprite's rect.
-                AssertColorApprox(texture.GetPixel(8, 8), 255, 0, 0, 255,
-                    "marker sprite must read red at its top-left-origin (8,8) after the row flip");
+                // The repack relocates every sprite, so the colour pins must be read at the sprite's NEW
+                // rect. Reading them through the derived index (rather than at hand-written coordinates) is
+                // what keeps this an ORIENTATION tooth instead of a packing-layout tooth.
+                Assert.IsTrue(index.TryGetSprite("marker", out SpriteEntry marker));
+                Assert.IsTrue(index.TryGetSprite("star", out SpriteEntry star));
+                Assert.IsTrue(index.TryGetSprite("dot", out SpriteEntry dot));
 
-                // star (x16,y0,24x24) -- opaque green.
-                AssertColorApprox(texture.GetPixel(28, 12), 0, 255, 0, 255,
-                    "star sprite must read green at its top-left-origin (28,12) after the row flip");
+                // marker (16x16) -- opaque red -- sample well inside the sprite's rect.
+                AssertColorApprox(texture.GetPixel(marker.X + 8, marker.Y + 8), 255, 0, 0, 255,
+                    "marker sprite must read red 8 texels inside its repacked rect");
 
-                // dot (x0,y32,8x8) -- opaque blue.
-                AssertColorApprox(texture.GetPixel(4, 36), 0, 0, 255, 255,
-                    "dot sprite must read blue at its top-left-origin (4,36) after the row flip");
+                // star (24x24) -- opaque green.
+                AssertColorApprox(texture.GetPixel(star.X + 12, star.Y + 12), 0, 255, 0, 255,
+                    "star sprite must read green 12 texels inside its repacked rect");
 
-                // Anti-flip guard: (8,55) sits outside every sprite's rect and must be transparent -- if
-                // the flip were backwards (or missing), Unity's un-flipped LoadImage decode would alias
-                // this coordinate to the marker's opaque red (the marker lands near the BOTTOM of
-                // un-flipped GetPixel space).
-                AssertColorApprox(texture.GetPixel(8, 55), 0, 0, 0, 0,
-                    "coordinate outside every sprite rect must read transparent -- an opaque/red read here means the row flip is backwards");
+                // dot (8x8) -- opaque blue.
+                AssertColorApprox(texture.GetPixel(dot.X + 4, dot.Y + 4), 0, 0, 255, 255,
+                    "dot sprite must read blue 4 texels inside its repacked rect");
+
+                // Anti-flip guard: the VERTICAL MIRROR of the dot sample. The dot's cell is only 10 texels
+                // tall in a 26-texel sheet, so its mirror lands in the sheet's empty region, which the
+                // composer clears to transparent. If the row flip were backwards (or doubled), this
+                // coordinate would alias the dot's opaque blue instead.
+                int mirroredY = sheet.View.Size.y - 1 - (dot.Y + 4);
+                Assert.AreNotEqual(dot.Y + 4, mirroredY, "the mirror must not coincide with the sample itself");
+                AssertColorApprox(texture.GetPixel(dot.X + 4, mirroredY), 0, 0, 0, 0,
+                    "the vertical mirror of the dot sample must read transparent -- a blue read here means " +
+                    "the row flip is backwards");
             }
             finally
             {
@@ -97,17 +109,72 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void View_ReportsSheetSizeAndIndex()
+        public void View_ReportsRepackedSheetSizeAndIndex()
         {
             SpriteSheet sheet = LoadFixtureSheet();
             try
             {
                 SpriteAtlasView view = sheet.View;
 
-                Assert.AreEqual(new int2(64, 64), view.Size);
+                // Hand-derived, not copied off a run. Cells (rect + 1 texel of border per side): star 26x26,
+                // marker 18x18, dot 10x10. Shelf width starts at max(source 64, widest cell 26) == 64;
+                // height-descending they lay on ONE shelf as 26 + 18 + 10 == 54 <= 64, so the packed sheet is
+                // 64 wide and one shelf (the tallest cell, 26) tall.
+                var expectedSize = new int2(64, 26);
+                Assert.AreEqual(expectedSize, view.Size, "repacked sheet size");
+
+                // …and the sheet must actually be bound at the size the planner produced for this index.
+                SpritePadPlan plan = SpriteSheetPadder.Plan(
+                    SpriteIndex.Parse(File.ReadAllText(LoadFixturePath("sample-sprite.json"))),
+                    new int2(64, 64), padding: 1);
+                Assert.AreEqual(plan.Size, view.Size, "SpriteSheet must bind the planned sheet size");
+
                 Assert.IsTrue(view.Index.TryGetSprite("marker", out _));
                 Assert.IsTrue(view.Index.TryGetSprite("star", out _));
                 Assert.IsTrue(view.Index.TryGetSprite("dot", out _));
+            }
+            finally
+            {
+                sheet.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// U3 — the border is REAL in the bound texture, not merely promised by the index: every one of the
+        /// eight neighbour texels around a sprite's content rect is alpha 0 carrying the RGB of the content
+        /// texel it abuts. Alpha 0 alone is not enough — bilinear interpolates RGB and alpha independently,
+        /// so a zeroed RGB would ring a black fringe around the icon.
+        /// </summary>
+        [Test]
+        public void EverySprite_IsSurroundedByAOneTexelTransparentBorderCarryingItsOwnRgb()
+        {
+            SpriteSheet sheet = LoadFixtureSheet();
+            try
+            {
+                Texture2D texture = sheet.Texture;
+                foreach (var kv in sheet.View.Index.Entries)
+                {
+                    SpriteEntry e = kv.Value;
+                    Assert.AreEqual(1, e.Padding, $"'{kv.Key}' must report its one-texel border");
+
+                    for (int dy = -1; dy <= e.Height; dy++)
+                    {
+                        for (int dx = -1; dx <= e.Width; dx++)
+                        {
+                            if (dx >= 0 && dx < e.Width && dy >= 0 && dy < e.Height) continue;
+
+                            Color border = texture.GetPixel(e.X + dx, e.Y + dy);
+                            Color content = texture.GetPixel(
+                                e.X + Mathf.Clamp(dx, 0, e.Width - 1), e.Y + Mathf.Clamp(dy, 0, e.Height - 1));
+
+                            Assert.AreEqual(0f, border.a, 1e-3f,
+                                $"'{kv.Key}' border texel ({dx},{dy}) must be fully transparent");
+                            AssertColorApprox(border, (byte)(content.r * 255f), (byte)(content.g * 255f),
+                                (byte)(content.b * 255f), 0,
+                                $"'{kv.Key}' border texel ({dx},{dy}) must replicate the adjacent content RGB");
+                        }
+                    }
+                }
             }
             finally
             {

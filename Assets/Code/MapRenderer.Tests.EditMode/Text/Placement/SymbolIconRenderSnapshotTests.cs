@@ -109,13 +109,16 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < placements.Length; i++)
             {
                 (string name, double east, double north) = placements[i];
-                Assert.IsTrue(index.TryGetSprite(name, out SpriteEntry entry), $"fixture must define sprite '{name}'");
+                // The REPACKED index — SpriteSheet relocates every sprite into its own padded cell, so the
+                // raw parsed rect no longer describes the texture being bound below.
+                Assert.IsTrue(sheet.View.Index.TryGetSprite(name, out SpriteEntry entry),
+                    $"fixture must define sprite '{name}'");
                 SymbolQuad quad = IconQuadLayout.Layout(
                     entry, sheetSize, iconSize: 2.0f, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
                 labels.Add(new LabelInstance
                 {
                     AnchorRender = frame.SceneOriginRender + new double3(east, 0.0, north),
-                    Layout = IconQuadLayout.ToLayoutResult(quad),
+                    Layout = IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(entry, 2.0f)),
                     Kind = LabelKind.Icon,
                     Paint = whitePaint,
                     TextSizePx = TextQuadLayout.OneEm, // scale 1 — matches the real StyledSymbolTileBuilder icon path
@@ -249,18 +252,21 @@ namespace MapRenderer.Tests.Text.Placement
             var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
             try
             {
-                Assert.IsTrue(index.TryGetSprite("arrow-down", out SpriteEntry entry),
+                Assert.IsTrue(sheet.View.Index.TryGetSprite("arrow-down", out SpriteEntry entry),
                     "precondition: the demo fixture must define the asymmetric 'arrow-down' sprite");
-                int2 sheetSize = sheet.View.Size;
 
-                // The sprite's real UV rect (IconQuadLayout's own formula) on a deliberately WIDE cell — the
-                // cell footprint, not the sprite's aspect, is what makes the orientation legible.
+                // The sprite's real UV rect, taken FROM IconQuadLayout rather than restated here, on a
+                // deliberately WIDE cell — the cell footprint, not the sprite's aspect, is what makes the
+                // orientation legible. Restating the formula would mean this fixture silently disagrees with
+                // the production rect whenever that rect changes (it now spans the sprite's padded cell).
+                SymbolQuad laidOut = IconQuadLayout.Layout(
+                    entry, sheet.View.Size, 1f, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
                 var cell = new SymbolQuad
                 {
                     TopLeft = new float2(-LineIconHalfWidthPx, LineIconHalfHeightPx),
                     BottomRight = new float2(LineIconHalfWidthPx, -LineIconHalfHeightPx),
-                    UvTopLeft = new float2(entry.X, entry.Y) / sheetSize,
-                    UvBottomRight = new float2(entry.X + entry.Width, entry.Y + entry.Height) / sheetSize,
+                    UvTopLeft = laidOut.UvTopLeft,
+                    UvBottomRight = laidOut.UvBottomRight,
                     LineIndex = 0,
                 };
 
@@ -351,7 +357,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
             try
             {
-                SymbolQuad cell = SignToothCell(index, sheet.View.Size, SignToothHalfExtentPx);
+                SymbolQuad cell = SignToothCell(sheet.View, SignToothHalfExtentPx);
                 SymbolInk baseline = MeasureAlongLineIconInk(
                     sheet, cell, SignToothSprite, lineAngleDeg: 0f, iconRotateDeg: 0f);
                 SymbolInk road45 = MeasureAlongLineIconInk(
@@ -389,7 +395,7 @@ namespace MapRenderer.Tests.Text.Placement
             var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
             try
             {
-                SymbolQuad cell = SignToothCell(index, sheet.View.Size, SignToothHalfExtentPx);
+                SymbolQuad cell = SignToothCell(sheet.View, SignToothHalfExtentPx);
                 SymbolInk baseline = MeasureAlongLineIconInk(
                     sheet, cell, SignToothSprite, lineAngleDeg: 0f, iconRotateDeg: 0f);
                 SymbolInk road45 = MeasureAlongLineIconInk(
@@ -489,13 +495,13 @@ namespace MapRenderer.Tests.Text.Placement
             var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
             try
             {
-                SymbolInk northUp = MeasurePointIconInk(sheet, index, SignToothHalfExtentPx,
+                SymbolInk northUp = MeasurePointIconInk(sheet, SignToothHalfExtentPx,
                     headingDeg: 0f, AlignmentMode.Map, anchorEastFractionOfAltitude: 0.0);
-                SymbolInk underBearing = MeasurePointIconInk(sheet, index, SignToothHalfExtentPx,
+                SymbolInk underBearing = MeasurePointIconInk(sheet, SignToothHalfExtentPx,
                     headingDeg: MapBearingToothHeadingDeg, AlignmentMode.Map, anchorEastFractionOfAltitude: 0.0);
-                SymbolInk mapEastNorthUp = MeasurePointIconInk(sheet, index, MapEastProbeHalfExtentPx,
+                SymbolInk mapEastNorthUp = MeasurePointIconInk(sheet, MapEastProbeHalfExtentPx,
                     headingDeg: 0f, AlignmentMode.Viewport, MapEastProbeAnchorFractionOfAltitude);
-                SymbolInk mapEastUnderBearing = MeasurePointIconInk(sheet, index, MapEastProbeHalfExtentPx,
+                SymbolInk mapEastUnderBearing = MeasurePointIconInk(sheet, MapEastProbeHalfExtentPx,
                     headingDeg: MapBearingToothHeadingDeg, AlignmentMode.Viewport, MapEastProbeAnchorFractionOfAltitude);
 
                 AssertAnchorIsTheViewportCentre(northUp);
@@ -557,9 +563,9 @@ namespace MapRenderer.Tests.Text.Placement
             var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
             try
             {
-                SymbolInk northUp = MeasurePointIconInk(sheet, index, SignToothHalfExtentPx,
+                SymbolInk northUp = MeasurePointIconInk(sheet, SignToothHalfExtentPx,
                     headingDeg: 0f, AlignmentMode.Viewport, anchorEastFractionOfAltitude: 0.0);
-                SymbolInk underBearing = MeasurePointIconInk(sheet, index, SignToothHalfExtentPx,
+                SymbolInk underBearing = MeasurePointIconInk(sheet, SignToothHalfExtentPx,
                     headingDeg: MapBearingToothHeadingDeg, AlignmentMode.Viewport, anchorEastFractionOfAltitude: 0.0);
 
                 AssertAnchorIsTheViewportCentre(northUp);
@@ -582,16 +588,20 @@ namespace MapRenderer.Tests.Text.Placement
         /// <summary>The sign teeth's sprite and cell: a SQUARE cell (so the sprite is not distorted and the
         /// rendered angles are the cell's own), large enough that the ~0.19-of-half-extent centroid offset is
         /// tens of px — far above rasterization jitter.</summary>
-        private static SymbolQuad SignToothCell(SpriteIndex index, int2 sheetSize, float halfExtentPx)
+        private static SymbolQuad SignToothCell(SpriteAtlasView view, float halfExtentPx)
         {
-            Assert.IsTrue(index.TryGetSprite(SignToothSprite, out SpriteEntry entry),
+            // The REPACKED view, and IconQuadLayout's own UV rect rather than a restatement of it: the sprite
+            // is relocated by SpriteSheet's padded repack, and its drawn rect spans its padded cell.
+            Assert.IsTrue(view.Index.TryGetSprite(SignToothSprite, out SpriteEntry entry),
                 $"precondition: the demo fixture must define the two-dimensionally asymmetric '{SignToothSprite}' sprite");
+            SymbolQuad laidOut = IconQuadLayout.Layout(
+                entry, view.Size, 1f, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
             return new SymbolQuad
             {
                 TopLeft = new float2(-halfExtentPx, halfExtentPx),
                 BottomRight = new float2(halfExtentPx, -halfExtentPx),
-                UvTopLeft = new float2(entry.X, entry.Y) / sheetSize,
-                UvBottomRight = new float2(entry.X + entry.Width, entry.Y + entry.Height) / sheetSize,
+                UvTopLeft = laidOut.UvTopLeft,
+                UvBottomRight = laidOut.UvBottomRight,
                 LineIndex = 0,
             };
         }
@@ -787,7 +797,7 @@ namespace MapRenderer.Tests.Text.Placement
         // on-screen ink. The along-line sibling above shares everything but the label: this one carries a
         // Layout + AnchorRender (the point path) instead of a PathRender + CurvedGlyphs, and a heading
         // instead of a road bearing.
-        private static SymbolInk MeasurePointIconInk(SpriteSheet sheet, SpriteIndex index, float halfExtentPx,
+        private static SymbolInk MeasurePointIconInk(SpriteSheet sheet, float halfExtentPx,
             float headingDeg, AlignmentMode rotationAlignment, double anchorEastFractionOfAltitude)
         {
             var camGo = new GameObject("MapAlignedPointIcon_TestCamera");
@@ -810,12 +820,14 @@ namespace MapRenderer.Tests.Text.Placement
             // camera orbits the look-at, so at tilt 0 its height above it is transform.position.y whatever
             // the heading.
             double altitude = uCam.transform.position.y;
-            SymbolQuad cell = SignToothCell(index, sheet.View.Size, halfExtentPx);
+            SymbolQuad cell = SignToothCell(sheet.View, halfExtentPx);
 
             var label = new LabelInstance
             {
                 AnchorRender = frame.SceneOriginRender + new double3(altitude * anchorEastFractionOfAltitude, 0.0, 0.0),
-                Layout = IconQuadLayout.ToLayoutResult(cell),
+                // The cell's footprint is a deliberately fixed square, not the sprite's own rect, so it
+                // carries no skirt to remove.
+                Layout = IconQuadLayout.ToLayoutResult(cell, skirtPx: 0f),
                 Kind = LabelKind.Icon,
                 IconImage = SignToothSprite,
                 RotationAlignment = rotationAlignment,

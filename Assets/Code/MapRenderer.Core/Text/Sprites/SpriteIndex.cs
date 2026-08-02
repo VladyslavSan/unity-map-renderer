@@ -17,6 +17,31 @@ namespace MapRenderer.Core.Text.Sprites
         /// <summary>Number of sprites in the index.</summary>
         public int Count => _entries.Count;
 
+        /// <summary>
+        /// Read-only enumeration of every name → entry pair — the same class of access as
+        /// <see cref="TryGetSprite"/>, just unkeyed. Consumer: <c>SpriteSheetPadder.Plan</c>, which must walk
+        /// the whole index to repack it.
+        /// </summary>
+        public IReadOnlyDictionary<string, SpriteEntry> Entries => _entries;
+
+        /// <summary>
+        /// Builds an index from already-derived entries — the repack's output path. <c>internal</c> on
+        /// purpose: constructing an index that did NOT come from a sprite JSON is privileged, and only
+        /// <c>SpriteSheetPadder.Plan</c> may do it. COPIES <paramref name="entries"/> so the returned index
+        /// keeps the "immutable after construction" property <see cref="Parse"/> establishes.
+        /// </summary>
+        internal static SpriteIndex FromEntries(IReadOnlyDictionary<string, SpriteEntry> entries)
+        {
+            var index = new SpriteIndex();
+            if (entries == null)
+                return index;
+
+            foreach (var kv in entries)
+                index._entries[kv.Key] = kv.Value;
+
+            return index;
+        }
+
         /// <summary>Parses a sprite JSON document's text. Malformed JSON yields an empty index (never throws).</summary>
         public static SpriteIndex Parse(string json)
         {

@@ -224,9 +224,15 @@ TEXTURE2D(_PatternMap);         SAMPLER(sampler_PatternMap);
 // neighbour with a zero-pixel gap).
 //
 // Point is what patterns rendered with before that change, so this restores them exactly rather than
-// trading one artifact for another. It is a CONTAINMENT, not the destination: the padded-repack stage gives
-// each sprite a wrap-replicated border, after which a pattern can take a correctly-filtered bilinear tap at
-// its seam and this inline sampler goes away.
+// trading one artifact for another. It is a CONTAINMENT, not the destination.
+//
+// The padded repack has since LANDED (SpriteSheetPadder/SpriteSheetComposer), but it gives every sprite a
+// TRANSPARENT border — the fill a silhouette needs to ramp into — which a pattern must never sample: a
+// tiling seam has to continue into the OPPOSITE edge's pixels, not fade out. Patterns therefore keep point
+// sampling inside their content rect and simply never touch the border (pinned by
+// FillPatternThroughSpriteSheetTests). This inline sampler goes away only at the FOLLOW-ON stage that adds
+// a second border-fill ROLE — wrap-replicated instead of transparent — selected per sprite; see
+// docs/labels-and-symbols-design.md §5.2.1's follow-on list.
 //
 // sampler_PointClamp is NOT declared here — Core.hlsl (included above) pulls in the core library's
 // GlobalSamplers.hlsl, which declares the whole inline-sampler set. Redeclaring it is a redefinition error.

@@ -186,6 +186,7 @@ namespace MapRenderer.Core.Style.Symbol
                 LabelPaint iconPaint   = default;
                 float      iconPadding = 0f;
                 float      iconRotateRadians = 0f;
+                float      iconSkirtPx = 0f;
                 if (hasIcon)
                 {
                     float iconSize = layout.IconSize.Evaluate(zoom, feature);
@@ -200,6 +201,9 @@ namespace MapRenderer.Core.Style.Symbol
                     float iconOpacity = paint.IconOpacity.Evaluate(zoom, feature);
                     iconQuad = IconQuadLayout.Layout(iconEntry, spriteAtlas.Size, iconSize, layout.IconAnchor,
                         layout.IconOffset);
+                    // The border baked into iconQuad, carried alongside it: every consumer that needs the
+                    // CONTENT box back (collision, placement) subtracts exactly this.
+                    iconSkirtPx = IconQuadLayout.SkirtPx(iconEntry, iconSize);
                     iconPaint = new LabelPaint
                     {
                         TextColor   = new float4(1f, 1f, 1f, 1f),
@@ -232,6 +236,7 @@ namespace MapRenderer.Core.Style.Symbol
                         ? new AlongLineIconContext
                         {
                             IconQuad = iconQuad,
+                            IconSkirtPx = iconSkirtPx,
                             IconImage = iconImage,
                             PaddingPx = iconPadding,
                             Paint = iconPaint,
@@ -342,6 +347,7 @@ namespace MapRenderer.Core.Style.Symbol
                                 TextRotationAlignment = layout.TextRotationAlignment,
                                 HasIcon = iconAtAnchors && hasIcon,
                                 IconQuad = iconQuad,
+                                IconSkirtPx = iconSkirtPx,
                                 IconImage = iconImage,
                                 IconPaddingPx = iconPadding,
                                 IconPaint = iconPaint,
@@ -388,6 +394,7 @@ namespace MapRenderer.Core.Style.Symbol
                         TextRotationAlignment = layout.TextRotationAlignment,
                         HasIcon = hasIcon,
                         IconQuad = iconQuad,
+                        IconSkirtPx = iconSkirtPx,
                         IconImage = iconImage,
                         IconPaddingPx = iconPadding,
                         IconPaint = iconPaint,
@@ -450,6 +457,8 @@ namespace MapRenderer.Core.Style.Symbol
             // icon side (HasIcon == false ⇒ emit no icon label)
             public bool               HasIcon { get; init; }
             public SymbolQuad         IconQuad { get; init; }
+            /// <summary>Baked-px transparent border inside <see cref="IconQuad"/>, per side.</summary>
+            public float              IconSkirtPx { get; init; }
             public string             IconImage { get; init; }
             public float              IconPaddingPx { get; init; }
             public LabelPaint         IconPaint { get; init; }
@@ -489,6 +498,8 @@ namespace MapRenderer.Core.Style.Symbol
         private readonly struct AlongLineIconContext
         {
             public SymbolQuad    IconQuad { get; init; }
+            /// <summary>Baked-px transparent border inside <see cref="IconQuad"/>, per side.</summary>
+            public float         IconSkirtPx { get; init; }
             public string        IconImage { get; init; }
             public float         PaddingPx { get; init; }
             public LabelPaint    Paint { get; init; }
@@ -525,6 +536,7 @@ namespace MapRenderer.Core.Style.Symbol
                 PathRender        = pathRender,
                 LineAnchors       = anchors,
                 IconQuad          = ctx.IconQuad,
+                IconSkirtPx       = ctx.IconSkirtPx,
                 IconImage         = ctx.IconImage,
                 PaddingPx         = ctx.PaddingPx,
                 SortKey           = ctx.SortKey,
@@ -613,6 +625,7 @@ namespace MapRenderer.Core.Style.Symbol
                 Placement         = SymbolPlacement.Point,
                 Kind              = LabelKind.Icon,
                 IconQuad          = ctx.IconQuad,
+                IconSkirtPx       = ctx.IconSkirtPx,
                 IconImage         = ctx.IconImage,
                 PaddingPx         = ctx.IconPaddingPx,
                 SortKey           = ctx.SortKey,

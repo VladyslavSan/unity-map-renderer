@@ -33,7 +33,7 @@ namespace MapRenderer.Tests.Text.Placement
             AnchorRender = new double3(100.0, 0.0, 200.0),
             Placement = SymbolPlacement.Point,
             Kind = LabelKind.Icon,
-            Layout = IconQuadLayout.ToLayoutResult(IconQuad),
+            Layout = IconQuadLayout.ToLayoutResult(IconQuad, skirtPx: 0f), // hand-built cell: no border
             Paint = LabelPaint.Default,
             TextSizePx = TextQuadLayout.OneEm,
             PaddingPx = 4f,

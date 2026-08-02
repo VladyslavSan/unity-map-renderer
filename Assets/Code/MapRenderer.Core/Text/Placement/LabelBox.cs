@@ -91,18 +91,25 @@ namespace MapRenderer.Core.Text.Placement
         /// rotation about <paramref name="anchorScreenPx"/>, then grown by <paramref name="paddingPx"/> on
         /// every edge. Only <see cref="Min"/>/<see cref="Max"/> are meaningful — the sort/flag fields live on
         /// the owning <see cref="LabelCandidate"/>, not the per-glyph box.
+        ///
+        /// <para><paramref name="cellSkirt"/> (<c>CurvedGlyph.CellSkirt</c>, baked px) is the transparent
+        /// border baked into <paramref name="cell"/>, and is REMOVED before the corners are built, so the
+        /// collision box bounds the icon's ink rather than its skirt. Text passes <c>0</c>, which makes every
+        /// term below an exact <c>x - 0f</c> and the text path byte-identical.</para>
         /// </summary>
         public static LabelBox BuildRotatedGlyph(
             in float2 anchorScreenPx,
             in SymbolQuad cell,
             float textSizePx,
             float rotationRadians,
-            float paddingPx)
+            float paddingPx,
+            float cellSkirt)
         {
             float scale = textSizePx / TextQuadLayout.OneEm;
+            float skirt = cellSkirt * scale;
 
-            float2 tlLocal = cell.TopLeft * scale;
-            float2 brLocal = cell.BottomRight * scale;
+            float2 tlLocal = cell.TopLeft * scale + new float2(skirt, -skirt);
+            float2 brLocal = cell.BottomRight * scale - new float2(skirt, -skirt);
             float2 trLocal = new float2(brLocal.x, tlLocal.y);
             float2 blLocal = new float2(tlLocal.x, brLocal.y);
 

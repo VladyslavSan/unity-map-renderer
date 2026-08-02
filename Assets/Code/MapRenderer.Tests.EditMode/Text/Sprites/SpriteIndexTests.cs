@@ -97,6 +97,18 @@ namespace MapRenderer.Tests
         }
 
         [Test]
+        public void ParsedIndex_ReportsZeroPadding_AndEnumeratesEveryEntry()
+        {
+            // A published sheet reserves no inter-sprite padding, so a raw Parse must never claim any: the
+            // whole padded-repack contract hangs on `Padding` meaning "border that ACTUALLY exists here".
+            var index = SpriteIndex.Parse(LoadFixtureText("sprites/sample-sprite.json"));
+
+            Assert.AreEqual(index.Count, index.Entries.Count, "Entries must expose the whole index");
+            foreach (var kv in index.Entries)
+                Assert.AreEqual(0, kv.Value.Padding, $"'{kv.Key}': a parsed sheet has no border");
+        }
+
+        [Test]
         public void Sdf_And_DefaultPixelRatio_ReadThrough()
         {
             var index = SpriteIndex.Parse("{\"a\":{\"x\":1,\"y\":2,\"width\":3,\"height\":4,\"sdf\":true}}");

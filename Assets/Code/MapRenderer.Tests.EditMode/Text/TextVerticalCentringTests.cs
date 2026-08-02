@@ -158,6 +158,19 @@ namespace MapRenderer.Tests.Text
 
             Assert.AreEqual(iconCentre, textCentre, 0.5f,
                 $"a centred digit's text ink centre must coincide with a centred icon's ink centre (icon={iconCentre}, text={textCentre})");
+
+            // …and the padded-repack border must not disturb that: SpriteSheet hands every drawable sprite a
+            // one-texel transparent border, IconQuadLayout draws it, and the growth must be SYMMETRIC — an
+            // asymmetric skirt would shift a shield's icon off the text it is centred behind.
+            var paddedEntry = new SpriteEntry { X = 1, Y = 1, Width = 20, Height = 20, PixelRatio = 1f, Padding = 1 };
+            SymbolQuad paddedQuad = IconQuadLayout.Layout(in paddedEntry, new int2(64, 64), 1f, TextAnchor.Center, float2.zero);
+            float paddedCentre = 0.5f * (paddedQuad.TopLeft.y + paddedQuad.BottomRight.y);
+            float paddedHeight = paddedQuad.TopLeft.y - paddedQuad.BottomRight.y;
+
+            Assert.AreEqual(iconCentre, paddedCentre, 1e-5f,
+                "the transparent border must grow the quad symmetrically — the content's centre must not move");
+            Assert.AreEqual(20f + 2f, paddedHeight, 1e-5f,
+                "the drawn quad must be the content plus one texel of border on EACH side");
         }
 
         // =========================================================================================

@@ -112,8 +112,18 @@ namespace MapRenderer.Core.Style.Symbol
         public LabelKind Kind { get; init; }
 
         /// <summary>The laid-out icon quad (sheet-pixel space, anchor-relative) — meaningful only when
-        /// <see cref="Kind"/> is <see cref="LabelKind.Icon"/>; default (all-zero) otherwise.</summary>
+        /// <see cref="Kind"/> is <see cref="LabelKind.Icon"/>; default (all-zero) otherwise. This is the
+        /// PADDED quad: it includes <see cref="IconSkirtPx"/> of transparent border on every side.</summary>
         public SymbolQuad IconQuad { get; init; }
+
+        /// <summary>
+        /// Baked-px width of the transparent border baked into <see cref="IconQuad"/>, per side — the value
+        /// <c>IconQuadLayout.SkirtPx</c> produced for this sprite at this <c>icon-size</c>. Carried rather
+        /// than re-derived downstream so the grow (in <c>IconQuadLayout.Layout</c>) and the un-grow (in
+        /// <c>IconQuadLayout.ToLayoutResult</c> / <c>LabelBox.BuildRotatedGlyph</c>) cannot drift apart.
+        /// Meaningful only when <see cref="Kind"/> is <see cref="LabelKind.Icon"/>; <c>0</c> otherwise.
+        /// </summary>
+        public float IconSkirtPx { get; init; }
 
         /// <summary>P-B: <c>icon-rotate</c> in RADIANS, positive = clockwise on screen (MapLibre's sense, kept
         /// verbatim on every carrier — the staging frame's opposite sense is entered once, far downstream, at

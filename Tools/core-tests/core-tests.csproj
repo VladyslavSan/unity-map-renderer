@@ -397,6 +397,16 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteIndex.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteIndexTests.cs" />
 
+    <!-- Padded sprite repack (docs/labels-and-symbols-design.md §5.2.1): rect planning + pixel composition,
+         both engine-free (the composer works over RGBA32 byte arrays, not Texture2D). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteBlit.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpritePadPlan.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/ShelfRectPacker.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetPadder.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetPadderTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetComposer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetComposerTests.cs" />
+
     <!-- I3: icon labels — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelKind.cs" />
@@ -405,6 +415,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/IconImageResolverTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/IconQuadLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorIconTests.cs" />
+    <!-- The skirt's carrier chain, extraction → builder → collision box (engine-free; shared verbatim). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/IconSkirtCarrierChainTests.cs" />
 
     <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
          NOT added here (Text/SymbolSpriteReadinessTests.cs, TestSupport/GatedSpriteSource.cs). -->

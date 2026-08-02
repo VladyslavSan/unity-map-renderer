@@ -729,81 +729,210 @@ pre-baked** — decoded once, never grows, UVs are stable. So the icon atlas is 
 `SpriteIndex` (name → rect) over an immutable texture. `pixelRatio` is the sheet's DPI scale: the sprite's
 **logical** size is `width/pixelRatio` × `height/pixelRatio`, and `icon-size` scales *that*.
 
-### 5.2.1 Sampling the sheet — bilinear + a half-texel inset (settled)
+### 5.2.1 Sampling the sheet — bilinear + a one-texel padded repack (settled)
 
-The sheet binds **`FilterMode.Bilinear`**, and `IconQuadLayout` insets each sprite's UV rect by **half a
-texel** on every side. The two are one decision and neither is correct alone.
+The sheet binds **`FilterMode.Bilinear`**, and `SpriteSheet` **repacks it at decode time so every sprite
+gets a one-texel transparent border**. The two are one decision and neither is correct alone. (This
+supersedes the half-texel UV inset that shipped first; see "What the inset was, and why it went" below.)
 
 **Why not nearest-neighbour.** An icon's magnification is `icon-size × dpr / pixelRatio`. The sheet is
 fetched @1x and `dpr` is `Screen.dpi / 160`, so the product is essentially never an integer — and
 nearest-neighbour is exact *only* at integer magnification. Off it, each source texel covers `N` or `N+1`
 device pixels and **which** depends on the quad's sub-pixel phase, so panning re-quantises an icon's
-interior every frame. That was the reported bug: "pixels inside the icon warp while zooming/panning".
+interior every frame. That was the first reported bug: "pixels inside the icon warp while zooming/panning".
 
 The diagnosis turned on one structural fact, not on measurement: `BillboardMath.BuildWorldQuad` gives all
 four corners the **same bitwise `anchorLocal`** plus static per-corner `OffsetPx`, so a quad is **rigid** in
 screen space. An anchor precision error therefore *translates* an icon and can never deform its interior —
 which rules out the entire geometry/precision family and leaves resampling.
 
-**Why the inset.** A sprite's UV rect ran exactly texel-edge to texel-edge. The sheet format reserves no
-inter-sprite padding and real sheets carry none — the shipped liberty style's sheet
-(`tiles.openfreemap.org/sprites/ofm_f384/ofm`) measures **371 abutting sprite pairs and zero separated by
-even one pixel** — so a bilinear tap at the rect boundary blends the neighbouring sprite 50/50. Insetting to
-the outermost texels' **centres** removes the reach-across.
+**Why the border — the SILHOUETTE defect.** Bilinear fixed the interior and left the outline. The icon's
+outline still wobbled ±1 device pixel while panning, and the cause chain is:
+
+1. The shipped style's sheet (`tiles.openfreemap.org/sprites/ofm_f384/ofm`) has **228 of its 264 sprites
+   full-bleed** — ink touching the rect edge — and **371 abutting sprite pairs, none separated by even one
+   pixel**.
+2. MSAA is **off** project-wide: `Assets/Settings/RPAsset.asset` `m_MSAA: 1` and
+   `ProjectSettings/QualitySettings.asset` `antiAliasing: 0`. One binary coverage sample per pixel per
+   polygon edge.
+3. For a full-bleed sprite the silhouette **IS** the quad's polygon edge, so it flips whole pixels in and out
+   as the quad slides sub-pixel. No sampler setting can help: bilinear can only produce a soft edge if there
+   is a transparent texel to ramp into, and a full-bleed sprite has none.
+
+So the fix is neither a filter change nor a shader change — it is a **content** change. `SpriteSheet` repacks
+the decoded sheet, giving every sprite its own cell with a one-texel border, and `IconQuadLayout` **draws**
+that border. The silhouette becomes a *texture alpha edge* with a one-texel ramp, which bilinear antialiases.
 
 *(Measured from the published sheet + its JSON index, which are style assets, not implementation. This repo
 is clean-room with respect to MapLibre: no MapLibre source has been read, and no design here is justified by
 what their implementation does.)*
 
-Cost: the outer half-texel band is not drawn, so content renders `W/(W-1)` larger than the quad implies —
-and that grows as sprites shrink.
+**The border's content: alpha 0, RGB replicated from the adjacent edge pixel.** Not `(0,0,0,0)`. Bilinear
+interpolates RGB and alpha *independently*, so a mid-ramp texel with a zeroed RGB contributes black to the
+colour while still contributing coverage — a dark fringe all the way round every icon. Replicating the
+nearest content pixel's RGB makes the ramp colour→same colour and alpha 1→0. A corner border texel replicates
+the diagonal content corner (clamp-to-content sampling makes edges and corners one rule).
 
-| sheet rect `W` | content magnification | cropped per side |
-|---|---|---|
-| 8 px (`dot`, `sample-sprite.json`) | 14.3% | 6.3% |
-| 22 px (`airport-11`, §5.2's example) | 4.8% | 2.3% |
-| 64 px | 1.6% | 0.8% |
+**Two structural rules, and the identity that ties them together.** Two shallow implementations would look
+done and both fail:
 
-It lands on the transparent margin any normally-authored icon carries, so it reads as a slightly fatter
-glyph rather than a crop. The alternative that avoids both — clamping the sample to the rect in the shader —
-needs the rect passed per-vertex, which is not worth it at these magnitudes. Repacking the sheet with
-per-sprite padding at decode time would also avoid both, at the cost of a repacker.
+* *Pad the atlas, leave the quad nominal* → the skirt is never rasterized, no ramp is drawn, the silhouette
+  is still the polygon edge. And the whole padded rect is squeezed into the unchanged quad, so the ink
+  **shrinks** by `W/(W+2P)` (32.0 px on the U2 fixture, against a 40.0 nominal).
+* *Grow the quad, leave the UV rect on the content* → the ramp is drawn, but only the *content* texels are
+  sampled across the now-larger quad, so each texel draws bigger and the ink **grows** by `(W+2P)/W`
+  (50.0 px on the same fixture). Note the direction: this one makes the icon LARGER, not smaller — the
+  "squeezed into a smaller share of the quad" reading is backwards, because the quad's UV span, not its
+  extent, is what sets the drawn size of a texel.
+
+The invariant that excludes both, checked in Core (`IconQuadLayoutTests`):
+
+> **texels-per-drawn-pixel is the same for the border and for the content** —
+> `uvWidth × sheetWidth / quadWidth == PixelRatio / iconSize`, independent of the sprite and of the padding.
+
+**The content rect stays the content rect.** `SpriteEntry.X/Y/Width/Height` continue to mean the sprite's own
+ink; the repack only *relocates* them, and a new `SpriteEntry.Padding` records how many texels of border
+surround them. That single decision is what keeps everything else still:
+
+* `IconQuadLayout`'s logical-size maths (`entry.Width / entry.PixelRatio`) is untouched, so `icon-size`
+  arithmetic cannot change and icons cannot silently grow — guaranteed by construction, not by a test.
+* `FillPattern.TryResolve` needs zero edits: it reads the relocated content rect, which is exactly what a
+  point-sampled `frac()`-wrapped pattern must have. `LogicalSizePixels` and every pattern period are
+  unchanged.
+* The **collision box stays on the content**: `IconQuadLayout.ToLayoutResult(quad, skirtPx)` and
+  `CurvedGlyph.CellSkirt` remove the skirt again for placement. A padded box would grow every icon's
+  collision footprint by ~1 logical px per side (up to ~9 % of a 22 px icon's area), silently changing which
+  labels win and which fade.
+
+So there are two representations with two consumers: the **padded** `SymbolQuad` (geometry + UVs) goes to
+render only; the **content** box goes to collision and placement only. The skirt is carried as one baked-px
+float (`IconQuadLayout.SkirtPx` → `SymbolLabel.IconSkirtPx` → `CurvedGlyph.CellSkirt`), never re-derived, so
+the grow and the un-grow cannot drift.
+
+**The packer.** `ShelfRectPacker` — next-fit-decreasing-height shelf packing, chosen over MaxRects/skyline
+because a few hundred cells that grow two texels do not need the extra 3–5 % occupancy, and a shelf layout's
+disjointness is provable by construction. Determinism is a hard requirement (the sheet must not differ
+between machines or runs): cells sort by height desc, width desc, then the group's lexicographically-smallest
+name by `string.CompareOrdinal`, which makes the order total and independent of dictionary insertion order.
+Names sharing one source rect are **grouped** so aliases stay aliased and are copied once. Sheet width is the
+first of `{W₀, 2W₀, 4W₀, …}` (with `W₀ = max(sourceWidth, widest cell)`) whose packed height fits 8192. If
+nothing fits, `Plan` returns the source sheet unchanged with `Padding = 0` and `SpriteSheet` logs a warning
+rather than throwing. Degenerate and out-of-bounds entries pass through untouched with `Padding = 0`, matching
+`SpriteIndex.Parse`'s forward-compat posture. Out-of-bounds is tested **overflow-safely** (`long`): in 32-bit
+signed arithmetic `x + width` for `x: 2147483647` wraps negative and passes the bound, and such an entry would
+be packed, blitted from a negative offset, and throw out of the `SpriteSheet` constructor — installing neither
+texture nor index, i.e. every icon on the map gone, from one malformed line of sprite JSON.
+
+**The fallback is a degraded mode, not a free one.** It is tempting to record it as harmless ("icons render as
+they did before this stage"); that is false. Because the half-texel inset is retired there is deliberately only
+one sampling path, so a `Padding == 0` sprite is drawn edge-to-edge — and on an unpadded, abutting, full-bleed
+sheet a bilinear edge tap then reaches into the neighbouring sprite. The fallback therefore **re-introduces
+neighbour bleed**, which is worse than the pre-stage inset, not equal to it. That is the accepted price of a
+single sampling path (two is exactly how this bug class returns), but it must be recorded as a price.
+
+Cost on the real sheet: ~**+20 %** sheet area (and VRAM), once, at style load.
+
+**What the inset was, and why it went.** The first fix insetting each sprite's UV rect by half a texel kept
+bilinear's edge taps off the neighbouring sprite, but at the cost of never drawing the sprite's outer
+half-texel — so its content rendered `W/(W−1)` larger than the quad implied, and that grew as sprites shrank:
+
+| sheet rect `W` | content magnification `W/(W−1) − 1` | shrink vs shipped `1 − (W−1)/W` | cropped per side |
+|---|---|---|---|
+| 8 px (`dot`, `sample-sprite.json`) | 14.3 % | **12.5 %** | 6.3 % |
+| 22 px (`airport-11`, §5.2's example) | 4.8 % | **4.5 %** | 2.3 % |
+| 64 px | 1.6 % | 1.6 % | 0.8 % |
+
+The two percentage columns are the *same ratio read from opposite ends* and they are not interchangeable:
+`W/(W−1)` is how much too large the inset drew, `1/W` is how much smaller the fix draws relative to that. Quote
+the second one whenever the sentence is "smaller than it shipped".
+
+The border does the inset's job better (the sprites are now *physically* separated, so there is nothing to
+reach across) and the inset's magnification is retired with it. **This is user-visible: icon ink is now
+4.5–12.5 % SMALLER than it shipped** — that is the intended return to nominal, not a regression. Icon
+silhouettes are also ~1 texel × magnification device px softer at the edge; that softness *is* the
+antialiasing.
+
+**Rejected — "keep the ink at 45.714 px".** An independent review arm called the return to nominal a
+contract violation and asked for the U2 fixture's five-texel bar separation to stay at 45.714 px. It is
+rejected, and the arithmetic is recorded here so it is not re-litigated:
+
+| tree | UV span over the quad | device px per texel | 5-texel separation |
+|---|---|---|---|
+| before `ed930d95` (`9113888f`) | `W` = 8 texels over 64 px | 8.000 | **40.000 px** |
+| `ed930d95` (the half-texel inset) | `W−1` = 7 texels over 64 px | 9.143 | 45.714 px |
+| this stage | 10 padded texels over an 80 px quad | 8.000 | **40.000 px** |
+
+40.000 px is the ORIGINAL, correct scale, restored. 45.714 px is the artifact the half-texel inset introduced
+hours earlier — documented in that commit as a temporary cost — and retiring it is the point of this stage.
+Pinning 45.714 would pin a one-commit-old known-bad state as the contract.
+
+There is deliberately **one** sampling path: `Padding == 0` draws the rect edge-to-edge and is not a fallback
+branch. Do not re-add a conditional inset for it — two sampling code paths is exactly how this bug class
+returns.
 
 **Still no mip chain.** Mips on a *packed* atlas average neighbouring sprites together at every level ≥ 1 —
 a worse artifact than the minification aliasing they would fix.
 
-**Teeth** (`SymbolIconResamplingTests`): a sub-pixel **phase sweep** — the same icon rendered across one
-full device pixel of shift in eighths, asserting the ink's centroid advances every step. Nearest-neighbour's
-smallest advance is exactly `0.000` px (measured: the centroid sat on 129.000 px for three consecutive
-phases); bilinear advances ~0.125 px each. A second test renders one sprite of an adjacent pair and asserts
-no pixel carries the neighbour's hue — that one is **green under nearest-neighbour** and exists to fence the
-fix: it goes red if the inset is ever dropped.
+**`fill-pattern` shares the texture, and keeps point sampling.** `filterMode` is state on the **texture**,
+not on a sampler, and `RenderLayerSet` binds ONE shared sprite texture — as `_MainTex` for icon materials and
+`_PatternMap` for fill layers. `Fill_LitInput.hlsl` therefore samples patterns through an inline
+`sampler_PointClamp` so pattern filtering does not depend on the shared texture's `filterMode`. The repack
+does **not** retire that: the border it lays down is *transparent*, and a pattern's tiling seam must continue
+into the opposite edge's pixels rather than fade out. Patterns keep sampling point-wise inside their content
+rect and never touch the border — pinned by `FillPatternThroughSpriteSheetTests`, which is the only test that
+drives a pattern through the real `SpriteSheet` (`FillPatternSnapshotTests` builds its own `FilterMode.Point`
+texture and never touches it).
 
-**OPEN — the filter change reaches `fill-pattern` too.** `filterMode` is state on the **texture**, not on a
-sampler, and `RenderLayerSet` binds ONE shared sprite texture — as `_MainTex` for icon materials and
-`_PatternMap` for fill layers. So moving the sheet to bilinear also moved pattern sampling, which
-`Fill_LitInput.hlsl:222` had already named as a hazard ("under bilinear filtering, bleeds in whichever
-neighbouring sprite is packed next door in the sheet"). `SampleFillPattern` wraps with `frac()` **inside**
-the rect and samples it edge-to-edge, so each tiling seam now blends whatever abuts that sprite. The
-explicit-gradient sample fixes the derivative/mip discontinuity at the seam, not this.
+**Follow-on stages (not built here).**
 
-Live in the shipped style: `landcover_wetland` (`wetland_bg_11`, 15×15) and `road_area_pattern`
-(`pedestrian_polygon`, 64×64); both abut neighbours with a zero-pixel gap, so both bleed. **No test covers
-it** — `FillPatternSnapshotTests` builds its own `FilterMode.Point` texture and never touches `SpriteSheet`.
+* **P1 — wrap-replicated pattern borders.** The same `SpriteSheetPadder`/`SpriteSheetComposer` mechanism with
+  a second border-fill *role* selected per sprite (opposite-edge replication instead of transparent). Only
+  then can `Fill_LitInput.hlsl` drop `sampler_PointClamp` and take a correctly-filtered bilinear tap at a
+  tiling seam. Needs its own plan: the role is not derivable from the sprite JSON — it depends on which style
+  layers reference the sprite as `fill-pattern`.
+* **P2 — minified icons.** `label_village` / `label_town` / `label_city` dots run at `icon-size` 0.2–0.5, i.e.
+  magnification 0.30–0.75. The ramp's on-screen width is `1 texel × magnification` device px, so below 1× the
+  whole ramp is sub-pixel and padding cannot fix it. That needs mips-with-per-sprite-guard-bands or a
+  downsampled sprite variant.
 
-Containment is one line: sample the pattern through an explicit point sampler state so pattern filtering
-stops depending on the texture's `filterMode`. The padded-repack stage supersedes it — see below.
+**Teeth.** `SymbolIconResamplingTests` carries three, all sweeping magnification (a tooth pinned at one
+magnification is weak, because the whole defect family is "which magnification you happen to be at"):
 
-**Where the repack goes.** Give every sprite a one-texel border at decode time, with content chosen by role:
-**transparent** (alpha 0, RGB replicated from the edge, so the ramp interpolates colour→same colour and
-alpha 1→0) for icons, so the silhouette has a texel to ramp into; **wrap-replicated** (the opposite edge)
-for patterns, so a bilinear tap at a tiling seam blends the pixels the tile actually continues into. One
-mechanism, two border fills. It also retires the half-texel inset and its 4.8–14% content magnification.
+* **interior** — a one-texel stripe swept across one full device pixel in eighths; the ink centroid must
+  advance every step. Nearest-neighbour's smallest advance is exactly `0.000` px; bilinear advances ~0.11–0.14.
+  Swept at 1.37 / 2.5 / 3.25 — all non-integer, because at an integer magnification the defect does not exist.
+* **silhouette** — the same sweep over a **full-bleed** sprite (uniform opaque ink touching all four rect
+  edges, abutting an opaque neighbour). Swept at 1.0 / 1.37 / 2.5 / 4.0, **including 1.0**, where the interior
+  tooth is vacuous and this one is sharpest. Measured RED against the un-fixed tree: the centroid sat on
+  `127.5000` px for four consecutive phases, then jumped `+1.0000`, at every magnification.
+* **nominal ink size** — an 8×8 sprite carrying two one-texel bars five texels apart, rendered at
+  magnification 8; the distance between the bars' ink centroids must read `5 × 8 == 40.0` device px.
+  A bar's rendered profile is symmetric about its centre and a monotone transfer curve maps a symmetric
+  profile to a symmetric one, so the separation is independent of whether the framebuffer is gamma-encoded —
+  which a coverage-threshold width would not be. Measured RED: `45.714` px, exactly `40 × 8/7`, the inset's
+  magnification.
 
-**Why this shipped.** Every pre-existing icon test renders ONE static frame, and no static frame can see a
-defect whose whole signature is "the render changes when it should not". The trap compounds: at exactly 1×
-magnification nearest-neighbour is a pixel-perfect blit, so the defect is invisible at the one setting an
-eyeball would check first.
+Plus: the neighbour-bleed guard (green before and after, now green for a better reason — the sprites are
+physically separated); `IconSkirtCarrierChainTests` — the **carrier chain**, from a genuinely padded
+`SpriteAtlasView` through real extraction and `StyledSymbolTileBuilder` to the point label's `Layout.Bounds*`
+and the along-line label's `CurvedGlyph.CellSkirt`. It is its own tooth because every other skirt test calls
+the two ends directly (`ToLayoutResult(quad, SkirtPx(…))`, `BuildRotatedGlyph(…, skirt: 3f)`) and so stays
+green against an implementation that never computes the skirt during extraction or emits `CellSkirt = 0`; the
+render snapshots cannot see it either, since they draw the padded quad, which a lost skirt does not change.
+`SpriteSheetPadderTests` (separation ≥ 2 texels between any two content rects, plan
+determinism across dictionary insertion order, alias preservation, field preservation, degenerate
+pass-through, an **overflowing** `x: 2147483647` rect that must pass through unpadded *and* leave composition
+runnable, the cannot-fit fallback); `SpriteSheetComposerTests` (content copied byte-for-byte, border
+alpha 0 on all eight bands, **no dark fringe** — a plain `Array.Clear` border fails it — corner replication,
+and everything outside a cell left transparent); `SpriteSheetTests` (the border is real in the bound texture
+and replicates the adjacent content RGB); and `IconQuadLayoutTests` (the content box is unchanged for all
+nine anchors × three icon-sizes × three sprites, the UV rect covers the padded cell, and the
+texels-per-drawn-pixel identity).
+
+**Why this shipped.** Every pre-existing icon test rendered ONE static frame, and no static frame can see a
+defect whose whole signature is "the render changes when it should not". The trap compounds twice over: at
+exactly 1× magnification nearest-neighbour is a pixel-perfect blit, so the *interior* defect is invisible at
+the one setting an eyeball would check first — and 1× is precisely where the *silhouette* defect is worst.
 
 ## 5.3 Architecture — where each piece lives (mirrors the text path)
 
@@ -852,6 +981,7 @@ globe eyeball). Each stage: plan → develop → review → headless gate (Edito
 | **I5a** ✅ | Data-path plumbing (Core+Unity, **§5.4-B**): `LabelInstance.Kind` + `AtlasKind` on `PointStageInput`/`CandidateEmit` (carried but NOT consumed ⇒ inert); `StyledSymbolTileBuilder` shapes an icon `LabelInstance` (skip glyph shaping, `IconQuad`→`Layout`, `TextSizePx=OneEm` ⇒ scale 1). Fully **headless-verified**. | Icon label stages as a 1-box point candidate at scale 1 (box = quad + padding, no double-scale); its `PlacedQuad` carries the sprite UVs; text path byte-identical; Burst-vs-managed parity green. |
 | **I5b** ✅ | Render (Unity): `SymbolIcon.shader` (RGBA, template + 3 deltas — straight sample, no SDF/halo, no UV re-flip) + `MapSymbolIcon.mat`; per-`(slot,AtlasKind)` draw partition binding the **sprite** texture for the icon bucket; `SymbolRenderLayer` icon material/presenter; `SymbolLabelSubsystem` loads the `SpriteSheet` at `SetStyle` + threads the real `SpriteAtlasView` (the null→real flip). Compile-green + snapshots; **on-screen render EYEBALL-OWED**. | Shader compiles; the icon bucket binds the SPRITE texture + icon material (`SymbolIconWiring` tooth); text snapshots byte-identical (icons off ⇒ no change). **Icon identity fenced to I6** (icons carry null `Text` ⇒ co-located distinct icons share fade/dedup). |
 | **I6 code** ✅ | Icon identity: `SymbolLabel`/`LabelInstance` carry `IconImage` (the sprite name); folded into `CrossTileLabelKey` (⇒ `PointFadeId`) so co-located distinct icons dedup/fade as two while the same icon across a zoom swap stays one. Guarded-skip fold ⇒ text keys/fades/snapshots byte-identical. | Two distinct co-located icons → distinct keys/FadeIds (RED pre-fix); same icon parent+child → one identity; text parity byte-identical. |
+| **Padded repack** (§5.2.1) | `SpriteSheet` repacks the decoded sheet so every sprite carries a one-texel transparent border (`SpriteSheetPadder` plans the rects, `SpriteSheetComposer` writes the pixels); `IconQuadLayout` draws that border and retires the half-texel UV inset; the skirt is removed again for collision (`ToLayoutResult(quad, skirtPx)`, `CurvedGlyph.CellSkirt`). **Icon ink returns to nominal — 4.5–12.5 % smaller than it shipped — and edges are ~1 texel softer: EYEBALL-OWED.** | Silhouette phase sweep over a FULL-BLEED sprite at magnification 1.0/1.37/2.5/4.0 (RED: centroid frozen at 127.500 for four phases, then +1.000); nominal-ink size via two bar centroids (RED: 45.714 px vs 40.000 nominal, i.e. exactly ×8/7); packer separation/determinism/alias/degenerate/**overflowing rect**/fallback; composer byte-identical content + alpha-0 + RGB-replicated border; the content box unchanged for all nine anchors; the texels-per-drawn-pixel identity; the skirt's carrier chain driven through real extraction → builder → collision box; a pattern driven through the real `SpriteSheet` samples neither the neighbour nor the border. |
 | **I6 eyeball** (maintainer) | The icon material is pre-wired into `Assets/Settings/Map/MapMaterialSet.asset`; liberty already carries the `sprite` URL — press Play and verify. | On-screen: icons draw at POI anchors, correct sprite/size/opacity, upright (not double-flipped), interleaved with text/fills; a real `sprite`-URL style lights up POI markers; icon-vs-text z-order. |
 **Invariant across I1–I5:** *text-only styles are byte-identical* — an icon change never perturbs the existing
 text snapshots (the icon path is inert when no `icon-image` resolves). I1–I3 RED-verify their regression teeth;
@@ -869,7 +999,10 @@ URL — press Play).
 Core: `Style/Symbol/PropertyNames`, `Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`,
 `Style/Symbol/SymbolFeatureExtractor` (the `isLine`/point branches — icons ride point), `Style/Symbol/SymbolLabel`
 (icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad), `Text/TextQuadLayout` (prior art for
-the new `IconQuadLayout`), a new `Text/Sprites/SpriteIndex`+`SpriteEntry`. Unity: `Text/GlyphManager`/
+the new `IconQuadLayout`), a new `Text/Sprites/SpriteIndex`+`SpriteEntry`. The padded repack (§5.2.1) adds
+`Text/Sprites/{SpriteBlit,SpritePadPlan,ShelfRectPacker,SpriteSheetPadder,SpriteSheetComposer}` — rect
+planning and RGBA32 pixel composition, both engine-free, so the load-bearing border rule is checked
+byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. Unity: `Text/GlyphManager`/
 `GlyphAtlasTexture` (prior art for the sprite `Texture2D`), `Rendering/Source/GlyphSourceFactory`+
 `UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolLabelBatchBuilder`,
 `Text/Placement/LabelPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`

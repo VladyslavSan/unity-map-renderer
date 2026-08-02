@@ -243,7 +243,7 @@ namespace MapRenderer.Tests.Text.Placement
             // that the 45° case is non-degenerate.
             LabelBox actual = p.Boxes[0];
             var expected = LabelBox.BuildRotatedGlyph(p.Quads[0].AnchorScreenPx, iconCell,
-                s.TextSizePx, p.Quads[0].RotationRadians, s.PaddingPx);
+                s.TextSizePx, p.Quads[0].RotationRadians, s.PaddingPx, glyphs[0].CellSkirt);
             Assert.AreEqual(expected.Min.x, actual.Min.x, Tol, "box Min.x");
             Assert.AreEqual(expected.Min.y, actual.Min.y, Tol, "box Min.y");
             Assert.AreEqual(expected.Max.x, actual.Max.x, Tol, "box Max.x");
@@ -300,6 +300,89 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(expectedDelta.y, p.Emit[0].TranslateDeltaPx.y, Tol, "world emit must carry text-translate.y");
             Assert.That(math.abs(p.Emit[0].TranslateDeltaPx.x) > Tol || math.abs(p.Emit[0].TranslateDeltaPx.y) > Tol,
                 "delta must be nonzero for a nonzero translate (guards the defaulted-to-zero bug)");
+        }
+
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+        // C13 — the curved collision box bounds the icon's INK, not its transparent border.
+        //
+        // An along-line icon's cell now carries CurvedGlyph.CellSkirt: the border SpriteSheet's padded
+        // repack laid around the sprite, which the cell DRAWS (that is what antialiases the silhouette) but
+        // which is not ink. Collision must run on the ink, or every along-line icon's footprint silently
+        // grows and changes which labels win.
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+        [TestCase(0f)]
+        [TestCase(30f)]
+        [TestCase(45f)]
+        [TestCase(90f)]
+        [TestCase(137f)]
+        public void BuildRotatedGlyph_WithACellSkirt_EqualsTheSameCellPreShrunkByIt(float rotationDeg)
+        {
+            const float skirt = 3f;
+            var anchor = new float2(120f, 75f);
+            float rotation = math.radians(rotationDeg);
+
+            var padded = new SymbolQuad
+            {
+                TopLeft = new float2(-20f, 9f), BottomRight = new float2(20f, -9f), LineIndex = 0,
+            };
+            var content = new SymbolQuad
+            {
+                TopLeft = padded.TopLeft + new float2(skirt, -skirt),
+                BottomRight = padded.BottomRight - new float2(skirt, -skirt),
+                LineIndex = 0,
+            };
+
+            LabelBox withSkirt = LabelBox.BuildRotatedGlyph(anchor, padded, 32f, rotation, 4f, skirt);
+            LabelBox preShrunk = LabelBox.BuildRotatedGlyph(anchor, content, 32f, rotation, 4f, 0f);
+
+            Assert.AreEqual(preShrunk.Min.x, withSkirt.Min.x, Tol, "Min.x");
+            Assert.AreEqual(preShrunk.Min.y, withSkirt.Min.y, Tol, "Min.y");
+            Assert.AreEqual(preShrunk.Max.x, withSkirt.Max.x, Tol, "Max.x");
+            Assert.AreEqual(preShrunk.Max.y, withSkirt.Max.y, Tol, "Max.y");
+
+            // Non-vacuity: the skirt must actually be REMOVED, not merely accepted. Against the same padded
+            // cell with skirt 0 the box has to be strictly larger.
+            LabelBox unshrunk = LabelBox.BuildRotatedGlyph(anchor, padded, 32f, rotation, 4f, 0f);
+            Assert.Greater(unshrunk.Max.x - unshrunk.Min.x, (withSkirt.Max.x - withSkirt.Min.x) + Tol,
+                "a non-zero cell skirt must SHRINK the box — otherwise this tooth proves nothing");
+        }
+
+        /// <summary>Text parity: a text glyph carries <c>CellSkirt == 0</c>, and at 0 the box must be the
+        /// plain AABB of the four rotated cell corners plus padding — the pre-skirt formula, independently
+        /// recomputed here rather than restated from the implementation.</summary>
+        [TestCase(0f)]
+        [TestCase(45f)]
+        [TestCase(200f)]
+        public void BuildRotatedGlyph_AtZeroSkirt_IsThePlainRotatedCornerAabb(float rotationDeg)
+        {
+            var anchor = new float2(-40f, 12f);
+            float rotation = math.radians(rotationDeg);
+            const float textSizePx = 48f, paddingPx = 2.5f;
+            var cell = new SymbolQuad
+            {
+                TopLeft = new float2(-7f, 11f), BottomRight = new float2(5f, -3f), LineIndex = 0,
+            };
+
+            LabelBox actual = LabelBox.BuildRotatedGlyph(anchor, cell, textSizePx, rotation, paddingPx, 0f);
+
+            float scale = textSizePx / TextQuadLayout.OneEm;
+            math.sincos(rotation, out float sin, out float cos);
+            float2 Rotate(float2 v) => new float2(cos * v.x - sin * v.y, sin * v.x + cos * v.y);
+            var corners = new[]
+            {
+                anchor + Rotate(cell.TopLeft * scale),
+                anchor + Rotate(new float2(cell.BottomRight.x, cell.TopLeft.y) * scale),
+                anchor + Rotate(cell.BottomRight * scale),
+                anchor + Rotate(new float2(cell.TopLeft.x, cell.BottomRight.y) * scale),
+            };
+            float2 min = corners[0], max = corners[0];
+            foreach (float2 c in corners) { min = math.min(min, c); max = math.max(max, c); }
+
+            Assert.AreEqual(min.x - paddingPx, actual.Min.x, Tol, "Min.x");
+            Assert.AreEqual(min.y - paddingPx, actual.Min.y, Tol, "Min.y");
+            Assert.AreEqual(max.x + paddingPx, actual.Max.x, Tol, "Max.x");
+            Assert.AreEqual(max.y + paddingPx, actual.Max.y, Tol, "Max.y");
         }
     }
 }

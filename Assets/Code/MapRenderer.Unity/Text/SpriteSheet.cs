@@ -29,9 +29,21 @@ namespace MapRenderer.Unity.Text
     /// it decodes a PNG's top row to <c>GetPixel</c> row <c>height-1</c> (Unity's bottom-left-origin
     /// <c>GetPixel</c> convention). To make this sheet obey the SAME contract as the glyph atlas — so the
     /// icon-quad-layout / SDF-glyph shader path (I5) can bind either texture unchanged — this constructor
-    /// flips the decoded image's rows vertically once, so the sprite JSON's top-left-origin
-    /// <c>(x,y)</c> rect also equals <c>GetPixel(x,y)</c> here. This renders icons UPRIGHT (matching text on
-    /// screen), pinned end-to-end by <c>SymbolIconRenderSnapshotTests</c>.
+    /// reads the decode into a top-left-origin buffer and writes the repacked result back row-reversed, so
+    /// the sprite JSON's top-left-origin <c>(x,y)</c> rect also equals <c>GetPixel(x,y)</c> here. This
+    /// renders icons UPRIGHT (matching text on screen), pinned end-to-end by
+    /// <c>SymbolIconRenderSnapshotTests</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Padded repack:</b> the decoded sheet is never bound as-is. Published sheets are full-bleed and
+    /// abutting (228 of 264 sprites in the shipped style's sheet have ink on the rect edge), so a sprite's
+    /// silhouette IS the drawn quad's polygon edge — and with MSAA off that edge gets one binary coverage
+    /// sample per pixel and flips whole pixels in and out as the quad slides sub-pixel. This constructor
+    /// therefore repacks every sprite into its own cell with a one-texel transparent border
+    /// (<c>SpriteSheetPadder</c> plans the rects, <c>SpriteSheetComposer</c> writes the pixels) and hands the
+    /// derived index on, so the silhouette becomes a texture ALPHA edge that bilinear filtering ramps across.
+    /// The sheet grows ~20 %, once, at style load.
     /// </para>
     ///
     /// Main-thread-only (like every <c>Texture2D</c> mutation) — must be constructed and disposed from the
@@ -40,10 +52,15 @@ namespace MapRenderer.Unity.Text
     /// </summary>
     public sealed class SpriteSheet : VerifiedDisposable
     {
+        /// <summary>Texels of transparent border manufactured around every sprite by the repack.</summary>
+        private const int BorderTexels = 1;
+
+        private const int BytesPerTexel = 4;
+
         private Texture2D _texture;
         private readonly SpriteIndex _index;
 
-        /// <summary>The decoded, row-flipped sheet texture.</summary>
+        /// <summary>The decoded, row-flipped, padded-repacked sheet texture.</summary>
         public Texture2D Texture => _texture;
 
         /// <summary>The read-only <see cref="SpriteAtlasView"/> icon-quad-layout consumers bind against.</summary>
@@ -56,54 +73,109 @@ namespace MapRenderer.Unity.Text
         public SpriteSheet(byte[] pngBytes, SpriteIndex index)
         {
             if (pngBytes == null) throw new ArgumentNullException(nameof(pngBytes));
-            _index = index ?? throw new ArgumentNullException(nameof(index));
+            if (index == null) throw new ArgumentNullException(nameof(index));
 
-            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
-            tex.LoadImage(pngBytes);
+            var decoded = new Texture2D(2, 2, TextureFormat.RGBA32, mipChain: false);
+            // Held in a local the `finally` can see: between its creation and the `_texture` assignment
+            // below, the repacked texture has NO owner, so a throw in there would strand it (the ctor's
+            // caller never gets an instance to Dispose). Nulled on success — the field owns it from that
+            // point, and DestroySafely is null-tolerant, so the two paths cannot double-destroy.
+            Texture2D repacked = null;
+            try
+            {
+                decoded.LoadImage(pngBytes);
+                var sourceSize = new int2(decoded.width, decoded.height);
 
-            FlipRowsInPlace(tex);
+                // GetPixels32 — NOT GetRawTextureData. LoadImage picks its own format from the PNG and does
+                // not have to honour the ctor's RGBA32, so the raw bytes may not be RGBA32 at all;
+                // GetPixels32 is the normalising read path.
+                byte[] source = PackTopLeftOrigin(decoded.GetPixels32(), sourceSize);
 
-            // BILINEAR, not Point. An icon's magnification is `icon-size * dpr / pixelRatio`; the sheet is
-            // always fetched @1x and dpr is Screen.dpi/160, so it is essentially never an integer — and
-            // nearest-neighbour is exact ONLY at integer magnification. Off it, each texel covers N or N+1
-            // device pixels depending on the quad's sub-pixel phase, so panning re-quantises an icon's
-            // interior every frame: the icon's pixels visibly warp. Pinned by
-            // SymbolIconResamplingTests.IconInterior_TracksSubPixelPhaseSmoothly.
-            //
-            // The paired half-texel UV inset lives in IconQuadLayout — WITHOUT it bilinear's edge taps reach
-            // into the sprite packed alongside this one. Do not change one without the other.
-            //
-            // Still no mip chain (see the ctor above): mips on a PACKED atlas average neighbouring sprites
-            // together at every level >= 1, which is a worse artifact than the minification aliasing they fix.
-            tex.filterMode = FilterMode.Bilinear;
-            tex.wrapMode = TextureWrapMode.Clamp;
+                SpritePadPlan plan = SpriteSheetPadder.Plan(index, sourceSize, BorderTexels);
+                if (plan.Padding != BorderTexels && index.Count > 0)
+                    Debug.LogWarning(
+                        $"SpriteSheet: the {sourceSize.x}x{sourceSize.y} sheet could not be repacked with a " +
+                        $"{BorderTexels}-texel border; icons will render without the silhouette ramp.");
 
-            _texture = tex;
+                var composed = new byte[plan.Size.x * plan.Size.y * BytesPerTexel];
+                SpriteSheetComposer.Compose(source, sourceSize.x, sourceSize.y, plan, composed);
+
+                repacked = new Texture2D(plan.Size.x, plan.Size.y, TextureFormat.RGBA32, mipChain: false);
+                repacked.SetPixels32(UnpackToUnityPixels(composed, plan.Size));
+                repacked.Apply(updateMipmaps: false);
+
+                // BILINEAR, not Point. An icon's magnification is `icon-size * dpr / pixelRatio`; the sheet is
+                // always fetched @1x and dpr is Screen.dpi/160, so it is essentially never an integer — and
+                // nearest-neighbour is exact ONLY at integer magnification. Off it, each texel covers N or N+1
+                // device pixels depending on the quad's sub-pixel phase, so panning re-quantises an icon's
+                // interior every frame: the icon's pixels visibly warp. Pinned by
+                // SymbolIconResamplingTests.IconInterior_TracksSubPixelPhaseSmoothly.
+                //
+                // What makes bilinear safe here is the ONE-TEXEL TRANSPARENT BORDER the repack above laid
+                // around every sprite — an edge tap now reaches into that border rather than into the sprite
+                // packed next door, and the border is simultaneously what turns the silhouette into an alpha
+                // edge the filter can antialias (SymbolIconResamplingTests' bleed and silhouette teeth).
+                // There is no UV inset any more: IconQuadLayout draws the padded rect edge-to-edge and grows
+                // the quad by the border, so the icon's ink keeps its nominal size.
+                //
+                // Still no mip chain (see the ctor above): mips on a PACKED atlas average neighbouring sprites
+                // together at every level >= 1, which is a worse artifact than the minification aliasing they fix.
+                repacked.filterMode = FilterMode.Bilinear;
+                repacked.wrapMode = TextureWrapMode.Clamp;
+
+                _texture = repacked;
+                repacked = null; // ownership transferred — see the local's declaration above
+                _index = plan.Index;
+            }
+            finally
+            {
+                decoded.DestroySafely();
+                repacked.DestroySafely(); // non-null only on the throw path
+            }
         }
 
         /// <summary>
-        /// Swaps row <c>y</c> with row <c>height-1-y</c> in place, undoing <c>LoadImage</c>'s
-        /// bottom-left-origin decode so the sheet's <c>GetPixel</c> convention matches the glyph atlas's
-        /// (see the class doc's orientation contract). Kept readable (headless <c>GetPixels32</c>/
-        /// <c>SetPixels32</c>) — this runs once per sheet, not per frame. On-screen correctness (icons render
-        /// upright, matching text) is pinned end-to-end by <c>SymbolIconRenderSnapshotTests</c>.
+        /// Reads Unity's bottom-left-origin <c>GetPixels32</c> buffer into a top-left-origin, row-major
+        /// RGBA32 byte buffer — the sprite-JSON space <c>SpriteSheetComposer</c> works in. This row reversal
+        /// IS the flip the orientation contract calls for: sprite-JSON top-left <c>(x,y)</c> ==
+        /// <c>GetPixel(x,y)</c>, the same convention <see cref="GlyphAtlasTexture"/> establishes.
         /// </summary>
-        private static void FlipRowsInPlace(Texture2D tex)
+        private static byte[] PackTopLeftOrigin(Color32[] pixels, int2 size)
         {
-            int width = tex.width;
-            int height = tex.height;
-            Color32[] pixels = tex.GetPixels32();
-            var flipped = new Color32[pixels.Length];
-
-            for (int y = 0; y < height; y++)
+            var bytes = new byte[size.x * size.y * BytesPerTexel];
+            for (int row = 0; row < size.y; row++)
             {
-                int srcRowStart = y * width;
-                int dstRowStart = (height - 1 - y) * width;
-                Array.Copy(pixels, srcRowStart, flipped, dstRowStart, width);
+                int sourceRowStart = (size.y - 1 - row) * size.x;
+                int destination = row * size.x * BytesPerTexel;
+                for (int column = 0; column < size.x; column++, destination += BytesPerTexel)
+                {
+                    Color32 pixel = pixels[sourceRowStart + column];
+                    bytes[destination] = pixel.r;
+                    bytes[destination + 1] = pixel.g;
+                    bytes[destination + 2] = pixel.b;
+                    bytes[destination + 3] = pixel.a;
+                }
             }
+            return bytes;
+        }
 
-            tex.SetPixels32(flipped);
-            tex.Apply(updateMipmaps: false);
+        /// <summary>
+        /// Writes a top-left-origin RGBA32 buffer into the <c>Color32[]</c> <c>SetPixels32</c> expects.
+        /// Deliberately NOT a row reversal: <c>SetPixels32</c> indexes <c>[y * width + x]</c> with <c>y</c>
+        /// being the <c>GetPixel</c> y, so a straight row-order copy is exactly what makes
+        /// <c>GetPixel(x,y)</c> read the top-left-origin <c>(x,y)</c> — the orientation contract. The single
+        /// flip of the whole path lives in <see cref="PackTopLeftOrigin"/>, which is where
+        /// <c>LoadImage</c>'s upside-down decode is undone; reversing here as well would flip the sheet back.
+        /// </summary>
+        private static Color32[] UnpackToUnityPixels(byte[] bytes, int2 size)
+        {
+            var pixels = new Color32[size.x * size.y];
+            for (int i = 0, source = 0; i < pixels.Length; i++, source += BytesPerTexel)
+            {
+                pixels[i] = new Color32(
+                    bytes[source], bytes[source + 1], bytes[source + 2], bytes[source + 3]);
+            }
+            return pixels;
         }
 
         protected override void DoDispose()
