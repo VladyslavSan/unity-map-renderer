@@ -8,6 +8,9 @@ using UnityEngine.Rendering;
 using MapRenderer.Core.Geometry;
 using Unity.Mathematics;
 using System.Collections.Generic;
+// Alias, not a plain `using`: the namespace segment `Rendering` would otherwise collide with a bare
+// UnityEngine type in lookup — the CS0118 trap this repo's conventions name.
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -70,6 +73,15 @@ namespace MapRenderer.Tests.Visual
             camera.clearFlags         = CameraClearFlags.SolidColor;
             camera.backgroundColor    = BgColor;
             camera.enabled            = false;
+
+            // The frame constant the line shader converts a PIXEL width with. Production pushes it from
+            // MapCamera.SyncToCamera, measured off that camera; this fixture hand-builds a UnityEngine.Camera
+            // with no MapCamera, so it must push the equivalent for ITS camera — MetersPerPx, already derived
+            // from OrthoSz and SnapH above, and exactly what 2*d*tan(fov/2)/H degenerates to under ortho.
+            // Any NEW fixture that hand-builds a camera has to do this too: a 0 here does not blank the
+            // frame, it renders every styled width as the same 1 px hairline, which looks plausible.
+            Shader.SetGlobalFloat(
+                ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel, MetersPerPx);
             return (go, camera);
         }
 

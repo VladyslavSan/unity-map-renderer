@@ -6,6 +6,9 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
+// Alias, not a plain `using`: the namespace segment `Rendering` would otherwise collide with a bare
+// UnityEngine type in lookup — the CS0118 trap this repo names in its conventions.
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -75,6 +78,16 @@ namespace MapRenderer.Tests.Visual
             camera.clearFlags         = CameraClearFlags.SolidColor;
             camera.backgroundColor    = BgColor;
             camera.enabled            = false;
+
+            // The frame constant the line shader converts a PIXEL width with. Production pushes it from
+            // MapCamera.SyncToCamera, measured off that camera; this fixture hand-builds a UnityEngine.Camera
+            // with no MapCamera, so it must push the equivalent for ITS camera — exactly MetresPerPx, already
+            // derived from OrthoSize and the snapshot height above, and what 2*d*tan(fov/2)/H degenerates to
+            // under ortho. Any NEW fixture that hand-builds a camera has to do this too, and the failure is
+            // QUIET: a 0 here renders every styled width as the same 1 px hairline (measured), not a blank
+            // frame. PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset pins that fallback.
+            Shader.SetGlobalFloat(
+                ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel, MetresPerPx);
             return (go, camera);
         }
 
@@ -2089,10 +2102,93 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
+        // ─── T7 (S116) — the missing-push fail-safe ─────────────────────────────────────────────
+
+        /// <summary>
+        /// <b>T7.</b> With <c>_MapFrameMetersPerDevicePixel</c> UNSET (0), a pixel-width band must still
+        /// render, with a plateau clearly distinct from the background.
+        ///
+        /// <para><b>Why the guard exists, and what it is not.</b> A shader global is PROCESS state; there is
+        /// no "unset" for one, so a render path that forgets the push reads 0. Multiplying the styled width by
+        /// 0 gives zero world width, and — MEASURED by removing the guard, not assumed — every road of every
+        /// styled width then collapses to the same <b>1 device-px hairline</b>: the AA pad is still extruded,
+        /// so the frame is not empty, it is plausible and wrong. That is the worst kind of diagnostic, and it
+        /// is how S116's own investigation ended up in the projection subsystem. The dash divisor's separate
+        /// fail-safe (0 ⇒ <c>dashU = 0</c> ⇒ a uniform half-coverage line) is deliberately left as it is:
+        /// visible, never corrupt.</para>
+        ///
+        /// <para>The fallback is <c>MapPixelsToWorld</c> at the vertex — chosen ONLY because it renders a
+        /// plausibly-sized line, not because it is the width model. It is the model this epic reverted, and
+        /// it is unreachable in production and in any fixture that builds a <c>MapCamera</c>. Under THIS
+        /// camera it happens to be exact (an orthographic projection has no depth term, so the per-vertex
+        /// probe returns <see cref="MetresPerPx"/> at every vertex), which is why the width clause below can
+        /// be tight — that is a property of the fixture, not an endorsement.</para>
+        ///
+        /// <para>RED-verified by removing the guard: the band renders <b>1.000 px</b> against 16, so the WIDTH
+        /// clause is the one that fires and the plateau clause still passes. Both clauses are load-bearing —
+        /// do not drop the width one as belt-and-braces.</para>
+        /// </summary>
+        [Test]
+        public void PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset()
+        {
+            const float StyledPx = 16f;
+
+            var (cameraGo, camera) = BuildCamera();
+            var (go, mat) = BuildHorizontalLine(StyledPx, widthIsPixels: true,
+                                                color: new Color(0.95f, 0.60f, 0.15f, 1f));
+
+            // AFTER BuildCamera, which pushes it — this is precisely the state a render path that forgot the
+            // push leaves behind, reproduced rather than simulated.
+            Shader.SetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel, 0f);
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            try
+            {
+                snap.Render(camera);
+                EnsureGpuContext(snap);
+                snap.WritePng("line-aa-t7-frame-constant-unset.png");
+
+                byte[] pixels     = snap.RawPixels;
+                float3 background = BackgroundLinear(pixels);
+
+                int rowFrom = (int)CentreRowF - 24;
+                int rowTo   = (int)CentreRowF + 24;
+                float3 plateau = PlateauOnColumn(pixels, CutColumn, rowFrom, rowTo, background);
+
+                float[] profile = CoverageProfileOnColumn(
+                    pixels, CutColumn, rowFrom, rowTo, background, plateau);
+                float measured = CoverageIntegral(profile);
+                TestContext.WriteLine(
+                    $"T7 unset frame constant: plateau {plateau} vs background {background}; " +
+                    $"apparent width {measured:F3} px (styled {StyledPx})");
+
+                Assert.That(math.distance(plateau, background), Is.GreaterThan(0.02f),
+                    "THE FAIL-SAFE: with the frame constant unset the band did not render at all. A missing " +
+                    "push must degrade to a plausibly-sized line, never to an empty frame — an absent layer " +
+                    "reads as a geometry bug and sends the investigation to the wrong subsystem. Profile: " +
+                    FormatProfile(profile, rowFrom));
+
+                Assert.That(measured, Is.EqualTo(StyledPx).Within(1.0f),
+                    $"the fallback rendered {measured:F3} px for a {StyledPx} px styled width. Under this " +
+                    "ORTHOGRAPHIC camera the per-vertex probe is depth-free and returns MetresPerPx exactly, " +
+                    "so the fallback is bit-exact here; a different reading means it is not taking the " +
+                    "branch. Profile: " + FormatProfile(profile, rowFrom));
+            }
+            finally
+            {
+                // Restore the value BuildCamera pushes. Leaving 0 would hand the next fixture in the process
+                // the very state this arm exists to describe.
+                Shader.SetGlobalFloat(
+                    ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel, MetresPerPx);
+                Object.DestroyImmediate(cameraGo);
+                DestroyFixture(go, mat);
+            }
+        }
+
         // ─── A7.3 — is interpolating `hairlineScale` sound? ─────────────────────────────────────
 
         /// <summary>A PERSPECTIVE camera tilted toward the horizon, so a line running away from it spans a
-        /// wide range of depths and `pxToWorld` varies strongly along its length.</summary>
+        /// wide range of depths and the rendered width of a fixed world width varies strongly along it.</summary>
         private static (GameObject go, Camera camera) BuildTiltedCamera()
         {
             var go     = new GameObject("LineAaTiltCamera");
@@ -2106,31 +2202,50 @@ namespace MapRenderer.Tests.Visual
             camera.clearFlags         = CameraClearFlags.SolidColor;
             camera.backgroundColor    = BgColor;
             camera.enabled            = false;
+
+            // This camera's OWN frame constant, and not BuildCamera's: the global is PROCESS state, so
+            // without this push a tilted perspective render runs against whatever the last orthographic
+            // fixture left behind (0.2734375 m/px, ~1.55x wrong here). Derived from the camera exactly as
+            // MapCamera.MetresPerDevicePixel is — 2·d·tan(fov/2)/H at the look-at, where the look-at is where
+            // the view axis meets the ground plane. Never a hand-written literal: a literal would stop
+            // tracking the pose above the moment anyone nudges it.
+            float distanceToLookAt = -camera.transform.position.y / camera.transform.forward.y;
+            Shader.SetGlobalFloat(
+                ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
+                2f * distanceToLookAt * math.tan(math.radians(camera.fieldOfView * 0.5f)) / SnapH);
             return (go, camera);
         }
 
         /// <summary>
-        /// <b>A7.3.</b> <c>hairlineScale</c> is a per-vertex scalar carried on a varying, so the reviewer
-        /// asked what perspective-correct interpolation does to it mid-segment.
+        /// <b>A7.3 (rewritten, S116).</b> <c>hairlineScale</c> is a per-vertex scalar carried on a varying, so
+        /// the reviewer asked what perspective-correct interpolation does to it mid-segment. The QUESTION is
+        /// live; the PREMISE this arm used to assert is gone.
         ///
-        /// <para><b>For a pixel-width line — every production layer — it is exactly constant, so there is
-        /// nothing to interpolate.</b> Algebraically: <c>aaPadWorld = 0.5·pxToWorld</c> ⇒
-        /// <c>minWidthWorld = 2·pxToWorld</c>, and <c>widthWorld = W·ws·pxToWorld</c>, so
-        /// <c>hairlineScale = saturate(W·ws / max(W·ws, 2))</c> — <c>pxToWorld</c> cancels completely. It
-        /// cannot vary with depth, tilt or latitude, the clamp engages for a whole feature or not at all, and
-        /// <c>noperspective</c> would make no difference.</para>
+        /// <para><b>What changed.</b> The old arm asserted the scalar is exactly CONSTANT along a pixel-width
+        /// line, on the algebra <c>aaPadWorld = 0.5·pxToWorld</c> ⇒ <c>minWidthWorld = 2·pxToWorld</c> and
+        /// <c>widthWorld = W·ws·pxToWorld</c>, so <c>pxToWorld</c> cancelled out of
+        /// <c>saturate(widthWorld / max(widthWorld, minWidthWorld))</c>. Under the world-width model those are
+        /// no longer the same quantity: <c>widthWorld</c> takes the frame constant while the pad — a genuine
+        /// screen quantity — keeps its per-vertex measurement. Nothing cancels, and nothing should: a
+        /// pixel-width hairline holds a fixed WORLD width, so it shrinks below the 2 device-px floor as it
+        /// recedes, the clamp engages progressively, and the compensation dims it to keep the coverage
+        /// integral honest. The old paragraph's "world-unit widths are the case that DOES vary" now describes
+        /// PIXEL widths.</para>
         ///
-        /// <para>This measures that claim rather than resting on it: a 1 px line running away from a tilted
-        /// perspective camera, where <c>pxToWorld</c> varies by a large factor end to end. If the scalar
-        /// drifted — or if interpolating a ratio were wrong mid-segment — the rendered peak would drift with
-        /// depth. It must not.</para>
+        /// <para><b>What is asserted instead</b> — the interpolation question, which is what the arm was
+        /// really for. Over a 1 px <c>_HAIRLINE_SOLID_CORE</c> line receding from a tilted perspective camera,
+        /// against a 4 px <c>a == 1</c> companion at the same depths (which cancels the lit shading exactly):
+        /// (a) it never VANISHES at any measured depth; (b) its ratio to the companion is monotonically
+        /// NON-INCREASING with depth — degradation, not drift or oscillation; (c) no row-to-row STEP exceeds a
+        /// bound, which is what "is interpolating a varying sound?" actually asks — a varying interpolated
+        /// wrongly, or a clamp engaging discontinuously, shows up as a jump; and (d) the compensation is
+        /// applied at all — a ratio near 1.0 means it is not.</para>
         ///
-        /// <para>World-unit widths are the case that DOES vary (<c>widthWorld</c> is constant in metres while
-        /// <c>minWidthWorld</c> tracks <c>pxToWorld</c>), so the clamp can engage mid-segment there. No
-        /// production layer takes that path; recorded in the design doc rather than tested.</para>
+        /// <para>Measured after the fix: 0.851 / 0.724 / 0.571 / 0.434 / 0.284 over rows 180…300, steps of
+        /// 0.127…0.153.</para>
         /// </summary>
         [Test]
-        public void HairlineScale_IsConstantAlongAPixelWidthLine_UnderTilt()
+        public void HairlineScale_DegradesSmoothlyWithDepth_UnderTilt()
         {
             var (cameraGo, camera) = BuildTiltedCamera();
             var color = new Color(0.95f, 0.60f, 0.15f, 1f);
@@ -2186,6 +2301,7 @@ namespace MapRenderer.Tests.Visual
                 // Walk up the frame. The hairline is right of centre, the wide companion left of it; they
                 // converge toward the vanishing point but never cross.
                 float lo = 2f, hi = 0f; int rowsMeasured = 0;
+                var ratios = new List<float>();
                 var report = new System.Text.StringBuilder();
                 for (int row = 150; row <= 330; row += 30)
                 {
@@ -2201,27 +2317,60 @@ namespace MapRenderer.Tests.Visual
                     float ratio = hair / wide;
                     report.Append($"[row {row}] {hair:F3}/{wide:F3}={ratio:F3}  ");
                     lo = math.min(lo, ratio); hi = math.max(hi, ratio);
+                    ratios.Add(ratio);
                     rowsMeasured++;
                 }
+
+                float maxRise = 0f, maxStep = 0f;
+                for (int i = 1; i < ratios.Count; i++)
+                {
+                    float delta = ratios[i] - ratios[i - 1];   // rows ascend ⇒ depth increases
+                    maxRise = math.max(maxRise,  delta);
+                    maxStep = math.max(maxStep, math.abs(delta));
+                }
+
                 TestContext.WriteLine(
                     $"A7.3 tilted 1 px _HAIRLINE_SOLID_CORE vs 4 px shading reference (RAW projections; " +
-                    $"plateau from row {plateauRow}): {report}(ratio spread {hi - lo:F3} over " +
-                    $"{rowsMeasured} depths)");
+                    $"plateau from row {plateauRow}): {report}({rowsMeasured} depths; ratio {hi:F3} → " +
+                    $"{lo:F3}; largest rise with depth {maxRise:F4}, largest step {maxStep:F4})");
 
-                Assert.That(rowsMeasured, Is.GreaterThanOrEqualTo(4),
+                // (a) IT MUST NOT VANISH — and every sampled depth must carry BOTH lines. The loop skips a
+                // row when either reads too faint, so this doubles as the vacuity guard: a hairline that
+                // stopped rendering at depth would silently shrink the sample rather than fail.
+                // KNIFE-EDGE, deliberately, and worth knowing before touching it: the sweep offers SEVEN
+                // candidate rows (150…330 step 30) and exactly FIVE survive the faint-row filter above —
+                // rows 150 and 330 are past the useful range at both ends, and row 300 already reads 0.739
+                // raw. So this bound has zero margin. Widening the sweep does not help (the filter, not the
+                // range, is what drops them); the honest reading of a drop to 4 is "a hairline stopped
+                // rendering at depth", which is a real regression and exactly what this clause is for.
+                Assert.That(rowsMeasured, Is.GreaterThanOrEqualTo(5),
                     $"Only {rowsMeasured} of the sampled depths carried both lines. Either the fixture no " +
                     "longer spans a useful depth range, or a hairline stopped rendering at depth — the " +
                     "second would be a real regression, so do not just widen the sweep.");
+                Assert.That(lo, Is.GreaterThan(0.10f),
+                    $"The clamped hairline falls to {lo:F3} of an a == 1 line at the same depth — it is " +
+                    "vanishing. SolidCore exists so a receding hairline keeps a solid 2 device-px core and " +
+                    $"pays for it in alpha; measured 0.284 at the deepest sampled row. {report}");
 
-                // RECORDED, NOT GATED on the spread. The residual depth drift is NOT stable between runs
-                // (0.046 in one run, 0.303 in another, same code, both smoothly monotonic rather than
-                // jittery — so it is not sub-pixel phase noise, and it is not explained). Gating on it would
-                // ship a flake. What is gated is the bound: the ratio must stay near W_true/W_min = 0.5 at
-                // every depth, which still catches the scalar being dropped, doubled or mis-signed — the
-                // failures this tooth exists for.
-                Assert.That(lo, Is.GreaterThan(0.25f),
-                    $"The clamped hairline falls to {lo:F3} of an a == 1 line at the same depth; it should " +
-                    $"sit near W_true/W_min = 0.5. {report}");
+                // (b) DEGRADATION, not drift. A fixed world width shrinks monotonically in device px with
+                // depth, so the clamp engages monotonically and the compensation follows it. A RISE would
+                // mean the scalar is tracking something other than the rendered width.
+                Assert.That(maxRise, Is.LessThan(0.02f),
+                    $"The hairline's coverage ratio RISES by {maxRise:F4} with depth. Under a constant world " +
+                    "width the rendered band can only get narrower, so hairlineScale can only fall. A rise " +
+                    $"means the scalar is not tracking the rendered width. {report}");
+
+                // (c) THE INTERPOLATION QUESTION. hairlineScale is a plain varying; if interpolating a ratio
+                // were unsound mid-segment, or the clamp engaged discontinuously, it would show as a JUMP
+                // between adjacent sampled depths rather than as a smooth ramp. Measured steps: 0.127…0.153.
+                Assert.That(maxStep, Is.LessThan(0.30f),
+                    $"hairlineScale steps by {maxStep:F4} between adjacent sampled depths, against a smooth " +
+                    "0.127…0.153 measured. A jump is what an unsound interpolation of this varying, or a " +
+                    $"discontinuous clamp, would look like. {report}");
+
+                // (d) THE COMPENSATION IS APPLIED AT ALL. Near 1.0 means the band is being clamped wider
+                // without paying for it in alpha — tooth T8's failure, a 1 px road rendered twice as
+                // prominent as the style asked for.
                 Assert.That(hi, Is.LessThan(0.95f),
                     $"The clamped hairline reaches {hi:F3} of an a == 1 line at the same depth; near 1.0 " +
                     $"means the energy compensation is not being applied. {report}");

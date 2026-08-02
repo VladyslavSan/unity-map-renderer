@@ -120,7 +120,7 @@ family — `text-size` is logical while `text-halo-width`, on the same material,
 | GPU: `off / _ScreenParamsLogical.xy` (`SymbolTextWorld_ForwardPass.hlsl:99`, `SymbolIconWorld_ForwardPass.hlsl:97`) | **logical** | ✅ |
 | GPU: `MapPixelsToWorld()` — spans against `_ScreenParams.xy` (`Line_VertexExtrude.hlsl:80-104`, char-identical copy in `Fill_VertexModify.hlsl:91-115`) | **device** | ❌ |
 | GPU: compare against an `fwidth`-derived screen scale (`SymbolTextWorld_ForwardPass.hlsl:119-128`) | **device** | ❌ |
-| GPU: `_MapFrameMetersPerDevicePixel` — the frame constant `MetersPerPixel(zoom) / dpr`, pushed by `RenderLayerSet.ApplyZoom` and read only by the line dash divisor (S110) | **device** | ✅ correct by construction — it is the only mechanism whose basis is chosen at the push site rather than inherited from a shader's screen reference |
+| GPU: `_MapFrameMetersPerDevicePixel` — the frame constant, read by the line dash divisor (S110) and, since S116, by the whole line WIDTH family | **device** | ✅ correct by construction — it is the only mechanism whose basis is chosen at the push site rather than inherited from a shader's screen reference |
 
 **Root cause, from the history.** `d5406d40` ("S104 P4 — resolve line width from the projection, delete
 `_MetersPerPixel`") removed the uniform fed by `CameraPoseMath.MetersPerPixel(zoom)`. That was metres per
@@ -155,9 +155,15 @@ is deliberately left alone.)
 metres is `(w_logical · dpr) × (mpp_logical / dpr) × Σ` — **the dpr cancels**. A Core helper written as
 `widthLogicalPx × MetersPerPixel(zoom) × Σ` is therefore *correct and mentions no ratio at all*, and would
 round-trip green at every dpr while the shader was off by exactly `dpr`. The error can only exist because
-the two halves are owned by different files: `ZoomStyleApplier` multiplies the width by dpr, and
-`RenderLayerSet.ApplyZoom` must divide the ruler by it. Only a rendered tooth at dpr ≠ 1 (S110 T2) plus a
-direct read of the pushed global (T3) can see it.
+the two halves are owned by different files: `ZoomStyleApplier` multiplies the width by dpr, and the ruler's
+push site must divide by it. Only a rendered tooth at dpr ≠ 1 (S110 T2) plus a direct read of the pushed
+global (T3) can see it.
+
+*S116 update: the push moved from `RenderLayerSet.ApplyZoom` to `MapCamera.SyncToCamera`, where the ruler is
+measured off the camera as `2·d_lookAt·tan(fov/2) / ViewportPx.y`. The `/ dpr` above is now **implicit** —
+`ViewportPx` is physical and the ratio enters exactly once, through `ViewportLogicalPx` in the altitude
+framing — so the two halves can no longer name it separately and disagree. The pinned values are unchanged;
+see `docs/line-rendering-design.md` §1.1.*
 
 **The collision grid is not a third space.** `LabelStagingMath` mixes padding with `BoundsMin/Max`,
 `TextSizePx` and a `ViewportLogicalPx`-projected anchor in one expression — the same quantities the shader

@@ -277,3 +277,48 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   nothing; opt out with `UMR_SKIP_SHADER_WARMUP=1`. (Rejected alternatives: `ShaderVariantCollection.WarmUp()`
   — canonical but needs a hand-maintained collection of every shader×keyword; the async flag — inert.
   2026-07-10.)
+
+- **The EDITOR does not reliably rebuild variants when only an included `.hlsl` changes — and batch mode does.**
+  Batch-mode tests compile from source every run, so `./Tools/run-tests.sh` can be **green on a change the
+  running Editor is not executing**. The two disagreeing is not a contradiction to explain away; it means the
+  Editor is stale. Symptom: a shader edit — even a hard `color.rgb = magenta` — has *no visible effect* in the
+  Game view. Touching the `.shader` file is **not** sufficient on its own; what worked reliably was **quit
+  Unity → delete `Library/ShaderCache` → reopen**. (2026-08-01, S114: cost most of an evening. Three
+  successive "the fix doesn't work" reports were all made against stale variants, and each one sent the
+  investigation to a different, innocent subsystem.)
+  **Method, not just the fix:** every in-scene shader diagnostic must be **self-verifying** — pair the thing
+  you are testing with an unmistakable signal that proves the build is live (a colour the previous build could
+  not produce), and never reuse a colour between revisions. Two diagnostics in a row that both rendered green
+  made "all green" unreadable. And when a maintainer reports "still happening", the FIRST move is to confirm
+  the code under test is the code running, before touching the maths again.
+
+- **A straight-road fixture cannot see a corner defect — and "my fixture disagrees with the scene" means the
+  fixture is wrong, not the scene.** S114's teeth all render one straight road, so they measured the
+  extrusion's convexity beautifully and were blind to the reported symptom, which turned out to involve
+  **miter/bisector vertices at a turn under grazing incidence**. A hard-coded constant-width override
+  (`lateralUnits = 8.0`) settled in one look what six rounds of derivation could not: the width was exactly
+  16 px, so the extrusion path was never the cause. Reach for the crudest override that removes all doubt
+  before refining a model. (2026-08-01.)
+
+- **A shader GLOBAL is PROCESS state, so a render fixture that forgets to push one reads another fixture's
+  camera.** `DevicePixelRatioSnapshotTests` built its materials through `MaterialFactory` +
+  `ZoomStyleApplier` and never through the seam that pushed `_MapFrameMetersPerDevicePixel`, so at zoom 8 it
+  rendered against `MetersPerPixel(5.0)` left behind by an earlier fixture in the same batch — a ratio of
+  exactly **8.000**, and a styled 16 px road that measured 128 px. **Read the number before theorising about
+  it:** 8.000 is 2³, three whole zoom levels, which a projection mismatch cannot produce (globe-vs-Mercator
+  at latitude 30 would have been 1.1547 — and that fixture is Mercator anyway). A clean dyadic ratio between
+  two readings of one quantity means *stale state*, not *wrong maths*. The structural fix is to push such a
+  constant from the object that owns the quantity — here `MapCamera.SyncToCamera` — so a path that builds the
+  object cannot forget it; a fixture written next month is not visible to any structural test. (2026-08-02,
+  S116.)
+
+- **Decoupling two expressions that shared a wrong number exposes the defect it was cancelling — that is the
+  fix working, not a regression to undo.** `widthWorld` and `aaPadWorld` both multiplied
+  `MapPixelsToWorld(centerWS, unitDir_WS)`. At a **round-cap pivot** `unitDir_WS` is deliberately zero, the
+  probe steps zero metres, `refPx` is 0 and the `max(refPx, 0.1)` clamp returns 51× the true scale — but
+  `hairlineScale = widthWorld / max(widthWorld, 2·(2·aaPadWorld))` is a *ratio*, so the blow-up divided out
+  exactly and nothing ever read wrong. Giving the width a frame constant left the pad holding the bad number
+  alone, and the cap's ink collapsed from 0.75 px to 0.229. The temptation is to re-couple them and go green;
+  that restores the cancellation and re-hides the bug. Fix it where it is wrong — a degenerate direction has
+  no probe, so take the function's existing behind-camera fallback, which computes exactly the direction-free
+  answer the degenerate case wants. (2026-08-02, S116.)

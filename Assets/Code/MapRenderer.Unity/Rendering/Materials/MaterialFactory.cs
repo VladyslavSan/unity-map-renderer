@@ -194,11 +194,11 @@ namespace MapRenderer.Unity.Rendering.Materials
             // The conversion stays on the CPU deliberately: MapPixelsToWorld must keep returning metres per
             // DEVICE pixel, because the AA straddle pad and the hairline floor derived from it are genuinely
             // sampling-grid quantities (half a physical pixel is half a physical pixel at any density) and
-            // must NOT scale. line-dasharray does NOT ride on that measurement (S110): dashU divides by
-            // Line_VertexExtrude.hlsl's `dashMetersPerUnit`, which pairs the device-px _Width bound here with
-            // the frame-constant _MapFrameMetersPerDevicePixel pushed by RenderLayerSet.ApplyZoom, not with
-            // the per-vertex widthWorld. Both halves carry the dpr, so it cancels and the period is
-            // dpr-invariant — which is exactly why a CPU-only round-trip cannot see a basis error here.
+            // must NOT scale. Neither the WIDTH family nor line-dasharray rides on that measurement any more
+            // (S110 for dashes, S116 for width): both pair the device-px _Width bound here with the
+            // frame-constant _MapFrameMetersPerDevicePixel, which MapCamera.SyncToCamera measures off the
+            // live camera. Both halves carry the dpr, so it cancels and the rendered result is dpr-invariant
+            // — which is exactly why a CPU-only round-trip cannot see a basis error here.
 
             // line-width (in pixels per MapLibre spec).
             // Convention (data-driven width): when Width depends on feature, the evaluated width is baked

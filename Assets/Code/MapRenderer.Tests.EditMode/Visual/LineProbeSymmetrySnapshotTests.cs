@@ -20,7 +20,8 @@
 // FIXTURE SHAPE IS LOAD-BEARING, exactly as in LineDashSnapshotTests: every arm drives the material through
 // the PRODUCTION seam — a style JSON parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr) — so
 // _Width and _LineOffset arrive in DEVICE px by the real MaterialFactory.BindDevicePixelFloat path. Setting
-// the properties on a hand-made material would test the shader while leaving the wiring unmeasured.
+// the properties on a hand-made material would test the shader while leaving the wiring unmeasured. The
+// frame constant the widths convert with comes from the real MapCamera (S116), which BuildScene constructs.
 
 #if UNITY_EDITOR
 using System;
@@ -53,6 +54,14 @@ namespace MapRenderer.Tests.Visual
 
         private const double RoadHalfLengthM = 80_000.0;
         private const double RoadStationM    =  2_000.0;
+
+        // T4's receding road. It must reach both frame edges at tilt 55: the bottom of the frame cuts the
+        // ground at z ≈ −75 km and the top at z ≈ +890 km (fov 60, so the frame's top ray is still 5° below
+        // horizontal and the horizon is off-screen — every row is ground). Stations are cosmetic under the
+        // world-width model, where widthWorld is constant and a chord of a constant IS the constant.
+        private const double RecedingRoadFromM    =  -90_000.0;
+        private const double RecedingRoadToM      = 950_000.0;
+        private const double RecedingRoadStationM =   10_000.0;
 
         private static readonly Color BgColor = new Color(0.05f, 0.05f, 0.08f, 1f);
 
@@ -252,6 +261,63 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
+        /// <summary>The T4 variant: a road running NORTH–SOUTH, i.e. away from the camera, so one render
+        /// carries a wide range of view depths on a band whose across-axis is world east — perpendicular to
+        /// the view azimuth, hence unforeshortened and vertical on screen at the centre column. Shares
+        /// <see cref="BuildScene"/> and the lighting recipe with <see cref="WithRenderedRoad"/>; only the
+        /// geometry and the centreline precondition differ.</summary>
+        private static void WithRenderedRecedingRoad(
+            double tiltDeg, double styledWidthPx, string pngName, Action<ProbeScene, byte[]> measure)
+        {
+            var saved   = SetupLitAmbient();
+            var lightGo = new GameObject("Probe_DirLight");
+            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
+            var light = lightGo.AddComponent<Light>();
+            light.type      = LightType.Directional;
+            light.intensity = 1f;
+
+            using var snap = new SnapshotRenderer(Size, Size);
+            try
+            {
+                using var scene = BuildScene(tiltDeg, styledWidthPx, lineOffsetPx: 0.0);
+
+                var pts = new List<double2>();
+                for (double z = RecedingRoadFromM; z <= RecedingRoadToM + 1e-6; z += RecedingRoadStationM)
+                    pts.Add(new double2(0.0, z));
+                Mesh mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
+                var go = new GameObject("Probe_RecedingRoad");
+                go.AddComponent<MeshFilter>().sharedMesh       = mesh;
+                go.AddComponent<MeshRenderer>().sharedMaterial = scene.Material;
+                try
+                {
+                    snap.Render(scene.UnityCamera);
+                    AssertGpuContext(snap);
+                    snap.WritePng(pngName);
+
+                    // At heading 0 a road on the world x = 0 plane projects to the vertical centre column,
+                    // so a HORIZONTAL cut is exactly perpendicular to the band and its coverage integral is
+                    // the rendered width. Asserted, not assumed.
+                    Vector3 nearSp = scene.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 0f));
+                    Vector3 farSp  = scene.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 200_000f));
+                    Assert.That(nearSp.x, Is.EqualTo(farSp.x).Within(0.05),
+                        "precondition: the receding road must project onto a single screen COLUMN, or a " +
+                        "horizontal cut is not perpendicular to it and the integral is not the width.");
+
+                    measure(scene, snap.RawPixels);
+                }
+                finally
+                {
+                    UnityEngine.Object.DestroyImmediate(go);
+                    UnityEngine.Object.DestroyImmediate(mesh);
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(lightGo);
+                RestoreAmbient(saved);
+            }
+        }
+
         // ── The measurement primitive: a per-column coverage integral on a PINNED lattice ─────────
         //
         // Sample j of RawPixels reports the shader's coverage at SCREEN-Y j + 0.5 (RawPixels is bottom-up,
@@ -287,8 +353,26 @@ namespace MapRenderer.Tests.Visual
         // anchor itself reads ≈1.000, and CoverageAt saturates, so an under-reading plateau clamps to 1
         // rather than biasing the sum.
 
-        private const int EdgeInsetPx = 4;  // anchor inside / outer sample outside, from the detected edge
+        /// <summary>Default anchor inset — inside / outer sample outside, from the detected edge.
+        ///
+        /// <para>NOT a free parameter, and NOT the same for every arm since S116. The two half-sums must not
+        /// share a row, so the band has to be thicker than <c>2·inset</c>; under the world-width model a band
+        /// running across the view azimuth renders <c>cos θ</c> thinner than its styled width, and T-S2's
+        /// offset band is now 8 rows, which 4 cannot inset. Each arm derives its own from the band it
+        /// MEASURES (<see cref="InsetForBand"/>) rather than assuming one — the alternative, widening the
+        /// disjointness assertion, would destroy the estimator's validity condition and make every number the
+        /// arm reports meaningless.</para></summary>
+        private const int EdgeInsetPx = 4;
         private const int PlateauRows = 6;  // tight, running INWARD from the anchor, the anchor included
+
+        /// <summary>The largest inset (capped at <see cref="EdgeInsetPx"/>) that still leaves the two
+        /// half-sum windows DISJOINT on a band spanning <paramref name="bottomRow"/>..<paramref name="topRow"/>:
+        /// disjointness needs <c>bottom + inset &lt; top − inset</c>, i.e. <c>2·inset &lt; top − bottom</c>.
+        /// The window's other two conditions (anchor fully covered, outer sample fully clear) are checked by
+        /// <see cref="AssertWindowIsWellFormed"/>, so an inset that comes out too small to contain the ramp
+        /// fails loudly rather than silently biasing the sum.</summary>
+        private static int InsetForBand(int bottomRow, int topRow)
+            => math.min(EdgeInsetPx, (topRow - bottomRow - 1) / 2);
 
         private const int CentreColumn = 256;
 
@@ -354,6 +438,13 @@ namespace MapRenderer.Tests.Visual
 
         private static ColumnSilhouettes MeasureColumn(
             byte[] pixels, int column, float3 background, float3 coarsePlateau)
+            => MeasureColumn(pixels, column, background, coarsePlateau, EdgeInsetPx);
+
+        /// <summary>The band's contiguous ≥0.5-coverage row run on one column. Split out of
+        /// <see cref="MeasureColumn"/> so an arm can size its anchor inset from the band it is about to
+        /// measure, with one implementation of "where the band is".</summary>
+        private static (int bottomRow, int topRow) BandRowSpan(
+            byte[] pixels, int column, float3 background, float3 coarsePlateau)
         {
             int topRow = -1, bottomRow = -1, covered = 0;
             for (int row = 0; row < Size; row++)
@@ -369,16 +460,25 @@ namespace MapRenderer.Tests.Visual
             Assert.That(covered, Is.EqualTo(topRow - bottomRow + 1),
                 $"column {column}: the ≥0.5 coverage run must be CONTIGUOUS ({covered} covered rows spanning " +
                 $"{bottomRow}..{topRow}). A gap means something other than one solid band is in frame.");
+            return (bottomRow, topRow);
+        }
 
-            int anchorFar  = topRow    - EdgeInsetPx;
-            int outerFar   = topRow    + EdgeInsetPx;
-            int anchorNear = bottomRow + EdgeInsetPx;
-            int outerNear  = bottomRow - EdgeInsetPx;
+        private static ColumnSilhouettes MeasureColumn(
+            byte[] pixels, int column, float3 background, float3 coarsePlateau, int edgeInsetPx)
+        {
+            var (bottomRow, topRow) = BandRowSpan(pixels, column, background, coarsePlateau);
+
+            int anchorFar  = topRow    - edgeInsetPx;
+            int outerFar   = topRow    + edgeInsetPx;
+            int anchorNear = bottomRow + edgeInsetPx;
+            int outerNear  = bottomRow - edgeInsetPx;
 
             // No sample may be claimed by both half-sums, or the two S's double-count and the recovered
-            // separation gains a pixel per shared row.
+            // separation gains a pixel per shared row. The inset is DERIVED from the band the arm measures
+            // (InsetForBand), so this fires only when a band is too thin for any inset at all — never
+            // because a hard-coded 4 outgrew the band.
             Assert.That(anchorNear, Is.LessThan(anchorFar),
-                $"column {column}: the two ±{EdgeInsetPx} px windows must be DISJOINT; the band spans " +
+                $"column {column}: the two ±{edgeInsetPx} px windows must be DISJOINT; the band spans " +
                 $"{bottomRow}..{topRow}, which is too thin to inset both anchors.");
 
             float3 plateauFar = PixelCoverage.PlateauOnColumn(
@@ -456,6 +556,38 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>RED at 1.019098 against a ±0.005 tolerance — a 3.8× margin — with the four step-5
         /// injections reading 1.019098 / 0.981260 / 1.038561 / 1.000000.</para>
+        ///
+        /// <para><b>THE ORIGINAL INVARIANT IS RETIRED (S116). Everything above describes what this arm USED
+        /// to catch; read it as history.</b> The styled WIDTH no longer calls <c>MapPixelsToWorld</c> at all —
+        /// both edges take the one frame constant — so <c>R == 1</c> now holds for the width BY CONSTRUCTION
+        /// and cannot fail for the reason the arm was written.</para>
+        ///
+        /// <para><b>And the survivor is weak — stated with the arithmetic, because "it still guards the AA
+        /// pad" would be over-claiming.</b> The pad is legitimately per-vertex and is still handed the two
+        /// opposite signs, so a w-ratio regression does still move R — but only through the pad, at
+        /// <c>2·e·p/(H+p)</c> with <c>p = 0.5·K/cos θ ≈ 266.5 m</c> and <c>H = 60·K ≈ 18 345 m</c>, i.e.
+        /// <b>2.7e-4</b> against this assertion's ±0.005. It is a factor of 18 UNDER the tolerance: at this
+        /// styled width the R clause <b>cannot</b> catch the mechanism, and no honest tightening reaches it
+        /// either (the measured 5.5e-5 is estimator noise, so the discriminating band is thinner than the
+        /// noise floor). Restoring amplitude needs <c>p/H</c> of order 1, i.e. a 1–2 px band — which this
+        /// half-sum estimator cannot measure, since it needs ±4 px anchor windows. The two are structurally
+        /// incompatible in one fixture.</para>
+        ///
+        /// <para><b>So what is this arm for now?</b> Two live clauses, and the R assertion demoted to a
+        /// gross-error bound:
+        /// <list type="number">
+        /// <item>the <b>framing</b> precondition, which pins the <c>cos θ</c> world-width behaviour and is
+        /// RED-verified — it reads 125.77 px against [68, 73] when a per-vertex width is injected;</item>
+        /// <item>the <b>uniformity</b> clause, a precondition that the band is uniform where it is
+        /// measured;</item>
+        /// <item>R itself, kept only as a coarse sanity bound — it would still catch a catastrophic
+        /// asymmetry (a sign flip, a dropped correction of order 1), and it costs nothing on a render this
+        /// arm performs anyway. <b>It is NOT the direction-symmetry discriminator any more.</b></item>
+        /// </list>
+        /// Direction symmetry at pad amplitude is currently pinned NOWHERE in a render —
+        /// <c>Estimator_…_TopDown</c> is a control with <c>e ≡ 0</c> by construction, so it cannot see it
+        /// either. Recorded as a gap rather than papered over; closing it needs a fixture that can resolve a
+        /// pad-sized effect, which is not this one.</para>
         /// </summary>
         [Test]
         public void RibbonEdges_AreEquidistantFromTheCentreline_UnderTilt()
@@ -479,11 +611,21 @@ namespace MapRenderer.Tests.Visual
                         $"{centre.NearScreenY:F4} (separation {centre.SeparationPx:F4} px); world z " +
                         $"{zFar:F1} / {zNear:F1} m; local scale {farMetresPerPx:F1} / {nearMetresPerPx:F1} m/px");
 
-                    Assert.That(centre.SeparationPx, Is.InRange(122.0, 129.0),
-                        $"T-S1 framing: the padded band must render {centre.SeparationPx:F2} px thick, in " +
-                        "[122, 129]. The window is wide on purpose — the rendered screen width is NOT " +
-                        "invariant under this fix (125.30 px before, 125.77 px after), because screen " +
-                        "position is rational in world offset.");
+                    // RE-DERIVED for the world-width model (S116). It used to read [122, 129] — i.e. the
+                    // styled 120 px plus the pad, the CONSTANT-DEVICE-WIDTH premise this epic deleted. A
+                    // styled px width now fixes a WORLD width at the look-at, and this road runs ACROSS the
+                    // view azimuth, so its across-axis lies in the ground plane along the tilt direction and
+                    // picks up that plane's foreshortening: 120·cos 55° + 1 = 69.83 px to first order.
+                    // Measured 70.73, ~0.9 px over, and that residual is expected rather than slack: the two
+                    // silhouettes sit at different DEPTHS (~78 km and ~200 km of view depth here), so neither
+                    // edge's own foreshortening is exactly the look-at's cos θ, and the AA pad each edge
+                    // carries is measured at its own depth too.
+                    Assert.That(centre.SeparationPx, Is.InRange(68.0, 73.0),
+                        $"T-S1 framing: the padded band renders {centre.SeparationPx:F2} px thick, expected " +
+                        "in [68, 73] (120·cos 55° + 1 = 69.83 to first order, 70.73 measured). A reading " +
+                        "near 121 would mean the band is holding a constant DEVICE width under tilt — the " +
+                        "compensation this epic reverted. If the fixture will not frame, RE-DERIVE from the " +
+                        "pose; never widen the window to reach it.");
 
                     // Only ±10 columns about the screen centre — see TiltedSweepHalfWidth for why the frame
                     // is not column-uniform under tilt. The sweep is a PRECONDITION that the band is uniform
@@ -525,8 +667,12 @@ namespace MapRenderer.Tests.Visual
                         "per-column quantisation is ~3e-4. More than that means the band is not uniform " +
                         "where it is being measured, and the derived expectation does not apply.");
 
+                    // A COARSE SANITY BOUND, not the sign-asymmetry discriminator it once was — see the
+                    // arithmetic in the summary: through the pad alone the mechanism is worth 2.7e-4 here,
+                    // 18x under this tolerance. Do not read a pass as evidence the w-ratio is intact.
                     Assert.That(ratio, Is.EqualTo(1.0).Within(0.005),
-                        $"THE SIGN ASYMMETRY: on the CENTRE COLUMN the ribbon's far (north) silhouette sits " +
+                        $"GROSS ASYMMETRY (the width path can no longer cause this — see the summary): on " +
+                        $"the CENTRE COLUMN the ribbon's far (north) silhouette sits " +
                         $"{zFar:F1} m from the centreline and its near (south) silhouette " +
                         $"{math.abs(zNear):F1} m, a ratio of {zFar / math.abs(zNear):F6}; the asserted value " +
                         $"is the MEAN over the swept columns, {ratio:F6} — do not divide the two world " +
@@ -637,17 +783,28 @@ namespace MapRenderer.Tests.Visual
         /// <c>centre = k(L + e·H)</c>, <c>half = k(H + e·L)</c>, and their ratio
         /// <c>(L + e·H)/(H + e·L)</c> is dimensionless — k cancels, so no projection number enters the
         /// expectation. The claim in words: THE RIBBON'S WORLD HALF-WIDTH MUST NOT DEPEND ON ITS OFFSET.
-        /// Today <c>e·L</c> leaks into it — 12.11 % at L = 160, and UNBOUNDED in L, because nothing bounds
+        /// <c>e·L</c> leaking into it was 12.11 % at L = 160, and UNBOUNDED in L, because nothing bounds
         /// it by the styled width — while the centre errs only <c>e·H/L</c> = 0.074 %.</para>
         ///
-        /// <para>NAME AND SCOPE, deliberately narrow: this tooth measures a WORLD-space coupling about the
-        /// original centreline. It neither claims nor delivers screen-width preservation — a 160 px offset
-        /// moves the ribbon to a depth where the scale measured at the unshifted centerWS is no longer
-        /// local, so this 24 device-px band renders 12.21 px today and 10.89 px after the fix. Whether
-        /// line-offset should re-measure at the SHIFTED position is a spec question about what line-offset
-        /// means under perspective, filed and out of scope.</para>
+        /// <para><b>S116 — the expectation moves from L/(W/2 + 0.5) to L/(W/2), and why that is a
+        /// re-derivation and not a re-bake.</b> Width and offset now convert with the frame constant while the
+        /// AA pad keeps its per-vertex measurement, so the two no longer share one <c>k</c> and the pad stops
+        /// cancelling: the recovered PADDED half-width is <c>K·W/2 + 0.5·k</c>, mixing rulers that differ by
+        /// <c>1/cos θ</c> under tilt (~7 % of the half-width on a 24 px band). The measurement subtracts the
+        /// pad — read off the live camera at the UNSHIFTED centreline, which is where the shader measures it —
+        /// and the assertion is then on the STYLED half-width, which is what the claim was always about. The
+        /// dimensionless form survives; only the pad term leaves it.</para>
         ///
-        /// <para>RED at 11.426080 against 12.800 ± 2.5 % — a 4.3× margin.</para>
+        /// <para>NAME AND SCOPE, deliberately narrow: this tooth measures a WORLD-space coupling about the
+        /// original centreline. It neither claims nor delivers screen-width preservation — the band is at a
+        /// different depth from the centreline the width was fixed at, so its rendered device width is
+        /// smaller and MOVES with the offset by construction. Whether line-offset should re-measure at the
+        /// SHIFTED position is a spec question about what line-offset means under perspective, filed and out
+        /// of scope.</para>
+        ///
+        /// <para>RED at 11.426080 against 12.800 ± 2.5 % — a 4.3× margin — under the pre-S116 formulation.
+        /// The same injection against the current formulation is larger, not smaller: the leak adds
+        /// <c>e·L·K</c> to a half-width that no longer carries the pad, ~29 %.</para>
         /// </summary>
         [Test]
         public void OffsetRibbon_HalfWidthDoesNotTrackTheOffset_UnderTilt()
@@ -666,9 +823,42 @@ namespace MapRenderer.Tests.Visual
                     // bisection silently.
                     const double Lo = -60_000.0, Hi = +200_000.0;
 
-                    var centre = MeasureColumn(pixels, CentreColumn, background, coarse);
+                    // The anchor inset is DERIVED from the band this arm actually renders, not assumed.
+                    // Under the world-width model a 24 px styled band running across the view azimuth
+                    // renders ~cos 55° thinner (8 rows here, against 12 before), and the default ±4 px
+                    // windows would then overlap. Widening the disjointness assertion instead is forbidden:
+                    // that assertion IS the half-sum estimator's validity condition, and loosening it makes
+                    // every world figure this arm reports meaningless. Nothing pinned moves — the asserted
+                    // ratio below is L/H, dimensionless, and the inset does not appear in it.
+                    var (bandBottom, bandTop) = BandRowSpan(pixels, CentreColumn, background, coarse);
+                    int inset = InsetForBand(bandBottom, bandTop);
+                    TestContext.WriteLine(
+                        $"T-S2: centre band spans rows {bandBottom}..{bandTop} ({bandTop - bandBottom + 1} " +
+                        $"rows); anchor inset {inset} px (default {EdgeInsetPx})");
+                    Assert.That(inset, Is.GreaterThanOrEqualTo(2),
+                        $"T-S2: the band spans only {bandTop - bandBottom + 1} rows, leaving an anchor inset " +
+                        $"of {inset} px — too thin to contain the one-device-pixel ramp with any margin. " +
+                        "RAISE the styled width in this arm and re-derive; do not shrink the inset further.");
+
+                    var centre = MeasureColumn(pixels, CentreColumn, background, coarse, inset);
                     var (zFarCentre,  farMetresPerPx)  = SolveEdge(scene.UnityCamera, centre.FarScreenY,  Lo, Hi);
                     var (zNearCentre, nearMetresPerPx) = SolveEdge(scene.UnityCamera, centre.NearScreenY, Lo, Hi);
+
+                    // ── The AA pad is no longer on the width's ruler, so it must be subtracted (S116) ──
+                    // The estimator recovers the PADDED silhouette (T-S1c pins that), and the pad is half a
+                    // device pixel measured PER VERTEX by MapPixelsToWorld at the UNSHIFTED centreline —
+                    // whereas the styled half-width is now W/2 × the frame constant. Under tilt those two
+                    // rulers differ by 1/cos θ (a ground across-axis foreshortens; the frame constant does
+                    // not), so on a 24 px band the pad is ~7 % of the half-width and no longer cancels the way
+                    // it did when width and pad shared one measurement. Subtracting it recovers the STYLED
+                    // half-width, which is what the claim below is actually about.
+                    //
+                    // MapPixelsToWorld along `across` at a ground point IS d(world z)/d(screen y) there, which
+                    // SolveEdge already computes — so this is read off the same live camera as everything
+                    // else, not modelled.
+                    double centreScreenY = scene.UnityCamera.WorldToScreenPoint(Vector3.zero).y;
+                    var (_, centrelineMetresPerPx) = SolveEdge(scene.UnityCamera, centreScreenY, Lo, Hi);
+                    double halfPadWorld = 0.5 * math.abs(centrelineMetresPerPx);
 
                     TestContext.WriteLine(
                         $"T-S2: centre column silhouettes screen-y {centre.FarScreenY:F4} / " +
@@ -676,20 +866,27 @@ namespace MapRenderer.Tests.Visual
                         $"{zFarCentre:F1} / {zNearCentre:F1} m; local scale {farMetresPerPx:F1} / " +
                         $"{nearMetresPerPx:F1} m/px");
 
-                    Assert.That(centre.SeparationPx, Is.InRange(9.0, 14.0),
+                    Assert.That(centre.SeparationPx, Is.InRange(6.5, 11.0),
                         $"T-S2 framing: the padded band renders {centre.SeparationPx:F2} px thick, expected " +
-                        "in [9, 14] (12.21 px before the fix, 10.89 px after — it MOVES, because the styled " +
-                        "width is measured at the unshifted centreline). If the fixture will not frame, " +
-                        "change L and RE-DERIVE; never widen the tolerance.");
+                        "in [6.5, 11]. RE-DERIVED, with the arithmetic, for the world-width model (S116): " +
+                        "the styled half-width is a fixed 24/2 × K = 12 K metres (K = 305.75 m/device px at " +
+                        "this pose) and the pad ~0.5 × K/cos 55° , so the band is ~3.93 km wide in the world " +
+                        "wherever it sits. It is offset 160 K = 48.9 km NORTH, which at tilt 55° puts it at " +
+                        "view depth 135.6 + 0.819×48.9 = 175.6 km against the look-at's 135.6 km — a factor " +
+                        "of 1.295 further away — so it renders 14.8/1.295 ≈ 11.4 px before the ground " +
+                        "plane's own cos 55° foreshortening of the across-axis brings it to ~8.8 (measured " +
+                        "8.794). The window brackets that; it MOVES with the offset by construction, which " +
+                        "is why the tooth below measures a dimensionless ratio instead. " +
+                        "If the fixture will not frame, change L and RE-DERIVE; never widen the tolerance.");
 
                     var ratios = new List<double>();
                     for (int column = CentreColumn - TiltedSweepHalfWidth;
                          column <= CentreColumn + TiltedSweepHalfWidth; column++)
                     {
-                        var s = MeasureColumn(pixels, column, background, coarse);
+                        var s = MeasureColumn(pixels, column, background, coarse, inset);
                         double far  = GroundRowSolver.SolveWorldZForRow(scene.UnityCamera, s.FarScreenY,  Lo, Hi);
                         double near = GroundRowSolver.SolveWorldZForRow(scene.UnityCamera, s.NearScreenY, Lo, Hi);
-                        ratios.Add(0.5 * (far + near) / (0.5 * (far - near)));
+                        ratios.Add(0.5 * (far + near) / (0.5 * (far - near) - halfPadWorld));
                     }
 
                     double minRatio = double.MaxValue, maxRatio = double.MinValue;
@@ -700,11 +897,15 @@ namespace MapRenderer.Tests.Visual
                     }
                     double ratio = Mean(ratios);
 
-                    double centreWorld = 0.5 * (zFarCentre + zNearCentre);
-                    double halfWorld   = 0.5 * (zFarCentre - zNearCentre);
+                    double centreWorld     = 0.5 * (zFarCentre + zNearCentre);
+                    double paddedHalfWorld = 0.5 * (zFarCentre - zNearCentre);
+                    double halfWorld       = paddedHalfWorld - halfPadWorld;
+                    double expected        = TS2OffsetPx / (TS2WidthPx * 0.5);
                     TestContext.WriteLine(
                         $"T-S2: {ratios.Count} columns; centre/half ∈ [{minRatio:F6}, {maxRatio:F6}], mean " +
-                        $"{ratio:F6}; centre column world centre {centreWorld:F1} m, half {halfWorld:F1} m");
+                        $"{ratio:F6} (want {expected:F6}); centre column world centre {centreWorld:F1} m, " +
+                        $"padded half {paddedHalfWorld:F1} m − pad {halfPadWorld:F1} m = styled half " +
+                        $"{halfWorld:F1} m");
 
                     Assert.That(maxRatio - minRatio, Is.LessThan(0.05),
                         $"T-S2 uniformity: centre/half varies {maxRatio - minRatio:F6} over " +
@@ -712,14 +913,155 @@ namespace MapRenderer.Tests.Visual
                         "and edge-localisation noise on a 7.5 km half-width contributes ~0.015. A " +
                         "PRECONDITION that the band is uniform where it is measured, not an error bar.");
 
-                    Assert.That(ratio, Is.EqualTo(TS2OffsetPx / (TS2WidthPx * 0.5 + 0.5)).Within(2.5).Percent,
+                    Assert.That(ratio, Is.EqualTo(expected).Within(2.5).Percent,
                         $"THE OFFSET LEAK: the offset ribbon's world centre sits {centreWorld:F1} m out with " +
-                        $"a half-width of {halfWorld:F1} m, a ratio of {ratio:F6} where L/H = " +
-                        $"{TS2OffsetPx / (TS2WidthPx * 0.5 + 0.5):F3} — the half-width must not depend on " +
-                        "the offset at all. _LineOffset is applied as a COMMON world vector to both station " +
-                        "vertices, but each measures pxToWorld with its own signed probe, so an offset of L " +
-                        "device px leaks e·L into the HALF-width: 12.11 % here, and unbounded in L. This is " +
-                        "the consumer whose error is NOT bounded by the styled width.");
+                        $"a STYLED half-width of {halfWorld:F1} m, a ratio of {ratio:F6} where L/(W/2) = " +
+                        $"{expected:F3} — the half-width must not depend on the offset at all. _LineOffset is " +
+                        "applied as a COMMON world vector to both station vertices; if each were to measure " +
+                        "its own signed ruler, an offset of L device px would leak e·L into the HALF-width — " +
+                        "12.11 % at this pose, and unbounded in L, because nothing bounds it by the styled " +
+                        "width. This is the consumer whose error is NOT bounded by the styled width.");
+                });
+        }
+
+        // ── T4: renderedWidthPx × depth is constant along a receding road ────────────────────────
+
+        private const double T4WidthPx = 40.0;
+
+        /// <summary>The rows swept. Chosen from the pose rather than by eye: at tilt 55 with fov 60 the frame
+        /// spans view depths of roughly 74 km (bottom) to 890 km (top), and rows 140…380 cover a ≥ 2× range
+        /// while keeping the widest band (bottom, ~55 px) and the narrowest (top, ~24 px) both comfortably
+        /// measurable. The sweep straddles the look-at row (256), where the rendered width is the styled
+        /// width exactly.</summary>
+        private static readonly int[] T4Rows = { 140, 200, 260, 320, 380 };
+
+        /// <summary>Rendered band width in device px on one screen ROW: the coverage integral across the
+        /// whole row. For a ramp that is one device pixel wide and CENTRED on the styled edge, the integral
+        /// is the styled (apparent) width whatever the sub-pixel phase — the AA pad contributes nothing, so
+        /// this measures the extrusion and not the straddle.
+        ///
+        /// <para>The plateau is taken LOCALLY, on this row: the shader is real PBR with a live
+        /// viewDirectionWS, and this fixture's rows are at wildly different depths, so one global plateau
+        /// would fold a shading gradient into every width.</para></summary>
+        private static double MeasureRowWidthPx(byte[] pixels, int row, float3 background)
+        {
+            float3 plateau = background;
+            float  best    = 0f;
+            for (int column = 0; column < Size; column++)
+            {
+                float3 sample = PixelCoverage.SampleLinear(pixels, Size, Size, column, row);
+                float  dist   = math.distancesq(sample, background);
+                if (dist > best) { best = dist; plateau = sample; }
+            }
+            Assert.That(math.distance(plateau, background), Is.GreaterThan(0.02f),
+                $"row {row}: nothing on this row is distinguishable from the background — the road did not " +
+                "render here, so no width is measurable.");
+
+            double sum = 0.0;
+            for (int column = 0; column < Size; column++)
+                sum += PixelCoverage.CoverageAt(pixels, Size, Size, column, row, background, plateau);
+            return sum;
+        }
+
+        /// <summary>View depth (== <c>clip.w</c> for a standard perspective projection) of the ground point
+        /// that projects onto <paramref name="screenY"/> on the road's own column.</summary>
+        private static double DepthAtRow(Camera cam, double screenY, out double worldZ)
+        {
+            worldZ = GroundRowSolver.SolveWorldZForRow(cam, screenY, -120_000.0, +2_000_000.0);
+            Vector3 p = new Vector3(0f, 0f, (float)worldZ);
+            return Vector3.Dot(p - cam.transform.position, cam.transform.forward);
+        }
+
+        /// <summary>
+        /// <b>T4 (REQUIRED) — the epic's central claim, pinned.</b> On a road RECEDING from a tilted camera,
+        /// <c>renderedWidthPx × depth</c> is CONSTANT along its length.
+        ///
+        /// <para>That product is the signature of a fixed WORLD width under the perspective divide, and
+        /// nothing else: a world half-width <c>h</c> at view depth <c>d</c> renders
+        /// <c>h · (viewportPx.y / (2·d·tan(fov/2)))</c> device px, so <c>widthPx · d</c> is
+        /// <c>h · viewportPx.y / (2·tan(fov/2))</c> — free of depth, of the row, and of where in the frame
+        /// the station lands. `line-width: N px` fixes that <c>h</c> once, at the look-at, and the divide
+        /// does the rest.</para>
+        ///
+        /// <para><b>What it rejects.</b> Any per-vertex px→world conversion for the WIDTH — the four reverted
+        /// stages, and the <c>MapPixelsToWorld</c> fallback branch the shader keeps only as a missing-push
+        /// backstop — holds <c>widthPx</c> itself constant instead, so the product tracks depth and spreads by
+        /// the sweep's full depth ratio (&gt; 2×) rather than ~1 %. There is no way to pass both. A tooth
+        /// asserting "the band is N device px at every depth" would assert exactly the thing this rejects,
+        /// which is how four stages measured green against a visibly wrong render.</para>
+        ///
+        /// <para>The near/far WIDTH ratio is recorded rather than gated: it is the independent cross-check
+        /// against the reference renderer's ~3.375 at maximum pitch, and it is a property of this fixture's
+        /// depth range, not a target to tune to.</para>
+        /// </summary>
+        [Test]
+        public void RenderedWidthTimesDepth_IsConstantAlongARecedingRoad_UnderTilt()
+        {
+            WithRenderedRecedingRoad(TiltDeg, T4WidthPx, "s116-t4-width-times-depth-tilt55.png",
+                (scene, pixels) =>
+                {
+                    float3 background = PixelCoverage.BackgroundLinear(pixels, Size, Size);
+
+                    var widths   = new List<double>();
+                    var depths   = new List<double>();
+                    var products = new List<double>();
+                    var report   = new System.Text.StringBuilder();
+
+                    foreach (int row in T4Rows)
+                    {
+                        // RawPixels row j reports the shader at SCREEN-Y j + 0.5 (bottom-up, no flip).
+                        double depth = DepthAtRow(scene.UnityCamera, row + 0.5, out double worldZ);
+                        double width = MeasureRowWidthPx(pixels, row, background);
+                        widths.Add(width);
+                        depths.Add(depth);
+                        products.Add(width * depth);
+                        report.Append(
+                            $"[row {row}] z {worldZ / 1000.0:F1} km, depth {depth / 1000.0:F1} km, " +
+                            $"width {width:F3} px, w·d {width * depth / 1000.0:F1} → ");
+                    }
+
+                    double minProduct = double.MaxValue, maxProduct = double.MinValue;
+                    double minDepth   = double.MaxValue, maxDepth   = double.MinValue;
+                    double minWidth   = double.MaxValue, maxWidth   = double.MinValue;
+                    for (int i = 0; i < products.Count; i++)
+                    {
+                        minProduct = math.min(minProduct, products[i]);
+                        maxProduct = math.max(maxProduct, products[i]);
+                        minDepth   = math.min(minDepth,   depths[i]);
+                        maxDepth   = math.max(maxDepth,   depths[i]);
+                        minWidth   = math.min(minWidth,   widths[i]);
+                        maxWidth   = math.max(maxWidth,   widths[i]);
+                    }
+                    double productSpread = maxProduct / minProduct;
+                    double depthSpread   = maxDepth   / minDepth;
+                    double widthSpread   = maxWidth   / minWidth;
+
+                    TestContext.WriteLine(
+                        $"T4: {report}depth spread {depthSpread:F3}×, WIDTH spread {widthSpread:F3}× " +
+                        $"(near/far — cross-check against the reference's ~3.375 at max pitch), " +
+                        $"w·d spread {productSpread:F5}×");
+
+                    // Vacuity guards. Both are preconditions on the FIXTURE, not results.
+                    Assert.That(depthSpread, Is.GreaterThan(2.0),
+                        $"T4: the swept rows span only a {depthSpread:F3}× depth range. Below 2× the " +
+                        "constant-device-width model and the constant-world-width model are too close to " +
+                        "tell apart, and the tooth would pass under both.");
+                    Assert.That(minWidth, Is.GreaterThan(4.0),
+                        $"T4: the narrowest measured band is {minWidth:F2} px. Below a few pixels the " +
+                        "coverage integral stops resolving the silhouette and the product is noise.");
+
+                    // 1.005 against a MEASURED 1.00022 — a 22× margin under the bound, and the injected
+                    // defect reads the full depth spread (2.290×), so the tooth discriminates by 3 orders of
+                    // magnitude. Tight on purpose: a PARTIAL compensation would sit between the two, and a
+                    // loose bound is exactly how the reverted stages measured green.
+                    Assert.That(productSpread, Is.LessThan(1.005),
+                        $"THE WIDTH MODEL: renderedWidthPx × depth varies by {productSpread:F5}× over a " +
+                        $"{depthSpread:F3}× depth range. It must be constant to ~1 %, because a styled px " +
+                        $"width fixes a WORLD width once and the perspective divide alone renders it. A " +
+                        $"spread approaching the depth spread ({depthSpread:F3}×) means the width is being " +
+                        "held constant in DEVICE pixels at every depth — a per-vertex px→world conversion, " +
+                        "which is the defect four reverted stages were built on. Measured widths: " +
+                        $"{minWidth:F2}…{maxWidth:F2} px. {report}");
                 });
         }
 

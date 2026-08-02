@@ -63,8 +63,8 @@ other's job.
 
 | ruler | who reads it | why it must be that one |
 |---|---|---|
-| `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | `widthWorld`, the AA pad, `line-gap-width`, `line-offset`, `line-translate` | width under tilt is genuinely a screen quantity: a road must stay N px wide however the projection foreshortens it there (S104) |
-| `_MapFrameMetersPerDevicePixel` — a **frame constant**, `MetersPerPixel(zoom) / dpr`, pushed by `RenderLayerSet.ApplyZoom` | the dash divisor `dashMetersPerUnit` only | a dash pattern is welded to the ground; its unit must not depend on where on screen you look |
+| `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | the AA straddle pad, the **min-width floor** (`minHalfWorld`), the `_HAIRLINE_SOLID_CORE` floor (via the pad), and `line-translate` | these are genuinely SAMPLING-GRID quantities *at that vertex*: half a device pixel of ramp must land on half a device pixel of framebuffer, a 1 px legibility floor must rescue a road **where** it thinned, and a translate is a screen displacement. The line shader binds one `metresPerDevicePx` for all of them so they cannot drift apart |
+| `_MapFrameMetersPerDevicePixel` — a **frame constant**, measured off the camera (`2·d_lookAt·tan(fov/2)/viewportPx.y`) and pushed by `MapCamera.SyncToCamera` | `widthWorld`, `line-gap-width`, `line-offset`, and the dash divisor `dashMetersPerUnit` | `line-width: N px` means N px **top-down**: it fixes a world width once and the perspective divide decides the rest. A pattern welded to the ground must not depend on where on screen you look, and neither must the width (S116; `docs/line-rendering-design.md` §1) |
 
 **The failure surface — one root, four visible symptoms.** `MapPixelsToWorld` is a *measurement*, and
 `dashU` was the one consumer that **integrated** it along the road while every other consumer is bounded

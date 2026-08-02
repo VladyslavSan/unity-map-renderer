@@ -4,7 +4,6 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Style
@@ -106,14 +105,18 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// Pushes per-frame uniforms to every layer (fill/line zoom paint, zoom-step dasharrays, and the
-        /// px→device conversion for the px-valued paint family), plus the frame's ground-resolution GLOBAL.
-        /// Line WIDTH is still resolved in screen space by the shader (S104) and needs no ground resolution —
-        /// but that screen space is the physical framebuffer, hence <paramref name="devicePixelRatio"/>
-        /// (S107). The line's DASH parameterisation is the half that is not: a per-vertex screen measurement
-        /// varies with depth, direction and the sign of the direction, and <c>dashU</c> integrates that along
-        /// the road, so since S110 the dash divisor takes the frame constant pushed below. Alloc-free: a
-        /// plain <c>for</c> over the list (struct enumerator-free), each layer's
+        /// px→device conversion for the px-valued paint family), hence <paramref name="devicePixelRatio"/>
+        /// (S107). Alloc-free: a plain <c>for</c> over the list (struct enumerator-free), each layer's
         /// <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
+        ///
+        /// <para><b>The frame's px→world RULER is NOT pushed here</b> (S116). The line shader converts every
+        /// <c>px</c>-valued width property and its dash parameterisation with the
+        /// <c>_MapFrameMetersPerDevicePixel</c> global, and that is a CAMERA quantity —
+        /// <see cref="Map.MapCamera.SyncToCamera"/> owns the push, measuring it off the live camera
+        /// (<see cref="Map.MapCamera.MetresPerDevicePixel"/>) instead of re-deriving it from a Web-Mercator
+        /// zoom formula here. The two agreed only while the altitude was the canonical function of zoom, and a
+        /// render path that never called this method read whatever an earlier one had left in that process
+        /// global.</para>
         ///
         /// <para><see cref="Build"/> deliberately takes no ratio: its per-layer seeds run at dpr 1, and the
         /// caller re-applies at the live ratio immediately afterwards (<c>MapView.SetStyle</c>) so no frame
@@ -123,16 +126,6 @@ namespace MapRenderer.Unity.Rendering.Style
         /// </summary>
         public void ApplyZoom(double zoom, double devicePixelRatio)
         {
-            // The frame's view-independent ruler, pushed ONCE for the frame rather than per layer: it is a
-            // camera quantity, identical for every layer and every instance. Consumed only by the line
-            // shader's dash parameterisation — see the scope note on the declaration in Line_LitInput.hlsl.
-            // Fully qualified rather than `using MapRenderer.Core.View;`: that would put the namespace
-            // segment `Camera` and the type `UnityEngine.Camera` in the same lookup (CS0118).
-            Shader.SetGlobalFloat(
-                ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
-                (float)MapRenderer.Core.View.DeviceScaling.PerLogicalPxToPerDevicePx(
-                    CameraPoseMath.MetersPerPixel(zoom), devicePixelRatio));
-
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].ApplyZoom(zoom, devicePixelRatio);
         }

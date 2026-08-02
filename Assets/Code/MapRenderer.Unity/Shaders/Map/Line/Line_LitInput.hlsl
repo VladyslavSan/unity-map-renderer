@@ -93,27 +93,52 @@ float  _WidthIsPixels;
 CBUFFER_END
 
 // ── Frame globals — NOT UnityPerMaterial, NOT a ShaderLab Property ────────────────────────────
-// _MapFrameMetersPerDevicePixel — world metres per DEVICE pixel for this frame, pushed once per frame
-// by RenderLayerSet.ApplyZoom via Shader.SetGlobalFloat.
+// _MapFrameMetersPerDevicePixel — world metres per DEVICE pixel for this frame, pushed once per frame by
+// MapCamera.SyncToCamera via Shader.SetGlobalFloat, and MEASURED off that camera:
+// 2*distanceToLookAt*tan(fov/2)/viewportPx.y. Pushed there rather than from the style seam because it is a
+// camera quantity, and because a render path that builds a MapCamera then cannot forget it (S116).
 //
 // OUTSIDE the CBUFFER on purpose: this declaration does not change the UnityPerMaterial layout, which is
 // what SRP Batcher keys on. Inside it, the value would become per-material and would need a DOTS-instancing
 // slot and a BRG SoA field for a number identical on every layer. Absent from Line.shader's Properties{}
 // on purpose too: a ShaderLab property serialises a value into MapLine.mat that silently shadows the global.
 //
-// SCOPE, load-bearing: it exists so the dash parameterisation is VIEW-INDEPENDENT. Width, gap, line-offset
-// and line-translate must keep using the per-vertex MapPixelsToWorld measurement — a frame scalar cannot
-// express those under tilt/foreshortening (S104).
+// SCOPE: it is the ruler for every quantity that is VIEW-INDEPENDENT — the dash parameterisation and,
+// since the width model was corrected, the WIDTH itself (and gap / line-offset, which act along the same
+// axis).
 //
-// UNSET it reads 0, so the divisor is 0, so the guard sets dashU = 0 — which renders a UNIFORM
-// HALF-COVERAGE line (smoothstep(-dfw,+dfw,0) == 0.5 exactly), not a solid one. No dash edges, never a
-// moving pattern: fail-safe and visible, never corrupt.
+// An earlier revision of this note asserted the opposite — that width "must keep using the per-vertex
+// MapPixelsToWorld measurement" because a frame scalar "cannot express it under tilt/foreshortening".
+// That was the mistake, not the constraint. A per-vertex measurement converts the styled pixel width at
+// EACH VERTEX'S OWN DEPTH, which holds the rendered band constant in device pixels all the way to the
+// horizon. A map does not do that: `line-width: N px` means N px TOP-DOWN, fixing a WORLD width once, after
+// which the perspective divide renders it wider near and thinner far. Measured against the reference at max
+// pitch: ~54 px near vs ~16 px at the horizon, a ratio of ~3.375 — exactly the depth ratio. Four stages of
+// per-vertex machinery existed to defeat that divide; all are reverted (branch
+// archive/line-width-compensation). See docs/line-rendering-design.md §1.
 //
-// LIMITATION, stated: Shader.SetGlobalFloat is PROCESS state. Two live MapViews would each write it from
-// their own LateUpdate in an order Unity does not define, so one map would get the other's dash ruler.
-// Nothing instantiates two MapViews today (one production `new MapView(`, in MapViewComponent). If that
-// changes, the escape hatch is a per-material instanced property — at the CBUFFER/DOTS/BRG-SoA cost this
-// declaration exists to avoid.
+// The one legitimate per-vertex user of MapPixelsToWorld is the AA pad: half a device pixel genuinely IS a
+// screen quantity at that vertex. line-translate is also per-vertex, in its own axis.
+//
+// UNSET it reads 0, and the two consumers fail differently, on purpose:
+//   - DASHES: the divisor is 0, so the guard sets dashU = 0 — a UNIFORM HALF-COVERAGE line
+//     (smoothstep(-dfw,+dfw,0) == 0.5 exactly), not a solid one. No dash edges, never a moving pattern.
+//   - WIDTH: 0 would mean zero world width, and every road of every styled width would collapse to the same
+//     1 device-px hairline (the AA pad is still extruded, so not quite an empty frame — measured). Strictly
+//     worse than the dash case: it looks like a plausible render, so the missing push presents as a defect
+//     in some other subsystem and sends the search there. It did exactly that in S116. Line_VertexExtrude
+//     therefore guards the width at > 1e-9 and falls back to the per-vertex MapPixelsToWorld, which renders
+//     a plausibly-SIZED line. That fallback is a diagnostic backstop, NOT the width model — see
+//     docs/line-rendering-design.md §1.
+// Do not unify the two: each fail-safe is chosen for its own consumer's worst case.
+//
+// LIMITATION, stated: Shader.SetGlobalFloat is PROCESS state, and this is a whole-process singleton for a
+// quantity that is per-camera. Two live MapViews would each write it from their own SyncToCamera in an order
+// Unity does not define, so one map would size its lines with the other's ruler — and since S116 that is a
+// MapCamera commit rather than a render-layer push, so a MapCamera that is not the rendering camera writes
+// it too. Nothing instantiates two MapViews today (one production `new MapView(`, in MapViewComponent). If
+// that changes, the escape hatch is a per-material instanced property — at the CBUFFER/DOTS/BRG-SoA cost
+// this declaration exists to avoid.
 float _MapFrameMetersPerDevicePixel;
 
 // ── DOTS-instancing bridge ────────────────────────────────────────────────────

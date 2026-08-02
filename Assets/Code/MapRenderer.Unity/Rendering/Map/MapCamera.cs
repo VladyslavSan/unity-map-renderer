@@ -4,6 +4,9 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+// Alias, not a plain `using`: the namespace segment `Rendering` collides with a bare UnityEngine type in
+// lookup — the CS0118 trap this repo documents at RenderLayerSet.cs.
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -82,6 +85,46 @@ namespace MapRenderer.Unity.Rendering.Map
         /// round-trip.
         /// </summary>
         public double3 CameraRelativePosition { get; private set; }
+
+        /// <summary>
+        /// World metres per DEVICE pixel at the look-at — the frame's view-independent ruler, MEASURED off
+        /// this camera rather than assumed from a zoom formula. Pushed to the shader global
+        /// <c>_MapFrameMetersPerDevicePixel</c> by <see cref="SyncToCamera"/>, where the line shader converts
+        /// every <c>px</c>-valued width property with it.
+        ///
+        /// <para><b>The reference depth is the distance to the LOOK-AT</b>, which under camera-relative
+        /// rendering is <c>|CameraRelativePosition|</c> — the orbit radius
+        /// <see cref="CameraPoseMath.ComputeRelativePose"/> was handed. That depth and no other, because it is
+        /// the only one the framing is defined at: <see cref="CameraPoseMath.AltitudeForZoom"/> frames the
+        /// look-at and nothing else, so any other reference would make the constant disagree with the camera
+        /// that produced it. It is also projection-agnostic (a distance and an angle — no Web-Mercator
+        /// constant, no latitude) and constant under tilt, since the orbit radius is; tilt changes only where
+        /// in the frame each depth lands.</para>
+        ///
+        /// <para><b><see cref="DevicePixelRatio"/> is absent on purpose, not by omission.</b>
+        /// <see cref="ViewportPx"/> is already physical, and the ratio enters exactly once — through
+        /// <see cref="ViewportLogicalPx"/> inside the altitude framing in <see cref="SyncToCamera"/>. Naming
+        /// it a second time here is what would let the two halves disagree; this way they cannot, by
+        /// construction. (Algebraically the result is <c>MetersPerPixel(zoom) · AltitudeMultiplier / dpr</c>
+        /// whenever the 0.1 m altitude floor is not binding — identical to the zoom-formula push this
+        /// replaced at the default multiplier of 1, and correct where that one silently was not.)</para>
+        ///
+        /// <para>The half-FOV goes through <see cref="Angle"/> rather than a bare <c>math.radians</c>: the
+        /// degrees→radians conversion lives once, inside <c>Angle.cs</c>, and
+        /// <see cref="CameraPoseMath.AltitudeForZoom"/> computes this identical quantity one property over
+        /// with <c>Angle.FromDegrees(fov * 0.5).Radians</c>. Halving in DEGREES before the conversion, as it
+        /// does, so the two are bit-identical and not merely equal.</para>
+        ///
+        /// <para>The <c>max(…, 1.0)</c> on the height is not arithmetic pedantry: this value is pushed into a
+        /// PROCESS-wide shader global, a zero-height viewport would make it <c>+Inf</c>, and <c>+Inf</c> sails
+        /// through the shader's <c>&gt; 1e-9</c> missing-push guard to size every line in the process. One
+        /// device pixel is the smallest viewport that means anything, and the sibling
+        /// <see cref="ViewportLogicalPx"/> already carries an equivalent unusable-input fallback.</para>
+        /// </summary>
+        public double MetresPerDevicePixel =>
+            2.0 * math.length(CameraRelativePosition)
+                * math.tan(Angle.FromDegrees(CurrentProperties.VerticalFovDeg * 0.5).Radians)
+                / math.max(ViewportPx.y, 1.0);
 
         public MapCamera(UnityEngine.Camera camera,
                          CameraProperties initial,
@@ -179,6 +222,20 @@ namespace MapRenderer.Unity.Rendering.Map
             // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far.
             Camera.farClipPlane  = (float)FarPlanePolicy.FarMetres(
                 altitude, CurrentProperties.Tilt.Value, CurrentProperties.VerticalFovDeg, Camera.aspect);
+
+            // The frame's ruler, pushed as the LAST act of the commit — after CameraRelativePosition, which
+            // MetresPerDevicePixel reads. Here rather than in RenderLayerSet.ApplyZoom because it is a CAMERA
+            // quantity and this is the one site where the camera's actual scale is established; a render path
+            // that builds a MapCamera therefore cannot forget it. (RenderLayerSet used to push a Web-Mercator
+            // zoom formula that merely happened to agree at AltitudeMultiplier 1 — and any fixture that
+            // rendered without calling ApplyZoom read whatever an earlier fixture had left in this PROCESS
+            // global.)
+            //
+            // PROCESS state, and still shared: with N live MapViews the last SyncToCamera of the frame wins,
+            // and now a MapCamera that is not the rendering camera writes it too. Same caveat as before,
+            // slightly wider; a real fix is per-material or per-renderer state and is its own stage.
+            Shader.SetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel,
+                                  (float)MetresPerDevicePixel);
         }
     }
 }

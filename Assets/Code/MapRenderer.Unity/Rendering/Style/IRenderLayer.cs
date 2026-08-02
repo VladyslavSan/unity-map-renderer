@@ -52,10 +52,12 @@ namespace MapRenderer.Unity.Rendering.Style
         Material Material { get; }
 
         /// <summary>Push this layer's per-frame uniforms. Called once per layer per frame from
-        /// <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). Line width is resolved in
-        /// screen space by the shader (S104) — no metersPerPixel is threaded through — but that screen space
-        /// is the PHYSICAL framebuffer, so <paramref name="devicePixelRatio"/> is what converts the style's
-        /// logical px into it (S107; see <see cref="ZoomStyleApplier.BindDevicePixelFloat"/>).</summary>
+        /// <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). No ground resolution is threaded
+        /// through: the shader converts a px-valued width with the <c>_MapFrameMetersPerDevicePixel</c> global
+        /// that <see cref="Map.MapCamera.SyncToCamera"/> measures off the camera (S116). That global is metres
+        /// per DEVICE pixel, so <paramref name="devicePixelRatio"/> is what converts the style's logical px
+        /// into the same basis here (S107; see <see cref="ZoomStyleApplier.BindDevicePixelFloat"/>) — the two
+        /// halves have to agree or every px width is off by exactly the ratio.</summary>
         /// <param name="zoom">The current map zoom level.</param>
         /// <param name="devicePixelRatio">Physical ÷ logical px for this frame's panel.</param>
         void ApplyZoom(double zoom, double devicePixelRatio);

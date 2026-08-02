@@ -27,10 +27,11 @@
 //      equalled the frame constant identically, so T2 saw only the basis.
 //
 // FIXTURE SHAPE IS LOAD-BEARING. Every arm drives the material through the PRODUCTION seam — a style JSON
-// with line-dasharray parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr) — because that call is
-// also what pushes the frame global. Setting _DashArray on a hand-made material would test the shader while
-// leaving the wiring unmeasured; with the seam in the loop, a missing push renders a uniform HALF-COVERAGE
-// line (dashU ≡ 0 ⇒ smoothstep(−dfw,+dfw,0) == 0.5 exactly) and every tooth here fails with "no dash edges".
+// with line-dasharray parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr). Setting _DashArray on a
+// hand-made material would test the shader while leaving the wiring unmeasured. The frame global itself is
+// pushed by the real MapCamera (S116 moved it there from ApplyZoom), which BuildScene constructs; with both
+// seams in the loop, a missing push renders a uniform HALF-COVERAGE line
+// (dashU ≡ 0 ⇒ smoothstep(−dfw,+dfw,0) == 0.5 exactly) and every tooth here fails with "no dash edges".
 
 #if UNITY_EDITOR
 using System;
@@ -57,7 +58,8 @@ namespace MapRenderer.Tests.Visual
         private const double LookAtLon = 30.0;
 
         /// <summary>Styled line-width in LOGICAL px. Clear of both thin-line clamps at both ratios, so the
-        /// rendered band stays proportional and the ±6 px probe rows of T7 sit inside it.</summary>
+        /// rendered band stays proportional and T7's probe rows — derived from the band that renders, which
+        /// under tilt is <c>cos θ</c> thinner than this — sit inside it.</summary>
         private const float StyledLineWidthPx = 16f;
 
         /// <summary>The tilt at which terms 1 and 3 are both large. 55° gives across·fwd = sin 55° = 0.8192,
@@ -163,8 +165,9 @@ namespace MapRenderer.Tests.Visual
                 $"precondition: _Width must reach the shader in DEVICE px ({StyledLineWidthPx}×dpr, S107).");
             Assert.That(Shader.GetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel),
                 Is.GreaterThan(0f),
-                "precondition: RenderLayerSet.ApplyZoom must have pushed the frame constant. A 0 here means " +
-                "the divisor is 0, the guard sets dashU = 0, and the line renders at a UNIFORM HALF " +
+                "precondition: the frame constant must have been pushed — by MapCamera.SyncToCamera, which " +
+                "the MapCamera ctor above runs (S116; it used to be RenderLayerSet.ApplyZoom). A 0 here means " +
+                "the dash divisor is 0, the guard sets dashU = 0, and the line renders at a UNIFORM HALF " +
                 "COVERAGE with no dash edges at all.");
 
             return new DashScene
@@ -504,7 +507,19 @@ namespace MapRenderer.Tests.Visual
 
         private const double T7HalfLengthM = 80_000.0;
         private const double T7StationM    =  2_000.0;
-        private const int    T7ProbeOffset = 6;       // px above/below the centre row: 2 px inside the styled edge
+
+        /// <summary>How far inside the styled edge each probe row sits, in device px. The probe OFFSET is
+        /// then derived from the band that actually renders (it used to be a hard-coded 6, which encoded
+        /// "the band is 16 px" — the premise S116 deleted). Clear of the ±0.5 px AA straddle with 2 px to
+        /// spare.</summary>
+        private const double T7ProbeInsetPx = 2.0;
+
+        /// <summary>Skew tolerance, expressed PER PIXEL OF PROBE SEPARATION rather than as an absolute — the
+        /// quantity the tooth is about is an ANGLE, and a band that renders <c>cos θ</c> thinner puts the two
+        /// probes closer together, which would silently scale an absolute bound's discriminating power.
+        /// <c>1.0 px over the original 12 px separation</c>, so the historical RED (3.94 px over 12 px =
+        /// 0.3283) keeps its 3.9× margin whatever the band width.</summary>
+        private const double T7MaxSkewPerSeparationPx = 1.0 / 12.0;
 
         /// <summary>
         /// The screen→arc-length map for ONE horizontal probe scanline across the east–west ribbon. A probe
@@ -609,12 +624,32 @@ namespace MapRenderer.Tests.Visual
                     int centreRow = (int)math.round(originSp.y);
                     ProbeMapping centre = MapProbeRow(scene.UnityCamera, originSp.y);
                     float thickness = MeasureBandThicknessPx(pixels, centreRow, 0, Size - 1, background, plateau);
+                    // RE-DERIVED (S116). This used to demand 16.0 ± 1.5 px — the styled width itself, i.e.
+                    // "a px width holds its DEVICE width under tilt", the premise the width model deleted.
+                    // A styled px width now fixes a WORLD width at the look-at; this road runs ACROSS the
+                    // view azimuth, so its across-axis lies in the ground plane along the tilt direction and
+                    // picks up that plane's foreshortening: 16·cos 55° = 9.177 px (measured 9.173).
+                    // It is a PRECONDITION for the probe placement below, not the tooth.
+                    double expectedThickness = StyledLineWidthPx * math.cos(math.radians(TiltDeg));
                     TestContext.WriteLine($"T7: centre row {originSp.y:F2}, rendered band thickness " +
-                                          $"{thickness:F2} px, {centre.PxPerMetre * 1000.0:F4} px per km");
-                    Assert.That(thickness, Is.EqualTo(16.0).Within(1.5),
-                        $"T7 precondition: the ribbon must render {StyledLineWidthPx} device px thick; " +
-                        $"measured {thickness:F2} px. The ±{T7ProbeOffset} px probes are placed 2 px inside " +
-                        "the styled edge on that basis, clear of the ±0.5 px AA straddle.");
+                                          $"{thickness:F2} px (want {expectedThickness:F3} = " +
+                                          $"{StyledLineWidthPx}·cos {TiltDeg}°), " +
+                                          $"{centre.PxPerMetre * 1000.0:F4} px per km");
+                    Assert.That(thickness, Is.EqualTo(expectedThickness).Within(0.6),
+                        $"T7 precondition: the ribbon must render {expectedThickness:F3} device px thick " +
+                        $"({StyledLineWidthPx} px styled × cos {TiltDeg}°, the ground plane's foreshortening " +
+                        $"along the across-axis); measured {thickness:F2} px. A reading near " +
+                        $"{StyledLineWidthPx} would mean the band is holding a constant DEVICE width under " +
+                        "tilt — the compensation this repo reverted.");
+
+                    // The probes are placed from the band that RENDERED, so this tooth no longer encodes any
+                    // width premise at all. 2 px inside the styled edge, integer rows because the probe is a
+                    // scanline.
+                    int probeOffset = (int)math.floor(0.5 * thickness - T7ProbeInsetPx);
+                    Assert.That(probeOffset, Is.GreaterThanOrEqualTo(2),
+                        $"T7: a {thickness:F2} px band leaves a probe offset of {probeOffset} px, too close " +
+                        "to the centreline to resolve a cross-ribbon skew. RAISE the styled width and " +
+                        "re-derive; do not move the probes onto the AA straddle.");
 
                     // THE MEASUREMENT SPACE IS ARC LENGTH, NOT SCREEN X — and that is not a detail.
                     // The two ribbon edges are two world lines at DIFFERENT DEPTHS under tilt (the far edge
@@ -629,14 +664,14 @@ namespace MapRenderer.Tests.Visual
                     // shifts probe PLACEMENT, not a measured quantity, so it is second-order here — but it is
                     // fatal in a tooth where 0.5 px IS the measurement. Fixing it would move T7's probes, which
                     // S111 is fenced from doing; if T7 ever flakes, symmetrise the offsets and fix this together.
-                    ProbeMapping upperMap = MapProbeRow(scene.UnityCamera, centreRow + T7ProbeOffset);
-                    ProbeMapping lowerMap = MapProbeRow(scene.UnityCamera, centreRow - T7ProbeOffset);
+                    ProbeMapping upperMap = MapProbeRow(scene.UnityCamera, centreRow + probeOffset);
+                    ProbeMapping lowerMap = MapProbeRow(scene.UnityCamera, centreRow - probeOffset);
                     TestContext.WriteLine($"T7: probe world-z {upperMap.Z:F0} / {lowerMap.Z:F0} m, " +
                                           $"px per km {upperMap.PxPerMetre * 1000.0:F4} / " +
                                           $"{lowerMap.PxPerMetre * 1000.0:F4}");
 
-                    float[] upper = CoverageAlongRow(pixels, centreRow + T7ProbeOffset, 0, Size - 1, background, plateau);
-                    float[] lower = CoverageAlongRow(pixels, centreRow - T7ProbeOffset, 0, Size - 1, background, plateau);
+                    float[] upper = CoverageAlongRow(pixels, centreRow + probeOffset, 0, Size - 1, background, plateau);
+                    float[] lower = CoverageAlongRow(pixels, centreRow - probeOffset, 0, Size - 1, background, plateau);
                     List<double> upperEdges = FallingEdges(upper);
                     List<double> lowerEdges = FallingEdges(lower);
 
@@ -680,10 +715,21 @@ namespace MapRenderer.Tests.Visual
                         $"T7: only {pairs} dash boundaries appear on BOTH probes; fewer than 4 makes the " +
                         "max below rest on too little.");
 
-                    Assert.That(maxSkewPx, Is.LessThanOrEqualTo(1.0),
+                    // The ANGLE, not the absolute displacement: the probes are now placed from the band that
+                    // rendered, and a cos θ-thinner band brings them closer together, which would silently
+                    // relax an absolute bound. Threshold = the original 1.0 px over the original 12 px
+                    // separation, so the historical RED (3.94 px over 12 px) keeps its 3.9× margin.
+                    double skewPerSeparation = maxSkewPx / (2.0 * probeOffset);
+                    TestContext.WriteLine(
+                        $"T7: probe separation {2 * probeOffset} px, skew {maxSkewPx:F4} px ⇒ " +
+                        $"{skewPerSeparation:F5} px per px of separation (limit " +
+                        $"{T7MaxSkewPerSeparationPx:F5})");
+
+                    Assert.That(skewPerSeparation, Is.LessThanOrEqualTo(T7MaxSkewPerSeparationPx),
                         $"THE ROTATION: a dash boundary sits at arc length {maxSkew:F0} m " +
-                        $"({maxSkewPx:F3} px along the road) apart on the two ±{T7ProbeOffset} px probes, so " +
-                        "it is not perpendicular to the road. HISTORICALLY that was the sign term: the two " +
+                        $"({maxSkewPx:F3} px along the road) apart on the two ±{probeOffset} px probes — a " +
+                        $"skew of {skewPerSeparation:F5} px per px of separation, i.e. it " +
+                        "is not perpendicular to the road. HISTORICALLY that was the sign term: the two " +
                         "ribbon vertices of a station share one centreline point and carry opposite " +
                         "extrudeN, and the pre-S111 MapPixelsToWorld probed ONE-SIDED, so with the " +
                         "per-vertex divisor they got rulers (1+e)/(1−e) = 1.910 % apart and dashU differed " +

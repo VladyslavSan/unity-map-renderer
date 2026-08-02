@@ -97,11 +97,21 @@ float MapPixelsToWorld(float3 centerWS, float3 dirWS)
 
     float4 clipRef = TransformWorldToHClip(centerWS + dirWS * refMag);
 
-    // Fallback (~the un-foreshortened target) when either point is behind the camera and the perspective
-    // divide would be meaningless. The same test guards the division by clipCenter.w, which is why the
-    // w-ratio lives INSIDE this branch: the fallback is an approximation with no probe to correct.
+    // Fallback (~the un-foreshortened target) for the two states in which the probe carries no information:
+    // either endpoint behind the camera (the perspective divide is meaningless there), or a DEGENERATE
+    // dirWS. The same test guards the division by clipCenter.w, which is why the w-ratio lives INSIDE this
+    // branch: the fallback is an approximation with no probe to correct.
+    //
+    // dirWS == 0 is the ROUND-CAP PIVOT: Line_VertexExtrude zeroes unitDir_WS at a zero-extrudeN vertex on
+    // purpose, to keep the pivot on the centreline. A zero direction steps zero metres, so ndcDelta and
+    // refPx are both 0 and the clamp below would return refMag/0.1 — 51x the true scale at the AA fixture's
+    // ortho camera, which collapsed the round cap's ink once the width stopped sharing the same blown-up
+    // number and the error stopped cancelling. The fallback is the RIGHT answer here, not merely a safe one:
+    // refMag/(0.01*H) == 2*|w|/(P11*H) is metres per device pixel at THIS vertex's depth along an
+    // unforeshortened screen axis — direction-free, which is exactly what a zero direction asks for, and
+    // bitwise the ortho camera's MetresPerPx.
     float refPx = 0.01 * _ScreenParams.y;
-    if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
+    if (dot(dirWS, dirWS) > 1e-12 && clipCenter.w > 1e-5 && clipRef.w > 1e-5)
     {
         float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
         refPx = length(ndcDelta * 0.5 * _ScreenParams.xy) * (clipRef.w / clipCenter.w);

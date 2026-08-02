@@ -46,6 +46,7 @@ using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests.Text.Placement; // TestSymbolPlan, TestTileKeys
 using Line = MapRenderer.Core.Style.Line;
 using Symbol = MapRenderer.Core.Style.Symbol;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -158,6 +159,21 @@ namespace MapRenderer.Tests.Visual
             // the world origin. Ground half-height = altitude·tan(fov/2), over Size/2 device pixels.
             double altitude = math.length(mapCam.CameraRelativePosition);
             double halfFov  = math.radians(mapCam.CurrentProperties.VerticalFovDeg) * 0.5;
+            double metresPerDevicePx = 2.0 * altitude * math.tan(halfFov) / Size;
+
+            // The frame constant the line shader sizes every px-valued width with. It is PROCESS state, and
+            // this fixture used to push it nowhere at all — it built its materials through MaterialFactory +
+            // ZoomStyleApplier, never through the seam that pushed it — so the styled arm rendered against
+            // whatever ruler an earlier fixture in the batch had left behind (measured: MetersPerPixel(5.0)
+            // at a zoom-8 camera, a clean factor of 8, and a 16 px road that rendered 128 px). The
+            // MapCamera ctor syncs and therefore pushes, so the constant now arrives by construction —
+            // asserted here rather than trusted, because the failure mode is silent and reads as a
+            // conversion bug three subsystems away.
+            Assert.That((double)Shader.GetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel),
+                Is.EqualTo(metresPerDevicePx).Within(0.1).Percent,
+                $"at dpr {devicePixelRatio} the pushed frame constant must be this scene's own metres per " +
+                $"device px ({metresPerDevicePx:F6}). A stale value here scales every styled line width by " +
+                "exactly its own ratio and nothing else in the frame moves with it.");
 
             return new SweptScene
             {
@@ -165,7 +181,7 @@ namespace MapRenderer.Tests.Visual
                 UnityCamera       = uCam,
                 ViewportRt        = rt,
                 MapCam            = mapCam,
-                MetresPerDevicePx = 2.0 * altitude * math.tan(halfFov) / Size,
+                MetresPerDevicePx = metresPerDevicePx,
                 Frame = new SceneFrame
                 {
                     SceneOriginRender = mapCam.Projection.Project(
@@ -531,6 +547,61 @@ namespace MapRenderer.Tests.Visual
                 UnityEngine.Object.DestroyImmediate(lightGo);
                 RestoreAmbient(saved);
             }
+        }
+
+        // ── T2b — the ruler the styled arm is sized with ─────────────────────────────────────────
+
+        /// <summary>
+        /// <b>T2b (S116).</b> At BOTH ratios the pushed <c>_MapFrameMetersPerDevicePixel</c> equals this
+        /// scene's own metres per device pixel, and the pair halves exactly.
+        ///
+        /// <para>Named separately from the render arms because it is the tooth that would have made the S116
+        /// investigation one step long. The symptom was a styled 16 px road rendering 128 px at dpr 1 and
+        /// 161 px at dpr 2 — a ratio of 1.258 that looks like a broken conversion and sent the search to the
+        /// projection subsystem. The cause was neither: this fixture never pushed the global, so the shader
+        /// read <c>MetersPerPixel(5.0) = 2445.985</c> left behind by an earlier fixture while the camera stood
+        /// at zoom 8 (<c>305.748113</c>). 2445.985 / 305.748113 = 8.000 = 2³, three whole zoom levels — and a
+        /// 16 px band × 8 is exactly the 128 px measured. A globe-vs-Mercator mismatch at latitude 30 would
+        /// have been 1.1547, and this fixture is Mercator anyway.</para>
+        ///
+        /// <para>No render, so it cannot go Inconclusive on a headless GPU.</para>
+        /// </summary>
+        [Test]
+        public void FrameConstant_IsTheScenesOwnMetresPerDevicePixel_AtBothRatios()
+        {
+            int id = ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel;
+
+            double pushedAt1, sceneAt1, pushedAt2, sceneAt2;
+            // BuildScene's own precondition asserts the equality; these read the numbers back out so the
+            // RATIO clause below has both halves at once, which is what names the 8.000 rather than a
+            // per-ratio "it does not match".
+            using (var scene1 = BuildScene(Dpr1))
+            {
+                pushedAt1 = Shader.GetGlobalFloat(id);
+                sceneAt1  = scene1.MetresPerDevicePx;
+            }
+            using (var scene2 = BuildScene(Dpr2))
+            {
+                pushedAt2 = Shader.GetGlobalFloat(id);
+                sceneAt2  = scene2.MetresPerDevicePx;
+            }
+
+            TestContext.WriteLine(
+                $"T2b: dpr 1 pushed {pushedAt1:F6} vs scene {sceneAt1:F6}; " +
+                $"dpr 2 pushed {pushedAt2:F6} vs scene {sceneAt2:F6}; " +
+                $"stale/pushed at dpr 1 = {2445.985 / pushedAt1:F3}");
+
+            Assert.That(pushedAt1, Is.EqualTo(sceneAt1).Within(0.1).Percent,
+                $"dpr 1: the shader's ruler is {pushedAt1:F6} m/device px while the camera's is " +
+                $"{sceneAt1:F6}. A ratio of 8.000 means a stale MetersPerPixel(5.0) from another fixture.");
+            Assert.That(pushedAt2, Is.EqualTo(sceneAt2).Within(0.1).Percent,
+                $"dpr 2: the shader's ruler is {pushedAt2:F6} m/device px while the camera's is " +
+                $"{sceneAt2:F6}.");
+
+            Assert.That(pushedAt2, Is.EqualTo(0.5 * pushedAt1).Within(0.1).Percent,
+                $"the ruler must HALVE at dpr 2 ({pushedAt1:F6} → {pushedAt2:F6}): the altitude is framed " +
+                "from the logical viewport, so a device pixel covers half the ground. That halving is what " +
+                "makes a styled px width double on screen, matching the ground arm's 2.000.");
         }
 
         // ── T3 (load-bearing) ────────────────────────────────────────────────────────────────────

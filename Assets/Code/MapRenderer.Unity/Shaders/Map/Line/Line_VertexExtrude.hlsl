@@ -86,11 +86,21 @@ float MapPixelsToWorld(float3 centerWS, float3 dirWS)
 
     float4 clipRef = TransformWorldToHClip(centerWS + dirWS * refMag);
 
-    // Fallback (~the un-foreshortened target) when either point is behind the camera and the perspective
-    // divide would be meaningless. The same test guards the division by clipCenter.w, which is why the
-    // w-ratio lives INSIDE this branch: the fallback is an approximation with no probe to correct.
+    // Fallback (~the un-foreshortened target) for the two states in which the probe carries no information:
+    // either endpoint behind the camera (the perspective divide is meaningless there), or a DEGENERATE
+    // dirWS. The same test guards the division by clipCenter.w, which is why the w-ratio lives INSIDE this
+    // branch: the fallback is an approximation with no probe to correct.
+    //
+    // dirWS == 0 is the ROUND-CAP PIVOT: Line_VertexExtrude zeroes unitDir_WS at a zero-extrudeN vertex on
+    // purpose, to keep the pivot on the centreline. A zero direction steps zero metres, so ndcDelta and
+    // refPx are both 0 and the clamp below would return refMag/0.1 — 51x the true scale at the AA fixture's
+    // ortho camera, which collapsed the round cap's ink once the width stopped sharing the same blown-up
+    // number and the error stopped cancelling. The fallback is the RIGHT answer here, not merely a safe one:
+    // refMag/(0.01*H) == 2*|w|/(P11*H) is metres per device pixel at THIS vertex's depth along an
+    // unforeshortened screen axis — direction-free, which is exactly what a zero direction asks for, and
+    // bitwise the ortho camera's MetresPerPx.
     float refPx = 0.01 * _ScreenParams.y;
-    if (clipCenter.w > 1e-5 && clipRef.w > 1e-5)
+    if (dot(dirWS, dirWS) > 1e-12 && clipCenter.w > 1e-5 && clipRef.w > 1e-5)
     {
         float2 ndcDelta = (clipRef.xy / clipRef.w) - (clipCenter.xy / clipCenter.w);
         refPx = length(ndcDelta * 0.5 * _ScreenParams.xy) * (clipRef.w / clipCenter.w);
@@ -179,34 +189,85 @@ float3 Line_VertexExtrude(
     float3 upWS = normalize(TransformObjectToWorldNormal(input.normalOS));
     float3 centerWS = TransformObjectToWorld(input.positionOS.xyz);
 
-    // px→world scale ALONG THE ACROSS-DIRECTION, for the width-family properties below. Non-pixel widths are
-    // already world metres (×1); pixel widths measure it. This is the S104 measurement, extracted verbatim
-    // into MapPixelsToWorld above — same call, same direction, same result.
+    // ── THE TWO RULERS. Everything below reads exactly one of these, and which one is a DECISION ────────
     //
-    // NOTE the scope: this scalar is correct for width/gap/offset, all of which act along `across`. It is NOT
-    // a general metres-per-pixel and must not be reused for an offset in some other direction — that was the
-    // line-translate bug (see below).
-    float pxToWorld = (_WidthIsPixels > 0.5) ? MapPixelsToWorld(centerWS, unitDir_WS) : 1.0;
+    // (1) metresPerDevicePx — a MEASUREMENT at this vertex, along this direction. Read by every quantity
+    //     that is genuinely a property of the SAMPLING GRID rather than of the style: the AA straddle pad,
+    //     the min-width floor, and (via the pad) the _HAIRLINE_SOLID_CORE floor. Half a device pixel has to
+    //     be half a device pixel of the framebuffer wherever the vertex lands, at any depth.
+    // (2) pxToWorld — a frame CONSTANT (below). Read by the styled width family: width, gap, line-offset,
+    //     and the dash divisor. A styled `N px` fixes a WORLD size once; the perspective divide renders it.
+    //
+    // KEEP THEM DISTINCT AND KEEP THEM NAMED. Before S116 both were the same expression, so a consumer's
+    // ruler was whatever `pxToWorld` happened to be and the distinction lived only in prose. When the width
+    // moved to the frame constant, EVERY consumer of `pxToWorld` silently changed meaning; two of them were
+    // screen quantities and had to be moved back here (the AA pad, found in-stage; `minHalfWorld`, found in
+    // review). The full audit of ruler (2)'s consumers, so the next reader need not redo it:
+    //   widthWorld, gapWorld, _LineOffset  → frame constant, deliberate (the width model).
+    //   dashMetersPerUnit                  → reads the global directly, deliberate (S110).
+    //   aaPadWorld, minHalfWorld           → ruler (1). Screen quantities.
+    //   minWidthWorld (SolidCore)          → ruler (1), via aaPadWorld. Already correct.
+    //   line-translate                     → its own per-axis MapPixelsToWorld calls. Different direction.
+    //
+    // ONE probe serves all of ruler (1) — fewer than the two the AA-on path took before, and they cannot
+    // drift apart. This is NOT the §2.4 cancellation returning: that one shared a ruler between the width
+    // and the pad, and it is the WIDTH that is now on the other ruler.
+    float metresPerDevicePx = MapPixelsToWorld(centerWS, unitDir_WS);
+
+    // px→world scale ALONG THE ACROSS-DIRECTION, for the width-family properties below. Non-pixel widths are
+    // already world metres (×1).
+    //
+    // A FRAME CONSTANT, not a per-vertex probe: `line-width: N px` fixes a WORLD width once, and the
+    // perspective divide alone decides what that renders as at any depth. No depth term, no direction, no
+    // sign, identical at every vertex — so any interpolant of a quantity derived from it is exact. Full
+    // derivation, and why four stages of per-vertex compensation were reverted, in
+    // docs/line-rendering-design.md §1.
+    //
+    // SCOPE: a unit CONVERSION for the width family (width / gap / line-offset), a literal 1.0 when the
+    // width is already world metres. It is NOT a metres-per-pixel scale — anything that genuinely wants a
+    // screen quantity at THIS vertex takes ruler (1) above (the AA pad, the min-width floor) or measures its
+    // own axis (line-translate).
+    //
+    // The > 1e-9 branch is a MISSING-PUSH fail-safe, not a fallback model. The global is pushed from
+    // MapCamera.SyncToCamera, so it is unreachable in production and in any fixture that builds a MapCamera;
+    // reaching it means some render path forgot to push it. Falling back to the per-vertex measurement is
+    // chosen only because it renders a plausibly-sized line. Without it, 0 gives widthWorld = 0 and every
+    // road of every styled width collapses to the same 1 device-px hairline — MEASURED, not assumed: the AA
+    // pad is still extruded, so the frame is not quite empty, and a uniform hairline is arguably a worse
+    // diagnostic than an empty one because it looks like a plausible render. Either way it presents as a
+    // defect in something other than the missing push, which is exactly what happened in S116. Branches on a
+    // uniform, so the control flow is uniform and no wave diverges. Pinned by T7.
+    float pxToWorld = (_WidthIsPixels > 0.5)
+        ? ((_MapFrameMetersPerDevicePixel > 1e-9) ? _MapFrameMetersPerDevicePixel : metresPerDevicePx)
+        : 1.0;
 
 #if !defined(_EDGE_ANTIALIASING_OFF)
     // ── AA straddle pad ───────────────────────────────────────────────────────
-    // HALF A DEVICE PIXEL, in world metres, ALWAYS MEASURED. `pxToWorld` above is a unit-CONVERSION
-    // factor — a literal 1.0 when the width is already in world metres — not a metres-per-pixel scale,
-    // so `0.5 * pxToWorld` would pad a world-unit layer by half a METRE (~1.8 px at the test camera)
-    // while looking correct on a pixel-width one. For a pixel-width layer the measurement is exactly what
-    // pxToWorld already holds, so it is reused rather than taken a second time.
-    float aaPadWorld = 0.5 * ((_WidthIsPixels > 0.5) ? pxToWorld
-                                                     : MapPixelsToWorld(centerWS, unitDir_WS));
+    // HALF A DEVICE PIXEL, in world metres, ALWAYS MEASURED — in BOTH width modes. Unlike the styled width
+    // this genuinely IS a screen quantity: the ramp must land on one device pixel of the framebuffer
+    // wherever this vertex happens to sit, so it wants the per-vertex, per-direction measurement and not
+    // the frame constant. (`pxToWorld` could not serve it anyway: it is a unit conversion and reads a
+    // literal 1.0 for a world-unit layer, which would pad by half a METRE.)
+    //
+    // The width and the pad therefore no longer share one number. They used to, and that hid a defect: at
+    // the round-cap pivot MapPixelsToWorld's degenerate-direction case blew up 51x, both terms inherited it
+    // and it cancelled out of hairlineScale. Fixed at source in MapPixelsToWorld above — do NOT re-couple
+    // the pad to the WIDTH to make a cap tooth go green. (Sharing ruler (1) with minHalfWorld is a different
+    // thing entirely and is correct: they are the same physical quantity, half a device pixel here.)
+    float aaPadWorld = 0.5 * metresPerDevicePx;
 #endif
 
     // Width / gap / outer radius in world metres (widthScale = per-feature; gap is layer-level).
-    // widthWorld is the STYLED width AS MEASURED AT THIS VERTEX — right for extrusion, wrong for dashes.
+    // widthWorld is the STYLED width as a WORLD length, identical at every vertex of the frame.
     float widthWorld = _Width * input.widthScale * pxToWorld;
 
-    // Metres of road per DASH UNIT — the same styled width, measured with the FRAME-CONSTANT ruler instead
-    // of this vertex's own. A dash length is specified in line-width units, so the divisor inherits every
-    // way its ruler varies, and dashU INTEGRATES that along the road while every other consumer of
-    // pxToWorld is bounded by the styled width. MapPixelsToWorld varies four ways, all of which showed:
+    // Metres of road per DASH UNIT — the same styled width on the same frame-constant ruler, written out
+    // rather than reusing widthWorld because it must NOT pick up the missing-push fallback branch above:
+    // dashes have their own documented fail-safe (a divisor of 0 ⇒ dashU 0 ⇒ uniform half coverage, a
+    // visible line with no dash edges), and mixing the two would trade a benign symptom for a subtle one.
+    // A dash length is specified in line-width units, so the divisor inherits every way its ruler varies,
+    // and dashU INTEGRATES that along the road while every other consumer of pxToWorld is bounded by the
+    // styled width. The per-vertex MapPixelsToWorld this replaced varies four ways, all of which showed:
     //   1. with DEPTH            → the world period grew with distance; the pattern crawled under tilt.
     //   2. with DIRECTION        → measured along `across` while dashes run `along`, so two roads at equal
     //                              depth with perpendicular bearings got different periods.
@@ -242,6 +303,12 @@ float3 Line_VertexExtrude(
     // aaPadWorld is half a device pixel in world metres, so 2·aaPadWorld is one device pixel — which is
     // why the pad block above had to move ahead of this one. It is measured in BOTH width modes, so
     // unlike the min-width floor this works for world-unit widths too.
+    //
+    // NOTE that the floor is a DEVICE-PIXEL floor and the width is now a WORLD length, so unlike before
+    // pxToWorld no longer cancels out of hairlineScale: a pixel-width hairline recedes, its world width
+    // holds, and the clamp engages progressively with depth while the compensation dims it to match. That
+    // is the intended behaviour of a world-width model — a receding hairline keeps a solid 2 px core and
+    // pays for it in alpha — and it is why A7.3 asserts smooth degradation rather than constancy.
     float minWidthWorld = HAIRLINE_MIN_WIDTH_PX * (2.0 * aaPadWorld);
     renderWidthWorld    = max(widthWorld, minWidthWorld);
     hairlineScale       = saturate(widthWorld / max(renderWidthWorld, 1e-9));
@@ -252,16 +319,25 @@ float3 Line_VertexExtrude(
     float gapWorld   = _GapWidth * pxToWorld;
     float outerWorld = (gapWorld > 1e-6) ? (0.5 * gapWorld + renderWidthWorld) : (0.5 * renderWidthWorld);
 
-    // Min-width floor (pixel widths only): half-width never below 0.5 px ⇒ a stable 1 px hairline.
-    // Still needed with the straddle: it floors the STYLED half-width, which is what the ramp's 50%
-    // contour sits on.
+    // Min-width floor (pixel widths only): half-width never below 0.5 DEVICE px AT THIS VERTEX ⇒ a stable
+    // 1 px hairline at any depth. Still needed with the straddle: it floors the STYLED half-width, which is
+    // what the ramp's 50% contour sits on.
+    //
+    // RULER (1), the per-vertex measurement — not pxToWorld. A legibility floor is a sampling-grid quantity,
+    // exactly like the AA pad it is written next to: a road that has thinned to nothing on screen must be
+    // rescued WHERE it thinned. On the frame constant this would be half a device pixel at the look-at and a
+    // fixed world length everywhere else, so a 1 px road at 3x the look-at depth would render ~0.33 px with
+    // no floor at all. That is what this line silently became when the width moved to the frame constant and
+    // this expression did not — no textual change, meaning inverted. It is invisible to the whole suite,
+    // because every hairline arm runs the top-down ORTHOGRAPHIC fixture where the two rulers are bitwise
+    // equal; see the dev report's recorded gap.
     //
     // NOTE it cannot bind under _HAIRLINE_SOLID_CORE: that clamp already forces the extruded half-width to
     // at least HAIRLINE_MIN_WIDTH_PX/2 + 0.5 = 1.5 px, above this floor's 1.0 px, so the max() below always
     // takes the miter branch. That is deliberate — proportionality below 1 px is exactly what SolidCore
     // buys with it — but it means a sub-pixel line genuinely fades there instead of holding a 1 px
     // hairline. Recorded in the shader README's strategy comparison; do not "fix" it here.
-    float minHalfWorld = (_WidthIsPixels > 0.5) ? (0.5 * pxToWorld) : 0.0;
+    float minHalfWorld = (_WidthIsPixels > 0.5) ? (0.5 * metresPerDevicePx) : 0.0;
 #if defined(_EDGE_ANTIALIASING_OFF)
     float3 lateralWS = unitDir_WS * max(miter * outerWorld, minHalfWorld);
 #else
