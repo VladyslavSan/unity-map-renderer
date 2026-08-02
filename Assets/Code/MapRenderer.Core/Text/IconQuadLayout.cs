@@ -51,9 +51,26 @@ namespace MapRenderer.Core.Text
             minY += offsetPx.y;
             maxY += offsetPx.y;
 
-            // UVs use the RAW sheet rect — pixelRatio only divides the logical SIZE, never the UV rect.
-            float2 uvTopLeft = new float2(entry.X, entry.Y) / sheetSize;
-            float2 uvBottomRight = new float2(entry.X + entry.Width, entry.Y + entry.Height) / sheetSize;
+            // UVs use the RAW sheet rect — pixelRatio only divides the logical SIZE, never the UV rect —
+            // INSET BY HALF A TEXEL on every side, so the quad's edges land on the outermost texels' CENTRES
+            // rather than on their outer edges.
+            //
+            // The inset is what makes bilinear filtering safe here (SpriteSheet binds the sheet
+            // FilterMode.Bilinear — see its note for why). The sprite-sheet format does not reserve any
+            // inter-sprite padding, and real sheets have none: the shipped liberty style's sheet was
+            // measured at 371 ABUTTING sprite pairs and not one separated by even a single pixel. So an
+            // edge-to-edge rect puts the quad's boundary exactly on the seam between this sprite and its
+            // neighbour, where a bilinear tap blends the two 50/50. Pinned by
+            // SymbolIconResamplingTests.IconSampling_NeverBleedsTheNeighbouringSprite.
+            //
+            // The cost is that the sprite's outer half-texel band is not drawn, so its content renders
+            // W/(W-1) larger than the quad implies, and that grows as sprites shrink: ~4.8% for a typical
+            // 22px sheet rect, ~14% for an 8px one. It lands on the transparent margin any normally-authored
+            // icon carries, so it reads as a slightly fatter glyph rather than a crop. The alternative that
+            // avoids both (clamping the sample to the rect in the shader) needs the rect passed per-vertex.
+            float2 halfTexel = new float2(0.5f, 0.5f) / sheetSize;
+            float2 uvTopLeft = new float2(entry.X, entry.Y) / sheetSize + halfTexel;
+            float2 uvBottomRight = new float2(entry.X + entry.Width, entry.Y + entry.Height) / sheetSize - halfTexel;
 
             return new SymbolQuad
             {

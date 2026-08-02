@@ -729,6 +729,82 @@ pre-baked** — decoded once, never grows, UVs are stable. So the icon atlas is 
 `SpriteIndex` (name → rect) over an immutable texture. `pixelRatio` is the sheet's DPI scale: the sprite's
 **logical** size is `width/pixelRatio` × `height/pixelRatio`, and `icon-size` scales *that*.
 
+### 5.2.1 Sampling the sheet — bilinear + a half-texel inset (settled)
+
+The sheet binds **`FilterMode.Bilinear`**, and `IconQuadLayout` insets each sprite's UV rect by **half a
+texel** on every side. The two are one decision and neither is correct alone.
+
+**Why not nearest-neighbour.** An icon's magnification is `icon-size × dpr / pixelRatio`. The sheet is
+fetched @1x and `dpr` is `Screen.dpi / 160`, so the product is essentially never an integer — and
+nearest-neighbour is exact *only* at integer magnification. Off it, each source texel covers `N` or `N+1`
+device pixels and **which** depends on the quad's sub-pixel phase, so panning re-quantises an icon's
+interior every frame. That was the reported bug: "pixels inside the icon warp while zooming/panning".
+
+The diagnosis turned on one structural fact, not on measurement: `BillboardMath.BuildWorldQuad` gives all
+four corners the **same bitwise `anchorLocal`** plus static per-corner `OffsetPx`, so a quad is **rigid** in
+screen space. An anchor precision error therefore *translates* an icon and can never deform its interior —
+which rules out the entire geometry/precision family and leaves resampling.
+
+**Why the inset.** A sprite's UV rect ran exactly texel-edge to texel-edge. The sheet format reserves no
+inter-sprite padding and real sheets carry none — the shipped liberty style's sheet
+(`tiles.openfreemap.org/sprites/ofm_f384/ofm`) measures **371 abutting sprite pairs and zero separated by
+even one pixel** — so a bilinear tap at the rect boundary blends the neighbouring sprite 50/50. Insetting to
+the outermost texels' **centres** removes the reach-across.
+
+*(Measured from the published sheet + its JSON index, which are style assets, not implementation. This repo
+is clean-room with respect to MapLibre: no MapLibre source has been read, and no design here is justified by
+what their implementation does.)*
+
+Cost: the outer half-texel band is not drawn, so content renders `W/(W-1)` larger than the quad implies —
+and that grows as sprites shrink.
+
+| sheet rect `W` | content magnification | cropped per side |
+|---|---|---|
+| 8 px (`dot`, `sample-sprite.json`) | 14.3% | 6.3% |
+| 22 px (`airport-11`, §5.2's example) | 4.8% | 2.3% |
+| 64 px | 1.6% | 0.8% |
+
+It lands on the transparent margin any normally-authored icon carries, so it reads as a slightly fatter
+glyph rather than a crop. The alternative that avoids both — clamping the sample to the rect in the shader —
+needs the rect passed per-vertex, which is not worth it at these magnitudes. Repacking the sheet with
+per-sprite padding at decode time would also avoid both, at the cost of a repacker.
+
+**Still no mip chain.** Mips on a *packed* atlas average neighbouring sprites together at every level ≥ 1 —
+a worse artifact than the minification aliasing they would fix.
+
+**Teeth** (`SymbolIconResamplingTests`): a sub-pixel **phase sweep** — the same icon rendered across one
+full device pixel of shift in eighths, asserting the ink's centroid advances every step. Nearest-neighbour's
+smallest advance is exactly `0.000` px (measured: the centroid sat on 129.000 px for three consecutive
+phases); bilinear advances ~0.125 px each. A second test renders one sprite of an adjacent pair and asserts
+no pixel carries the neighbour's hue — that one is **green under nearest-neighbour** and exists to fence the
+fix: it goes red if the inset is ever dropped.
+
+**OPEN — the filter change reaches `fill-pattern` too.** `filterMode` is state on the **texture**, not on a
+sampler, and `RenderLayerSet` binds ONE shared sprite texture — as `_MainTex` for icon materials and
+`_PatternMap` for fill layers. So moving the sheet to bilinear also moved pattern sampling, which
+`Fill_LitInput.hlsl:222` had already named as a hazard ("under bilinear filtering, bleeds in whichever
+neighbouring sprite is packed next door in the sheet"). `SampleFillPattern` wraps with `frac()` **inside**
+the rect and samples it edge-to-edge, so each tiling seam now blends whatever abuts that sprite. The
+explicit-gradient sample fixes the derivative/mip discontinuity at the seam, not this.
+
+Live in the shipped style: `landcover_wetland` (`wetland_bg_11`, 15×15) and `road_area_pattern`
+(`pedestrian_polygon`, 64×64); both abut neighbours with a zero-pixel gap, so both bleed. **No test covers
+it** — `FillPatternSnapshotTests` builds its own `FilterMode.Point` texture and never touches `SpriteSheet`.
+
+Containment is one line: sample the pattern through an explicit point sampler state so pattern filtering
+stops depending on the texture's `filterMode`. The padded-repack stage supersedes it — see below.
+
+**Where the repack goes.** Give every sprite a one-texel border at decode time, with content chosen by role:
+**transparent** (alpha 0, RGB replicated from the edge, so the ramp interpolates colour→same colour and
+alpha 1→0) for icons, so the silhouette has a texel to ramp into; **wrap-replicated** (the opposite edge)
+for patterns, so a bilinear tap at a tiling seam blends the pixels the tile actually continues into. One
+mechanism, two border fills. It also retires the half-texel inset and its 4.8–14% content magnification.
+
+**Why this shipped.** Every pre-existing icon test renders ONE static frame, and no static frame can see a
+defect whose whole signature is "the render changes when it should not". The trap compounds: at exactly 1×
+magnification nearest-neighbour is a pixel-perfect blit, so the defect is invisible at the one setting an
+eyeball would check first.
+
 ## 5.3 Architecture — where each piece lives (mirrors the text path)
 
 | Concern | Text (existing) | Icon (this epic) |

@@ -63,7 +63,19 @@ namespace MapRenderer.Unity.Text
 
             FlipRowsInPlace(tex);
 
-            tex.filterMode = FilterMode.Point;
+            // BILINEAR, not Point. An icon's magnification is `icon-size * dpr / pixelRatio`; the sheet is
+            // always fetched @1x and dpr is Screen.dpi/160, so it is essentially never an integer — and
+            // nearest-neighbour is exact ONLY at integer magnification. Off it, each texel covers N or N+1
+            // device pixels depending on the quad's sub-pixel phase, so panning re-quantises an icon's
+            // interior every frame: the icon's pixels visibly warp. Pinned by
+            // SymbolIconResamplingTests.IconInterior_TracksSubPixelPhaseSmoothly.
+            //
+            // The paired half-texel UV inset lives in IconQuadLayout — WITHOUT it bilinear's edge taps reach
+            // into the sprite packed alongside this one. Do not change one without the other.
+            //
+            // Still no mip chain (see the ctor above): mips on a PACKED atlas average neighbouring sprites
+            // together at every level >= 1, which is a worse artifact than the minification aliasing they fix.
+            tex.filterMode = FilterMode.Bilinear;
             tex.wrapMode = TextureWrapMode.Clamp;
 
             _texture = tex;

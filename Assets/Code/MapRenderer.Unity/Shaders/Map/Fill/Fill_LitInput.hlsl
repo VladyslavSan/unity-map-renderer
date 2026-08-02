@@ -214,6 +214,23 @@ TEXTURE2D(_ClearCoatMap);       SAMPLER(sampler_ClearCoatMap);
 // above, where every material property must live) carries the sheet dimensions.
 TEXTURE2D(_PatternMap);         SAMPLER(sampler_PatternMap);
 
+// The pattern is sampled through this INLINE sampler state, not through sampler_PatternMap, so that pattern
+// filtering does not depend on the shared texture's filterMode. That coupling is not hypothetical: the
+// sheet moved to FilterMode.Bilinear to fix icon resampling (docs/labels-and-symbols-design.md §5.2.1), and
+// because filterMode is state on the TEXTURE rather than on a sampler, it silently changed pattern sampling
+// too — the exact bleed the SampleFillPattern note below had already named. A pattern wraps with frac()
+// INSIDE its rect and samples it edge-to-edge, so a bilinear tap at a tiling seam reaches into whichever
+// sprite abuts it in the sheet (in the shipped style, wetland_bg_11 and pedestrian_polygon both abut a
+// neighbour with a zero-pixel gap).
+//
+// Point is what patterns rendered with before that change, so this restores them exactly rather than
+// trading one artifact for another. It is a CONTAINMENT, not the destination: the padded-repack stage gives
+// each sprite a wrap-replicated border, after which a pattern can take a correctly-filtered bilinear tap at
+// its seam and this inline sampler goes away.
+//
+// sampler_PointClamp is NOT declared here — Core.hlsl (included above) pulls in the core library's
+// GlobalSamplers.hlsl, which declares the whole inline-sampler set. Redeclaring it is a redefinition error.
+
 // Samples the fill-pattern sprite at tile-normalized `uv`, tiling it _PatternScale times across the tile.
 // Returns the sprite texel; `clipped` is true when this is a pattern layer whose sprite did not resolve.
 //
@@ -243,7 +260,7 @@ half4 SampleFillPattern(float2 uv, out bool clipped)
     float2 gradX       = ddx(patternUv) * texelPerUv;
     float2 gradY       = ddy(patternUv) * texelPerUv;
 
-    return SAMPLE_TEXTURE2D_GRAD(_PatternMap, sampler_PatternMap, spriteUv, gradX, gradY);
+    return SAMPLE_TEXTURE2D_GRAD(_PatternMap, sampler_PointClamp, spriteUv, gradX, gradY);
 }
 
 #ifdef _SPECULAR_SETUP

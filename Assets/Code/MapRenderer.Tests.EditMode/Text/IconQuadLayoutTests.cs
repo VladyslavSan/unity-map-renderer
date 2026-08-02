@@ -14,6 +14,13 @@ namespace MapRenderer.Tests
     /// hand-pinned rather than re-derived, so a formula regression (e.g. UV accidentally divided by
     /// <see cref="SpriteEntry.PixelRatio"/>) is caught by a literal mismatch. Engine-free; runs in both
     /// runners.
+    ///
+    /// <para>Every UV expectation below is the raw sheet rect INSET BY HALF A TEXEL on each side —
+    /// <c>0.5/64 == 0.0078125</c> exactly, so the literals stay exact. The inset is what makes the sheet's
+    /// bilinear filtering safe (see <see cref="IconQuadLayout"/> and <c>SpriteSheet</c>); each expectation
+    /// carries its own derivation in a trailing comment. They remain hand-written literals ON PURPOSE:
+    /// re-deriving them from <c>entry.X / sheetSize + halfTexel</c> would just restate the implementation
+    /// and could not fail.</para>
     /// </summary>
     [TestFixture]
     public class IconQuadLayoutTests
@@ -30,9 +37,11 @@ namespace MapRenderer.Tests
         [Test]
         public void Star_CenterAnchor_IconSize1_LogicalSizeAndUvBothCorrect()
         {
-            // The UV/pixelRatio RED tooth: star is @2x, so logical size (24/2=12) and the UV rect (raw
-            // 24px extent, NEVER divided by pixelRatio) must diverge from each other — asserting both in
-            // one test catches an implementation that mistakenly divides the UV rect too.
+            // The UV/pixelRatio RED tooth: star is @2x, so logical size (24/2=12) and the UV rect (spanning
+            // the raw 24px extent, NEVER divided by pixelRatio) must diverge from each other — asserting
+            // both in one test catches an implementation that mistakenly divides the UV rect too. The
+            // half-texel inset does not blunt this: the UV extent below is 23/64, i.e. (Width-1) texels of
+            // a 24px sprite, still nowhere near the 12px a pixelRatio division would produce.
             SymbolQuad quad = IconQuadLayout.Layout(Star, SheetSize, 1f, TextAnchor.Center, float2.zero);
 
             Assert.AreEqual(-6f, quad.TopLeft.x, Eps);
@@ -40,14 +49,14 @@ namespace MapRenderer.Tests
             Assert.AreEqual(6f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-6f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0.25f, quad.UvTopLeft.x, Eps);
-            Assert.AreEqual(0f, quad.UvTopLeft.y, Eps);
-            Assert.AreEqual(0.625f, quad.UvBottomRight.x, Eps);
-            Assert.AreEqual(0.375f, quad.UvBottomRight.y, Eps);
+            Assert.AreEqual(0.2578125f, quad.UvTopLeft.x, Eps);     // 16/64 + 0.5/64
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.6171875f, quad.UvBottomRight.x, Eps); // 40/64 - 0.5/64
+            Assert.AreEqual(0.3671875f, quad.UvBottomRight.y, Eps); // 24/64 - 0.5/64
         }
 
         [Test]
-        public void Marker_CenterAnchor_IconSize1_UvMatchesRawRect()
+        public void Marker_CenterAnchor_IconSize1_UvIsTheRawRectInsetByHalfATexel()
         {
             SymbolQuad quad = IconQuadLayout.Layout(Marker, SheetSize, 1f, TextAnchor.Center, float2.zero);
 
@@ -56,10 +65,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(8f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-8f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0f, quad.UvTopLeft.x, Eps);
-            Assert.AreEqual(0f, quad.UvTopLeft.y, Eps);
-            Assert.AreEqual(0.25f, quad.UvBottomRight.x, Eps);
-            Assert.AreEqual(0.25f, quad.UvBottomRight.y, Eps);
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.2421875f, quad.UvBottomRight.x, Eps); // 16/64 - 0.5/64
+            Assert.AreEqual(0.2421875f, quad.UvBottomRight.y, Eps); // 16/64 - 0.5/64
         }
 
         [Test]
@@ -73,10 +82,10 @@ namespace MapRenderer.Tests
             Assert.AreEqual(8f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-8f, quad.BottomRight.y, Eps);
 
-            Assert.AreEqual(0f, quad.UvTopLeft.x, Eps);
-            Assert.AreEqual(0.5f, quad.UvTopLeft.y, Eps);
-            Assert.AreEqual(0.125f, quad.UvBottomRight.x, Eps);
-            Assert.AreEqual(0.625f, quad.UvBottomRight.y, Eps);
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.5078125f, quad.UvTopLeft.y, Eps);     // 32/64 + 0.5/64
+            Assert.AreEqual(0.1171875f, quad.UvBottomRight.x, Eps); //  8/64 - 0.5/64
+            Assert.AreEqual(0.6171875f, quad.UvBottomRight.y, Eps); // 40/64 - 0.5/64
         }
 
         [Test]
@@ -89,11 +98,12 @@ namespace MapRenderer.Tests
             Assert.AreEqual(16f, quad.BottomRight.x, Eps);
             Assert.AreEqual(-16f, quad.BottomRight.y, Eps);
 
-            // UV is unaffected by icon-size — it indexes the sheet, not the drawn extent.
-            Assert.AreEqual(0f, quad.UvTopLeft.x, Eps);
-            Assert.AreEqual(0f, quad.UvTopLeft.y, Eps);
-            Assert.AreEqual(0.25f, quad.UvBottomRight.x, Eps);
-            Assert.AreEqual(0.25f, quad.UvBottomRight.y, Eps);
+            // UV is unaffected by icon-size — it indexes the sheet, not the drawn extent. Byte-identical to
+            // the iconSize-1 case above, which is the whole point of this test.
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.x, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.0078125f, quad.UvTopLeft.y, Eps);     //  0/64 + 0.5/64
+            Assert.AreEqual(0.2421875f, quad.UvBottomRight.x, Eps); // 16/64 - 0.5/64
+            Assert.AreEqual(0.2421875f, quad.UvBottomRight.y, Eps); // 16/64 - 0.5/64
         }
 
         [Test]
