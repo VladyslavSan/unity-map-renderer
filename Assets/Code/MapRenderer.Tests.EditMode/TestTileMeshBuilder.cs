@@ -26,7 +26,11 @@ namespace MapRenderer.Tests
         public static Mesh BuildFill(
             IReadOnlyList<ITileFeature> features, Fill.PaintProperties paint,
             double zoom, double extent, TileId id, IProjection projection = null,
-            Fill.LayoutProperties layout = null) // null ⇒ no fill-sort-key (declared feature order)
+            Fill.LayoutProperties layout = null, // null ⇒ no fill-sort-key (declared feature order)
+            // A parity oracle comparing this against the MapView path MUST pass the same clip the view is
+            // configured with; leaving it default builds the reference arm under a DIFFERENT window, and the
+            // comparison silently stops being one.
+            TileBufferClip clip = default)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
@@ -34,7 +38,7 @@ namespace MapRenderer.Tests
             // (id, projection) here (NOT a caller-supplied Mercator origin) so a globe fixture bakes correctly.
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
             StyledFillTileBuilder.WriteMeshData(mda[0], features, paint, zoom, extent, id,
-                renderOrigin, out int vertexCount, out Bounds bounds, projection, layout);
+                renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip);
             return Finish(mda, vertexCount, bounds, "TestFill");
         }
 

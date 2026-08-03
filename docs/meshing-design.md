@@ -658,14 +658,22 @@ knob exists for. The comments at all three sites now state this instead of promi
 *Fix shape:* put the bake parameters in the cache key (or fold them into `StyleToken`), which also makes the
 `Clear()` unnecessary. Nothing currently tests a live config change with a tile cycling through cover.
 
-**F-CLIP-2 — flip the default to 0.** T5 measured a **zero-pixel** crack at `b = 0` at both altitudes, so the
-hazard the non-zero default hedges against is not real. What blocks 0 is not rendering: two **parity oracles**
-(`MapViewAsyncMeshBuildTests.Tooth3`, `MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder`)
-compare the MapView path against the direct sync builder, and the reference arm passes no clip ⇒ disabled. At
-any non-default value the two arms build under *different parameters* and the oracle stops being a comparison.
-They are green at 16 only because `sample-tile`'s 6-unit overshoot happens to fit inside a 16-unit window —
-luck, not design. Pass the same `TileBufferClip` to both arms; that **restores** their precondition rather
-than weakening it. Then flip to 0, with an aesthetic eyeball on a real basemap as the only human step.
+**F-CLIP-2 — flip the default to 0. DONE 2026-08-03.** T5 measured a **zero-pixel** crack at `b = 0` at
+both altitudes, and the maintainer confirmed it on a real basemap ("at 0 buffer it works okay"), so the
+hazard the non-zero default hedged against is not real and the knob now defaults to **0**.
+
+What had blocked it was never rendering. Two **parity oracles**
+(`MapViewAsyncMeshBuildTests.Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath`,
+`MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder`) compare the MapView path against
+the direct sync builder, and the reference arm passed **no clip** — so at any non-disabled default the two
+arms built under *different windows* and the oracle silently stopped being a comparison. They were green at
+16 only because `sample-tile`'s 6-unit overshoot fits inside a 16-unit window: luck, not design.
+Both arms now decode the same config field through `TileBufferClip.FromInspectorUnits` — which **restores**
+the precondition rather than relaxing it — and both pass at 0. That factory also absorbed the review NIT
+about the negative-means-disabled sentinel being inline in `MapView`, unreachable and untested.
+
+*Left deliberately:* `BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh` also calls `BuildFill`, but
+compares two direct-builder paths that never read config, so it was never affected and takes no clip.
 
 **F-CLIP-3 — arm the two would-be falsifiers.** `A6NonMvtDecoderTests` and `TileBackgroundQuadProjectionTests`
 assert the synthetic full-extent ring produces exactly 4 vertices, and the plan leaned on them as free

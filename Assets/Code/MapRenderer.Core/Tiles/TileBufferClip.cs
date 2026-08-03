@@ -35,6 +35,19 @@ namespace MapRenderer.Core.Tiles
         /// <summary>Keep <paramref name="unitsAtReferenceExtent"/> tile units of buffer on every side, measured
         /// at <see cref="ReferenceExtent"/>. Negative input clamps to 0 (cut at the tile boundary) rather than
         /// eroding into the tile.</summary>
+        /// <summary>
+        /// Decodes an Inspector-authored margin, which carries one state this value type does not:
+        /// <b>negative means "do not run the clip stage at all"</b>, which is NOT the same as a zero margin
+        /// ("cut exactly at the tile boundary"). <see cref="KeepTileUnits"/>'s clamp is the invariant of an
+        /// already-enabled margin, so the two meanings never meet.
+        ///
+        /// <para>This lives here rather than at the Inspector boundary so that every consumer decodes the
+        /// same field identically — in particular the parity oracles, whose reference arm must build under
+        /// the SAME window as the arm it is compared against or it stops being a comparison.</para>
+        /// </summary>
+        public static TileBufferClip FromInspectorUnits(double unitsAtReferenceExtent)
+            => unitsAtReferenceExtent < 0.0 ? Disabled : KeepTileUnits(unitsAtReferenceExtent);
+
         public static TileBufferClip KeepTileUnits(double unitsAtReferenceExtent)
             => new TileBufferClip(
                 // NaN is rejected explicitly, not clamped: math.max(0, NaN) IS NaN (the comparison is

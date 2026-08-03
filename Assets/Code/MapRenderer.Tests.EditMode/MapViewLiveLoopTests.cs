@@ -176,7 +176,11 @@ namespace MapRenderer.Tests
                 Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
                 Mesh directMesh = TestTileMeshBuilder.BuildFill(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
+                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                    // Same window as the MapView arm — decoded through the SAME factory the view
+                    // uses. Without this the reference arm builds unclipped and the oracle silently
+                    // stops being a comparison the moment the config default is non-disabled.
+                    clip: MapRenderer.Core.Tiles.TileBufferClip.FromInspectorUnits(view.Config.FillTileBufferClip));
 
                 Assert.IsNotNull(directMesh,
                     "StyledFillTileBuilder.BuildMesh must produce a mesh for the 'countries' layer");
