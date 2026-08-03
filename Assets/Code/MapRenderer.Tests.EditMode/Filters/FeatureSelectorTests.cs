@@ -192,5 +192,64 @@ namespace MapRenderer.Tests.Filters
             var result = FeatureSelector.SelectFeatures(null, tile);
             Assert.That(result.Count, Is.EqualTo(0), "Null StyleLayer should yield empty selection");
         }
+
+        // ── Compiled-filter memo ──────────────────────────────────────────────────────────────────
+        // Every case below uses an ARRAY filter on purpose. Compile() returns shared MatchAll/MatchNone
+        // SINGLETONS for null and for bare true/false, so a reference-equality tooth written against
+        // those would pass with no memo at all — it cannot discriminate. An array filter is the value
+        // where the code is not inert: uncached, each Compile allocates a fresh CompiledFilter.
+
+        private const string ArrayFilter = "[\"==\",\"$type\",\"LineString\"]";
+
+        [Test]
+        public void CompiledFilter_SameLayer_IsCompiledOnce()
+        {
+            var layer = MakeLayer("roads", ArrayFilter);
+            Assert.AreSame(FeatureSelector.FilterFor(layer), FeatureSelector.FilterFor(layer),
+                "An array filter must be compiled once and reused — a second CompiledFilter instance " +
+                "means the memo missed and the filter was recompiled.");
+        }
+
+        [Test]
+        public void CompiledFilter_DistinctFilterNodes_DoNotShare()
+        {
+            // Same filter TEXT, two independently parsed nodes: the memo must key on the node, so these
+            // are two entries. Guards against a "cache" that collapses onto one global CompiledFilter.
+            Assert.AreNotSame(
+                FeatureSelector.FilterFor(MakeLayer("roads", ArrayFilter)),
+                FeatureSelector.FilterFor(MakeLayer("roads", ArrayFilter)),
+                "Two separately parsed filter nodes must compile to two CompiledFilters.");
+        }
+
+        [Test]
+        public void CompiledFilter_ReassignedFilter_IsRecompiled()
+        {
+            // StyleLayer.Filter is a public mutable field. Keying the memo on the LAYER would serve the
+            // stale compile here; keying on the node misses and recompiles. This is the assertion that
+            // makes the choice of key load-bearing rather than incidental.
+            var layer = MakeLayer("roads", ArrayFilter);
+            var before = FeatureSelector.FilterFor(layer);
+
+            layer.Filter = JsonParser.Parse("[\"==\",\"$type\",\"Point\"]");
+            var after = FeatureSelector.FilterFor(layer);
+
+            Assert.AreNotSame(before, after, "Reassigning Filter must not keep serving the old compile.");
+
+            var tile = BuildTile();
+            Assert.That(FeatureSelector.SelectFeatures(layer, tile).Count, Is.EqualTo(1),
+                "…and the new filter must actually be the one applied: 'roads' holds 1 Point feature.");
+        }
+
+        [Test]
+        public void CompiledFilter_MalformedFilter_ThrowsEveryTime()
+        {
+            // Nothing is memoized on the throwing path, so the second call must throw too rather than
+            // silently succeeding off a half-populated entry.
+            var layer = MakeLayer("roads", "[\"==\"]");
+            Assert.Throws<MapRenderer.Core.Expressions.ExpressionParseException>(
+                () => FeatureSelector.FilterFor(layer));
+            Assert.Throws<MapRenderer.Core.Expressions.ExpressionParseException>(
+                () => FeatureSelector.FilterFor(layer));
+        }
     }
 }
