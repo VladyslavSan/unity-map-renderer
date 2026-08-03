@@ -9,7 +9,8 @@ essay. Keep the two in sync: when a rule changes, edit `conventions.md` and upda
 
 ---
 
-- **`Unity.Mathematics` for all math (types *and* functions); `System.Math` is prohibited.**
+- **`Unity.Mathematics` for all math (types *and* functions); `System.Math` and `UnityEngine.Mathf` are
+  prohibited.**
   - *Types:* `float2/3/4`, `double2/3`, `int2/3`, `quaternion`, `float4x4` — **not** `UnityEngine.Vector2/3/4`
     / `Quaternion` / `Matrix4x4` for our own math or storage. `Core` is engine-free, so `UnityEngine.Vector*`
     is forbidden there outright. Sole exception: a Unity boundary API that *demands* a `VectorN`
@@ -17,7 +18,10 @@ essay. Keep the two in sync: when a rule changes, edit `conventions.md` and upda
   - *Functions:* the `math.*` free functions — `math.sin`, `math.sqrt`, `math.abs`, `math.pow`,
     `math.min/max`, … — **not** `System.Math.*` (banned in production). For double-precision π/e use
     **`math.PI_DBL` / `math.E_DBL`**, not `math.PI` (a single-precision float that silently injects ~1e-7
-    error and breaks `const double` initializers).
+    error and breaks `const double` initializers). **`UnityEngine.Mathf.*` is banned on the same terms** —
+    `Mathf.Max` → `math.max`, `Mathf.Clamp01` → `math.saturate`, `Mathf.Deg2Rad/Rad2Deg` → the `Angle` type.
+    `Mathf` is float-only, so a `Mathf` call inside a `double` expression has already narrowed the value —
+    check precision when migrating, don't just swap the token. Vendored `ThirdParty/` code is out of scope.
 
 - **Pass large read-only structs by `in`.** A method that only *reads* a struct param bigger than ~16 bytes
   (camera state, eval contexts, descriptors) takes it `in` — a read-only reference, no per-call copy, intent

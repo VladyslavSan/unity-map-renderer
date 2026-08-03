@@ -50,10 +50,19 @@ into `Core` or the Jobs layer.
 
 *(Established S60.)*
 
-### `System.Math` is banned
+### `System.Math` and `UnityEngine.Mathf` are banned
 
 Starting S62, `System.Math.*` is **banned in all production `.cs` files** (`Core/`, `Jobs/`, `Unity/`).
 Use the equivalent `Unity.Mathematics.math.*` free function instead.
+
+**`UnityEngine.Mathf.*` is banned on the same terms** — it is the same rule wearing the engine's badge, and
+it was the surviving exception S62 chose not to chase (`Core` cannot reference `UnityEngine` at all, so this
+only ever bit `Unity/`). Same replacements as the table below, lower-cased: `Mathf.Max` → `math.max`,
+`Mathf.Clamp01` → `math.saturate`, `Mathf.Deg2Rad`/`Rad2Deg` → the `Angle` type (see below), and so on.
+Two traps specific to `Mathf`: every member is **`float`-only**, so a `Mathf` call sitting in a `double`
+expression has already narrowed the value — check the surrounding precision when you migrate rather than
+swapping the token; and `Mathf.Approximately` has no `math.*` equivalent, so write the epsilon comparison
+explicitly. Vendored third-party code under `Assets/Code/ThirdParty/` is out of scope, as always.
 
 | Banned | Replacement | Notes |
 |--------|-------------|-------|
@@ -81,7 +90,10 @@ causes const-expression compile failures when used in `const double` field initi
 **Test code:** The `Tools/core-tests` shim stubs all the math.* members above by delegating to
 `System.Math`. The shim cannot detect `log2`/`round` divergence — only the EditMode Unity gate does.
 
-*(Established S62.)*
+*(Established S62; extended to `Mathf` 2026-08-03, when the last production `Mathf` call —
+`MapCamera.SyncToCamera`'s near-clip floor — was migrated to `math.max`. The ban is documented, not
+test-enforced: `System.Math` never had a structure test either, and the honest reason both hold is that
+the list of offenders is a one-line grep away.)*
 
 ---
 

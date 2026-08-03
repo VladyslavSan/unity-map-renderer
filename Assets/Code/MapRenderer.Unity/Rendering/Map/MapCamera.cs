@@ -217,7 +217,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 new Vector3((float)fwd.x, (float)fwd.y, (float)fwd.z),
                 new Vector3((float)up.x,  (float)up.y,  (float)up.z));
 
-            Camera.nearClipPlane = Mathf.Max(0.1f, (float)CameraPoseMath.NearClip(altitude));
+            Camera.nearClipPlane = math.max(0.1f, (float)CameraPoseMath.NearClip(altitude));
             // The injected far policy (shared with the tile selector, per projection) — geometry-aware for the
             // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far.
             Camera.farClipPlane  = (float)FarPlanePolicy.FarMetres(
