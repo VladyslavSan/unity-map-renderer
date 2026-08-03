@@ -22,9 +22,16 @@ namespace MapRenderer.Unity.Rendering.Style
         /// layer extent (tile units). Reports the written <paramref name="vertexCount"/> (0 = no geometry, with
         /// <paramref name="md"/> left untouched) and the worker-computed <paramref name="bounds"/>. The caller
         /// wraps the writable array in a <see cref="MeshDataPayload"/> and applies it on the main thread.
+        ///
+        /// <para><paramref name="clip"/> is the global tile-buffer clip window. <b>Fill honours it; every
+        /// other kind ignores it BY DECISION.</b> Clipping an input polyline at the tile boundary turns the
+        /// join at that vertex into a cap — trading the alpha band for a notch at every seam — so the line
+        /// equivalent is clipping the tessellated RIBBON, a different and harder operation that is
+        /// deliberately not attempted here.</para>
         /// </summary>
         void WriteInto(
             Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds);
+            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            out int vertexCount, out Bounds bounds);
     }
 }

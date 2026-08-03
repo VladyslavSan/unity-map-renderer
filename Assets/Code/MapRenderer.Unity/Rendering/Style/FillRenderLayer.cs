@@ -168,10 +168,11 @@ namespace MapRenderer.Unity.Rendering.Style
 
         public void WriteInto(
             Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds)
+            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            out int vertexCount, out Bounds bounds)
             => Meshing.StyledFillTileBuilder.WriteMeshData(
                 md, features, _paint, zoom, extent, id, tileOriginRender, out vertexCount, out bounds,
-                projection, _layout);
+                projection, _layout, clip);
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

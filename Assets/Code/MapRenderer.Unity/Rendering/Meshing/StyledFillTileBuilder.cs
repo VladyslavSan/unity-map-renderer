@@ -181,6 +181,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// no polygon geometry is produced — the caller then disposes the unused writable-mesh-data without
         /// creating a Mesh. On success, <paramref name="bounds"/> carries the worker-computed tight AABB
         /// (assigned to <c>Mesh.bounds</c> after apply, avoiding a main-thread RecalculateBounds scan).</para>
+        ///
+        /// <para><paramref name="clip"/> is how much of the tile's MVT buffer survives into the mesh
+        /// (<see cref="TileBufferClip"/>). It is trailing and optional because <c>default</c> means DISABLED:
+        /// every caller that does not pass one keeps the pre-clip geometry exactly.</para>
         /// </summary>
         public static void WriteMeshData(
             Mesh.MeshData               md,
@@ -193,7 +197,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             out int                     vertexCount,
             out Bounds                  bounds,
             IProjection                 projection = null, // null ⇒ WebMercator (launch-time config threads this in)
-            Fill.LayoutProperties       layout     = null) // null ⇒ no fill-sort-key (declared feature order)
+            Fill.LayoutProperties       layout     = null, // null ⇒ no fill-sort-key (declared feature order)
+            TileBufferClip              clip       = default) // default ⇒ disabled ⇒ the whole tile buffer is drawn
         {
             vertexCount = 0;
             bounds      = default;
@@ -255,6 +260,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 Tile              = id,
                 OriginRender      = tileOriginRender,
                 Projection        = projection ?? DefaultProjection,
+                Clip              = clip,
             });
 
             try

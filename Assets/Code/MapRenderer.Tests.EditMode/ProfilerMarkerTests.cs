@@ -121,6 +121,7 @@ namespace MapRenderer.Tests
                 StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData,
                 TileManager.ProfilerMarkerNames.MeshUpload,
                 FillMeshPipeline.ProfilerMarkerNames.Decode,
+                FillMeshPipeline.ProfilerMarkerNames.Clip,
                 FillMeshPipeline.ProfilerMarkerNames.RingAssembly,
                 FillMeshPipeline.ProfilerMarkerNames.Earcut,
                 FillMeshPipeline.ProfilerMarkerNames.Project,

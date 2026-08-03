@@ -56,6 +56,22 @@ namespace MapRenderer.Unity.Rendering.Map
                  "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
         public int MaxReleasesPerTick = 4;
 
+        [Header("Meshing")]
+        [Tooltip("How much of each tile's MVT buffer the FILL meshes keep, in tile units at extent 4096 " +
+                 "(scaled to the layer's own extent). Tiles carry geometry past their edge so neighbours " +
+                 "join seamlessly, but drawing all of it makes adjacent tiles double-paint the overlap " +
+                 "strip — a brighter band along every seam wherever the fill is translucent, plus ~6% " +
+                 "overdraw. 0 = cut exactly at the tile boundary; 64 = keep the full standard buffer; " +
+                 "NEGATIVE = disable the clip stage entirely (no clip job runs at all). Default 16 — the " +
+                 "smallest round value above the 6-unit maximum overshoot of the committed snapshot fixture, " +
+                 "so every snapshot stays byte-identical while the overlap strip drops 128 -> 32 units. " +
+                 "Read live, and a change evicts what is in the prepared-tile cache AT THAT MOMENT — but " +
+                 "meshes already in cover are NOT rebuilt, and when such a tile later leaves cover its " +
+                 "stale-window mesh re-enters the cache indistinguishably (the key carries no clip), so " +
+                 "re-entering cover serves it again. Restyle or restart to be certain every mesh reflects " +
+                 "the new value. A tuning knob, not a live toggle.")]
+        public double FillTileBufferClip = 16.0;
+
         [Header("Labels")]
         [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
                  "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +

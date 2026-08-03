@@ -97,9 +97,12 @@ namespace MapRenderer.Unity.Rendering.Style
             }
         }
 
+        // `clip` is accepted and IGNORED by decision (see ITileMeshRenderLayer.WriteInto): clipping the input
+        // polyline turns the join at the boundary vertex into a cap, trading the seam band for a seam notch.
         public void WriteInto(
             Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds)
+            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            out int vertexCount, out Bounds bounds)
             => Meshing.StyledLineTileBuilder.WriteMeshData(
                 md, features, _paint, _layout, zoom, extent, id, tileOriginRender, out vertexCount, out bounds, projection);
 

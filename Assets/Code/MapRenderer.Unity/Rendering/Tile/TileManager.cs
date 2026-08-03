@@ -126,6 +126,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// release linger in <c>_loaded</c> (still pumped) for a few frames until drained. 0 = uncapped.
             /// Default 4 (mirrors <see cref="MaxConsumesPerTick"/>).</summary>
             public int MaxReleasesPerTick;
+
+            /// <summary>How much of each tile's MVT buffer the FILL meshes keep before triangulation — one
+            /// global knob (<c>MapViewConfig.FillTileBufferClip</c>), read live like the budgets above.
+            ///
+            /// <para>Changing it mid-run evicts what is in the <c>PreparedTileCache</c> at that moment, and
+            /// does NOT rebuild meshes already in cover. Those tiles then re-populate the cache with their
+            /// stale-window geometry when they leave cover — <c>PreparedKey</c> is (Style, Tile, LayerId)
+            /// with no clip component, so the entry is indistinguishable from a fresh one and re-entering
+            /// cover serves it verbatim. A tuning knob, not a live visual toggle: restyle or restart to be
+            /// certain every mesh reflects the new value.</para></summary>
+            public TileBufferClip BufferClip;
         }
 
         // ── S47 mesh build payload (S51: Task → UniTask) ────────────────────────────────────
@@ -427,6 +438,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         // off-Tick) mesh build write bakes vertices with the SAME projection the tile origin + scene frame
         // use. null ⇒ WebMercator (planar). Launch-constant, so any Tick's value is correct.
         private IProjection _projection;
+
+        // The live fill tile-buffer clip, cached each Tick alongside _projection and read by both mesh-kick
+        // context sites. Unlike the projection this one CAN change at runtime (an Inspector tweak), which is
+        // why Tick compares it against the previous value.
+        private TileBufferClip _bufferClip;
 
         /// <summary>The visible-tile selection seam. Set by MapView (default <see cref="FrustumTileSelector"/>);
         /// a different <see cref="IVisibleTileSelector"/> is a drop-in replacement. This consumer builds a
@@ -1013,6 +1029,26 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _projection = cfg.Projection; // cache for the mesh build bake (Level-1); same projection as origin + frame
 
+            // A changed clip window means every cached mesh was baked against a different tile buffer, so the
+            // PreparedTileCache must not serve them. Compared field-by-field rather than via ValueType.Equals,
+            // which reflects/boxes — this runs every Tick.
+            //
+            // What this Clear() does NOT do, stated precisely because the obvious reading is wrong: it evicts
+            // what is in the cache AT THIS MOMENT. A tile that is in cover now keeps its stale-window mesh,
+            // and when it later LEAVES cover that mesh is Put() into the (now clean) cache under a
+            // PreparedKey of (Style, Tile, LayerId) — which carries no clip component, so it is
+            // indistinguishable from a freshly-baked entry. Re-entering cover therefore serves it verbatim.
+            // The stale geometry survives arbitrarily many leave/re-enter cycles; only an LRU eviction or a
+            // restyle clears it. Acceptable because this is a tuning knob, not a live visual toggle — but do
+            // not read the Clear() as a guarantee that a value change is eventually reflected everywhere.
+            // Closing it properly means keying the cache on the bake parameters; see the design doc.
+            if (cfg.BufferClip.IsEnabled             != _bufferClip.IsEnabled ||
+                cfg.BufferClip.KeepAtReferenceExtent != _bufferClip.KeepAtReferenceExtent)
+            {
+                _bufferClip = cfg.BufferClip;
+                _prepared.Clear();
+            }
+
             if (!_coverKeyInitialised                         ||
                 cam.LookAt.Longitude    != _coverKeyLon       ||
                 cam.LookAt.Latitude     != _coverKeyLat       ||
@@ -1584,6 +1620,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Zoom             = zoom,
                 TileOriginRender = tileOrigin,
                 Projection       = _projection,
+                BufferClip       = _bufferClip,
             };
 
             return UniTask.RunOnThreadPool(() =>
@@ -1648,6 +1685,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Zoom             = zoom,
                 TileOriginRender = origin,
                 Projection       = _projection,
+                BufferClip       = _bufferClip,
             };
 
             return UniTask.RunOnThreadPool(() =>

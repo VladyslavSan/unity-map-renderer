@@ -532,6 +532,14 @@ namespace MapRenderer.Unity.Rendering.Map
                 MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
                 MaxVerticesPerTick   = _config.MaxVerticesPerTick,
                 MaxReleasesPerTick   = _config.MaxReleasesPerTick,
+                // The Inspector field carries one extra state the value type does not: NEGATIVE means "do not
+                // run the clip stage at all", which is not the same as a zero margin ("cut at the tile
+                // boundary"). TileBufferClip's own clamp is the value type's invariant for an already-enabled
+                // margin, so the two meanings never meet — the sentinel is resolved here, once, at the
+                // Inspector boundary.
+                BufferClip           = _config.FillTileBufferClip < 0.0
+                    ? MapRenderer.Core.Tiles.TileBufferClip.Disabled
+                    : MapRenderer.Core.Tiles.TileBufferClip.KeepTileUnits(_config.FillTileBufferClip),
             };
 
         /// <summary>

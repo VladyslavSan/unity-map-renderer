@@ -39,6 +39,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/GlobeSubdivisionTests.cs" />
     <Compile Include="LineMiterHairpinTests.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
+    <Compile Include="TileBufferClipTests.cs" />
 
     <!-- Real Core sources (single source of truth) -->
     <!-- Epic A / A6: the neutral tile-decode surface (referenced by MvtModels.cs's interface impls below). -->
@@ -46,6 +47,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileGeometryType.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/DecodedTile.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/ITileDecoder.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileBufferClip.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileDecodersTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/ProtobufReader.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Mvt/MvtModels.cs" />

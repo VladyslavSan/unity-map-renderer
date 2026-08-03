@@ -37,6 +37,8 @@ That last row is the tile-build loop — two verbs, no "phases":
 ## The named responsibilities (inside one mesh build)
 
 - **Decode** — MVT command bytes → integer tile-space rings. (`MvtDecodeJob`.)
+- **Clip** — cut rings, in tile space, to `[−b, extent + b]` — the tile plus however much of its **buffer** is
+  kept. Fill only (see below). (`RingClipJob`, parameterised by the `TileBufferClip` knob in Core.)
 - **Assemble** — classify rings into polygons + holes (outer/hole/skip by signed area). (`RingAssemblyJob`.)
 - **Subdivide** — insert extra points so a straight edge in tile space follows a *curved* projected surface.
   Driven entirely by `IProjection.MaxRefineAngleRad` (∞ for Mercator ⇒ no split; a small angle for the globe).
@@ -56,7 +58,7 @@ overload it replaced.
 
 | Kind | Order | Where |
 |------|-------|-------|
-| **Fill** | Decode → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshPipeline.Schedule` does Decode→Assemble→Triangulate→Project; `StyledFillTileBuilder` adds the globe Subdivide (`GlobeFillSubdivideDispatch`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)`) then writes the mesh. |
+| **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshPipeline.Schedule` does Decode→Clip→Assemble→Triangulate→Project; `StyledFillTileBuilder` adds the globe Subdivide (`GlobeFillSubdivideDispatch`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)`) then writes the mesh. |
 | **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `StyledLineTileBuilder.WriteMeshData` (called via `LineRenderLayer.WriteInto`): `SubdivideCenterline` → per-point `TileToGeoJob` + `IProjection.ProjectPoint` → `LineRibbonJob` → writes the mesh. |
 
 **Why fills Triangulate *before* Project.** Ear-clipping is a **planar 2D algorithm**, and triangle
@@ -71,6 +73,33 @@ per-projection flip; the uniform Unity-front reversal for stock Cull Back happen
 see [`coordinates-and-projections.md` §7.1](coordinates-and-projections.md) and §8). So the centerline
 is subdivided and projected first, then `LineRibbonJob` triangulates in render space.
 
+## Why the fill path Clips, and why only the fill path
+
+Every MVT tile carries geometry past `[0, extent)` — its **buffer**, 64 tile units at extent 4096 by the
+OpenMapTiles convention — so a neighbour's geometry is available for joins. We used to draw all of it, so two
+adjacent tiles both painted the 128-unit overlap strip. Under the fill's `SrcAlpha`/`OneMinusSrcAlpha`,
+`ZWrite`-off contract a translucent fill composites to `1 − (1 − α)²` there instead of `α`: a uniform brighter
+**band** one buffer-width wide along every seam, for any `fill-opacity < 1`, any `rgba()` `fill-color`, or any
+two stacked translucent fill layers. (Opaque fills are unaffected — same colour over same colour composites
+identically — but the ≈ 6 % overdraw saving is real regardless.)
+
+Clip sits **after Decode and before Assemble**, deliberately. Rings are still just rings there, with no
+polygon/hole structure to keep consistent; `RingAssemblyJob` then classifies the geometry that will actually be
+drawn, and its two existing filters (`rLen < 3`, degenerate `|area2|`) drop the clipped-to-nothing rings for
+free. Sutherland–Hodgman against the four half-planes is orientation-preserving, so the CCW-in-tile-space
+winding contract is untouched. The window's boundary is **inclusive**, and a ring whose bbox is already inside
+is copied verbatim — which is what makes "already-inside geometry is bit-identical" structural rather than a
+property of the arithmetic.
+
+**Lines are deliberately NOT clipped.** Clipping an input polyline at the tile boundary turns the join at that
+vertex into a **cap**, trading the alpha band for a notch at every seam. The line equivalent is clipping the
+tessellated *ribbon* — a different and harder operation, not attempted here. Symbols already clip (the
+single-world `[0, extent)` anchor rule); fill-extrusion and raster are untouched. `ITileMeshRenderLayer.WriteInto`
+therefore carries the knob to every kind but only `FillRenderLayer` acts on it.
+
+Alternative mechanisms for the same defect — per-tile stencil masks, a clip plane, a shader-side discard on
+tile-space UV — are all viable and all out of scope.
+
 ## Threading & lifetime (both kinds)
 
 The Burst jobs run via `.Run()` **on the mesh-build worker thread**, not the main thread — only `Mesh.MeshData`
@@ -83,7 +112,9 @@ cancellation contract" and the mesh-ownership rule in [`conventions-short.md`](c
 
 | Type | Assembly | Role |
 |------|----------|------|
-| `FillMeshPipeline` | `MapRenderer.Jobs` | Fill: coordinates Decode→Assemble→Triangulate→Project; owns `LayerInput`. Produces `TileMeshBuffers`. |
+| `FillMeshPipeline` | `MapRenderer.Jobs` | Fill: coordinates Decode→Clip→Assemble→Triangulate→Project; owns `LayerInput`. Produces `TileMeshBuffers`. |
+| `RingClipJob` | `MapRenderer.Jobs` | Fill Clip: Sutherland–Hodgman of each ring against the tile-buffer window, in tile space. Winding- and space-preserving. |
+| `TileBufferClip` | `MapRenderer.Core` | The knob: how much buffer to keep, in tile units at extent 4096, converted to the layer's own extent in one place. `default` ⇒ disabled. |
 | `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on `FillMeshPipeline`. |
 | `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
 | `LineRibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
@@ -611,3 +642,51 @@ globe track.)
   point-label default, so `ZTest Always` likely survives — but line-following labels behind buildings deserve a
   look in that stage.
 - **Raster per-tile texture vs per-layer material** — unresolved by design; decided in the raster stage.
+
+### Review findings recorded at merge (dual-arm, 2026-08-03)
+
+Non-blocking; recorded per `AGENTS.md` rather than fixed in-stage.
+
+**F-CLIP-1 — a knob change does not reliably reach every mesh, and the obvious reading of the code says it
+does.** `TileManager.Tick` calls `_prepared.Clear()` when `BufferClip` changes, which evicts what is in the
+`PreparedTileCache` *at that instant*. A tile in cover keeps its stale-window mesh; when it later **leaves**
+cover that mesh is `Put()` into the now-clean cache under a `PreparedKey` of `(Style, Tile, LayerId)` — which
+carries **no clip component** — so it is indistinguishable from a fresh entry, and re-entering cover serves it
+verbatim. The stale geometry survives arbitrarily many leave/re-enter cycles; only an LRU eviction or a
+restyle clears it. Visual-only, no crash or leak, and narrow — but it is exactly the live-tuning workflow the
+knob exists for. The comments at all three sites now state this instead of promising otherwise.
+*Fix shape:* put the bake parameters in the cache key (or fold them into `StyleToken`), which also makes the
+`Clear()` unnecessary. Nothing currently tests a live config change with a tile cycling through cover.
+
+**F-CLIP-2 — flip the default to 0.** T5 measured a **zero-pixel** crack at `b = 0` at both altitudes, so the
+hazard the non-zero default hedges against is not real. What blocks 0 is not rendering: two **parity oracles**
+(`MapViewAsyncMeshBuildTests.Tooth3`, `MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder`)
+compare the MapView path against the direct sync builder, and the reference arm passes no clip ⇒ disabled. At
+any non-default value the two arms build under *different parameters* and the oracle stops being a comparison.
+They are green at 16 only because `sample-tile`'s 6-unit overshoot happens to fit inside a 16-unit window —
+luck, not design. Pass the same `TileBufferClip` to both arms; that **restores** their precondition rather
+than weakening it. Then flip to 0, with an aesthetic eyeball on a real basemap as the only human step.
+
+**F-CLIP-3 — arm the two would-be falsifiers.** `A6NonMvtDecoderTests` and `TileBackgroundQuadProjectionTests`
+assert the synthetic full-extent ring produces exactly 4 vertices, and the plan leaned on them as free
+falsifiers for a boundary slip. Both build a `TileLayerProcessContext` with `BufferClip` unset ⇒ disabled, so
+neither exercises the clip — including now, when production clips the background quad. Thread a non-default
+clip into their contexts.
+
+**F-CLIP-4 — scratch headroom.** `ScratchLengthMultiplier = 16` is the loose per-plane bound (2⁴). The tight
+bound is 1.5⁴ ≈ 5.06× — the alternating case that maximises output also forces `#entering == #exiting`. Safe
+as-is (over-estimating is the only safe direction under Burst), but ~3× more than needed, and it is ~26 MB
+transient for a 50 k-vertex ring.
+
+**F-CLIP-5 — `FillMeshPipeline.Schedule` has no `try/finally`.** A throw between an allocation and an exit
+leaks. Pre-existing shape — it already leaks `tileVerts` and the per-poly arrays the same way — but the clip
+stage adds three more containers to the leak set.
+
+**F-CLIP-6 — hole containment after clipping.** `RingAssemblyJob.RingContainedIn` tests a hole's centroid (then
+its first vertex) against the outer ring. Clipping can move a hole's centroid, so for a strongly concave
+clipped outer the containment test could in principle now miss. Not observed on the corpus; recorded as a
+pre-existing weakness the clip makes marginally easier to reach.
+
+**Lines still paint their buffer** — by decision, not omission. Clipping an input polyline at the boundary
+turns the join at that vertex into a cap, trading the band for a notch. The equivalent for lines is clipping
+the tessellated ribbon.

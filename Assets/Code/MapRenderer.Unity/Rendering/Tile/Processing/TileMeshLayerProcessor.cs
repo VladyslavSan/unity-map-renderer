@@ -55,7 +55,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     // adapter completes as zero-vertex (Complete()'s _completedNormally == false branch),
                     // matching today's fallback rather than uploading partially-written data.
                     _layer.WriteInto(_mda[0], features, context.Zoom, tileLayer.Extent, context.Tile,
-                        context.TileOriginRender, context.Projection, out int verts, out Bounds bounds);
+                        context.TileOriginRender, context.Projection, context.BufferClip,
+                        out int verts, out Bounds bounds);
                     _vertexCount = verts;
                     _bounds      = bounds;
                 }

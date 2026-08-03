@@ -113,7 +113,8 @@ namespace MapRenderer.Tests
 
             public void WriteInto(
                 Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-                TileId id, double3 tileOriginRender, IProjection projection, out int vertexCount, out Bounds bounds)
+                TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+                out int vertexCount, out Bounds bounds)
             {
                 throw new InvalidOperationException("ThrowingTileMeshRenderLayer deliberate fault (test)");
             }

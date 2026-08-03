@@ -87,9 +87,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // If WriteMeshData throws partway through, control never reaches the two lines below — the
             // processor completes as zero-vertex (Complete()'s _completedNormally == false branch), matching
             // TileMeshLayerProcessor's fallback rather than uploading partially-written data.
+            // The clip is threaded through even though it is behaviourally inert here — the synthetic ring sits
+            // exactly ON the window at any margin ≥ 0, and the boundary is inclusive — so the background quad
+            // and the fill layers over it can never be built under different windows.
             StyledFillTileBuilder.WriteMeshData(
                 _mda[0], FullExtentRingFeatures, WhitePaint, context.Zoom, Extent, context.Tile,
-                context.TileOriginRender, out int verts, out Bounds bounds, context.Projection);
+                context.TileOriginRender, out int verts, out Bounds bounds, context.Projection,
+                layout: null, clip: context.BufferClip);
             _vertexCount = verts;
             _bounds      = bounds;
 

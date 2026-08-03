@@ -34,5 +34,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>The active pixel↔ground projection for this worker pass (S91-C: cached once per Tick).</summary>
         public IProjection Projection { get; init; }
+
+        /// <summary>How much of the tile's MVT buffer the fill mesh keeps — the single global knob, read live
+        /// off <c>MapViewConfig</c> each Tick. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
+        public TileBufferClip BufferClip { get; init; }
     }
 }

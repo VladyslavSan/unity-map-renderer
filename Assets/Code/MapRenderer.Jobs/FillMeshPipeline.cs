@@ -44,6 +44,7 @@ namespace MapRenderer.Jobs
         public static class ProfilerMarkerNames
         {
             public const string Decode       = "MapRenderer.Pipeline.Decode";
+            public const string Clip         = "MapRenderer.Pipeline.Clip";
             public const string RingAssembly = "MapRenderer.Pipeline.RingAssembly";
             public const string Earcut       = "MapRenderer.Pipeline.Earcut";
             public const string Project      = "MapRenderer.Pipeline.Project";
@@ -54,6 +55,8 @@ namespace MapRenderer.Jobs
         // Separate path from the live MapView loop; wired for the Profiler window, not for the recorder test.
         private static readonly ProfilerMarker PmPipelineDecode =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Decode);
+        private static readonly ProfilerMarker PmPipelineClip =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Clip);
         private static readonly ProfilerMarker PmPipelineRingAssembly =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.RingAssembly);
         private static readonly ProfilerMarker PmPipelineEarcut =
@@ -173,6 +176,11 @@ namespace MapRenderer.Jobs
             /// <summary>S91: the projection the geometry is built with (a stateless struct behind
             /// <see cref="MapRenderer.Core.Geo.IProjection"/>). Left <c>null</c> ⇒ Web Mercator (planar).</summary>
             public MapRenderer.Core.Geo.IProjection Projection;
+
+            /// <summary>How much of the tile's buffer to keep before triangulating (Stage 1b). <c>default</c>
+            /// ⇒ disabled ⇒ the clip stage is skipped entirely and the geometry reaches assembly exactly as
+            /// decoded — the behaviour-preserving state every unset caller gets.</summary>
+            public MapRenderer.Core.Tiles.TileBufferClip Clip;
         }
 
         /// <summary>
@@ -265,6 +273,67 @@ namespace MapRenderer.Jobs
             EnsureCapacity(ringCount, maxRings, "ring");
             EnsureCapacity(decodedVertCount, maxVertices, "decoded vertex");
 
+            // ── Stage 1b: clip to the tile-buffer window. ──────────────────────────────────────────
+            // MVT tiles carry geometry past [0, extent) so neighbours join seamlessly; drawing all of it makes
+            // adjacent tiles double-paint the overlap strip (a brighter band under the fill's translucent
+            // ZWrite-off blend). Cutting HERE — after decode, before assembly — means RingAssemblyJob
+            // classifies the geometry that will actually be drawn, and its rLen/degenerate-area filters clean
+            // up the clipped-to-nothing rings for free.
+            //
+            // DISPOSAL (R10): when this stage runs, the decode arrays are freed here and tileVerts/ringOffsets/
+            // ringFeatIdx are rebound to VIEWS over the NativeLists below — a view must never be disposed, so
+            // both exit paths free the lists instead. `clipped` is the single discriminator; the disabled path
+            // allocates nothing and leaves the bookkeeping exactly as it was.
+            var  clipVerts       = default(NativeList<double2>);
+            var  clipRingOffsets = default(NativeList<int>);
+            var  clipRingFeatIdx = default(NativeList<int>);
+            bool clipped         = false;
+
+            if (ringCount > 0 && input.Clip.TryWindow(input.Extent, out double2 clipMin, out double2 clipMax))
+            {
+                using var sPipelineClip = PmPipelineClip.Auto();
+
+                int maxRingLen = 0;
+                for (int ri = 0; ri < ringCount; ri++)
+                    maxRingLen = math.max(maxRingLen, ringOffsets[ri + 1] - ringOffsets[ri]);
+
+                // Per-RING ping-pong scratch at Sutherland–Hodgman's provable bound — not per tile, and not
+                // an extension of the exact decode pre-count (the clip can grow a ring, so that invariant
+                // governs the decode stage only).
+                int scratchCap = math.max(1, maxRingLen * RingClipJob.ScratchLengthMultiplier);
+                var scratchA = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var scratchB = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+                clipVerts       = new NativeList<double2>(math.max(1, decodedVertCount), Allocator.Persistent);
+                clipRingOffsets = new NativeList<int>(ringCount + 1, Allocator.Persistent);
+                clipRingFeatIdx = new NativeList<int>(math.max(1, ringCount), Allocator.Persistent);
+
+                new RingClipJob
+                {
+                    Vertices          = tileVerts,
+                    RingOffsets       = ringOffsets,
+                    RingFeatureIdx    = ringFeatIdx,
+                    RingCount         = ringCount,
+                    ClipMin           = clipMin,
+                    ClipMax           = clipMax,
+                    ScratchA          = scratchA,
+                    ScratchB          = scratchB,
+                    OutVertices       = clipVerts,
+                    OutRingOffsets    = clipRingOffsets,
+                    OutRingFeatureIdx = clipRingFeatIdx,
+                }.Run(); // Run, like every other stage — the pipeline must stay callable off the main thread
+
+                scratchA.Dispose();
+                scratchB.Dispose();
+                tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
+
+                tileVerts   = clipVerts.AsArray();
+                ringOffsets = clipRingOffsets.AsArray();
+                ringFeatIdx = clipRingFeatIdx.AsArray();
+                ringCount   = clipRingOffsets.Length - 1;
+                clipped     = true;
+            }
+
             // ── Stage 2: ring assembly. ────────────────────────────────────────────────────────────
             var polyOuterIdx  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var polyHoleStart = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -303,7 +372,8 @@ namespace MapRenderer.Jobs
 
             if (polyCount == 0)
             {
-                tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
+                DisposeRingStage(clipped, tileVerts, ringOffsets, ringFeatIdx,
+                                 clipVerts, clipRingOffsets, clipRingFeatIdx);
                 polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
                 holeRingIdxs.Dispose();
                 return default;
@@ -447,7 +517,8 @@ namespace MapRenderer.Jobs
             }
 
             // No longer need ring/assembly data.
-            tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
+            DisposeRingStage(clipped, tileVerts, ringOffsets, ringFeatIdx,
+                             clipVerts, clipRingOffsets, clipRingFeatIdx);
             polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
             holeRingIdxs.Dispose();
 
@@ -574,6 +645,28 @@ namespace MapRenderer.Jobs
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
         // (The tile's bake origin is TileRenderOrigin.Project — Core, engine-free, shared by every geometry
         //  kind; it is NOT fill-specific, so it does not live on this fill pipeline.)
+
+        /// <summary>
+        /// Frees the ring-stage buffers exactly once, on either of <see cref="Schedule"/>'s two exit paths.
+        /// When Stage 1b ran, the decode arrays are already gone and the <c>tileVerts</c>/<c>ringOffsets</c>/
+        /// <c>ringFeatIdx</c> the caller holds are <c>NativeList.AsArray()</c> VIEWS — disposing a view is
+        /// invalid, so the lists are freed instead. Passed by value rather than closed over: a local function
+        /// capturing these would hoist the whole set into a per-call display object on a GC-free hot path.
+        /// </summary>
+        private static void DisposeRingStage(
+            bool clipped,
+            NativeArray<double2> tileVerts, NativeArray<int> ringOffsets, NativeArray<int> ringFeatIdx,
+            NativeList<double2> clipVerts, NativeList<int> clipRingOffsets, NativeList<int> clipRingFeatIdx)
+        {
+            if (clipped)
+            {
+                clipVerts.Dispose(); clipRingOffsets.Dispose(); clipRingFeatIdx.Dispose();
+            }
+            else
+            {
+                tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
+            }
+        }
 
         private static double LeftmostX(NativeArray<double2> verts, int start, int len)
         {
