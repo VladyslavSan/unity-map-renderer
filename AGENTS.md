@@ -137,6 +137,25 @@ decides what to squash). The design doc is the running SSOT — decisions, the s
 findings live there. The orchestrator (main session) hands each role its brief, relays results, and gates
 the commit; it does not do the role work itself.
 
+**Two rules every role brief must carry** — a subagent only knows what its brief points it at, and both of
+these were learned the expensive way:
+
+- **Clean-room: implement from the open specs and from black-box observation of rendered output. Do NOT
+  read, cite, quote, or paraphrase another renderer's source** — not to derive a design, and not to
+  *confirm* one you already derived. `ARCHITECTURE.md` § "Clean-room hygiene" is the rule; the design docs
+  state it as a fact about this repo ("no MapLibre source has been read"), which reads as provenance rather
+  than instruction, so a role that has only the design docs will not see a prohibition. A planner once
+  settled a decision by citing MapLibre's `symbol_layout.ts` — including a verbatim source comment — and
+  instructed the developer to paste that comment into `docs/`. The decision was independently derivable and
+  survived unchanged; the citation was pure contamination risk. Caught before any developer ran, but the
+  failure is asymmetric: a bad design is reverted, foreign source text committed to a proprietary repo is
+  not.
+- **Escalation beats invention. If a decision genuinely needs the maintainer, STOP, say so, and write down
+  the options with their consequences.** A role has no channel to the human, so "decide it or leave it
+  open" is a false choice — and a brief that forbids leaving it open (rightly, per
+  `refine-lock-core-design-questions`) has removed the only safe exit unless it supplies this one. Halting
+  with a stated fork is a successful outcome, not a failure to deliver.
+
 ### Commit conventions — read `docs/commit-conventions.md`
 `type(scope): subject` ([Conventional Commits](https://www.conventionalcommits.org)). **The scope is a
 code-area tag, never a stage id** — `feat(meshing): …`, not `feat(S89 D2): …` (a scope must be
