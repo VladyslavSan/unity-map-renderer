@@ -22,7 +22,6 @@
 // fires, the test produces Assert.Fail (a real failure, not a vacuous skip).
 
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -162,15 +161,25 @@ namespace MapRenderer.Tests.Visual
             ]
         }");
 
-
-        private static void PumpUntilSettled(MapView view, int maxFrames = 500)
+        /// <summary>
+        /// Deterministic settle: one <c>LateUpdate</c> kicks fetch + mesh build, <c>DrainMeshBuilds</c>
+        /// blocks on the in-flight UniTasks and consumes them inline (after it returns
+        /// <c>AllTilesSettled()</c> is guaranteed true — S47), and a final <c>LateUpdate</c> lets the
+        /// backend rebuild its sorted draw list over the now-complete draw-item set.
+        ///
+        /// <para>This replaced a <c>LateUpdate</c> + <c>Thread.Sleep(1)</c> poll bounded by a frame
+        /// ceiling (500 here, 2500 in the draw-order teeth). That poll turned every assertion in this
+        /// fixture into a race against the threadpool: on a loaded machine the async decode/mesh-build
+        /// had not landed before the ceiling ran out, and the fixture failed with "Tiles must settle"
+        /// with nothing wrong in the code under test. Raising the ceiling only widens the window —
+        /// the ceiling itself is the defect, because it measures in wall-clock what is not a
+        /// wall-clock property. Do not reintroduce a sleep-poll here.</para>
+        /// </summary>
+        private static void SettleDeterministically(MapView view)
         {
-            for (int f = 0; f < maxFrames; f++)
-            {
-                view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
-            }
+            view.LateUpdate();
+            view.DrainMeshBuilds();
+            view.LateUpdate();
         }
 
         // ── Tooth 1: toggle OFF (default) → BRG never constructed ─────────────────────────────
@@ -204,7 +213,7 @@ namespace MapRenderer.Tests.Visual
                     "The default backend must construct the EntitiesTileRenderer.");
 
                 // Also verify the tile settles normally on the default path.
-                PumpUntilSettled(view);
+                SettleDeterministically(view);
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tiles must settle on the default (Entities) backend.");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -248,7 +257,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsNotNull(view.BrgRenderer(),
                     "Backend=Brg must construct a BrgTileRenderer.");
 
-                PumpUntilSettled(view);
+                SettleDeterministically(view);
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tiles must settle on the BRG path.");
 
@@ -365,16 +374,9 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                             style: StyleLineThenFill());
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style A: BRG must load and settle tiles.");
-
-                        // One more Tick so _sortedItems is rebuilt from the full draw-item set after
-                        // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.LateUpdate();
 
                         // Frame the camera on the actual BRG scene bounds (same for both styles).
                         // Must be computed here (after tiles settle + Rebuild runs in Tick).
@@ -415,16 +417,9 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                             style: StyleFillThenLine());
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Style B: BRG must load and settle tiles.");
-
-                        // One more Tick so _sortedItems is rebuilt from the full draw-item set after
-                        // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.LateUpdate();
 
                         // Re-frame camera on Style B's own scene bounds.
                         // Both styles use zoom=3 centered at (0,0), so the tile layout is the same, but
@@ -599,7 +594,7 @@ namespace MapRenderer.Tests.Visual
                 var cam0 = MakeCam(0, 0, 0.0);
                 view.LoadTestStyle(src, cam0, style: style);
 
-                PumpUntilSettled(view);
+                SettleDeterministically(view);
                 Assert.IsTrue(view.AllTilesSettled(), "Tiles must settle.");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "z0/0/0 tile must be built by the BRG path.");
@@ -702,7 +697,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());
-                PumpUntilSettled(view);
+                SettleDeterministically(view);
 
                 var brg = view.BrgRenderer();
                 Assert.IsNotNull(brg, "BRG must be non-null after Initialise with BRG backend.");
@@ -764,7 +759,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());
-                PumpUntilSettled(view);
+                SettleDeterministically(view);
 
                 var brg = view.BrgRenderer();
                 Assert.IsNotNull(brg);
@@ -865,11 +860,7 @@ namespace MapRenderer.Tests.Visual
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                     style: MinimalStyle());
 
-                for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                {
-                    view.LateUpdate();
-                    Thread.Sleep(1);
-                }
+                SettleDeterministically(view);
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "BRG path must load + settle tiles.");
 
@@ -1082,16 +1073,9 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 1.0, 0, 0),
                             style: StyleZoomDependentLine());
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=1 render: BRG must settle tiles.");
-
-                        // One more Tick so _sortedItems is rebuilt from the full draw-item set after
-                        // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.LateUpdate();
 
                         // Frame camera on zoom=1 scene bounds (large tiles, set once for both renders).
                         float tileSize1 = (float)(WebMercator.WorldExtent * 2.0 / System.Math.Pow(2.0, 1));
@@ -1134,16 +1118,9 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
                             style: StyleZoomDependentLine());
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Zoom=5 render: BRG must settle tiles.");
-
-                        // One more Tick so _sortedItems is rebuilt from the full draw-item set after
-                        // the final tile consume (the settle loop exits before its next Rebuild).
-                        view.LateUpdate();
 
                         // Frame camera on zoom=5 tile bounds (each tile is 1/32 of the zoom=1 extent).
                         // Both renders must be framed on their own tile bounds so they fill the camera
@@ -1326,10 +1303,7 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
                             style: style);
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); System.Threading.Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "Entities render: must settle tiles at zoom=5.");
                         view.LateUpdate();
@@ -1371,10 +1345,7 @@ namespace MapRenderer.Tests.Visual
                         view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 5.0, 0, 0),
                             style: style);
 
-                        for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                        {
-                            view.LateUpdate(); System.Threading.Thread.Sleep(1);
-                        }
+                        SettleDeterministically(view);
                         Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                             "BRG render: must settle tiles at zoom=5.");
                         view.LateUpdate();
