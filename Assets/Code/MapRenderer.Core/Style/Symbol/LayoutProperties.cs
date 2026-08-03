@@ -157,7 +157,7 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>icon-optional: when true, the TEXT half of an icon+text pair may place even if the icon
         /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol
-        /// (see <c>SymbolFeatureExtractor</c>'s centred-pair predicate); ignored on a lone icon.</summary>
+        /// (see <c>SymbolFeatureExtractor</c>'s pairing predicate); ignored on a lone icon.</summary>
         public bool IconOptional { get; }
 
         /// <summary>text-optional: when true, the ICON half of an icon+text pair may place even if the text

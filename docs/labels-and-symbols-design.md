@@ -10,6 +10,8 @@ layout, metrics).
 3. **[Curved along-line text](#3-curved-along-line-text)** — `symbol-placement: line` / `line-center` (mostly landed).
 4. **[Projection support](#4-projection-support-globe-ready-labels)** — globe-ready labels under any `IProjection` (designed, not started).
 5. **[Icon support](#5-icon-support-sprite-symbols)** — `icon-image` sprite symbols; the sibling of text under one anchor (in progress).
+6. **[Map-aligned line icons + `icon-rotate`](#6-map-aligned-line-icons--icon-rotate-p-b)** — the third icon emit shape (P-B, landed).
+7. **[Non-centred icon+text pairing](#7-non-centred-icontext-pairing-p-a--landed)** — a pair is an *instance*, not a coincidence (P-A, landed).
 
 ---
 
@@ -1134,23 +1136,126 @@ and road arrows both render. Headless teeth cover the emit shape, the atlas rout
 observable at runtime — that is what this confirms. It also confirms the `icon-rotate` sign correction
 (§ the 45°-tangent tooth) holds in the real renderer and not merely in the tooth that derived it.
 
-Two things the eyeball did NOT settle. **One has since been settled; one is still open.**
-
-**SETTLED (2026-08-01) — the non-centred-pairing gate is DISCHARGED.** Maintainer confirmation: *"dots are
-still visible without text."* Orphan dots are a real on-screen artefact, not a theoretical gap, which is
-exactly what the gate asked for — so **P-A is worth its snapshot re-bake cost** and is unblocked.
-
-The cause is `Style/Symbol/SymbolFeatureExtractor.cs:168-173`: `centredPair` requires `TextAnchor.Center`
-**and** zero `TextOffset` **and** zero radial offset **and** `IconAnchor.Center` **and** zero `IconOffset`.
-Every non-centred symbol — `airport`, `label_village` / `_town` / `_city` / `_city_capital`, `poi_*` — fails
-that test and so never pairs, which is why a dot can place while its name is collision-culled independently.
-MapLibre's model is an *instance* of icon + text placed together, not two symbols that happen to coincide.
-
-Its prerequisite has landed: `icon-optional` / `text-optional` shipped in `ddd71367` (parity Stage C), so
-the pair-flag machinery P-A needs already exists. What remains is relaxing `centredPair` to the instance
-model, re-placing `poi_*` / `label_*` / `airport`, and re-baking the affected snapshots. **Not yet planned —
-no code, tests or design section exists for it.** One detail the confirmation did not pin down: the zoom
-range. The gate named z10–13; if P-A is planned, sample the range rather than assuming it.
+Two things the eyeball did NOT settle. **One has since been settled (§7, P-A); one is still open.**
 
 **STILL OPEN:** whether arrows DOUBLE at tile seams (along-line icons have no cross-tile dedup, KL-A1) —
 cheap to notice next time the scene is up.
+
+---
+
+# 7. Non-centred icon+text pairing (P-A) — LANDED
+
+The gate was discharged by maintainer confirmation — *"dots are still visible without text"* — so orphan
+dots were a real on-screen artefact, not a theoretical gap. The cause was the pairing predicate in
+`Style/Symbol/SymbolFeatureExtractor`: `centredPair` required `TextAnchor.Center` **and** zero `TextOffset`
+**and** zero radial offset **and** `IconAnchor.Center` **and** zero `IconOffset`. Every non-centred symbol
+failed that test and so never paired, which is why a dot could place while its name was collision-culled
+independently. MapLibre's model is an *instance* of icon + text placed together, not two symbols that
+happen to coincide.
+
+**D-PA-1 — the predicate is `hasIcon && text != null`.** Symmetric and anchor/offset-independent; all five
+conjuncts retire (including one per-feature `text-radial-offset` expression evaluation).
+
+**D-PA-2 — the ICON stays the pair Owner.** `SymbolTileLabelBlockBaker` derives a pair's `FadeId` from the
+owner's icon identity, and `LabelPairing` / `LabelStageJob` / `AssertPairAdjacency` all encode
+owner-immediately-then-rider. Flipping the roles to the text half was explicitly out of scope.
+
+**D-PA-3 — `icon-optional`/`text-optional` still do NOT gate pair formation; D11 stays refuted, for a NEW
+reason.** Stage C's argument (a centred pair's boxes overlap by construction, so un-pairing makes the halves
+mutually exclusive rather than independent) genuinely does *not* transfer — non-centred boxes are disjoint
+and would not self-block. The argument that does is the *instance* one: `text-optional` means "this instance
+may render icon-only", which presupposes the instance. liberty's `airport` sets it and nothing else; under
+D11 it would not pair, its halves would be collision-tested independently, and the text could place with the
+icon culled — exactly what the flag forbids. Optionality remains a per-BOX verdict inside the
+test-all-then-insert loop (`LabelCandidate.OptionalBoxMask`).
+
+**D-PA-4 — the line branch re-gates on BOTH suppressions.** The old `centredPair && iconAtAnchors` re-gated
+the icon suppression but not the text one, so a line layer with `text-rotation-alignment: map` +
+`icon-rotation-alignment: viewport` stamped an Owner with no Rider. Now `&& textAtAnchors` as well, which
+makes `EmitAtAnchor`'s "PairedInstance implies both halves" true by construction. Byte-identical on every
+shipped layer (the shields resolve both sides to viewport).
+
+**D-PA-5 — naming follows meaning:** `centredPair` → `pairedInstance`, `AnchorEmitContext.CentredPair` →
+`PairedInstance`. "Centred" survives only where it is still true (the shield-specific test names, §10).
+
+**Affected layers.** Nine liberty layers newly pair; the three shield layers were already centred and the
+new predicate is a strict superset, so their verdict is unchanged.
+
+| layer | what makes it non-centred | notes |
+|---|---|---|
+| `label_city`, `label_city_capital` | `text-anchor: bottom` (+ `text-offset` −0.1/−0.2 em) | dot only **below z9**; `icon-allow-overlap: true`, `icon-optional: false` |
+| `label_town`, `label_village` | `text-anchor: bottom` | dot only **below z10**; same flags |
+| `airport` | `text-anchor: top`, `text-offset [0, 0.6]` | `text-optional: true` — D-PA-3's case |
+| `poi_r1`, `poi_r7`, `poi_r20` | `text-anchor: top`, `text-offset [0, 0.6]` | minzoom 15/16/17 |
+| `poi_transit` | `text-anchor: left`, `text-offset [0.9, 0]` | the only horizontally-offset pair |
+
+**Consequence, intended:** `icon-allow-overlap: true` no longer buys a `label_*` dot a free pass — the
+candidate's `AllowOverlap` is the AND of the halves, so a colliding city label now drops **both**. Expect
+visibly fewer city/town dots at z<9/10. That is MapLibre-correct; do not re-widen the predicate to
+compensate. The icon also now takes the lower `FeatureIndex` of the two, so placement order among equal
+sort keys shifts (the pair is ordered by its icon's ordinal), and the pair's `FadeId` becomes the icon's.
+
+**Two corrections to what this section previously recorded:**
+
+1. **The gate's "z10–13" was wrong.** liberty gates the dot with
+   `icon-image: ["step",["zoom"],"circle_11_black", 9|10, ""]` — the dot exists only **below** z9
+   (`label_city`, `label_city_capital`) / z10 (`label_town`, `label_village`). At z10–13 those layers have
+   no icon at all, so nothing there could orphan. The maintainer's observation was a low-zoom one.
+2. **`poi_r1`/`poi_r7`/`poi_r20`/`poi_transit` have no committed test data** — the `poi` source layer is
+   absent from every fixture in `Assets/Fixtures/`, and committing a new binary fixture was out of scope.
+   They are covered only by hand-built layers carrying liberty's exact layout JSON. Their only real check is
+   a maintainer eyeball at z15+. (`airport` is nearly the same story: the Berlin fixture *does* carry the
+   aerodrome_label feature, but at tile x=4929 — outside `[0, extent)`, so the single-world clip drops it.
+   T5 therefore runs the REAL `airport` layer over a hand-built tile.)
+
+**Grounding.** Core: `Style/Symbol/SymbolFeatureExtractor` (`pairedInstance`,
+`AnchorEmitContext.PairedInstance`, `EmitAtAnchor`). Teeth: `Style/SymbolPairPredicateTests` (T2–T8),
+`Style/SymbolShieldExtractionTests.NonCentredPair_NowEmitsIconThenText_OwnerRider` (T1),
+`Style/SymbolTestFixtures` (the shared loaders + `StageInputFor`). Nothing else changed — the halves'
+anchors/offsets were already baked anchor-relative into their own quads and bounds by
+`TextQuadLayout.Layout` / `IconQuadLayout.Layout`, so `LabelStagingMath.StagePointPair` appending both at
+the owner's `ScreenPx` was already correct for a displaced half. That premise is pinned by T3: staging the
+rider from the *owner's* bounds — the precise way the premise fails — reds T3 and **nothing else in 2017
+tests**. Do not read that as "T3 is the only tooth guarding the premise": perturb the layout/staging code it
+rests on in other ways and several teeth notice (the dual review measured 7 and 5 failures for two such
+injections). T3's claim is narrower and is the one that matters — it is what makes a *displaced* half's box
+provably its own.
+
+## 7.1 Review findings recorded at merge (dual-arm, 2026-08-03)
+
+Non-blocking. Recorded here rather than fixed in-stage, per `AGENTS.md` ("non-blocking findings are
+recorded, not necessarily fixed in-stage").
+
+**F-PA-1 — a MapLibre divergence that P-A makes LIVE. Read this before blaming the predicate.**
+`LabelStagingMath.StagePointPair` sets the candidate's `AllowOverlap = owner.AllowOverlap && rider.AllowOverlap`,
+and `LabelCollision.SelectSurvivors` consults only that **candidate** flag — `LabelBox.AllowOverlap` is
+carried per box but never read there. MapLibre GL JS instead tests each half against the grid with *its own*
+allow-overlap and then ANDs the two **verdicts**. The two agree in the case this stage is about (text blocked
+⇒ both drop) and **diverge in the mirror case**: dot's box blocked, text's box free — MapLibre places both,
+we drop both. That case was unreachable before P-A, because no shield layer sets allow-overlap. It is live
+now: `label_city`/`_capital`/`_town`/`_village` all set `icon-allow-overlap: true`.
+*Consequence:* slightly fewer city labels than MapLibre at z<9/10, **on top of** the intended R2 reduction.
+**If the eyeball reads "too few labels", this is the suspect — not the pairing predicate.** Do not re-widen
+the predicate to compensate. Fix shape when it matters: test each box with its own carried `AllowOverlap`,
+keep the all-or-nothing AND on the verdicts.
+
+**F-PA-2 — `AnchorEmitContext.PairedInstance` could be structural instead of hand-maintained.** It is an
+`init` property set at two sites, and both reduce to exactly `HasIcon && Text != null`. A computed
+`public bool PairedInstance => HasIcon && Text != null;` deletes both initializers and makes D-PA-4's bug
+class — an initializer that forgets one of the suppression fences — *unrepresentable* rather than
+fixed-once-and-commented. T2/T8 stay meaningful either way: they exercise the fences, not the field.
+
+**F-PA-3 — per-half viewport culling.** `StagePointPair` gates the whole pair on the owner's `ScreenPx`, so
+a rider displaced by up to 0.9 em (`poi_transit`) is culled or kept by the *icon's* position. Negligible at
+liberty's offsets; real if `icon-text-fit` or larger offsets ever land.
+
+**F-PA-4 — stale "centred pair" wording** survives in `LabelStagingMath.cs:82`, `LabelCandidate.cs:34`,
+`CandidateEmit.cs:14`, `LabelPlacementSystem.cs:358`/`:719`. All sit inside P-A's stop-listed files; fix on
+the next legitimate visit to each. Related: `LabelCollision.cs:180` justifies test-all-then-insert with
+"a centred pair's two boxes overlap by construction" — still true of centred pairs, so the code is right,
+but it now reads as the general rationale and no longer is (P-A's pairs are disjoint).
+
+**F-PA-5 — `poi_r1`/`_r7`/`_r20`/`_transit` remain headlessly unverifiable** (no `poi` source layer in any
+committed fixture), as do `label_town`/`label_village` at their real offsets. `poi_transit` is the only
+horizontally-offset layer in the style and so the only exercise of a non-vertical pair. Maintainer eyeball
+at z15+ is the only check.

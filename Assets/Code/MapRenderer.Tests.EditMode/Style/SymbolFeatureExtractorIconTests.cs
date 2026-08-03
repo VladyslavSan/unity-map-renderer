@@ -140,14 +140,16 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void Extract_TextAndIcon_YieldsTwoLabels_CentredPair_IconFirstThenText()
+        public void Extract_TextAndIcon_YieldsTwoLabels_IconFirstThenText()
         {
-            // §10 D8/D10 (road-shields, road-shields-design.md — supersedes D5): default text-anchor/icon-anchor
-            // (both center) + zero offsets/radial-offset is the CENTRED PAIR predicate — this is not
-            // shield-specific, it fires for ANY feature whose text sits centred on its icon. The icon
-            // (collision owner) is emitted first, the text rides as its Rider — ONE placement instance
-            // downstream (LabelPairing / StagePointPair), so neither half's overlap flags are forced anymore;
-            // both carry their AUTHORED text-allow-overlap/text-ignore-placement (default false, unset here).
+            // §10 D8/D10 (road-shields, road-shields-design.md — supersedes D5): a feature resolving BOTH a
+            // text and an icon is ONE placement instance. The icon (collision owner) is emitted first, the
+            // text rides as its Rider — ONE placement instance downstream (LabelPairing / StagePointPair), so
+            // neither half's overlap flags are forced anymore; both carry their AUTHORED
+            // text-allow-overlap/text-ignore-placement (default false, unset here).
+            // NOTE (P-A): this layer leaves every anchor/offset at its default, i.e. the halves are CENTRED —
+            // the retired conjuncts were all inert at that value, so this test does NOT discriminate the P-A
+            // predicate. SymbolPairPredicateTests carries the teeth that do.
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");

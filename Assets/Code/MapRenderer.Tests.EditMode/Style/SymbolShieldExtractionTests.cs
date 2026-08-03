@@ -1,9 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 
-using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -28,61 +26,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SymbolShieldExtractionTests
     {
-        // ── Walk-up fixture loaders (work in Unity batch mode AND dotnet test) — mirrors LoadFixture in
-        //    SymbolFeatureExtractorTests.cs / SymbolFeatureExtractorIconTests.cs. ──
-        private static string[] PathParts(string root, string[] rest)
-        {
-            var parts = new string[rest.Length + 1];
-            parts[0] = root;
-            Array.Copy(rest, 0, parts, 1, rest.Length);
-            return parts;
-        }
+        // ── Walk-up fixture loaders + the parsed Liberty style live in SymbolTestFixtures (shared with
+        //    SymbolPairPredicateTests); these are the local names this file's call sites already use. ──
+        private static byte[] LoadBerlinFixtureBytes()
+            => SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "boundary-9-274-168.pbf.bytes");
 
-        private static string LoadUpTextParts(params string[] relSegments)
-        {
-            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
-            foreach (string start in starts)
-            {
-                var dir = new DirectoryInfo(start);
-                while (dir != null)
-                {
-                    string p = Path.Combine(PathParts(dir.FullName, relSegments));
-                    if (File.Exists(p)) return File.ReadAllText(p);
-                    dir = dir.Parent;
-                }
-            }
-            throw new FileNotFoundException("Not found walking up from cwd/AppContext: " + string.Join("/", relSegments));
-        }
-
-        private static byte[] LoadUpBytesParts(params string[] relSegments)
-        {
-            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
-            foreach (string start in starts)
-            {
-                var dir = new DirectoryInfo(start);
-                while (dir != null)
-                {
-                    string p = Path.Combine(PathParts(dir.FullName, relSegments));
-                    if (File.Exists(p)) return File.ReadAllBytes(p);
-                    dir = dir.Parent;
-                }
-            }
-            throw new FileNotFoundException("Not found walking up from cwd/AppContext: " + string.Join("/", relSegments));
-        }
-
-        private static string LoadLibertyJson() => LoadUpTextParts("Assets", "StreamingAssets", "Fixtures", "liberty.json");
-        private static byte[] LoadBerlinFixtureBytes() => LoadUpBytesParts("Assets", "Fixtures", "boundary-9-274-168.pbf.bytes");
-
-        // ── Real style / real fixture ─────────────────────────────────────────────────────────────────
-        private static StyleDocument _libertyDoc;
-        private static StyleDocument LibertyDoc() => _libertyDoc ??= StyleParser.Parse(LoadLibertyJson());
-
-        private static SymbolStyle.StyleLayer FindShieldLayer(string id)
-        {
-            foreach (StyleLayer layer in LibertyDoc().Layers)
-                if (layer.Id == id) return layer as SymbolStyle.StyleLayer;
-            return null;
-        }
+        private static SymbolStyle.StyleLayer FindShieldLayer(string id) => SymbolTestFixtures.FindSymbolLayer(id);
 
         private static readonly TileId BerlinTile = new TileId { Z = 9, X = 274, Y = 168 };
         private static MvtTile _berlinTile;
@@ -327,10 +276,12 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── §10 D10 negative case: a non-centred icon+text feature (text-offset != 0) stays unpaired and
-        //    keeps the PRE-pairing text-then-icon order. ──
+        // ── P-A (was §10 D10's negative case): a NON-centred icon+text feature (text-offset != 0) now PAIRS
+        //    like any other — the predicate is "both halves resolved", not "both halves coincide". The old
+        //    expectation (unpaired, text-then-icon) described the gap that let a city dot place while its own
+        //    name was culled; inverted in place rather than deleted, so the discriminating value survives. ──
         [Test]
-        public void NonCentredPair_EmitsTextThenIcon_BothRolesNone()
+        public void NonCentredPair_NowEmitsIconThenText_OwnerRider()
         {
             var feature = new DictionaryFeature(
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
@@ -357,10 +308,14 @@ namespace MapRenderer.Tests
                 new WebMercatorProjection(), labels, SyntheticShieldAtlas());
 
             Assert.AreEqual(2, labels.Count, "precondition: text + icon must both be emitted");
-            Assert.AreEqual(LabelKind.Text, labels[0].Kind, "non-centred order stays text-then-icon");
-            Assert.AreEqual(LabelKind.Icon, labels[1].Kind);
-            Assert.AreEqual(LabelPairRole.None, labels[0].PairRole, "a non-centred text must NOT be paired");
-            Assert.AreEqual(LabelPairRole.None, labels[1].PairRole, "a non-centred icon must NOT be paired");
+            Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "a pair emits its OWNER (the icon) first");
+            Assert.AreEqual(LabelKind.Text, labels[1].Kind, "the rider text follows immediately");
+            Assert.AreEqual(LabelPairRole.Owner, labels[0].PairRole, "the icon is the pair owner");
+            Assert.AreEqual(LabelPairRole.Rider, labels[1].PairRole, "the offset text still rides its icon");
+            Assert.AreEqual(labels[0].FeatureIndex, labels[0].PairId, "PairId is the owner's own FeatureIndex");
+            Assert.AreEqual(labels[0].PairId, labels[1].PairId, "both halves share one PairId");
+            Assert.AreEqual(labels[0].FeatureIndex + 1, labels[1].FeatureIndex,
+                "the rider's ordinal must immediately follow its owner's (LabelPairing's adjacency contract)");
         }
 
         // ── T7 ─────────────────────────────────────────────────────────────────────────────────────────
@@ -716,24 +671,10 @@ namespace MapRenderer.Tests
             return null;
         }
 
-        // §10 D8 test helper: hand-builds the PointStageInput for one half of a pair from the REAL extractor's
-        // own SymbolLabel — mirrors SymbolTileLabelBlockBaker.BuildPointInput's field math (the Unity-only bake
-        // step itself can't run here — no Unity.Collections in Tools/core-tests — so this is the engine-free
-        // subset: Color/FadeId are placeholders, unasserted by these teeth).
+        // §10 D8 test helper (shared with SymbolPairPredicateTests — see SymbolTestFixtures.StageInputFor).
         private static PointStageInput StageInputFor(SymbolStyle.SymbolLabel label, LabelKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
-            => new PointStageInput
-            {
-                ScreenPx = screenPx, Depth = 0f, Projected = true,
-                BoundsMin = boundsMin, BoundsMax = boundsMax,
-                TextSizePx = textSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
-                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey, Slot = 0,
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
-                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                RotationAlignment = label.RotationAlignment, Color = new float4(1, 1, 1, 1),
-                AtlasKind = atlasKind,
-                PairOptional = label.PairOptional, // stage C — mirrors BuildPointInput's own carry
-            };
+            => SymbolTestFixtures.StageInputFor(label, atlasKind, boundsMin, boundsMax, screenPx, textSizePx);
 
         // A single synthetic quad standing in for a shaped text run (SymbolLabel carries no Layout — shaping is
         // Unity-side) — its exact footprint is irrelevant to these teeth, only that quads.Length > 0.

@@ -139,7 +139,8 @@ namespace MapRenderer.Core.Style.Symbol
         /// co-located icons no longer collide (I5b's deferred gap).</summary>
         public string IconImage { get; init; }
 
-        /// <summary>Road-shields §10 D8/D10: whether this label is one half of a centred icon+text pair —
+        /// <summary>Road-shields §10 D8/D10, widened by P-A: whether this label is one half of an icon+text
+        /// pair — ANY such pair, centred or not; the centred restriction was the predicate P-A retired —
         /// <see cref="LabelPairRole.Owner"/> (the icon) or <see cref="LabelPairRole.Rider"/> (the text), or
         /// <see cref="LabelPairRole.None"/> for every ordinary label. A PROPOSAL: <see cref="Placement.LabelPairing"/>
         /// resolves whether it actually holds. Default <see cref="LabelPairRole.None"/> so every pre-pairing

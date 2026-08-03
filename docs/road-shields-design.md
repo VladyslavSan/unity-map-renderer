@@ -632,6 +632,16 @@ comment-value fix, nothing else — no assertion, no input, no baseline, no beha
 
 ## 10. Stage 3 — G5: a centred icon+text symbol is ONE placement instance
 
+> **SUPERSEDED IN PART (2026-08-03) — read this section as the record of what Stage 3 shipped, not as a
+> description of today's behaviour.** Stage **P-A** removed the *centred* restriction: the predicate is now
+> `hasIcon && text != null`, so **every** icon+text symbol is one placement instance, not only a centred one.
+> The identifier `centredPair` no longer exists (it is `pairedInstance`), and this section's Invariant below
+> — "no `poi_*` / `place` / `airport` / `label_*` layer changes" — was true of Stage 3 and is **false today**:
+> those are precisely the layers P-A changed. The deferred item at the foot of this section ("Pairing every
+> icon+text symbol, not just CENTRED ones") is **done**. Current SSOT:
+> `docs/labels-and-symbols-design.md` §7. Nothing below has been rewritten — a shipped stage's record should
+> not be edited to match later work — so where this section and §7 disagree, §7 wins.
+
 Stage 2 removed the "badge alone" symptom. The remaining one is **"only the number, no badge"** — the G5/D5
 residual, which §3 D5 named an approximation and §6 deferred. This stage fixes it, and retires D5.
 
@@ -789,6 +799,8 @@ accepted behaviour; that decision is now withdrawn, so restating them would be d
    this from a re-bake by that inversion: the new tooth cannot pass against the old code.
 2. **`CentredPair_EmitsAdjacentIconThenText`** (T5) and
    **`SymbolFeatureExtractorIconTests.Extract_TextAndIcon_YieldsTwoLabels_CentredPair_IconFirstThenText`**
+   *(P-A renamed this to `…_YieldsTwoLabels_IconFirstThenText` — its layer uses default anchors, so the
+   conjuncts P-A retired were inert at its values and it never discriminated the centred predicate)*
    assert the passenger text carries forced `AllowOverlap && IgnorePlacement`. The forcing is deleted, so
    they now assert the AUTHORED flags plus the pair roles. Strictly stronger (they gain the role
    assertions); RED against today's tree at the flag lines, with no new API involved.
@@ -847,7 +859,7 @@ against this prose) and held on every axis. Recorded so a later reader knows the
 
 | Item | Why |
 |---|---|
-| **Pairing every icon+text symbol, not just CENTRED ones** (the true MapLibre instance model) | `poi_*`, `label_city/town/village`, `airport`, `poi_transit` all pair in MapLibre (they declare `icon-optional: false`) but offset or re-anchor their text. Pairing them changes their placement and forces snapshot re-bakes — outside this stage's invariant, and it wants its own eyeball. The centred predicate stays the fence. |
+| ~~**Pairing every icon+text symbol, not just CENTRED ones**~~ — **DONE, stage P-A (2026-08-03)** | Was: `poi_*`, `label_city/town/village`, `airport`, `poi_transit` all pair in MapLibre but offset or re-anchor their text, so pairing them was left outside this stage's fence. P-A shipped it. Two of the reasons recorded here proved wrong on contact: no snapshot re-bake was needed (no pixel snapshot reaches `SymbolFeatureExtractor` — they build labels through `SymbolLabelBatchBuilder`), and it did not want its own eyeball first, because the maintainer had already reported the artefact ("dots are still visible without text"). See `docs/labels-and-symbols-design.md` §7. |
 | **MapLibre's optional FALLBACK semantics** (place the pair; if it fails, retry without the optional half) | Needs a placement retry pass. D11 approximates by outcome. |
 | **A curved (along-line) label paired with an icon** | Line-placement icons are still fenced to the viewport-aligned upright case (D4/T8); a pair only exists on the point path. |
 | **A union AABB instead of two boxes** | Two boxes are strictly more faithful and cost the same. |

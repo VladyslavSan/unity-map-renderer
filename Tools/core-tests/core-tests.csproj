@@ -421,7 +421,11 @@
     <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
          NOT added here (Text/SymbolSpriteReadinessTests.cs, TestSupport/GatedSpriteSource.cs). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentResolution.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolTestFixtures.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolShieldExtractionTests.cs" />
+
+    <!-- P-A (non-centred icon+text pairing): the pairing predicate's teeth — engine-free. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolPairPredicateTests.cs" />
 
     <!-- Road shields §10 (symbol pairing, D8-D11): the pair resolver — engine-free. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelPairRole.cs" />

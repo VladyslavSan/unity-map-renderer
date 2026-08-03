@@ -153,24 +153,34 @@ namespace MapRenderer.Core.Style.Symbol
 
                 if (text == null && !hasIcon) continue; // neither a text label nor an icon → nothing to emit
 
-                // §10 D8/D9 (road-shields, road-shields-design.md): a centred icon+text pair (both at the
-                // feature's anchor, no offset) is the PAIRING predicate — the two halves are stamped ONE
-                // instance downstream (LabelPairing / StagePointPair), not the old D5 icon-owns-collision
-                // approximation (the forced overlap flags below were D5's mechanism; D5 is retired — see §10).
+                // P-A (D-PA-1): the PAIRING predicate is "this feature resolved BOTH a text and an icon",
+                // nothing more. The two halves are stamped ONE placement instance downstream (LabelPairing /
+                // StagePointPair), not the old D5 icon-owns-collision approximation (the forced overlap flags
+                // were D5's mechanism; D5 is retired — see §10). §10 D8/D9's five extra conjuncts (text/icon
+                // anchor == Center, zero text/icon offset, zero radial offset) are RETIRED: MapLibre's model
+                // is an INSTANCE of icon + text placed together, not two symbols that happen to coincide, so a
+                // bottom-anchored city name is as much one instance with its dot as a shield's centred ref is
+                // with its badge. That gap is what let a dot place while its own name was culled.
                 //
-                // Stage C CORRECTS D11: icon-optional/text-optional deliberately do NOT appear here. D11's
-                // recorded shape ("pair only when both are false") is refuted — a centred pair's two boxes
-                // OVERLAP BY CONSTRUCTION, so un-pairing does not make the halves independent, it makes them
-                // mutually exclusive: the earlier-ordinal half inserts its box and the later half collides
-                // with its own former partner, every frame (the bare-number defect §10 was built to kill).
-                // The pair forms regardless of the flags; optionality is a per-BOX verdict inside the
+                // Coincident boxes were never what made pairing work. Each half's anchor/offset is baked
+                // ANCHOR-RELATIVE upstream — TextQuadLayout.Layout folds text-anchor/-offset/-radial-offset
+                // into every quad before measuring TextLayoutResult.BoundsMin/Max, and IconQuadLayout.Layout
+                // does the same for icon-anchor/-offset — so LabelBox.Build's `anchor + baked bounds` puts
+                // each half exactly where the style asked, and LabelStagingMath.StagePointPair appending both
+                // halves at the OWNER's ScreenPx stays correct with no per-half placement plumbing. A
+                // non-centred pair's two boxes are simply DISJOINT; each is still collision-tested on its own
+                // (the candidate reserves no union box spanning the gap between them).
+                //
+                // D-PA-3: icon-optional/text-optional deliberately still do NOT appear here, and D11 ("pair
+                // only when both are false") stays refuted — but for a NEW reason. Stage C's argument was that
+                // a CENTRED pair's boxes overlap by construction, so un-pairing makes the halves mutually
+                // exclusive rather than independent; that does not transfer to disjoint boxes. The argument
+                // that does is the INSTANCE one: `text-optional` means "this instance may render icon-only",
+                // which presupposes the instance. liberty's `airport` sets it and nothing else — un-paired,
+                // its halves would be collision-tested independently and the text could place with the icon
+                // culled, the one outcome the flag forbids. Optionality remains a per-BOX verdict inside the
                 // test-all-then-insert collision loop (LabelCandidate.OptionalBoxMask).
-                bool centredPair = hasIcon && text != null
-                    && layout.TextAnchor == TextAnchor.Center
-                    && layout.TextOffset.Equals(float2.zero)
-                    && layout.TextRadialOffset.Evaluate(zoom, feature) == 0f
-                    && layout.IconAnchor == TextAnchor.Center
-                    && layout.IconOffset.Equals(float2.zero);
+                bool pairedInstance = hasIcon && text != null;
 
                 // Per-feature evaluated style (zoom + feature — safe for constant/zoom/data-driven).
                 float      textSize   = layout.TextSize.Evaluate(zoom, feature);
@@ -360,14 +370,16 @@ namespace MapRenderer.Core.Style.Symbol
                                 SortKey = sortKey,
                                 TranslatePx = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
-                                // `centredPair` is computed from the UN-suppressed hasIcon, so on this branch
-                                // it must be re-gated on the same fence HasIcon is: P-B made `hasIcon` true
-                                // with `iconAtAnchors` false (the along-line case), and without this a
-                                // viewport-aligned text on such a layer would be stamped Rider against a
-                                // PairId no emitted label owns. Restores EmitAtAnchor's documented
-                                // "CentredPair implies both halves". Byte-identical wherever iconAtAnchors
-                                // holds — which is every shipped shield layer.
-                                CentredPair = centredPair && iconAtAnchors,
+                                // `pairedInstance` is computed from the UN-suppressed text/hasIcon, so on this
+                                // branch it must be re-gated on BOTH fences that can suppress a half. Icon
+                                // side: P-B made `hasIcon` true with `iconAtAnchors` false (the along-line
+                                // case), which would stamp a viewport-aligned text Rider against a PairId no
+                                // emitted label owns. Text side (D-PA-4): a map-aligned text leaves `Text`
+                                // null here, which would stamp the icon Owner with no Rider ever following.
+                                // With both conjuncts EmitAtAnchor's "PairedInstance implies both halves" is
+                                // true by construction rather than by convention. Byte-identical wherever
+                                // both sides resolve to viewport — which is every shipped shield layer.
+                                PairedInstance = pairedInstance && iconAtAnchors && textAtAnchors,
                             };
                             for (int a = 0; a < anchors.Length; a++)
                             {
@@ -407,7 +419,7 @@ namespace MapRenderer.Core.Style.Symbol
                         SortKey = sortKey,
                         TranslatePx = translatePx,
                         TranslateAnchor = paint.TranslateAnchor,
-                        CentredPair = centredPair,
+                        PairedInstance = pairedInstance,
                     };
                     for (int p = 0; p < paths.Count; p++)
                     {
@@ -480,13 +492,14 @@ namespace MapRenderer.Core.Style.Symbol
             public float              SortKey { get; init; }
             public float2             TranslatePx { get; init; }
             public TextTranslateAnchor TranslateAnchor { get; init; }
-            /// <summary>§10 D8/D10: true when this feature's text+icon are a centred pair — the two halves
-            /// are ONE placement instance. The icon is stamped <see cref="LabelPairRole.Owner"/> (emitted
-            /// first) and the text <see cref="LabelPairRole.Rider"/>, sharing a <c>PairId</c>; whether the
-            /// proposed pair actually holds is decided downstream by <see cref="Placement.LabelPairing"/>.
-            /// Otherwise the pre-pairing order (text then icon) is unchanged and both halves carry
+            /// <summary>§10 D10 / P-A: true when this feature resolved BOTH a text and an icon and both are
+            /// emitted at this anchor — the two halves are ONE placement instance, centred or not. The icon
+            /// is stamped <see cref="LabelPairRole.Owner"/> (emitted first) and the text
+            /// <see cref="LabelPairRole.Rider"/>, sharing a <c>PairId</c>; whether the proposed pair actually
+            /// holds is decided downstream by <see cref="Placement.LabelPairing"/>. Otherwise the pre-pairing
+            /// order (text then icon) is unchanged and both halves carry
             /// <see cref="LabelPairRole.None"/>.</summary>
-            public bool               CentredPair { get; init; }
+            public bool               PairedInstance { get; init; }
         }
 
         /// <summary>P-B: the per-FEATURE icon values every along-line icon label of that feature stamps —
@@ -571,12 +584,12 @@ namespace MapRenderer.Core.Style.Symbol
             double2 lonLat = tileId.ToLonLat(tilePoint.x, tilePoint.y, extent);
             double3 anchor = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
 
-            if (ctx.CentredPair)
+            if (ctx.PairedInstance)
             {
                 // §10 D10: the pair's PairId is the OWNER's (icon's) FeatureIndex, captured before either
-                // emitter advances `ordinal`. CentredPair implies both HasIcon and Text != null — every
-                // caller re-gates the centred predicate on the same fences that suppress a half (the line
-                // branch on `iconAtAnchors`) — so both emitters below always run together here.
+                // emitter advances `ordinal`. PairedInstance implies both HasIcon and Text != null — every
+                // caller re-gates the predicate on the same fences that suppress a half (the line branch on
+                // `iconAtAnchors && textAtAnchors`) — so both emitters below always run together here.
                 int pairId = ordinal;
                 if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Owner, pairId);
                 if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Rider, pairId);
