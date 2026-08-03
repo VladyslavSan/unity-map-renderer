@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using Unity.Mathematics;
 
 namespace MapRenderer.Core.Expressions
 {
@@ -9,6 +10,13 @@ namespace MapRenderer.Core.Expressions
     /// <c>#rgb</c>/<c>#rgba</c>/<c>#rrggbb</c>/<c>#rrggbbaa</c>, <c>rgb()/rgba()</c>, <c>hsl()/hsla()</c>,
     /// and the CSS named colors. Clean-room: the CSS color syntax + the named-color table are public web
     /// standards.
+    ///
+    /// <para><b>Out-of-range component values are clamped, not rejected</b> — CSS Color 4 §4.1: a component
+    /// outside its range is valid syntax and is clipped to the range at used-value time, so
+    /// <c>rgb(300,0,-20)</c> is red. This is the one place the two entry points to a color differ on purpose:
+    /// the <c>rgb</c>/<c>rgba</c> <i>expression constructors</i> (<see cref="Ops.ColorCtors"/>) take numbers
+    /// the style author computed and treat out-of-range as an evaluation <i>error</i>, because there a 300
+    /// means the expression is wrong. Here the 300 is a literal someone wrote, and CSS says what it means.</para>
     /// </summary>
     public static class ColorParser
     {
@@ -107,7 +115,7 @@ namespace MapRenderer.Core.Expressions
             return true;
         }
 
-        // A rgb() channel: a 0..255 number, or a percentage of 255.
+        // A rgb() channel: a 0..255 number, or a percentage of 255. Clamped to [0,255] — see the class doc.
         private static bool TryChannel(string s, out double v)
         {
             s = s.Trim();
@@ -116,16 +124,24 @@ namespace MapRenderer.Core.Expressions
                 if (double.TryParse(s.Substring(0, s.Length - 1), NumberStyles.Float,
                     CultureInfo.InvariantCulture, out double pct))
                 {
-                    v = pct / 100.0 * 255.0;
+                    v = math.clamp(pct / 100.0 * 255.0, 0.0, 255.0);
                     return true;
                 }
                 v = 0; return false;
             }
-            return double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+            if (!double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                return false;
+            v = math.clamp(v, 0.0, 255.0);
+            return true;
         }
 
         private static bool TryAlpha(string s, out double v)
-            => double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out v);
+        {
+            if (!double.TryParse(s.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                return false;
+            v = math.clamp(v, 0.0, 1.0);
+            return true;
+        }
 
         private static bool TryParseHsl(string[] parts, out Color color)
         {
@@ -157,6 +173,8 @@ namespace MapRenderer.Core.Expressions
             return true;
         }
 
+        // hsl() saturation / lightness: a percentage of 1. Clamped to [0,1] — CSS clips these the same way
+        // it clips rgb() channels, and an unclamped l > 1 drives HueToRgb past white into a negative channel.
         private static bool TryPercent(string s, out double v)
         {
             s = s.Trim();
@@ -164,13 +182,16 @@ namespace MapRenderer.Core.Expressions
             {
                 // accept a bare 0..1 too, but CSS requires '%'; be tolerant.
                 if (double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out v))
+                {
+                    v = math.clamp(v, 0.0, 1.0);
                     return true;
+                }
                 v = 0; return false;
             }
             if (double.TryParse(s.Substring(0, s.Length - 1), NumberStyles.Float,
                 CultureInfo.InvariantCulture, out double pct))
             {
-                v = pct / 100.0;
+                v = math.clamp(pct / 100.0, 0.0, 1.0);
                 return true;
             }
             v = 0; return false;

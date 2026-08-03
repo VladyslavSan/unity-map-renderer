@@ -19,7 +19,13 @@ namespace MapRenderer.Core.Expressions
     /// </summary>
     public readonly struct Color : IEquatable<Color>
     {
-        /// <summary>sRGB red, green, blue, and alpha — each in [0,1] (values are clamped on construction).</summary>
+        /// <summary>sRGB red, green, blue, and alpha — each nominally in [0,1].
+        ///
+        /// <para>The range is enforced by the <i>producers</i>, not by this constructor: every way a color
+        /// enters the type clamps or rejects at its own boundary — <see cref="ColorParser"/> clips per CSS,
+        /// <see cref="Ops.ColorCtors"/> raises an evaluation error, <see cref="FromLab"/> clamps the
+        /// out-of-gamut result of its conversion. The constructor stays a plain field assignment so it can
+        /// also carry the intermediate values of a color-space round-trip without clipping them.</para></summary>
         public readonly double R, G, B, A;
 
         public Color(double r, double g, double b, double a)

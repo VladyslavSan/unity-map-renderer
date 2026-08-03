@@ -111,5 +111,50 @@ namespace MapRenderer.Tests.Expressions
             Assert.AreEqual(-9.997846439624425e-06, a, 1e-9, "a* for neutral gray (near 0)");
             Assert.AreEqual(3.99913857584977e-06, b, 1e-9, "b* for neutral gray (near 0)");
         }
+
+        // ---- CSS out-of-range components are CLIPPED, not rejected (CSS Color 4 §4.1) ----------------
+        // The counterpart to Rgb_OutOfRangeChannel_IsError / Rgba_OutOfRangeAlpha_IsError above: the
+        // EXPRESSION constructors raise on a 300, the CSS-string parse path clamps it. Both are tested so
+        // a future "unify them" edit has to break one of these two assertions to land.
+
+        [Test]
+        public void CssRgbString_ChannelAboveRange_ClampsTo255()
+        {
+            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(300, 0, 0)\"]"));
+            Assert.AreEqual(255.0, rgba[0], 1e-9, "rgb(300,…) must clip to 255, not produce R > 1.0");
+            Assert.AreEqual(0.0, rgba[1], 1e-9);
+        }
+
+        [Test]
+        public void CssRgbString_NegativeChannel_ClampsToZero()
+        {
+            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(0, -20, 0)\"]"));
+            Assert.AreEqual(0.0, rgba[1], 1e-9, "a negative channel must clip to 0, not to a negative G");
+        }
+
+        [Test]
+        public void CssRgbString_PercentAboveRange_ClampsTo255()
+        {
+            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgb(150%, 0%, 0%)\"]"));
+            Assert.AreEqual(255.0, rgba[0], 1e-9, "the percent channel path needs its own clamp");
+        }
+
+        [Test]
+        public void CssRgbaString_AlphaAboveRange_ClampsToOne()
+        {
+            var rgba = Rgba(Expr.Eval("[\"to-color\", \"rgba(0, 0, 0, 5)\"]"));
+            Assert.AreEqual(1.0, rgba[3], 1e-9, "alpha is opacity in [0,1]; 5 must clip to fully opaque");
+        }
+
+        [Test]
+        public void CssHslString_LightnessAboveRange_ClampsToWhite()
+        {
+            // Unclamped, l = 1.5 drives q = l + s - l*s past 1 and HueToRgb returns p = 2l - q < 0 for the
+            // off-hue channels — the colour comes out with NEGATIVE components, not merely too bright.
+            var rgba = Rgba(Expr.Eval("[\"to-color\", \"hsl(0, 100%, 150%)\"]"));
+            Assert.AreEqual(255.0, rgba[0], 1e-9, "l > 100% must clip to white");
+            Assert.AreEqual(255.0, rgba[1], 1e-9);
+            Assert.AreEqual(255.0, rgba[2], 1e-9);
+        }
     }
 }
