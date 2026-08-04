@@ -384,6 +384,369 @@ namespace MapRenderer.Tests
                 $"3-pt round join (roundSegments=4) → 27 indices. Got {r.Indices.Length}.");
         }
 
+        // ─── Inner-join miter clamp (bevel/round) ─────────────────────────────────────────
+        //
+        // docs/line-rendering-design.md §3 item 2: the bevel/round INNER vertex must carry the
+        // same miter-factor magnitude the miter join already carries (min(1/|cos(θ/2)|, miterLimit)),
+        // not a unit vector. See §1/§2 of the stage plan for the derivation.
+
+        /// <summary>
+        /// Locates the join's inner (concave) vertex robustly (not by index): the unique vertex sitting
+        /// at <paramref name="corner"/> whose <see cref="LineVertex.Side"/> sign matches the turn side
+        /// (left turn ⇒ concave is left ⇒ Side == +1; right turn ⇒ concave is right ⇒ Side == −1).
+        /// Asserts uniqueness as a precondition so a topology change cannot silently make the caller's
+        /// assertions vacuous.
+        /// </summary>
+        private static int FindInnerVertexIndex(LineVertex[] verts, double2 corner, bool leftTurn)
+        {
+            float expectedSide = leftTurn ? +1f : -1f;
+            int found = -1;
+            int count = 0;
+            for (int i = 0; i < verts.Length; i++)
+            {
+                double2 pos = verts[i].Position;
+                if (Math.Abs(pos.x - corner.x) < 1e-9 && Math.Abs(pos.y - corner.y) < 1e-9 &&
+                    verts[i].Side == expectedSide)
+                {
+                    found = i;
+                    count++;
+                }
+            }
+            Assert.AreEqual(1, count,
+                $"Expected exactly one inner-join vertex at corner ({corner.x:G},{corner.y:G}) with " +
+                $"Side={expectedSide}. Found {count}.");
+            return found;
+        }
+
+        [Test]
+        public void InnerJoin_Bevel_90LeftTurn_Unclamped_MatchesConcaveOffsetLineIntersection()
+        {
+            // Bevel, 90° left turn, miterLimit 2.0. Raw factor 1/cos45° = √2 ≈ 1.414 < 2 → UNCLAMPED.
+            // n1=(0,1), n2=(-1,0), mu=normalize(n1+n2)=(-1,1)/√2. Left turn ⇒ concave is LEFT ⇒ the
+            // inner vertex carries mu·factor directly (not negated): (-1,1).
+            var corner = Pt(10, 0);
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) },
+                JoinType.Bevel, CapType.Butt, miterLimit: 2.0);
+
+            int idx = FindInnerVertexIndex(r.Vertices, corner, leftTurn: true);
+            double2 normal = r.Vertices[idx].Normal;
+
+            AssertNearlyEqual(-1.0, normal.x, 1e-9, $"Inner normal.x should be -1.0. Got {normal.x:G17}.");
+            AssertNearlyEqual(1.0, normal.y, 1e-9, $"Inner normal.y should be 1.0. Got {normal.y:G17}.");
+
+            double len = VecLen(normal);
+            AssertNearlyEqual(1.4142135623730951, len, 1e-9,
+                $"Inner |normal| should be √2 = 1.4142135623730951. Got {len:G17}.");
+
+            // Analytic check, not measured: the extruded inner (concave) vertex must sit at the
+            // intersection of the incoming LEFT offset line (y=+2) and the outgoing LEFT offset line
+            // (x=8) — §1/§2 of the stage plan. Un-fixed (chamfer on the concave side) extrudes to
+            // (12,-2); f1ffe702 (pre-blocked-stage, |N|=1 inner) extrudes to
+            // (11.414213562373096, -1.414213562373095) — the CONVEX side, at unit magnitude.
+            double2 extruded = Extrude(r.Vertices[idx]);
+            AssertNearlyEqual(8.0, extruded.x, 1e-9, $"Extruded inner vertex.x should be 8. Got {extruded.x:G17}.");
+            AssertNearlyEqual(2.0, extruded.y, 1e-9, $"Extruded inner vertex.y should be 2. Got {extruded.y:G17}.");
+        }
+
+        [Test]
+        public void InnerJoin_Round_90RightTurn_Unclamped_MirrorSignBranch()
+        {
+            // Round, 90° RIGHT turn (mirror of the previous tooth's sign branch), miterLimit 2.0.
+            // n1=(0,1), t2=(0,-1) ⇒ n2=(1,0), mu=normalize(n1+n2)=(1,1)/√2. Right turn ⇒ concave is
+            // RIGHT ⇒ the inner vertex carries -mu·factor: (-1,-1).
+            var corner = Pt(10, 0);
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0), Pt(10, -10) },
+                JoinType.Round, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+
+            int idx = FindInnerVertexIndex(r.Vertices, corner, leftTurn: false);
+            double2 normal = r.Vertices[idx].Normal;
+
+            AssertNearlyEqual(-1.0, normal.x, 1e-9, $"Inner normal.x should be -1.0. Got {normal.x:G17}.");
+            AssertNearlyEqual(-1.0, normal.y, 1e-9, $"Inner normal.y should be -1.0. Got {normal.y:G17}.");
+
+            double len = VecLen(normal);
+            AssertNearlyEqual(1.4142135623730951, len, 1e-9,
+                $"Inner |normal| should be √2 = 1.4142135623730951. Got {len:G17}.");
+
+            // Intersection of the two RIGHT offset lines (y=-2, x=8). Un-fixed extrudes to (12,2);
+            // f1ffe702 extrudes to (11.414213562373096, 1.414213562373095) — the mirror of the
+            // left-turn case above, on the CONVEX (here: left) side at unit magnitude.
+            double2 extruded = Extrude(r.Vertices[idx]);
+            AssertNearlyEqual(8.0, extruded.x, 1e-9, $"Extruded inner vertex.x should be 8. Got {extruded.x:G17}.");
+            AssertNearlyEqual(-2.0, extruded.y, 1e-9, $"Extruded inner vertex.y should be -2. Got {extruded.y:G17}.");
+        }
+
+        [Test]
+        public void InnerJoin_Bevel_150LeftTurn_ClampedBranch()
+        {
+            // Bevel, 150° left turn (external turn angle), miterLimit 2.0.
+            // Third point = (10,0) + 30·(cos150°, sin150°) = (-15.980762113533157, 15.0).
+            // t2 = (-0.8660254037844387, 0.5); n2 = left normal of t2 = (-0.5, -0.8660254037844387).
+            // n1 = (0,1). mu = normalize(n1+n2) = (-0.9659258262890683, 0.2588190451025207).
+            // cosHalf = dot(mu,n1) = 0.2588190451025207 = cos75°.
+            // Raw factor 1/cos75° = 3.8637033051562737 > 2 → CLAMPED to exactly 2.0.
+            // Left turn ⇒ concave is LEFT ⇒ inner vertex carries mu·2.0 directly (not negated):
+            // (-1.9318516525781366, 0.5176380902050415).
+            // Deliberately NOT asserting the offset-line intersection here: the clamp deliberately
+            // falls short of the true miter intersection at this angle — do not "fix" that later.
+            var corner = Pt(10, 0);
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0), Pt(-15.980762113533157, 15.0) },
+                JoinType.Bevel, CapType.Butt, miterLimit: 2.0);
+
+            int idx = FindInnerVertexIndex(r.Vertices, corner, leftTurn: true);
+            double2 normal = r.Vertices[idx].Normal;
+
+            // Three distinguishable readings: un-fixed (chamfer on concave side) |N|=1; correct
+            // (clamped) |N|=2.0; clamp-omitted |N|=3.8637033051562737.
+            AssertNearlyEqual(-1.9318516525781366, normal.x, 1e-9, $"Inner normal.x should be -1.9318516525781366. Got {normal.x:G17}.");
+            AssertNearlyEqual(0.5176380902050415, normal.y, 1e-9, $"Inner normal.y should be 0.5176380902050415. Got {normal.y:G17}.");
+
+            double len = VecLen(normal);
+            AssertNearlyEqual(2.0, len, 1e-9, $"Inner |normal| should be clamped to exactly 2.0. Got {len:G17}.");
+        }
+
+        [Test]
+        public void InnerJoin_Round_150LeftTurn_ClampedBranch()
+        {
+            // Same fixture geometry as the bevel clamped tooth, JoinType.Round — covers the round
+            // arm of the clamped branch (same ComputeInnerNormal helper, different emission path).
+            // Left turn ⇒ round join's inner vertex also carries mu·2.0 directly (not negated) — same
+            // values as the bevel tooth above.
+            var corner = Pt(10, 0);
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0), Pt(-15.980762113533157, 15.0) },
+                JoinType.Round, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+
+            int idx = FindInnerVertexIndex(r.Vertices, corner, leftTurn: true);
+            double2 normal = r.Vertices[idx].Normal;
+
+            AssertNearlyEqual(-1.9318516525781366, normal.x, 1e-9, $"Inner normal.x should be -1.9318516525781366. Got {normal.x:G17}.");
+            AssertNearlyEqual(0.5176380902050415, normal.y, 1e-9, $"Inner normal.y should be 0.5176380902050415. Got {normal.y:G17}.");
+
+            double len = VecLen(normal);
+            AssertNearlyEqual(2.0, len, 1e-9, $"Inner |normal| should be clamped to exactly 2.0. Got {len:G17}.");
+        }
+
+        [Test]
+        public void MiterJoin_Untouched_InvariantTooth()
+        {
+            // This is the "did the refactor stay bit-identical" tooth, not a regression tooth — it
+            // must read the same before and after every edit in this stage. 1e-12 (tighter than the
+            // clamp teeth's 1e-9): mux*miterFactor is a divide-then-multiply, so it lands within
+            // ~1e-16 of ±1.0 but is not guaranteed bit-exact; a flaky invariant tooth is worse than none.
+            var r = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) },
+                JoinType.Miter, CapType.Butt, miterLimit: 10.0);
+
+            // Join vertices are verts[2] (left, +1) and verts[3] (right, -1).
+            AssertNearlyEqual(-1.0, r.Vertices[2].Normal.x, 1e-12, $"Miter left.x should be -1.0. Got {r.Vertices[2].Normal.x:G17}.");
+            AssertNearlyEqual(1.0, r.Vertices[2].Normal.y, 1e-12, $"Miter left.y should be 1.0. Got {r.Vertices[2].Normal.y:G17}.");
+            AssertNearlyEqual(1.0, r.Vertices[3].Normal.x, 1e-12, $"Miter right.x should be 1.0. Got {r.Vertices[3].Normal.x:G17}.");
+            AssertNearlyEqual(-1.0, r.Vertices[3].Normal.y, 1e-12, $"Miter right.y should be -1.0. Got {r.Vertices[3].Normal.y:G17}.");
+        }
+
+        // ─── Join side — chamfer/arc on the CONVEX side (region-membership teeth) ────────────
+        //
+        // The teeth above (E18-E23) pin normal LENGTHS and POSITIONS but never which side of the
+        // band a join vertex lands on — the exact gap that let the inner/outer inversion ship. These
+        // teeth compute the two half-width bands from the fixture geometry directly and assert region
+        // membership, independent of the production code's own normal arithmetic.
+
+        /// <summary>Closed-rectangle membership test with tolerance <paramref name="eps"/>.</summary>
+        private static bool InClosed(double2 q, double2 rMin, double2 rMax, double eps)
+            => q.x >= rMin.x - eps && q.x <= rMax.x + eps &&
+               q.y >= rMin.y - eps && q.y <= rMax.y + eps;
+
+        /// <summary>
+        /// All corner-position vertices (within 1e-9) whose <see cref="LineVertex.Side"/> equals
+        /// <paramref name="side"/>, in emission order (ascending index — the array is built by
+        /// sequential <c>List.Add</c>, so index order IS emission order).
+        /// </summary>
+        private static List<int> CornerVerticesBySide(LineVertex[] verts, double2 corner, float side)
+        {
+            var found = new List<int>();
+            for (int i = 0; i < verts.Length; i++)
+            {
+                double2 pos = verts[i].Position;
+                if (Math.Abs(pos.x - corner.x) < 1e-9 && Math.Abs(pos.y - corner.y) < 1e-9 &&
+                    verts[i].Side == side)
+                    found.Add(i);
+            }
+            return found;
+        }
+
+        [Test]
+        public void JoinSide_BevelAndRound_ChamferIsOnTheConvexSide()
+        {
+            // Fixture A: (0,0)→(10,0)→(10,10), h=2 (HalfWidth), miterLimit=2.0, roundSegments=4.
+            // R1 = [0,10]×[-2,2] (segment 1's band), R2 = [8,12]×[0,10] (segment 2's band).
+            var r1Min = Pt(0, -2);  var r1Max = Pt(10, 2);
+            var r2Min = Pt(8, 0);   var r2Max = Pt(12, 10);
+            var corner = Pt(10, 0);
+            var mu = new double2(-0.7071067811865476, 0.7071067811865476);
+            const double eps = 1e-9;
+
+            var fixtureA = new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) };
+
+            // T1a — the concave vertex must sit INSIDE both bands (the overlap), and on the mu side.
+            var bevelA = LineTessellator.Triangulate(fixtureA, JoinType.Bevel, CapType.Butt, miterLimit: 2.0);
+            int concaveIdx = FindInnerVertexIndex(bevelA.Vertices, corner, leftTurn: true);
+            double2 concaveExtruded = Extrude(bevelA.Vertices[concaveIdx]);
+            double dotMu = (concaveExtruded.x - corner.x) * mu.x + (concaveExtruded.y - corner.y) * mu.y;
+
+            AssertNearlyEqual(8.0, concaveExtruded.x, eps, $"T1a: concave vertex.x should be 8.0. Got {concaveExtruded.x:G17}.");
+            AssertNearlyEqual(2.0, concaveExtruded.y, eps, $"T1a: concave vertex.y should be 2.0. Got {concaveExtruded.y:G17}.");
+            AssertNearlyEqual(2.8284271247461903, dotMu, eps, $"T1a: dot(Extrude-C, mu) should be 2.8284271247461903. Got {dotMu:G17}.");
+            Assert.Greater(dotMu, 0.0, "T1a: concave vertex must be on the mu (turn) side.");
+            Assert.IsTrue(InClosed(concaveExtruded, r1Min, r1Max, eps), "T1a: concave vertex must lie inside R1 (band overlap).");
+            Assert.IsTrue(InClosed(concaveExtruded, r2Min, r2Max, eps), "T1a: concave vertex must lie inside R2 (band overlap).");
+
+            // T1b — bevel chamfer chord: the two convex unit-normal vertices' midpoint must sit
+            // strictly OUTSIDE both bands (the uncovered wedge).
+            var outerVerts = CornerVerticesBySide(bevelA.Vertices, corner, -1f);
+            Assert.AreEqual(2, outerVerts.Count, $"T1b: expected exactly 2 convex (side=-1) bevel vertices at the corner. Found {outerVerts.Count}.");
+            double2 outerA = Extrude(bevelA.Vertices[outerVerts[0]]);
+            double2 outerB = Extrude(bevelA.Vertices[outerVerts[1]]);
+            double2 chordMid = new double2((outerA.x + outerB.x) / 2.0, (outerA.y + outerB.y) / 2.0);
+
+            AssertNearlyEqual(10.0, outerA.x, eps, $"T1b: outerA.x should be 10.0. Got {outerA.x:G17}.");
+            AssertNearlyEqual(-2.0, outerA.y, eps, $"T1b: outerA.y should be -2.0. Got {outerA.y:G17}.");
+            AssertNearlyEqual(12.0, outerB.x, eps, $"T1b: outerB.x should be 12.0. Got {outerB.x:G17}.");
+            AssertNearlyEqual(0.0, outerB.y, eps, $"T1b: outerB.y should be 0.0. Got {outerB.y:G17}.");
+            AssertNearlyEqual(11.0, chordMid.x, eps, $"T1b: chord midpoint.x should be 11.0. Got {chordMid.x:G17}.");
+            AssertNearlyEqual(-1.0, chordMid.y, eps, $"T1b: chord midpoint.y should be -1.0. Got {chordMid.y:G17}.");
+            Assert.IsFalse(InClosed(chordMid, r1Min, r1Max, -eps), "T1b: chamfer chord midpoint must lie strictly outside R1.");
+            Assert.IsFalse(InClosed(chordMid, r2Min, r2Max, -eps), "T1b: chamfer chord midpoint must lie strictly outside R2.");
+
+            // T1c — round arc: all 4 arc-intermediate vertices must be strictly outside both bands.
+            var roundA = LineTessellator.Triangulate(fixtureA, JoinType.Round, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+            var arcSideVerts = CornerVerticesBySide(roundA.Vertices, corner, -1f);
+            Assert.AreEqual(6, arcSideVerts.Count, $"T1c: expected 6 convex-side (side=-1) round-join vertices (arcStart + 4 intermediates + arcEnd). Found {arcSideVerts.Count}.");
+
+            double[] expectedX = { 10.6180339887, 11.1755705046, 11.6180339887, 11.9021130326 };
+            double[] expectedY = { -1.9021130326, -1.6180339887, -1.1755705046, -0.6180339887 };
+            double minMargin = double.MaxValue;
+            for (int k = 0; k < 4; k++)
+            {
+                // arcSideVerts[0] = arcStart, [1..4] = fan intermediates, [5] = arcEnd.
+                double2 fanPos = Extrude(roundA.Vertices[arcSideVerts[k + 1]]);
+                AssertNearlyEqual(expectedX[k], fanPos.x, 1e-6, $"T1c: arc intermediate[{k}].x. Got {fanPos.x:G17}.");
+                AssertNearlyEqual(expectedY[k], fanPos.y, 1e-6, $"T1c: arc intermediate[{k}].y. Got {fanPos.y:G17}.");
+                Assert.IsFalse(InClosed(fanPos, r1Min, r1Max, -eps), $"T1c: arc intermediate[{k}] must lie strictly outside R1. Got ({fanPos.x:G},{fanPos.y:G}).");
+                Assert.IsFalse(InClosed(fanPos, r2Min, r2Max, -eps), $"T1c: arc intermediate[{k}] must lie strictly outside R2. Got ({fanPos.x:G},{fanPos.y:G}).");
+
+                // Distance to the UNION is the MIN of the two box distances, not the max: a point clear of
+                // R1 by 1.902 but of R2 by only 0.618 is 0.618 from the union. (Using max here read 1.618
+                // and over-claimed the margin by ~2.6× — review NIT.) Both points are outside both boxes
+                // on one axis only, so the per-axis excess IS the box distance.
+                double marginR1 = fanPos.x - 10.0;   // clear of R1 to the right
+                double marginR2 = -fanPos.y;         // clear of R2 below
+                double margin = Math.Min(marginR1, marginR2);
+                if (margin < minMargin) minMargin = margin;
+            }
+            Assert.Greater(minMargin, 0.6, $"T1c: minimum distance from R1∪R2 should be ~0.618. Got {minMargin:G17}.");
+
+            // T1d — right-turn mirror (Fixture B), closes the single-branch coverage hole (§3.6).
+            var fixtureB = new[] { Pt(0, 0), Pt(10, 0), Pt(10, -10) };
+            var bevelB = LineTessellator.Triangulate(fixtureB, JoinType.Bevel, CapType.Butt, miterLimit: 2.0);
+            int concaveIdxB = FindInnerVertexIndex(bevelB.Vertices, corner, leftTurn: false);
+            double2 concaveExtrudedB = Extrude(bevelB.Vertices[concaveIdxB]);
+            var r2MinB = Pt(8, -10); var r2MaxB = Pt(12, 0);
+
+            AssertNearlyEqual(8.0, concaveExtrudedB.x, eps, $"T1d: concave vertex.x should be 8.0. Got {concaveExtrudedB.x:G17}.");
+            AssertNearlyEqual(-2.0, concaveExtrudedB.y, eps, $"T1d: concave vertex.y should be -2.0. Got {concaveExtrudedB.y:G17}.");
+            Assert.IsTrue(InClosed(concaveExtrudedB, r1Min, r1Max, eps), "T1d: concave vertex must lie inside R1.");
+            Assert.IsTrue(InClosed(concaveExtrudedB, r2MinB, r2MaxB, eps), "T1d: concave vertex must lie inside R2 (mirrored band).");
+
+            var outerVertsB = CornerVerticesBySide(bevelB.Vertices, corner, +1f);
+            Assert.AreEqual(2, outerVertsB.Count, $"T1d: expected exactly 2 convex (side=+1) bevel vertices at the corner. Found {outerVertsB.Count}.");
+            double2 outerAB = Extrude(bevelB.Vertices[outerVertsB[0]]);
+            double2 outerBB = Extrude(bevelB.Vertices[outerVertsB[1]]);
+            double2 chordMidB = new double2((outerAB.x + outerBB.x) / 2.0, (outerAB.y + outerBB.y) / 2.0);
+
+            AssertNearlyEqual(11.0, chordMidB.x, eps, $"T1d: chord midpoint.x should be 11.0. Got {chordMidB.x:G17}.");
+            AssertNearlyEqual(1.0, chordMidB.y, eps, $"T1d: chord midpoint.y should be 1.0. Got {chordMidB.y:G17}.");
+            Assert.IsFalse(InClosed(chordMidB, r1Min, r1Max, -eps), "T1d: chamfer chord midpoint must lie strictly outside R1.");
+            Assert.IsFalse(InClosed(chordMidB, r2MinB, r2MaxB, -eps), "T1d: chamfer chord midpoint must lie strictly outside R2 (mirrored band).");
+        }
+
+        [Test]
+        public void JoinVertices_NormalTimesSide_IsUnchanged()
+        {
+            // Trap 1 (plan §3.1): operations (a) negate-the-normal and (b) flip-the-side-tag must be
+            // performed TOGETHER, so Normal × Side is unchanged vertex-for-vertex at every join vertex.
+            // This is an INVARIANT tooth — relative to the inner-magnitude change already in the tree it
+            // reads GREEN both before and after the side swap (only RED if a developer does (a) without
+            // (b)). It is NOT green against the pre-magnitude baseline, where the inner normal was unit
+            // length and Normal×Side at the corner reads (−0.7071, 0.7071) against the expected (−1, 1).
+            // It does not itself prove the join-side correction, which is what
+            // JoinSide_BevelAndRound_ChamferIsOnTheConvexSide pins.
+            var corner = Pt(10, 0);
+            var fixtureA = new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) };
+            var r = LineTessellator.Triangulate(fixtureA, JoinType.Bevel, CapType.Butt, miterLimit: 2.0);
+
+            var cornerVerts = new List<int>();
+            for (int i = 0; i < r.Vertices.Length; i++)
+            {
+                double2 pos = r.Vertices[i].Position;
+                if (Math.Abs(pos.x - corner.x) < 1e-9 && Math.Abs(pos.y - corner.y) < 1e-9)
+                    cornerVerts.Add(i);
+            }
+            Assert.AreEqual(3, cornerVerts.Count, $"Expected exactly 3 bevel join vertices at the corner. Found {cornerVerts.Count}.");
+
+            double2[] expected = { new double2(0, 1), new double2(-1, 1), new double2(-1, 0) };
+            for (int k = 0; k < 3; k++)
+            {
+                var v = r.Vertices[cornerVerts[k]];
+                double2 normalTimesSide = new double2(v.Normal.x * v.Side, v.Normal.y * v.Side);
+                AssertNearlyEqual(expected[k].x, normalTimesSide.x, 1e-9,
+                    $"Normal×Side[{k}].x should be {expected[k].x:G17}. Got {normalTimesSide.x:G17}.");
+                AssertNearlyEqual(expected[k].y, normalTimesSide.y, 1e-9,
+                    $"Normal×Side[{k}].y should be {expected[k].y:G17}. Got {normalTimesSide.y:G17}.");
+            }
+
+            // Additional invariant: dot(Normal, mu) > 0 ⟺ Side == +1, over every corner vertex, bevel
+            // and round both. mu is the incoming/outgoing bisector, recomputed per-fixture below.
+            AssertNormalMuSideCorrelation(fixtureA, JoinType.Bevel, corner);
+            AssertNormalMuSideCorrelation(fixtureA, JoinType.Round, corner);
+        }
+
+        private static void AssertNormalMuSideCorrelation(double2[] pts, JoinType joinType, double2 corner)
+        {
+            var r = LineTessellator.Triangulate(pts, joinType, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+            // mu for this corner (fixture A): normalize(n1+n2) = (-0.7071067811865476, 0.7071067811865476).
+            var mu = new double2(-0.7071067811865476, 0.7071067811865476);
+
+            int asserted = 0, ambiguous = 0;
+            for (int i = 0; i < r.Vertices.Length; i++)
+            {
+                double2 pos = r.Vertices[i].Position;
+                if (Math.Abs(pos.x - corner.x) > 1e-9 || Math.Abs(pos.y - corner.y) > 1e-9)
+                    continue;
+                if (r.Vertices[i].Side == 0f) continue; // fan pivot, not a corner-offset vertex.
+
+                double dot = r.Vertices[i].Normal.x * mu.x + r.Vertices[i].Normal.y * mu.y;
+                bool sidePositive = r.Vertices[i].Side > 0f;
+                // Exclude near-zero dot (arc vertices near the mu-perpendicular) from the strict
+                // correlation — only assert where the sign is unambiguous.
+                if (Math.Abs(dot) < 1e-6) { ambiguous++; continue; }
+                Assert.AreEqual(dot > 0.0, sidePositive,
+                    $"{joinType} vertex[{i}]: dot(Normal,mu)={dot:G17} but Side={r.Vertices[i].Side} — sign mismatch.");
+                asserted++;
+            }
+
+            // The skip above is an escape hatch for a geometry that does not currently occur (min |dot| is
+            // 0.7071 on this fixture for both join types). Pin that, so a future join topology cannot
+            // hollow the correlation out silently.
+            Assert.AreEqual(0, ambiguous,
+                $"{joinType}: {ambiguous} corner vertices were skipped as sign-ambiguous — the correlation " +
+                "is no longer checking what it claims. Re-derive it against the new join topology.");
+            Assert.Greater(asserted, 0, $"{joinType}: no corner vertices were checked — the tooth is vacuous.");
+        }
+
         // ─── Square cap ────────────────────────────────────────────────────────────────────
 
         [Test]
@@ -698,6 +1061,102 @@ namespace MapRenderer.Tests
                         endPt: Pt(10,10),  endTangent: new double2(0,1));
                 }
             }
+        }
+
+        [Test]
+        public void AllJoinCapCombinations_RightTurn_PositiveWindingNoDegenerate()
+        {
+            // Closes §3.6's coverage hole: AllJoinCapCombinations_LShape_* exercises only the
+            // leftTurn branch (Fixture A). A botched quad-index swap (c) or next-pointer swap (d) in
+            // the !leftTurn branch would ship green through every other tooth in this file — both
+            // producers would agree (parity is agreement, not correctness) and no other winding pin
+            // exercises a right turn. Fixture B: (0,0)→(10,0)→(10,-10), right turn at (10,0).
+            var pts   = new[] { Pt(0,0), Pt(10,0), Pt(10,-10) };
+            var joins = new[] { JoinType.Miter, JoinType.Bevel, JoinType.Round };
+            var caps  = new[] { CapType.Butt, CapType.Square, CapType.Round };
+
+            foreach (var join in joins)
+            {
+                foreach (var cap in caps)
+                {
+                    string label = $"RightTurn {join}/{cap}";
+                    var r = LineTessellator.Triangulate(pts, join, cap, roundSegments: 4);
+
+                    // Start tangent = (1,0), end tangent = (0,-1).
+                    bool needsExtentCheck = (cap == CapType.Round || cap == CapType.Square);
+                    AssertGeometryValid(r, label, needsExtentCheck,
+                        startPt: Pt(0,0),   startTangent: new double2(1,0),
+                        endPt: Pt(10,-10),  endTangent: new double2(0,-1));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Doubled signed areas of every triangle, after shader extrusion at <see cref="HalfWidth"/>.
+        /// Positive = CCW (canonical), negative = the inner-join fold, zero = degenerate.
+        /// </summary>
+        private static double[] DoubledSignedAreas(LineTessellator.Result r)
+        {
+            var areas = new double[r.Indices.Length / 3];
+            for (int t = 0; t < areas.Length; t++)
+            {
+                double2 a = Extrude(r.Vertices[r.Indices[t * 3]]);
+                double2 b = Extrude(r.Vertices[r.Indices[t * 3 + 1]]);
+                double2 c = Extrude(r.Vertices[r.Indices[t * 3 + 2]]);
+                areas[t] = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
+            }
+            return areas;
+        }
+
+        // The inner-join fold. AllJoinCapCombinations_* above assert UNIFORM CCW, but their fixtures use
+        // 10-unit segments against HalfWidth 2 — an order of magnitude clear of the fold regime. Left at
+        // that, the suite would read as a guarantee of uniform winding that the producer does NOT provide.
+        // These cases pin where the guarantee actually ends.
+        //
+        // A 90° turn with HalfWidth 2 and miterLimit 2 has k = 1/cos45° = √2 (unclamped), so
+        // docs/line-rendering-design.md §3 item 5's threshold
+        //     S_crit = 2·h·k·sin(θ/2) / (1 + k·cos(θ/2)) = 2·2·√2·0.7071 / (1 + √2·0.7071) = 4/2
+        // is EXACTLY 2.0 here — which makes the boundary itself testable rather than approximate. All three
+        // join types fold identically, because the offending triangle is the incoming quad's (L0, R1, L1)
+        // and every join emits that quad with the same two corner vertices.
+        [Test]
+        [TestCase(JoinType.Miter)]
+        [TestCase(JoinType.Bevel)]
+        [TestCase(JoinType.Round)]
+        public void ShortSegment_InnerJoinFold_OnsetIsExactlyTheDocumentedSCrit(JoinType join)
+        {
+            // Below S_crit: the quad diagonal has inverted. Exactly one triangle, at exactly -0.8.
+            var below = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(1.8, 0), Pt(1.8, 10) }, join, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+            var belowAreas = DoubledSignedAreas(below);
+            int belowFolded = 0;
+            double mostNegative = 0.0;
+            foreach (double area in belowAreas)
+                if (area < 0.0) { belowFolded++; if (area < mostNegative) mostNegative = area; }
+
+            Assert.AreEqual(1, belowFolded,
+                $"{join}: S = 1.8 < S_crit = 2.0 must fold EXACTLY ONE triangle (the incoming quad's " +
+                $"(L0, R1, L1)). Found {belowFolded}. If this changed, §3 item 5's bound is stale.");
+            AssertNearlyEqual(-0.8, mostNegative, 1e-9,
+                $"{join}: the folded triangle's doubled signed area should be -0.8. Got {mostNegative:G17}.");
+
+            // At S_crit the same triangle is exactly degenerate — the boundary is not approximate.
+            var at = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(2.0, 0), Pt(2.0, 10) }, join, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+            double closestToZero = double.MaxValue;
+            foreach (double area in DoubledSignedAreas(at))
+            {
+                Assert.GreaterOrEqual(area, -1e-9, $"{join}: nothing may fold AT S_crit. Got {area:G17}.");
+                if (Math.Abs(area) < Math.Abs(closestToZero)) closestToZero = area;
+            }
+            AssertNearlyEqual(0.0, closestToZero, 1e-9,
+                $"{join}: at S = S_crit = 2.0 exactly one triangle must be degenerate. Got {closestToZero:G17}.");
+
+            // Above S_crit: uniform CCW, the regime AllJoinCapCombinations_* covers.
+            var above = LineTessellator.Triangulate(
+                new[] { Pt(0, 0), Pt(2.2, 0), Pt(2.2, 10) }, join, CapType.Butt, roundSegments: 4, miterLimit: 2.0);
+            foreach (double area in DoubledSignedAreas(above))
+                Assert.Greater(area, 0.0, $"{join}: S = 2.2 > S_crit must be uniformly CCW. Got {area:G17}.");
         }
 
         [Test]

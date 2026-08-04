@@ -187,6 +187,73 @@ namespace MapRenderer.Tests
             => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(18, 6), new double2(28, 6) },
                             JoinType.Round, CapType.Round, 2.0, 4, "round-both");
 
+        // ── Inner-join miter clamp (bevel/round inner vertex now carries the miter factor) ──────────
+        //
+        // BevelJoin_LeftTurn_Parity / BevelJoin_RightTurn_Parity above use a 38.7° turn (factor 1.060) —
+        // the UNclamped branch only, and weakly. MiterJoin_SharpCorner_FallsBackToBevel_Parity already
+        // exercises the clamped branch via the miter→bevel fallback, but stays green whether both arms
+        // agree at 1.0 (un-fixed) or 2.0 (fixed) — parity alone cannot tell the two apart. These two
+        // teeth force the clamped branch explicitly, with the fixture that also proves it clamps managed-side
+        // (LineTessellatorTests.InnerJoin_Bevel_150LeftTurn_ClampedBranch / ..._Round_150LeftTurn_...).
+
+        [Test]
+        public void InnerJoin_ClampedAngle_Bevel_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(-15.980762113533157, 15.0) },
+                            JoinType.Bevel, CapType.Butt, 2.0, 4, "inner-clamp-bevel");
+
+        [Test]
+        public void InnerJoin_ClampedAngle_Round_Parity()
+            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(-15.980762113533157, 15.0) },
+                            JoinType.Round, CapType.Butt, 2.0, 4, "inner-clamp-round");
+
+        // Short-segment fold regime. Every OTHER parity fixture in this file uses ≥10-unit segments against
+        // HalfWidth 2 — an order of magnitude clear of the regime where the inner-join quad provably inverts
+        // (docs/line-rendering-design.md §3 item 5). LineTessellatorTests pins the boundary exactly, but on
+        // the MANAGED oracle; without these cases the Burst producer — the one that actually ships — is
+        // unexercised at the documented boundary, and a Jobs-only divergence there would ship green.
+        // Same 90° fixture, S = 1.8 < S_crit = 2.0.
+        [TestCase(JoinType.Miter, "fold-miter")]
+        [TestCase(JoinType.Bevel, "fold-bevel")]
+        [TestCase(JoinType.Round, "fold-round")]
+        public void ShortSegment_FoldRegime_Parity(JoinType join, string label)
+            => AssertParity(new[] { new double2(0, 0), new double2(1.8, 0), new double2(1.8, 10) },
+                            join, CapType.Butt, 2.0, 4, label);
+
+        /// <summary>
+        /// One direct analytic assertion on the Burst side (deliberately redundant with T1 ∧ parity):
+        /// the tooth that survives if <see cref="AssertParity"/> is ever loosened. Same fixture as
+        /// <c>LineTessellatorTests.InnerJoin_Bevel_90LeftTurn_Unclamped_MatchesConcaveOffsetLineIntersection</c>,
+        /// mapped flat 2D (x,y) → 3D (x,0,y).
+        /// </summary>
+        [Test]
+        public void InnerJoin_Bevel_90LeftTurn_Across_MatchesManagedAnalytic()
+        {
+            var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(10, 10) };
+            var (jv, _) = RunJob(pts, JoinType.Bevel, CapType.Butt, 2.0, 4);
+
+            double3 corner = new double3(10, 0, 0);
+            int found = -1, count = 0;
+            for (int i = 0; i < jv.Length; i++)
+            {
+                double3 pos = jv[i].Position;
+                if (math.abs(pos.x - corner.x) < 1e-9 && math.abs(pos.y - corner.y) < 1e-9 &&
+                    math.abs(pos.z - corner.z) < 1e-9 && jv[i].Side == +1f) // left turn ⇒ concave Side == +1
+                {
+                    found = i;
+                    count++;
+                }
+            }
+            Assert.AreEqual(1, count, $"Expected exactly one inner-join vertex at the corner with Side=+1. Found {count}.");
+
+            double3 across = jv[found].Across;
+            Assert.AreEqual(-1.0, across.x, 1e-9, $"Across.x should be -1.0. Got {across.x:G17}.");
+            Assert.AreEqual(0.0, across.y, 1e-9, $"Across.y should be 0.0. Got {across.y:G17}.");
+            Assert.AreEqual(1.0, across.z, 1e-9, $"Across.z should be 1.0. Got {across.z:G17}.");
+
+            double len = math.length(across);
+            Assert.AreEqual(1.4142135623730951, len, 1e-9, $"|Across| should be √2 = 1.4142135623730951. Got {len:G17}.");
+        }
+
         // ── Fixture-wide oracle over real line geometry (geolines layer) ────────────────────────────
 
         [Test]

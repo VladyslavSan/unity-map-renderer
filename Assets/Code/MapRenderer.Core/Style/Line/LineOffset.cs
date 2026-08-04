@@ -24,12 +24,16 @@ namespace MapRenderer.Core.Style.Line
     /// Round join/cap limitation: fan vertices have per-vertex varying normals with a single
     /// side sign per half-fan, so <c>Displace</c> with fan normals produces a non-uniform shift.
     /// This is the documented MapLibre-parity limitation for round joins at large offset.
-    /// The band-center shift on fans is bounded (fan normals stay unit-length) and does not
-    /// produce NaN (the fan pivot has normal=0 → zero displacement).
+    /// The band-center shift on fans is bounded (fan rim normals stay unit-length; the inner fan
+    /// vertex is bounded at miterLimit) and does not produce NaN (the fan pivot has normal=0 →
+    /// zero displacement).
     ///
-    /// Large-offset sharp-corner limitation: miter factor (1/cos(θ/2)) → ∞ as θ → 180°.
-    /// The displacement magnitude is <c>miter × offsetM</c>, so a tight hairpin corner at large
-    /// offset can blow up. This matches MapLibre's known limitation; no geometric solver is built.
+    /// Large-offset sharp-corner limitation: the RAW miter factor (1/cos(θ/2)) → ∞ as θ → 180°,
+    /// and the displacement magnitude is <c>miter × offsetM</c>. With an UNBOUNDED limit a tight
+    /// hairpin at large offset therefore blows up. Production does not run unbounded: at
+    /// <c>MiterLimit = 2</c> the miter join falls back to bevel and the bevel/round concave vertex is
+    /// saturated at the limit, so the emitted magnitude is at most <c>2 × |offsetM|</c>. This matches
+    /// MapLibre's known limitation; no geometric solver is built.
     ///
     /// Engine-free: no UnityEngine references. Runs in both dotnet core-tests and Unity EditMode.
     /// Clean-room: offset semantics from the public MapLibre Style Spec. No MapLibre source read.
@@ -42,8 +46,9 @@ namespace MapRenderer.Core.Style.Line
         //
         // Parameters:
         //   normal   — per-vertex extrusion normal (from LineVertex.Normal).
-        //              For straight segments / miter joins: |normal| = miter factor (≥1).
-        //              For unit-normal vertices (bevel outer, segment ends): |normal| = 1.
+        //              For straight segments / miter joins / the bevel-or-round inner vertex:
+        //              |normal| = miter factor (≥1, saturated at miterLimit for the inner vertex).
+        //              For unit-normal vertices (bevel/round outer, segment ends): |normal| = 1.
         //   side     — signed side value ∈{+1,−1} (from LineVertex.Side).
         //   offsetM  — perpendicular shift in world meters (same space as the normal).
         //

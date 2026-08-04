@@ -24,9 +24,10 @@ namespace MapRenderer.Core.Geometry
 
         /// <summary>
         /// 3D extrusion direction in the surface tangent plane (perpendicular to <see cref="Up"/> and the line).
-        /// <b>Magnitude carries the miter factor</b> (1 for straight/bevel/round vertices, 1/cos(θ/2) at a miter
-        /// join) — the SAME contract as <see cref="LineVertex.Normal"/>, so the shader (<c>Line_VertexExtrude.hlsl</c>)
-        /// applies <c>lateral = across/|across| · |across| · outerM</c> unchanged. Per-side sign is baked in.
+        /// <b>Magnitude carries the miter factor</b> (1 for straight/terminal, cap-rim, and bevel/round OUTER
+        /// vertices; min(1/cos(θ/2), miterLimit) for a miter join and the bevel/round INNER vertex) — the SAME
+        /// contract as <see cref="LineVertex.Normal"/>, so the shader (<c>Line_VertexExtrude.hlsl</c>) applies
+        /// <c>lateral = across/|across| · |across| · outerM</c> unchanged. Per-side sign is baked in.
         /// </summary>
         public double3 Across;
 

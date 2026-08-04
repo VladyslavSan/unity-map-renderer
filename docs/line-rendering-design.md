@@ -139,9 +139,27 @@ Each is real, independent of the width question, and much smaller than the width
    per-vertex screen-space scale (§2). *A tile mesh is built once and viewed from every angle, so it may
    bake only view-independent quantities; the two segment tangents qualify, the miter derived from them
    does not.*
-2. **Bevel and round joins' inner vertex** is emitted with the miter factor discarded (`|Normal| = 1`), so
+2. ~~**Bevel and round joins' inner vertex** is emitted with the miter factor discarded (`|Normal| = 1`), so
    it sits `cos(θ/2)` too far in — wrong in world terms, before any screen question. Needs an inner-join
-   clamp rule.
+   clamp rule.~~ **RESOLVED, in two parts.** First, the concave vertex of a bevel/round join now emits
+   `min(1/cos(θ/2), miterLimit)` — the same bisector-direction, miter-factor magnitude the miter join
+   already emits at that corner, saturated at `miterLimit` instead of falling back to bevel (see
+   `LineTessellator.ComputeInnerNormal`, `LineRibbonJob.ComputeInnerNormal`; pinned by
+   `LineTessellatorTests.InnerJoin_*` and `LineRibbonJobTests.InnerJoin_*`). Second — found while
+   re-deriving the first part — that magnitude vertex was being emitted on the **wrong side of the
+   corner**: `LineTessellator.cs:144`'s comment claimed `t1×t2 > 0 ⇒ left turn, outer side = left`, but a
+   left turn actually puts the CONCAVE side on the left (the two half-width bands overlap there); the
+   convex (uncovered-wedge) side is the other one. So bevel/round joins were chamfering/fanning the
+   concave side (hidden inside the band overlap — a bevel rendered as a miter, a round join never rendered
+   round) and placing the single miter-factor vertex on the convex side, the reverse of the intended
+   contract. This inversion **pre-dated this stage** (review finding F1, `inner-join-miter` stage); the
+   join-side-correction stage fixed it, moving the chamfer/arc to the convex side and the single
+   bisector/miter-factor vertex to the concave side — the *derivation* of the magnitude (this item's
+   original scope) was correct throughout and needed no change. Pinned by
+   `LineTessellatorTests.JoinSide_BevelAndRound_ChamferIsOnTheConvexSide` (region-membership: the chamfer
+   chord / arc sit strictly outside both segments' half-width bands) and
+   `LineTessellatorTests.JoinVertices_NormalTimesSide_IsUnchanged` (the AA/offset contract is unaffected).
+   This left one thing open — see the new item below.
 3. **Square caps** bake `across ∓ along` (length √2) and are indistinguishable from a 90° join by
    `(bisector, miter)` alone. `distanceAlong == 0` separates the *start* cap; the end cap is not separable
    from the current stream and does not need to be, because `EmitEndCap` appends an isolated quad while
@@ -150,6 +168,53 @@ Each is real, independent of the width question, and much smaller than the width
    three joins (miter/bevel/round) are implemented and wired; none has been measured under tilt. Prior art
    before planning it: a `normalize(0)` NaN once made `line-cap: round` render as butt, and it hid because
    nothing measured caps.
+5. **Open (recorded, not fixed): the width-dependent inner-join overlap.** All three join types place the
+   inner vertex along the bisector at `halfWidth · k`, `k = min(1/cos(θ/2), miterLimit)` — the intersection
+   of the two inner offset lines while unclamped, deliberately short of it once the clamp engages. Its
+   along-track overshoot from the joint is `halfWidth · k · sin(θ/2)` (which equals `halfWidth · √(k² − 1)`
+   **only** unclamped), rising to a supremum of `miterLimit · halfWidth = 2 · halfWidth` as θ → 180°.
+   The ribbon does not wait for the vertices to cross: the incoming quad's second triangle `(L0, R1, L1)`
+   has signed area `½·halfWidth·(S·(k·cos(θ/2) + 1) − 2·halfWidth·k·sin(θ/2))`, so it inverts (folds, and
+   is then culled) once the adjacent segment is shorter than
+
+       S_crit = 2 · halfWidth · k · sin(θ/2) / (1 + k · cos(θ/2))
+
+   whose supremum is `2 · miterLimit · halfWidth = 4 · halfWidth` — i.e. **twice the line width**, not the
+   ~1.7 half-widths that `k · sin(θ/2)` alone suggests. Measured at `halfWidth = 2, miterLimit = 2` (bevel,
+   round and the miter→bevel fallback all fold at the same threshold): `S_crit / halfWidth` = 1.00 (θ=90°),
+   1.73 (120°), 2.55 (150°), 3.93 (179°); with both ends of a segment clamped, a fold at 4.1 half-widths.
+   Note θ > 120° is exactly where `miterLimit = 2.0` engages, so for sharp corners bevel/round now fold
+   where the old unit-length inner vertex did not — but net band coverage still **improves** (the
+   correction restores far more of the intended band than the culled sliver removes), so this is a
+   sharp-corner artefact to schedule, not a regression to revert. **This is the one place the canonical
+   CCW winding contract (`docs/coordinates-and-projections.md` §7.1) does not hold**, so the bound above is
+   pinned rather than left as prose: `LineTessellatorTests.ShortSegment_InnerJoinFold_OnsetIsExactlyTheDocumentedSCrit`
+   asserts, for all three join types at a 90° corner where `S_crit` is exactly 2.0, that S = 1.8 folds
+   exactly one triangle at exactly −0.8, that S = 2.0 makes it exactly degenerate, and that S = 2.2 is
+   uniformly CCW. That exact pin is on the **managed** producer; the Burst arm reaches the same regime
+   through `LineRibbonJobTests.ShortSegment_FoldRegime_Parity` (index-, `Side`- and `Across`-exact against
+   the oracle), so a Jobs-only divergence at the boundary is caught but its *value* is pinned only via
+   parity. `AllJoinCapCombinations_*`'s uniform-CCW claim is scoped to its own 10-unit fixtures, an order
+   of magnitude clear of this regime. Fixing it requires the world width, which
+   neither ribbon producer has by construction (width is a shader uniform × per-vertex `WidthScale`). Applies
+   to all three join types, including the miter path that has shipped since before this stage. Same
+   phenomenon as `docs/line-antialiasing-design.md` §6.3's "short-segment fold" row, which understated the
+   bound as "segment length ≲ line width" and has been reconciled with the derivation above.
+
+Three smaller findings from the join-side-correction review are recorded here rather than fixed in-stage:
+
+- **No *direct* analytic tooth on the Burst arm's right-turn branch or the round join's convex rim.** Both
+  are carried transitively by `LineRibbonJobTests.AssertParity`, which is index-, `Side`- and `Across`-exact
+  against the managed producer. Worth one direct Jobs-side assertion if `AssertParity` is ever loosened —
+  which is exactly the hedge `InnerJoin_Bevel_90LeftTurn_Across_MatchesManagedAnalytic` provides on the left.
+- **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
+  *direction* is floating-point noise, where `ComputeMiterNormals` returns the inert `n1` fallback for the
+  same condition. The branch is narrow (reachable only for `|n₁+n₂| ∈ [1e-12, 2e-12)`) and documented at both
+  sites; consider unifying on the `n1` fallback.
+- **The round fan's `|side| = 0` locus is no longer the centreline at a *clamped* join** — the pivot sits up
+  to `2 · halfWidth` from the corner while the rim is at `1 · halfWidth`. Identical to the miter join's
+  long-standing situation and not observed to matter (`Join_NoInteriorSeam` is green at 60°), but it is the
+  geometric assumption the AA ramp rests on and nothing currently measures it at a clamped corner.
 
 ---
 

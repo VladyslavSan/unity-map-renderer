@@ -583,6 +583,13 @@ namespace MapRenderer.Tests.Visual
         /// for a 90° corner (0.71·half-width) would fall INSIDE the probe. Hence the 60° corner, whose
         /// bevel chord sits at 0.87·half-width, outside the annulus for all three join types. No point in
         /// the annulus is near enough to the silhouette for the straddle ramp to legitimately darken it.</para>
+        ///
+        /// <para><b>The 60° corner is NECESSARY, not an arbitrary/incidental choice — do not move this
+        /// fixture to 90°.</b> This bites harder after the join-side-correction stage: the chamfer/arc now
+        /// really do sit on the convex side (the actual silhouette), so their standoff from the corner is
+        /// exactly the margin this test depends on. At a 90° corner the corrected chamfer chord would sit
+        /// at <c>0.7071·halfWidthPx = 8.49 px</c> against an annulus reaching <c>(2/3)·halfWidthPx = 8 px</c>
+        /// — a margin of only ~0.5 px, not a safe one to probe blind.</para>
         /// </summary>
         [TestCase(JoinType.Miter)]
         [TestCase(JoinType.Bevel)]

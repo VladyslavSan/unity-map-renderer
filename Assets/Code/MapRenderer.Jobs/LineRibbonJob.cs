@@ -167,6 +167,9 @@ namespace MapRenderer.Jobs
                     // Left turn ⇔ the segment direction rotates left about the surface up. Sign calibrated to the
                     // planar oracle: mapping flat 2D (x,y)→3D (x,0,y), managed's t1×t2 z-component equals
                     // −dot(cross(along_in,along_out), up), so the left-turn test is the NEGATIVE dot (docs §7.1).
+                    // (This predicate only says which way the path turns; it does not by itself say which side
+                    // is outer/convex — see EmitBevelJoin/EmitRoundJoin below, mirroring the managed §1.2 proof
+                    // that a left turn puts the CONCAVE side on the left.)
                     bool leftTurn = math.dot(math.cross(along[seg], along[seg + 1]), upJ) < 0.0;
 
                     bool bevel = (Join == JoinType.Bevel) ||
@@ -175,12 +178,12 @@ namespace MapRenderer.Jobs
                     if (Join == JoinType.Round)
                     {
                         EmitRoundJoin(p2, upJ, n1, n2, dist2, roundSegments, leftTurn, leftPrev, rightPrev,
-                                      out leftPrev, out rightPrev, ref v, ref idx);
+                                      miterLimit, out leftPrev, out rightPrev, ref v, ref idx);
                     }
                     else if (bevel)
                     {
                         EmitBevelJoin(p2, upJ, n1, n2, dist2, leftTurn, leftPrev, rightPrev,
-                                      out leftPrev, out rightPrev, ref v, ref idx);
+                                      miterLimit, out leftPrev, out rightPrev, ref v, ref idx);
                     }
                     else
                     {
@@ -234,32 +237,67 @@ namespace MapRenderer.Jobs
         // Miter (mirrors LineTessellator.ComputeMiterNormals / NeedsBevel, 3D)
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
-        private static void ComputeMiterNormals(double3 n1, double3 n2, out double3 leftN, out double3 rightN)
+        /// <summary>
+        /// Computes the join bisector direction and half-angle cosine shared by
+        /// <see cref="ComputeMiterNormals"/>, <see cref="ComputeInnerNormal"/> and
+        /// <see cref="NeedsBevel"/> — the one statement of this arithmetic in the file (mirrors
+        /// <c>LineTessellator.TryJoinBisector</c>, 3D). Returns false at a 180° hairpin (the normals
+        /// cancel), in which case <paramref name="mu"/> is set to <paramref name="n1"/> and
+        /// <paramref name="cosHalf"/> to 1.0 as an inert fallback.
+        /// </summary>
+        private static bool TryJoinBisector(double3 n1, double3 n2, out double3 mu, out double cosHalf)
         {
             double3 m    = n1 + n2;
             double  mLen = math.length(m);
-            if (mLen < 1e-12) { leftN = n1; rightN = -n1; return; }
+            if (mLen < 1e-12) { mu = n1; cosHalf = 1.0; return false; }
 
-            double3 mu  = m / mLen;
-            double  dot = math.dot(mu, n1); // cos(θ/2)
-            if (math.abs(dot) < 1e-12) { leftN = n1; rightN = -n1; return; }
+            mu      = m / mLen;
+            cosHalf = math.dot(mu, n1); // cos(θ/2)
+            return true;
+        }
 
-            double miterFactor = 1.0 / dot;
+        private static void ComputeMiterNormals(double3 n1, double3 n2, out double3 leftN, out double3 rightN)
+        {
+            if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf))
+            { leftN = n1; rightN = -n1; return; }
+
+            if (math.abs(cosHalf) < 1e-12) { leftN = n1; rightN = -n1; return; }
+
+            double miterFactor = 1.0 / cosHalf;
             leftN  =  mu * miterFactor;
             rightN = -mu * miterFactor;
         }
 
+        /// <summary>
+        /// Inner-vertex normal for a bevel/round join: the SAME miter-factor magnitude the miter
+        /// join's <see cref="ComputeMiterNormals"/> emits, saturated at <paramref name="miterLimit"/>
+        /// instead of falling back to bevel (mirrors <c>LineTessellator.ComputeInnerNormal</c>, 3D).
+        /// Returns the MAGNITUDE along <c>+mu</c> only (not signed) — the caller applies the
+        /// turn-direction sign (<c>leftTurn ? +innerN : -innerN</c>) when placing the vertex on the
+        /// concave side (see <see cref="EmitBevelJoin"/>/<see cref="EmitRoundJoin"/>).
+        /// </summary>
+        private static double3 ComputeInnerNormal(double3 n1, double3 n2, double miterLimit)
+        {
+            if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf))
+                return n1; // 180° hairpin — exactly today's fallback.
+
+            if (math.abs(cosHalf) < 1e-12)
+                // Saturated answer; avoids 1/0 → ±Inf through Burst. mu's DIRECTION here is
+                // floating-point noise (mirrors LineTessellator.ComputeInnerNormal); only the saturated
+                // magnitude is relied on.
+                return mu * miterLimit;
+
+            double innerFactor = math.min(1.0 / math.abs(cosHalf), miterLimit);
+            return mu * innerFactor;
+        }
+
         private static bool NeedsBevel(double3 n1, double3 n2, double miterLimit)
         {
-            double3 m    = n1 + n2;
-            double  mLen = math.length(m);
-            if (mLen < 1e-12) return true;
-            double3 mu  = m / mLen;
-            double  dot = math.dot(mu, n1);
-            if (math.abs(dot) < 1e-12) return true;
+            if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf)) return true;
+            if (math.abs(cosHalf) < 1e-12) return true;
             // Magnitude test (mirrors LineTessellator.NeedsBevel): near a 180° hairpin dot can go small-NEGATIVE,
             // and a signed 1/dot > limit lets a huge negative miter factor slip past the bevel gate (the glitch).
-            return math.abs(1.0 / dot) > miterLimit;
+            return math.abs(1.0 / cosHalf) > miterLimit;
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -268,74 +306,79 @@ namespace MapRenderer.Jobs
 
         private void EmitBevelJoin(
             double3 p, double3 up, double3 n1, double3 n2, double dist,
-            bool leftTurn, int leftPrev, int rightPrev,
+            bool leftTurn, int leftPrev, int rightPrev, double miterLimit,
             out int leftNext, out int rightNext, ref int v, ref int idx)
         {
-            double3 iSum = n1 + n2;
-            double  iLen = math.length(iSum);
-            double3 innerN = (iLen > 1e-12) ? (iSum / iLen) : n1;
+            double3 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
+            // Mirrors the managed LineTessellator.EmitBevelJoin (2D §2.1/§2.2) — the two branches are
+            // mirror images, not unifiable (a reflection reverses triangle orientation; see the managed
+            // file's comment for the −12 CW counterexample).
             if (leftTurn)
             {
+                // Left turn ⇒ concave = left, convex = right.
                 int outerA = v, innerV = v + 1, outerB = v + 2;
-                AddVertex(ref v, MakeVertex(p,  n1,       up, dist, +1f));
-                AddVertex(ref v, MakeVertex(p, -innerN,   up, dist, -1f));
-                AddVertex(ref v, MakeVertex(p,  n2,       up, dist, +1f));
-
-                EmitQuad(ref idx, leftPrev, rightPrev, outerA, innerV);
-                AddIndex(ref idx, outerA);
-                AddIndex(ref idx, outerB);
-                AddIndex(ref idx, innerV);
-
-                leftNext  = outerB;
-                rightNext = innerV;
-            }
-            else
-            {
-                int innerV = v, outerA = v + 1, outerB = v + 2;
-                AddVertex(ref v, MakeVertex(p,  innerN,   up, dist, +1f));
                 AddVertex(ref v, MakeVertex(p, -n1,       up, dist, -1f));
+                AddVertex(ref v, MakeVertex(p,  innerN,   up, dist, +1f));
                 AddVertex(ref v, MakeVertex(p, -n2,       up, dist, -1f));
 
                 EmitQuad(ref idx, leftPrev, rightPrev, innerV, outerA);
                 AddIndex(ref idx, outerA);
-                AddIndex(ref idx, innerV);
                 AddIndex(ref idx, outerB);
+                AddIndex(ref idx, innerV);
 
                 leftNext  = innerV;
                 rightNext = outerB;
+            }
+            else
+            {
+                // Right turn ⇒ concave = right, convex = left.
+                int innerV = v, outerA = v + 1, outerB = v + 2;
+                AddVertex(ref v, MakeVertex(p, -innerN,   up, dist, -1f));
+                AddVertex(ref v, MakeVertex(p,  n1,       up, dist, +1f));
+                AddVertex(ref v, MakeVertex(p,  n2,       up, dist, +1f));
+
+                EmitQuad(ref idx, leftPrev, rightPrev, outerA, innerV);
+                AddIndex(ref idx, outerA);
+                AddIndex(ref idx, innerV);
+                AddIndex(ref idx, outerB);
+
+                leftNext  = outerB;
+                rightNext = innerV;
             }
         }
 
         private void EmitRoundJoin(
             double3 p, double3 up, double3 n1, double3 n2, double dist,
-            int roundSegments, bool leftTurn, int leftPrev, int rightPrev,
+            int roundSegments, bool leftTurn, int leftPrev, int rightPrev, double miterLimit,
             out int leftNext, out int rightNext, ref int v, ref int idx)
         {
-            double3 iSum = n1 + n2;
-            double  iLen = math.length(iSum);
-            double3 innerN = (iLen > 1e-12) ? (iSum / iLen) : n1;
+            double3 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
-            double3 arcStart = leftTurn ?  n1 : -n1;
-            double3 arcEnd   = leftTurn ?  n2 : -n2;
+            // Convex-rim arc start/end (mirrors managed §2.3): a left turn's convex side is the right,
+            // i.e. −n1/−n2.
+            double3 arcStart = leftTurn ? -n1 : n1;
+            double3 arcEnd   = leftTurn ? -n2 : n2;
 
-            // Sweep the outer arc in the local tangent-plane basis (e0 = arcStart, e1 ⊥ e0 in-plane). The signed
+            // Sweep the convex arc in the local tangent-plane basis (e0 = arcStart, e1 ⊥ e0 in-plane). The signed
             // angle to arcEnd is measured in THIS basis, so the e1-sign is self-cancelling and the intermediate
             // directions are basis-independent — the same equal-angle fan the 2D atan2 sweep produces.
+            // `sweep` is bit-invariant under the joint negation arcStart→−arcStart, arcEnd→−arcEnd (e0→−e0,
+            // e1→−e1, and dot(arcEnd,e{0,1}) is a product of two negated terms) — no edit needed here.
             double3 e0 = arcStart;
             double3 e1 = math.normalize(math.cross(up, e0));
             double  sweep = math.atan2(math.dot(arcEnd, e1), math.dot(arcEnd, e0));
 
             int innerIdx = v;
-            if (leftTurn) AddVertex(ref v, MakeVertex(p, -innerN, up, dist, -1f));
-            else          AddVertex(ref v, MakeVertex(p,  innerN, up, dist, +1f));
+            if (leftTurn) AddVertex(ref v, MakeVertex(p,  innerN, up, dist, +1f));
+            else          AddVertex(ref v, MakeVertex(p, -innerN, up, dist, -1f));
 
             int arcStartIdx = v;
-            if (leftTurn) AddVertex(ref v, MakeVertex(p, arcStart, up, dist, +1f));
-            else          AddVertex(ref v, MakeVertex(p, arcStart, up, dist, -1f));
+            if (leftTurn) AddVertex(ref v, MakeVertex(p, arcStart, up, dist, -1f));
+            else          AddVertex(ref v, MakeVertex(p, arcStart, up, dist, +1f));
 
-            if (leftTurn) EmitQuad(ref idx, leftPrev, rightPrev, arcStartIdx, innerIdx);
-            else          EmitQuad(ref idx, leftPrev, rightPrev, innerIdx, arcStartIdx);
+            if (leftTurn) EmitQuad(ref idx, leftPrev, rightPrev, innerIdx, arcStartIdx);
+            else          EmitQuad(ref idx, leftPrev, rightPrev, arcStartIdx, innerIdx);
 
             int prevFanIdx = arcStartIdx;
             for (int k = 1; k <= roundSegments; k++)
@@ -344,8 +387,8 @@ namespace MapRenderer.Jobs
                 double  ang = t * sweep;
                 double3 dir = math.cos(ang) * e0 + math.sin(ang) * e1;
                 int fanIdx = v;
-                if (leftTurn) AddVertex(ref v, MakeVertex(p, dir, up, dist, +1f));
-                else          AddVertex(ref v, MakeVertex(p, dir, up, dist, -1f));
+                if (leftTurn) AddVertex(ref v, MakeVertex(p, dir, up, dist, -1f));
+                else          AddVertex(ref v, MakeVertex(p, dir, up, dist, +1f));
 
                 if (leftTurn) { AddIndex(ref idx, prevFanIdx); AddIndex(ref idx, fanIdx); AddIndex(ref idx, innerIdx); }
                 else          { AddIndex(ref idx, innerIdx); AddIndex(ref idx, fanIdx); AddIndex(ref idx, prevFanIdx); }
@@ -354,14 +397,14 @@ namespace MapRenderer.Jobs
             }
 
             int arcEndIdx = v;
-            if (leftTurn) AddVertex(ref v, MakeVertex(p, arcEnd, up, dist, +1f));
-            else          AddVertex(ref v, MakeVertex(p, arcEnd, up, dist, -1f));
+            if (leftTurn) AddVertex(ref v, MakeVertex(p, arcEnd, up, dist, -1f));
+            else          AddVertex(ref v, MakeVertex(p, arcEnd, up, dist, +1f));
 
             if (leftTurn) { AddIndex(ref idx, prevFanIdx); AddIndex(ref idx, arcEndIdx); AddIndex(ref idx, innerIdx); }
             else          { AddIndex(ref idx, innerIdx); AddIndex(ref idx, arcEndIdx); AddIndex(ref idx, prevFanIdx); }
 
-            if (leftTurn) { leftNext = arcEndIdx; rightNext = innerIdx; }
-            else          { leftNext = innerIdx; rightNext = arcEndIdx; }
+            if (leftTurn) { leftNext = innerIdx; rightNext = arcEndIdx; }
+            else          { leftNext = arcEndIdx; rightNext = innerIdx; }
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -476,7 +519,7 @@ namespace MapRenderer.Jobs
                         prevFanIdx = fanIdx;
                     }
                     // Closing-triangle seed: geometrically identical to rightPrev (this cap's `across` is the
-                    // same n1 the last segment extruded rightPrev with, at :196-200) but tagged +1, so the
+                    // same n1 the last segment extruded rightPrev with, at :202-206) but tagged +1, so the
                     // closing triangle's outer edge runs +1 → +1 instead of +1 → −1. rightPrev itself stays
                     // −1 for the ribbon quad. Same fix as EmitStartCap's capSeed.
                     int capSeedIdx = v;

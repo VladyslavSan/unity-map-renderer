@@ -13,16 +13,18 @@ namespace MapRenderer.Core.Geometry
     /// Coordinate space: space-agnostic. For S05, caller passes world-meter coordinates.
     ///
     /// Normal contract (IMPORTANT — packing note):
-    ///   • Straight/bevel/round vertices: |normal| = 1.
-    ///   • Miter join vertices: |normal| = 1/cos(θ/2) (the miter factor is baked into the length).
-    ///   • Do NOT store as SNORM (unit-only format) — miter normals exceed length 1.
+    ///   • Straight/terminal, cap-rim, and bevel/round OUTER vertices: |normal| = 1.
+    ///   • Miter-join vertices, and the bevel/round INNER vertex: |normal| = min(1/cos(θ/2), miterLimit) —
+    ///     the miter factor, saturated at miterLimit for the inner vertex instead of falling back to bevel.
+    ///   • Do NOT store as SNORM (unit-only format) — miter/inner normals exceed length 1.
     ///   • Vertex shader: worldPos += normal * 0.5 * widthMeters (uniform, no side multiplier).
     ///   • Side ∈ {+1, −1} is used only by the fragment shader for AA feathering.
     ///
     /// Join bevel/round geometry principle:
     ///   At an interior point, one side is the "outer" (convex) side and one is the "inner"
     ///   (concave) side. The outer side gets the extra bevel/fan geometry; the inner side gets
-    ///   a single miter-like vertex (using the normalised average normal, length=1).
+    ///   a single miter-like vertex — the SAME bisector-direction, miter-factor-magnitude vertex
+    ///   the miter join would emit at that corner, clamped at miterLimit (see ComputeInnerNormal).
     /// </summary>
     public static class LineTessellator
     {
@@ -139,7 +141,9 @@ namespace MapRenderer.Core.Geometry
                     double2 t1 = tangent[seg];
                     double2 t2 = tangent[seg + 1];
 
-                    // Cross product z: t1 × t2 > 0 → left turn, outer side = left (+).
+                    // Cross product z: t1 × t2 > 0 → left turn ⇒ the path curves LEFT ⇒ the LEFT side
+                    // is CONCAVE (the two half-width bands overlap there) and the RIGHT side is CONVEX
+                    // (the uncovered wedge). The chamfer/arc goes on the CONVEX side.
                     double cross = t1.x * t2.y - t1.y * t2.x;
                     bool leftTurn = cross > 0;
 
@@ -149,13 +153,13 @@ namespace MapRenderer.Core.Geometry
                     if (joinType == JoinType.Round)
                     {
                         EmitRoundJoin(verts, indices, p2, n1, n2, dist2, roundSegments,
-                                      leftTurn, leftPrev, rightPrev,
+                                      leftTurn, leftPrev, rightPrev, miterLimit,
                                       out leftPrev, out rightPrev);
                     }
                     else if (bevel)
                     {
                         EmitBevelJoin(verts, indices, p2, n1, n2, dist2,
-                                      leftTurn, leftPrev, rightPrev,
+                                      leftTurn, leftPrev, rightPrev, miterLimit,
                                       out leftPrev, out rightPrev);
                     }
                     else
@@ -198,14 +202,17 @@ namespace MapRenderer.Core.Geometry
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Compute miter left/right normals at the join between two segments whose left normals
-        /// are <paramref name="n1"/> (incoming) and <paramref name="n2"/> (outgoing).
-        /// The miter normal's LENGTH encodes the miter factor (1/cos(θ/2)).
+        /// Computes the join bisector direction and half-angle cosine shared by
+        /// <see cref="ComputeMiterNormals"/>, <see cref="ComputeInnerNormal"/> and
+        /// <see cref="NeedsBevel"/> — the one statement of this arithmetic in the file.
+        /// <paramref name="mu"/> is the normalised average of the two left normals
+        /// (<paramref name="n1"/> incoming, <paramref name="n2"/> outgoing); <paramref name="cosHalf"/>
+        /// is <c>dot(mu, n1) == cos(θ/2)</c> where θ is the turn angle. Returns false at a 180°
+        /// hairpin (the normals cancel), in which case <paramref name="mu"/> is set to
+        /// <paramref name="n1"/> and <paramref name="cosHalf"/> to 1.0 as an inert fallback.
         /// </summary>
-        private static void ComputeMiterNormals(double2 n1, double2 n2,
-                                                out double2 leftN, out double2 rightN)
+        private static bool TryJoinBisector(double2 n1, double2 n2, out double2 mu, out double cosHalf)
         {
-            // Miter direction = normalised average of the two left normals.
             double mx   = n1.x + n2.x;
             double my   = n1.y + n2.y;
             double mLen = Sqrt(mx * mx + my * my);
@@ -213,26 +220,72 @@ namespace MapRenderer.Core.Geometry
             if (mLen < 1e-12)
             {
                 // 180° hairpin — normals cancel; fall back to incoming normal.
-                leftN  = n1;
-                rightN = Neg(n1);
-                return;
+                mu      = n1;
+                cosHalf = 1.0;
+                return false;
             }
 
             double mux = mx / mLen;
             double muy = my / mLen;
+            mu      = new double2(mux, muy);
+            cosHalf = mux * n1.x + muy * n1.y; // dot(mu, n1) = cos(θ/2)
+            return true;
+        }
 
-            // Miter factor = 1 / (miter_unit · n1).  dot = cos(θ/2).
-            double dot = mux * n1.x + muy * n1.y;
-            if (math.abs(dot) < 1e-12)
+        /// <summary>
+        /// Compute miter left/right normals at the join between two segments whose left normals
+        /// are <paramref name="n1"/> (incoming) and <paramref name="n2"/> (outgoing).
+        /// The miter normal's LENGTH encodes the miter factor (1/cos(θ/2)).
+        /// </summary>
+        private static void ComputeMiterNormals(double2 n1, double2 n2,
+                                                out double2 leftN, out double2 rightN)
+        {
+            if (!TryJoinBisector(n1, n2, out double2 mu, out double cosHalf))
             {
                 leftN  = n1;
                 rightN = Neg(n1);
                 return;
             }
 
-            double miterFactor = 1.0 / dot;
-            leftN  = new double2(mux * miterFactor,  muy * miterFactor);
-            rightN = new double2(-mux * miterFactor, -muy * miterFactor);
+            // Miter factor = 1 / (miter_unit · n1).  dot = cos(θ/2).
+            if (math.abs(cosHalf) < 1e-12)
+            {
+                leftN  = n1;
+                rightN = Neg(n1);
+                return;
+            }
+
+            double miterFactor = 1.0 / cosHalf;
+            leftN  = new double2(mu.x * miterFactor,  mu.y * miterFactor);
+            rightN = new double2(-mu.x * miterFactor, -mu.y * miterFactor);
+        }
+
+        /// <summary>
+        /// Inner-vertex normal for a bevel/round join: the SAME miter-factor magnitude the miter
+        /// join's <see cref="ComputeMiterNormals"/> emits, saturated at <paramref name="miterLimit"/>
+        /// instead of falling back to bevel. Derivation: the two CONCAVE inner offset lines (perpendicular
+        /// distance h from the centerline along <paramref name="n1"/>/<paramref name="n2"/>) meet at
+        /// <c>P + h·mu/cos(θ/2)</c> for a LEFT turn (bisector direction <c>mu</c>, half-angle cosine
+        /// <c>cos(θ/2)</c>); for a RIGHT turn the concave offset lines are the −n1/−n2 pair and meet at
+        /// <c>P − h·mu/cos(θ/2)</c>. Clamping the factor is the same bound <see cref="NeedsBevel"/> gates
+        /// the miter path with. This helper returns the MAGNITUDE along <c>+mu</c> only (not signed) —
+        /// the caller applies the turn-direction sign (<c>leftTurn ? +innerN : -innerN</c>) when placing
+        /// the vertex on the concave side (see <see cref="EmitBevelJoin"/>/<see cref="EmitRoundJoin"/>).
+        /// </summary>
+        private static double2 ComputeInnerNormal(double2 n1, double2 n2, double miterLimit)
+        {
+            if (!TryJoinBisector(n1, n2, out double2 mu, out double cosHalf))
+                return n1; // 180° hairpin — exactly today's fallback.
+
+            if (math.abs(cosHalf) < 1e-12)
+                // Saturated answer; avoids 1/0 → ±Inf through Burst. mLen = 2·|cosHalf| for unit n1/n2,
+                // so this branch is only reached in the narrow band where mLen cleared the 1e-12 hairpin
+                // guard but cosHalf still landed near zero — mu's DIRECTION here is floating-point noise,
+                // not a meaningful bisector; only the saturated magnitude is relied on.
+                return mu * miterLimit;
+
+            double innerFactor = math.min(1.0 / math.abs(cosHalf), miterLimit);
+            return mu * innerFactor;
         }
 
         /// <summary>
@@ -241,19 +294,13 @@ namespace MapRenderer.Core.Geometry
         /// </summary>
         public static bool NeedsBevel(double2 n1, double2 n2, double miterLimit)
         {
-            double mx   = n1.x + n2.x;
-            double my   = n1.y + n2.y;
-            double mLen = Sqrt(mx * mx + my * my);
-            if (mLen < 1e-12) return true;
-            double mux = mx / mLen;
-            double muy = my / mLen;
-            double dot = mux * n1.x + muy * n1.y;
-            if (math.abs(dot) < 1e-12) return true;
+            if (!TryJoinBisector(n1, n2, out double2 mu, out double cosHalf)) return true;
+            if (math.abs(cosHalf) < 1e-12) return true;
             // The miter factor is a MAGNITUDE (1/|cos(θ/2)|). Near a 180° hairpin normalize(n1+n2)
             // is dominated by numerical residual and can point opposite n1, making dot a small NEGATIVE;
             // a signed `1/dot > limit` then lets a huge negative factor slip past the bevel gate and the
             // miter normal blows up (the "line across the whole screen" glitch). Compare the magnitude.
-            return math.abs(1.0 / dot) > miterLimit;
+            return math.abs(1.0 / cosHalf) > miterLimit;
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -262,8 +309,9 @@ namespace MapRenderer.Core.Geometry
 
         /// <summary>
         /// Bevel join: outer side gets two unit-normal vertices (one per adjacent segment);
-        /// inner side gets the normalised-average unit normal. Emits: quad from previous seg,
-        /// bevel triangle, and updates out-params for next segment start.
+        /// inner side gets the bisector-direction, miter-factor-magnitude vertex (see
+        /// <see cref="ComputeInnerNormal"/>), saturated at <c>miterLimit</c>. Emits: quad from
+        /// previous seg, bevel triangle, and updates out-params for next segment start.
         ///
         /// After call: leftPrev/rightPrev are updated to the join's "outgoing" vertices.
         /// </summary>
@@ -271,111 +319,114 @@ namespace MapRenderer.Core.Geometry
             List<LineVertex> verts, List<int> indices,
             double2 p, double2 n1, double2 n2, double dist,
             bool leftTurn, int leftPrev, int rightPrev,
+            double miterLimit,
             out int leftNext, out int rightNext)
         {
-            // Inner normal: normalised average.
-            double ix   = n1.x + n2.x;
-            double iy   = n1.y + n2.y;
-            double iLen = Sqrt(ix * ix + iy * iy);
-            double2 innerN = (iLen > 1e-12)
-                ? new double2(ix / iLen, iy / iLen) : n1;
+            double2 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
+            // The two branches below are mirror images, NOT the same code with signs swapped, and they
+            // are NOT unifiable: a reflection reverses triangle orientation, so the chamfer index order
+            // that is CCW in one branch is CW in the other. Concretely — flip only the outer/inner
+            // predicate and reuse the leftTurn branch's index order on a right turn and the chamfer comes
+            // out as (outerA, outerB, innerV) = ((10,2),(12,0),(8,−2)) on Fixture B: signed area
+            // 2A = −12, CW — back-faced. Keep both branches written out in full.
             if (leftTurn)
             {
-                // Outer = left (+), inner = right (−).
+                // Left turn ⇒ concave = left, convex = right (see the `cross` comment above).
+                // Convex (outer) side gets two unit-normal vertices; concave (inner) side gets the
+                // single bisector/miter-factor vertex.
                 int outerA  = verts.Count;
                 int innerV  = verts.Count + 1;
                 int outerB  = verts.Count + 2;
-                verts.Add(MakeVertex(p,  n1,        dist, +1f));  // outerA: left of incoming seg
-                verts.Add(MakeVertex(p, Neg(innerN), dist, -1f)); // innerV: right inner
-                verts.Add(MakeVertex(p,  n2,        dist, +1f));  // outerB: left of outgoing seg
+                verts.Add(MakeVertex(p, Neg(n1),   dist, -1f));  // outerA: right of incoming seg, convex
+                verts.Add(MakeVertex(p, innerN,    dist, +1f));  // innerV: left, concave
+                verts.Add(MakeVertex(p, Neg(n2),   dist, -1f));  // outerB: right of outgoing seg, convex
 
-                // Quad from prev seg ending at outerA (left) and innerV (right).
-                EmitQuad(indices, leftPrev, rightPrev, outerA, innerV);
-                // Bevel triangle fills outer gap: CCW = outerA, outerB, innerV when looking down −Y.
-                indices.Add(outerA);
-                indices.Add(outerB);
-                indices.Add(innerV);
-
-                leftNext  = outerB;
-                rightNext = innerV;
-            }
-            else
-            {
-                // Outer = right (−), inner = left (+).
-                int innerV  = verts.Count;
-                int outerA  = verts.Count + 1;
-                int outerB  = verts.Count + 2;
-                verts.Add(MakeVertex(p,  innerN,  dist, +1f));  // innerV: left inner
-                verts.Add(MakeVertex(p, Neg(n1),  dist, -1f));  // outerA: right of incoming seg
-                verts.Add(MakeVertex(p, Neg(n2),  dist, -1f));  // outerB: right of outgoing seg
-
+                // Quad from prev seg ending at innerV (left) and outerA (right).
                 EmitQuad(indices, leftPrev, rightPrev, innerV, outerA);
-                // Bevel triangle on right side: CCW = outerA, innerV, outerB.
+                // Chamfer triangle fills the convex gap: CCW = outerA, outerB, innerV when looking down −Y.
                 indices.Add(outerA);
-                indices.Add(innerV);
                 indices.Add(outerB);
+                indices.Add(innerV);
 
                 leftNext  = innerV;
                 rightNext = outerB;
             }
+            else
+            {
+                // Right turn ⇒ concave = right, convex = left.
+                int innerV  = verts.Count;
+                int outerA  = verts.Count + 1;
+                int outerB  = verts.Count + 2;
+                verts.Add(MakeVertex(p, Neg(innerN), dist, -1f)); // innerV: right, concave
+                verts.Add(MakeVertex(p,  n1,         dist, +1f)); // outerA: left of incoming seg, convex
+                verts.Add(MakeVertex(p,  n2,         dist, +1f)); // outerB: left of outgoing seg, convex
+
+                EmitQuad(indices, leftPrev, rightPrev, outerA, innerV);
+                // Chamfer triangle on the convex (left) side: CCW = outerA, innerV, outerB.
+                indices.Add(outerA);
+                indices.Add(innerV);
+                indices.Add(outerB);
+
+                leftNext  = outerB;
+                rightNext = innerV;
+            }
         }
 
         /// <summary>
-        /// Round join: outer side gets a fan of arc vertices; inner side gets the unit average
-        /// normal. Emits quad, fan triangles, and updates out-params.
+        /// Round join: outer side gets a fan of arc vertices; inner side gets the bisector-direction,
+        /// miter-factor-magnitude vertex (see <see cref="ComputeInnerNormal"/>), saturated at
+        /// <c>miterLimit</c>. Emits quad, fan triangles, and updates out-params.
         /// </summary>
         private static void EmitRoundJoin(
             List<LineVertex> verts, List<int> indices,
             double2 p, double2 n1, double2 n2, double dist,
             int roundSegments, bool leftTurn,
             int leftPrev, int rightPrev,
+            double miterLimit,
             out int leftNext, out int rightNext)
         {
-            // Inner normal: normalised average.
-            double ix   = n1.x + n2.x;
-            double iy   = n1.y + n2.y;
-            double iLen = Sqrt(ix * ix + iy * iy);
-            double2 innerN = (iLen > 1e-12)
-                ? new double2(ix / iLen, iy / iLen) : n1;
+            double2 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
-            // Arc start/end normals (outer side).
-            double2 arcStart = leftTurn ?  n1 : Neg(n1);
-            double2 arcEnd   = leftTurn ?  n2 : Neg(n2);
+            // Arc start/end normals — the CONVEX rim. A left turn rotates the tangent CCW by θ, so both
+            // n1→n2 and −n1→−n2 rotate CCW by θ; the convex (outer) rim for a left turn is the RIGHT side,
+            // i.e. −n1/−n2 (concave is left, per the `cross` comment above). Mirrored for a right turn.
+            double2 arcStart = leftTurn ? Neg(n1) : n1;
+            double2 arcEnd   = leftTurn ? Neg(n2) : n2;
 
             // Angles for arc interpolation (unit circle).
             double a0 = math.atan2(arcStart.y, arcStart.x);
             double a1 = math.atan2(arcEnd.y,   arcEnd.x);
             if (leftTurn)
             {
-                // Outer arc goes CCW (a1 ≥ a0 after wrapping).
+                // Convex (right) rim sweeps CCW as the tangent turns left (a1 ≥ a0 after wrapping).
                 while (a1 < a0) a1 += 2.0 * math.PI_DBL;
             }
             else
             {
-                // Outer arc goes CW (a1 ≤ a0 after wrapping).
+                // Convex (left) rim sweeps CW as the tangent turns right (a1 ≤ a0 after wrapping).
                 while (a1 > a0) a1 -= 2.0 * math.PI_DBL;
             }
 
-            // Emit inner vertex.
+            // Emit inner (concave) vertex.
             int innerIdx = verts.Count;
             if (leftTurn)
-                verts.Add(MakeVertex(p, Neg(innerN), dist, -1f));
+                verts.Add(MakeVertex(p,  innerN,     dist, +1f));
             else
-                verts.Add(MakeVertex(p,  innerN,    dist, +1f));
+                verts.Add(MakeVertex(p, Neg(innerN), dist, -1f));
 
-            // Emit arcStart vertex.
+            // Emit arcStart vertex (convex rim).
             int arcStartIdx = verts.Count;
             if (leftTurn)
-                verts.Add(MakeVertex(p, arcStart, dist, +1f));
-            else
                 verts.Add(MakeVertex(p, arcStart, dist, -1f));
+            else
+                verts.Add(MakeVertex(p, arcStart, dist, +1f));
 
             // Connect previous quad to this join's arcStart and innerV.
             if (leftTurn)
-                EmitQuad(indices, leftPrev, rightPrev, arcStartIdx, innerIdx);
-            else
                 EmitQuad(indices, leftPrev, rightPrev, innerIdx, arcStartIdx);
+            else
+                EmitQuad(indices, leftPrev, rightPrev, arcStartIdx, innerIdx);
 
             // Fan intermediate vertices.
             int prevFanIdx = arcStartIdx;
@@ -385,9 +436,9 @@ namespace MapRenderer.Core.Geometry
                 double ang = a0 + t * (a1 - a0);
                 int fanIdx = verts.Count;
                 if (leftTurn)
-                    verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
-                else
                     verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, -1f));
+                else
+                    verts.Add(MakeVertex(p, new double2(math.cos(ang), math.sin(ang)), dist, +1f));
 
                 if (leftTurn)
                 { indices.Add(prevFanIdx); indices.Add(fanIdx); indices.Add(innerIdx); }
@@ -397,12 +448,12 @@ namespace MapRenderer.Core.Geometry
                 prevFanIdx = fanIdx;
             }
 
-            // Emit arcEnd vertex.
+            // Emit arcEnd vertex (convex rim).
             int arcEndIdx = verts.Count;
             if (leftTurn)
-                verts.Add(MakeVertex(p, arcEnd, dist, +1f));
-            else
                 verts.Add(MakeVertex(p, arcEnd, dist, -1f));
+            else
+                verts.Add(MakeVertex(p, arcEnd, dist, +1f));
 
             // Last fan triangle.
             if (leftTurn)
@@ -410,11 +461,12 @@ namespace MapRenderer.Core.Geometry
             else
             { indices.Add(innerIdx); indices.Add(arcEndIdx); indices.Add(prevFanIdx); }
 
-            // Outgoing edge.
+            // Outgoing edge — the quad's L1/R1 roles swap relative to the (unreflected) leftPrev/rightPrev,
+            // so the next-pointers swap too (see the join-point-reflection argument in the plan).
             if (leftTurn)
-            { leftNext = arcEndIdx; rightNext = innerIdx; }
-            else
             { leftNext = innerIdx; rightNext = arcEndIdx; }
+            else
+            { leftNext = arcEndIdx; rightNext = innerIdx; }
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────

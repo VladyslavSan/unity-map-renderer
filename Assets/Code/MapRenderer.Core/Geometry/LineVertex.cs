@@ -53,10 +53,11 @@ namespace MapRenderer.Core.Geometry
     /// Mesh/shader contract (channel layout documented in StyledLineTileBuilder):
     /// <list type="bullet">
     ///   <item><description><see cref="Position"/> — centerline point in the mesh build space (world meters for S05).</description></item>
-    ///   <item><description><see cref="Normal"/> — 2D extrusion normal in the same space. For straight segments and bevel/round
-    ///     joins the length is 1. For miter joins the length equals the miter factor (1/cos(θ/2)), so the vertex shader
-    ///     can uniformly apply: <c>worldPos.xz += normal * 0.5 * widthMeters</c>. IMPORTANT: do NOT pack these as SNORM
-    ///     (which is unit-only); store as float2 whose magnitude carries the miter factor.</description></item>
+    ///   <item><description><see cref="Normal"/> — 2D extrusion normal in the same space. For straight/terminal, cap-rim,
+    ///     and bevel/round OUTER vertices the length is 1. For miter-join vertices, and the bevel/round INNER vertex,
+    ///     the length equals the miter factor (1/cos(θ/2)), saturated at <c>miterLimit</c> for the inner vertex, so the
+    ///     vertex shader can uniformly apply: <c>worldPos.xz += normal * 0.5 * widthMeters</c>. IMPORTANT: do NOT pack
+    ///     these as SNORM (which is unit-only); store as float2 whose magnitude carries the miter factor.</description></item>
     ///   <item><description><see cref="DistanceAlong"/> — cumulative arc length from the line start (reserved for S14 dash patterns). Set now, consumed later.</description></item>
     ///   <item><description><see cref="Side"/> — signed extrude coordinate: +1 for the left/positive side, −1 for the right/negative side.
     ///     Used by the fragment shader for AA edge feathering; not a multiplier on the normal vector (the normal already encodes direction).</description></item>
@@ -69,10 +70,11 @@ namespace MapRenderer.Core.Geometry
         public double2 Position;
 
         /// <summary>
-        /// 2D extrusion normal in mesh build space. Length = 1 for straight/bevel/round vertices;
-        /// length = 1/cos(θ/2) (miter factor) for miter join vertices. The vertex shader applies
-        /// <c>worldPos += normal * 0.5 * widthMeters</c> uniformly — the miter factor is baked
-        /// into the normal's length, not a separate attribute.
+        /// 2D extrusion normal in mesh build space. Length = 1 for straight/terminal, cap-rim, and
+        /// bevel/round OUTER vertices; length = min(1/cos(θ/2), miterLimit) (the miter factor,
+        /// saturated at miterLimit) for miter-join vertices and the bevel/round INNER vertex. The
+        /// vertex shader applies <c>worldPos += normal * 0.5 * widthMeters</c> uniformly — the miter
+        /// factor is baked into the normal's length, not a separate attribute.
         /// </summary>
         public double2 Normal;
 
