@@ -1202,5 +1202,357 @@ namespace MapRenderer.Tests
                     "an explicit Viewport must pass through unchanged");
             }
         }
+
+        // ── KL-A1: the along-line anchor clip ──────────────────────────────────────────────────────────
+        // One horizontal road crossing a VERTICAL seam, with the IDENTICAL local geometry in both tiles —
+        // which is what a tiler emits for a road spanning a seam, each tile clipping it to its own box plus a
+        // 128-unit buffer. Both tiles therefore compute the same local anchor phase, and the two halves of the
+        // road claim the same world stretch twice.
+        //
+        // The vertices at local x == 0 and x == 4096 are load-bearing, not decoration. LineAnchor.T is a
+        // FLOAT, so an anchor resolved in the middle of a long segment lands ~1e-4 tile units off its ideal
+        // position — which on a boundary anchor is enough to decide the `< extent` comparison the WRONG way
+        // and make the tooth measure float rounding instead of the clip. With a vertex AT each boundary the
+        // containing arc ends exactly on that vertex, so LineAnchorPlacement resolves t == 1.0f exactly (and
+        // dyadic k/16 in between); every anchor then sits bit-exactly on local x == 256k, and `>= extent` vs
+        // `> extent` / `>= 0` vs `> 0` are genuinely discriminated.
+        private static readonly double2[] SeamRoadVertices =
+        {
+            new double2(-128, 2048), new double2(0, 2048), new double2(4096, 2048), new double2(4224, 2048),
+        };
+
+        private const double SeamSpacingPx        = 32.0;   // 32 · 4096 / 512 == 256 tile units
+        private const double SeamAnchorStride     = 256.0;
+        private const int    SeamPreClipAnchors   = 17;     // arcs 256·(k+0.5) <= 4352  =>  k = 0..16
+        private static readonly TileId SeamTileA = new TileId { Z = 1, X = 0, Y = 0 };
+        private static readonly TileId SeamTileB = new TileId { Z = 1, X = 1, Y = 0 };
+
+        /// <summary>A path whose every anchor falls in the buffer strip: length 100 &lt; one spacing, so
+        /// <c>Compute</c> falls back to a single centred anchor, at local x == -70.</summary>
+        private static readonly double2[] BufferOnlyRoadVertices =
+        {
+            new double2(-120, 2048), new double2(-20, 2048),
+        };
+
+        /// <summary>The two emit shapes that ride the shared along-line anchors — the clip must cover both,
+        /// and only running every tooth in both arms proves it.</summary>
+        public enum SeamArm { AlongLineIcon, CurvedText }
+
+        // No rotation-alignment on the icon arm: unset -> auto -> MAP under line placement (D3), the
+        // road_one_way_arrow* shape. The text arm declares map explicitly so it stays curved rather than
+        // resolving to the upright at-anchors shape.
+        private static SymbolStyle.StyleLayer SeamLayer(SeamArm arm) => new SymbolStyle.StyleLayer
+        {
+            Id          = "seam-clip-probe",
+            LayerType   = StyleLayerType.Symbol,
+            Source      = "s",
+            SourceLayer = "lines",
+            LayoutJson  = MapRenderer.Core.Json.JsonParser.Parse(
+                arm == SeamArm.AlongLineIcon
+                    ? "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\",\"symbol-spacing\":32}"
+                    : "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"map\"," +
+                      "\"symbol-spacing\":32}"),
+        };
+
+        private static IDecodedTile LineTile(params double2[][] paths)
+        {
+            var features = new List<ITileFeature>();
+            foreach (double2[] path in paths)
+                features.Add(new InMemoryTileFeature
+                {
+                    GeometryType = TileGeometryType.LineString,
+                    Geometry     = LineStringGeometry(path),
+                });
+            return new FixtureDecodedTile(new FixtureTileLayer
+            {
+                Name = "lines", Extent = Extent, Features = features,
+            });
+        }
+
+        private static List<SymbolStyle.SymbolLabel> ExtractLines(
+            SymbolStyle.StyleLayer layer, TileId tileId, params double2[][] paths)
+        {
+            var labels = new List<SymbolStyle.SymbolLabel>();
+            SymbolStyle.SymbolFeatureExtractor.Extract(layer, LineTile(paths), tileId, 1.0,
+                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+            return labels;
+        }
+
+        /// <summary>The tile-space x an anchor resolves to on <paramref name="path"/> — the same
+        /// <c>lerp(v[Segment], v[Segment+1], T)</c> recovery <see cref="LineAnchor"/> documents, computed here
+        /// from the test's own vertices so no production code is borrowed to check production code.</summary>
+        private static double AnchorLocalX(LineAnchor anchor, double2[] path)
+            => math.lerp(path[anchor.Segment], path[anchor.Segment + 1], anchor.T).x;
+
+        /// <summary>Every emitted along-line anchor of <paramref name="labels"/>, as a world x in tile units
+        /// (<c>tileId.X · extent + localX</c>) — one flat list, in emit order.</summary>
+        private static List<double> EmittedWorldXs(
+            List<SymbolStyle.SymbolLabel> labels, TileId tileId, double2[] path)
+        {
+            var world = new List<double>();
+            foreach (SymbolStyle.SymbolLabel l in labels)
+            {
+                if (l.LineAnchors == null) continue;
+                foreach (LineAnchor a in l.LineAnchors)
+                    world.Add(tileId.X * (double)Extent + AnchorLocalX(a, path));
+            }
+            return world;
+        }
+
+        /// <summary>The world anchor xs both tiles emit for the seam road, restricted to the two tiles' OWN
+        /// world territory <c>[0, 8192)</c> — the outer buffer belongs to X=-1 / X=2, which this test does not
+        /// extract, so counting it would compare against tiles that are not in the picture.</summary>
+        private static List<double> SeamRoadWorldXs(SeamArm arm)
+        {
+            List<SymbolStyle.SymbolLabel> a = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
+            List<SymbolStyle.SymbolLabel> b = ExtractLines(SeamLayer(arm), SeamTileB, SeamRoadVertices);
+            Assert.Greater(a.Count, 0, $"{arm}: precondition: tile A must emit a label at all");
+            Assert.Greater(b.Count, 0, $"{arm}: precondition: tile B must emit a label at all");
+            if (arm == SeamArm.AlongLineIcon)
+            {
+                Assert.Greater(CountIcons(a), 0, "precondition: the icon arm must resolve its sprite in tile A");
+                Assert.Greater(CountIcons(b), 0, "precondition: the icon arm must resolve its sprite in tile B");
+            }
+
+            var world = new List<double>();
+            world.AddRange(EmittedWorldXs(a, SeamTileA, SeamRoadVertices));
+            world.AddRange(EmittedWorldXs(b, SeamTileB, SeamRoadVertices));
+            world.RemoveAll(x => x < 0.0 || x >= 2.0 * Extent);
+            return world;
+        }
+
+        private static int DistinctCount(List<double> values)
+        {
+            var seen = new HashSet<double>();
+            foreach (double v in values) seen.Add(v);
+            return seen.Count;
+        }
+
+        /// <summary>Anti-vacuity for every seam tooth: the UNCLIPPED anchor set really is 17 anchors landing
+        /// bit-exactly on local x == 256k, and the two tiles' unclipped world sets really do collide — so a
+        /// tooth that passes is measuring the clip, not a geometry that never reached the seam.</summary>
+        private static void AssertSeamGeometryReachesTheSeam()
+        {
+            double spacingTileUnits = SeamSpacingPx * Extent / MapRenderer.Core.Geo.WebMercator.TilePixelSize;
+            Assert.AreEqual(SeamAnchorStride, spacingTileUnits, 1e-12,
+                "precondition: symbol-spacing 32 px is 256 tile units at extent 4096");
+
+            LineAnchor[] unclipped = LineAnchorPlacement.Compute(
+                new List<double2>(SeamRoadVertices), spacingTileUnits, SymbolPlacement.Line);
+            Assert.AreEqual(SeamPreClipAnchors, unclipped.Length,
+                "precondition: the seam road must carry 17 pre-clip anchors (arcs 256·(k+0.5) <= 4352)");
+
+            var unclippedWorld = new List<double>();
+            for (int k = 0; k < unclipped.Length; k++)
+            {
+                Assert.AreEqual(SeamAnchorStride * k, AnchorLocalX(unclipped[k], SeamRoadVertices),
+                    $"precondition: pre-clip anchor {k} must land EXACTLY on local x == {SeamAnchorStride * k} " +
+                    "(a vertex-aligned t — if this drifts, the boundary comparisons stop discriminating)");
+                unclippedWorld.Add(SeamAnchorStride * k);                    // tile A, X = 0
+                unclippedWorld.Add(Extent + SeamAnchorStride * k);           // tile B, X = 1
+            }
+            unclippedWorld.RemoveAll(x => x < 0.0 || x >= 2.0 * Extent);
+            Assert.AreEqual(33, unclippedWorld.Count,
+                "precondition: unclipped, the two tiles emit 33 anchors inside [0, 8192)");
+            Assert.AreEqual(32, DistinctCount(unclippedWorld),
+                "precondition: exactly one of those world positions (the seam, 4096) is claimed TWICE — " +
+                "without this the tooth below could pass over a geometry that never doubled anything");
+        }
+
+        // T1 — CENTRAL, two-tile: the defect itself. A world position claimed by two tiles is emitted by
+        // exactly one of them. Single-tile output cannot discriminate this — the duplicate exists only in the
+        // union.
+        [Test]
+        public void SeamAnchorClip_TwoTiles_EmitEachWorldPositionExactlyOnce(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            AssertSeamGeometryReachesTheSeam();
+
+            List<double> world = SeamRoadWorldXs(arm);
+            Assert.AreEqual(DistinctCount(world), world.Count,
+                $"{arm}: a road crossing a seam must yield ONE symbol per world position, not two — " +
+                $"emitted {world.Count} anchors over {DistinctCount(world)} distinct world positions");
+        }
+
+        // T2 — anti-over-clip: GREEN before AND after. The surviving set is exactly the positions the geometry
+        // implies, so "the fix drops symbols that should exist" fails here rather than passing quietly.
+        [Test]
+        public void SeamAnchorClip_KeepsEveryWorldPositionTheGeometryImplies(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            AssertSeamGeometryReachesTheSeam();
+
+            var expected = new List<double>();
+            for (int k = 0; k < 2 * SeamPreClipAnchors - 2; k++) expected.Add(SeamAnchorStride * k); // 0 .. 7936
+
+            List<double> world = SeamRoadWorldXs(arm);
+            world.Sort();
+            var distinct = new List<double>();
+            foreach (double x in world) if (distinct.Count == 0 || distinct[distinct.Count - 1] != x) distinct.Add(x);
+
+            CollectionAssert.AreEqual(expected, distinct,
+                $"{arm}: the two tiles together must cover exactly {{256k : k = 0..31}} over [0, 8192) — " +
+                "no position orphaned by a too-tight bound, none invented");
+        }
+
+        // T3 — the boundary SENSE. The seam position is emitted exactly once and by the tile whose LOCAL
+        // coordinate for it is 0, never by the one whose local coordinate is `extent`. This is the only tooth
+        // that separates `< extent` from `<= extent` and `>= 0` from `> 0`.
+        [Test]
+        public void SeamAnchorClip_SeamPositionIsOwnedByTheTileHoldingItAtLocalZero(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            AssertSeamGeometryReachesTheSeam();
+
+            List<double> fromA = EmittedWorldXs(
+                ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices), SeamTileA, SeamRoadVertices);
+            List<double> fromB = EmittedWorldXs(
+                ExtractLines(SeamLayer(arm), SeamTileB, SeamRoadVertices), SeamTileB, SeamRoadVertices);
+            Assert.Greater(fromA.Count, 0, $"{arm}: precondition: tile A must emit anchors");
+            Assert.Greater(fromB.Count, 0, $"{arm}: precondition: tile B must emit anchors");
+
+            const double seam = 4096.0;
+            Assert.AreEqual(0, fromA.FindAll(x => x == seam).Count,
+                $"{arm}: tile A holds the seam at local x == extent, which it does NOT own (a `<= extent` " +
+                "upper bound would emit it here as well as in B — the duplicate, restored)");
+            Assert.AreEqual(1, fromB.FindAll(x => x == seam).Count,
+                $"{arm}: tile B holds the seam at local x == 0, which it DOES own (a `> 0` lower bound would " +
+                "orphan it — emitted by neither tile)");
+
+            Assert.AreEqual(1, fromA.FindAll(x => x == 0.0).Count,
+                $"{arm}: tile A must still emit its own left edge at local x == 0 (`> 0` would drop it)");
+        }
+
+        // T7 — the SAME property on the Y axis. Every tooth above runs a horizontal road across a vertical
+        // seam, so all four comparisons are exercised only through `p.x`: a predicate that tested `p.x` twice,
+        // or that used `p.y <= extent`, passes every one of them. This is the transposed fixture — a vertical
+        // road across a HORIZONTAL seam between z1 (0,0) and (0,1) — so the y comparisons carry the assertion.
+        // Deliberately only the one discriminating claim; the x teeth already cover the shared machinery.
+        [Test]
+        public void SeamAnchorClip_TwoTilesStackedVertically_EmitEachWorldPositionExactlyOnce(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            // The x fixture transposed. Vertices sit ON both boundaries for the same float-exactness reason:
+            // a 2-vertex path resolves the seam anchor to 4095.9998779 / +4.8e-7 and the duplicate survives.
+            double2[] road =
+            {
+                new double2(2048, -128), new double2(2048, 0), new double2(2048, 4096), new double2(2048, 4224),
+            };
+            TileId tileTop    = new TileId { Z = 1, X = 0, Y = 0 };
+            TileId tileBottom = new TileId { Z = 1, X = 0, Y = 1 };
+
+            List<double> world = new List<double>();
+            foreach ((TileId tile, List<SymbolStyle.SymbolLabel> labels) in new[]
+                     { (tileTop,    ExtractLines(SeamLayer(arm), tileTop,    road)),
+                       (tileBottom, ExtractLines(SeamLayer(arm), tileBottom, road)) })
+            {
+                Assert.Greater(labels.Count, 0, $"{arm}: precondition: tile {tile.Y} must emit a label");
+                foreach (SymbolStyle.SymbolLabel l in labels)
+                {
+                    if (l.LineAnchors == null) continue;
+                    foreach (LineAnchor a in l.LineAnchors)
+                    {
+                        double localY = math.lerp(road[a.Segment], road[a.Segment + 1], a.T).y;
+                        double worldY = tile.Y * (double)Extent + localY;
+                        if (worldY >= 0.0 && worldY < 2.0 * Extent) world.Add(worldY);
+                    }
+                }
+            }
+
+            world.Sort();
+            var distinct = new List<double>();
+            foreach (double y in world) if (distinct.Count == 0 || distinct[distinct.Count - 1] != y) distinct.Add(y);
+
+            Assert.AreEqual(distinct.Count, world.Count,
+                $"{arm}: a world position emitted twice means the Y bound duplicates at the seam " +
+                "(`p.y <= extent`), or the predicate never tests y at all");
+            Assert.AreEqual(2 * Extent / SeamAnchorStride, distinct.Count,
+                $"{arm}: every position the geometry implies over [0, 2·extent) must survive — a missing one " +
+                "means the Y lower bound orphans the seam (`p.y > 0`)");
+        }
+
+        // T4 — the path is NOT clipped: only anchors are filtered. A shallow implementation that clipped the
+        // polyline instead would shorten PathRender and turn a join into a cap.
+        [Test]
+        public void SeamAnchorClip_DoesNotClipThePath(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            var projection = new WebMercatorProjection();
+            List<SymbolStyle.SymbolLabel> labels = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
+            Assert.Greater(labels.Count, 0, $"{arm}: precondition: the seam road must emit a curved label");
+
+            foreach (SymbolStyle.SymbolLabel l in labels)
+            {
+                Assert.IsNotNull(l.PathRender, $"{arm}: a curved label carries its projected path");
+                Assert.AreEqual(SeamRoadVertices.Length, l.PathRender.Length,
+                    $"{arm}: PathRender must keep every DECODED vertex — the clip filters anchors, never the path");
+
+                foreach (int i in new[] { 0, SeamRoadVertices.Length - 1 })
+                {
+                    double2 lonLat = SeamTileA.ToLonLat(SeamRoadVertices[i].x, SeamRoadVertices[i].y, Extent);
+                    double3 expected = projection.Project(
+                        new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                    Assert.AreEqual(expected.x, l.PathRender[i].x, 1e-6,
+                        $"{arm}: PathRender[{i}] must still project the OUT-OF-TILE endpoint {SeamRoadVertices[i].x}");
+                    Assert.AreEqual(expected.y, l.PathRender[i].y, 1e-6);
+                    Assert.AreEqual(expected.z, l.PathRender[i].z, 1e-6);
+                }
+            }
+        }
+
+        // T5 — a path whose every anchor belongs to a neighbour emits NOTHING here, rather than an anchor-less
+        // label that can never place.
+        [Test]
+        public void SeamAnchorClip_PathWithNoSurvivingAnchor_EmitsNoLabel(
+            [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
+        {
+            // Precondition: the geometry really does produce one anchor, and it really is out of tile.
+            LineAnchor[] unclipped = LineAnchorPlacement.Compute(
+                new List<double2>(BufferOnlyRoadVertices),
+                SeamSpacingPx * Extent / MapRenderer.Core.Geo.WebMercator.TilePixelSize, SymbolPlacement.Line);
+            Assert.AreEqual(1, unclipped.Length,
+                "precondition: a path shorter than one spacing falls back to a single centred anchor");
+            Assert.Less(AnchorLocalX(unclipped[0], BufferOnlyRoadVertices), 0.0,
+                "precondition: that anchor must lie in the buffer strip, outside [0, extent)");
+
+            List<SymbolStyle.SymbolLabel> labels =
+                ExtractLines(SeamLayer(arm), SeamTileA, BufferOnlyRoadVertices);
+            Assert.AreEqual(0, labels.Count,
+                $"{arm}: a buffer-only path must emit ZERO labels here — not one carrying an empty LineAnchors");
+        }
+
+        // T6 — the at-anchors arm (the shipped D4 shield shape) did not move: it already applied the same
+        // predicate at EmitAtAnchor, so hoisting the test upstream is the same comparison on the same inputs.
+        // Drift between the two copies of the rule shows up here as a shield regression rather than as nothing.
+        [Test]
+        public void SeamAnchorClip_AtAnchorsArmIsUnchanged()
+        {
+            var projection = new WebMercatorProjection();
+            var layer = new SymbolStyle.StyleLayer
+            {
+                Id = "seam-at-anchors-probe", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
+                LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
+                    "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\"," +
+                    "\"symbol-spacing\":32}"),
+            };
+
+            List<SymbolStyle.SymbolLabel> labels = ExtractLines(layer, SeamTileA, SeamRoadVertices);
+
+            // 17 pre-clip anchors at local x = 0 .. 4096; EmitAtAnchor already dropped local 4096 (>= extent).
+            Assert.AreEqual(SeamPreClipAnchors - 1, labels.Count,
+                "the at-anchors arm must emit one upright label per IN-TILE anchor — 16, exactly as before");
+            foreach (SymbolStyle.SymbolLabel l in labels)
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor labels are Point-placed");
+
+            foreach (int k in new[] { 0, SeamPreClipAnchors - 2 })
+            {
+                double2 lonLat = SeamTileA.ToLonLat(SeamAnchorStride * k, SeamRoadVertices[0].y, Extent);
+                double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                Assert.AreEqual(expected.x, labels[k].AnchorRender.x, 1e-6,
+                    $"label {k} must sit at local x == {SeamAnchorStride * k}");
+                Assert.AreEqual(expected.y, labels[k].AnchorRender.y, 1e-6);
+                Assert.AreEqual(expected.z, labels[k].AnchorRender.z, 1e-6);
+            }
+        }
     }
 }

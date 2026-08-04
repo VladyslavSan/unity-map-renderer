@@ -303,6 +303,12 @@ namespace MapRenderer.Core.Style.Symbol
                         // inline with identical arguments — byte-identical).
                         LineAnchor[] anchors = LineAnchorPlacement.Compute(densePath, spacingTileUnits, placement);
 
+                        // KL-A1: the single-world clip the point path has had since D2, now applied to the LINE
+                        // branch's shared anchors — so an anchor in the MVT buffer strip is emitted by the tile
+                        // that OWNS it and no other.
+                        anchors = KeepAnchorsInsideTile(anchors, densePath, extent);
+                        if (anchors.Length == 0) continue; // every anchor belongs to a neighbour — nothing here
+
                         // Curved text — the pre-shields path, unchanged, but only when this label is NOT
                         // upright-at-anchors (map-aligned, or line-center's textAlign resolves Map by D3).
                         if (text != null && !textAtAnchors)
@@ -524,6 +530,50 @@ namespace MapRenderer.Core.Style.Symbol
             public float         MaxAngleDeg { get; init; }
             /// <summary>P-B <c>icon-rotate</c> in radians, composed on top of the along-line tangent.</summary>
             public float         IconRotateRadians { get; init; }
+        }
+
+        /// <summary>KL-A1: the along-line twin of <see cref="EmitAtAnchor"/>'s single-world <c>[0, extent)</c>
+        /// clip — returns the anchors of <paramref name="anchors"/> whose resolved tile-space point
+        /// (<c>lerp(tilePath[Segment], tilePath[Segment+1], T)</c>, the same expression every consumer resolves
+        /// an anchor with) lies inside this tile, in the original along-line arc order.
+        ///
+        /// <para>The bound is HALF-OPEN because tile coordinates are per-tile: world position
+        /// <c>x == extent</c> in tile T is <c>x == 0</c> in tile T+1. An inclusive upper bound duplicates every
+        /// anchor sitting on a shared edge and an exclusive lower bound orphans it; only <c>[0, extent)</c>
+        /// makes adjacent tiles' anchor sets a true PARTITION of world space — exactly one owner per position,
+        /// no gaps. That is why this is a hard 0 and deliberately not
+        /// <c>MapViewConfig.FillTileBufferClip</c>: a buffer is a MARGIN for geometry (a wider polygon, a
+        /// cosmetic cost), whereas anchor assignment is an OWNERSHIP partition, and a non-zero margin on a
+        /// partition means two tiles both emit the strip — the doubled-arrow defect this closes.</para>
+        ///
+        /// <para>It filters ANCHORS, never the path: the path stays whole because clipping a polyline turns a
+        /// join into a cap, and the per-frame arc walk needs the vertices beyond the surviving anchors.</para></summary>
+        private static LineAnchor[] KeepAnchorsInsideTile(
+            LineAnchor[] anchors, IReadOnlyList<double2> tilePath, double extent)
+        {
+            int kept = 0;
+            for (int i = 0; i < anchors.Length; i++)
+                if (IsAnchorInsideTile(anchors[i], tilePath, extent)) kept++;
+
+            // The overwhelmingly common case: hand the input array straight back, so "unchanged" is literally
+            // unchanged (zero alloc, same instance).
+            if (kept == anchors.Length) return anchors;
+            if (kept == 0) return System.Array.Empty<LineAnchor>();
+
+            var inside = new LineAnchor[kept];
+            int w = 0;
+            for (int i = 0; i < anchors.Length; i++)
+                if (IsAnchorInsideTile(anchors[i], tilePath, extent)) inside[w++] = anchors[i];
+            return inside;
+        }
+
+        // The exact complement of EmitAtAnchor's early-return test — the same four comparisons in the same
+        // order, so the line branch's clip and the point branch's cannot drift into an overlap.
+        private static bool IsAnchorInsideTile(
+            LineAnchor anchor, IReadOnlyList<double2> tilePath, double extent)
+        {
+            double2 p = math.lerp(tilePath[anchor.Segment], tilePath[anchor.Segment + 1], anchor.T);
+            return p.x >= 0.0 && p.x < extent && p.y >= 0.0 && p.y < extent;
         }
 
         /// <summary>P-B: emits ONE along-line icon label for a decoded path — a curved label whose single

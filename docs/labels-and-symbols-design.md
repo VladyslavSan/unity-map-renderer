@@ -69,11 +69,13 @@ so an out-of-range `px` projects to a render position exactly one world-width of
 the tile server-side, but symbols were not — so on Mercator every label rendered as three copies one world-width
 apart while the base map stayed single (measured: 108 records = 36 labels × 3). Half-open so a shared-edge anchor
 is owned by exactly one tile (`x==extent` in tile T is `x==0` in T+1). **Known gaps (deferred, recorded at merge
-from the Stage-B dual review):** (1) the **LINE/curved** branch has the same unguarded `ToLonLat` (extractor
-LineString loop + `ProjectPath`) and is *not* clipped — if the source ever ships an out-of-bounds LineString
-point the identical ±360° duplicate fires for curved text; the finite-sheet camera (Mercator bounded pan/zoom)
-keeps off-world space off-screen so it is not *drawn*, but a duplicate would still exist in the label/collision/
-sort system (budget + tiebreak), so this is a data fix still owed. (2) the regression test
+from the Stage-B dual review):** (1) the **LINE/curved** branch's *anchors* are now clipped on the same
+half-open predicate (§6.3 KL-A1), but its **path vertices** are not: the extractor's LineString loop and
+`ProjectPath` still call the same unguarded `ToLonLat` on every decoded vertex, so if the source ever ships
+an out-of-bounds LineString point the ±360° world-copy still fires for the curved *geometry*. The finite-sheet
+camera (Mercator bounded pan/zoom) keeps off-world space off-screen so it is not *drawn*, but a displaced path
+vertex would still distort the curved layout it carries, so this is a data fix still owed — narrowed by the
+anchor clip, **not** closed by it. (2) the regression test
 (`Extract_PointPlacement_ClipsOutOfBoundsAnchorsToTile`) is **synthetic** (hand-encoded MultiPoint), pinning the
 `[0,extent)` boundary logic but not the real OpenFreeMap z0 place layer's actual coordinates — a real-tile smoke
 check is worth adding to the epic.
@@ -1097,10 +1099,36 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
 
 ## 6.3 Known limits (accepted)
 
-* **KL-A1 — no cross-tile dedup for along-line icons.** Curved labels are excluded from dedup, and the
-  point path's `[0, extent)` single-world anchor clip does not apply to them, so an arrow on a road
-  crossing a tile seam can be emitted by both tiles. This is the *existing* curved-text behaviour inherited
-  unchanged, not a new class of defect.
+* **KL-A1 — arrows doubled at tile seams. FIXED (along-line anchor clip).** Curved labels are still
+  excluded from cross-tile dedup, but they no longer need it here: the LINE branch's shared `anchors` array
+  is now filtered by `KeepAnchorsInsideTile` before any of the three arms consumes it, keeping only anchors
+  whose resolved tile-space point `lerp(densePath[Segment], densePath[Segment+1], T)` satisfies
+  `x >= 0 && x < extent && y >= 0 && y < extent`. A path left with **no** surviving anchor emits no label at
+  all rather than an anchor-less one that can never place.
+  * Applied to the **shared** array, so it covers curved text and along-line icons alike — the same defect
+    with a different collision outcome (a ~20 px arrow box lets both seam copies survive collision; a
+    ~100 px road-name box usually overlaps its twin, so one gets culled and the bug reads as quieter).
+  * The **at-anchors** arm is byte-identical: `EmitAtAnchor` already applied the identical predicate to the
+    identical expression over the identical inputs, so hoisting the test upstream only moves its position.
+    `EmitAtAnchor`'s own clip **stays** — the POINT branch still feeds it unclipped anchor points.
+  * The bound is **half-open because tile coordinates are per-tile**, not by preference: world position
+    `x == extent` in tile T is `x == 0` in tile T+1, so `[0, extent]` duplicates every anchor on a shared
+    edge and `(0, extent)` orphans it. Only `[0, extent)` makes adjacent tiles' anchor sets a true
+    **partition** of world space — exactly one owner per position, no gaps.
+  * The bound is a **hard 0** and deliberately does **not** read `MapViewConfig.FillTileBufferClip`. A
+    buffer is a *margin* for geometry (a wider polygon; a cosmetic cost that degrades smoothly); anchor
+    assignment is an *ownership partition*, and a partition with overlap is not a partition — any `b > 0`
+    would re-instate exactly this defect. The knob keeps its fill-scoped name because fills remain its only
+    reader.
+  *Scope note:* the filter sits in the `isLine` branch, and `isLine` is `placement != Point` — so
+  **`line-center` labels are clipped too**, not just `line`. That is the consistent outcome (a line-center
+  label is a single along-line anchor and was equally duplicable), but worth stating, because "along-line"
+  reads as the `line` mode alone.
+  *Carve-out on "the at-anchors arm is byte-identical":* true per feature — a dropped anchor is exactly one
+  `EmitAtAnchor` already early-returned on, before any `ordinal++` or `output.Add`. But `ordinal` is per
+  `Extract` call, so when a LINE feature loses its curved label entirely, later features' `FeatureIndex`
+  shift down by one. That index is a collision tiebreak only, is layer- and tile-local, and no cross-tile
+  key reads it — 0 fixtures affected. Stated because "byte-identical" is otherwise read as unconditional.
 * **KL-A2 — new per-frame collision/stage work.** At z16 each `oneway` road emits one candidate per
   `symbol-spacing` (250 px default) per tile, in the profiled hot path
   (`docs/symbol-label-perf-design.md`). Both layers are `minzoom: 16` and filtered, so this is not expected
@@ -1110,6 +1138,21 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
   independent, unpaired text (at-anchors) and icon (along-line) candidates from the two branches. liberty
   never does this — the shields set both to viewport, the arrows are icon-only, the name layers are
   text-only. Recorded so the next reader knows it was considered, not missed. Not built for.
+* **KL-A4 — `symbol-spacing` phase is not aligned across a seam (accepted).** Each tile computes anchors at
+  `spacing·(k+0.5)` from **its own** copy of the path, so the interval spanning a seam is irregular even
+  though no anchor is duplicated any more. Aligning phase would need a world-space anchor parameterisation
+  shared between neighbouring tiles, which no part of this pipeline has. Pre-existing (it is today's
+  curved-text behaviour), not introduced by the clip, not built for.
+* **KL-A5 — a buffer-dominated path can now lose its label (accepted).** A path whose every anchor falls in
+  the buffer strip emits nothing in this tile.
+  The partition argument is airtight for *positions* — every world position has exactly one owning tile — but
+  it does NOT carry to roads: each tile derives anchors from its own copy of the path at its own phase, so
+  neighbouring tiles' anchor sets are not partitions of one shared set. In practice the neighbour owning that
+  stretch emits its own anchors and the road stays labelled; a short stub clipping a tile corner is the case
+  that can genuinely go unlabelled there.
+  *Measured 0 occurrences across the committed fixtures on 2026-08-03* — a one-off manual replay of
+  `LineAnchorPlacement.Compute` plus the predicate, NOT a standing check: no test reproduces it, and a
+  fixture change can invalidate it silently.
 * **KL-B1 — `icon-rotate` does not rotate the point collision box.** The point path's box is the unrotated
   `BoundsMin/BoundsMax` AABB even under a live map bearing, so rotating it for `icon-rotate` alone would
   make the convention inconsistent with the case it must match. (The *along-line* box IS rotated — by the
@@ -1120,7 +1163,8 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
 ## 6.4 Grounding (touch points)
 
 Core: `Style/Symbol/PropertyNames` (`icon-rotate`), `Style/Symbol/LayoutProperties` (`IconRotate`),
-`Style/Symbol/SymbolFeatureExtractor` (`iconAlongLine`, `AlongLineIconContext`, `EmitAlongLineIcon`),
+`Style/Symbol/SymbolFeatureExtractor` (`iconAlongLine`, `AlongLineIconContext`, `EmitAlongLineIcon`,
+`KeepAnchorsInsideTile`/`IsAnchorInsideTile` — the KL-A1 along-line anchor clip),
 `Style/Symbol/SymbolLabel` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
 conventions), `Text/Placement/LabelStageInputs` (`CurvedStageInput.AtlasKind`, both `IconRotateRadians`),
 `Text/Placement/CandidateEmit` (`ExtraRotationRadians`), `Text/Placement/LabelStagingMath`
@@ -1136,10 +1180,12 @@ and road arrows both render. Headless teeth cover the emit shape, the atlas rout
 observable at runtime — that is what this confirms. It also confirms the `icon-rotate` sign correction
 (§ the 45°-tangent tooth) holds in the real renderer and not merely in the tooth that derived it.
 
-Two things the eyeball did NOT settle. **One has since been settled (§7, P-A); one is still open.**
+Two things the eyeball did NOT settle. **Both have since been settled** — one by §7 (P-A), one below.
 
-**STILL OPEN:** whether arrows DOUBLE at tile seams (along-line icons have no cross-tile dedup, KL-A1) —
-cheap to notice next time the scene is up.
+**CONFIRMED then FIXED:** arrows DID double at tile seams. Maintainer-confirmed on screen 2026-08-03, and
+closed by the along-line anchor clip (§6.3 KL-A1). The fix is applied to the shared anchors array, so road
+**names** at seams changed too — a name that rendered as two half-labels now renders once. Worth an eyeball
+on names as well as arrows.
 
 ---
 
