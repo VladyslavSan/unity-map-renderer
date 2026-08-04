@@ -663,6 +663,134 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
+        // ─── Joins: the three types must be DISTINGUISHABLE on screen ───────────────────────────
+        //
+        // Until the join-side correction, `line-join: bevel` rendered as a miter and `line-join: round`
+        // never rendered round — the chamfer/arc were emitted on the CONCAVE side, buried inside the
+        // overlap of the two half-width bands. It survived because no rendered-output tooth could tell the
+        // three joins apart: Join_NoInteriorSeam probes the corner's INTERIOR (it stays green if the
+        // convex silhouette vanishes entirely) and LineSnapshotTests' round-join scene only asserts the PNG
+        // is non-trivial. Exactly the shape of the normalize(0) NaN that made line-cap: round render as
+        // butt — see §4's "ask what the tooth would read if the mechanism were absent".
+        //
+        // The discriminator is the reach of the join silhouette along the OUTWARD bisector. At a 90° corner
+        // the three are analytically separated and cannot be confused within AA tolerance:
+        //     miter → halfWidth / cos45° = 1.41421·h     (the miter tip)
+        //     round → halfWidth          = 1.00000·h     (the arc radius)
+        //     bevel → halfWidth · cos45° = 0.70711·h     (the chamfer chord's standoff)
+        //
+        // Fixture: a V with its apex at the world origin opening toward −X, so the outward bisector points
+        // along +X — screen-RIGHT under this ortho camera regardless of the raw buffer's row order, which
+        // no other tooth in this file has had to pin down.
+
+        private const float JoinReachWidthM     = 24f;                        // world metres, so h = 12 m
+        private const float JoinReachHalfWidthM = JoinReachWidthM * 0.5f;
+        private const float JoinReachHalfWidthPx = JoinReachHalfWidthM / MetresPerPx;   // ≈ 43.9 px
+        private const float JoinReachArmM       = 40f;
+
+        private static (GameObject go, Material mat) BuildApexFixture(JoinType join)
+        {
+            // Right turn at the apex; interior angle 90°; convex wedge faces +X.
+            var pts = new List<double2>
+            {
+                new double2(-JoinReachArmM,  JoinReachArmM),
+                new double2(0.0,             0.0),
+                new double2(-JoinReachArmM, -JoinReachArmM),
+            };
+            return BuildLine(pts, JoinReachWidthM, widthIsPixels: false,
+                             color: new Color(0.95f, 0.60f, 0.15f, 1f), join: join, cap: CapType.Butt);
+        }
+
+        /// <summary>
+        /// Last column, marching +X from the apex along the bisector row, whose coverage is still ≥ half.
+        /// Returned in pixels from the apex. Sub-pixel refined by linear interpolation across the AA edge so
+        /// the three joins' reaches are resolved well inside their ~13 px separation.
+        /// </summary>
+        private static float BisectorReachPx(byte[] pixels, float3 background, float3 plateau)
+        {
+            const int apexCol = SnapW / 2;
+            const int row     = SnapH / 2;
+
+            float prevCoverage = CoverageAt(pixels, apexCol, row, background, plateau);
+            Assert.Greater(prevCoverage, 0.9f,
+                $"The apex pixel itself must be covered by every join type (got {prevCoverage:F3}) — " +
+                "if it is not, the fixture is not where this tooth thinks it is.");
+
+            for (int col = apexCol + 1; col < SnapW; col++)
+            {
+                float coverage = CoverageAt(pixels, col, row, background, plateau);
+                if (coverage < 0.5f)
+                {
+                    // Linear crossing between the last ≥0.5 sample and this one.
+                    float t = (prevCoverage - 0.5f) / math.max(prevCoverage - coverage, 1e-6f);
+                    return (col - 1 - apexCol) + t;
+                }
+                prevCoverage = coverage;
+            }
+            Assert.Fail("Coverage never fell below half before the frame edge — fixture too large.");
+            return 0f;
+        }
+
+        [Test]
+        public void JoinTypes_AreDistinguishableOnScreen_ByBisectorReach()
+        {
+            var (cameraGo, camera) = BuildCamera();
+            var reaches = new Dictionary<JoinType, float>();
+            try
+            {
+                foreach (var join in new[] { JoinType.Miter, JoinType.Round, JoinType.Bevel })
+                {
+                    var (lineGo, mat) = BuildApexFixture(join);
+                    try
+                    {
+                        using var snap = new SnapshotRenderer(SnapW, SnapH);
+                        snap.Render(camera);
+                        if (snap.IsAllBlack())
+                        {
+                            Assert.Inconclusive("No GPU context (all-black render) — re-run as PlayMode.");
+                            return;
+                        }
+
+                        byte[] pixels     = snap.RawPixels;
+                        float3 background = BackgroundLinear(pixels);
+
+                        // Plateau: the most saturated sample on a column that crosses BOTH arms, scanned
+                        // over the full height. Not a fixed (col,row) — the centre row left of the apex is
+                        // the empty wedge BETWEEN the arms, and a fixed row would also have to assume the
+                        // raw buffer's row order, which this fixture is built specifically not to depend on.
+                        float3 plateau = PlateauOnColumn(pixels, SnapW / 2 - 73, 0, SnapH - 1, background);
+                        Assert.Greater(math.length(plateau - background), 0.05f,
+                            $"{join}: no covered pixel found on the arm-crossing column — the fixture did " +
+                            "not render where this tooth looks, so every later reading would be vacuous.");
+
+                        reaches[join] = BisectorReachPx(pixels, background, plateau);
+                    }
+                    finally { DestroyFixture(lineGo, mat); }
+                }
+
+                float h = JoinReachHalfWidthPx;
+                // Absolute: each join reaches its own analytic distance. 2 px covers the AA edge and the
+                // round join's 4-segment chord secancy; the three targets are ~13 px apart.
+                Assert.AreEqual(1.41421f * h, reaches[JoinType.Miter], 2.0f,
+                    $"Miter must reach the miter tip at 1.414·h = {1.41421f * h:F1} px. Got {reaches[JoinType.Miter]:F2}.");
+                Assert.AreEqual(1.00000f * h, reaches[JoinType.Round], 2.0f,
+                    $"Round must reach the arc radius h = {h:F1} px. Got {reaches[JoinType.Round]:F2}. " +
+                    "Reading ~1.414·h means the arc is not being emitted and the join fell back to a miter.");
+                Assert.AreEqual(0.70711f * h, reaches[JoinType.Bevel], 2.0f,
+                    $"Bevel must stop at the chamfer chord, 0.707·h = {0.70711f * h:F1} px. " +
+                    $"Got {reaches[JoinType.Bevel]:F2}. Reading ~1.414·h is the pre-correction bug: the " +
+                    "chamfer emitted on the concave side, so the silhouette was the miter tip.");
+
+                // Ordering with a hard separation floor. This is the part that cannot be satisfied by a
+                // join type degrading into another one, whatever the absolute tolerances allow.
+                Assert.Greater(reaches[JoinType.Miter] - reaches[JoinType.Round], 8.0f,
+                    $"Miter must out-reach round by ≫0 (got {reaches[JoinType.Miter]:F2} vs {reaches[JoinType.Round]:F2}).");
+                Assert.Greater(reaches[JoinType.Round] - reaches[JoinType.Bevel], 8.0f,
+                    $"Round must out-reach bevel by ≫0 (got {reaches[JoinType.Round]:F2} vs {reaches[JoinType.Bevel]:F2}).");
+            }
+            finally { Object.DestroyImmediate(cameraGo); }
+        }
+
         // ─── Round caps: they must actually reach the screen, and be round ──────────────────────
 
         private const float CapWidthPx     = 40f;                  // half-width 20 px — big enough to resolve
