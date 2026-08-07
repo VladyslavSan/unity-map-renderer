@@ -11,9 +11,10 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// #5 B1 — CurvedTextLayout maps a shaped single-line run to per-glyph (arc-center, baseline-centered
-    /// cell), the build-time half of curved along-line text. Expectations are recomputed from the atlas
-    /// entries, then pinned.
+    /// #5 B1 — CurvedTextLayout maps a shaped single-line run to per-glyph (arc-center, path-centred cell),
+    /// the build-time half of curved along-line text. Expectations are recomputed from the atlas entries,
+    /// then pinned. The vertical centring itself is pinned by <c>CurvedTextCentringTests</c>; what moves
+    /// here is only the positional restatement.
     /// </summary>
     [TestFixture]
     public class CurvedTextLayoutTests
@@ -62,12 +63,27 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(centerA, glyphs[0].ArcCenter, 1e-4f);
             Assert.AreEqual(centerLowerA, glyphs[1].ArcCenter, 1e-4f);
 
-            // Glyph 0's cell: same TOP-referenced box as TextQuadLayout, shifted -arcCenter in x, y baseline-relative.
+            // Glyph 0's cell: same TOP-referenced box as TextQuadLayout, shifted -arcCenter in x and lifted
+            // in y so the run's optical (cap-band) centre lands on the path. The shift is restated here as
+            // the derivation it is — baseline offset less half a cap height, §11 D12 — deliberately NOT read
+            // off TextQuadLayout's own constant, which is the code under test.
+            float opticalCentreShift = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * TextQuadLayout.OneEm;
             SymbolQuad cell0 = glyphs[0].Cell;
             Assert.AreEqual(entryA.Left - GlyphSdf.Buffer - centerA, cell0.TopLeft.x, 1e-4f, "cell x is centered on the arc-center");
-            Assert.AreEqual(entryA.Top + GlyphSdf.Buffer, cell0.TopLeft.y, 1e-4f, "cell y stays baseline-relative (NOT vertically centered)");
+            Assert.AreEqual(entryA.Top + GlyphSdf.Buffer + opticalCentreShift, cell0.TopLeft.y, 1e-4f, "cell y is centered on the path's optical centre");
             Assert.AreEqual(entryA.Left - GlyphSdf.Buffer + entryA.CellSize.x - centerA, cell0.BottomRight.x, 1e-4f);
-            Assert.AreEqual(entryA.Top + GlyphSdf.Buffer - entryA.CellSize.y, cell0.BottomRight.y, 1e-4f);
+            Assert.AreEqual(entryA.Top + GlyphSdf.Buffer + opticalCentreShift - entryA.CellSize.y, cell0.BottomRight.y, 1e-4f);
+
+            // Glyph 1's cell y, by the SAME derivation — and 'a' is the discriminating half of this pair.
+            // 'A' is a baseline-resting CAP glyph, for which centring the run on its optical centre and
+            // centring each glyph on its own box happen to give the identical answer (they coincide exactly
+            // when bare height == the nominal cap height), so cell0 alone cannot tell the correct per-LABEL
+            // rule from the rejected per-GLYPH one. 'a' is an x-height glyph and separates them by 2.0 baked
+            // px, which is 20 000x this tolerance.
+            SymbolQuad cell1 = glyphs[1].Cell;
+            Assert.AreEqual(entryLowerA.Top + GlyphSdf.Buffer + opticalCentreShift, cell1.TopLeft.y, 1e-4f,
+                "every glyph in the run shifts by the same per-label constant — an x-height glyph included");
+            Assert.AreEqual(entryLowerA.Top + GlyphSdf.Buffer + opticalCentreShift - entryLowerA.CellSize.y, cell1.BottomRight.y, 1e-4f);
 
             // UVs unchanged from the atlas entry.
             float2 atlasSize = atlas.Size;

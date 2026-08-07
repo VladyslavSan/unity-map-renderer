@@ -3,18 +3,19 @@
 // mesh (Epic A, world-anchored-labels-design.md §3.1/§11 A0) — fed straight to Mesh.SetVertexBufferData
 // by WorldBillboardMeshBuilder — field DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
-// TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (OffsetPx), TexCoord3 (AlignFlags), TexCoord5 (Tangent) —
-// Unity's canonical ascending VertexAttribute enum order (Position=0, Color=3, TexCoord0=4, TexCoord1=5,
-// TexCoord2=6, TexCoord3=7, TexCoord5=9; see BillboardVertex/StyledLineTileBuilder's identical rule).
-// Declaring these out of order triggers Unity's "non-standard order" auto-adjustment, which silently
-// reinterprets the byte layout against a DIFFERENT stream than this struct actually writes
-// (BillboardVertex's header documents the exact failure mode: the label renders nothing). Keep to
-// blittable fields only.
+// TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
+// TexCoord6 (Up) — Unity's canonical ascending VertexAttribute enum order (Position=0, Color=3,
+// TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord5=9, TexCoord6=10; see
+// BillboardVertex/StyledLineTileBuilder's identical rule). Declaring these out of order triggers Unity's
+// "non-standard order" auto-adjustment, which silently reinterprets the byte layout against a DIFFERENT
+// stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
+// label renders nothing). Keep to blittable fields only.
 //
 // FROZEN at A0 (world-anchored-labels-design.md §11 A0): A1/A2/A3 are purely additive on top of this
-// layout — never a reshuffle of stream 0. Stage AC (curved-world) appends Tangent as the new LAST
-// field/descriptor (TEXCOORD5) — AlignFlags is no longer last, Tangent is (see its own doc below); this
-// still honors "append, never reshuffle existing attributes." Opacity is NOT here — it is stream 1 (a
+// layout — never a reshuffle of stream 0. Stage AC (curved-world) appended Tangent as the LAST field at
+// the time (TEXCOORD5) — AlignFlags was no longer last, Tangent was; P2 now appends Up (TEXCOORD6) as the
+// new LAST field (see its own doc below) — Tangent is no longer last, Up is. Both still honor "append,
+// never reshuffle existing attributes." Opacity is NOT here — it is stream 1 (a
 // separate per-frame dynamic array, TexCoord4 on the mesh) so a fade update (A2) never touches this
 // stream's topology.
 
@@ -50,11 +51,18 @@ namespace MapRenderer.Core.Text.Placement
         /// not an <c>int</c>, because it rides a Float32x1 vertex stream.</summary>
         public float Page;
 
-        /// <summary>UNROTATED glyph-corner offset from the anchor (TEXCOORD2), in LOGICAL screen pixels —
-        /// the world-path analogue of <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus
-        /// any rotation (A0 is north-up; map-aligned bearing rotation is applied in the vertex shader once
-        /// <c>AlignFlags</c> is wired, A1/A3 — see <c>SymbolTextWorld_ForwardPass.hlsl</c>).</summary>
-        public float2 OffsetPx;
+        /// <summary>UNROTATED glyph-corner offset from the anchor (TEXCOORD2) — the world-path analogue of
+        /// <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus any rotation (A0 is north-up;
+        /// map-aligned bearing rotation is applied in the vertex shader once <c>AlignFlags</c> is wired,
+        /// A1/A3 — see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
+        /// <para><b>W2 — TWO UNITS, selected by <see cref="AlignFlags"/> bit2.</b> Bit2 CLEAR (every point/icon
+        /// label, every viewport-pitched curved label — the pre-W2 behaviour): LOGICAL SCREEN PIXELS, added to
+        /// <c>clip.xy</c> after projection, so the glyph is a fixed screen size at any depth. Bit2 SET
+        /// (map-pitched curved): WORLD METRES, displaced in the ground plane at the anchor before projection,
+        /// so the glyph is a fixed WORLD size and foreshortens with depth. <b>The field is deliberately NOT named
+        /// <c>OffsetPx</c>:</b> it was, and the suffix became a lie the moment bit2 introduced the metre
+        /// unit. Read the unit off bit2, never off the name (F-W2-1, discharged).</para></summary>
+        public float2 Offset;
 
         /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0). WRITTEN by A0 (always
         /// 0 — viewport-aligned, matching the old path's only mode today), UNREAD by the A0 shader (the
@@ -68,5 +76,11 @@ namespace MapRenderer.Core.Text.Placement
         /// Read by the shader ONLY when <see cref="AlignFlags"/> bit1 is set (curved); <see cref="float3.zero"/>
         /// for point/icon (an unread attribute — their render stays byte-identical).</summary>
         public float3 Tangent;
+
+        /// <summary>P2 — TEXCOORD6, the new LAST field (see this file's header): unit surface normal at the
+        /// anchor, pre-RTC render-space DIRECTION (the Level-1 RTC translation does not apply to a direction),
+        /// supplied by <c>IProjection.ProjectPoint(...).Up</c> via <see cref="BillboardMath.BuildWorldQuad"/>.
+        /// WRITTEN by P2, UNREAD by every shader — the pitch-alignment tangent-frame branch is P3.</summary>
+        public float3 Up;
     }
 }

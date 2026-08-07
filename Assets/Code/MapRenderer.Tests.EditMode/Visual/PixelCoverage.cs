@@ -1,6 +1,7 @@
 // Unity EditMode only — operates on SnapshotRenderer.RawPixels (RGBA32, bottom-up origin).
 // NOT registered in Tools/core-tests/core-tests.csproj.
 
+using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 
@@ -66,18 +67,23 @@ namespace MapRenderer.Tests.Visual
         public static float3 BackgroundLinear(byte[] pixels, int width, int height)
             => SampleLinearBox(pixels, width, height, 8, 8, 2);
 
+        /// <summary>The background→plateau axis projection shared by every coverage reader — factored out so
+        /// <see cref="CoverageAt"/> (integer lattice) and <see cref="CoverageProfileAlongRay"/> (general
+        /// direction, bilinear) cannot drift apart on what "coverage" means.</summary>
+        private static float ProjectCoverage(float3 sample, float3 background, float3 plateau)
+        {
+            float3 axis  = plateau - background;
+            float  denom = math.dot(axis, axis);
+            if (denom < 1e-9f) return 0f;
+            return math.saturate(math.dot(sample - background, axis) / denom);
+        }
+
         /// <summary>Alpha-weighted coverage at one pixel: the composite's position on the
         /// background→plateau axis. Exactly the rendered alpha when <paramref name="plateau"/> is a
         /// fully-covered pixel of the same material.</summary>
         public static float CoverageAt(
             byte[] pixels, int width, int height, int column, int row, float3 background, float3 plateau)
-        {
-            float3 axis  = plateau - background;
-            float  denom = math.dot(axis, axis);
-            if (denom < 1e-9f) return 0f;
-            return math.saturate(
-                math.dot(SampleLinear(pixels, width, height, column, row) - background, axis) / denom);
-        }
+            => ProjectCoverage(SampleLinear(pixels, width, height, column, row), background, plateau);
 
         /// <summary>The most saturated sample on a column cut — the band's fully-covered interior.</summary>
         public static float3 PlateauOnColumn(
@@ -120,6 +126,103 @@ namespace MapRenderer.Tests.Visual
             for (int i = 0; i < profile.Length; i++)
                 sb.Append($"[{rowFrom + i}]={profile[i]:F3} ");
             return sb.ToString();
+        }
+
+        // ── General-direction extensions (Stage T) — add-only, no existing member's behaviour changes ────
+        //
+        // Everything above this line is column-cut (axis-aligned) and untouched: DevicePixelRatioSnapshotTests
+        // and LineProbeSymmetrySnapshotTests depend on its exact behaviour. Below is a general-direction cut
+        // for fixtures under tilt, where the silhouette a tooth wants to measure is not vertical on screen.
+
+        /// <summary>Bilinear sample in SCREEN coordinates (not a pixel index). Pixel index j's centre is at
+        /// screen coordinate j + 0.5 (<see cref="GroundRowSolver"/> is the authority on this half-pixel, and
+        /// on there being no flip — rows are bottom-up and Unity screen-y grows up too), so the fractional
+        /// pixel index is <paramref name="screenPoint"/> − 0.5. Border behaviour matches <see cref="SampleLinear"/>
+        /// exactly, because each of the 4 taps IS a <see cref="SampleLinear"/> call. Existing integer-index
+        /// callers are unaffected — this is a new entry point for cuts that are not axis-aligned.</summary>
+        public static float3 SampleLinearBilinear(byte[] pixels, int width, int height, double2 screenPoint)
+        {
+            double2 idx = screenPoint - 0.5;
+            int    x0 = (int)math.floor(idx.x);
+            int    y0 = (int)math.floor(idx.y);
+            double fx = idx.x - x0;
+            double fy = idx.y - y0;
+
+            float3 c00 = SampleLinear(pixels, width, height, x0,     y0);
+            float3 c10 = SampleLinear(pixels, width, height, x0 + 1, y0);
+            float3 c01 = SampleLinear(pixels, width, height, x0,     y0 + 1);
+            float3 c11 = SampleLinear(pixels, width, height, x0 + 1, y0 + 1);
+
+            float3 cx0 = math.lerp(c00, c10, (float)fx);
+            float3 cx1 = math.lerp(c01, c11, (float)fx);
+            return math.lerp(cx0, cx1, (float)fy);
+        }
+
+        /// <summary>Coverage samples <c>i = 0..steps-1</c> marching from <paramref name="originScreen"/> along
+        /// <paramref name="unitDirScreen"/> in steps of <paramref name="stepPx"/> screen px, each read through
+        /// <see cref="SampleLinearBilinear"/> and projected onto the background→plateau axis by the SAME
+        /// <see cref="ProjectCoverage"/> helper <see cref="CoverageAt"/> uses — so a column cut and a ray cut
+        /// cannot disagree on what "coverage" means.</summary>
+        public static float[] CoverageProfileAlongRay(
+            byte[] pixels, int width, int height, double2 originScreen, double2 unitDirScreen,
+            int steps, double stepPx, float3 background, float3 plateau)
+        {
+            var profile = new float[steps];
+            for (int i = 0; i < steps; i++)
+            {
+                double2 p = originScreen + unitDirScreen * (i * stepPx);
+                profile[i] = ProjectCoverage(SampleLinearBilinear(pixels, width, height, p), background, plateau);
+            }
+            return profile;
+        }
+
+        /// <summary>The most-saturated sample along the same ray <see cref="CoverageProfileAlongRay"/> marches
+        /// — the ray analogue of <see cref="PlateauOnColumn"/>.</summary>
+        public static float3 PlateauAlongRay(
+            byte[] pixels, int width, int height, double2 originScreen, double2 unitDirScreen,
+            int steps, double stepPx, float3 background)
+        {
+            float3 best     = background;
+            float  bestDist = 0f;
+            for (int i = 0; i < steps; i++)
+            {
+                double2 p      = originScreen + unitDirScreen * (i * stepPx);
+                float3  sample = SampleLinearBilinear(pixels, width, height, p);
+                float   dist   = math.distancesq(sample, background);
+                if (dist > bestDist) { bestDist = dist; best = sample; }
+            }
+            return best;
+        }
+
+        /// <summary>Distance from the ray origin (<c>i = 0</c>) to the first <c>≥0.5 → &lt;0.5</c> crossing in
+        /// <paramref name="profile"/>, linearly interpolated between the bracketing samples and scaled by
+        /// <paramref name="stepPx"/>. Generalises <c>LineAaSnapshotTests.BisectorReachPx</c> to an arbitrary
+        /// screen direction.
+        ///
+        /// <para>ACCURACY, stated honestly: this is a SILHOUETTE-REACH estimator, good to a small fraction of a
+        /// pixel at a hard-ish edge — it is NOT the sub-0.1 px estimator
+        /// (<c>LineProbeSymmetrySnapshotTests</c>'s half-sum rejects the 0.5-crossing for that régime, and that
+        /// rejection stands). Use the coverage INTEGRAL where apparent WIDTH is wanted; use this where
+        /// silhouette REACH is wanted.</para>
+        ///
+        /// <para>Fails loudly when no crossing occurs within <paramref name="profile"/>'s length — a silent 0
+        /// would read as "the feature vanished" and could pass a <c>&lt;</c> assertion for the wrong
+        /// reason.</para></summary>
+        public static double HalfCrossingDistancePx(float[] profile, double stepPx)
+        {
+            for (int i = 1; i < profile.Length; i++)
+            {
+                if (profile[i - 1] >= 0.5f && profile[i] < 0.5f)
+                {
+                    float t = (profile[i - 1] - 0.5f) / math.max(profile[i - 1] - profile[i], 1e-6f);
+                    return (i - 1 + t) * stepPx;
+                }
+            }
+            Assert.Fail(
+                $"HalfCrossingDistancePx: no ≥0.5→<0.5 crossing found within {profile.Length} steps of " +
+                $"{stepPx:F3} px — either the feature does not reach this far (a real result the caller must " +
+                "see, not a silent 0) or the profile never entered coverage at all.");
+            return double.NaN; // unreachable: Assert.Fail throws.
         }
     }
 }

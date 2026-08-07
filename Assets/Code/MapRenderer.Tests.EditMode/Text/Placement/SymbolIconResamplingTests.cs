@@ -7,7 +7,7 @@
 //
 // The reported symptom was "pixels inside the icon warp while zooming/panning". The geometry cannot produce
 // that: BillboardMath.BuildWorldQuad gives all four corners the SAME bitwise anchorLocal plus static
-// per-corner OffsetPx, so a quad is RIGID in screen space — an anchor precision error TRANSLATES an icon and
+// per-corner Offset, so a quad is RIGID in screen space — an anchor precision error TRANSLATES an icon and
 // can never deform its interior. Interior deformation therefore has to be resampling, and it was:
 // SpriteSheet bound the sheet with FilterMode.Point.
 //

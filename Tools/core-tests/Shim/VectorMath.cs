@@ -63,5 +63,17 @@ namespace Unity.Mathematics
             double len = length(a);
             return len > 0.0 ? new double3(a.x / len, a.y / len, a.z / len) : a;
         }
+
+        // P2: PolylineArcMath.SampleUp's per-vertex-up lerp/normalize.
+        public static float   dot(float3 a, float3 b)      => a.x * b.x + a.y * b.y + a.z * b.z;
+        public static float   length(float3 a)             => (float)System.Math.Sqrt(dot(a, a));
+        public static float   lengthsq(float3 a)            => dot(a, a);
+        public static float3  lerp(float3 a, float3 b, float t)
+            => new float3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
+        public static float3 normalize(float3 a)
+        {
+            float len = length(a);
+            return len > 0f ? new float3(a.x / len, a.y / len, a.z / len) : a;
+        }
     }
 }

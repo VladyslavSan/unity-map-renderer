@@ -57,7 +57,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        private static (GlyphAtlasTexture texture, TextLayoutResult layout) BuildGlyphA()
+        /// <summary>Internal (not private): Stage T's <c>TiltFixtureSelfTests.ViewportPitchAlignedLabel_…</c>
+        /// reuses this one-glyph bootstrap under tilt rather than carrying a second copy
+        /// (test-code-bloat convention — widen, don't duplicate-and-drag).</summary>
+        internal static (GlyphAtlasTexture texture, TextLayoutResult layout) BuildGlyphA()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();
@@ -124,7 +127,7 @@ namespace MapRenderer.Tests.Text.Placement
                 WorldSymbolInkAnalysis.ThirdWidths(px, Size, Size, minRow, maxRow, out float topThird, out float bottomThird);
                 Assert.Greater(bottomThird, topThird * 1.3f,
                     "'A' must render UPRIGHT through the REAL production BillboardMath.BuildWorldQuad (A0-F2) — " +
-                    "if this fails mirrored (top third wider), the OffsetPx.y negation regressed.");
+                    "if this fails mirrored (top third wider), the Offset.y negation regressed.");
             }
             finally
             {

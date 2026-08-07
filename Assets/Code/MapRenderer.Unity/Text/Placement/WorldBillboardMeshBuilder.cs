@@ -17,8 +17,8 @@ namespace MapRenderer.Unity.Text.Placement
     ///
     /// <para><b>Two streams</b> (so a per-frame fade update never touches topology, §3.1): stream 0 is
     /// <see cref="WorldBillboardVertex"/> — Position(AnchorLocal)/Color(ColorRGB)/TexCoord0(Uv)/
-    /// TexCoord1(Page)/TexCoord2(OffsetPx)/TexCoord3(AlignFlags)/TexCoord5(Tangent, Stage AC), FROZEN
-    /// load-bearing byte layout (see <see cref="WorldBillboardVertex"/>'s header). Stream 1 is a single
+    /// TexCoord1(Page)/TexCoord2(Offset)/TexCoord3(AlignFlags)/TexCoord5(Tangent, Stage AC)/TexCoord6(Up, P2),
+    /// FROZEN load-bearing byte layout (see <see cref="WorldBillboardVertex"/>'s header). Stream 1 is a single
     /// <c>float</c> Opacity (TexCoord4) — A0 uploads a constant 1 array; A2 re-uploads this stream alone
     /// per frame for the fade.</para>
     ///
@@ -32,23 +32,25 @@ namespace MapRenderer.Unity.Text.Placement
         // WorldBillboardVertex's header / LabelPlacementSystem.VertexDescriptors' identical rule): the array
         // MUST stay in globally-ASCENDING VertexAttribute enum order ACROSS THE WHOLE ARRAY regardless of
         // stream — Position=0, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord4=8
-        // (stream 1!), TexCoord5=9 — declaring them out of order triggers a silent "non-standard order"
-        // layout re-adjustment that reads the wrong bytes for the wrong attribute (at worst: 0 ink pixels).
-        // TexCoord4 (Opacity) is stream 1 — a SEPARATE vertex buffer, so re-uploading it per frame (A2)
-        // never touches stream 0 — but it still occupies enum slot 8, so Stage AC's TexCoord5 (Tangent,
-        // enum 9, stream 0) MUST be declared AFTER it, truly last in the array, to keep 0,3,4,5,6,7,8,9
-        // ascending. Putting TexCoord5 before TexCoord4 would read 9,8 (descending) — the exact hazard this
-        // codebase's vertex-descriptor convention exists to prevent.
+        // (stream 1!), TexCoord5=9, TexCoord6=10 — declaring them out of order triggers a silent
+        // "non-standard order" layout re-adjustment that reads the wrong bytes for the wrong attribute (at
+        // worst: 0 ink pixels). TexCoord4 (Opacity) is stream 1 — a SEPARATE vertex buffer, so re-uploading
+        // it per frame (A2) never touches stream 0 — but it still occupies enum slot 8, so Stage AC's
+        // TexCoord5 (Tangent, enum 9, stream 0) MUST be declared after it, and P2's TexCoord6 (Up, enum 10,
+        // stream 0) after THAT — the new truly-LAST element — to keep 0,3,4,5,6,7,8,9,10 ascending. Putting
+        // TexCoord5/6 before TexCoord4 would read descending — the exact hazard this codebase's
+        // vertex-descriptor convention exists to prevent.
         private static readonly VertexAttributeDescriptor[] VertexDescriptors =
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0), // AnchorLocal
             new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 3, stream: 0), // ColorRGB
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 0), // Uv
             new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.Float32, 1, stream: 0), // Page
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 2, stream: 0), // OffsetPx
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 2, stream: 0), // Offset
             new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 1, stream: 0), // AlignFlags
             new VertexAttributeDescriptor(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 1, stream: 1), // Opacity
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3, stream: 0), // Tangent (Stage AC) — truly LAST
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3, stream: 0), // Tangent (Stage AC)
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up (P2) — truly LAST
         };
 
         // Skip main-thread index validation + redundant bounds recompute (mirrors LabelPlacementSystem's

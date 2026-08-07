@@ -75,6 +75,9 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeArray<CurvedGlyph> Glyphs;
         internal NativeArray<LineAnchor>  Anchors;
         internal NativeArray<double3>     WorldPoints; // anchor (point) / path verts (curved) — for projection
+        // P2: the unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount.
+        // Written by the bake; not yet consumed by any downstream reader (P3 reads it).
+        internal NativeArray<float3>      WorldUps;
         internal NativeArray<long>        AnchorFadeIds; // per curved anchor + a trailing fallback slot
 
         // ── staging output upper bounds (mirrors SymbolLabelBatch.Max* — independent of the camera) ──
@@ -124,6 +127,7 @@ namespace MapRenderer.Unity.Text.Placement
             if (Glyphs.IsCreated) Glyphs.Dispose();
             if (Anchors.IsCreated) Anchors.Dispose();
             if (WorldPoints.IsCreated) WorldPoints.Dispose();
+            if (WorldUps.IsCreated) WorldUps.Dispose();
             if (AnchorFadeIds.IsCreated) AnchorFadeIds.Dispose();
         }
     }

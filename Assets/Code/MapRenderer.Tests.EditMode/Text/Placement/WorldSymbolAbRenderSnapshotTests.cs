@@ -13,7 +13,7 @@
 // NEW path's stock `TransformObjectToHClip` carries no such calibration. Both raw readbacks are therefore
 // put through the SAME `FlipRowsVertically` un-mirror before comparison (mirrors the orientation test's own
 // treatment) and BOTH must land upright + centered; if the NEW path lands mirrored relative to the OLD
-// path after that un-mirror, the corner-emit convention below (OffsetPx.y / UV.y sign) is the fix point —
+// path after that un-mirror, the corner-emit convention below (Offset.y / UV.y sign) is the fix point —
 // see the RESOLVED CONVENTION note on <see cref="BuildOneGlyphWorldMesh"/>.
 
 using System;
@@ -198,7 +198,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(oldBottomThird, oldTopThird * 1.3f, "OLD path must render 'A' upright (regression sentinel, not the tooth under test).");
             Assert.Greater(newBottomThird, newTopThird * 1.3f,
                 "NEW path must render 'A' upright after the SAME un-mirror as the OLD path — if this fails mirrored " +
-                "(top third wider), the world-mesh corner-emit convention (BuildOneGlyphWorldMesh) needs its OffsetPx.y/UV.y sign flipped.");
+                "(top third wider), the world-mesh corner-emit convention (BuildOneGlyphWorldMesh) needs its Offset.y/UV.y sign flipped.");
 
             // (2) Both horizontally centered (flip-invariant axis).
             Assert.That((oldMinCol + oldMaxCol) * 0.5f, Is.EqualTo(Size * 0.5f).Within(Size * 0.15f), "OLD path horizontal placement.");
@@ -228,14 +228,14 @@ namespace MapRenderer.Tests.Text.Placement
         /// emit; this helper exists only so A0's teeth can exercise <see cref="WorldBillboardMeshBuilder"/>
         /// against a genuine glyph). AnchorLocal is <see cref="float3.zero"/> for every corner (the mesh's
         /// object-space origin IS the anchor — see the call site's placement comment); only the corner
-        /// <c>OffsetPx</c> varies per vertex, mirroring <c>BillboardMath.BuildQuad</c>'s unrotated
+        /// <c>Offset</c> varies per vertex, mirroring <c>BillboardMath.BuildQuad</c>'s unrotated
         /// anchor-relative corners exactly (same TL/TR/BR/BL UV mapping, no flip). <b>RESOLVED Y CONVENTION
         /// (empirical, see this file's header):</b> a direct, unflipped carry-over of the OLD path's
-        /// OffsetPx sign rendered the glyph UPSIDE DOWN after the shared un-mirror (confirmed by a failing
+        /// Offset sign rendered the glyph UPSIDE DOWN after the shared un-mirror (confirmed by a failing
         /// run of the A/B tooth below: top-third-wider instead of bottom-third-wider) — the OLD path's
         /// SymbolPassVertex bakes an extra <c>ndc.y = -ndc.y</c> on-screen calibration flip that the NEW
         /// path's stock MVP has no equivalent of (SymbolTextWorld_ForwardPass.hlsl's header). The resolved
-        /// fix point, per the A0 plan, is the emit: <c>OffsetPx.y</c> is negated here (UV stays attached to
+        /// fix point, per the A0 plan, is the emit: <c>Offset.y</c> is negated here (UV stays attached to
         /// its original corner) — a vertical mirror of each corner's SCREEN position while the TEXTURE
         /// content it samples stays put, which is exactly the missing flip. Never move this into the shader
         /// (that would re-import the hack MVP exists to remove).
@@ -293,7 +293,7 @@ namespace MapRenderer.Tests.Text.Placement
                 ColorRGB = colorRgb,
                 Uv = uv,
                 Page = page,
-                OffsetPx = offsetPx,
+                Offset = offsetPx,
                 AlignFlags = 0f,
             };
     }

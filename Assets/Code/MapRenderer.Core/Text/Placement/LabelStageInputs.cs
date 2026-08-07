@@ -20,6 +20,12 @@ namespace MapRenderer.Core.Text.Placement
         public float  Depth;                        // NDC depth carried to the quads
         public bool   Projected;                    // false = behind the camera (skip)
 
+        /// <summary>P2: the unit surface normal at this anchor, from <c>IProjection.ProjectPoint(...).Up</c>.
+        /// PER-FRAME PATCHED by <see cref="LabelStageJob"/> — like <see cref="ScreenPx"/>/<see cref="Depth"/>/
+        /// <see cref="Projected"/> — NOT a stable baked field (the baker/<c>BuildPointInput</c> never sets it).
+        /// WRITTEN by P2; not yet consumed by any placement math.</summary>
+        public float3 SurfaceUp;
+
         public float2 BoundsMin, BoundsMax;         // S19 block bbox (baked-px, anchor-relative)
         public float  TextSizePx, PaddingPx, SortKey;
         public int    FeatureIndex;
@@ -78,6 +84,12 @@ namespace MapRenderer.Core.Text.Placement
     /// <see cref="LabelStagingMath.StageCurved"/> needs beyond this frame's projected path, its glyphs/anchors,
     /// and the pre-resolved per-anchor fade id + incumbency spans. <see cref="Color"/> and <see cref="Slot"/> are
     /// pre-resolved by the caller (managed sRGB→linear / slot clamp).
+    ///
+    /// <para>Stable per label EXCEPT <see cref="MetresPerLogicalPixel"/>, which is this frame's camera ruler
+    /// and is PER-FRAME PATCHED by <see cref="LabelStageJob"/> — the curved analogue of
+    /// <see cref="PointStageInput.ScreenPx"/>/<see cref="PointStageInput.Depth"/>/
+    /// <see cref="PointStageInput.Projected"/>/<see cref="PointStageInput.SurfaceUp"/>. The baker never sets
+    /// it.</para>
     /// </summary>
     public struct CurvedStageInput
     {
@@ -112,5 +124,38 @@ namespace MapRenderer.Core.Text.Placement
         /// rotate by the projected tangent instead), so the converted value rides out on
         /// <see cref="CandidateEmit.ExtraRotationRadians"/>. Default 0 ⇒ curved TEXT is byte-identical.</summary>
         public float IconRotateRadians;
+
+        /// <summary>
+        /// W1 — the RESOLVED <c>*-pitch-alignment</c> (<see cref="AlignmentResolution.ResolvePitch"/>), the
+        /// predicate that selects <see cref="LabelStagingMath.StageCurved"/>'s WORLD arc walk:
+        /// <see cref="AlignmentMode.Map"/> lays the label out in world metres, anything else keeps the
+        /// pre-W1 screen-px walk.
+        ///
+        /// <para><b><see cref="AlignmentMode.Auto"/> here means "the pre-W1 screen walk", and that is
+        /// deliberate.</b> In production this field is never <c>Auto</c> —
+        /// <see cref="AlignmentResolution.ResolvePitch"/>'s contract is a resolved value (pinned by
+        /// <c>AlignmentResolutionTests.ResolvePitch_NeverReturnsAuto</c>) and every producer stamps its
+        /// output here. <c>Auto</c> is reachable only from a HAND-BUILT fixture that never sets the field,
+        /// where the enum's zero value gives it the exact pre-W1 behaviour. That is the hinge of W1's stage
+        /// invariant: every pre-existing curved fixture keeps the screen walk without editing one of
+        /// them.</para>
+        /// </summary>
+        public AlignmentMode PitchAlignment;
+
+        /// <summary>
+        /// W1 — this frame's world ruler: how many METRES one LOGICAL screen pixel spans at the camera's
+        /// reference depth (<c>MapCamera.MetresPerDevicePixel × MapCamera.DevicePixelRatio</c>). LOGICAL, not
+        /// device: <c>SymbolProjectionJob.OutScreen</c>, <see cref="TextSizePx"/> and
+        /// <see cref="CurvedGlyph.ArcCenter"/> all live in the logical-px domain, so this is the one
+        /// conversion that lands the arc walk in metres. The recombination happens ONCE, at
+        /// <c>LabelPlacementSystem.Tick</c>; the value that travels from there is already per-logical-px and
+        /// the name never changes at any hop.
+        ///
+        /// <para><b>PER-FRAME PATCHED</b> by <see cref="LabelStageJob"/> — never baked. Read ONLY inside
+        /// <see cref="LabelStagingMath.StageCurved"/>'s <see cref="AlignmentMode.Map"/> branch, so a
+        /// non-map-pitched label cannot observe it (pinned by W1-T8). A value of 0 (never patched) degrades
+        /// that branch to the screen walk rather than collapsing the label (pinned by W1-T9).</para>
+        /// </summary>
+        public float MetresPerLogicalPixel;
     }
 }

@@ -7,7 +7,7 @@ namespace MapRenderer.Jobs
 {
     /// <summary>
     /// Burst-gather Stage 1 (docs/symbol-label-perf-design.md §10.9): a blittable, non-owning VIEW over one
-    /// <c>SymbolTileLabelBlock</c>'s 19 <c>Allocator.Persistent</c> arrays (<c>MapRenderer.Unity.Text.Placement</c>
+    /// <c>SymbolTileLabelBlock</c>'s 20 <c>Allocator.Persistent</c> arrays (<c>MapRenderer.Unity.Text.Placement</c>
     /// — that type is engine-Unity-side and can't itself be referenced from a Burst job in this Jobs-only
     /// assembly), so <see cref="SymbolGatherJob"/> can index a block's fields without a managed call.
     ///
@@ -52,6 +52,9 @@ namespace MapRenderer.Jobs
         public UnsafeList<CurvedGlyph> Glyphs;
         public UnsafeList<LineAnchor>  Anchors;
         public UnsafeList<double3>     WorldPoints;
+        // P2: index-parallel to WorldPoints (same WorldStart/WorldCount slice) — the unit surface normal at
+        // each world point. Written by the gather copy; not yet consumed by any downstream Burst reader.
+        public UnsafeList<float3>      WorldUps;
         public UnsafeList<long>        AnchorFadeIds;
     }
 }

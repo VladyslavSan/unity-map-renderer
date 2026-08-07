@@ -24,6 +24,17 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         private const float ViewportMarginPx = 256f;
 
+        /// <summary>Magnitude past which a projected screen coordinate is treated as a near-plane blow-up
+        /// rather than a position. A point just in front of the camera plane has a tiny positive <c>clip.w</c>,
+        /// which survives the behind-camera test in <see cref="TryProjectPoint"/> and then divides into an
+        /// arbitrarily large screen coordinate — finite, so no NaN guard catches it, but useless as geometry.
+        /// <para>Lives here, not on a caller, because BOTH consumers of a projected point need the same
+        /// threshold: <c>LabelStagingMath.StageCurved</c> bounds a path VERTEX (a blow-up there would explode
+        /// the arc walk), and <see cref="LabelBox.TryBuildProjectedWorldGlyph"/> bounds a projected CORNER (a
+        /// blow-up there would make the collision AABB unbounded, where the pre-W3 screen box was bounded by
+        /// construction). Two copies of one threshold is how they drift apart.</para></summary>
+        internal const float MaxProjectedPx = 1e5f;
+
         /// <summary>
         /// Projects <paramref name="renderPos"/> (render-space, pre-RTC — the SAME space
         /// <c>projection.Project(geo)</c> emits) to a logical screen pixel, or returns <c>false</c> if the

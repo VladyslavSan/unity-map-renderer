@@ -27,6 +27,33 @@ namespace MapRenderer.Core.Text.Placement
             return cumulative[count - 1];
         }
 
+        /// <summary>
+        /// W1 — the <c>double3</c> WORLD sibling of <see cref="BuildCumulative"/>: fills
+        /// <paramref name="cumulative"/>[0..count) with the arc length in METRES at each vertex and returns
+        /// the total (0 for &lt; 2 points). Feeds the map-pitched arc walk, where a glyph advance is a fixed
+        /// world length rather than a fixed screen length.
+        ///
+        /// <para><paramref name="count"/> is the SCREEN path length, deliberately: the two spans are
+        /// index-aligned 1:1 (the stage job slices both at the same <c>(off, wc)</c>), so one count governs
+        /// both and a <c>(seg, t)</c> resolved against this table indexes the screen path correctly.</para>
+        ///
+        /// <para>The running total accumulates in <c>double</c> and is narrowed per entry, unlike
+        /// <see cref="BuildCumulative"/>'s float chain: these are absolute world metres at a Level-1 RTC
+        /// scale, where a long polyline summing them in float would drift.</para>
+        /// </summary>
+        public static float BuildCumulativeWorld(ReadOnlySpan<double3> world, int count, Span<float> cumulative)
+        {
+            if (count <= 0) return 0f;
+            cumulative[0] = 0f;
+            double running = 0.0;
+            for (int i = 1; i < count; i++)
+            {
+                running += math.length(world[i] - world[i - 1]);
+                cumulative[i] = (float)running;
+            }
+            return cumulative[count - 1];
+        }
+
         /// <summary>The screen arc distance of a stable <see cref="LineAnchor"/> <c>(segment, t)</c> along this
         /// polyline. <paramref name="segment"/> is clamped to a valid segment; <paramref name="t"/> to [0,1].</summary>
         public static float ArcDistanceAt(ReadOnlySpan<float> cumulative, int count, int segment, float t)
@@ -117,6 +144,17 @@ namespace MapRenderer.Core.Text.Placement
                 if (math.lengthsq(d) > 1e-18) { dir = d; return; }
             }
             dir = double3.zero;
+        }
+
+        /// <summary>P2 (curved arm): the unit-surface-normal analogue of <see cref="SampleWorld"/> — lerps the
+        /// per-vertex ups at the SAME already-resolved <c>(seg,t)</c> <see cref="SampleWorld"/> was handed (so
+        /// the up and the anchor are sampled at the identical point), then re-normalizes (a lerp of two unit
+        /// vectors is not itself unit length). Falls back to <paramref name="ups"/>[seg] on a degenerate
+        /// (near-zero-length) blend — the two ups nearly cancel, so either endpoint is as good as any lerp.</summary>
+        public static float3 SampleUp(ReadOnlySpan<float3> ups, int seg, float t)
+        {
+            float3 blended = math.lerp(ups[seg], ups[seg + 1], t);
+            return math.lengthsq(blended) > 1e-12f ? math.normalize(blended) : ups[seg];
         }
 
         /// <summary>Tangent of segment [i, i+1]; skips forward/backward over zero-length (coincident) vertices so

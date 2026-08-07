@@ -220,6 +220,22 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
 
 ## Test workflow
 
+- **`dotnet test Tools/core-tests` is STRUCTURALLY blind to every Unity-only file — a green run there is not
+  evidence the tree compiles.** The fast project references no `UnityEngine`, and it compiles only the files
+  registered in `Tools/core-tests/core-tests.csproj`. So it cannot see, by construction:
+  - **Unity namespace collisions.** `MapRenderer.Core.Text.TextAnchor` vs `UnityEngine.TextAnchor` compiled
+    clean in the fast runner and failed the Unity gate with `CS0104`. Fixed with a `using` alias.
+  - **A missing `using` for a Unity type.** Adding a `NativeArray` return to a test file with no
+    `using Unity.Collections;` — fast runner reported **1282 passed**, Unity gate exited **4**, compile
+    error, no tests ran.
+  - **Any file not in the csproj at all.** `#if UNITY_EDITOR` fixtures under `Visual/` are never compiled by
+    it, so a whole test suite can be broken and invisible.
+
+  Three instances during the pitch-alignment epic, from three different directions. Use the fast loop for
+  what `AGENTS.md` says — decode/geometry/earcut/projection math — and treat the Unity gate as the only
+  instrument that answers "does this tree compile". **Never report a fast-runner pass as a compile check.**
+
+
 - **Measuring per-frame GC allocation: only NUnit's `Is.Not.AllocatingGCMemory` is trustworthy here; the
   two obvious `System.GC` counters both lie on this Unity Mono runtime.** Verified during the S53b
   re-measurement (2026-06-23):

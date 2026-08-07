@@ -38,6 +38,7 @@ namespace MapRenderer.Core.Style.Symbol
         public const string IconRotate         = "icon-rotate";
         public const string IconAnchor         = "icon-anchor";
         public const string IconRotationAlignment = "icon-rotation-alignment";
+        public const string IconPitchAlignment    = "icon-pitch-alignment";
         public const string IconAllowOverlap   = "icon-allow-overlap";
         public const string IconIgnorePlacement = "icon-ignore-placement";
         public const string IconOptional       = "icon-optional";
@@ -85,7 +86,7 @@ namespace MapRenderer.Core.Style.Symbol
         public const string TranslateAnchorMap      = "map";
         public const string TranslateAnchorViewport = "viewport";
 
-        // ── text-rotation-alignment / text-pitch-alignment values (auto is the default/zero) ──
+        // ── the four {text,icon}-{rotation,pitch}-alignment keys' values (auto is the default/zero) ──
         public const string AlignAuto     = "auto";
         public const string AlignMap      = "map";
         public const string AlignViewport = "viewport";

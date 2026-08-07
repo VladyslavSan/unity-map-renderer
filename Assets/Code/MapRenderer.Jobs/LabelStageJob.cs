@@ -61,11 +61,27 @@ namespace MapRenderer.Jobs
         // SAME (off, wc) as the screen path so a glyph's world anchor/tangent sample the identical (segment, t)
         // the screen arc walk resolves. Point arm never reads this.
         public NativeArray<double3> WorldPointsRender;
+        // P2: index-parallel to WorldPointsRender (same Slice(off, wc)) — the unit surface normal at each
+        // gathered world point, from IProjection.ProjectPoint(...).Up. Patched into PointStageInput.SurfaceUp
+        // (point arm) / sliced for StageCurved (curved arm) below. WRITTEN by P2; not yet consumed by
+        // LabelStagingMath's actual placement math — carried onto CandidateEmit/PlacedQuad for P3.
+        public NativeArray<float3>  WorldUpsRender;
         // A-5 incumbency per global anchor-fade index — JOB-OWNED scratch: filled here (below) from
         // AnchorFadeIds + Placed, not resolved by the caller. Sized by the caller to _mirrorFadeCount.
         public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
         public double2 Viewport;
+        // W1: this frame's world ruler, metres per LOGICAL screen pixel — already recombined by
+        // LabelPlacementSystem.Tick (MetresPerDevicePixel × DevicePixelRatio), so nothing downstream carries
+        // a device-px value plus a ratio to be re-multiplied. Patched into each curved record below, the same
+        // way the point arm patches ScreenPx/Depth/Projected/SurfaceUp.
+        public float   MetresPerLogicalPixel;
+        // W3: this frame's view transform (scene origin, rebase, view-projection, logical viewport) — the
+        // four values LabelScreenProjection needs to project an arbitrary render-space point, which is what
+        // the map-pitched collision box is built from. Per-frame, like Bearing/Viewport; passed to
+        // StageCurved only. The POINT arm never sees it (StagePoint/StagePointPair take no such parameter),
+        // and a default-constructed value selects the pre-W3 screen box — see LabelViewTransform.IsUsable.
+        public LabelViewTransform View;
 
         // A-5 incumbency: last frame's collision survivors, keyed by fade id. Read from Burst — the reason
         // LabelPlacementSystem._placedLastFrame is a NativeHashSet at all. NEVER stored across frames by the
@@ -124,6 +140,7 @@ namespace MapRenderer.Jobs
                     s.ScreenPx = Screen[off];
                     s.Depth = Depth[off];
                     s.Projected = Valid[off] != 0;
+                    s.SurfaceUp = WorldUpsRender[off]; // P2: per-frame patched, like ScreenPx/Depth/Projected
                     s.WasPlacedLastFrame = Placed.Contains(s.FadeId); // s is the Points[d] copy; FadeId is never patched
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
@@ -158,18 +175,20 @@ namespace MapRenderer.Jobs
                     int anchorCount = CurvedAnchorCount[d];
                     int fadeStart   = CurvedAnchorFadeStart[d];
                     CurvedStageInput s = Curveds[d];
+                    s.MetresPerLogicalPixel = MetresPerLogicalPixel; // W1: per-frame patch (see the field's doc)
 
                     ReadOnlySpan<float2>  screen = Screen.AsSpan().Slice(off, wc);
                     ReadOnlySpan<float>   depth  = Depth.AsSpan().Slice(off, wc);
                     ReadOnlySpan<byte>    valid  = Valid.AsSpan().Slice(off, wc);
                     ReadOnlySpan<double3> world  = WorldPointsRender.AsSpan().Slice(off, wc);
+                    ReadOnlySpan<float3>  worldUps = WorldUpsRender.AsSpan().Slice(off, wc);
                     ReadOnlySpan<CurvedGlyph> glyphs  = Glyphs.AsSpan().Slice(CurvedGlyphStart[d], CurvedGlyphCount[d]);
                     ReadOnlySpan<LineAnchor>  anchors = Anchors.AsSpan().Slice(CurvedAnchorStart[d], anchorCount);
                     ReadOnlySpan<long> fadeIds   = AnchorFadeIds.AsSpan().Slice(fadeStart, anchorCount + 1);
                     ReadOnlySpan<byte> wasPlaced = AnchorWasPlaced.AsSpan().Slice(fadeStart, anchorCount + 1);
 
-                    candidateCount += LabelStagingMath.StageCurved(in s, screen, depth, valid, world, glyphs, anchors,
-                        fadeIds, wasPlaced, path.Slice(0, wc), cum.Slice(0, wc), Bearing, candidateCount,
+                    candidateCount += LabelStagingMath.StageCurved(in s, screen, depth, valid, world, worldUps, glyphs, anchors,
+                        fadeIds, wasPlaced, path.Slice(0, wc), cum.Slice(0, wc), Bearing, in View, candidateCount,
                         boxes, ref boxCount, quads, ref quadCount, cands, emit, ref emitCount);
                 }
             }

@@ -103,6 +103,15 @@ namespace MapRenderer.Core.Style.Symbol
             // untouched — this only lifts the icon fence / switches emit shape for the viewport-resolved case.
             AlignmentMode textAlign    = AlignmentResolution.Resolve(layout.TextRotationAlignment, placement);
             AlignmentMode iconAlign    = AlignmentResolution.Resolve(layout.IconRotationAlignment, placement);
+            // W1: the PITCH twins, resolved on the SAME once-per-layer terms (the spec's pitch `auto` defers
+            // to the RESOLVED rotation alignment, which is what ResolvePitch encodes). Unlike the rotation
+            // values above — recorded as authored and re-resolved downstream — these are stamped RESOLVED
+            // onto the emitted label, because the curved staging arm consumes them and has no placement in
+            // hand to resolve `auto` against.
+            AlignmentMode textPitch    = AlignmentResolution.ResolvePitch(
+                layout.TextPitchAlignment, layout.TextRotationAlignment, placement);
+            AlignmentMode iconPitch    = AlignmentResolution.ResolvePitch(
+                layout.IconPitchAlignment, layout.IconRotationAlignment, placement);
             bool          textAtAnchors = isLine && textAlign != AlignmentMode.Map;
             bool          iconAtAnchors = isLine && iconAlign != AlignmentMode.Map;
             // P-B: the third icon mode. A MAP-resolved line icon rides the along-line anchors AND rotates to
@@ -253,6 +262,7 @@ namespace MapRenderer.Core.Style.Symbol
                             AllowOverlap = layout.IconAllowOverlap,
                             IgnorePlacement = layout.IconIgnorePlacement,
                             RotationAlignment = layout.IconRotationAlignment,
+                            PitchAlignment = iconPitch, // W1: RESOLVED, unlike RotationAlignment above
                             SortKey = sortKey,
                             SpacingPx = spacing,
                             MaxAngleDeg = maxAngle,
@@ -313,10 +323,12 @@ namespace MapRenderer.Core.Style.Symbol
                         // upright-at-anchors (map-aligned, or line-center's textAlign resolves Map by D3).
                         if (text != null && !textAtAnchors)
                         {
+                            double3[] textPathRender = ProjectPath(densePath, tileId, extent, projection, out double3[] textPathUps);
                             output.Add(new SymbolLabel
                             {
                                 Placement       = placement,
-                                PathRender      = ProjectPath(densePath, tileId, extent, projection),
+                                PathRender      = textPathRender,
+                                PathUpRender    = textPathUps,
                                 LineAnchors     = anchors,
                                 Text            = text,
                                 TextSizePx      = textSize,
@@ -332,6 +344,7 @@ namespace MapRenderer.Core.Style.Symbol
                                 Paint           = labelPaint,
                                 TranslatePx     = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
+                                PitchAlignment  = textPitch, // W1: RESOLVED — selects the world-metre arc walk
                             });
                         }
 
@@ -341,8 +354,11 @@ namespace MapRenderer.Core.Style.Symbol
                         // second projection on a layer carrying map-aligned text AND a map-aligned icon,
                         // which no shipped style does.
                         if (iconAlongLine && hasIcon)
-                            EmitAlongLineIcon(placement, ProjectPath(densePath, tileId, extent, projection),
+                        {
+                            double3[] iconPathRender = ProjectPath(densePath, tileId, extent, projection, out double3[] iconPathUps);
+                            EmitAlongLineIcon(placement, iconPathRender, iconPathUps,
                                 anchors, in alongLineIconCtx, tileKey, ref ordinal, output);
+                        }
 
                         // D4: upright-at-anchors — text and/or icon emitted as ordinary POINT labels at each
                         // along-line anchor (the road-shield look). Suppress whichever side didn't resolve to
@@ -525,6 +541,10 @@ namespace MapRenderer.Core.Style.Symbol
             public bool          AllowOverlap { get; init; }
             public bool          IgnorePlacement { get; init; }
             public AlignmentMode RotationAlignment { get; init; }
+            /// <summary>W1 — the RESOLVED <c>icon-pitch-alignment</c>, unlike
+            /// <see cref="RotationAlignment"/> beside it (recorded as authored). Consumed: it selects the
+            /// world-metre arc walk in the curved staging arm.</summary>
+            public AlignmentMode PitchAlignment { get; init; }
             public float         SortKey { get; init; }
             public float         SpacingPx { get; init; }
             public float         MaxAngleDeg { get; init; }
@@ -589,7 +609,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// this label's <c>PairRole</c> stays <see cref="LabelPairRole.None"/> structurally — §10's "a curved
         /// label is never paired" fence holds with no guard here.</para></summary>
         private static void EmitAlongLineIcon(
-            SymbolPlacement placement, double3[] pathRender, LineAnchor[] anchors,
+            SymbolPlacement placement, double3[] pathRender, double3[] pathUpRender, LineAnchor[] anchors,
             in AlongLineIconContext ctx, long tileKey, ref int ordinal, List<SymbolLabel> output)
         {
             output.Add(new SymbolLabel
@@ -597,6 +617,7 @@ namespace MapRenderer.Core.Style.Symbol
                 Placement         = placement,
                 Kind              = LabelKind.Icon,
                 PathRender        = pathRender,
+                PathUpRender      = pathUpRender,
                 LineAnchors       = anchors,
                 IconQuad          = ctx.IconQuad,
                 IconSkirtPx       = ctx.IconSkirtPx,
@@ -614,6 +635,8 @@ namespace MapRenderer.Core.Style.Symbol
                 // line tangent, so — exactly like the curved-text emit above — the builder does not forward
                 // this onto the LabelInstance. It says what the style asked for, nothing downstream reads it.
                 RotationAlignment = ctx.RotationAlignment,
+                // W1: the pitch twin IS forwarded and IS read — it selects StageCurved's world arc walk.
+                PitchAlignment    = ctx.PitchAlignment,
                 IconRotateRadians = ctx.IconRotateRadians,
                 Paint             = ctx.Paint,
                 FeatureIndex      = ordinal++,
@@ -632,7 +655,8 @@ namespace MapRenderer.Core.Style.Symbol
         {
             if (tilePoint.x < 0.0 || tilePoint.x >= extent || tilePoint.y < 0.0 || tilePoint.y >= extent) return;
             double2 lonLat = tileId.ToLonLat(tilePoint.x, tilePoint.y, extent);
-            double3 anchor = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+            ProjectedPoint pp = projection.ProjectPoint(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+            double3 anchor = pp.World;
 
             if (ctx.PairedInstance)
             {
@@ -641,23 +665,24 @@ namespace MapRenderer.Core.Style.Symbol
                 // caller re-gates the predicate on the same fences that suppress a half (the line branch on
                 // `iconAtAnchors && textAtAnchors`) — so both emitters below always run together here.
                 int pairId = ordinal;
-                if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Owner, pairId);
-                if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.Rider, pairId);
+                if (ctx.HasIcon) EmitIconLabel(anchor, pp.Up, tileKey, ref ordinal, output, in ctx, LabelPairRole.Owner, pairId);
+                if (ctx.Text != null) EmitTextLabel(anchor, pp.Up, tileKey, ref ordinal, output, in ctx, LabelPairRole.Rider, pairId);
             }
             else
             {
-                if (ctx.Text != null) EmitTextLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
-                if (ctx.HasIcon) EmitIconLabel(anchor, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
+                if (ctx.Text != null) EmitTextLabel(anchor, pp.Up, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
+                if (ctx.HasIcon) EmitIconLabel(anchor, pp.Up, tileKey, ref ordinal, output, in ctx, LabelPairRole.None, 0);
             }
         }
 
         private static void EmitTextLabel(
-            double3 anchor, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
+            double3 anchor, double3 up, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
             LabelPairRole pairRole, int pairId)
         {
             output.Add(new SymbolLabel
             {
                 AnchorRender      = anchor,
+                UpRender          = up,
                 Placement         = SymbolPlacement.Point,
                 Text              = ctx.Text,
                 TextSizePx        = ctx.TextSizePx,
@@ -679,12 +704,13 @@ namespace MapRenderer.Core.Style.Symbol
         }
 
         private static void EmitIconLabel(
-            double3 anchor, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
+            double3 anchor, double3 up, long tileKey, ref int ordinal, List<SymbolLabel> output, in AnchorEmitContext ctx,
             LabelPairRole pairRole, int pairId)
         {
             output.Add(new SymbolLabel
             {
                 AnchorRender      = anchor,
+                UpRender          = up,
                 Placement         = SymbolPlacement.Point,
                 Kind              = LabelKind.Icon,
                 IconQuad          = ctx.IconQuad,
@@ -705,15 +731,19 @@ namespace MapRenderer.Core.Style.Symbol
             });
         }
 
-        // Project a tile-local line string to render-space (PRE-RTC) vertices.
+        // Project a tile-local line string to render-space (PRE-RTC) vertices, plus (P2) the parallel,
+        // index-parallel unit surface normal at each vertex.
         private static double3[] ProjectPath(
-            IReadOnlyList<double2> path, TileId tileId, double extent, IProjection projection)
+            IReadOnlyList<double2> path, TileId tileId, double extent, IProjection projection, out double3[] ups)
         {
             var pts = new double3[path.Count];
+            ups = new double3[path.Count];
             for (int i = 0; i < path.Count; i++)
             {
                 double2 lonLat = tileId.ToLonLat(path[i].x, path[i].y, extent);
-                pts[i] = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                ProjectedPoint pp = projection.ProjectPoint(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                pts[i] = pp.World;
+                ups[i] = pp.Up;
             }
 
             return pts;

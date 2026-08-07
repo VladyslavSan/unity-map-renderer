@@ -223,7 +223,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Epic A / A1: this label is a POINT (default Placement) — it now draws through the world path.
             // The screen-space translate no longer shows up as a delta on system.Mesh's Position (screen px);
-            // D4 carries it as an ADDITIVE, UNROTATED OffsetPx delta instead (BillboardMath.BuildWorldQuad),
+            // D4 carries it as an ADDITIVE, UNROTATED Offset delta instead (BillboardMath.BuildWorldQuad),
             // with the SAME A0-F2 Y-negation as the glyph corner — so the sign convention differs from the
             // OLD path's raw screen-vertex delta (see BuildWorldQuad's doc for the derivation).
             var system = new LabelPlacementSystem(mapCamera,
@@ -247,9 +247,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.Greater(v0.Length, 0, "the label placed at least one quad");
                 for (int i = 0; i < v0.Length; i++)
                 {
-                    Assert.AreEqual(translate.x, v1[i].OffsetPx.x - v0[i].OffsetPx.x, 1e-3f, $"vertex {i}: +tx in OffsetPx.x");
-                    Assert.AreEqual(translate.y, v1[i].OffsetPx.y - v0[i].OffsetPx.y, 1e-3f, $"vertex {i}: +ty in OffsetPx.y (D4's SAME Y-negation as the corner, applied to both — the two negations cancel back to +ty)");
-                    Assert.AreEqual(v0[i].AnchorLocal, v1[i].AnchorLocal, "the anchor itself is untouched by a screen-space translate — only OffsetPx moves");
+                    Assert.AreEqual(translate.x, v1[i].Offset.x - v0[i].Offset.x, 1e-3f, $"vertex {i}: +tx in Offset.x");
+                    Assert.AreEqual(translate.y, v1[i].Offset.y - v0[i].Offset.y, 1e-3f, $"vertex {i}: +ty in Offset.y (D4's SAME Y-negation as the corner, applied to both — the two negations cancel back to +ty)");
+                    Assert.AreEqual(v0[i].AnchorLocal, v1[i].AnchorLocal, "the anchor itself is untouched by a screen-space translate — only Offset moves");
                 }
             }
             finally
@@ -284,8 +284,8 @@ namespace MapRenderer.Tests.Text.Placement
             var mapLabels      = new List<LabelInstance> { MakeLabel(0, frame.SceneOriginRender, default, AlignmentMode.Map) };
 
             // Epic A / A1: this label is a POINT — it now draws through the world path. The rotation is baked
-            // into OffsetPx (D3 — every frame, byte-equivalent to the old path while A1's emit runs every
-            // Tick) rather than a raw screen-vertex position, so this reads OffsetPx off the world mesh
+            // into Offset (D3 — every frame, byte-equivalent to the old path while A1's emit runs every
+            // Tick) rather than a raw screen-vertex position, so this reads Offset off the world mesh
             // instead of system.Mesh.vertices. Winding is IDENTICAL to the old path (BuildWorldQuad mirrors
             // BuildQuad's TL/TR/BR/BL corner order).
             var system = new LabelPlacementSystem(mapCamera,
@@ -304,13 +304,13 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mapMesh), "the world slot mesh must exist.");
                 WorldMeshReadback.Read(mapMesh, out WorldBillboardVertex[] mp, out _);
 
-                // Viewport: top edge horizontal (axis-aligned billboard) — TL.OffsetPx.y == TR.OffsetPx.y.
-                Assert.AreEqual(vp[0].OffsetPx.y, vp[1].OffsetPx.y, 1e-3f, "viewport billboard's top edge stays horizontal");
+                // Viewport: top edge horizontal (axis-aligned billboard) — TL.Offset.y == TR.Offset.y.
+                Assert.AreEqual(vp[0].Offset.y, vp[1].Offset.y, 1e-3f, "viewport billboard's top edge stays horizontal");
                 // Map under a 45° bearing: the quad is rotated, so the top edge is NOT horizontal.
-                Assert.That(math.abs(mp[0].OffsetPx.y - mp[1].OffsetPx.y), Is.GreaterThan(1f),
+                Assert.That(math.abs(mp[0].Offset.y - mp[1].Offset.y), Is.GreaterThan(1f),
                     "rotation-alignment:map must rotate the billboard under a non-zero bearing (top edge no longer horizontal)");
                 // And it genuinely differs from the viewport placement (rotation actually applied).
-                Assert.That(math.abs(mp[1].OffsetPx.x - vp[1].OffsetPx.x) + math.abs(mp[1].OffsetPx.y - vp[1].OffsetPx.y), Is.GreaterThan(1f),
+                Assert.That(math.abs(mp[1].Offset.x - vp[1].Offset.x) + math.abs(mp[1].Offset.y - vp[1].Offset.y), Is.GreaterThan(1f),
                     "map- and viewport-aligned billboards must differ under a non-zero bearing");
             }
             finally

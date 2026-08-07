@@ -432,6 +432,141 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
+
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+        // W2 — the map-PITCHED along-line ICON arm, rendered. (Review REQUIRED 1.)
+        //
+        // WHY THIS EXISTS. W2 gave `Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` a map-pitch branch, and
+        // that branch is LIVE IN PRODUCTION TODAY: `AlignmentResolution.ResolvePitch(Auto, Auto, LineCenter)`
+        // resolves to Map, `SymbolFeatureExtractor` stamps it onto the along-line ICON SymbolLabel, and
+        // `StageCurved` is shared across AtlasKind — so `road_one_way_arrow` / `road_one_way_arrow_opposite`
+        // ship with AlignFlags bit2 and METRE corner offsets. Every other W2 rendered tooth binds
+        // Map/Symbol/TextWorld and LabelKind.Text, so without this pair the icon copy of the branch was
+        // compiled and shipped but never rendered by any test. `round-caps-never-rendered` is this repo's
+        // recorded cost of shipping exactly that shape.
+        //
+        // WHAT IS ICON-SPECIFIC ABOUT IT, i.e. why the text teeth do not cover it. Only the ICON arm carries a
+        // CPU-baked constant rotation: `CandidateEmit.ExtraRotationRadians` (icon-rotate) is applied to the
+        // corners by BillboardMath.BuildWorldQuad in its y-DOWN frame, and the shader THEN maps those already-
+        // rotated corners into the ground frame (x̂, ŷ). Curved text leaves that constant at 0, so no text tooth
+        // exercises the composition at all. The claim under test is that the two rotations compose the same way
+        // on both branches:
+        //     viewport:  off = Rot(cornerBaked, iconRotate)  then the shader rotates by the projected tangent
+        //     map:       off = Rot(cornerBaked, iconRotate)  then the ground frame's x̂ IS the tangent
+        // — so at tilt 0 the total must be identical, and a swapped composition order or a flipped rotate sign
+        // must break it.
+        //
+        // WHY THESE PARAMETERS, none of them free choices:
+        //   · tilt 0 — the ONLY pose where a map-pitched quad and a viewport one must agree exactly: the ground
+        //     plane is ⊥ the view axis, so `cornerPx · metresPerLogicalPixel` metres projects to exactly
+        //     `cornerPx` logical px. (Same calibration MapPitchedGlyphSizeTiltZeroTests rests on.)
+        //   · road 45° — a sign or composition error is INVISIBLE on a screen-axis-aligned road; this file's own
+        //     sign teeth are at 45° for that reason, and W2's E8 sign measurement read a false agreement at 0°.
+        //   · icon-rotate 90°, NOT 180° — 180° is its own inverse, so the only value production styles use
+        //     cannot expose a sign error. This file's header says so; the reviewer's REQUIRED said so.
+        //   · sprite 'f-glyph' — 'arrow-down' is very nearly centroid-symmetric (0.25 px of 32 from its cell
+        //     centre), so it carries no usable direction signal however far it is rotated.
+        //   · PathUpRender is set to world up by the harness, so the map arm takes SymbolWorldGroundFrame's
+        //     GROUND branch. Without it the arm would still pass at tilt 0 — via the camera-facing fallback,
+        //     which coincides there — while never exercising the branch this tooth exists for.
+        //
+        // THE REFERENCE IS THE VIEWPORT ARM, which shares no code with the map branch: SymbolWorldIsMapPitched
+        // sends the two down mutually exclusive paths. The twins differ in EXACTLY ONE FIELD,
+        // LabelInstance.PitchAlignment. (P3a's rebuilt-T2 lesson: a reference drawn from the arm under test
+        // cancels the defect it is meant to expose.)
+        //
+        // Two [Test] methods, never one with two clauses — NUnit throws on the first failure, so a second
+        // clause would never run. That has already cost this epic two teeth. The COUNT clause is the only one
+        // that can see a uniform scale error (it reads k as k²); the CENTROID clause is the only one that can
+        // see a mirror or a rotation error (a mirror is an isometry, so the count is structurally blind to it).
+        // ══════════════════════════════════════════════════════════════════════════════════════════════
+
+        /// <summary>Ink-count agreement bound for the map-vs-viewport icon twins. Same reasoning as
+        /// <c>MapPitchedGlyphSizeTiltZeroTests</c>: a uniform scale error reads as its square here, so 2 %
+        /// brackets a 1 % scale error, while the failures this exists for are gross — metres reinterpreted as
+        /// pixels is a ~mpp× quad. The slack absorbs only the sub-pixel disagreement between two arithmetically
+        /// different routes to one clip position (world displace → MVP, versus MVP → clip add).</summary>
+        private const double MapPitchIconCountTolerance = 0.02;
+
+        /// <summary>Ink-centroid agreement bound in px, for the same twins. A flipped rotate sign or a swapped
+        /// composition order moves an `f-glyph` centroid by tens of pixels at this cell size, so the
+        /// discrimination is large against this bound — the RED-verify records the achieved number.</summary>
+        private const double MapPitchIconCentroidTolerancePx = 1.5;
+
+        [Test]
+        public void MapPitchedAlongLineIcon_AtTiltZero_MatchesViewport_InkCount()
+        {
+            SpriteIndex index = SpriteIndex.Parse(LoadFixtureText("demo-icons.json"));
+            var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
+            try
+            {
+                SymbolQuad cell = SignToothCell(sheet.View, SignToothHalfExtentPx);
+                SymbolInk viewport = MeasureAlongLineIconInk(sheet, cell, SignToothSprite,
+                    lineAngleDeg: 45f, iconRotateDeg: 90f, pitchAlignment: AlignmentMode.Viewport);
+                SymbolInk map = MeasureAlongLineIconInk(sheet, cell, SignToothSprite,
+                    lineAngleDeg: 45f, iconRotateDeg: 90f, pitchAlignment: AlignmentMode.Map);
+
+                double ratio = (double)map.InkCount / viewport.InkCount;
+                TestContext.Out.WriteLine(
+                    $"W2 icon map-vs-viewport (road 45 deg, icon-rotate 90 deg): map ink={map.InkCount} px, " +
+                    $"viewport ink={viewport.InkCount} px, ratio={ratio:F5}");
+
+                Assert.That(ratio, Is.EqualTo(1.0).Within(MapPitchIconCountTolerance),
+                    $"at tilt 0 a map-PITCHED along-line icon must cover the same ink as its viewport twin — " +
+                    $"map {map.InkCount} px, viewport {viewport.InkCount} px, ratio {ratio:F5}. The two labels " +
+                    "differ in exactly one field, PitchAlignment. A gross ratio means the icon shader's map " +
+                    "branch fed its METRE corner offsets into the logical-pixel formula (a ~mpp-times quad) " +
+                    "or collapsed the quad; a clean 2x or 0.5x is a dropped or doubled DevicePixelRatio. " +
+                    "road_one_way_arrow ships through this branch TODAY.");
+            }
+            finally
+            {
+                sheet.Dispose();
+            }
+        }
+
+        [Test]
+        public void MapPitchedAlongLineIcon_AtTiltZero_MatchesViewport_InkCentroid()
+        {
+            SpriteIndex index = SpriteIndex.Parse(LoadFixtureText("demo-icons.json"));
+            var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
+            try
+            {
+                SymbolQuad cell = SignToothCell(sheet.View, SignToothHalfExtentPx);
+                SymbolInk viewport = MeasureAlongLineIconInk(sheet, cell, SignToothSprite,
+                    lineAngleDeg: 45f, iconRotateDeg: 90f, pitchAlignment: AlignmentMode.Viewport);
+                SymbolInk map = MeasureAlongLineIconInk(sheet, cell, SignToothSprite,
+                    lineAngleDeg: 45f, iconRotateDeg: 90f, pitchAlignment: AlignmentMode.Map);
+
+                // Non-vacuity: the ink must actually carry a direction. A centroid sitting on the anchor
+                // would make "the two centroids agree" true for any rotation whatsoever.
+                float2 v = viewport.CentroidFromViewportCentrePx;
+                Assert.That(math.length(v), Is.GreaterThan(6f),
+                    $"precondition: the reference arm's ink centroid sits {math.length(v):F2} px from the " +
+                    "anchor — too close to carry a direction, so an agreement between the twins would be " +
+                    "vacuous. 'f-glyph' is used precisely because it is two-dimensionally asymmetric.");
+
+                float2 delta = map.CentroidFromViewportCentrePx - v;
+                TestContext.Out.WriteLine(
+                    $"W2 icon map-vs-viewport (road 45 deg, icon-rotate 90 deg): map centroid " +
+                    $"{map.CentroidFromViewportCentrePx} px, viewport {v} px, delta {math.length(delta):F3} px");
+
+                Assert.That(math.length(delta), Is.LessThan(MapPitchIconCentroidTolerancePx),
+                    $"at tilt 0 a map-PITCHED along-line icon must land where its viewport twin does — " +
+                    $"centroids {map.CentroidFromViewportCentrePx} vs {v} px about the anchor, " +
+                    $"{math.length(delta):F3} px apart. This is the ONLY tooth that observes the CPU-baked " +
+                    "icon-rotate composing with the shader's ground frame: a flipped rotate sign, or applying " +
+                    "the rotation after the ground frame instead of before it, moves the centroid by tens of " +
+                    "pixels here while leaving the ink COUNT at exactly 1.0000 (both are isometries). Road 45 " +
+                    "deg and icon-rotate 90 deg are load-bearing — 0 deg and 180 deg cannot discriminate " +
+                    "either error.");
+            }
+            finally
+            {
+                sheet.Dispose();
+            }
+        }
+
         // ══════════════════════════════════════════════════════════════════════════════════════════════
         // LabelBearing.MapAlignedSign — the map-BEARING sign, the last of this file's three rotation signs.
         // It was documented as "not headlessly testable … chosen, not derived … deferred to an eyeball
@@ -664,6 +799,11 @@ namespace MapRenderer.Tests.Text.Placement
             public int BoxWidth { get; set; }
             public int BoxHeight { get; set; }
 
+            /// <summary>Total inked pixels. W2 reads this: a uniform scale error `k` shows up as `k²` here,
+            /// and it is the ONLY one of these measures that can see one (a box is quantised to whole pixels
+            /// and both centroids are scale-free about their own reference).</summary>
+            public int InkCount { get; set; }
+
             /// <summary>Ink centroid minus the VIEWPORT CENTRE — which is the label's anchor on every arm
             /// that anchors at the look-at, making this the direction-BEARING measure a rotation about the
             /// anchor acts on exactly. Named for the fixed reference rather than for the anchor because the
@@ -681,7 +821,8 @@ namespace MapRenderer.Tests.Text.Placement
         // at `lineAngleDeg` (0 = east/screen-horizontal, 90 = north/screen-vertical at heading 0) through the
         // real LabelPlacementSystem → Map/Symbol/IconWorld, and measures its on-screen ink.
         private static SymbolInk MeasureAlongLineIconInk(SpriteSheet sheet, in SymbolQuad cell,
-            string iconImage, float lineAngleDeg, float iconRotateDeg)
+            string iconImage, float lineAngleDeg, float iconRotateDeg,
+            AlignmentMode pitchAlignment = AlignmentMode.Viewport)
         {
             var camGo = new GameObject("AlongLineIconTangent_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -706,11 +847,22 @@ namespace MapRenderer.Tests.Text.Placement
             double3 dir = new double3(math.cos(rad), 0.0, math.sin(rad));
             double halfLen = altitude * 0.02;
 
+            // W2: the per-vertex surface normal. Web-Mercator, so up IS (0,1,0). Set UNCONDITIONALLY — it is
+            // unread on the viewport path (so no existing arm moves), and it is what makes a map-pitched arm
+            // take SymbolWorldGroundFrame's GROUND branch rather than its camera-facing fallback. Without it
+            // the map arm would still pass at tilt 0 (the two frames coincide there) while never exercising
+            // the branch the tooth exists for.
+            var worldUp = new double3(0.0, 1.0, 0.0);
+
             var label = new LabelInstance
             {
                 Placement = SymbolPlacement.LineCenter,
                 Kind = LabelKind.Icon,
+                // W2: the ONLY field the map/viewport twins below differ in.
+                PitchAlignment = pitchAlignment,
                 PathRender = new[] { frame.SceneOriginRender - dir * halfLen, frame.SceneOriginRender + dir * halfLen },
+                PathUpRender = new[] { worldUp, worldUp },
+                UpRender = worldUp,
                 LineAnchors = new[] { new LineAnchor(0, 0.5f) },
                 CurvedGlyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } },
                 IconImage = iconImage,
@@ -771,6 +923,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     BoxWidth = maxCol - minCol + 1,
                     BoxHeight = maxRow - minRow + 1,
+                    InkCount = ink,
                     CentroidFromViewportCentrePx = new float2(centroidCol - viewportCentre, viewportCentre - centroidRow),
                     CentroidFromInkBoxPx = new float2(centroidCol - inkBoxCentre.x, inkBoxCentre.y - centroidRow),
                 };
@@ -883,6 +1036,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     BoxWidth = maxCol - minCol + 1,
                     BoxHeight = maxRow - minRow + 1,
+                    InkCount = ink,
                     CentroidFromViewportCentrePx = new float2(centroidCol - viewportCentre, viewportCentre - centroidRow),
                     CentroidFromInkBoxPx = new float2(centroidCol - inkBoxCentre.x, inkBoxCentre.y - centroidRow),
                 };

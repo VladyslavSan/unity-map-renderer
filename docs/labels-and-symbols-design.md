@@ -468,10 +468,30 @@ different anchors/rotations instead of N sharing one. New work is two pure Core 
 - **`CurvedTextLayout`** — `Layout(ShapedRun, IGlyphAtlasView) → IReadOnlyList<CurvedGlyph>` where
   `CurvedGlyph { float ArcCenter; SymbolQuad Cell }`. A single forward pass (mirrors `TextQuadLayout.PlaceGlyph`)
   places each glyph's cell relative to **its own** pen origin, centered **horizontally** on the glyph's
-  advance-center, while `Top`/`Bottom` stay **baseline-relative** (NOT vertically centered — that would make
-  ascenders/descenders straddle the line). `ArcCenter` = cumulative advance to that center. This baseline-center
-  anchoring is what lets the Burst job stay unchanged: `BuildQuad` rotates the cell about `anchorScreenPx`, so
-  that point being the baseline-center makes the tangent rotation correct.
+  advance-center, and **vertically on the run's optical (cap-band) centre** — the same
+  `TextQuadLayout.OpticalCentreBelowReferencePx` a centre-anchored point label applies (`docs/road-shields-design.md`
+  §11 D12), so a curved and a point label of the same string sit the same way on their anchor.
+  `ArcCenter` = cumulative advance to that center.
+
+  > **Corrected in W4 (symbol pitch-alignment epic) — this paragraph used to assert the opposite, and that is
+  > why the defect survived three stages.** It read: cells *"stay baseline-relative (NOT vertically centered —
+  > that would make ascenders/descenders straddle the line)"*, and that *"this baseline-center anchoring is
+  > what lets the Burst job stay unchanged"*. **Both clauses were false**, and the maintainer's very first
+  > reported defect — road labels drawn a fixed offset above or below the road, at tilt 0 included — was
+  > exactly this text sitting `17.5` baked px off its line.
+  >
+  > 1. **The rejected-alternative confusion.** "Vertically centered" does not imply centring each glyph on its
+  >    OWN ink; that is a *different* rule, and it is the one that would make ascenders and descenders bob. The
+  >    correct rule adds **one constant per LABEL**, with no per-glyph term, so every glyph in a run keeps its
+  >    exact relative offset and descenders still descend. The doc argued against the per-glyph rule and
+  >    thereby rejected the per-label one. Pinned by `CurvedTextCentringTests`' W4-T2, which goes RED on the
+  >    per-glyph alternative while a cap-glyph-only tooth stays green.
+  > 2. **The rationale attributed the wrong cause.** The Burst job needs no change because the cell→screen/world
+  >    map is **linear and homogeneous about the anchor** (`BillboardMath.BuildWorldQuad`,
+  >    `LabelBox.BuildRotatedGlyph`), so cell `y = 0` lands on the anchor under every branch and the tangent
+  >    rotation is correct for **any** vertical placement of the cell. Baseline-anchoring was never what made
+  >    that work — it was one arbitrary choice among many that the linearity permits. (The retired
+  >    `BillboardMath.BuildQuad` this sentence named no longer exists; the two live sites are those above.)
 
 **Placement (`LabelPlacementSystem`, per frame):** `SymbolLabel`/`LabelInstance` carry a `PathRender`
 (`double3[]`) for line labels (null for point labels — `AnchorRender` untouched) plus `SymbolPlacement` +
@@ -714,8 +734,10 @@ a stage plan may not quietly cross one.
     an upright point-icon at each along-line anchor (the existing point-icon path, a different anchor). A
     **map-aligned** line icon (`icon-rotation-alignment` resolving `map`, e.g. `road_one_way_arrow*`) stays
     fenced — that needs icons rotated to the line tangent, a genuinely new staging path. `icon-keep-upright`,
-    `icon-pitch-alignment`, `icon-translate`, `icon-image` **stretchable** (`content`/`stretchX/Y`). Icons on
-    line features are dropped in v1 (text still places along the line as today).
+    `icon-translate`, `icon-image` **stretchable** (`content`/`stretchX/Y`). Icons on line features are
+    dropped in v1 (text still places along the line as today). (`icon-pitch-alignment` — as of the
+    pitch-alignment epic P1, parsed and resolved via `AlignmentResolution.ResolvePitch`, but unconsumed; see
+    §6.3's "Known limits" list below — it is no longer the out-of-scope key this paragraph originally meant.)
 
 ## 5.2 The sprite sheet (vs. the glyph atlas)
 
@@ -1157,8 +1179,27 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
   `BoundsMin/BoundsMax` AABB even under a live map bearing, so rotating it for `icon-rotate` alone would
   make the convention inconsistent with the case it must match. (The *along-line* box IS rotated — by the
   tangent, via `BuildRotatedGlyph` — it simply does not include the extra constant.)
+  **Amended by the pitch-alignment epic W3, for the map-pitched along-line arm only.** The *viewport*
+  along-line box is unchanged (still `BuildRotatedGlyph`, tangent only, no `icon-rotate`). A *map-pitched*
+  along-line glyph's box is now the screen AABB of its four projected WORLD corners
+  (`LabelBox.TryBuildProjectedWorldGlyph`) and it **does** include `icon-rotate` — it must, because that is
+  what the renderer rotates the drawn corners by, and a box that omits it does not bound the ink.
+  Numerically a no-op on every shipped style: the only production `icon-rotate` on a map-pitched layer is
+  180°, which on a centre-anchored cell maps the cell onto itself and leaves the AABB identical. The point
+  path is untouched by W3 and this bullet's own claim about it still stands.
 * Out of scope, no liberty consumer: `icon-keep-upright` (§6.2), `icon-translate`/`-anchor`,
-  `icon-text-fit`, `icon-color`, `icon-halo-*`, `icon-pitch-alignment`.
+  `icon-text-fit`, `icon-color`, `icon-halo-*`.
+* `icon-pitch-alignment` — parsed as of the pitch-alignment epic P1 (`LayoutProperties.IconPitchAlignment`,
+  resolved via `AlignmentResolution.ResolvePitch`), so it is NOT the "no liberty consumer" case above:
+  `road_one_way_arrow`/`road_one_way_arrow_opposite` resolve it to `map` (both `icon-rotation-alignment` and
+  `icon-pitch-alignment` unset, `symbol-placement: line`). **CONSUMED as of the same epic's W1/W2/W3** — the
+  "still unconsumed, no render caller yet" note that stood here was inherited staleness and has been false
+  since W2. The resolved value reaches `CurvedStageInput.PitchAlignment`, where W1 makes it select the
+  WORLD-metre arc walk (`LabelStagingMath.StageCurved`'s `worldArc`), W2 makes it select the world-metre
+  corner unit (`CandidateEmit.CornerMetresPerLogicalPixel` → `SymbolWorldPitchAlign.hlsl`), and W3 makes it
+  select the projected-world-corner collision box. (docs/maplibre-spec.md's `text-pitch-alignment` table
+  carries the `icon-pitch-alignment` row too, since `symbol — icon` has no per-key table of its own; that
+  table's own rows are separately stale and are recorded for the merge step, not edited here.)
 
 ## 6.4 Grounding (touch points)
 

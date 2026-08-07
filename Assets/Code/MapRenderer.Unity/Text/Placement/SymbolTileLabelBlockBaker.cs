@@ -111,6 +111,10 @@ namespace MapRenderer.Unity.Text.Placement
                 // map-aligned line icon is a one-glyph curved label sampling the SPRITE sheet.
                 AtlasKind = label.Kind == LabelKind.Icon ? LabelKind.Icon : LabelKind.Text,
                 IconRotateRadians = label.IconRotateRadians,
+                // W1: the resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
+                // is deliberately absent: it is this frame's camera ruler, patched per frame by
+                // LabelStageJob, not a stable baked field.
+                PitchAlignment = label.PitchAlignment,
             };
         internal static SymbolTileLabelBlock Bake(List<LabelInstance> labels, int slotCount, in double3 tileOriginRender)
         {
@@ -142,6 +146,7 @@ namespace MapRenderer.Unity.Text.Placement
                 block.Glyphs = new NativeArray<CurvedGlyph>(glyphCount, Allocator.Persistent);
                 block.Anchors = new NativeArray<LineAnchor>(anchorCount, Allocator.Persistent);
                 block.WorldPoints = new NativeArray<double3>(worldPointCount, Allocator.Persistent);
+                block.WorldUps = new NativeArray<float3>(worldPointCount, Allocator.Persistent);
                 block.AnchorFadeIds = new NativeArray<long>(anchorFadeCount, Allocator.Persistent);
 
                 Fill(block, labels, rawCount, slotCount, tileOriginRender);
@@ -230,7 +235,9 @@ namespace MapRenderer.Unity.Text.Placement
                     block.PointQuadCount[slot] = quadCount;
 
                     int worldStart = worldPointIdx;
-                    block.WorldPoints[worldPointIdx++] = label.AnchorRender;
+                    block.WorldPoints[worldPointIdx] = label.AnchorRender;
+                    block.WorldUps[worldPointIdx] = NarrowUp(label.UpRender);
+                    worldPointIdx++;
 
                     block.Kinds[i] = (byte)LabelRecordKind.Point;
                     block.Detail[i] = slot;
@@ -273,9 +280,17 @@ namespace MapRenderer.Unity.Text.Placement
                     block.CurvedAnchorFadeStart[slot] = anchorFadeStart;
 
                     double3[] path = label.PathRender;
+                    double3[] pathUps = label.PathUpRender; // may be null on a legacy/hand-built label — guarded below
                     int pathLen = path?.Length ?? 0;
                     int worldStart = worldPointIdx;
-                    for (int v = 0; v < pathLen; v++) block.WorldPoints[worldPointIdx++] = path[v];
+                    for (int v = 0; v < pathLen; v++)
+                    {
+                        block.WorldPoints[worldPointIdx] = path[v];
+                        block.WorldUps[worldPointIdx] = pathUps != null && v < pathUps.Length
+                            ? NarrowUp(pathUps[v])
+                            : float3.zero; // bug signal, not a supported state — see T-3
+                        worldPointIdx++;
+                    }
                     double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
 
                     block.Kinds[i] = (byte)LabelRecordKind.Curved;
@@ -296,6 +311,13 @@ namespace MapRenderer.Unity.Text.Placement
             // passes ever disagreed, the write above would have thrown IndexOutOfRange at the divergence
             // rather than silently leaving a count short of Length — which is the point of not carrying one.
         }
+
+        // P2: manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
+        // BuildPointInput's anchorLocal narrowing above). Up is a DIRECTION (pre-RTC render-space), so unlike
+        // AnchorRender it needs no tile-origin subtraction — narrow only. Internal (not private): the test-side
+        // parity oracle (SymbolLabelBatchBuilder) reuses it verbatim rather than duplicating the cast, so the
+        // two narrowings cannot drift apart.
+        internal static float3 NarrowUp(in double3 up) => new float3((float)up.x, (float)up.y, (float)up.z);
 
         // Every label in one build's list shares the same physical tile (one (source, tile) build) — the
         // first non-null label's TileKey identifies the whole block; an all-null build (every label failed)

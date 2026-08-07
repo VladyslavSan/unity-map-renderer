@@ -106,6 +106,7 @@ namespace MapRenderer.Tests
             Assert.AreEqual(2f, sym.Layout.IconPadding.Evaluate(0.0), 1e-6, "icon-padding default is 2");
             Assert.AreEqual(TextAnchor.Center, sym.Layout.IconAnchor, "icon-anchor default is center");
             Assert.AreEqual(AlignmentMode.Auto, sym.Layout.IconRotationAlignment, "icon-rotation-alignment default is auto");
+            Assert.AreEqual(AlignmentMode.Auto, sym.Layout.IconPitchAlignment, "icon-pitch-alignment default is auto");
             Assert.IsFalse(sym.Layout.IconAllowOverlap, "icon-allow-overlap default is false");
             Assert.IsFalse(sym.Layout.IconIgnorePlacement, "icon-ignore-placement default is false");
             Assert.AreEqual(float2.zero, sym.Layout.IconOffset, "icon-offset default is [0,0]");
@@ -182,6 +183,56 @@ namespace MapRenderer.Tests
                 { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
                     'text-field':'{NAME}','text-rotation-alignment':'sideways' } } ] }").Layers[0];
             Assert.AreEqual(AlignmentMode.Auto, bad.Layout.TextRotationAlignment, "an unrecognized alignment degrades to auto");
+        }
+
+        // T6 (P1, pitch-alignment epic) — icon/text parse independence. AlignmentMode has only two usable
+        // non-auto values for FOUR keys, so one layer can never give all four keys distinguishable values
+        // (a prior version of this test wrongly claimed it could, setting two of the four to the same
+        // 'map'). Instead: FOUR layers, each setting exactly ONE of the four {text,icon}-{rotation,pitch}
+        // keys to 'map' and leaving the other three absent (auto). A copy-paste that reads the wrong
+        // PropertyNames constant, or assigns a pitch property from its sibling rotation key, then makes the
+        // SET key read Auto or an absent key read Map — caught unambiguously in exactly one of the four
+        // layers below.
+        [Test]
+        public void SymbolLayer_FourAlignmentKeys_ParseIndependently()
+        {
+            var textRotationOnly = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-rotation-alignment':'map' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Map, textRotationOnly.Layout.TextRotationAlignment, "text-rotation-alignment: the key that was set");
+            Assert.AreEqual(AlignmentMode.Auto, textRotationOnly.Layout.TextPitchAlignment, "text-pitch-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, textRotationOnly.Layout.IconRotationAlignment, "icon-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, textRotationOnly.Layout.IconPitchAlignment, "icon-pitch-alignment must stay auto");
+
+            var textPitchOnly = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','text-pitch-alignment':'map' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Auto, textPitchOnly.Layout.TextRotationAlignment, "text-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Map, textPitchOnly.Layout.TextPitchAlignment, "text-pitch-alignment: the key that was set");
+            Assert.AreEqual(AlignmentMode.Auto, textPitchOnly.Layout.IconRotationAlignment, "icon-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, textPitchOnly.Layout.IconPitchAlignment, "icon-pitch-alignment must stay auto");
+
+            var iconRotationOnly = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','icon-rotation-alignment':'map' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Auto, iconRotationOnly.Layout.TextRotationAlignment, "text-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, iconRotationOnly.Layout.TextPitchAlignment, "text-pitch-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Map, iconRotationOnly.Layout.IconRotationAlignment, "icon-rotation-alignment: the key that was set");
+            Assert.AreEqual(AlignmentMode.Auto, iconRotationOnly.Layout.IconPitchAlignment, "icon-pitch-alignment must stay auto");
+
+            var iconPitchOnly = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','icon-pitch-alignment':'map' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Auto, iconPitchOnly.Layout.TextRotationAlignment, "text-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, iconPitchOnly.Layout.TextPitchAlignment, "text-pitch-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Auto, iconPitchOnly.Layout.IconRotationAlignment, "icon-rotation-alignment must stay auto");
+            Assert.AreEqual(AlignmentMode.Map, iconPitchOnly.Layout.IconPitchAlignment, "icon-pitch-alignment: the key that was set");
+
+            var bad = (SymbolStyle.StyleLayer)Parse(@"{ 'version':8, 'layers':[
+                { 'id':'a','type':'symbol','source':'s','source-layer':'c','layout':{
+                    'text-field':'{NAME}','icon-pitch-alignment':'sideways' } } ] }").Layers[0];
+            Assert.AreEqual(AlignmentMode.Auto, bad.Layout.IconPitchAlignment,
+                "an unrecognized icon-pitch-alignment degrades to auto");
         }
 
         [Test]

@@ -176,6 +176,7 @@ namespace MapRenderer.Unity.Text
                             output.Add(new LabelInstance
                             {
                                 AnchorRender = s.AnchorRender,
+                                UpRender = s.UpRender,
                                 Placement = SymbolPlacement.Point,
                                 Kind = LabelKind.Icon,
                                 Layout = iconLayout,
@@ -212,6 +213,7 @@ namespace MapRenderer.Unity.Text
                                 Placement = s.Placement,
                                 Kind = LabelKind.Icon,
                                 PathRender = s.PathRender,
+                                PathUpRender = s.PathUpRender,
                                 LineAnchors = s.LineAnchors,
                                 CurvedGlyphs = new[]
                                 {
@@ -233,6 +235,8 @@ namespace MapRenderer.Unity.Text
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
                                 IconRotateRadians = s.IconRotateRadians,
+                                // W1: the resolved icon-pitch-alignment — the curved arm's world-arc predicate.
+                                PitchAlignment = s.PitchAlignment,
                             });
                             continue;
                         }
@@ -252,6 +256,7 @@ namespace MapRenderer.Unity.Text
                             output.Add(new LabelInstance
                             {
                                 AnchorRender = s.AnchorRender,
+                                UpRender = s.UpRender,
                                 Placement = SymbolPlacement.Point,
                                 Layout = layout,
                                 Text = s.Text, // A-3: cross-tile identity
@@ -281,6 +286,7 @@ namespace MapRenderer.Unity.Text
                             {
                                 Placement = s.Placement,
                                 PathRender = s.PathRender,
+                                PathUpRender = s.PathUpRender,
                                 LineAnchors = s.LineAnchors, // A-2: carry the build-time zoom-invariant anchors
                                 CurvedGlyphs = curvedGlyphs,
                                 Text = s.Text, // A-3: carried for parity (line labels are excluded from dedup in v1)
@@ -297,6 +303,8 @@ namespace MapRenderer.Unity.Text
                                 MaterialIndex = materialIndex,
                                 TranslatePx = s.TranslatePx,
                                 TranslateAnchor = s.TranslateAnchor,
+                                // W1: the resolved text-pitch-alignment — the curved arm's world-arc predicate.
+                                PitchAlignment = s.PitchAlignment,
                             });
                         }
                     }

@@ -419,12 +419,16 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorIconTests.cs" />
     <!-- The skirt's carrier chain, extraction → builder → collision box (engine-free; shared verbatim). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/IconSkirtCarrierChainTests.cs" />
+    <!-- P2 REQUIRED-1: the Up carrier chain (Block A), driven through real extraction + build (engine-free). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolUpCarrierChainTests.cs" />
 
     <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
          NOT added here (Text/SymbolSpriteReadinessTests.cs, TestSupport/GatedSpriteSource.cs). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentResolution.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolTestFixtures.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolShieldExtractionTests.cs" />
+    <!-- Pitch-alignment epic, P1: icon-pitch-alignment parse + AlignmentResolution.ResolvePitch. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/AlignmentResolutionTests.cs" />
 
     <!-- P-A (non-centred icon+text pairing): the pairing predicate's teeth — engine-free. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolPairPredicateTests.cs" />
@@ -470,6 +474,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStageInputs.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStagingMath.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
+    <!-- W3: LabelStagingMath.StageCurved takes one of these, so the fast runner needs it to compile. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewTransform.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTranslate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBearing.cs" />
 
@@ -504,7 +510,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathSortKeyTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedVertexTests.cs" />
+    <!-- P2 T-2: SampleUp exact per-glyph sample (engine-free; shared verbatim). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedUpTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
+    <!-- W4: curved-text vertical centring teeth (shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextCentringTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />

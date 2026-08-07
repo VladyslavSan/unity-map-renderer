@@ -276,8 +276,8 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     // The whole tooth: a 180 deg rotation is -I, so every drawn corner offset flips sign.
                     // After stage A alone the two meshes are IDENTICAL, so this is what discriminates.
-                    Assert.AreEqual(-plain[v].OffsetPx.x, rotated[v].OffsetPx.x, Tol, $"vertex {v}: OffsetPx.x negated");
-                    Assert.AreEqual(-plain[v].OffsetPx.y, rotated[v].OffsetPx.y, Tol, $"vertex {v}: OffsetPx.y negated");
+                    Assert.AreEqual(-plain[v].Offset.x, rotated[v].Offset.x, Tol, $"vertex {v}: Offset.x negated");
+                    Assert.AreEqual(-plain[v].Offset.y, rotated[v].Offset.y, Tol, $"vertex {v}: Offset.y negated");
                     // …and the corners move, the TEXTURE does not: an impl that rotated the UVs with them
                     // would draw the sprite mirrored rather than turned.
                     Assert.AreEqual(plain[v].Uv.x, rotated[v].Uv.x, 1e-6f, $"vertex {v}: Uv.x unchanged");
@@ -286,7 +286,7 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.AreEqual(plain[v].AlignFlags, rotated[v].AlignFlags, 1e-6f, $"vertex {v}: same align flags");
                 }
 
-                Assert.Greater(math.lengthsq(plain[0].OffsetPx), 1f,
+                Assert.Greater(math.lengthsq(plain[0].Offset), 1f,
                     "precondition: the unrotated offsets must be non-degenerate, or the negation is vacuous.");
             }
             finally

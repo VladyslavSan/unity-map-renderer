@@ -50,9 +50,10 @@ namespace MapRenderer.Core.Text
         /// <summary>
         /// How far below a line's reference origin that line's OPTICAL centre sits — the baseline
         /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>), less half a cap height
-        /// (<see cref="GlyphSdf.NominalCapHeightEm"/>) — used only by <see cref="VerticalAnchorShiftPx"/>'s
-        /// <see cref="VerticalAnchor.Centre"/> case (<c>docs/road-shields-design.md</c> §11 D12). Not the
-        /// midpoint of the line box: the box's top edge carries the font's ascent slack, so the box
+        /// (<see cref="GlyphSdf.NominalCapHeightEm"/>) — applied by <see cref="VerticalAnchorShiftPx"/>'s
+        /// <see cref="VerticalAnchor.Centre"/> case on the point path, and by
+        /// <see cref="CurvedTextLayout"/> on the along-line path (<c>docs/road-shields-design.md</c> §11 D12).
+        /// Not the midpoint of the line box: the box's top edge carries the font's ascent slack, so the box
         /// midpoint sits noticeably above the ink's actual optical centre.
         /// <para>
         /// The em conversion cancels exactly: the cap height is <c>17/24</c> em and <see cref="OneEm"/> is
@@ -60,8 +61,13 @@ namespace MapRenderer.Core.Text
         /// <c>26 − 8.5 = 17.5</c> — an exact value rather than an approximation, which is why the teeth can
         /// pin it as a clean hand-derived literal.
         /// </para>
+        /// <para>
+        /// It has a SECOND reader outside this type: <see cref="CurvedTextLayout"/> applies the same constant
+        /// to every along-line cell, so a curved label and a centred point label of the same string have the
+        /// same optical relationship to their anchor. One derivation site, two producers.
+        /// </para>
         /// </summary>
-        private const float OpticalCentreBelowReferencePx = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * OneEm;
+        internal const float OpticalCentreBelowReferencePx = GlyphSdf.BaselineBelowReferencePx - 0.5f * GlyphSdf.NominalCapHeightEm * OneEm;
 
         /// <summary>
         /// The three cases <see cref="TextAnchor"/>'s vertical component ever resolves to. Kept as a

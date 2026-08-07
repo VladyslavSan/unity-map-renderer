@@ -196,7 +196,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.IsTrue(h.System.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldMesh1), "the world text slot must still exist.");
             WorldMeshReadback.Read(worldMesh1, out WorldBillboardVertex[] secondWorldV, out float[] secondWorldOpacity);
-            Assert.AreEqual(firstWorldV, secondWorldV, "WORLD vertex data (AnchorLocal/ColorRGB/Uv/Page/OffsetPx/AlignFlags) drifted across identical Ticks — the two point labels' index mapping is unstable.");
+            Assert.AreEqual(firstWorldV, secondWorldV, "WORLD vertex data (AnchorLocal/ColorRGB/Uv/Page/Offset/AlignFlags) drifted across identical Ticks — the two point labels' index mapping is unstable.");
             Assert.AreEqual(firstWorldOpacity, secondWorldOpacity, "WORLD opacity stream drifted across identical Ticks.");
         }
 

@@ -20,6 +20,11 @@ namespace MapRenderer.Core.Text.Placement
         /// space tile geometry projects into (<c>camera.Projection.Project(geo)</c>).</summary>
         public double3 AnchorRender { get; init; }
 
+        /// <summary>P2: the unit surface normal at <see cref="AnchorRender"/>, threaded from
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.UpRender"/>. WRITTEN by P2; not yet consumed
+        /// by any renderer.</summary>
+        public double3 UpRender { get; init; }
+
         /// <summary>S19's size-independent, baked-px quads (<c>OneEm</c> = 24) + block bbox for this label.
         /// Point labels only; a line label carries <see cref="CurvedGlyphs"/> + <see cref="PathRender"/> instead.</summary>
         public TextLayoutResult Layout { get; init; }
@@ -31,6 +36,11 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>The line's render-space vertices (PRE-RTC), for <see cref="Text.SymbolPlacement.Line"/> /
         /// <see cref="Text.SymbolPlacement.LineCenter"/>; null for point labels. Projected + walked per frame.</summary>
         public double3[] PathRender { get; init; }
+
+        /// <summary>P2: index-parallel to <see cref="PathRender"/>, threaded from
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.PathUpRender"/>. Null for point labels.
+        /// WRITTEN by P2; not yet consumed by any renderer.</summary>
+        public double3[] PathUpRender { get; init; }
 
         /// <summary>A-2: the zoom-invariant along-line anchors (tile-space <see cref="LineAnchor"/> topology,
         /// computed once at build) the per-frame walk places the label at — one per repeat for
@@ -107,6 +117,14 @@ namespace MapRenderer.Core.Text.Placement
         /// or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
         /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
         public AlignmentMode RotationAlignment { get; init; }
+
+        /// <summary>W1 — the RESOLVED <c>*-pitch-alignment</c>, threaded from
+        /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.PitchAlignment"/>. Consumed by the CURVED arm
+        /// ONLY (<c>SymbolTileLabelBlockBaker.BuildCurvedInput</c> → <see cref="CurvedStageInput"/>), where
+        /// <see cref="AlignmentMode.Map"/> selects the world-metre arc walk; the POINT arm is deferred to a
+        /// later stage of the epic and reads nothing from this. Default <see cref="AlignmentMode.Auto"/> (the
+        /// zero value) so a hand-built label keeps the pre-W1 screen walk.</summary>
+        public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>I5a — distinguishes a text label from an icon label, threaded from
         /// <see cref="MapRenderer.Core.Style.Symbol.SymbolLabel.Kind"/>. Default <see cref="LabelKind.Text"/>

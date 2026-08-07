@@ -248,6 +248,9 @@ namespace MapRenderer.Unity.Text.Placement
         // count threshold), so the projection is always Burst SIMD with zero managed fallback and zero per-frame GC.
         // All buffers are reused + grown geometrically.
         private NativeList<double3> _symbolPoints;
+        // P2: index-parallel to _symbolPoints — the unit surface normal at each gathered world point. Filled
+        // in lockstep in GatherSymbolPoints; not yet consumed by any downstream reader.
+        private NativeList<float3>  _symbolUps;
         private NativeList<float2>  _symbolScreen;
         private NativeList<float>   _symbolDepth;
         private NativeList<byte>    _symbolValid;
@@ -311,6 +314,9 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<int>     _mirrorWorldStart;
         private NativeList<double3> _mirrorRepAnchor;
         private NativeList<double3> _mirrorWorldPoints;
+        // P2: index-parallel to _mirrorWorldPoints (same _mirrorWorldStart/_mirrorWorldCount slice) — the unit
+        // surface normal at each mirrored world point. Written by GatherIntoMirror; not yet consumed.
+        private NativeList<float3>  _mirrorWorldUps;
         private NativeList<byte>    _mirrorRecordDeparting;
         private NativeList<byte>    _mirrorRecordCoverageFading;
         // D1: the tile-coverage cull's Drop decision as a per-record MASK (LabelTileCoverageFilter.ClassifyActive
@@ -345,7 +351,7 @@ namespace MapRenderer.Unity.Text.Placement
         // ── stage-job buffers (pre-sized to the mirror's worst case, refilled every Tick) ──
         private NativeList<int>            _stagePointOffset;     // gather output (-1 = culled)
         private NativeList<byte>           _stageAnchorWasPlaced; // per-frame A-5 anchor incumbency — filled by LabelStageJob, sized here
-        private NativeList<LabelBox>       _stageBoxes;
+        internal NativeList<LabelBox>      _stageBoxes;           // internal: read by LabelPlacementSystemTestExtensions.LastStagedBoxes()
         private NativeList<PlacedQuad>     _stageQuads;
         private NativeList<LabelCandidate> _stageCandidates;
         private NativeList<CandidateEmit>  _stageEmit;
@@ -401,6 +407,12 @@ namespace MapRenderer.Unity.Text.Placement
 
         /// <summary>Labels fed into the LAST <see cref="Tick"/> (before any projection cull) — telemetry.</summary>
         internal int LastInputLabelCount { get; private set; }
+
+        /// <summary>W3 — collision BOXES staged on the last <see cref="Tick"/> (a point label is 1, a curved
+        /// label is 1 per glyph). The N+1 sibling of the <see cref="LastQuadCount"/> family above; the
+        /// alternative for W3's headline tooth was to reconstruct the staged boxes in the test, which would
+        /// make its oracle self-referential.</summary>
+        internal int LastBoxCount { get; private set; }
 
         /// <summary>Collision CANDIDATES on the last Tick (labels that survived projection and entered the
         /// greedy pass — a point label is 1, a curved/repeated line label is 1 per anchor). Telemetry.</summary>
@@ -469,6 +481,7 @@ namespace MapRenderer.Unity.Text.Placement
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
 
             _symbolPoints = new NativeList<double3>(Allocator.Persistent); // B-2 projection scratch
+            _symbolUps = new NativeList<float3>(Allocator.Persistent);
             _symbolScreen = new NativeList<float2>(Allocator.Persistent);
             _symbolDepth  = new NativeList<float>(Allocator.Persistent);
             _symbolValid  = new NativeList<byte>(Allocator.Persistent);
@@ -503,6 +516,7 @@ namespace MapRenderer.Unity.Text.Placement
             _mirrorWorldStart = new NativeList<int>(Allocator.Persistent);            // Stage-2 record-level fields
             _mirrorRepAnchor = new NativeList<double3>(Allocator.Persistent);
             _mirrorWorldPoints = new NativeList<double3>(Allocator.Persistent);
+            _mirrorWorldUps = new NativeList<float3>(Allocator.Persistent);
             _mirrorRecordDeparting = new NativeList<byte>(Allocator.Persistent);
             _mirrorRecordCoverageFading = new NativeList<byte>(Allocator.Persistent);
             _mirrorRecordDropped = new NativeList<byte>(Allocator.Persistent);
@@ -579,6 +593,12 @@ namespace MapRenderer.Unity.Text.Placement
                     HarvestCollision();
 
                 double2 viewportLogicalPx = _camera.ViewportLogicalPx;
+                // W1: this frame's world ruler for map-pitched curved labels. MetresPerDevicePixel is per
+                // DEVICE px by its own doc (DevicePixelRatio is absent there on purpose); every staging
+                // quantity it meets — TextSizePx, CurvedGlyph.ArcCenter, the projected screen path — is
+                // LOGICAL px. The ratio is therefore a real factor and it is applied HERE, once, so the value
+                // that travels is already per-logical-px and no hop downstream can drop or double it.
+                float metresPerLogicalPixel = (float)(_camera.MetresPerDevicePixel * _camera.DevicePixelRatio);
 
                 LastCandidateCount = 0;
                 LastDistanceCulledCount = 0;
@@ -650,8 +670,19 @@ namespace MapRenderer.Unity.Text.Placement
                             // frame's A-5 incumbency, R2); run; read counts. Its native outputs feed the collision +
                             // emit passes directly.
                             PreSizeStageOutputs();
-                            RunStageJob(bearingRadians, viewportLogicalPx);
+                            // W3: the map-pitched collision box is the screen AABB of the glyph's four
+                            // PROJECTED world corners, so the staging math needs this frame's projection —
+                            // the same four values ProjectSymbols above was just handed.
+                            var view = new LabelViewTransform
+                            {
+                                SceneOriginRender = sceneOriginRender,
+                                Rebase            = rebase,
+                                ViewProj          = viewProj,
+                                ViewportLogicalPx = viewportLogicalPx,
+                            };
+                            RunStageJob(bearingRadians, viewportLogicalPx, metresPerLogicalPixel, in view);
                             candidateCount = _stageCounts[0]; boxCount = _stageCounts[1];
+                            LastBoxCount = boxCount;
                         }
                     }
 
@@ -774,6 +805,7 @@ namespace MapRenderer.Unity.Text.Placement
         {
             _stagePointOffset.ResizeUninitialized(_mirrorCount);
             _symbolPoints.Clear();
+            _symbolUps.Clear();
             _forceFadeOut.Clear();
             for (int r = 0; r < _mirrorCount; r++)
             {
@@ -817,7 +849,11 @@ namespace MapRenderer.Unity.Text.Placement
 
                 _stagePointOffset[r] = _symbolPoints.Length;
                 int ws = _mirrorWorldStart[r], wc = _mirrorWorldCount[r];
-                for (int v = 0; v < wc; v++) _symbolPoints.Add(_mirrorWorldPoints[ws + v]);
+                for (int v = 0; v < wc; v++)
+                {
+                    _symbolPoints.Add(_mirrorWorldPoints[ws + v]);
+                    _symbolUps.Add(_mirrorWorldUps[ws + v]);
+                }
             }
         }
 
@@ -1149,7 +1185,7 @@ namespace MapRenderer.Unity.Text.Placement
                 _mirrorCurvedAnchorFadeStart.ResizeUninitialized(0);
                 _mirrorQuads.ResizeUninitialized(0); _mirrorGlyphs.ResizeUninitialized(0);
                 _mirrorAnchors.ResizeUninitialized(0); _mirrorFadeIds.ResizeUninitialized(0);
-                _mirrorWorldPoints.ResizeUninitialized(0);
+                _mirrorWorldPoints.ResizeUninitialized(0); _mirrorWorldUps.ResizeUninitialized(0);
 
                 _mirrorPointCount = 0; _mirrorCurvedCount = 0;
                 _mirrorQuadCount = 0; _mirrorGlyphCount = 0; _mirrorAnchorCount = 0; _mirrorFadeCount = 0; _mirrorWorldPointCount = 0;
@@ -1175,7 +1211,7 @@ namespace MapRenderer.Unity.Text.Placement
                     MCurvedAnchorStart = _mirrorCurvedAnchorStart, MCurvedAnchorCount = _mirrorCurvedAnchorCount,
                     MCurvedAnchorFadeStart = _mirrorCurvedAnchorFadeStart,
                     MQuads = _mirrorQuads, MGlyphs = _mirrorGlyphs, MAnchors = _mirrorAnchors, MFadeIds = _mirrorFadeIds,
-                    MWorldPoints = _mirrorWorldPoints,
+                    MWorldPoints = _mirrorWorldPoints, MWorldUps = _mirrorWorldUps,
                     OutCounts = _gatherCounts,
                 }.Run();
 
@@ -1219,7 +1255,7 @@ namespace MapRenderer.Unity.Text.Placement
         // an AtomicSafetyHandle.CheckRead per call — a disposed block throws HERE, on the main thread, with a
         // real stack, rather than the job silently reading freed memory (§2.3's decisive argument for this
         // storage shape). Managed-allocation-free: indexing plan.Blocks (a plain array) and taking pointers off
-        // already-live NativeArrays allocates nothing (SymbolTileLabelBlockBaker.Bake always allocates all 19
+        // already-live NativeArrays allocates nothing (SymbolTileLabelBlockBaker.Bake always allocates all 20
         // arrays, even at length 0, so no IsCreated guard is needed here). Called from GatherIntoMirror, above.
         private unsafe void BuildBlockViews(SymbolGatherPlan plan)
         {
@@ -1250,6 +1286,7 @@ namespace MapRenderer.Unity.Text.Placement
                     Glyphs = new UnsafeList<CurvedGlyph>((CurvedGlyph*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Glyphs), block.Glyphs.Length),
                     Anchors = new UnsafeList<LineAnchor>((LineAnchor*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Anchors), block.Anchors.Length),
                     WorldPoints = new UnsafeList<double3>((double3*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.WorldPoints), block.WorldPoints.Length),
+                    WorldUps = new UnsafeList<float3>((float3*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.WorldUps), block.WorldUps.Length),
                     AnchorFadeIds = new UnsafeList<long>((long*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.AnchorFadeIds), block.AnchorFadeIds.Length),
                 };
             }
@@ -1342,6 +1379,7 @@ namespace MapRenderer.Unity.Text.Placement
             dest.Glyphs = ToArray(_mirrorGlyphs, _mirrorGlyphCount); dest.GlyphCount = _mirrorGlyphCount;
             dest.Anchors = ToArray(_mirrorAnchors, _mirrorAnchorCount); dest.AnchorCount = _mirrorAnchorCount;
             dest.WorldPoints = ToArray(_mirrorWorldPoints, _mirrorWorldPointCount); dest.WorldPointCount = _mirrorWorldPointCount;
+            dest.WorldUps = ToArray(_mirrorWorldUps, _mirrorWorldPointCount); dest.WorldUpCount = _mirrorWorldPointCount;
             dest.AnchorFadeIds = ToArray(_mirrorFadeIds, _mirrorFadeCount); dest.AnchorFadeCount = _mirrorFadeCount;
 
             dest.MaxBoxes = _mirrorMaxBoxes; dest.MaxQuads = _mirrorMaxQuads; dest.MaxCandidates = _mirrorMaxCandidates;
@@ -1380,7 +1418,8 @@ namespace MapRenderer.Unity.Text.Placement
             _stageAnchorWasPlaced.ResizeUninitialized(_mirrorFadeCount);
         }
 
-        private void RunStageJob(float bearingRadians, double2 viewportLogicalPx)
+        private void RunStageJob(float bearingRadians, double2 viewportLogicalPx, float metresPerLogicalPixel,
+            in LabelViewTransform view)
         {
             new LabelStageJob
             {
@@ -1395,10 +1434,12 @@ namespace MapRenderer.Unity.Text.Placement
                 Screen = _symbolScreen.AsArray(), Depth = _symbolDepth.AsArray(), Valid = _symbolValid.AsArray(),
                 // Stage AC (curved-world): the SAME gathered world polyline Screen was projected FROM
                 // (_symbolPoints persists across the synchronous .Run() call below — see its own field doc).
-                WorldPointsRender = _symbolPoints.AsArray(),
+                WorldPointsRender = _symbolPoints.AsArray(), WorldUpsRender = _symbolUps.AsArray(),
                 AnchorWasPlaced = _stageAnchorWasPlaced.AsArray(), Placed = _placedLastFrame.AsReadOnly(),
                 DroppedHalves = _droppedHalvesLastFrame.AsReadOnly(),
                 Bearing = bearingRadians, Viewport = viewportLogicalPx,
+                MetresPerLogicalPixel = metresPerLogicalPixel, // W1: per-frame ruler, patched per curved record
+                View = view,                                  // W3: per-frame view transform (curved arm only)
                 PathScratch = _stagePath.AsArray(), CumScratch = _stageCumulativeLength.AsArray(),
                 Boxes = _stageBoxes.AsArray(), StagedQuads = _stageQuads.AsArray(),
                 Candidates = _stageCandidates.AsArray(), Emit = _stageEmit.AsArray(), OutCounts = _stageCounts,
@@ -1569,6 +1610,7 @@ namespace MapRenderer.Unity.Text.Placement
             _worldIconMaterial = null;
 
             _symbolPoints.Dispose(); // B-2 projection scratch
+            _symbolUps.Dispose();
             _symbolScreen.Dispose();
             _symbolDepth.Dispose();
             _symbolValid.Dispose();
@@ -1586,7 +1628,7 @@ namespace MapRenderer.Unity.Text.Placement
             _mirrorCurvedAnchorStart.Dispose(); _mirrorCurvedAnchorCount.Dispose(); _mirrorCurvedAnchorFadeStart.Dispose();
             _mirrorPoints.Dispose(); _mirrorCurveds.Dispose();
             _mirrorQuads.Dispose(); _mirrorGlyphs.Dispose(); _mirrorAnchors.Dispose(); _mirrorFadeIds.Dispose();
-            _mirrorWorldStart.Dispose(); _mirrorRepAnchor.Dispose(); _mirrorWorldPoints.Dispose();       // Stage-2 record-level fields
+            _mirrorWorldStart.Dispose(); _mirrorRepAnchor.Dispose(); _mirrorWorldPoints.Dispose(); _mirrorWorldUps.Dispose(); // Stage-2 record-level fields
             _mirrorRecordDeparting.Dispose(); _mirrorRecordCoverageFading.Dispose(); _mirrorRecordDropped.Dispose();
             _stagePointOffset.Dispose(); _stageAnchorWasPlaced.Dispose();
             _stageBoxes.Dispose(); _stageQuads.Dispose(); _stageCandidates.Dispose(); _stageEmit.Dispose();

@@ -179,7 +179,7 @@ namespace MapRenderer.Tests.Text.Placement
                     "anchor must project in front of the camera at pose 1.");
 
                 // (a) POSITION: the glyph must shift by the anchor's own projected screen delta — the SAME
-                //     analytic reasoning as WorldLabelMotionTests (OffsetPx is a fixed additive clip-space
+                //     analytic reasoning as WorldLabelMotionTests (Offset is a fixed additive clip-space
                 //     term that cancels exactly in a delta).
                 float2 expectedDeltaScreen = anchorScreen1 - anchorScreen0;
                 Assert.Greater(math.abs(expectedDeltaScreen.x) + math.abs(expectedDeltaScreen.y), 50f,
@@ -240,13 +240,13 @@ namespace MapRenderer.Tests.Text.Placement
         /// WorldLabelMotionTests' point scaffolds, which hand-roll the corner math independently — curved's
         /// rotation-by-tangent has no simpler independent form worth re-deriving here; BuildWorldQuad's own
         /// corner/rotation math is separately pinned by BillboardMathTests). Unrotated corners
-        /// (rotationRadians: 0f) + AlignFlags bit1 set — the shader rotates <c>OffsetPx</c> live from
+        /// (rotationRadians: 0f) + AlignFlags bit1 set — the shader rotates <c>Offset</c> live from
         /// <paramref name="tangentLocal"/>'s projected screen angle (D-E).</summary>
         private static Mesh BuildOneGlyphWorldMeshCurved(in SymbolQuad quad, float textSizePx, float3 colorRgb,
             in float3 anchorLocal, in float3 tangentLocal)
         {
             BillboardMath.BuildWorldQuad(in quad, in anchorLocal, textSizePx, in colorRgb, 0f, in float2.zero,
-                in tangentLocal, alignFlags: 2f,
+                in tangentLocal, float3.zero, alignFlags: 2f,
                 out WorldBillboardVertex tl, out WorldBillboardVertex tr,
                 out WorldBillboardVertex br, out WorldBillboardVertex bl);
 

@@ -52,5 +52,12 @@ namespace MapRenderer.Core.Text.Placement
         /// projects live to derive the on-screen rotation. Default <see cref="float3.zero"/> for a point
         /// label (unread there).</summary>
         public float3 Tangent;
+
+        /// <summary>P2 (curved arm): this glyph's unit surface normal, pre-RTC render-space DIRECTION —
+        /// sampled from the world polyline's per-vertex ups at the SAME <c>(segment, t)</c>
+        /// <see cref="AnchorLocal"/> was sampled at (<see cref="PolylineArcMath.SampleUp"/>). Default
+        /// <see cref="float3.zero"/> for a point label (which carries its anchor's up on
+        /// <see cref="CandidateEmit.SurfaceUp"/> instead). WRITTEN by P2; UNREAD by every shader.</summary>
+        public float3 SurfaceUp;
     }
 }

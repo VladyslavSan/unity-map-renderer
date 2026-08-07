@@ -13,6 +13,7 @@
 // this step removes. Callers already have the MapCamera they built the system with.
 
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
@@ -58,6 +59,22 @@ namespace MapRenderer.Tests.Text.Placement
             IReadOnlyList<SymbolRenderLayer> symbolLayers = null, Texture2D spriteTexture = null)
             => system.Tick(in frame, plan.Build(labels, SlotCountFor(labels)), atlas, deltaTime,
                 symbolLayers, spriteTexture);
+
+        // ── Staged collision boxes ───────────────────────────────────────────────────────────────────
+
+        /// <summary>W3 — the last <c>Tick</c>'s staged collision boxes, valid over
+        /// <c>[0, LabelPlacementSystem.LastBoxCount)</c>. Lives here, not on the system, for the same reason
+        /// the world-slot forwards below do: a "Test surface" DATA accessor is the shape the conventions bar
+        /// from a production class (<c>LastBoxCount</c> itself stays — it is a real N+1 of the counter
+        /// telemetry family, which is a different shape).
+        /// <para><b>Box ORDER is staging order, and collision does not disturb it</b> —
+        /// <c>LabelCollision.SelectSurvivors</c> sorts the CANDIDATES and its grid stores absolute box
+        /// indices, so the box pool itself is never reordered. With a single curved label in the frame,
+        /// <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in the same loop iteration, so
+        /// <c>box[g]</c> pairs with that label's <c>vertices[4g … 4g+3]</c>. A caller relying on that pairing
+        /// must ASSERT it (box count == vertex count / 4), not assume it.</para></summary>
+        public static NativeArray<LabelBox> LastStagedBoxes(this LabelPlacementSystem system)
+            => system._stageBoxes.AsArray();
 
         // ── World-slot inspection ────────────────────────────────────────────────────────────────────
         // These four were `internal` members on LabelPlacementSystem, each a one-line forward to its

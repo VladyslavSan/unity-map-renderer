@@ -137,6 +137,7 @@ namespace MapRenderer.Tests
             int detail = batch.AddPoint(input, quadStart, quadCount);
 
             int worldStart = batch.AddWorldPoint(label.AnchorRender);      // point anchor → 1 world point
+            batch.AddWorldUp(SymbolTileLabelBlockBaker.NarrowUp(label.UpRender));
             batch.AddRecord(LabelRecordKind.Point, detail, worldStart, 1, label.AnchorRender, departing, coverageFading);
         }
 
@@ -173,9 +174,16 @@ namespace MapRenderer.Tests
             // Path world points, in order (projected + walked per frame). Cull rep = path midpoint, else the anchor
             // (matches LabelPlacementSystem.RepresentativeAnchor for a line with/without a path).
             double3[] path = label.PathRender;
+            double3[] pathUps = label.PathUpRender; // may be null on a legacy/hand-built label — guarded below
             int pathLen = path?.Length ?? 0;
             int worldStart = batch.WorldPointCount;
-            for (int v = 0; v < pathLen; v++) batch.AddWorldPoint(path[v]);
+            for (int v = 0; v < pathLen; v++)
+            {
+                batch.AddWorldPoint(path[v]);
+                batch.AddWorldUp(pathUps != null && v < pathUps.Length
+                    ? SymbolTileLabelBlockBaker.NarrowUp(pathUps[v])
+                    : float3.zero); // bug signal, not a supported state — see T-3
+            }
             double3 rep = pathLen > 0 ? path[pathLen / 2] : label.AnchorRender;
             batch.AddRecord(LabelRecordKind.Curved, detail, worldStart, pathLen, rep, departing, coverageFading);
         }

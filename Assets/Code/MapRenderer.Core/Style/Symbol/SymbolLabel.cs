@@ -23,6 +23,11 @@ namespace MapRenderer.Core.Style.Symbol
         /// <see cref="Text.SymbolPlacement.Point"/>; a line label uses <see cref="PathRender"/> instead.</summary>
         public double3 AnchorRender { get; init; }
 
+        /// <summary>P2: the unit surface normal at <see cref="AnchorRender"/>, from
+        /// <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>'s <c>Up</c> — same render space
+        /// (pre-RTC) as <see cref="AnchorRender"/>. WRITTEN by P2; not yet consumed by any renderer.</summary>
+        public double3 UpRender { get; init; }
+
         /// <summary><c>symbol-placement</c>. Default <see cref="Text.SymbolPlacement.Point"/>.</summary>
         public SymbolPlacement Placement { get; init; }
 
@@ -30,6 +35,11 @@ namespace MapRenderer.Core.Style.Symbol
         /// / <see cref="Text.SymbolPlacement.LineCenter"/>; null for point labels). Curved along-line text (#5)
         /// walks the per-frame projection of this path.</summary>
         public double3[] PathRender { get; init; }
+
+        /// <summary>P2: index-parallel to <see cref="PathRender"/> (same length, same vertices) — each
+        /// entry is that vertex's unit surface normal from <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>.
+        /// Null for point labels. WRITTEN by P2; not yet consumed by any renderer.</summary>
+        public double3[] PathUpRender { get; init; }
 
         /// <summary>A-2: the along-line anchors, computed ONCE at build time in tile space
         /// (<see cref="LineAnchorPlacement.Compute"/>) as zoom-invariant <see cref="LineAnchor"/> topology so
@@ -97,6 +107,15 @@ namespace MapRenderer.Core.Style.Symbol
         /// (<c>map</c>) or stays screen-aligned (<c>viewport</c>/<c>auto</c> for point). Default
         /// <see cref="AlignmentMode.Auto"/> (#4).</summary>
         public AlignmentMode RotationAlignment { get; init; }
+
+        /// <summary>W1 — the RESOLVED <c>text-pitch-alignment</c> / <c>icon-pitch-alignment</c>
+        /// (<see cref="AlignmentResolution.ResolvePitch"/>), NOT the raw layout value: unlike
+        /// <see cref="RotationAlignment"/> above (recorded as authored) this one is consumed downstream, so
+        /// the <c>auto</c> chain is collapsed once, in <see cref="SymbolFeatureExtractor"/>, where the
+        /// layer's <c>symbol-placement</c> is in hand. Carried onto <c>LabelInstance.PitchAlignment</c> and
+        /// from there into the curved staging input, whose <c>Map</c> branch lays the label out in world
+        /// metres.</summary>
+        public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>
         /// I3 — distinguishes a text label from an icon label. Default <see cref="LabelKind.Text"/> so

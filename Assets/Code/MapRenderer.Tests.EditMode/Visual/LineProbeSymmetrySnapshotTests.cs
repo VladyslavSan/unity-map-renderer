@@ -45,8 +45,6 @@ namespace MapRenderer.Tests.Visual
     {
         private const int    Size      = 512;
         private const double Zoom      = 8.0;
-        private const double LookAtLat = 30.0;
-        private const double LookAtLon = 30.0;
 
         /// <summary>T7's pose. across·fwd = sin 55° = 0.81915, so e = 0.02·tan30°·0.81915 = 0.009458753 and
         /// the two rulers sit (1+e)/(1−e) = 1.0190982 apart.</summary>
@@ -63,17 +61,15 @@ namespace MapRenderer.Tests.Visual
         private const double RecedingRoadToM      = 950_000.0;
         private const double RecedingRoadStationM =   10_000.0;
 
-        private static readonly Color BgColor = new Color(0.05f, 0.05f, 0.08f, 1f);
-
         // ── The scene ────────────────────────────────────────────────────────────────────────────
 
         private sealed class ProbeScene : IDisposable
         {
-            public GameObject     CamGo;
-            public Camera         UnityCamera;
-            public RenderTexture  ViewportRt;
-            public MapCamera      MapCam;
-            public RenderLayerSet Layers;
+            public TiltedGroundScene Scene;
+            public RenderLayerSet    Layers;
+
+            public Camera    UnityCamera => Scene.UnityCamera;
+            public MapCamera MapCam      => Scene.MapCam;
 
             /// <summary>The styled line material, straight off the production render layer.</summary>
             public Material Material => Layers[0].Material;
@@ -81,12 +77,7 @@ namespace MapRenderer.Tests.Visual
             public void Dispose()
             {
                 Layers?.Dispose();
-                if (CamGo != null) UnityEngine.Object.DestroyImmediate(CamGo);
-                if (ViewportRt != null)
-                {
-                    ViewportRt.Release();
-                    UnityEngine.Object.DestroyImmediate(ViewportRt);
-                }
+                Scene?.Dispose();
             }
         }
 
@@ -108,23 +99,18 @@ namespace MapRenderer.Tests.Visual
                 "  ] }";
         }
 
+        /// <summary>Builds the styled <see cref="RenderLayerSet"/> and its ten preconditions FIRST, and
+        /// <see cref="TiltedGroundScene.Create"/> LAST — deliberately, not incidentally. <c>Create</c>
+        /// mutates PROCESS-GLOBAL state (ambient mode, quality level) that only <c>Dispose</c> restores; if
+        /// any precondition below fired while the scene already existed, an assertion failure would abort
+        /// this method with no <c>try</c>/<c>finally</c> in scope and leak that global state for the REST OF
+        /// THE BATCH — every lit snapshot fixture after this one would render under Flat 0.9 ambient at
+        /// quality 0 and fail pointing nowhere near the cause (exactly the stale-shader-global genre
+        /// <c>docs/line-rendering-design.md</c> §1.1 already recorded once). None of these preconditions
+        /// read <c>scene</c>, so ordering `Create` last removes the window instead of handling it.</summary>
         private static ProbeScene BuildScene(double tiltDeg, double styledWidthPx, double lineOffsetPx)
         {
             const double Dpr = 1.0;
-
-            var camGo = new GameObject("Probe_TestCamera");
-            var uCam  = camGo.AddComponent<Camera>();
-
-            var rt = new RenderTexture(Size, Size, 24, RenderTextureFormat.ARGB32);
-            uCam.targetTexture   = rt;
-            uCam.clearFlags      = CameraClearFlags.SolidColor;
-            uCam.backgroundColor = BgColor;
-            uCam.enabled         = false;
-
-            var props = new CameraProperties(
-                new GeoCoordinate3D { Latitude = LookAtLat, Longitude = LookAtLon, Altitude = 0.0 },
-                zoom: Zoom, heading: 0.0, tilt: tiltDeg);
-            var mapCam = new MapCamera(uCam, props, 1f, null, Dpr);
 
             var set = new RenderLayerSet();
             set.Build(StyleParser.Parse(StyleJson(styledWidthPx, lineOffsetPx)), Zoom,
@@ -158,106 +144,57 @@ namespace MapRenderer.Tests.Visual
             Assert.That(mat.IsKeywordEnabled("_HAIRLINE_HARD"), Is.False,
                 "precondition: _HAIRLINE_HARD narrows the ramp toward a step.");
 
+            var scene = TiltedGroundScene.Create(new TiltedGroundSceneConfig { TiltDegrees = tiltDeg });
+
             return new ProbeScene
             {
-                CamGo       = camGo,
-                UnityCamera = uCam,
-                ViewportRt  = rt,
-                MapCam      = mapCam,
-                Layers      = set,
+                Scene  = scene,
+                Layers = set,
             };
         }
 
-        // ── Scene chrome (the lit-ambient recipe every line snapshot fixture uses) ───────────────
-
-        private static (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) SetupLitAmbient()
-        {
-            int prevQuality = QualitySettings.GetQualityLevel();
-            QualitySettings.SetQualityLevel(0, false);
-            var prevMode  = RenderSettings.ambientMode;
-            var prevLight = RenderSettings.ambientLight;
-            RenderSettings.ambientMode  = UnityEngine.Rendering.AmbientMode.Flat;
-            RenderSettings.ambientLight = new Color(0.9f, 0.9f, 0.9f, 1f);
-            return (prevQuality, prevMode, prevLight);
-        }
-
-        private static void RestoreAmbient((int quality, UnityEngine.Rendering.AmbientMode mode, Color light) saved)
-        {
-            QualitySettings.SetQualityLevel(saved.quality, false);
-            RenderSettings.ambientMode  = saved.mode;
-            RenderSettings.ambientLight = saved.light;
-        }
-
-        private static void AssertGpuContext(SnapshotRenderer snap)
-        {
-            if (!snap.IsAllBlack()) return;
-            var blankGo = new GameObject("Probe_BlankCamera");
-            try
-            {
-                var blankCam = blankGo.AddComponent<Camera>();
-                blankCam.clearFlags      = CameraClearFlags.SolidColor;
-                blankCam.backgroundColor = BgColor;
-                using var blank = new SnapshotRenderer(Size, Size);
-                blank.Render(blankCam);
-                if (blank.IsAllBlack())
-                    Assert.Inconclusive("Scene render and blank control are both all-black: no GPU context " +
-                                        "in batch EditMode. Re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
-            }
-            finally { UnityEngine.Object.DestroyImmediate(blankGo); }
-        }
-
         /// <summary>Builds the east–west road, renders it once, and hands the caller the scene and the raw
-        /// pixels. Everything the measurement needs is read off that one render.</summary>
+        /// pixels. Everything the measurement needs is read off that one render.
+        ///
+        /// <para>ORDERING NOTE (Stage T extraction): before Stage T, the lit ambient was set up BEFORE
+        /// <see cref="BuildScene"/> ran; <see cref="TiltedGroundScene.Create"/> now sets it up INSIDE the
+        /// scene construction that <c>BuildScene</c> calls. Nothing between the two reads ambient state, so
+        /// this reordering is behaviour-preserving — noted because it is the one non-mechanical part of the
+        /// extraction.</para></summary>
         private static void WithRenderedRoad(
             double tiltDeg, double styledWidthPx, double lineOffsetPx, string pngName,
             Action<ProbeScene, byte[]> measure)
         {
-            var saved   = SetupLitAmbient();
-            var lightGo = new GameObject("Probe_DirLight");
-            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
-            var light = lightGo.AddComponent<Light>();
-            light.type      = LightType.Directional;
-            light.intensity = 1f;
+            using var snap  = new SnapshotRenderer(Size, Size);
+            using var probe = BuildScene(tiltDeg, styledWidthPx, lineOffsetPx);
 
-            using var snap = new SnapshotRenderer(Size, Size);
+            var pts = new List<double2>();
+            for (double x = -RoadHalfLengthM; x <= RoadHalfLengthM + 1e-6; x += RoadStationM)
+                pts.Add(new double2(x, 0.0));
+            Mesh mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
+            var go = new GameObject("Probe_Road");
+            go.AddComponent<MeshFilter>().sharedMesh       = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = probe.Material;
             try
             {
-                using var scene = BuildScene(tiltDeg, styledWidthPx, lineOffsetPx);
+                probe.Scene.Render(snap);
+                snap.WritePng(pngName);
 
-                var pts = new List<double2>();
-                for (double x = -RoadHalfLengthM; x <= RoadHalfLengthM + 1e-6; x += RoadStationM)
-                    pts.Add(new double2(x, 0.0));
-                Mesh mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
-                var go = new GameObject("Probe_Road");
-                go.AddComponent<MeshFilter>().sharedMesh       = mesh;
-                go.AddComponent<MeshRenderer>().sharedMaterial = scene.Material;
-                try
-                {
-                    snap.Render(scene.UnityCamera);
-                    AssertGpuContext(snap);
-                    snap.WritePng(pngName);
+                // The ribbon edges are lines of constant world z, so a probe row inverts to one z. That
+                // holds because the camera has heading 0: a rotation about world X leaves screen-y a
+                // function of world z alone. Asserted rather than assumed.
+                Vector3 originSp = probe.UnityCamera.WorldToScreenPoint(Vector3.zero);
+                Vector3 refSp    = probe.UnityCamera.WorldToScreenPoint(new Vector3(10_000f, 0f, 0f));
+                Assert.That(originSp.y, Is.EqualTo(refSp.y).Within(0.05),
+                    "precondition: the road's centreline must project onto a single screen ROW, or a " +
+                    "silhouette screen-y does not invert to a single world z.");
 
-                    // The ribbon edges are lines of constant world z, so a probe row inverts to one z. That
-                    // holds because the camera has heading 0: a rotation about world X leaves screen-y a
-                    // function of world z alone. Asserted rather than assumed.
-                    Vector3 originSp = scene.UnityCamera.WorldToScreenPoint(Vector3.zero);
-                    Vector3 refSp    = scene.UnityCamera.WorldToScreenPoint(new Vector3(10_000f, 0f, 0f));
-                    Assert.That(originSp.y, Is.EqualTo(refSp.y).Within(0.05),
-                        "precondition: the road's centreline must project onto a single screen ROW, or a " +
-                        "silhouette screen-y does not invert to a single world z.");
-
-                    measure(scene, snap.RawPixels);
-                }
-                finally
-                {
-                    UnityEngine.Object.DestroyImmediate(go);
-                    UnityEngine.Object.DestroyImmediate(mesh);
-                }
+                measure(probe, snap.RawPixels);
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(lightGo);
-                RestoreAmbient(saved);
+                UnityEngine.Object.DestroyImmediate(go);
+                UnityEngine.Object.DestroyImmediate(mesh);
             }
         }
 
@@ -269,52 +206,36 @@ namespace MapRenderer.Tests.Visual
         private static void WithRenderedRecedingRoad(
             double tiltDeg, double styledWidthPx, string pngName, Action<ProbeScene, byte[]> measure)
         {
-            var saved   = SetupLitAmbient();
-            var lightGo = new GameObject("Probe_DirLight");
-            lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
-            var light = lightGo.AddComponent<Light>();
-            light.type      = LightType.Directional;
-            light.intensity = 1f;
+            using var snap  = new SnapshotRenderer(Size, Size);
+            using var probe = BuildScene(tiltDeg, styledWidthPx, lineOffsetPx: 0.0);
 
-            using var snap = new SnapshotRenderer(Size, Size);
+            var pts = new List<double2>();
+            for (double z = RecedingRoadFromM; z <= RecedingRoadToM + 1e-6; z += RecedingRoadStationM)
+                pts.Add(new double2(0.0, z));
+            Mesh mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
+            var go = new GameObject("Probe_RecedingRoad");
+            go.AddComponent<MeshFilter>().sharedMesh       = mesh;
+            go.AddComponent<MeshRenderer>().sharedMaterial = probe.Material;
             try
             {
-                using var scene = BuildScene(tiltDeg, styledWidthPx, lineOffsetPx: 0.0);
+                probe.Scene.Render(snap);
+                snap.WritePng(pngName);
 
-                var pts = new List<double2>();
-                for (double z = RecedingRoadFromM; z <= RecedingRoadToM + 1e-6; z += RecedingRoadStationM)
-                    pts.Add(new double2(0.0, z));
-                Mesh mesh = SyntheticLineMesh.BuildFromPoints(pts, JoinType.Miter, CapType.Butt);
-                var go = new GameObject("Probe_RecedingRoad");
-                go.AddComponent<MeshFilter>().sharedMesh       = mesh;
-                go.AddComponent<MeshRenderer>().sharedMaterial = scene.Material;
-                try
-                {
-                    snap.Render(scene.UnityCamera);
-                    AssertGpuContext(snap);
-                    snap.WritePng(pngName);
+                // At heading 0 a road on the world x = 0 plane projects to the vertical centre column,
+                // so a HORIZONTAL cut is exactly perpendicular to the band and its coverage integral is
+                // the rendered width. Asserted, not assumed.
+                Vector3 nearSp = probe.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 0f));
+                Vector3 farSp  = probe.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 200_000f));
+                Assert.That(nearSp.x, Is.EqualTo(farSp.x).Within(0.05),
+                    "precondition: the receding road must project onto a single screen COLUMN, or a " +
+                    "horizontal cut is not perpendicular to it and the integral is not the width.");
 
-                    // At heading 0 a road on the world x = 0 plane projects to the vertical centre column,
-                    // so a HORIZONTAL cut is exactly perpendicular to the band and its coverage integral is
-                    // the rendered width. Asserted, not assumed.
-                    Vector3 nearSp = scene.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 0f));
-                    Vector3 farSp  = scene.UnityCamera.WorldToScreenPoint(new Vector3(0f, 0f, 200_000f));
-                    Assert.That(nearSp.x, Is.EqualTo(farSp.x).Within(0.05),
-                        "precondition: the receding road must project onto a single screen COLUMN, or a " +
-                        "horizontal cut is not perpendicular to it and the integral is not the width.");
-
-                    measure(scene, snap.RawPixels);
-                }
-                finally
-                {
-                    UnityEngine.Object.DestroyImmediate(go);
-                    UnityEngine.Object.DestroyImmediate(mesh);
-                }
+                measure(probe, snap.RawPixels);
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(lightGo);
-                RestoreAmbient(saved);
+                UnityEngine.Object.DestroyImmediate(go);
+                UnityEngine.Object.DestroyImmediate(mesh);
             }
         }
 

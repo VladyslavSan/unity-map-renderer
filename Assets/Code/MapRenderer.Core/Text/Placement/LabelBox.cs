@@ -124,6 +124,156 @@ namespace MapRenderer.Core.Text.Placement
             return new LabelBox { Min = min, Max = max };
         }
 
+        /// <summary>
+        /// W3 — the map-pitched curved glyph's collision box: the screen AABB of its FOUR PROJECTED WORLD
+        /// CORNERS. Since W2 a map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at
+        /// its anchor, so its screen size foreshortens with depth; <see cref="BuildRotatedGlyph"/> has no
+        /// depth term at all and therefore over-reserves, without bound, as the label recedes. This builds the
+        /// same frame the shader does, displaces the four corners in it, and projects each one.
+        ///
+        /// <para>Returns <c>false</c> — meaning <b>take the pre-W3 screen box</b>, not "fail" — when the
+        /// ground frame is degenerate (zero/parallel <paramref name="surfaceUp"/>/<paramref name="tangentRender"/>)
+        /// or any corner fails to project — behind the camera, or projecting past
+        /// <see cref="LabelScreenProjection.MaxProjectedPx"/> in a near-plane blow-up (F-W3-8), which would
+        /// otherwise make this AABB unbounded. <paramref name="box"/> is then untouched, so a
+        /// half-built box is not expressible. <b>This is a KNOWING divergence from the shader</b>, whose own
+        /// degenerate fallback is a camera-facing METRE frame (<c>SymbolWorldPitchAlign.hlsl</c>): in that case
+        /// the box will not track the ink. Reproducing the camera-facing frame needs the view basis in render
+        /// space and a fresh handedness derivation, to serve a state unreachable in production — recorded as
+        /// followUp F-W3-1 and pinned by W3-T6/T7 rather than left implicit.</para>
+        ///
+        /// <para><b><paramref name="emScaleMetres"/> must be built as
+        /// <c>TextSizePx · CandidateEmit.CornerMetresPerLogicalPixel</c></b> — the RENDERER's own association
+        /// (<c>WorldLabelRenderer</c> passes <c>q.TextSizePx * cornerScale</c> into
+        /// <see cref="BillboardMath.BuildWorldQuad"/>). <c>LabelStagingMath</c>'s already-computed
+        /// <c>arcScale</c> is the mathematically equal but differently-associated
+        /// <c>TextSizePx / OneEm · metresPerLogicalPixel</c>; substituting it would make the box agree with the
+        /// quad only to a ULP instead of to the last bit, which is a silent loosening of the strongest tooth
+        /// in this stage.</para>
+        ///
+        /// <para><b>The ŷ sense.</b> The shader displaces by
+        /// <c>off.y · SYMBOL_WORLD_MAP_Y_SIGN · _ProjectionParams.x · cross(up, x̂)</c> with
+        /// <c>off.y = −c_y</c> (the A0-F2 negation), so at the measured <c>_ProjectionParams.x == −1</c> the
+        /// world displacement for a y-UP corner <c>c_y</c> is <c>c_y · cross(x̂, up)</c> — which is what this
+        /// uses. <b>The CPU must not reproduce <c>_ProjectionParams.x</c>:</b> it cancels out of the DISPLAY
+        /// sense of an ordinary projection (there is no flipped target here) but not out of the shader's WORLD
+        /// displacement, so the shader's runtime read is load-bearing and this side simply picks the
+        /// geometrically-correct sense. If the shader is ever wrong at <c>+1</c>, the box is right and the ink
+        /// is wrong — a shader defect, not a box defect. <b>The sense is pinned by W3-T10, and by nothing
+        /// else</b> (F-W3-6, measured — injection I2 flipped this sign and left the whole suite green):
+        /// this box is an AABB, and for a cell that is y-symmetric about its anchor a ŷ flip merely
+        /// PERMUTES the corner set, which an AABB is invariant under. Every other fixture cell is symmetric,
+        /// so W3-T10 uses a deliberately off-centre one. Note W3-T10 re-derives this sense rather than
+        /// importing it, so a SHARED convention error is still unobserved on the CPU side; the independent
+        /// reference is W2's tilt-0 ink centroid, which pins the SHADER's sign only.</para>
+        ///
+        /// <para><paramref name="cellSkirt"/> is removed BEFORE the corners are built, exactly as
+        /// <see cref="BuildRotatedGlyph"/> does — the box bounds the icon's ink, not its transparent border.
+        /// <paramref name="paddingPx"/> stays a SCREEN-pixel grow of the final AABB: <c>text-padding</c> is a
+        /// screen-space property, and growing it in metres would make it depth-dependent.</para>
+        ///
+        /// <para>Only <see cref="Min"/>/<see cref="Max"/> are written — the sort/flag fields live on the
+        /// owning <see cref="LabelCandidate"/>, as with <see cref="BuildRotatedGlyph"/>.</para>
+        /// </summary>
+        /// <param name="cell">The glyph's baked-px cell, skirt included.</param>
+        /// <param name="cellSkirt">The transparent border baked into <paramref name="cell"/>, baked px.</param>
+        /// <param name="emScaleMetres">What ONE em is in WORLD METRES — see the note above on its association.</param>
+        /// <param name="rotationRadians">The constant extra rotation the renderer applies to the corners
+        /// (<c>CandidateEmit.ExtraRotationRadians</c>, i.e. <c>icon-rotate</c>). The along-line TANGENT is not
+        /// included: it is already carried by <paramref name="tangentRender"/>, which builds the frame.</param>
+        /// <param name="translateDeltaMetres">The renderer's <c>text-translate</c> delta in the corners' own
+        /// unit (<c>CandidateEmit.TranslateDeltaPx · CornerMetresPerLogicalPixel</c>), y-UP.</param>
+        /// <param name="anchorRender">The glyph's world anchor, render space (pre-RTC).</param>
+        /// <param name="tangentRender">The glyph's unit world tangent, render space — already keep-upright
+        /// negated by the caller, which is how the box inherits keep-upright for free.</param>
+        /// <param name="surfaceUp">The unit surface normal at the anchor, render-space direction.</param>
+        /// <param name="view">This frame's view transform. The caller must have checked
+        /// <see cref="LabelViewTransform.IsUsable"/>.</param>
+        internal static bool TryBuildProjectedWorldGlyph(
+            in SymbolQuad cell,
+            float cellSkirt,
+            float emScaleMetres,
+            float rotationRadians,
+            in float2 translateDeltaMetres,
+            in double3 anchorRender,
+            in double3 tangentRender,
+            in float3 surfaceUp,
+            in LabelViewTransform view,
+            float paddingPx,
+            out LabelBox box)
+        {
+            box = default;
+
+            // The ground frame, mirroring SymbolWorldGroundFrame's guards in the SAME order with the SAME
+            // constants. Guard BEFORE any normalize, both operands: a zero Up is what ~10 older fixtures and
+            // SymbolTileLabelBlockBaker (null PathUpRender) still write, and a zero tangent is what
+            // StageCurvedAnchor produces on a degenerate world chord.
+            double3 up = new double3(surfaceUp.x, surfaceUp.y, surfaceUp.z);
+            if (math.dot(up, up) < 0.5 || math.dot(tangentRender, tangentRender) < 0.5) return false;
+
+            // A road pointing along the surface normal has no in-surface direction to be tangent to.
+            double axial = math.dot(tangentRender, up);
+            if (math.abs(axial) > 1.0 - 1e-3) return false;
+
+            // Gram-Schmidt — keeps x̂ IN the surface. INERT on every Mercator fixture (up is (0,1,0) and every
+            // baked road tangent is horizontal ⇒ axial == 0 exactly), which is the second copy of the
+            // shader's own inert projection: followUp F-W3-3. A spherical curved-map fixture closes both.
+            double3 xh = math.normalize(tangentRender - up * axial);
+            double3 yh = math.cross(xh, up); // see the ŷ-sense paragraph above
+
+            // D9 — the skirt comes off FIRST, in BAKED units, so the one scale below is applied once and a
+            // skirted cell is bit-identical to the same cell pre-shrunk by it (W3-T9). Text carries a 0
+            // skirt, which makes both terms an exact `x ± 0f`. Only the two corners are carried: the atlas UVs
+            // play no part in a collision box.
+            var content = new SymbolQuad
+            {
+                TopLeft     = cell.TopLeft     + new float2(cellSkirt, -cellSkirt),
+                BottomRight = cell.BottomRight - new float2(cellSkirt, -cellSkirt),
+            };
+
+            // The SAME four rotated y-UP corners BillboardMath.BuildWorldQuad emits — one expression, shared,
+            // rather than two hand-maintained copies — plus the renderer's own translate, in the same frame.
+            BillboardMath.QuadCornersLocal(in content, emScaleMetres, rotationRadians,
+                out float2 tl, out float2 tr, out float2 br, out float2 bl);
+            tl += translateDeltaMetres;
+            tr += translateDeltaMetres;
+            br += translateDeltaMetres;
+            bl += translateDeltaMetres;
+
+            if (!TryProjectCorner(tl, xh, yh, anchorRender, in view, out float2 pTl) ||
+                !TryProjectCorner(tr, xh, yh, anchorRender, in view, out float2 pTr) ||
+                !TryProjectCorner(br, xh, yh, anchorRender, in view, out float2 pBr) ||
+                !TryProjectCorner(bl, xh, yh, anchorRender, in view, out float2 pBl))
+                return false;
+
+            float2 min = math.min(math.min(pTl, pTr), math.min(pBr, pBl)) - new float2(paddingPx, paddingPx);
+            float2 max = math.max(math.max(pTl, pTr), math.max(pBr, pBl)) + new float2(paddingPx, paddingPx);
+            box = new LabelBox { Min = min, Max = max };
+            return true;
+        }
+
+        // Displaces ONE y-UP corner in the ground frame at the anchor and projects it. The accumulation is in
+        // double3 (render space is full-scale — the float narrow happens inside TryProjectPoint, after the
+        // scene-origin subtract, exactly as it does for every other projected label point).
+        private static bool TryProjectCorner(
+            in float2 cornerLocal, in double3 xh, in double3 yh, in double3 anchorRender,
+            in LabelViewTransform view, out float2 screenPx)
+        {
+            double3 cornerRender = anchorRender + xh * cornerLocal.x + yh * cornerLocal.y;
+            if (!LabelScreenProjection.TryProjectPoint(cornerRender, view.SceneOriginRender, view.ViewProj,
+                    view.ViewportLogicalPx, view.Rebase, out screenPx, out _))
+                return false;
+
+            // F-W3-8: a corner just IN FRONT of the camera plane has a tiny positive clip.w, which survives
+            // the behind-camera test above and then divides into an arbitrarily large — but finite, so no NaN
+            // guard sees it — screen coordinate. Unbounded here means an unbounded collision AABB, where the
+            // pre-W3 screen box was bounded by the cell. The same threshold bounds a path VERTEX one level up
+            // (LabelStagingMath.StageCurved); rejecting the corner takes the screen-box fallback, which is the
+            // bounded answer.
+            return math.abs(screenPx.x) < LabelScreenProjection.MaxProjectedPx
+                && math.abs(screenPx.y) < LabelScreenProjection.MaxProjectedPx;
+        }
+
         // CCW rotation in a y-up frame — the SAME formula BillboardMath.Rotate uses (identity at angle 0), so
         // the collision box corners coincide with the drawn quad corners.
         private static float2 Rotate(in float2 p, float sin, float cos)

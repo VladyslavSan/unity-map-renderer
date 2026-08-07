@@ -59,6 +59,7 @@ namespace MapRenderer.Tests.Text.Placement
                 new double3(100, 0, 0),
                 new double3(100 + 100 * math.cos(bendRad), 0, 100 * math.sin(bendRad)),
             };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation-only tooth
 
             // 3 glyphs, ArcCenter cumulative-advance midpoints (40-baked-px advance each), scale = 1
             // (TextSizePx == OneEm). The MIDDLE glyph is 20-baked-px half-wide and lands exactly on the vertex
@@ -83,8 +84,9 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch = new float[3];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
+                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
@@ -116,6 +118,7 @@ namespace MapRenderer.Tests.Text.Placement
             var validPath = new byte[] { 1, 1 };
             // World path mirrors the screen path 1:1 (index-aligned) on the flat XZ plane.
             var worldPath = new[] { double3.zero, new double3(direction.x, 0, direction.y) * 200.0 };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation-only tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
@@ -136,8 +139,9 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch = new float[2];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
+                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
@@ -154,6 +158,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var screenPath = new[] { float2.zero, new float2(400f, 0f) };
             var worldPath = new[] { double3.zero, new double3(400, 0, 0) };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this atlas/rotation-only tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
@@ -173,8 +178,9 @@ namespace MapRenderer.Tests.Text.Placement
             int boxCountBefore = p.BoxCount;
 
             int staged = LabelStagingMath.StageCurved(in s, screenPath, new[] { 0f, 0f }, new byte[] { 1, 1 },
-                worldPath, glyphs, anchors, fadeIds, new byte[] { 0, 0 }, new float2[2], new float[2],
-                bearingRadians: 0f, ordinal: 0,
+                worldPath, worldUpPath, glyphs, anchors, fadeIds, new byte[] { 0, 0 }, new float2[2], new float[2],
+                bearingRadians: 0f,
+                view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
@@ -196,6 +202,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath = new[] { 0f, 0f };
             var validPath = new byte[] { 1, 1 };
             var worldPath = new[] { double3.zero, new double3(dir.x, 0, dir.y) * 600.0 };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation/atlas tooth
 
             // A deliberately WIDE cell (24 x 12) so the rotated box is measurably wider in x than the cell.
             var iconCell = new SymbolQuad
@@ -221,8 +228,9 @@ namespace MapRenderer.Tests.Text.Placement
             var wasPlaced = new byte[] { 0, 0, 0 };
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs,
-                anchors, fadeIds, wasPlaced, new float2[2], new float[2], bearingRadians: 0f, ordinal: 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs,
+                anchors, fadeIds, wasPlaced, new float2[2], new float[2], bearingRadians: 0f,
+                view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(anchors.Length, staged, "one candidate per along-line anchor");
@@ -268,6 +276,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath = new[] { 0f, 0f };
             var validPath = new byte[] { 1, 1 };
             var worldPath = new[] { double3.zero, new double3(200, 0, 0) };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this translate-delta tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 40f, Cell = Cell(10f) },
@@ -289,8 +298,9 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch = new float[2];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
+                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);

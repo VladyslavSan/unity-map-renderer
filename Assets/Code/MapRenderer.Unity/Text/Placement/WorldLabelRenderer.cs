@@ -50,11 +50,16 @@ namespace MapRenderer.Unity.Text.Placement
         // roughly a second of frames at 60fps. A reappearing key just lazily re-creates its slot (D1).
         private const int IdleReclaimFrames = 60;
 
-        // Stage AC (curved-world) D-I: WorldBillboardVertex.AlignFlags bit1 — "rotate OffsetPx by the
+        // Stage AC (curved-world) D-I: WorldBillboardVertex.AlignFlags bit1 — "rotate Offset by the
         // projected Tangent." Point/icon leave bit0 (map-bearing, A3) as their only bit; curved sets ONLY
         // this one (bit1 set ⇒ the shader ignores bit0 — MapLibre line placement ignores
         // text-rotation-alignment).
         private const float AlongLineAlignFlag = 2f;
+
+        // W2: WorldBillboardVertex.AlignFlags bit2 — "Offset is WORLD METRES; displace the anchor in its
+        // own ground plane BEFORE projection" (Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl). bit0 is A3's
+        // map-bearing and bit1 is Stage AC's along-line, so bit2 is the next free one.
+        private const float MapPitchAlignFlag = 4f;
 
         private sealed class Slot
         {
@@ -247,10 +252,36 @@ namespace MapRenderer.Unity.Text.Placement
                 float3 anchorLocal     = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
                 float  rotationRadians = emit.AlongLine ? emit.ExtraRotationRadians : q.RotationRadians;
                 float3 tangentLocal    = emit.AlongLine ? q.Tangent : float3.zero;
-                float  alignFlags      = emit.AlongLine ? AlongLineAlignFlag : 0f;
+                // P2: same per-glyph-vs-per-candidate selector as tangentLocal above — a curved candidate's
+                // up rides the quad (per-glyph, sampled along the path); point/icon carry the candidate's
+                // single anchor up.
+                float3 surfaceUp       = emit.AlongLine ? q.SurfaceUp : emit.SurfaceUp;
 
-                BillboardMath.BuildWorldQuad(in q.Quad, in anchorLocal, q.TextSizePx, q.Color.xyz,
-                    rotationRadians, in emit.TranslateDeltaPx, in tangentLocal, alignFlags,
+                // W2: ONE local decides BOTH the corner unit and the shader bit, so a state where the offsets
+                // are metres while the shader believes they are pixels — or the reverse — is not expressible.
+                // The emit.AlongLine conjunct is a SCOPE FENCE, not a defensive check: LabelStagingMath writes
+                // CornerMetresPerLogicalPixel only in StageCurvedAnchor, so it is already 0 on every point
+                // emit. It states, at the one place a later stage would cross it, that point/icon map-pitch is
+                // not W2's scope.
+                bool  mapPitchCorners  = emit.AlongLine && emit.CornerMetresPerLogicalPixel > 0f;
+                // On every non-map path this is the literal 1f, and `x * 1f` is bitwise identity for every
+                // finite float and for ±0/±Inf/NaN payloads alike — so the vertex stream is bit-for-bit what
+                // it was before W2, and `alignFlags` is textually the pre-W2 expression. Pinned by W2-T7.
+                float cornerScale      = mapPitchCorners ? emit.CornerMetresPerLogicalPixel : 1f;
+                float  alignFlags      = emit.AlongLine
+                    ? (mapPitchCorners ? AlongLineAlignFlag + MapPitchAlignFlag : AlongLineAlignFlag)
+                    : 0f;
+                // ONE unit for the whole `off`: the shader has a single displacement path, so the corners and
+                // the translate delta must share whichever unit is in force. Consequence, recorded as
+                // followUp F-W2-2 and observed by W2-T8: under map pitch `text-translate` becomes a WORLD
+                // translate rather than a screen one. The spec's proper control for that is
+                // `text-translate-anchor`, not `text-pitch-alignment`, so this is a recorded limitation and
+                // not a design position; it is inert on all 7 shipped line-symbol layers, none of which set
+                // a translate (the delta is exactly float2.zero there, and 0 · k == 0).
+                float2 translateDelta  = emit.TranslateDeltaPx * cornerScale;
+
+                BillboardMath.BuildWorldQuad(in q.Quad, in anchorLocal, q.TextSizePx * cornerScale, q.Color.xyz,
+                    rotationRadians, in translateDelta, in tangentLocal, in surfaceUp, alignFlags,
                     out WorldBillboardVertex tl, out WorldBillboardVertex tr,
                     out WorldBillboardVertex br, out WorldBillboardVertex bl);
 

@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── Golden: unit scale, no rotation, no translate, anchor at 0 — the expected corners below are the
         //    same anchor-relative baked-px corners MakeQuad()'s TopLeft/BottomRight decompose into (no
-        //    scale/rotation/anchor to apply at these params), up to the A0-F2 Y-negation (OffsetPx.y is the
+        //    scale/rotation/anchor to apply at these params), up to the A0-F2 Y-negation (Offset.y is the
         //    corner's Y negated). Pins the corner math is REUSED, not re-derived, and that
         //    AnchorLocal/Page/AlignFlags carry through. Inlined literals — the old BuildQuad oracle this test
         //    used is retired with the dead screen render path it built. ──
@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Text.Placement
             var expectedBl = new float2(quad.TopLeft.x, quad.BottomRight.y);
 
             BillboardMath.BuildWorldQuad(in quad, in anchorLocal, TextQuadLayout.OneEm, in colorRgb, 0f, in float2.zero,
-                in ZeroFloat3, 0f,
+                in ZeroFloat3, in ZeroFloat3, 0f,
                 out WorldBillboardVertex worldTl, out WorldBillboardVertex worldTr,
                 out WorldBillboardVertex worldBr, out WorldBillboardVertex worldBl);
 
@@ -68,8 +68,8 @@ namespace MapRenderer.Tests.Text.Placement
                          (expectedBl, worldBl, new float2(quad.UvTopLeft.x, quad.UvBottomRight.y), "bottomLeft"),
                      })
             {
-                Assert.AreEqual(expectedScreenPx.x, world.OffsetPx.x, 1e-5f, $"{label}: OffsetPx.x matches BuildQuad's ScreenPx.x (no translate offset here — anchor is 0)");
-                Assert.AreEqual(-expectedScreenPx.y, world.OffsetPx.y, 1e-5f, $"{label}: OffsetPx.y is the A0-F2 NEGATION of BuildQuad's ScreenPx.y");
+                Assert.AreEqual(expectedScreenPx.x, world.Offset.x, 1e-5f, $"{label}: Offset.x matches BuildQuad's ScreenPx.x (no translate offset here — anchor is 0)");
+                Assert.AreEqual(-expectedScreenPx.y, world.Offset.y, 1e-5f, $"{label}: Offset.y is the A0-F2 NEGATION of BuildQuad's ScreenPx.y");
                 Assert.AreEqual(expectedUv.x, world.Uv.x, 1e-6f, $"{label}: UV stays attached to its ORIGINAL corner (no flip)");
                 Assert.AreEqual(expectedUv.y, world.Uv.y, 1e-6f, $"{label}: UV.y unflipped too");
                 Assert.AreEqual(anchorLocal, world.AnchorLocal, $"{label}: AnchorLocal is the same on every corner");
@@ -88,10 +88,10 @@ namespace MapRenderer.Tests.Text.Placement
             var translateDeltaPx = new float2(7f, -3f);
 
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
-                in ZeroFloat3, 0f,
+                in ZeroFloat3, in ZeroFloat3, 0f,
                 out WorldBillboardVertex tl0, out WorldBillboardVertex tr0, out WorldBillboardVertex br0, out WorldBillboardVertex bl0);
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in translateDeltaPx,
-                in ZeroFloat3, 0f,
+                in ZeroFloat3, in ZeroFloat3, 0f,
                 out WorldBillboardVertex tl1, out WorldBillboardVertex tr1, out WorldBillboardVertex br1, out WorldBillboardVertex bl1);
 
             var expectedDelta = new float2(translateDeltaPx.x, -translateDeltaPx.y); // same negation as the corner
@@ -100,8 +100,8 @@ namespace MapRenderer.Tests.Text.Placement
                          (tl0, tl1, "topLeft"), (tr0, tr1, "topRight"), (br0, br1, "bottomRight"), (bl0, bl1, "bottomLeft"),
                      })
             {
-                Assert.AreEqual(expectedDelta.x, after.OffsetPx.x - before.OffsetPx.x, 1e-5f, $"{label}: translate delta x");
-                Assert.AreEqual(expectedDelta.y, after.OffsetPx.y - before.OffsetPx.y, 1e-5f, $"{label}: translate delta y");
+                Assert.AreEqual(expectedDelta.x, after.Offset.x - before.Offset.x, 1e-5f, $"{label}: translate delta x");
+                Assert.AreEqual(expectedDelta.y, after.Offset.y - before.Offset.y, 1e-5f, $"{label}: translate delta y");
             }
         }
 
@@ -114,7 +114,7 @@ namespace MapRenderer.Tests.Text.Placement
             var colorRgb = new float3(0.73f, 0.11f, 0.42f); // deliberately non-trivial — a double-convert would move this
 
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in colorRgb, 0f, in float2.zero,
-                in ZeroFloat3, 0f,
+                in ZeroFloat3, in ZeroFloat3, 0f,
                 out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
             foreach (WorldBillboardVertex v in new[] { tl, tr, br, bl })
@@ -132,33 +132,37 @@ namespace MapRenderer.Tests.Text.Placement
         {
             SymbolQuad quad = MakeQuad();
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
-                in ZeroFloat3, 0f,
+                in ZeroFloat3, in ZeroFloat3, 0f,
                 out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
             // TR shares BR's baked x / TL's baked y (mirrors BuildQuad's trLocal = (brLocal.x, tlLocal.y)) —
-            // after negation, TR.OffsetPx.y == TL.OffsetPx.y (both share the top edge).
-            Assert.AreEqual(tl.OffsetPx.y, tr.OffsetPx.y, 1e-5f, "TL/TR share the top edge (same Y)");
-            Assert.AreEqual(br.OffsetPx.y, bl.OffsetPx.y, 1e-5f, "BR/BL share the bottom edge (same Y)");
-            Assert.AreEqual(tl.OffsetPx.x, bl.OffsetPx.x, 1e-5f, "TL/BL share the left edge (same X)");
-            Assert.AreEqual(tr.OffsetPx.x, br.OffsetPx.x, 1e-5f, "TR/BR share the right edge (same X)");
+            // after negation, TR.Offset.y == TL.Offset.y (both share the top edge).
+            Assert.AreEqual(tl.Offset.y, tr.Offset.y, 1e-5f, "TL/TR share the top edge (same Y)");
+            Assert.AreEqual(br.Offset.y, bl.Offset.y, 1e-5f, "BR/BL share the bottom edge (same Y)");
+            Assert.AreEqual(tl.Offset.x, bl.Offset.x, 1e-5f, "TL/BL share the left edge (same X)");
+            Assert.AreEqual(tr.Offset.x, br.Offset.x, 1e-5f, "TR/BR share the right edge (same X)");
         }
 
         // ── Stage AC (curved-world) D-I/D-A: tangentLocal/alignFlags ride VERBATIM onto every corner —
-        //    curved's discriminator (bit1 set, a nonzero Tangent) must not be dropped or blended per-corner. ──
+        //    curved's discriminator (bit1 set, a nonzero Tangent) must not be dropped or blended per-corner.
+        //    P2: surfaceUp rides the same way, onto Up — added here rather than a separate test since it is
+        //    the identical "carries verbatim to every corner" contract as Tangent. ──
         [Test]
         public void BuildWorldQuad_TangentLocalAndAlignFlags_CarryVerbatimToEveryCorner()
         {
             SymbolQuad quad = MakeQuad();
             var tangentLocal = new float3(0.6f, 0.0f, 0.8f); // a unit-ish along-line direction
+            var surfaceUp = new float3(0.0f, 0.6f, 0.8f);    // deliberately distinct from tangentLocal
             const float alongLineAlignFlags = 2f; // D-I bit1
 
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
-                in tangentLocal, alongLineAlignFlags,
+                in tangentLocal, in surfaceUp, alongLineAlignFlags,
                 out WorldBillboardVertex tl, out WorldBillboardVertex tr, out WorldBillboardVertex br, out WorldBillboardVertex bl);
 
             foreach ((WorldBillboardVertex v, string label) in new[] { (tl, "topLeft"), (tr, "topRight"), (br, "bottomRight"), (bl, "bottomLeft") })
             {
                 Assert.AreEqual(tangentLocal, v.Tangent, $"{label}: Tangent carries verbatim to every corner");
+                Assert.AreEqual(surfaceUp, v.Up, $"{label}: Up carries verbatim to every corner");
                 Assert.AreEqual(alongLineAlignFlags, v.AlignFlags, $"{label}: AlignFlags carries verbatim to every corner");
             }
         }

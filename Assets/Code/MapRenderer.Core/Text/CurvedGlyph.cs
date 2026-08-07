@@ -16,12 +16,15 @@ namespace MapRenderer.Core.Text
         /// A lone icon cell sits at 0 (it IS the run).</summary>
         public float ArcCenter { get; init; }
 
-        /// <summary>The cell, centered HORIZONTALLY on <see cref="ArcCenter"/> (so <see cref="SymbolQuad.TopLeft"/>.x
-        /// / <see cref="SymbolQuad.BottomRight"/>.x straddle 0). Its VERTICAL convention is the producer's:
-        /// a text glyph is BASELINE-relative (Top/Bottom keep their baseline offsets, so ascenders/descenders
-        /// ride above the line rather than across it), while an icon quad is vertically CENTRED on the line
-        /// (<c>icon-anchor: center</c>). Placement depends on neither — the arc walk, rotation and world-quad
-        /// bake are geometrically correct for any vertical placement of the cell about its anchor.</summary>
+        /// <summary>The cell, centred HORIZONTALLY on <see cref="ArcCenter"/> (so <see cref="SymbolQuad.TopLeft"/>.x
+        /// / <see cref="SymbolQuad.BottomRight"/>.x straddle 0) and VERTICALLY on the line — both producers,
+        /// each by its own metric: a text glyph on the run's OPTICAL (cap-band) centre
+        /// (<c>TextQuadLayout.OpticalCentreBelowReferencePx</c>, the same constant a centred point label
+        /// applies, so the two paths sit the same way on their anchor), an icon quad on its box centre
+        /// (<c>icon-anchor: center</c>). Placement depends on neither — the cell→screen/world map is LINEAR
+        /// and homogeneous about the anchor (<c>BillboardMath.BuildWorldQuad</c>,
+        /// <c>LabelBox.BuildRotatedGlyph</c>), so cell y=0 lands on the anchor under every branch and the
+        /// arc walk, rotation and world-quad bake stay correct for any vertical placement of the cell.</summary>
         public SymbolQuad Cell { get; init; }
 
         /// <summary>

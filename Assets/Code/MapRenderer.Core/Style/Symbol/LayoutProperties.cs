@@ -120,9 +120,24 @@ namespace MapRenderer.Core.Style.Symbol
         public AlignmentMode TextRotationAlignment { get; }
 
         /// <summary>text-pitch-alignment: whether the label lies flat on the map (<c>map</c>) or faces the
-        /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <b>Parsed but its <c>map</c>
-        /// (ground-flat) behaviour is not yet consumed</b> — that needs a world-space text path (deferred to
-        /// its own stage); point placement resolves auto→viewport (the current billboard) regardless.</summary>
+        /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
+        /// <see cref="AlignmentResolution.ResolvePitch"/> against the RESOLVED
+        /// <see cref="TextRotationAlignment"/> — so under <see cref="SymbolPlacement.Line"/> /
+        /// <see cref="SymbolPlacement.LineCenter"/> placement it resolves to <c>map</c>, matching that
+        /// resolved rotation alignment; under <see cref="SymbolPlacement.Point"/> with an
+        /// auto-auto pair it resolves to <c>viewport</c> (today's billboard).
+        ///
+        /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only.</b>
+        /// <see cref="SymbolFeatureExtractor"/> resolves this once per layer and stamps it onto the emitted
+        /// label; under <see cref="AlignmentMode.Map"/> <c>LabelStagingMath.StageCurved</c> lays the label out
+        /// in WORLD ARC LENGTH rather than screen px, so a glyph advance is a fixed world size and spacing
+        /// foreshortens with depth. This is not a dormant key: every shipped line-symbol layer resolves to
+        /// <c>map</c> here (an explicit or auto-auto <see cref="TextRotationAlignment"/> under line
+        /// placement), so it selects the world-metre layout for all of them.</para>
+        ///
+        /// <para><b>The POINT arm does NOT consume it yet</b> — do not infer otherwise from the above. A
+        /// map-pitched point label still billboards; the ground-flat point path is a later stage. Glyph SIZE
+        /// is likewise still screen-constant on both arms (W1 moved the layout, not the render).</para></summary>
         public AlignmentMode TextPitchAlignment { get; }
 
         /// <summary>icon-image: the raw value (a <c>{token}</c> string or an expression array), or null when
@@ -148,6 +163,17 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>icon-rotation-alignment: whether the icon rotates with the map (<c>map</c>) or stays
         /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>.</summary>
         public AlignmentMode IconRotationAlignment { get; }
+
+        /// <summary>icon-pitch-alignment: whether the icon lies flat on the map (<c>map</c>) or faces the
+        /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
+        /// <see cref="AlignmentResolution.ResolvePitch"/> against the RESOLVED
+        /// <see cref="IconRotationAlignment"/> — mirrors <see cref="TextPitchAlignment"/>.
+        ///
+        /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only</b> — the same wiring and the same
+        /// fence as <see cref="TextPitchAlignment"/>, which states both in full. For icons that arm is the
+        /// one-glyph along-line label a MAP-resolved line icon emits (<c>road_one_way_arrow*</c> and
+        /// friends); a POINT icon still billboards.</para></summary>
+        public AlignmentMode IconPitchAlignment { get; }
 
         /// <summary>icon-allow-overlap: skip collision, always place. Default false.</summary>
         public bool IconAllowOverlap { get; }
@@ -259,6 +285,7 @@ namespace MapRenderer.Core.Style.Symbol
 
             IconAnchor = ParseAnchor(layout?.Get(PropertyNames.IconAnchor)?.AsString(null));
             IconRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.IconRotationAlignment)?.AsString(null));
+            IconPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.IconPitchAlignment)?.AsString(null));
 
             IconAllowOverlap = layout?.Get(PropertyNames.IconAllowOverlap)?.AsBool(false) ?? false;
             IconIgnorePlacement = layout?.Get(PropertyNames.IconIgnorePlacement)?.AsBool(false) ?? false;

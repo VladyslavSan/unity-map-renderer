@@ -176,7 +176,7 @@ namespace MapRenderer.Tests.Text.Placement
                         out float2 anchorScreen1, out _),
                     "anchor must project in front of the camera at pose 1.");
 
-                // ── The analytic expected shift (OffsetPx is a fixed additive clip-space term that cancels
+                // ── The analytic expected shift (Offset is a fixed additive clip-space term that cancels
                 // exactly in a delta — see SymbolTextWorld_ForwardPass.hlsl's pinned math and
                 // WorldBillboardRtcAlgebraTests/T1's identical reasoning — so the glyph's screen delta must
                 // equal the ANCHOR's screen delta, independent of the constant glyph-corner offset). ──────
@@ -375,10 +375,10 @@ namespace MapRenderer.Tests.Text.Placement
         /// <see cref="SymbolQuad"/> — the A0 test-scaffold analogue of <see cref="BillboardMath.BuildQuad"/>
         /// (duplicated from WorldSymbolAbRenderSnapshotTests.BuildOneGlyphWorldMesh, not shared — a private
         /// per-file helper, same reasoning as this file's AtlasMetrics shim). AnchorLocal is
-        /// <see cref="float3.zero"/> for every corner; only the corner <c>OffsetPx</c> varies, mirroring
+        /// <see cref="float3.zero"/> for every corner; only the corner <c>Offset</c> varies, mirroring
         /// <c>BillboardMath.BuildQuad</c>'s unrotated anchor-relative corners. <b>Same RESOLVED Y
         /// CONVENTION as WorldSymbolAbRenderSnapshotTests</b> (see that file's identical helper for the
-        /// full empirical rationale): <c>OffsetPx.y</c> is negated per corner; UV stays attached to its
+        /// full empirical rationale): <c>Offset.y</c> is negated per corner; UV stays attached to its
         /// original corner.</summary>
         private static Mesh BuildOneGlyphWorldMesh(in SymbolQuad quad, float textSizePx, float3 colorRgb)
         {
@@ -433,7 +433,7 @@ namespace MapRenderer.Tests.Text.Placement
                 ColorRGB = colorRgb,
                 Uv = uv,
                 Page = page,
-                OffsetPx = offsetPx,
+                Offset = offsetPx,
                 AlignFlags = 0f,
             };
     }

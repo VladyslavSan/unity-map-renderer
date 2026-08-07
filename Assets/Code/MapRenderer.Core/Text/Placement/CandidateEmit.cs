@@ -55,7 +55,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>text-translate</c>, computed by <see cref="LabelStagingMath.StagePoint"/> as
         /// <c>screenPx − s.ScreenPx</c> (both already resolved there) — the world path does not project the
         /// anchor, so it cannot fold the translate into it the way the OLD path does; instead
-        /// <c>BillboardMath.BuildWorldQuad</c> adds this to every corner's <c>OffsetPx</c> (same Y negation
+        /// <c>BillboardMath.BuildWorldQuad</c> adds this to every corner's <c>Offset</c> (same Y negation
         /// as the corner). Default <c>float2.zero</c> — no-op for the common (untranslated) case.</summary>
         public float2 TranslateDeltaPx;
 
@@ -93,5 +93,34 @@ namespace MapRenderer.Core.Text.Placement
         /// additively in one frame.</para>
         /// </summary>
         public float ExtraRotationRadians;
+
+        /// <summary>P2: the unit surface normal at this candidate's anchor (point/icon arm) — pre-RTC
+        /// render-space DIRECTION, from <c>IProjection.ProjectPoint(...).Up</c> via
+        /// <see cref="PointStageInput.SurfaceUp"/>. WRITTEN by P2; UNREAD by every shader (the pitch-alignment
+        /// tangent-frame branch is P3).</summary>
+        public float3 SurfaceUp;
+
+        /// <summary>
+        /// W2 — the UNIT of this emit's corner offsets, and the factor that produces it.
+        /// <list type="bullet">
+        /// <item><b><c>0</c></b> ⇒ <c>WorldBillboardVertex.Offset</c> is in LOGICAL SCREEN PIXELS (the
+        /// pre-W2 unit). This is the struct's zero value, so every point emit, every non-map-pitched curved
+        /// emit and every hand-built fixture emit keeps the old behaviour without being edited.</item>
+        /// <item><b>&gt; <c>0</c></b> ⇒ those offsets are in WORLD METRES, and this is the metres-per-logical-
+        /// pixel factor the renderer multiplied them by
+        /// (<c>BuildWorldQuad</c>'s <c>emScale = TextSizePx · this</c>).</item>
+        /// </list>
+        /// <para><b>One value carries BOTH the unit conversion and the shader's bit2.</b> There is
+        /// deliberately no separate <c>bool MapPitched</c>: a design where a flag and a scale can disagree is a
+        /// design where the shader can reinterpret pixels as metres — which is exactly the class of defect
+        /// this epic kept re-landing. <c>WorldLabelRenderer.Emit</c> derives the multiplier and the flag from
+        /// this one field.</para>
+        /// <para><b>Written in exactly one place</b> — <see cref="LabelStagingMath.StageCurved"/>'s
+        /// <c>worldArc</c> predicate, carried into <c>StageCurvedAnchor</c>'s emit. It is the SAME value
+        /// <c>arcScale</c> already spaces the glyph anchors with, so a map-pitched label's spacing and its
+        /// drawn size come from one constant and foreshorten together (the settled model: a map-pitched
+        /// <c>text-size</c> is X px TOP-DOWN, like <c>line-width</c>).</para>
+        /// </summary>
+        public float CornerMetresPerLogicalPixel;
     }
 }

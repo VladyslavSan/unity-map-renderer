@@ -66,10 +66,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <para><b>MEASURED, not chosen</b> — the first of the two to be, and the reason
         /// <see cref="MapAlignedSign"/> was measured after it. The staging frame's sense
         /// is what <c>BillboardMath.BuildWorldQuad</c> produces: it rotates the quad's corners in a y-up LOCAL
-        /// frame and then negates Y, which lands <c>OffsetPx</c> in a y-DOWN screen frame, and a rotation read
+        /// frame and then negates Y, which lands <c>Offset</c> in a y-DOWN screen frame, and a rotation read
         /// through a mirrored axis reverses — a positive <c>rotationRadians</c> appears counter-clockwise on
         /// screen. The earlier reading of that negation (that it supplied the clockwise sense, leaving
-        /// <c>OffsetPx</c> y-up) was self-contradictory: the negation is precisely what makes <c>OffsetPx</c>
+        /// <c>Offset</c> y-up) was self-contradictory: the negation is precisely what makes <c>Offset</c>
         /// y-down. Pinned end-to-end by the rendered tooth
         /// <c>SymbolIconRenderSnapshotTests.AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen</c>,
         /// which measures ink CENTROID (a bounding box is direction-blind) on a 45° road through the real GPU

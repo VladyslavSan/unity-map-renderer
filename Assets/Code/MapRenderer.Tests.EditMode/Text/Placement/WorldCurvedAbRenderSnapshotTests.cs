@@ -92,7 +92,12 @@ namespace MapRenderer.Tests.Text.Placement
 
         // 'F' (70) — no mirror symmetry in x or y (unlike 'A'), so a wrong rotation sense cannot alias back
         // to a correct-looking render.
-        private static (GlyphAtlasTexture texture, SymbolQuad quad) BuildGlyphF()
+        //
+        // Internal (not private): MapRenderer.Tests.Visual.OffLookAtLabelScene builds its multi-glyph
+        // cross-azimuth labels out of copies of THIS one cell rather than carrying a second copy of the
+        // decoder/shaper bootstrap (test-code-bloat convention — widen and reuse, never duplicate-and-drag;
+        // the same call WorldPointEmitRenderTests.BuildGlyphA already made for Stage T's T4).
+        internal static (GlyphAtlasTexture texture, SymbolQuad quad) BuildGlyphF()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();

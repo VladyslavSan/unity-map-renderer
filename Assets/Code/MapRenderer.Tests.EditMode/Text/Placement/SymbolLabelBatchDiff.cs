@@ -23,6 +23,7 @@ namespace MapRenderer.Tests.Text.Placement
             if (o.GlyphCount != g.GlyphCount) return $"GlyphCount {o.GlyphCount} vs {g.GlyphCount}";
             if (o.AnchorCount != g.AnchorCount) return $"AnchorCount {o.AnchorCount} vs {g.AnchorCount}";
             if (o.WorldPointCount != g.WorldPointCount) return $"WorldPointCount {o.WorldPointCount} vs {g.WorldPointCount}";
+            if (o.WorldUpCount != g.WorldUpCount) return $"WorldUpCount {o.WorldUpCount} vs {g.WorldUpCount}";
             if (o.AnchorFadeCount != g.AnchorFadeCount) return $"AnchorFadeCount {o.AnchorFadeCount} vs {g.AnchorFadeCount}";
             if (o.MaxBoxes != g.MaxBoxes) return $"MaxBoxes {o.MaxBoxes} vs {g.MaxBoxes}";
             if (o.MaxQuads != g.MaxQuads) return $"MaxQuads {o.MaxQuads} vs {g.MaxQuads}";
@@ -57,6 +58,7 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < o.GlyphCount; i++) if (!o.Glyphs[i].Equals(g.Glyphs[i])) return $"Glyphs[{i}]";
             for (int i = 0; i < o.AnchorCount; i++) if (!o.Anchors[i].Equals(g.Anchors[i])) return $"Anchors[{i}]";
             for (int i = 0; i < o.WorldPointCount; i++) if (!o.WorldPoints[i].Equals(g.WorldPoints[i])) return $"WorldPoints[{i}]";
+            for (int i = 0; i < o.WorldUpCount; i++) if (!o.WorldUps[i].Equals(g.WorldUps[i])) return $"WorldUps[{i}]";
             for (int i = 0; i < o.AnchorFadeCount; i++) if (o.AnchorFadeIds[i] != g.AnchorFadeIds[i]) return $"AnchorFadeIds[{i}]";
             return null;
         }

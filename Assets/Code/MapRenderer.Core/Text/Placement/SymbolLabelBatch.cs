@@ -61,6 +61,13 @@ namespace MapRenderer.Core.Text.Placement
         public int           AnchorCount;
         public double3[]     WorldPoints  = Array.Empty<double3>();          // anchor (point) / path verts (curved) — for projection
         public int           WorldPointCount;
+        // P2: the unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount
+        // pair (no second index pair). float3 (a direction; narrowed at the same site WorldPoints would be if
+        // it were narrowed): a unit vector at float precision carries ~1e-7 rad of angular error, well below
+        // what any consumer needs, so narrowing at the source (the baker) rather than carrying double3 all
+        // the way through this pool is safe.
+        public float3[]      WorldUps     = Array.Empty<float3>();
+        public int           WorldUpCount;
         public long[]        AnchorFadeIds = Array.Empty<long>();            // per curved anchor + a trailing fallback slot
         public int           AnchorFadeCount;
 
@@ -80,7 +87,7 @@ namespace MapRenderer.Core.Text.Placement
         public void Reset()
         {
             Count = 0; PointCount = 0; CurvedCount = 0;
-            QuadCount = 0; GlyphCount = 0; AnchorCount = 0; WorldPointCount = 0; AnchorFadeCount = 0;
+            QuadCount = 0; GlyphCount = 0; AnchorCount = 0; WorldPointCount = 0; WorldUpCount = 0; AnchorFadeCount = 0;
             MaxBoxes = 0; MaxQuads = 0; MaxCandidates = 0;
             BuildId++;
         }
@@ -125,6 +132,7 @@ namespace MapRenderer.Core.Text.Placement
         public int AddGlyph(in CurvedGlyph g)    { Grow(ref Glyphs, GlyphCount); Glyphs[GlyphCount] = g; return GlyphCount++; }
         public int AddAnchor(in LineAnchor a)    { Grow(ref Anchors, AnchorCount); Anchors[AnchorCount] = a; return AnchorCount++; }
         public int AddWorldPoint(in double3 p)   { Grow(ref WorldPoints, WorldPointCount); WorldPoints[WorldPointCount] = p; return WorldPointCount++; }
+        public int AddWorldUp(in float3 up)      { Grow(ref WorldUps, WorldUpCount); WorldUps[WorldUpCount] = up; return WorldUpCount++; }
         public int AddAnchorFadeId(long id)      { Grow(ref AnchorFadeIds, AnchorFadeCount); AnchorFadeIds[AnchorFadeCount] = id; return AnchorFadeCount++; }
 
         private static void Grow<T>(ref T[] arr, int index)

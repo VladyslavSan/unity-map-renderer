@@ -68,6 +68,9 @@ namespace MapRenderer.Jobs
         public NativeList<LineAnchor>  MAnchors;
         public NativeList<long>        MFadeIds;
         public NativeList<double3>     MWorldPoints;
+        // P2: index-parallel to MWorldPoints (same MWorldStart/MWorldCount slice) — the unit surface normal at
+        // each world point. Copied in lockstep with MWorldPoints below; not yet consumed by any downstream reader.
+        public NativeList<float3>      MWorldUps;
 
         // ── output counts (see the Count* consts above) ──
         public NativeArray<int> OutCounts;
@@ -112,12 +115,14 @@ namespace MapRenderer.Jobs
             MQuads.ResizeUninitialized(quads); MGlyphs.ResizeUninitialized(glyphs);
             MAnchors.ResizeUninitialized(anchors); MFadeIds.ResizeUninitialized(fades);
             MWorldPoints.ResizeUninitialized(worlds);
+            MWorldUps.ResizeUninitialized(worlds);
 
             NativeArray<SymbolQuad>  dstQuads   = MQuads.AsArray();
             NativeArray<CurvedGlyph> dstGlyphs  = MGlyphs.AsArray();
             NativeArray<LineAnchor>  dstAnchors = MAnchors.AsArray();
             NativeArray<long>        dstFades   = MFadeIds.AsArray();
             NativeArray<double3>     dstWorlds  = MWorldPoints.AsArray();
+            NativeArray<float3>      dstWorldUps = MWorldUps.AsArray();
 
             int mPoint = 0, mCurved = 0, mQuad = 0, mGlyph = 0, mAnchor = 0, mFade = 0, mWorld = 0;
             int maxBoxes = 0, maxQuads = 0, maxCandidates = 0;
@@ -130,7 +135,11 @@ namespace MapRenderer.Jobs
                 int detail = block.Detail[li];
                 int worldStartSrc = block.WorldStart[li], worldCount = block.WorldCount[li];
                 int worldStart = mWorld;
-                if (worldCount > 0) CopyView(block.WorldPoints, worldStartSrc, dstWorlds, mWorld, worldCount);
+                if (worldCount > 0)
+                {
+                    CopyView(block.WorldPoints, worldStartSrc, dstWorlds, mWorld, worldCount);
+                    CopyView(block.WorldUps, worldStartSrc, dstWorldUps, mWorld, worldCount);
+                }
                 mWorld += worldCount;
 
                 if (block.Kinds[li] == (byte)LabelRecordKind.Point)

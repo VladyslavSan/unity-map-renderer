@@ -132,18 +132,18 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(100f + 12f, p.Boxes[0].Max.x, Tol);
 
             // (d) SIGN, observed on the offsets the quad actually draws with — the same observable, now
-            // stated in the frame OffsetPx is ACTUALLY in.
+            // stated in the frame Offset is ACTUALLY in.
             //
             //   BuildWorldQuad rotates the corners in the quad's y-UP LOCAL frame and then negates Y, which
-            //   puts OffsetPx in a y-DOWN SCREEN frame. That negation is the frame flip, not a sense
+            //   puts Offset in a y-DOWN SCREEN frame. That negation is the frame flip, not a sense
             //   correction: read through a mirrored axis a rotation reverses, so a positive angle handed to
             //   BuildWorldQuad appears COUNTER-clockwise on screen. This test previously asserted the
-            //   opposite (OffsetPx y-up, so the negation supplied the clockwise sense) — two claims that
+            //   opposite (Offset y-up, so the negation supplied the clockwise sense) — two claims that
             //   cannot both hold, and the pair of them mechanised the very convention they assumed. What
             //   settled it is a RENDERED tooth, not a derivation:
             //   SymbolIconRenderSnapshotTests.AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen.
             //
-            // So a CLOCKWISE-on-screen quarter-turn is +90 deg in OffsetPx components: (x, y) -> (-y, x).
+            // So a CLOCKWISE-on-screen quarter-turn is +90 deg in Offset components: (x, y) -> (-y, x).
             // That is what a +90 icon-rotate must produce, since MapLibre defines icon-rotate as clockwise.
             // Drop LabelBearing.IconRotationRadians' negation and this lands at (y, -x) instead — which is
             // precisely the shipped defect, and which the 180 deg case in (e) could never see.
@@ -151,26 +151,26 @@ namespace MapRenderer.Tests.Text.Placement
             var zeroAnchor = new float3(0f, 0f, 0f);
             var white = new float3(1f, 1f, 1f);
             BillboardMath.BuildWorldQuad(in cell, in zeroAnchor, TextQuadLayout.OneEm, in white, 0f,
-                in float2.zero, in zeroAnchor, 0f,
+                in float2.zero, in zeroAnchor, in zeroAnchor, 0f,
                 out _, out WorldBillboardVertex unrotatedTopRight,
                 out WorldBillboardVertex unrotatedBottomRight, out _);
             BillboardMath.BuildWorldQuad(in cell, in zeroAnchor, TextQuadLayout.OneEm, in white,
-                p.Quads[0].RotationRadians, in float2.zero, in zeroAnchor, 0f,
+                p.Quads[0].RotationRadians, in float2.zero, in zeroAnchor, in zeroAnchor, 0f,
                 out _, out WorldBillboardVertex rotatedTopRight, out _, out _);
 
-            float2 before = unrotatedTopRight.OffsetPx;
+            float2 before = unrotatedTopRight.Offset;
             var clockwiseQuarterTurn = new float2(-before.y, before.x);
-            Assert.AreEqual(clockwiseQuarterTurn.x, rotatedTopRight.OffsetPx.x, Tol,
+            Assert.AreEqual(clockwiseQuarterTurn.x, rotatedTopRight.Offset.x, Tol,
                 "a +90 deg icon-rotate turns the drawn corner offsets CLOCKWISE on screen, which in the " +
-                "y-DOWN OffsetPx frame is (x, y) -> (-y, x)");
-            Assert.AreEqual(clockwiseQuarterTurn.y, rotatedTopRight.OffsetPx.y, Tol,
+                "y-DOWN Offset frame is (x, y) -> (-y, x)");
+            Assert.AreEqual(clockwiseQuarterTurn.y, rotatedTopRight.Offset.y, Tol,
                 "…in y too — an un-negated icon-rotate lands at (y, -x), i.e. counter-clockwise on screen");
             // Cross-check against a named corner, which is where this reads as a picture rather than as
             // algebra: turn a sprite clockwise by a quarter and its TOP-right corner goes to where its
             // BOTTOM-right corner sat. (The version of this line that expected the top-LEFT corner was
             // describing a counter-clockwise turn — the bug, asserted.)
-            Assert.AreEqual(unrotatedBottomRight.OffsetPx.x, rotatedTopRight.OffsetPx.x, Tol);
-            Assert.AreEqual(unrotatedBottomRight.OffsetPx.y, rotatedTopRight.OffsetPx.y, Tol);
+            Assert.AreEqual(unrotatedBottomRight.Offset.x, rotatedTopRight.Offset.x, Tol);
+            Assert.AreEqual(unrotatedBottomRight.Offset.y, rotatedTopRight.Offset.y, Tol);
             Assert.AreEqual(unrotatedTopRight.Uv.x, rotatedTopRight.Uv.x, Tol, "UVs never rotate with the corners");
             Assert.AreEqual(unrotatedTopRight.Uv.y, rotatedTopRight.Uv.y, Tol);
 
@@ -182,10 +182,10 @@ namespace MapRenderer.Tests.Text.Placement
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 pFlip.Boxes, ref pFlip.BoxCount, pFlip.Quads, ref pFlip.QuadCount, pFlip.Candidates, pFlip.Emit, ref pFlip.EmitCount);
             BillboardMath.BuildWorldQuad(in cell, in zeroAnchor, TextQuadLayout.OneEm, in white,
-                pFlip.Quads[0].RotationRadians, in float2.zero, in zeroAnchor, 0f,
+                pFlip.Quads[0].RotationRadians, in float2.zero, in zeroAnchor, in zeroAnchor, 0f,
                 out _, out WorldBillboardVertex flippedTopRight, out _, out _);
-            Assert.AreEqual(-unrotatedTopRight.OffsetPx.x, flippedTopRight.OffsetPx.x, Tol, "180 deg negates x");
-            Assert.AreEqual(-unrotatedTopRight.OffsetPx.y, flippedTopRight.OffsetPx.y, Tol, "180 deg negates y");
+            Assert.AreEqual(-unrotatedTopRight.Offset.x, flippedTopRight.Offset.x, Tol, "180 deg negates x");
+            Assert.AreEqual(-unrotatedTopRight.Offset.y, flippedTopRight.Offset.y, Tol, "180 deg negates y");
         }
 
         // I5a: AtlasKind (the icon/text discriminator) must ride through emit[ordinal] unchanged — a plain
@@ -271,6 +271,7 @@ namespace MapRenderer.Tests.Text.Placement
             // World path mirrors the screen path 1:1 (index-aligned, per LabelStageJob's contract) — a flat
             // east-only line at Y=Z=0, TileOriginRender left at its float3-zero default.
             var worldPath  = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this box/tangent tooth
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) } };
             var anchors    = new[] { new LineAnchor(0, 0.5f) };  // arc distance 50 along the 100-px line
             long fid = LabelStagingMath.LineFadeId(9, 0, 3, 0);
@@ -280,8 +281,8 @@ namespace MapRenderer.Tests.Text.Placement
             var cumScratch  = new float[2];
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, ordinal: 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
+                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
@@ -317,6 +318,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath  = new[] { 0f, 0f };
             var validPath  = new byte[] { 1, 1 };
             var worldPath  = new[] { new double3(0, 0, 0), new double3(10, 0, 0) };
+            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this too-long-to-fit tooth
             // glyph span 0..100 baked-px * scale 1 = 100 px label, longer than the 10-px line → never fits.
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) },
                                      new CurvedGlyph { ArcCenter = 100f, Cell = Cell(6f) } };
@@ -325,8 +327,8 @@ namespace MapRenderer.Tests.Text.Placement
             var wasPlaced  = new byte[] { 0, 0 };
             var p = Pools.New();
 
-            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, glyphs, anchors,
-                fadeIds, wasPlaced, new float2[2], new float[2], 0f, 0,
+            int staged = LabelStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
+                fadeIds, wasPlaced, new float2[2], new float[2], 0f, default, 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(0, staged);
@@ -371,10 +373,11 @@ namespace MapRenderer.Tests.Text.Placement
             candidateCount += LabelStagingMath.StageCurved(in curved,
                 new[] { new float2(0, 400), new float2(200, 400) }, new[] { 0f, 0f }, new byte[] { 1, 1 },
                 new[] { new double3(0, 0, 0), new double3(200, 0, 0) },
+                new float3[2], // P2: unread by this pair-shape/range-tiling tooth
                 new[] { new CurvedGlyph { ArcCenter = -8f, Cell = Cell(6f) }, new CurvedGlyph { ArcCenter = 8f, Cell = Cell(6f) } },
                 new[] { new LineAnchor(0, 0.5f) },
                 new[] { curvedFadeId, LabelStagingMath.LineFadeId(9, 0, 5, -1) }, new byte[] { 0, 0 },
-                new float2[2], new float[2], 0f, candidateCount,
+                new float2[2], new float[2], 0f, default, candidateCount,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             // A BOTH-optional pair, with a stale last-frame verdict carried in — the shape most likely to leak.

@@ -8,11 +8,12 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// #5: lays out a shaped run for CURVED along-line placement — one <see cref="CurvedGlyph"/> per visible
-    /// glyph, each carrying its along-run <see cref="CurvedGlyph.ArcCenter"/> and a baseline-center-anchored
-    /// cell. Unlike <see cref="TextQuadLayout"/> (which lays glyphs into an anchored, justified, possibly-
-    /// wrapped block for point placement), this is a single un-wrapped forward pass with NO block anchor /
-    /// justify / offset — those are point concepts; a line label's position + orientation come from the
-    /// projected line at placement time.
+    /// glyph, each carrying its along-run <see cref="CurvedGlyph.ArcCenter"/> and a cell centred on the path
+    /// (horizontally on that arc center, vertically on the run's optical centre — see
+    /// <see cref="TextQuadLayout.OpticalCentreBelowReferencePx"/>). Unlike <see cref="TextQuadLayout"/>
+    /// (which lays glyphs into an anchored, justified, possibly-wrapped block for point placement), this is
+    /// a single un-wrapped forward pass with NO block anchor / justify / offset — those are point concepts;
+    /// a line label's position + orientation come from the projected line at placement time.
     /// </summary>
     public static class CurvedTextLayout
     {
@@ -53,11 +54,15 @@ namespace MapRenderer.Core.Text
                     float2 cellSize = entry.CellSize;
                     float arcCenter = penX + advance * 0.5f;
 
-                    // Same TOP-referenced cell as TextQuadLayout.PlaceGlyph (baseline at y=0), but placed
-                    // relative to THIS glyph's own pen origin and shifted so the cell is centered HORIZONTALLY
-                    // on arcCenter. y stays baseline-relative (Top/Bottom keep their offsets).
+                    // Same TOP-referenced cell as TextQuadLayout.PlaceGlyph, but placed relative to THIS
+                    // glyph's own pen origin and centered HORIZONTALLY on arcCenter — and VERTICALLY on the
+                    // path, by the same OpticalCentreBelowReferencePx a point label's Centre vertical anchor
+                    // applies (§11 D12), so a curved and a point label of the same string have the same
+                    // optical relationship to their anchor. That shift is one constant per LABEL (no `entry`
+                    // term), so the run's own typography is untouched: ascenders and descenders keep their
+                    // relative offsets instead of each glyph bobbing onto its own ink centre.
                     float leftX = penX + entry.Left - GlyphSdf.Buffer;
-                    float cellTopY = entry.Top + GlyphSdf.Buffer;
+                    float cellTopY = entry.Top + GlyphSdf.Buffer + TextQuadLayout.OpticalCentreBelowReferencePx;
                     float2 topLeft = new float2(leftX - arcCenter, cellTopY);
                     float2 bottomRight = new float2(leftX + cellSize.x - arcCenter, cellTopY - cellSize.y);
 

@@ -36,13 +36,30 @@ namespace MapRenderer.Tests.Text.Placement
             byte[] rgba, int width, int height,
             out int minRow, out int maxRow, out int minCol, out int maxCol,
             out float centroidRow, out float centroidCol, out int inkCount)
+            => AnalyzeInk(rgba, width, height, 0, height - 1,
+                out minRow, out maxRow, out minCol, out maxCol, out centroidRow, out centroidCol, out inkCount);
+
+        /// <summary>Same scan, restricted to the INCLUSIVE row band
+        /// <paramref name="rowFrom"/>..<paramref name="rowTo"/> (clamped to the buffer; an inverted band
+        /// reports no ink) — for a frame carrying more than one label, where a whole-frame scan reports one
+        /// merged bounding box that belongs to neither.
+        ///
+        /// <para>The whole-frame overload above forwards to this one, so there is exactly ONE scanner: a
+        /// change to the ink rule cannot apply to one caller and not the other.</para></summary>
+        public static void AnalyzeInk(
+            byte[] rgba, int width, int height, int rowFrom, int rowTo,
+            out int minRow, out int maxRow, out int minCol, out int maxCol,
+            out float centroidRow, out float centroidCol, out int inkCount)
         {
             minRow = int.MaxValue; maxRow = int.MinValue;
             minCol = int.MaxValue; maxCol = int.MinValue;
             inkCount = 0;
             double sumRow = 0.0, sumCol = 0.0;
 
-            for (int row = 0; row < height; row++)
+            int firstRow = math.max(0, rowFrom);
+            int lastRow  = math.min(height - 1, rowTo);
+
+            for (int row = firstRow; row <= lastRow; row++)
             {
                 for (int col = 0; col < width; col++)
                 {
