@@ -193,7 +193,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                 TileId containing = TestTileKeys.Containing(lookAt, zoom: 14);
                 TileId neighbor = new TileId { X = containing.X + 1, Y = containing.Y, Z = containing.Z };
-                long tileKey = SymbolFeatureExtractor.PackTileKey(neighbor);
+                long tileKey = LabelTileKey.Pack(neighbor);
 
                 (double3 pathA, double3 pathB) = ShortLineAt(uCam, frame, 45f);
 

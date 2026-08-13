@@ -4,10 +4,11 @@
 
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using NUnit.Framework;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Filters
 {
@@ -26,16 +27,16 @@ namespace MapRenderer.Tests.Filters
 
             // Layer "roads": 2 LineString features, 1 Point feature
             var roads = new MvtLayer { Name = "roads", Extent = 4096, Version = 2 };
-            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString, Geometry = new uint[0] });
-            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString, Geometry = new uint[0] });
-            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Point, Geometry = new uint[0] });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.LineString });
+            roads.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Point });
             tile.Layers.Add(roads);
 
             // Layer "landuse": 3 Polygon features
             var landuse = new MvtLayer { Name = "landuse", Extent = 4096, Version = 2 };
-            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
-            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
-            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon, Geometry = new uint[0] });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon });
+            landuse.Features.Add(new MvtFeature { GeometryType = TileGeometryType.Polygon });
             tile.Layers.Add(landuse);
 
             return tile;
@@ -191,6 +192,66 @@ namespace MapRenderer.Tests.Filters
             var tile = BuildTile();
             var result = FeatureSelector.SelectFeatures(null, tile);
             Assert.That(result.Count, Is.EqualTo(0), "Null StyleLayer should yield empty selection");
+        }
+
+        // ── IR B7: the ordinal-returning overload ─────────────────────────────────────────────────
+
+        /// <summary>
+        /// The ordinal is the feature's position in the <b>source layer's</b> feature list — never its
+        /// position in the selection. Every per-feature side array a consumer joins to the shared geometry
+        /// buffer is keyed on it, and <c>RingFeatureIdx</c> indexes the layer, so a slot-based ordinal
+        /// mis-attributes colours, widths and labels the moment a filter rejects anything.
+        ///
+        /// <para>The fixture makes the two differ: the only matching feature sits at layer position 2 and
+        /// selection position 0, so a slot-indexed implementation reports 0 and fails here.</para>
+        /// </summary>
+        [Test]
+        public void SelectFeaturesByOrdinal_ReportsThePositionInTheLayer_NotInTheSelection()
+        {
+            MvtTile tile = BuildTile();
+            ITileLayer roads = tile.GetLayer("roads");
+            var layer = MakeLayer("roads", "[\"==\",\"$type\",\"Point\"]");
+
+            var selected = new System.Collections.Generic.List<SelectedTileFeature>();
+            FeatureSelector.SelectFeatures(layer, roads, 0.0, selected);
+
+            Assert.AreEqual(3, roads.Features.Count, "precondition: 'roads' holds three features");
+            Assert.AreEqual(1, selected.Count, "precondition: exactly one of them is a Point");
+            Assert.AreEqual(2, selected[0].Ordinal,
+                "the Point is the THIRD feature of 'roads', so its ordinal is 2 — a selected-slot ordinal " +
+                "would report 0 here and silently mis-join every per-feature side array");
+            Assert.AreSame(roads.Features[2], selected[0].Feature,
+                "…and the pair must carry the feature that ordinal names");
+        }
+
+        /// <summary>An unfiltered selection reports the identity ordinals — the case every consumer's
+        /// existing behaviour depends on — and the output list is cleared first, so a reused buffer cannot
+        /// accumulate two layers' selections into one join.</summary>
+        [Test]
+        public void SelectFeaturesByOrdinal_UnfilteredIsIdentity_AndClearsTheOutputList()
+        {
+            MvtTile tile = BuildTile();
+            ITileLayer landuse = tile.GetLayer("landuse");
+            var layer = MakeLayer("landuse");
+
+            var selected = new System.Collections.Generic.List<SelectedTileFeature>
+            {
+                // Deliberate leftover: a selection that appended without clearing would keep it.
+                new SelectedTileFeature { Feature = landuse.Features[0], Ordinal = 99 },
+            };
+            FeatureSelector.SelectFeatures(layer, landuse, 0.0, selected);
+
+            Assert.AreEqual(3, selected.Count,
+                "the output list must be CLEARED first — three features selected, not four");
+            for (int i = 0; i < selected.Count; i++)
+            {
+                Assert.AreEqual(i, selected[i].Ordinal, $"unfiltered ordinal {i} must be the identity");
+                Assert.AreSame(landuse.Features[i], selected[i].Feature, $"…paired with feature {i}");
+            }
+
+            // Null-tolerance, matching the IDecodedTile overload: an unresolvable layer selects nothing.
+            FeatureSelector.SelectFeatures(layer, null, 0.0, selected);
+            Assert.AreEqual(0, selected.Count, "a null tile layer must leave the output empty");
         }
 
         // ── Compiled-filter memo ──────────────────────────────────────────────────────────────────

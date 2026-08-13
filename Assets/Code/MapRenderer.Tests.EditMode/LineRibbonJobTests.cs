@@ -6,9 +6,10 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -260,21 +261,22 @@ namespace MapRenderer.Tests
         public void Fixture_Geolines_Parity_MiterButt()
         {
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
-            var tile  = MvtDecoder.Decode(File.ReadAllBytes(FixturePath));
-            var layer = tile.GetLayer("geolines");
+            // IR C1 P3: the command streams come from the bytes (MvtFixtureStreams), not off a decoded
+            // feature — the ribbon oracle must not share its input path with production's decoder.
+            var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(FixturePath), "geolines");
             Assert.IsNotNull(layer, "geolines layer present in fixture");
 
             int pathsChecked = 0;
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.LineString || feature.Geometry == null)
+                if (layer.Kinds[fi] != TileGeometryType.LineString || layer.Commands[fi] == null)
                     continue;
 
-                List<List<double2>> paths = MvtGeometry.Decode(feature.Geometry);
+                List<List<double2>> paths = MvtGeometry.Decode(layer.Commands[fi]);
                 foreach (var path in paths)
                 {
                     if (path.Count < 2) continue;
-                    AssertParity(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4, $"geolines#{feature.Id}");
+                    AssertParity(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4, $"geolines#{fi}");
                     pathsChecked++;
                 }
             }

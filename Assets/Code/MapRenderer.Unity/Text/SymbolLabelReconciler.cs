@@ -103,7 +103,7 @@ namespace MapRenderer.Unity.Text
                     if (LabelPairing.IsRider(labels, i)) continue;
 
                     var key = DedupKey.For(label.AnchorRender, label.MaterialIndex, slice.TextIds[i], slice.IconImageIds[i], CrossTileLabelKey.CanonicalGridMeters);
-                    int z = (int)(label.TileKey >> 44); // PackTileKey: z in the high bits (finest zoom wins)
+                    int z = (int)(label.TileKey >> 44); // LabelTileKey.Pack: z in the high bits (finest zoom wins)
                     if (!_dedup.TryGetValue(key, out DedupEntry cur)
                         || z > cur.Z || (z == cur.Z && label.TileKey < cur.TileKey))
                     {

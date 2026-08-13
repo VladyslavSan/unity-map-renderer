@@ -4,8 +4,9 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -69,13 +70,16 @@ namespace MapRenderer.Tests.Meshing
         {
             foreach (string name in Corpus)
             {
-                var layer = MvtDecoder.Decode(LoadFixture(name)).GetLayer("water");
+                // IR C1 P3: the command streams come from the test-side fixture reader, not from a decoded
+                // MvtFeature — a decoded feature carries no geometry now, and reading production's buffer
+                // instead would make this oracle audit itself.
+                var layer = MvtFixtureStreams.ReadLayer(LoadFixture(name), "water");
                 Assert.IsNotNull(layer, $"{name}: water layer present");
                 int polys = 0;
-                foreach (var f in layer.Features)
+                for (int fi = 0; fi < layer.Kinds.Count; fi++)
                 {
-                    if (f.GeometryType != TileGeometryType.Polygon) continue;
-                    foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)))
+                    if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
+                    foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])))
                     {
                         polys++;
                         var res = Earcut.Triangulate(poly.Outer, new List<List<double2>>()); // outer alone

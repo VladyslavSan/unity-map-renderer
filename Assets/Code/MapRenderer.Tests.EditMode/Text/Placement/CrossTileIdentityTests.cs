@@ -40,7 +40,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AnchorRender = anchor,
                 MaterialIndex = layer,
                 Text = text,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                TileKey = LabelTileKey.Pack(tile),
             };
 
         private static List<LabelInstance> Collect(SymbolTileLabelStore store, double q)
@@ -212,9 +212,9 @@ namespace MapRenderer.Tests.Text.Placement
             const double q = 50.0;
             var tile = new TileId { Z = 12, X = 3, Y = 4 };
             var line1 = new LabelInstance { Placement = SymbolPlacement.Line, Text = "Main St", MaterialIndex = 0,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile) };
+                TileKey = LabelTileKey.Pack(tile) };
             var line2 = new LabelInstance { Placement = SymbolPlacement.LineCenter, Text = "Main St", MaterialIndex = 0,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile) };
+                TileKey = LabelTileKey.Pack(tile) };
 
             var store = new SymbolTileLabelStore(cacheCap: 8);
             var key = new SymbolTileLabelStore.Key("src", tile);

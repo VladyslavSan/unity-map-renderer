@@ -64,6 +64,8 @@ namespace MapRenderer.Core.Style
 
             src.Url = json.GetString("url");
             src.Tiles = ParseStringArray(json.Get("tiles"));
+            // geojson `data`: retained verbatim, because the spec allows an inline object OR a URL string.
+            src.Data = json.Get("data");
 
             // Vector-source defaults. (Other source types carry these keys too; applying the vector
             // defaults is harmless for them and the raw object is always retained for later stages.)

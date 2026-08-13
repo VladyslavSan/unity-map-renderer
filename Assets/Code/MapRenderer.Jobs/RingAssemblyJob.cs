@@ -2,6 +2,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Jobs
 {
@@ -17,7 +18,17 @@ namespace MapRenderer.Jobs
     ///     centroid (or first vertex) falls INSIDE the current outer ring (containment check),
     ///     preventing disjoint artefact rings from corrupting the triangulation.
     ///
-    /// Does NOT reference MapRenderer.Core — Core's System.Math stays off the Burst path.
+    /// <b>Kind gate (IR B7).</b> A ring whose feature is not a Polygon is skipped outright. This job
+    /// classifies purely by signed area, and a LineString ring is the same shape of data as a polygon ring —
+    /// so without this it would silently read one as a spurious exterior or hole and corrupt the
+    /// triangulation. It used to be guarded only by the caller choosing what to decode; since the geometry
+    /// buffer is shared across consumers, the caller's filter decides which ring INDICES it visits, which is
+    /// bookkeeping-shaped code and much easier to lose. Two independent guards, each observable on its own.
+    ///
+    /// Does NOT reference MapRenderer.Core <b>code</b> — no Core call, and in particular none of Core's
+    /// <c>System.Math</c>, on the Burst path. Blittable Core <i>value types</i> are fine and always were:
+    /// <see cref="TileGeometryType"/> is an enum with no code, and <c>TileToGeoJob</c> in this same assembly
+    /// already takes Core's <c>TileId</c> and emits Core's <c>GeoCoordinate</c>.
     ///
     /// Input: flat vertex array + per-ring offsets from <see cref="MvtDecodeJob"/>.
     /// Output: polygon descriptors (outer start/length + hole start/count) in flat arrays.
@@ -35,6 +46,12 @@ namespace MapRenderer.Jobs
         [ReadOnly] public NativeArray<int>     RingOffsets;   // length = ringCount + 1 (sentinel)
         [ReadOnly] public NativeArray<int>     RingFeatureIdx;// which feature each ring belongs to
         [ReadOnly] public int                  RingCount;
+
+        /// <summary>Per-FEATURE geometry kind (see <c>TileGeometryBuffers.FeatureGeometryType</c>) — ring
+        /// <c>r</c>'s kind is <c>FeatureGeometryType[RingFeatureIdx[r]]</c>. Read by the kind gate in
+        /// <see cref="Execute"/>. An unfilled element reads <c>Unknown</c>, which the gate rejects, so a
+        /// producer that forgot to fill the column assembles NOTHING (loud) rather than something wrong.</summary>
+        [ReadOnly] public NativeArray<TileGeometryType> FeatureGeometryType;
 
         // ── Output ─────────────────────────────────────────────────────────────────────────────
         // Each polygon: one outer ring + zero or more holes.
@@ -72,6 +89,11 @@ namespace MapRenderer.Jobs
                 if (rLen < 3) continue; // degenerate
 
                 int featureIdx = RingFeatureIdx[ri];
+
+                // Kind gate: only a Polygon feature's rings are polygon rings. Placed BEFORE the
+                // exterior-sign reset so a non-polygon feature leaves no trace in the classifier state at
+                // all, and before the area work so a LineString can never establish or flip a sign.
+                if (FeatureGeometryType[featureIdx] != TileGeometryType.Polygon) continue;
 
                 // New feature resets exterior sign.
                 if (featureIdx != prevFeature)

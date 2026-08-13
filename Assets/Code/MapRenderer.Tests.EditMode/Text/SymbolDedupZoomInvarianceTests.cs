@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Text
                 MaterialIndex = 0,
                 Text = text,
                 FeatureIndex = feature,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                TileKey = LabelTileKey.Pack(tile),
             };
 
         private readonly struct Snapshot

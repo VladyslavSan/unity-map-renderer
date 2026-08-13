@@ -3,7 +3,7 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Tiles
 {

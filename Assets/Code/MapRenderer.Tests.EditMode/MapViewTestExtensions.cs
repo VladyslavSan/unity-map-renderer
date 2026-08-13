@@ -119,6 +119,10 @@ namespace MapRenderer.Tests
         /// <summary>Number of currently loaded (or loading) tiles.</summary>
         public static int LoadedTileCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.LoadedTileCount : 0;
 
+        /// <summary>Number of source pipelines that actually own a feature source (the source-less
+        /// background pipeline excluded) — "how many sources did the style wire?".</summary>
+        public static int WiredFeatureSourceCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.WiredFeatureSourceCount : 0;
+
         /// <summary>The scheduler's in-flight fetch count.</summary>
         public static int InFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.InFlightCount : 0;
 

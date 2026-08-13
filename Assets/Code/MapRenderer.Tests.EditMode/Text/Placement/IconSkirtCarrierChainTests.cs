@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System.Collections.Generic;
 using System.Threading.Tasks;
@@ -13,6 +14,8 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Text.Placement
 {
@@ -35,6 +38,12 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class IconSkirtCarrierChainTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private const int Padding = 1;
         private const int SpriteExtent = 16;
         private const float IconSize = 2f;
@@ -194,20 +203,6 @@ namespace MapRenderer.Tests.Text.Placement
                     "{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}"),
             };
 
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
 
         private static IDecodedTile OnePointTile(double2 point)
@@ -217,10 +212,7 @@ namespace MapRenderer.Tests.Text.Placement
                 GeometryType = TileGeometryType.Point,
                 Geometry = new[] { 1u | (1u << 3), ZigZagEncode((long)point.x), ZigZagEncode((long)point.y) },
             };
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            return TestDecodedTiles.Of("points", TileId0, new List<IFeature> { feature }, Extent);
         }
 
         private static IDecodedTile OneLineTile(double2 from, double2 to)
@@ -234,10 +226,7 @@ namespace MapRenderer.Tests.Text.Placement
                     2u | (1u << 3), ZigZagEncode((long)(to.x - from.x)), ZigZagEncode((long)(to.y - from.y)),
                 },
             };
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "roads", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            return TestDecodedTiles.Of("roads", TileId0, new List<IFeature> { feature }, Extent);
         }
     }
 }

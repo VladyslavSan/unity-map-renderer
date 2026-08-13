@@ -162,6 +162,51 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
+        /// Encodes an arbitrary RGBA32 buffer (same bottom-left-origin convention as <see cref="RawPixels"/>)
+        /// to <c>Logs/snapshots/&lt;filename&gt;</c> via a throwaway <see cref="Texture2D"/>. Needed for
+        /// artifacts that never went through this renderer's own <c>_tex</c> — e.g. a synthesised diff buffer,
+        /// or a second render's raw pixels — where <see cref="WritePng"/> (which encodes only <c>_tex</c>)
+        /// does not apply.
+        /// </summary>
+        /// <param name="rgba32">Flat RGBA32 buffer; length must be <c>width * height * 4</c>.</param>
+        /// <param name="width">Buffer width, px.</param>
+        /// <param name="height">Buffer height, px.</param>
+        /// <param name="filename">File name only (e.g. "gv0-fill.actual.png"); no path.</param>
+        /// <returns>Absolute path of the written file.</returns>
+        public static string WritePngFromRgba32(byte[] rgba32, int width, int height, string filename)
+        {
+            string snapshotsDir = GetSnapshotsDir();
+            Directory.CreateDirectory(snapshotsDir);
+            string path = Path.Combine(snapshotsDir, filename);
+            File.WriteAllBytes(path, EncodeRgba32ToPng(rgba32, width, height));
+            return path;
+        }
+
+        /// <summary>
+        /// Encodes <paramref name="rgba32"/> (bottom-left origin, same convention as <see cref="RawPixels"/>)
+        /// to PNG bytes via a throwaway <see cref="Texture2D"/>. Shared by <see cref="WritePngFromRgba32"/>
+        /// and <c>GoldenImage</c>'s bake path (which writes to a different directory, so it cannot reuse
+        /// <see cref="WritePngFromRgba32"/> directly).
+        /// </summary>
+        /// <param name="rgba32">Flat RGBA32 buffer; length must be <c>width * height * 4</c>.</param>
+        /// <param name="width">Buffer width, px.</param>
+        /// <param name="height">Buffer height, px.</param>
+        internal static byte[] EncodeRgba32ToPng(byte[] rgba32, int width, int height)
+        {
+            var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            try
+            {
+                tex.LoadRawTextureData(rgba32);
+                tex.Apply(updateMipmaps: false);
+                return ImageConversion.EncodeToPNG(tex);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(tex);
+            }
+        }
+
+        /// <summary>
         /// Releases the <see cref="RenderTexture"/> and <see cref="Texture2D"/>. Safe to call multiple times.
         /// </summary>
         public void Dispose()

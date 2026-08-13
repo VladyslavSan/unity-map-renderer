@@ -138,7 +138,7 @@ echo "exit: $CODE"
 if [ -f "$RESULTS" ]; then
   grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$RESULTS" | head -1
   grep -oE '<test-case [^>]*' "$RESULTS" \
-    | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
+    | sed -E 's/.*fullname="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
 fi
 
 COMPILE_ERRORS="$(grep -E 'error CS' "$LOG" 2>/dev/null | sort -u)"

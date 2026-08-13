@@ -161,9 +161,24 @@ namespace MapRenderer.Tests
             view.Config.MaxMeshBuildsPerTick = 64;           // kick all tiles
             view.Config.MaxVerticesPerTick      = int.MaxValue;
             view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
-            view.LateUpdate(); Thread.Sleep(10);   // request
-            view.LateUpdate(); Thread.Sleep(10);   // observe → ReadyBytes
-            view.LateUpdate(); Thread.Sleep(2000); // kick all; wait for every mesh build to complete
+            view.LateUpdate();                     // request
+
+            // The fetch task carries the DECODE too, so a cover's fetches complete measurably later than a
+            // fixed pair of sleeps can assume — and if the observe tick lands early, nothing is kicked and
+            // the backlog these teeth measure is empty. Pump until every loaded tile has been kicked
+            // instead. The DRIVE changed; what the teeth assert about the consume budget did not.
+            int kicked = 0;
+            for (int f = 0; f < 3000; f++)
+            {
+                Thread.Sleep(1);
+                view.LateUpdate();
+                kicked += view.MeshBuildsKickedLastTick();
+                if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+            }
+            Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
+                "drive precondition: every cover tile must have been kicked, or there is no backlog to budget");
+
+            Thread.Sleep(2000);                    // wait for every mesh build to complete
             return (go, view);
         }
 
@@ -199,17 +214,23 @@ namespace MapRenderer.Tests
                 Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
                     "Tooth (a): after Tick 1 (requests only), no kicks issued yet.");
 
-                // Tick 2: observe completed fetches → ReadyBytes set. Still no kicks.
-                Thread.Sleep(2);
-                view.LateUpdate();
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
-                    "Tooth (a): after observe Tick, kicks still 0 (kick deferred to next Tick).");
+                // Pump to the FIRST kick tick instead of assuming it is tick 3. The fetch task now carries
+                // the tile's DECODE, so "fetches are observed by tick 2" is no longer a safe assumption at a
+                // fixed 2 ms sleep — on a slow machine tick 2 becomes the request tick and tick 3 the observe
+                // tick, and the cap assertion reads 0 for a reason that has nothing to do with the cap. The
+                // DRIVE is what changed; the property is identical, and the assertion below is if anything
+                // sharper: on the first tick that kicks anything at all, it must kick exactly one.
+                int kickTickFrames = 0;
+                while (view.MeshBuildsKickedLastTick() == 0 && kickTickFrames++ < 3000)
+                {
+                    Thread.Sleep(1);
+                    view.LateUpdate();
+                }
 
-                // Tick 3: first kick Tick — cap of 1 must bind.
-                view.LateUpdate();
                 Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
-                    $"Tooth (a): cap=1 must limit kicks to exactly 1 on the first kick Tick " +
-                    $"(loaded tiles = {view.LoadedTileCount()}).");
+                    $"Tooth (a): cap=1 must limit kicks to exactly 1 on the FIRST tick that kicks at all " +
+                    $"(loaded tiles = {view.LoadedTileCount()}). A 0 here means the pump gave up before any " +
+                    "kick fired; anything above 1 is the cap failing to bind.");
 
                 // Settle to confirm all tiles eventually complete under the cap.
                 PumpUntilSettled(view);

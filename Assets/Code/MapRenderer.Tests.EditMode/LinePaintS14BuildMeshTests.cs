@@ -8,12 +8,14 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Unity.Mathematics;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -57,23 +59,27 @@ namespace MapRenderer.Tests
         /// Load geolines features from fixture, inject a discriminating string property.
         /// Reuses real MVT LineString geometry — no hand-encoding.
         /// </summary>
-        private static List<MvtFeature> LoadGeolinesWithProperty(
+        /// <remarks>IR C1 P3: a decoded <c>MvtFeature</c> no longer carries a command stream, so the
+        /// injected-property doubles are rebuilt as <c>DictionaryFeature</c>s over the fixture's REAL
+        /// LineString streams, read from the bytes by <c>MvtFixtureStreams</c>. Same geometry, same order —
+        /// only the property bag is synthetic, which is what this fixture was always doing.</remarks>
+        private static List<IFeature> LoadGeolinesWithProperty(
             string propKey, params string[] propValues)
         {
-            var tile = MvtDecoder.Decode(LoadFixture());
-            var layer = tile.GetLayer("geolines");
+            MvtFixtureStreams.Layer layer = MvtFixtureStreams.ReadLayer(LoadFixture(), "geolines");
             Assert.IsNotNull(layer, "geolines layer must be present in fixture.");
 
-            var result = new List<MvtFeature>();
+            var result = new List<IFeature>();
             int vi = 0;
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.LineString) continue;
+                if (layer.Kinds[fi] != TileGeometryType.LineString) continue;
 
-                // Inject the discriminating property (overwrite if already present).
                 string value = vi < propValues.Length ? propValues[vi] : propValues[propValues.Length - 1];
-                feature.Properties[propKey] = Value.String(value);
-                result.Add(feature);
+                result.Add(new DictionaryFeature(
+                    properties:   new Dictionary<string, Value> { [propKey] = Value.String(value) },
+                    geometryType: TileGeometryType.LineString,
+                    geometry:     layer.Commands[fi]));
                 vi++;
 
                 if (vi >= Math.Max(propValues.Length, 2)) break; // need at least 2 features
@@ -122,11 +128,15 @@ namespace MapRenderer.Tests
             var layout = new Line.LayoutProperties(paintLayer);
 
             var mda = Mesh.AllocateWritableMeshData(1);
+            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // feature list IS the layer here, so ordinals are 0..n-1.
+            TileGeometryBuffers geometry =
+                TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
                 StyledLineTileBuilder.WriteMeshData(
-                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
-                    out int vertexCount, out _);
+                    mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
+                    TestOriginMerc, out int vertexCount, out _);
 
                 Assert.Greater(vertexCount, 0,
                     "WriteMeshData must produce geometry for geolines features with a match expression.");
@@ -151,6 +161,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                geometry.Dispose();
                 mda.Dispose();
             }
         }
@@ -179,11 +190,15 @@ namespace MapRenderer.Tests
             var layout = new Line.LayoutProperties(paintLayer);
 
             var mda = Mesh.AllocateWritableMeshData(1);
+            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // feature list IS the layer here, so ordinals are 0..n-1.
+            TileGeometryBuffers geometry =
+                TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
                 StyledLineTileBuilder.WriteMeshData(
-                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
-                    out int vertexCount, out _);
+                    mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
+                    TestOriginMerc, out int vertexCount, out _);
 
                 Assert.Greater(vertexCount, 0,
                     "WriteMeshData must produce geometry for geolines features with a constant color.");
@@ -207,6 +222,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                geometry.Dispose();
                 mda.Dispose();
             }
         }
@@ -245,11 +261,15 @@ namespace MapRenderer.Tests
                 "WidthKind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
+            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // feature list IS the layer here, so ordinals are 0..n-1.
+            TileGeometryBuffers geometry =
+                TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
                 StyledLineTileBuilder.WriteMeshData(
-                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
-                    out int vertexCount, out _);
+                    mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
+                    TestOriginMerc, out int vertexCount, out _);
 
                 Assert.Greater(vertexCount, 0,
                     "WriteMeshData must produce geometry for geolines features with a data-driven width.");
@@ -271,6 +291,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                geometry.Dispose();
                 mda.Dispose();
             }
         }
@@ -309,11 +330,15 @@ namespace MapRenderer.Tests
                 "OpacityKind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
+            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // feature list IS the layer here, so ordinals are 0..n-1.
+            TileGeometryBuffers geometry =
+                TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
                 StyledLineTileBuilder.WriteMeshData(
-                    mda[0], features, paint, layout, TestZoom, TestExtent, TestTileId, TestOriginMerc,
-                    out int vertexCount, out _);
+                    mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
+                    TestOriginMerc, out int vertexCount, out _);
 
                 Assert.Greater(vertexCount, 0,
                     "WriteMeshData must produce geometry for geolines features with a data-driven opacity.");
@@ -335,6 +360,7 @@ namespace MapRenderer.Tests
             }
             finally
             {
+                geometry.Dispose();
                 mda.Dispose();
             }
         }

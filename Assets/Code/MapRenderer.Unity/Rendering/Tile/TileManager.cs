@@ -5,6 +5,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
@@ -13,9 +14,11 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Common;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Tiles;
 using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
 using EntBackend = MapRenderer.Unity.Rendering.Backend.Entities;
 using GOBackend = MapRenderer.Unity.Rendering.Backend.GameObjects;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {
@@ -160,7 +163,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// container GameObject.
         ///
         /// S47/S51: the lifecycle is now:
-        ///   1. Fetch (Request → UniTask[IDecodedTileHandle] in-flight, stored as .Preserve())
+        ///   1. Fetch (Request → UniTask[SharedDisposable[IDecodedTile]] in-flight, stored as .Preserve())
         ///   2. Mesh build kicked (MeshBuildTask in-flight; FetchCompleted = true)
         ///   3. Mesh build consumed (Built = true; MeshBuildTask = default; Go = container)
         ///
@@ -174,7 +177,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         private struct LoadedTile
         {
-            public UniTask<IDecodedTileHandle> Request;
+            public UniTask<SharedDisposable<IDecodedTile>> Request;
             public bool                        FetchCompleted; // fetch done; mesh build may be in-flight
             public UniTask<MeshBuildResult>    MeshBuildTask;  // default until fetch completes; default after consumed
             public bool                        HasMeshBuild;   // true when MeshBuildTask is valid
@@ -217,12 +220,30 @@ namespace MapRenderer.Unity.Rendering.Tile
             public int ConsumeCursor;
 
             /// <summary>
-            /// S55/A4: the decode-provisioning handle minted by the fetch (Epic A / A7:
-            /// <see cref="ITileFeatureSource.GetTile"/>'s result), awaiting a (capped) mesh build kick. Set
-            /// when the fetch completes and the per-tick kick cap has been reached. Null in all other states.
-            /// Cleared (to null) when KickMeshBuild fires. GC-owned; no special disposal needed on eviction —
-            /// a never-kicked entry is simply dropped with the record, no lifetime protocol to run (Q1).</summary>
-            public IDecodedTileHandle ReadyDecode;
+            /// S55/A4: the decode-provisioning handle the fetch produced (Epic A / A7:
+            /// <see cref="ITileFeatureSource.GetTile"/>'s result). Set when the fetch completes; null before
+            /// that, and null again once the record no longer owns it.
+            ///
+            /// <para><b>This field IS one reference</b> to an already-decoded tile holding
+            /// <c>Allocator.Persistent</c> buffers. R1: it is cleared exactly ONE way now —
+            /// <see cref="RenderTeardownRecord"/> RELEASES it (cover change, eviction, restyle, teardown) —
+            /// for a kicked record precisely as much as a never-kicked one. The mesh kick no longer TRANSFERS
+            /// this reference: it takes its own separate one (<see cref="KickMeshBuild"/>'s prologue
+            /// <c>Acquire()</c>), so this field stays live and unchanged across the whole kick. Dropping it
+            /// any other way leaks the tile.</para>
+            ///
+            /// <para><b>Deliberate cost, recorded rather than tested (no observing tooth exists for it — see
+            /// <c>recorded-limitation-needs-an-observing-tooth</c>).</b> Because this field now survives the
+            /// kick instead of being released when the mesh build completes, a decoded tile's
+            /// <c>Allocator.Persistent</c> buffers live for the record's WHOLE in-cover lifetime, not just
+            /// until its mesh is built — a DURATION increase in peak resident decoded-tile memory on top of
+            /// the eager-decode BREADTH increase the prior stage already accepted (every fetched cover tile
+            /// decodes, kicked or not). Rendered output is unaffected — this is a resource-lifetime cost, not
+            /// a behaviour change — and it was chosen knowingly over the alternative (release at kick
+            /// completion instead of at teardown), which would have partly resurrected the transfer machinery
+            /// this stage deletes. A future residency-ceiling tooth, if one is ever added, is the thing that
+            /// would stop this being deliberate.</para></summary>
+            public SharedDisposable<IDecodedTile> Decode;
         }
 
         /// <summary>
@@ -289,8 +310,28 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// S83b: value-equality identity of a resolved source definition — the restyle diff key (decision
         /// 7a). Two sources are "the same" (keep the pipeline, reuse cached bytes) iff their resolved
-        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds match. Remote-TileJSON content drift is out of scope
-        /// (no refresh — decision 4), so equality is purely over the resolved fields.
+        /// <c>Url</c>/<c>tiles[]</c>/zoom/scheme/bounds/<c>data</c> match. Remote-TileJSON content drift is
+        /// out of scope (no refresh — decision 4), so equality is purely over the resolved fields.
+        ///
+        /// <para><b>Why <c>data</c> is one of them.</b> A source whose payload is INLINE has no
+        /// <c>url</c> and no <c>tiles[]</c>, and takes the spec defaults for zoom/scheme/bounds — so without
+        /// this field every inline source in existence is value-equal to every other, and a restyle from one
+        /// dataset to a different one keeps the FIRST one's pipeline and renders the wrong geometry, silently.
+        /// It is carried as a canonical STRING (<see cref="JsonCanonical"/>) rather than as the DOM node:
+        /// reference identity would flip the failure the other way — a restyle re-parses the document, so
+        /// every inline source would compare as changed and rebuild on every restyle, quietly retiring the
+        /// keep-the-pipeline path this key exists to provide.</para>
+        ///
+        /// <para><b>Why <c>type</c> is one of them.</b> It is not a tolerated extra field — it is the field
+        /// that SELECTS WHICH FACTORY RUNS (<c>MapView.BuildSourceSpecs</c> branches on it to build a byte
+        /// fetcher or a local slicer), so two definitions differing only in it are not the same source by any
+        /// reading of the question this key asks. Without it they hash and compare equal and
+        /// <see cref="SetSources"/> keeps the first pipeline, leaving the map fetching MVT for a style that
+        /// now declares inline GeoJSON, or slicing a retired dataset for one that now declares vector tiles.
+        /// The repro is narrow — each side must also carry the other type's keys, since a data-less geojson
+        /// source and a tiles-less vector source are both skipped before a spec is minted — but its
+        /// structural value does not depend on the repro: <b>do not delete this field for being
+        /// untriggerable.</b></para>
         /// </summary>
         internal readonly struct SourceKey : System.IEquatable<SourceKey>
         {
@@ -300,15 +341,24 @@ namespace MapRenderer.Unity.Rendering.Tile
             public readonly int    MaxZoom;
             public readonly string Scheme;
             public readonly string Bounds; // bounds joined with ',' — value-equality (null when default/absent)
+            public readonly string Data;   // canonical `data` text — null when the key is absent
+            public readonly SourceType Type; // the discriminator that selects the factory — see the type doc
 
-            public SourceKey(string url, string tiles, int minZoom, int maxZoom, string scheme, string bounds)
+            /// <summary>PRIVATE, and every parameter required, so <see cref="From"/> is the only way to
+            /// mint a key. A defaulted <c>type</c> (or <c>data</c>) is the recorded bug wearing a legal
+            /// signature: a caller that omitted it would build a key that compares equal across the very
+            /// field the pipeline diff branches on.</summary>
+            private SourceKey(string url, string tiles, int minZoom, int maxZoom, string scheme, string bounds,
+                string data, SourceType type)
             {
+                Type    = type;
                 Url     = url;
                 Tiles   = tiles;
                 MinZoom = minZoom;
                 MaxZoom = maxZoom;
                 Scheme  = scheme;
                 Bounds  = bounds;
+                Data    = data;
             }
 
             /// <summary>Builds the key from a resolved <see cref="SourceDefinition"/> (post-S83a resolution).</summary>
@@ -316,12 +366,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 string tiles  = def.Tiles  != null ? string.Join("\n", def.Tiles) : null;
                 string bounds = def.Bounds != null ? string.Join(",",  def.Bounds) : null;
-                return new SourceKey(def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, bounds);
+                string data   = def.Data   != null ? JsonCanonical.Write(def.Data) : null;
+                return new SourceKey(def.Url, tiles, def.MinZoom, def.MaxZoom, def.Scheme, bounds, data, def.Type);
             }
 
             public bool Equals(SourceKey o)
-                => Url        == o.Url     && Tiles  == o.Tiles  && MinZoom == o.MinZoom
-                   && MaxZoom == o.MaxZoom && Scheme == o.Scheme && Bounds  == o.Bounds;
+                => Type       == o.Type    && Url    == o.Url    && Tiles   == o.Tiles
+                   && MinZoom == o.MinZoom && MaxZoom == o.MaxZoom && Scheme == o.Scheme
+                   && Bounds  == o.Bounds  && Data   == o.Data;
 
             public override bool Equals(object obj) => obj is SourceKey o && Equals(o);
 
@@ -336,6 +388,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                     h = h * 31 + MaxZoom;
                     h = h * 31 + (Scheme ?? string.Empty).GetHashCode();
                     h = h * 31 + (Bounds ?? string.Empty).GetHashCode();
+                    h = h * 31 + (Data   ?? string.Empty).GetHashCode();
+                    h = h * 31 + (int)Type;
                     return h;
                 }
             }
@@ -474,7 +528,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S105/A5b: the symbol-agnostic seam through which the DECOUPLED symbol-label subsystem is driven —
         // TileManager holds only this interface (never a label/store/glyph type). The per-tile mesh KICK
         // (PumpPending) calls TryBeginBuild on the MAIN THREAD, isolated (a throwing factory must never fault
-        // the tile pipeline, mirroring ObserveFetchOutcome's per-tile fault isolation), then threads the
+        // the tile pipeline, mirroring TakeDecodeFromFetch's per-tile fault isolation), then threads the
         // returned pass into the SAME kick task so the symbol worker runs alongside the mesh pass, sharing
         // the A4 shared-decode entry (no re-fetch, no second decode, no touching the mesh/disposal path). The
         // tile LIFECYCLE (which tiles are loaded → which labels render) is NOT pushed — the subsystem PULLS
@@ -560,10 +614,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         // "UnityWebRequestException: Unknown Error". Stash the in-flight fetch here on release; each Tick
         // observes completed ones (and Dispose spins the rest), so every fetch task's outcome is consumed
         // exactly once. Main-thread only, like _pendingDisposal.
-        private readonly List<UniTask<IDecodedTileHandle>> _pendingFetchDisposal = new(8);
+        private readonly List<UniTask<SharedDisposable<IDecodedTile>>> _pendingFetchDisposal = new(8);
 
         // S84: running count of genuine (non-cancellation) fetch errors, for bounded logging.
         private int _fetchErrorCount;
+
+        // Running count of DECODE faults, kept separate from _fetchErrorCount so a malformed tile can never
+        // be throttled away inside a burst of network errors (they arrive on the same task under D1).
+        private int _decodeErrorCount;
 
         /// <summary>
         /// S82: <paramref name="cacheConfig"/> supplies the <see cref="PreparedTileCache"/>'s master toggle
@@ -765,6 +823,22 @@ namespace MapRenderer.Unity.Rendering.Tile
                     n += _pipelines[i].FeatureSource.InFlightCount;
                 }
 
+                return n;
+            }
+        }
+
+        /// <summary>Number of pipelines that actually own a feature source — i.e. sources the style got
+        /// WIRED, excluding the synthetic source-less background pipeline. Zero says "nothing was wired",
+        /// which is the only positive statement available about a source the style-build SKIPPED: not
+        /// throwing, not fetching and not rendering are all equally satisfied by a source substituted with
+        /// an empty dataset.</summary>
+        internal int WiredFeatureSourceCount
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _pipelines.Count; i++)
+                    if (!_pipelines[i].IsSourceless) n++;
                 return n;
             }
         }
@@ -1177,7 +1251,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         else
                         {
                             _prepared.Misses++;
-                            UniTask<IDecodedTileHandle> fetchReq;
+                            UniTask<SharedDisposable<IDecodedTile>> fetchReq;
                             {
                                 using var sSchedReq = PmSchedulerReq.Auto();
                                 // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
@@ -1283,16 +1357,24 @@ namespace MapRenderer.Unity.Rendering.Tile
                     // S84: observe the fetch outcome exactly once (Succeeded / Faulted / Canceled) so a
                     // faulted fetch is never dropped unobserved. Epic A / A7: the mint (bytes → handle) now
                     // happens INSIDE ITileFeatureSource.GetTile; this just observes the handle it returned.
-                    IDecodedTileHandle handle = ObserveFetchOutcome(req, logErrors: true);
+                    // Non-null ⇒ STORED in the record below and kicked by (a2) in this same iteration; null
+                    // ⇒ absent, faulted or cancelled, in which case TakeDecodeFromFetch produced no lease
+                    // and there is nothing to release.
+                    SharedDisposable<IDecodedTile> handle = TakeDecodeFromFetch(req);
                     if (handle != null)
                     {
-                        // Kick mesh build synchronously (wait inline). A4: mint inline, single-consumer — no
-                        // push here today, none added. A5b: symbolPass is left at its default (null) — the
-                        // drain path stays symbol-silent BY CONSTRUCTION (§Q-Drain; symbolPass is computed
-                        // only at the PumpPending kick site).
-                        var tessTask = KickMeshBuild(lt, id, handle, sourceId);
-                        lt.HasMeshBuild  = true;
-                        lt.MeshBuildTask = tessTask;
+                        // STORE it in the record rather than passing it straight to KickMeshBuild. This used
+                        // to be the one place a decoded-tile reference lived as a bare LOCAL, and a bare
+                        // local is the one owner no funnel can see: a main-thread prologue throw inside the
+                        // kick unwound this frame with the last reference in it. Held in `lt.Decode` the
+                        // reference is instead recovered by a funnel on every exception path — this `lt` is
+                        // a COPY that is only written back to `_loaded` at the end of the iteration, so a
+                        // throw leaves `_loaded[key]` with `FetchCompleted == false` and its PRESERVED
+                        // `Request`, which funnel 2 (DiscardFetchOutcome) consumes and releases.
+                        // Behaviourally identical on the happy path: (a2) below kicks it in this same
+                        // iteration — its guard is satisfied the moment this line runs — with the same
+                        // default (null) symbolPass, so the drain stays symbol-silent BY CONSTRUCTION.
+                        lt.Decode = handle;
                     }
                     else
                     {
@@ -1303,15 +1385,20 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
                 }
 
-                // (a2) S55: fetch completed with data but mesh build not yet kicked (cap-deferred in
-                // normal pump). Kick inline here — drain ignores per-tick caps. A5b: symbolPass left at its
-                // default (null) — a cap-deferred tile that settles via drain never attempts a symbol build
-                // either (§Q-Drain KEEP), matching the drain path's existing symbol-silent behaviour.
-                if (lt.FetchCompleted && lt.ReadyDecode != null && !lt.HasMeshBuild)
+                // (a2) S55: fetch completed with data but mesh build not yet kicked — either cap-deferred
+                // in the normal pump, or observed by (a) just above (the two paths share this ONE kick site
+                // so the record is the owner in both). Kick inline here — drain ignores per-tick caps. A5b:
+                // symbolPass left at its default (null) — a cap-deferred tile that settles via drain never
+                // attempts a symbol build either (§Q-Drain KEEP), matching the drain path's existing
+                // symbol-silent behaviour.
+                if (lt.FetchCompleted && lt.Decode != null && !lt.HasMeshBuild)
                 {
-                    lt.MeshBuildTask = KickMeshBuild(lt, id, lt.ReadyDecode, sourceId);
+                    lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId);
                     lt.HasMeshBuild  = true;
-                    lt.ReadyDecode   = null;
+                    // R1: the record KEEPS its reference — no transfer, no null-out. The kick took its own
+                    // separate reference in KickMeshBuild's prologue; this `lt.Decode` stays live until
+                    // funnel 1 (RenderTeardownRecord) or funnel 2 (DiscardFetchOutcome, if this `lt` copy
+                    // never makes it back to `_loaded`) releases it.
                 }
 
                 // Epic A / A2 (design §E step 4, HIGH a): a source-less (background) record the Tick loop
@@ -1319,7 +1406,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // inline here — drain ignores per-tick caps. Without this branch the record falls straight to
                 // the "else { lt.Built = true; }" no-mesh settle below (§F tooth 12) — invisible in exactly
                 // the deterministic/snapshot harnesses that settle via DrainMeshBuilds.
-                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.ReadyDecode == null &&
+                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.Decode == null &&
                     _pipelines[key.Slot].IsSourceless)
                 {
                     lt.MeshBuildTask = KickSourcelessBackground(id, lt.TileOriginRender);
@@ -1353,7 +1440,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///
         /// Mesh build (fetch→kick): for tiles whose fetch completed, mint the shared decode entry and kick a
         /// background mesh-build UniTask (S55: at most <paramref name="maxMeshBuildsPerTick"/> kicks per
-        /// Tick — the entry is retained in <see cref="LoadedTile.ReadyDecode"/> until the cap allows).
+        /// Tick — the entry is retained in <see cref="LoadedTile.Decode"/> until the cap allows).
         ///
         /// Consume (build→upload): for tiles whose mesh-build UniTask is completed, consume the result on the
         /// main thread (UploadMesh → backend registration) MESH-by-mesh (S87). The per-frame budget is dual —
@@ -1441,8 +1528,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                     continue;
                 }
 
-                // ── Kick a mesh build from ReadyDecode ─────────────────────────────────────────
-                if (lt.FetchCompleted && lt.ReadyDecode != null)
+                // ── Kick a mesh build from Decode ─────────────────────────────────────────
+                if (lt.FetchCompleted && lt.Decode != null)
                 {
                     // Stall #2: don't start a NEW background build for a record already condemned to release
                     // (DrainReleaseQueue will free it within a few frames). In-flight builds still finish and
@@ -1455,13 +1542,14 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                     if (buildsKicked >= buildCap)
                     {
-                        // Cap reached this tick — the shared decode is retained for next Tick.
+                        // Cap reached this tick — the record keeps its reference (and with it the decoded
+                        // tile's buffers) until a later Tick kicks, or teardown releases it.
                         pending++;
                         continue;
                     }
 
                     // Epic A / A5b: obtain the symbol worker pass on the MAIN THREAD, isolated (a throwing
-                    // factory must never fault the pump — mirrors ObserveFetchOutcome's per-tile fault
+                    // factory must never fault the pump — mirrors TakeDecodeFromFetch's per-tile fault
                     // isolation), then thread it into the SAME kick task so the symbol worker rides the mesh
                     // kick, sharing the shared decode below (the feed swap — retires the parallel push).
                     Processing.ISymbolTileWorkerPass symbolPass = null;
@@ -1474,9 +1562,12 @@ namespace MapRenderer.Unity.Rendering.Tile
                         Debug.LogWarning($"[TileManager] symbol factory (begin-build) threw for {id}: {ex.Message}");
                     }
 
-                    lt.MeshBuildTask = KickMeshBuild(lt, id, lt.ReadyDecode, sourceId, symbolPass);
+                    lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId, symbolPass);
                     lt.HasMeshBuild  = true;
-                    lt.ReadyDecode   = null;
+                    // R1: the record KEEPS its reference — no transfer, no null-out, no Release() here
+                    // (which would free the tile mid-build). The kick took its own separate reference in
+                    // KickMeshBuild's prologue; this `lt.Decode` stays live until funnel 1
+                    // (RenderTeardownRecord) releases it, kicked or not.
                     buildsKicked++;
                     MeshBuildsKickedLastTick = buildsKicked;
                     pending++; // mesh build now in-flight
@@ -1485,10 +1576,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
 
                 // ── Epic A / A2 (design §E step 4, HIGH 2): kick a source-less (background) build ──────
-                // A pending record the Tick cover-loop only CREATED (never kicked — no ReadyDecode to
+                // A pending record the Tick cover-loop only CREATED (never kicked — no Decode to
                 // dispatch on). Rides the SAME condemned-skip + buildCap throttle as the byte path above, so
                 // background loads at the shared build cadence, never as one synchronous cover-wide burst.
-                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.ReadyDecode == null &&
+                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.Decode == null &&
                     _pipelines[key.Slot].IsSourceless)
                 {
                     if (_releaseQueued.Contains(key))
@@ -1523,16 +1614,19 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // S84: observe the fetch outcome exactly once (handles Succeeded / Faulted / Canceled) so
                 // a faulted fetch is never left for UniTask's unobserved-exception finalizer.
                 lt.FetchCompleted = true;
-                IDecodedTileHandle handle = ObserveFetchOutcome(lt.Request, logErrors: true);
+                SharedDisposable<IDecodedTile> handle = TakeDecodeFromFetch(lt.Request);
                 if (handle != null)
                 {
                     // A4/A7: retain the decode-provisioning handle ONCE per fetch — the single fork point
                     // where one (source, tile) splits into the mesh and symbol cadences. Kick deferred to a
                     // subsequent Tick (capped by buildCap). A5b: the symbol cadence is no longer pushed here —
                     // it is driven from the KICK block above (SymbolWorkerFactory.TryBeginBuild), sharing
-                    // this SAME entry. Epic A / A7: the mint (bytes → handle) already happened inside
-                    // ITileFeatureSource.GetTile — this just retains what it returned.
-                    lt.ReadyDecode = handle;
+                    // this SAME entry. Epic A / A7: the DECODE already happened inside
+                    // ITileFeatureSource.GetTile — this just retains what it returned, and with it the
+                    // creator's REFERENCE. The acquire was the decode, not this line; from here the record
+                    // owns it, and R1: RenderTeardownRecord (funnel 1) alone is what ends that ownership —
+                    // a kick no longer transfers it (KickMeshBuild takes its own separate reference instead).
+                    lt.Decode = handle;
                     pending++; // decode awaiting kick
                 }
                 else
@@ -1580,9 +1674,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// labels never appeared in snapshots and no test drove symbols via drain).</para>
         /// </summary>
         private UniTask<MeshBuildResult> KickMeshBuild(
-            LoadedTile                       lt, TileId id, IDecodedTileHandle decode, string sourceId,
+            LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
             Processing.ISymbolTileWorkerPass symbolPass = null)
         {
+            // OWNERSHIP (R1 — symmetric self-owned references): `decode` is BORROWED for this whole
+            // prologue and stays the CALLER's — the record's reference is no longer transferred into the
+            // kick, and no call site nulls its field around this call any more (see the LoadedTile.Decode
+            // field doc: RenderTeardownRecord, funnel 1, is its only release, for the record's whole in-cover
+            // lifetime, kicked or not). The KICK instead takes its OWN separate reference — `decode.Acquire()`
+            // below, immediately before the pool lambda that reads it is created — and releases exactly that one
+            // from the lambda's `finally`. The `RunOnThreadPool` hand-off can itself throw synchronously
+            // (OOM), so the Acquire is guarded (try/catch below) to release on that path too. A main-thread prologue
+            // throw therefore never touches the kick's reference at all (it is not acquired yet), and the
+            // caller's own reference is untouched either way — one of the funnels frees it in due course.
             var     layersSnapshot = _layers.SnapshotLayers();
             double  zoom           = id.Z;
             double3 tileOrigin     = lt.TileOriginRender;
@@ -1598,8 +1702,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // ── MAIN THREAD: one ITileMeshLayerProcessor per this-source layer, each pre-allocating its own
             // writable MeshDataArray (Mesh.AllocateWritableMeshData is main-thread only — spike-verified).
-            // Epic A / A1: the worker decodes ONCE and writes into these processors' arrays in place; the
-            // main thread applies at consume. Every allocated array is wrapped by a processor's Complete()
+            // Epic A / A1: the worker writes into these processors' arrays in place; the main thread
+            // applies at consume. Every allocated array is wrapped by a processor's Complete()
             // (written OR 0-vertex) — via TileLayerProcessorRunner's settlement loop below — so it is
             // disposed exactly once on the main thread, including on a faulted tile.
             var processors = new Processing.ITileMeshLayerProcessor[dense];
@@ -1623,31 +1727,58 @@ namespace MapRenderer.Unity.Rendering.Tile
                 BufferClip       = _bufferClip,
             };
 
-            return UniTask.RunOnThreadPool(() =>
+            decode.Acquire(); // the kick's OWN reference — see the ownership comment above
+            try
             {
-                // The fan-out point (Epic A / A1): read the shared decode (decoding it if this cadence
-                // arrives first — A4), run every this-source processor once in dense order against that
-                // same decoded tile, then settle every one of them exactly once — the moved form of today's
-                // ensure-wrapped loop.
-                Style.IRenderLayerPayload[] payloads =
-                    Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors);
-                var result = new MeshBuildResult { Payloads = payloads }; // mesh domain closed, arrays settled
-
-                // Epic A / A5b (§Q5): fault domain 2, disjoint from the mesh domain above — the mesh RESULT
-                // is already built, so a symbol fault below can never strand a mesh MeshDataArray. The pass
-                // is infallible BY CONTRACT (owns its own try/catch), but this outer guard makes that
-                // invariant STRUCTURAL rather than a trust in the contract — belt-and-braces over the pass's
-                // own inner guard, exactly A1's per-processor Complete() guard precedent (RunWorkerPass above).
-                try
+                return UniTask.RunOnThreadPool(() =>
                 {
-                    symbolPass?.RunWorkerAndHandoff(decode);
-                }
-                catch (System.Exception)
-                { /* a contract-violating throw must not strand the mesh arrays */
-                }
+                    // FUNNEL 3 successor: the kick's OWN reference, acquired in the main-thread prologue above —
+                    // no longer a transfer of the record's. It covers the mesh pass AND the un-parked symbol pass
+                    // below, which is what makes those two cadences share a single decoded tile (and, with it,
+                    // one geometry buffer per source-layer across both). Releasing it here frees the tile's
+                    // Allocator.Persistent buffers ONLY if it is the last reference — the record's own is always
+                    // still outstanding at this point (RenderTeardownRecord is what drops it), and a parked
+                    // symbol build may hold a further one of its own, taken during the symbol pass below.
+                    try
+                    {
+                        // The fan-out point (Epic A / A1): read the already-decoded tile off the lease, run every
+                        // this-source processor once in dense order against that same tile, then settle every one
+                        // of them exactly once — the moved form of today's ensure-wrapped loop.
+                        Style.IRenderLayerPayload[] payloads =
+                            Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors);
+                        var result = new MeshBuildResult { Payloads = payloads }; // mesh domain closed, arrays settled
 
-                return result;
-            }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
+                        // Epic A / A5b (§Q5): fault domain 2, disjoint from the mesh domain above — the mesh
+                        // RESULT is already built, so a symbol fault below can never strand a mesh
+                        // MeshDataArray. The pass is infallible BY CONTRACT (owns its own try/catch), but this
+                        // outer guard makes that invariant STRUCTURAL rather than a trust in the contract —
+                        // belt-and-braces over the pass's own inner guard, exactly A1's per-processor
+                        // Complete() guard precedent (RunWorkerPass above).
+                        try
+                        {
+                            symbolPass?.RunWorkerAndHandoff(decode);
+                        }
+                        catch (System.Exception)
+                        { /* a contract-violating throw must not strand the mesh arrays */
+                        }
+
+                        return result;
+                    }
+                    finally
+                    {
+                        decode.Release();
+                    }
+                }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
+            }
+            catch
+            {
+                // The hand-off itself — the closure/state-machine allocation, or the pool schedule — can
+                // throw SYNCHRONOUSLY (OOM) before the lambda runs, and the lambda's `finally` is the only
+                // release. Mirror TryParkBuild's Acquire->Enqueue guard: free the kick's reference here, or
+                // the tile's Allocator.Persistent buffers leak with nothing left to observe them.
+                decode.Release();
+                throw;
+            }
         }
 
         /// <summary>
@@ -2003,9 +2134,32 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// caller's choice — <see cref="ReleaseTile"/> follows with <c>Scheduler.Release</c> (evicts the
         /// cache); restyle (decision 7b) calls this ALONE for a kept source so its cached bytes survive.
         /// The caller removes the key from <see cref="_loaded"/>.
+        ///
+        /// <para><b>The single record-teardown funnel.</b> All four abandonment paths reach a record through
+        /// here — cover change / eviction (<see cref="ReleaseTile"/>), restyle (<see cref="SetSources"/>) and
+        /// teardown (<see cref="DoDispose"/>, which cancels an in-flight fetch just before calling this and
+        /// spin-drains the pens afterwards). A new per-record teardown obligation belongs in this method and
+        /// nowhere else.</para>
         /// </summary>
         private void RenderTeardownRecord(ref LoadedTile lt)
         {
+            // FUNNEL 1: the record's own reference to its decoded tile. R1: this is now the ONLY release
+            // site for that reference, for a KICKED record as much as a never-kicked one — the record keeps
+            // its reference across the whole kick now (the kick takes its own separate one instead of a
+            // transfer), so a tile fetched but never kicked (cover churn, eviction, restyle, teardown) and a
+            // tile fetched, kicked and still in-cover both hold Allocator.Persistent buffers that only this
+            // release frees. These three lines are the whole of its lifetime protocol.
+            //
+            // DISARM BEFORE FIRING. The field is nulled BEFORE Release() runs, not after: Release() throws
+            // on an unbalanced release (that diagnostic is deliberate), and IDecodedTile.Dispose() can throw
+            // too. With the null-out afterwards, either throw leaves the field still armed with a handle
+            // whose reference is already gone, and the next teardown of the same record releases it a
+            // second time — turning one loud fault into a corrupted count. Same "a transfer nulls the
+            // source" rule as the mesh lifetime, applied to the effect ORDER and not just its presence.
+            SharedDisposable<IDecodedTile> decode = lt.Decode;
+            lt.Decode = null;
+            decode?.Release();
+
             // S84: if the FETCH is still in-flight, stash its preserved UniTask so it is observed when it
             // completes. Otherwise the dropped task faults unobserved → UnityWebRequestException console flood.
             if (!lt.FetchCompleted)
@@ -2064,18 +2218,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// S84: Observes a COMPLETED fetch task's terminal outcome exactly once and returns its
-        /// decode-provisioning handle (null on cancel/fault, or on an absent tile — Epic A / A7:
-        /// <see cref="ITileFeatureSource.GetTile"/> already mapped <c>!HasData</c> to null). This is the
-        /// single place a fetch <see cref="UniTask{T}"/> result is consumed, so a faulted/cancelled fetch is
-        /// never left for UniTask's unobserved-exception finalizer (the console-flood bug). A tile released
-        /// mid-fetch cancels its token, surfacing as <see cref="System.OperationCanceledException"/> (mapped
-        /// from the aborted request by <c>UnityWebRequestDataSource</c>) — benign, swallowed silently. A
-        /// genuine error (5xx / connection) is surfaced only when <paramref name="logErrors"/> is set (the
-        /// still-wanted path) and is bounded. Precondition: <c>req.Status.IsCompleted()</c>; safe because
-        /// <c>lt.Request</c> is <c>.Preserve()</c>d.
+        /// S84: Observes a COMPLETED fetch task's terminal outcome exactly once and hands the
+        /// decode-provisioning handle to the caller, who <b>now owns it</b> (null on cancel/fault, or on an
+        /// absent tile — Epic A / A7: <see cref="ITileFeatureSource.GetTile"/> already mapped
+        /// <c>!HasData</c> to null). One of exactly TWO ways a fetch <see cref="UniTask{T}"/> result may be
+        /// consumed — the other is <see cref="DiscardFetchOutcome"/> — so a faulted/cancelled fetch is never
+        /// left for UniTask's unobserved-exception finalizer (the console-flood bug). This is the
+        /// <b>still-wanted</b> arm: a genuine error (5xx / connection) is logged, bounded, by
+        /// <see cref="LogFetchErrorThrottled"/>. A tile released mid-fetch cancels its token, surfacing as
+        /// <see cref="System.OperationCanceledException"/> (mapped from the aborted request by
+        /// <c>UnityWebRequestDataSource</c>) — benign, swallowed silently. Precondition:
+        /// <c>req.Status.IsCompleted()</c>; safe because <c>lt.Request</c> is <c>.Preserve()</c>d.
         /// </summary>
-        private IDecodedTileHandle ObserveFetchOutcome(UniTask<IDecodedTileHandle> req, bool logErrors)
+        private SharedDisposable<IDecodedTile> TakeDecodeFromFetch(UniTask<SharedDisposable<IDecodedTile>> req)
         {
             try
             {
@@ -2085,10 +2240,54 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 return null; // tile released mid-fetch — benign cancellation
             }
+            catch (Processing.TileDecodeException ex)
+            {
+                // BEFORE the general arm, deliberately. Under the eager decode a malformed tile faults the
+                // same task a 5xx does, and routing both into one counter would let a genuinely broken tile
+                // hide behind 64 unrelated network errors — and would label it "tile fetch failed", which is
+                // a lie. The fetch succeeded; the bytes are bad. Its own counter, its own message.
+                LogDecodeErrorThrottled(ex);
+                return null;
+            }
             catch (System.Exception ex)
             {
-                if (logErrors) LogFetchErrorThrottled(ex);
+                LogFetchErrorThrottled(ex);
                 return null;
+            }
+        }
+
+        /// <summary>
+        /// S84: Observes a COMPLETED fetch task's terminal outcome exactly once and <b>throws the result
+        /// away</b> — the abandonment arm, for a tile nobody wants any more (released mid-fetch, or torn
+        /// down). Every outcome is swallowed silently: this path is reached only after the caller already
+        /// decided the tile is unwanted, so a 5xx here is noise, not news (exactly the pre-split
+        /// <c>logErrors: false</c> behaviour).
+        ///
+        /// <para><b>The <see langword="void"/> return type is load-bearing — for the CALLER.</b> A discard
+        /// site cannot bind the handle, so it cannot retain, re-consume or leak what the fetch produced:
+        /// caller-side ownership is compiler-enforced, not conventional. Keep it <see langword="void"/>:
+        /// the moment it hands something back it stops being a funnel and becomes a fourth thing to
+        /// remember. What it does NOT enforce, so that the guarantee is not read wider than it is: nothing
+        /// stops THIS method's own body from retaining or leaking what it observed — that half is a
+        /// per-record obligation, and it belongs to the runtime lifetime teeth, not to the signature.</para>
+        ///
+        /// Precondition: <c>req.Status.IsCompleted()</c>; safe because the stashed task is <c>.Preserve()</c>d.
+        /// </summary>
+        private void DiscardFetchOutcome(UniTask<SharedDisposable<IDecodedTile>> req)
+        {
+            try
+            {
+                // FUNNEL 2: a fetch that succeeded for a tile nobody wants any more still produced a
+                // DECODED tile — the eager decode ran the moment the bytes landed, so observing the outcome
+                // is no longer enough. This release is what frees its Allocator.Persistent buffers.
+                req.GetAwaiter().GetResult()?.Release();
+            }
+            catch (System.Exception)
+            {
+                // Cancelled (released mid-fetch) or faulted (5xx / connection / a malformed tile's
+                // TileDecodeException) — all expected on an abandoned tile, and all already observed by the
+                // GetResult above, which is the whole point of the call. A faulted task produced no lease,
+                // so there is nothing to release on this arm. Nothing to log, nothing to hand back.
             }
         }
 
@@ -2105,6 +2304,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
+        /// The DECODE sibling of <see cref="LogFetchErrorThrottled"/>, with the same bound and its OWN
+        /// counter. Two counters rather than one because the two faults have different causes and different
+        /// remedies: a fetch error is the network's, a decode fault is the tile's. Sharing a counter would
+        /// let a broken tile fall inside another failure's throttle window and never be seen at all.
+        /// </summary>
+        private void LogDecodeErrorThrottled(System.Exception ex)
+        {
+            _decodeErrorCount++;
+            if (_decodeErrorCount == 1 || (_decodeErrorCount & 63) == 0)
+                Debug.LogWarning($"[TileManager] tile decode failed ({_decodeErrorCount} total): {ex.Message}");
+        }
+
+        /// <summary>
         /// S84: Drains completed tasks from the mid-flight FETCH holding pen, observing (and discarding)
         /// each outcome silently — these are released tiles we no longer want. Non-blocking poll; called
         /// once per Tick (mirrors <see cref="DrainPendingDisposal"/>).
@@ -2118,7 +2330,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (!_pendingFetchDisposal[i].Status.IsCompleted())
                     continue; // still in-flight; check again next Tick
 
-                ObserveFetchOutcome(_pendingFetchDisposal[i], logErrors: false); // released → swallow silently
+                DiscardFetchOutcome(_pendingFetchDisposal[i]); // released → swallow silently
                 _pendingFetchDisposal.RemoveAt(i);
             }
         }
@@ -2150,31 +2362,39 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         protected override void DoDispose()
         {
-            // S51/S48: drain outstanding mesh build UniTasks before tearing down.
-            // Safe spin: mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
-            // so IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning
-            // here on the main thread is therefore deadlock-free.
+            // Teardown routes EVERY record through the SINGLE record-teardown funnel,
+            // RenderTeardownRecord — the same one cover-change, eviction (ReleaseTile) and restyle
+            // (SetSources) already use. It unregisters the record's instanced draw items, destroys
+            // its tracked Mesh assets (S51 leak guard: a Mesh asset is NOT freed just because nothing
+            // references it) and stashes any in-flight fetch / mesh build in the S48/S84 holding pens; the
+            // spin-drains below then take those pens to completion. This method used to hand-roll its own
+            // three loops instead, which made teardown a FOURTH record-teardown path — one that any future
+            // per-record obligation added to the funnel would silently miss.
             //
-            // S48: after spinning, dispose the NativeArray payload — we're tearing down and must
-            // not leak. (These are tiles still in _loaded; mid-flight-released tiles are in
-            // _pendingDisposal, drained separately below.)
+            // CANCEL THE FETCH FIRST, before the record is stashed: otherwise the spin further down would
+            // wait on a request that only the (later) source Dispose would cancel. Release does not touch
+            // _loaded, so iterating it here is safe. The `?.` is defensive only — a source-less record
+            // always has FetchCompleted == true, so this branch cannot reach a null FeatureSource today.
+            //
+            // Order: destroy meshes (here, inside the funnel) → dispose the backend (below), so the backend
+            // never references a freed Mesh.
             foreach (var kv in _loaded)
             {
-                if (kv.Value.HasMeshBuild)
-                {
-                    var tessTask = kv.Value.MeshBuildTask;
-                    // Thread.Sleep(1) yields real CPU time so the ThreadPool can complete the task.
-                    int spins = 0;
-                    while (!tessTask.Status.IsCompleted() && spins++ < 10000)
-                        Thread.Sleep(1);
-
-                    // S48: dispose the produced NativeArrays (or no-op if faulted/cancelled).
-                    if (tessTask.Status == UniTaskStatus.Succeeded)
-                        DisposeWholeResult(tessTask.GetAwaiter().GetResult());
-                }
+                var lt = kv.Value; // foreach value is read-only; teardown needs a ref to null its Meshes
+                if (!lt.FetchCompleted)
+                    _pipelines[kv.Key.Slot].FeatureSource?.Release(kv.Key.Tile);
+                RenderTeardownRecord(ref lt);
             }
 
-            // S48: drain the mid-flight-discard holding pen — spin to completion, then dispose.
+            _loaded.Clear();
+
+            // S48: drain the mid-flight-discard holding pen — spin to completion, then dispose the
+            // NativeArray payload; we're tearing down and must not leak. Runs AFTER the teardown loop
+            // above, so it also absorbs every mesh build that loop just stashed.
+            // Safe spin: mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool), so
+            // IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning here on
+            // the main thread is therefore deadlock-free. Thread.Sleep(1) yields real CPU time so the
+            // ThreadPool can complete the task.
             for (int i = 0; i < _pendingDisposal.Count; i++)
             {
                 var task  = _pendingDisposal[i];
@@ -2188,54 +2408,24 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _pendingDisposal.Clear();
 
-            // S84: cancel + observe any FETCH still in-flight at teardown — loaded tiles whose fetch
-            // hasn't completed, plus the mid-flight-released holding pen — so no fetch task is dropped
-            // unobserved (UnityWebRequestException flood on the abort). CANCEL FIRST via _scheduler.Release
-            // so the in-flight request faults/cancels promptly; otherwise the spin below would wait on a
-            // request that only the (later) _scheduler.Dispose would cancel. (Release does not touch
-            // _loaded, so iterating it here is safe.)
-            foreach (var kv in _loaded)
-            {
-                if (kv.Value.FetchCompleted) continue;
-                _pipelines[kv.Key.Slot].FeatureSource.Release(kv.Key.Tile);
-                var fetchTask = kv.Value.Request;
-                int spins     = 0;
-                while (!fetchTask.Status.IsCompleted() && spins++ < 10000)
-                    Thread.Sleep(1);
-                ObserveFetchOutcome(fetchTask, logErrors: false);
-            }
-
+            // S84: the FETCH pen, drained the same way — spin, then observe-and-discard through the single
+            // abandonment funnel, so no fetch task is dropped unobserved (UnityWebRequestException flood on
+            // the abort). Also absorbs what the teardown loop above stashed, whose requests it already
+            // cancelled.
             for (int i = 0; i < _pendingFetchDisposal.Count; i++)
             {
                 var task  = _pendingFetchDisposal[i];
                 int spins = 0;
                 while (!task.Status.IsCompleted() && spins++ < 10000)
                     Thread.Sleep(1);
-                ObserveFetchOutcome(task, logErrors: false);
+                DiscardFetchOutcome(task);
             }
 
             _pendingFetchDisposal.Clear();
 
-            // Destroy each tile's tracked Mesh assets.
-            //
-            // S51 leak guard: a Mesh asset is NOT freed just because nothing references it. lt.Meshes
-            // holds direct Mesh references (set by ConsumeMeshBuild) for reliable, index-safe
-            // destruction; DestroyTrackedMeshes iterates that array directly.
-            //
-            // Order: destroy meshes → dispose the backend (below), so the backend never references a
-            // freed Mesh.
-            foreach (var kv in _loaded)
-            {
-                var lt = kv.Value;
-                // DestroyTrackedMeshes takes ref — use a local copy (foreach var is read-only).
-                DestroyTrackedMeshes(ref lt);
-            }
-
-            _loaded.Clear();
-
             // S82: destroy every Mesh the PreparedTileCache still holds (out-of-cover tiles handed off by
-            // ReleaseTile) — SAME "destroy meshes → dispose backend" ordering as the loop just above, so the
-            // backend never references a freed Mesh either way.
+            // ReleaseTile) — SAME "destroy meshes → dispose backend" ordering as the teardown loop at the
+            // top, so the backend never references a freed Mesh either way.
             _prepared.Dispose();
 
             // Dispose the instanced backend AFTER destroying all tile meshes (it references mesh IDs that

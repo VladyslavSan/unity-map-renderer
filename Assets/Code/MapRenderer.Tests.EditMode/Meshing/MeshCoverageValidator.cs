@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using System.Text;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -59,12 +60,14 @@ namespace MapRenderer.Tests.Meshing
         /// <summary>Decode a tile, take one polygon layer, run decode → assemble → earcut, and validate.</summary>
         public static Report ValidateTileLayer(byte[] mvt, string layerName, int rasterN = 192)
         {
-            var layer = MvtDecoder.Decode(mvt).GetLayer(layerName);
+            // IR C1 P3: read the command streams from the bytes directly (MvtFixtureStreams), so this
+            // validator shares no code with the decoder whose output it validates.
+            var layer = MvtFixtureStreams.ReadLayer(mvt, layerName);
             if (layer == null) return new Report(0, 0, 0, 0, 0, 0, 0, 0, 0, "(no layer)");
             var polys = new List<Polygon>();
-            foreach (var f in layer.Features)
-                if (f.GeometryType == TileGeometryType.Polygon)
-                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)));
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+                if (layer.Kinds[fi] == TileGeometryType.Polygon)
+                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])));
             return Validate(polys, (int)layer.Extent, rasterN);
         }
 

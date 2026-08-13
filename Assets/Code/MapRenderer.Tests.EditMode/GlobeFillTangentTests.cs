@@ -10,16 +10,20 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
     public class GlobeFillTangentTests
     {
+
+        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static byte[] FixtureBytes()
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
@@ -34,25 +38,28 @@ namespace MapRenderer.Tests
                 ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        private static (IReadOnlyList<ITileFeature> features, Fill.PaintProperties paint, double extent) Setup()
+        /// <summary>IR C1 P3: the fixture is decoded at the SAME z0 address every test builds at, and the
+        /// layer (which owns its buffer) is returned instead of a detached feature list.</summary>
+        private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
+
+        private static (ITileLayer layer, List<SelectedTileFeature> selection, Fill.PaintProperties paint) Setup()
         {
-            var mvtTile   = MvtDecoder.Decode(FixtureBytes());
+            var mvtTile   = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, FixtureBytes()));
             var fillLayer = MinimalStyle().Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
-            var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must have the 'countries' layer");
-            Assert.Greater(features.Count, 0);
-            return (features, paint, mvtLayer.Extent);
+            var selected  = TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0);
+            Assert.Greater(selected.Count, 0);
+            return (mvtLayer, selected, paint);
         }
 
         [Test]
         public void GlobeFill_Tangent_IsPerVertexEast_OrthonormalToNormal()
         {
-            var (features, paint, extent) = Setup();
-            var id = new TileId { Z = 0, X = 0, Y = 0 };
+            var (layer, selection, paint) = Setup();
 
-            Mesh mesh = TestTileMeshBuilder.BuildFill(features, paint, 0.0, extent, id, new SphericalProjection());
+            Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, new SphericalProjection());
             Assert.IsNotNull(mesh, "globe fill must produce geometry");
             Vector4[] tan = mesh.tangents;
             Vector3[] nrm = mesh.normals;
@@ -79,11 +86,10 @@ namespace MapRenderer.Tests
         [Test]
         public void GlobeFill_IsSubdivided_ForCurvature_MercatorIsNot()
         {
-            var (features, paint, extent) = Setup();
-            var id = new TileId { Z = 0, X = 0, Y = 0 }; // z0 tile spans the globe → heavy chording without C-3
+            var (layer, selection, paint) = Setup(); // z0 tile spans the globe → heavy chording without C-3
 
-            Mesh flat  = TestTileMeshBuilder.BuildFill(features, paint, 0.0, extent, id, null);
-            Mesh globe = TestTileMeshBuilder.BuildFill(features, paint, 0.0, extent, id, new SphericalProjection());
+            Mesh flat  = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, null);
+            Mesh globe = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, new SphericalProjection());
             Assert.IsNotNull(flat); Assert.IsNotNull(globe);
 
             // C-3 refines flat earcut triangles onto the sphere → strictly more vertices than the flat build,
@@ -97,10 +103,9 @@ namespace MapRenderer.Tests
         [Test]
         public void MercatorFill_Tangent_StaysConstantPlusX()
         {
-            var (features, paint, extent) = Setup();
-            var id = new TileId { Z = 0, X = 0, Y = 0 };
+            var (layer, selection, paint) = Setup();
 
-            Mesh mesh = TestTileMeshBuilder.BuildFill(features, paint, 0.0, extent, id, null); // null ⇒ WebMercator
+            Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, null); // null ⇒ WebMercator
             Assert.IsNotNull(mesh);
             Vector4[] tan = mesh.tangents;
             Assert.Greater(tan.Length, 0);

@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System;
 using System.Collections.Generic;
@@ -8,15 +9,19 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// S105 Slice 2 (A3): <see cref="SymbolStyle.SymbolFeatureExtractor.Extract"/> over the committed fixture's
+    /// S105 Slice 2 (A3): <see cref="SymbolFeatureExtractor.Extract"/> over the committed fixture's
     /// <c>centroids</c> layer (250 Point features with <c>NAME</c>/<c>ABBREV</c>) yields the right count,
     /// the right resolved text for the first feature (<c>"Aruba"</c>), an anchor that is the REAL
     /// tile→geo→project chain (not a stub), and honours the layer filter. Engine-free; both runners.
@@ -24,6 +29,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SymbolFeatureExtractorTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // Walk-up fixture loader (works in Unity batch mode AND dotnet test) — mirrors MvtPropertyDecodeTests.
         private static byte[] LoadFixture()
         {
@@ -56,11 +67,11 @@ namespace MapRenderer.Tests
         [Test]
         public void Extract_CentroidsLayer_Yields250LabelsWithRealAnchors()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, labels);
+            SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, labels);
 
             // The fixture has 250 centroids features; one label per point feature with a NON-EMPTY NAME.
             // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the A2 skip
@@ -84,7 +95,9 @@ namespace MapRenderer.Tests
 
             // Its anchor is the REAL tile→geo→project chain, not a stubbed origin. Recompute independently
             // from the decoded first point and assert equality; also pin the fixture point (1252,1904).
-            List<List<double2>> paths = MvtGeometry.Decode(centroids.Features[0].Geometry);
+            // IR C1 P3: arm A reads the command stream from the BYTES (a decoded feature carries none).
+            List<List<double2>> paths = MvtGeometry.Decode(
+                MvtFixtureStreams.ReadLayer(LoadFixture(), "centroids").Commands[0]);
             double2 firstPoint = paths[0][0];
             Assert.AreEqual(1252.0, firstPoint.x, 1e-6, "fixture pin: feature[0].point.x");
             Assert.AreEqual(1904.0, firstPoint.y, 1e-6, "fixture pin: feature[0].point.y");
@@ -128,7 +141,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Extract_DoesNotGateByLayerZoom_SoOverzoomWorks()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
             var layer = new SymbolStyle.StyleLayer
             {
@@ -136,7 +149,7 @@ namespace MapRenderer.Tests
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"), MinZoom = 15.0, // MapLibre-hidden at z14
             };
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, labels);
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, labels);
             Assert.AreEqual(248, labels.Count,
                 "a minzoom-15 layer must still EXTRACT at z14 (its labels live in the store); display-time " +
                 "IsVisibleAtZoom hides them until the camera reaches z15 — so overzoomed data reveals them correctly");
@@ -145,7 +158,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Extract_TextTransform_CaseFoldsResolvedLabel()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
             SymbolStyle.StyleLayer Layer(string transform) => new SymbolStyle.StyleLayer
@@ -158,24 +171,24 @@ namespace MapRenderer.Tests
             };
 
             var upper = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(Layer("uppercase"), tile, FixtureTile, 0.0, projection, upper);
+            SymbolFeatureExtractor.Extract(Layer("uppercase"), tile, FixtureTile, 0.0, projection, upper);
             Assert.AreEqual("ARUBA", upper[0].Text, "text-transform:uppercase must uppercase the resolved label");
 
             var lower = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(Layer("lowercase"), tile, FixtureTile, 0.0, projection, lower);
+            SymbolFeatureExtractor.Extract(Layer("lowercase"), tile, FixtureTile, 0.0, projection, lower);
             Assert.AreEqual("aruba", lower[0].Text, "text-transform:lowercase must lowercase the resolved label");
 
             // Teeth: default (no transform) leaves the mixed-case source untouched — so the two above are
             // genuine transforms, not a fixture that happens to be already-cased.
             var none = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, none);
+            SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, none);
             Assert.AreEqual("Aruba", none[0].Text, "no text-transform leaves the source casing as-is");
         }
 
         [Test]
         public void Extract_LinePlacement_ProducesLineLabelsWithProjectedPath()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
             SymbolStyle.StyleLayer LineLayer(string placement) => new SymbolStyle.StyleLayer
@@ -188,7 +201,7 @@ namespace MapRenderer.Tests
             };
 
             var lineLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineLabels);
+            SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineLabels);
 
             Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
             SymbolStyle.SymbolLabel first = lineLabels[0];
@@ -203,7 +216,8 @@ namespace MapRenderer.Tests
 
             // The path IS the real tile->geo->project chain (recompute the first line's first vertex).
             MvtLayer geolines = tile.GetLayer("geolines");
-            List<List<double2>> paths = MvtGeometry.Decode(geolines.Features[0].Geometry);
+            List<List<double2>> paths = MvtGeometry.Decode(
+                MvtFixtureStreams.ReadLayer(LoadFixture(), "geolines").Commands[0]);
             double2 lonLat = FixtureTile.ToLonLat(paths[0][0].x, paths[0][0].y, geolines.Extent);
             double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
             Assert.AreEqual(expected.x, first.PathRender[0].x, 1e-6, "path vertex is the real projection, not a stub");
@@ -212,7 +226,7 @@ namespace MapRenderer.Tests
             // mid arc-length (one label per path) instead of skipping it outright — the G2 fix. (Superseded the
             // pre-shields "point placement skips LineString features" assertion, which was the very bug D2 fixes.)
             var pointOverLines = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
+            SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
             Assert.Greater(pointOverLines.Count, 0, "D2: point placement now anchors a LineString path at its mid arc-length");
             foreach (SymbolStyle.SymbolLabel l in pointOverLines)
             {
@@ -226,7 +240,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Extract_LinePlacement_Mercator_PathRenderLengthMatchesOriginalVertexCount()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection(); // MaxRefineAngleRad == +infinity
 
             var lineLayer = new SymbolStyle.StyleLayer
@@ -238,11 +252,11 @@ namespace MapRenderer.Tests
             };
 
             var lineLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineLabels);
+            SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineLabels);
             Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
 
-            MvtLayer geolines = tile.GetLayer("geolines");
-            List<List<double2>> paths = MvtGeometry.Decode(geolines.Features[0].Geometry);
+            List<List<double2>> paths = MvtGeometry.Decode(
+                MvtFixtureStreams.ReadLayer(LoadFixture(), "geolines").Commands[0]);
             int originalVertexCount = paths[0].Count;
 
             Assert.AreEqual(originalVertexCount, lineLabels[0].PathRender.Length,
@@ -252,24 +266,10 @@ namespace MapRenderer.Tests
 
         // ── S4-T6: globe subdivision + anchor alignment (the crux) ─────────────────────────────────────
 
-        /// <summary>Minimal engine-free <see cref="ITileFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
+        /// <summary>Minimal engine-free <see cref="IFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
         /// test doubles for a synthetic tile — mirrors <c>A7TileFeatureSourceTests.FixtureDecodedTile</c>/
         /// <c>FixtureTileLayer</c> (test-only, duplicated locally per convention rather than shared, since both
         /// are private test fixtures, not a production type).</summary>
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         /// <summary>Protobuf zigzag ENcode — the inverse of <see cref="MvtGeometry.ZigZag"/> — for hand-building
         /// a synthetic MVT command stream.</summary>
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
@@ -292,15 +292,9 @@ namespace MapRenderer.Tests
                 GeometryType = MapRenderer.Core.Tiles.TileGeometryType.LineString,
                 Geometry = DiagonalLineGeometry(extent),
             };
-            var layer = new FixtureTileLayer
-            {
-                Name = "lines",
-                Extent = extent,
-                Features = new List<ITileFeature> { feature },
-            };
-            var tile = new FixtureDecodedTile(layer);
             // A low zoom so the two endpoints' surface normals subtend a large arc — many splits.
             var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("lines", tileId, new List<IFeature> { feature }, extent);
             var projection = new SphericalProjection(); // MaxRefineAngleRad ~2 degrees (finite)
 
             var lineLayer = new SymbolStyle.StyleLayer
@@ -312,7 +306,7 @@ namespace MapRenderer.Tests
             };
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, labels);
+            SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, labels);
 
             Assert.AreEqual(1, labels.Count, "one line label for the single synthetic feature");
             SymbolStyle.SymbolLabel label = labels[0];
@@ -395,14 +389,8 @@ namespace MapRenderer.Tests
                 Geometry = MultiPointGeometry(
                     inA, outXHigh, inB, outXNeg, outYHigh, inMinEdge, inMaxEdge, outXEdge, outYEdge),
             };
-            var layer = new FixtureTileLayer
-            {
-                Name = "points",
-                Extent = extent,
-                Features = new List<ITileFeature> { feature },
-            };
-            var tile = new FixtureDecodedTile(layer);
             var tileId = new TileId { Z = 1, X = 0, Y = 0 };
+            var tile = TestDecodedTiles.Of("points", tileId, new List<IFeature> { feature }, extent);
             var projection = new WebMercatorProjection();
 
             var pointLayer = new SymbolStyle.StyleLayer
@@ -417,7 +405,7 @@ namespace MapRenderer.Tests
             };
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, labels);
+            SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, labels);
 
             Assert.AreEqual(4, labels.Count,
                 "only the 4 in-bounds anchors are emitted; the 5 out-of-bounds/edge points are clipped");
@@ -439,11 +427,11 @@ namespace MapRenderer.Tests
         [Test]
         public void Extract_WithFilter_NarrowsToNamedFeature()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadFixture());
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 CentroidsLayer(filterJson: "[\"==\",[\"get\",\"ABBREV\"],\"Afg.\"]"),
                 tile, FixtureTile, 0.0, projection, labels);
 

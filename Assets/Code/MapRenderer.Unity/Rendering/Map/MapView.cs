@@ -16,6 +16,9 @@ using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using Symbol = MapRenderer.Core.Style.Symbol;
+// Aliased rather than imported wholesale: this file names the GeoJSON parse entry at exactly one site (the
+// geojson branch of BuildSourceSpecs) and nothing else here should reach for the rest of that namespace.
+using GeoJson = MapRenderer.Core.GeoJson;
 
 namespace MapRenderer.Unity.Rendering.Map
 {
@@ -308,6 +311,51 @@ namespace MapRenderer.Unity.Rendering.Map
                 if (def == null)
                 {
                     Debug.LogWarning($"[MapView.SetStyle] layer references undefined source '{sid}' — skipped.");
+                    continue;
+                }
+
+                // A geojson source is sliced locally: no TileJSON, no tiles[], no byte fetcher at all. Branch
+                // BEFORE the TileJSON fetch below (which it has no url for) and therefore before the
+                // no-tiles skip (which it would always hit). Same failure-isolation shape as the two warns
+                // around it — a bad source is skipped, never a thrown SetStyle.
+                if (def.Type == SourceType.GeoJson)
+                {
+                    if (def.Data == null || !def.Data.IsObject)
+                    {
+                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' needs an INLINE object " +
+                                         "`data` (a URL-valued `data` is not supported yet) — skipped.");
+                        continue;
+                    }
+
+                    GeoJson.GeoJsonDataset parsed;
+                    try
+                    {
+                        parsed = GeoJson.GeoJsonParser.Parse(def.Data);
+                    }
+                    catch (System.OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        // System.Exception, not just GeoJsonFormatException, so this really is the shape the
+                        // comment above claims. Every current GeoJsonParser throw IS a format exception, so
+                        // the widening changes nothing today — it is here because a parser edit that threw
+                        // anything else would otherwise fault SetStyle for the WHOLE style over one bad
+                        // source, which is the failure isolation this branch exists to provide. Cancellation
+                        // is rethrown: swallowing it is its own defect, and the TileJSON path beside this
+                        // makes the same exception.
+                        Debug.LogWarning($"[MapView.SetStyle] geojson source '{sid}' failed to parse: " +
+                                         $"{ex.Message}. Source skipped.");
+                        continue;
+                    }
+
+                    // Slice options are per-source by design; v1 has no style key for them, so the default is
+                    // supplied HERE, at the wiring site, and the source keeps taking them as a parameter.
+                    var geoJsonOptions = GeoJson.GeoJsonSliceOptions.Default;
+                    specs.Add(new Tile.TileManager.SourceSpec(
+                        sid, Tile.TileManager.SourceKey.From(def), def.MinZoom, def.MaxZoom,
+                        () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions)));
                     continue;
                 }
 

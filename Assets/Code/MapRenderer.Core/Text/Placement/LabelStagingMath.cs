@@ -592,7 +592,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>A-4 LINE fade identity: (tile, LAYER, feature, anchor-index) FNV-1a-64. Anchor index -1 is the
         /// centred fallback. Pure arithmetic — the caller precomputes these per anchor so the staging math needs no
         /// string or set state.
-        /// <para><b><paramref name="layerId"/> is load-bearing, not decorative.</b> <see cref="SymbolFeatureExtractor"/>
+        /// <para><b><paramref name="layerId"/> is load-bearing, not decorative.</b> <c>SymbolFeatureExtractor</c>
         /// runs once PER symbol layer and restarts its <c>FeatureIndex</c> ordinal at 0 each time, so
         /// <c>(tileKey, featureIndex)</c> is NOT unique across layers of one tile — two different roads in two
         /// different line-symbol layers share it. Without the layer dimension their fade ids collide, and because a

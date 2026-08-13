@@ -3,8 +3,9 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -113,13 +114,14 @@ namespace MapRenderer.Tests.Meshing
         /// managed-mirror subdivision. <paramref name="extent"/> is taken from the layer.</summary>
         public static Report ValidateTileLayer(byte[] mvt, string layerName, in TileId id, IProjection projection)
         {
-            var layer = MvtDecoder.Decode(mvt).GetLayer(layerName);
+            // IR C1 P3: command streams straight from the bytes — see MvtFixtureStreams.
+            var layer = MvtFixtureStreams.ReadLayer(mvt, layerName);
             if (layer == null) return new Report(0, 0, 0, false, 0, 0, 0, 0, new int[6], 0, 0, 0, 0, default);
 
             var polys = new List<Polygon>();
-            foreach (var f in layer.Features)
-                if (f.GeometryType == TileGeometryType.Polygon)
-                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)));
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+                if (layer.Kinds[fi] == TileGeometryType.Polygon)
+                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])));
 
             return Validate(polys, id, projection, layer.Extent);
         }

@@ -416,7 +416,7 @@ namespace MapRenderer.Unity.Text.Placement
         {
             if (slot.Node != null) return;
 
-            TileId    tileId        = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
+            TileId    tileId        = LabelTileKey.Unpack(key.TileKey);
             Transform tileContainer = _tree.GetOrCreateTileNode(tileId, slot.TileOriginRender);
 
             var layerKey = new LayerNodeKey { TileId = tileId, Slot = key.Slot };
@@ -467,7 +467,7 @@ namespace MapRenderer.Unity.Text.Placement
             (key.Kind == LabelKind.Icon ? _iconChildPool : _textChildPool).Release(slot.Node);
             slot.Node = null;
 
-            TileId tileId   = SymbolFeatureExtractor.UnpackTileKey(key.TileKey);
+            TileId tileId   = LabelTileKey.Unpack(key.TileKey);
             var    layerKey = new LayerNodeKey { TileId = tileId, Slot = key.Slot };
             if (!_layerNodes.TryGetValue(layerKey, out LayerNodeRec layerRec)) return;
 

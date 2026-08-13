@@ -883,6 +883,42 @@ namespace MapRenderer.Tests
                 "Near-180° turn: miter factor >> 2 → NeedsBevel should be true.");
         }
 
+        /// <summary>
+        /// The hairpin case the magnitude compare exists for. Near 180° the bisector <c>normalize(n1+n2)</c>
+        /// is dominated by numerical residual and can point OPPOSITE <c>n1</c>, making <c>cos(θ/2)</c> a small
+        /// NEGATIVE — so a signed <c>1/cos > limit</c> gate lets a huge negative factor through and the miter
+        /// normal explodes ("line across the whole screen"). The sibling above does NOT discriminate this: its
+        /// residual happens to land positive, so it passes under the signed gate too.
+        ///
+        /// <para>Added in the IR C1 fix stage, when <c>Tools/core-tests/LineMiterHairpinTests.cs</c> — which
+        /// caught this over real boundary tiles but had stopped compiling and stopped running — was retired.
+        /// Production's own mirror of this gate (<c>LineRibbonJob.NeedsBevel</c>) stays covered end-to-end by
+        /// <c>BoundaryGlitchMeshTests</c> over the same three fixtures; this keeps the managed oracle, which
+        /// has no production caller, pinned at a value that tells the two comparisons apart.</para>
+        /// </summary>
+        [Test]
+        public void NeedsBevel_HairpinWithNegativeHalfAngleCosine_StillReturnsTrue()
+        {
+            // Left normals that are near-antipodal but not exactly so — the shape real projected geometry
+            // hands the tessellator at a doubled-back boundary ring.
+            double2 n1 = new double2(0, 1);
+            double2 n2 = new double2(1e-9, -1.0000000001);
+
+            // Precondition, not decoration: this input is only discriminating while the SIGNED factor is
+            // negative. If the arithmetic ever changes so it is not, this test stops testing anything.
+            double signedFactor = MiterFactor(n1, n2);
+            Assert.Less(signedFactor, 0.0,
+                $"Precondition: this input must drive cos(θ/2) NEGATIVE for the signed-vs-magnitude " +
+                $"distinction to exist. Signed miter factor was {signedFactor:G6}.");
+            Assert.Greater(math.abs(signedFactor), 2.0,
+                $"Precondition: the miter factor's MAGNITUDE must exceed the limit. Got {math.abs(signedFactor):G6}.");
+
+            Assert.IsTrue(LineTessellator.NeedsBevel(n1, n2, 2.0),
+                $"Hairpin with a negative cos(θ/2): |1/cos| = {math.abs(signedFactor):G6} exceeds the limit 2, " +
+                "so the join must bevel. Comparing the SIGNED factor instead lets it through and the miter " +
+                "normal blows up.");
+        }
+
         [Test]
         public void MiterFactor_RightAngle_IsSqrt2()
         {

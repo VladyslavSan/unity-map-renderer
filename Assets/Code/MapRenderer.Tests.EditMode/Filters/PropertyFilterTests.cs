@@ -5,11 +5,12 @@
 using System;
 using System.IO;
 using NUnit.Framework;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Expressions;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Geo;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Filters
 {
@@ -53,7 +54,7 @@ namespace MapRenderer.Tests.Filters
         [OneTimeSetUp]
         public void SetUp()
         {
-            _tile = MvtDecoder.Decode(LoadFixture());
+            _tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, LoadFixture());
         }
 
         private static StyleLayer MakeCountriesLayer(string filterJson)

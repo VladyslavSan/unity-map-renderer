@@ -1,5 +1,5 @@
 using System.Collections.Generic;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Protobuf;
 
 namespace MapRenderer.Core.Text
 {

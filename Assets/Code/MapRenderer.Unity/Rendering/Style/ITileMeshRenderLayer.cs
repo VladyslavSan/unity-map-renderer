@@ -3,6 +3,8 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -18,10 +20,23 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>
         /// Off-main-thread: build the mesh from this layer's <b>already-selected</b> features straight into
         /// <paramref name="md"/> — a caller-allocated <c>Mesh.MeshData</c> (allocated on the main thread at
-        /// kick; the worker-write path is spike-guarded). <paramref name="extent"/> is the resolved tile
-        /// layer extent (tile units). Reports the written <paramref name="vertexCount"/> (0 = no geometry, with
-        /// <paramref name="md"/> left untouched) and the worker-computed <paramref name="bounds"/>. The caller
-        /// wraps the writable array in a <see cref="MeshDataPayload"/> and applies it on the main thread.
+        /// kick; the worker-write path is spike-guarded). Reports the written <paramref name="vertexCount"/>
+        /// (0 = no geometry, with <paramref name="md"/> left untouched) and the worker-computed
+        /// <paramref name="bounds"/>. The caller wraps the writable array in a <see cref="MeshDataPayload"/>
+        /// and applies it on the main thread.
+        ///
+        /// <para><paramref name="selected"/> pairs each feature with its <b>ordinal</b> in the source layer,
+        /// and <paramref name="geometry"/> is the whole source layer's tile geometry, materialized once per
+        /// worker pass and <b>BORROWED</b> — an implementation must not dispose it, retain it or write to it.
+        /// The ordinal is how a per-feature side array joins back to the buffer's <c>RingFeatureIdx</c>. The
+        /// tile extent is <c>geometry.Extent</c>; it is deliberately not a separate parameter, because a
+        /// second copy is what lets a stage quietly substitute a constant.</para>
+        ///
+        /// <para><b>There is no <c>TileId</c> parameter</b> (B7a review N1, retired in IR C1 P2). The buffer
+        /// declares its own tile as <c>geometry.Tile</c>, exactly as it declares its own extent, so a caller
+        /// cannot pair a z0 buffer with a z1 address — the mispairing shape does not exist in the signature.
+        /// The parameter survived B7a only because LINE still minted its own buffer and had no
+        /// <paramref name="geometry"/> to read; P2 converted line and it went with the mint.</para>
         ///
         /// <para><paramref name="clip"/> is the global tile-buffer clip window. <b>Fill honours it; every
         /// other kind ignores it BY DECISION.</b> Clipping an input polyline at the tile boundary turns the
@@ -30,8 +45,8 @@ namespace MapRenderer.Unity.Rendering.Style
         /// deliberately not attempted here.</para>
         /// </summary>
         void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
             out int vertexCount, out Bounds bounds);
     }
 }

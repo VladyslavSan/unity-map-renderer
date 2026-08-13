@@ -10,12 +10,19 @@ workflow) — check it before debugging a shader/material/test-harness surprise.
 Proprietary / all rights reserved.
 
 ## Project layout
-- `Assets/Code/MapRenderer.Core/` — managed library: MVT decode, Web-Mercator/tile math, geometry, earcut.
-- `Assets/Code/MapRenderer.Jobs/` — Burst + Collections jobs (coordinate transforms, etc.).
-- `Assets/Code/MapRenderer.Unity/` — MonoBehaviours, mesh building, rendering glue.
+
+**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`; `MapRenderer.Core` is a convenience, not a goal —
+and never a placement argument.** Put code where it belongs architecturally, then test it wherever it lands.
+**Read `ARCHITECTURE.md` §2 "Module boundaries" before moving code between assemblies or adding a type to
+Core** — it carries the rule, the rationale, and the three-workaround failure that produced it.
+
+- `Assets/Code/MapRenderer.Unity/` — **the product**: MonoBehaviours, mesh building, rendering glue.
+- `Assets/Code/MapRenderer.Jobs/` — **the product**: Burst + Collections jobs; anything naturally blittable.
+- `Assets/Code/MapRenderer.Core/` — naturally engine-free code: tile math, geometry, earcut, style/expression
+  evaluation, text shaping.
 - `Assets/Code/MapRenderer.Tests.EditMode/` — headless EditMode tests.
 - `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
-- Assemblies are split via `.asmdef`; keep Core free of `MapRenderer.Unity` dependencies.
+- Assemblies are split via `.asmdef`; Core does not depend on `MapRenderer.Unity`.
 
 ## Way of working
 
@@ -69,11 +76,16 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 > grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u
 > # Then the results. An ABSENT file here means this run produced none — never read the .prev one as current.
 > grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$ROOT/Logs/test-results.xml" | head -1
+# Capture `fullname`, NOT `name`: sed is greedy, so `.*name="` runs forward to the LAST attribute
+># ending in `name=` before `result=` — which is `classname`. Using `name` prints FIXTURE names and
+># silently hides which TEST failed (see `red-verify-counts-must-reconcile-with-names`).
 > grep -oE '<test-case [^>]*' "$ROOT/Logs/test-results.xml" \
->   | sed -E 's/.*name="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
+>   | sed -E 's/.*fullname="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
 > ```
 
-### Fast Core tests (no Unity) — prefer these for `MapRenderer.Core` logic
+### Fast Core tests (no Unity) — a faster loop for code that *already* lives in `MapRenderer.Core`
+> A convenience, **never** a placement argument — see `ARCHITECTURE.md` §2 "Module boundaries".
+
 `MapRenderer.Core` is plain C# (its only Unity dependency is `Unity.Mathematics.double2`, which a 2-field
 shim replaces). `Tools/core-tests/` is a `dotnet test` project that compiles the **real** Core `.cs` files
 plus the **engine-free EditMode test files verbatim** (single source of truth — they run in both runners).
@@ -101,8 +113,9 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 - **`Logs/` is git-ignored** — safe to write test output there.
 
 ### Editing conventions
-- Logic that can be unit-tested (decode, math, geometry, earcut) lives in `Core` and **must** have
-  EditMode tests; validate via the recipe above before declaring done.
+- **Placement is architectural, not test-driven** — `ARCHITECTURE.md` §2 "Module boundaries" is the rule.
+- Logic that can be unit-tested **must** have EditMode tests wherever it lives; validate via the recipe above
+  before declaring done.
 - Engine-only behavior (mesh build, rendering, camera) lives in `MapRenderer.Unity`; verify it visually
   in the Editor (a step the user runs).
 - Vendored third-party code goes under `Assets/Code/ThirdParty/<name>/` with its license, and an entry in

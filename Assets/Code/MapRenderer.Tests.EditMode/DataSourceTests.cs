@@ -14,7 +14,7 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -97,7 +97,7 @@ namespace MapRenderer.Tests
                 CollectionAssert.AreEqual(fixtureBytes, fileResponse.Bytes, "File bytes match");
 
                 // Decodes to the same layer/feature structure as the raw fixture
-                MvtTile fileTile = MvtDecoder.Decode(fileResponse.Bytes);
+                using MvtTile fileTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, fileResponse.Bytes);
                 Assert.Greater(fileTile.GetLayer("countries").Features.Count, 0,
                     "countries layer must have features");
             }

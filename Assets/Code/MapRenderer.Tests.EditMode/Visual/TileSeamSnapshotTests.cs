@@ -13,14 +13,19 @@ using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using MapRenderer.Jobs.Tiles;
 using Fill = MapRenderer.Core.Style.Fill;
+using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
+                                                        // 'Color' ambiguous with UnityEngine's
 
 namespace MapRenderer.Tests.Visual
 {
@@ -345,12 +350,10 @@ namespace MapRenderer.Tests.Visual
                 GeometryType = TileGeometryType.Polygon,
                 Geometry     = BufferedRingGeometry,
             };
-            var layer = new SeamTileLayer
-            {
-                Name     = SeamSourceLayerName,
-                Extent   = (uint)TileExtent,
-                Features = new ITileFeature[] { feature },
-            };
+            // IR C1 P3: the synthetic layer owns its buffer, materialized at construction like a decoded
+            // one — and stamped with the SAME id the context builds at, which is now the only copy.
+            using var seamTile = new InMemoryDecodedTile(
+                new InMemoryTileLayer(SeamSourceLayerName, id, new IFeature[] { feature }, (uint)TileExtent));
 
             var styleLayer = new StyleLayer { Id = "seam-fill", SourceLayer = SeamSourceLayerName };
             var paint      = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
@@ -366,10 +369,15 @@ namespace MapRenderer.Tests.Visual
             };
 
             var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
-            var decode    = new SharedTileDecode(SeamDecoderBytes, new SeamTileDecoder(new SeamDecodedTile(layer)));
+            var decode    = new SharedDisposable<IDecodedTile>(new SeamTileDecoder(seamTile).Decode(id, SeamDecoderBytes));
 
-            IRenderLayerPayload[] payloads = TileLayerProcessorRunner.RunWorkerPass(
-                decode, in context, new ITileMeshLayerProcessor[] { processor });
+            IRenderLayerPayload[] payloads;
+            try
+            {
+                payloads = TileLayerProcessorRunner.RunWorkerPass(
+                    decode, in context, new ITileMeshLayerProcessor[] { processor });
+            }
+            finally { decode.Release(); }
 
             Assert.AreEqual(1, payloads.Length);
             return payloads[0].Upload();
@@ -382,25 +390,11 @@ namespace MapRenderer.Tests.Visual
         // Never decoded: SeamTileDecoder ignores the bytes and returns the synthetic tile.
         private static readonly byte[] SeamDecoderBytes = { 0x1A, 0x64 };
 
-        private sealed class SeamDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public SeamDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class SeamTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         private sealed class SeamTileDecoder : ITileDecoder
         {
             private readonly IDecodedTile _tile;
             public SeamTileDecoder(IDecodedTile tile) => _tile = tile;
-            public IDecodedTile Decode(byte[] bytes) => _tile;
+            public IDecodedTile Decode(TileId id, byte[] bytes) => _tile;
         }
 
         /// <summary>Mirrors <c>FillRenderLayer.WriteInto</c>'s forward without needing a real Material —
@@ -425,11 +419,11 @@ namespace MapRenderer.Tests.Visual
             public void Dispose() { }
 
             public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-                TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
                 out int vertexCount, out Bounds bounds)
                 => StyledFillTileBuilder.WriteMeshData(
-                    md, features, _paint, zoom, extent, id, tileOriginRender, out vertexCount, out bounds,
+                    md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
                     projection, layout: null, clip: clip);
         }
     }

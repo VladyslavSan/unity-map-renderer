@@ -27,14 +27,15 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -200,6 +201,12 @@ namespace MapRenderer.Tests
             // are in HasMeshBuild=true, Built=false state when we evict them.
             view.Config.MaxConsumesPerTick = 0;
             view.Config.MaxMeshBuildsPerTick = 64;
+            // Evict the WHOLE condemned cover on the pan tick. At the default budget of 4 the release order
+            // decides whether the tiles that happen to be released are the ones whose build is still running,
+            // which makes the positive control below a coin flip once fetch completion is spread out by the
+            // decode. Releasing all of them removes the ordering dependence without weakening anything: the
+            // leak assertions are over the whole cover either way.
+            view.Config.MaxReleasesPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
@@ -210,10 +217,25 @@ namespace MapRenderer.Tests
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → completes immediately).
                 view.LateUpdate();
-                // Brief sleep so ThreadPool mesh build tasks can start (MaxConsumesPerTick=0 won't consume them).
-                Thread.Sleep(5);
-                // Second Tick: fetch complete → mesh build tasks are kicked (build). Still not consumed.
-                view.LateUpdate();
+                // The fetch task carries the tile's DECODE now, so a fixed 5 ms sleep no longer guarantees
+                // the fetches are observable by the next Tick — and if they are not, nothing is kicked, no
+                // tile is ever in-flight, and the positive control below reads 0 for a DRIVE reason rather
+                // than a behaviour one. Pump until EVERY cover tile has been kicked instead. Waiting for the
+                // first kick is not enough: fetches now complete at spread-out times, so the first kick tick
+                // may dispatch one or two tiles while the release budget below evicts a different, never-
+                // kicked handful — and the positive control reads 0 with every build still in flight.
+                // Property unchanged; only the drive is.
+                int kicked = 0;
+                for (int f = 0; f < 3000; f++)
+                {
+                    Thread.Sleep(1);
+                    view.LateUpdate();
+                    kicked += view.MeshBuildsKickedLastTick();
+                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+                }
+                Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
+                    "drive precondition: every cover tile's mesh build must have been kicked before the pan, " +
+                    "or the eviction has no in-flight build to race");
 
                 // Pan far east — before mesh build results are consumed.
                 // MaxConsumesPerTick=0 guarantees tiles are still in-flight (HasMeshBuild && !Built).
@@ -288,14 +310,15 @@ namespace MapRenderer.Tests
         public void NativeArray_PositiveControl_LeakedAlloc_CounterNonZero()
         {
             byte[] bytes    = FixtureBytes();
-            var mvtTile     = MvtDecoder.Decode(bytes);
+            var    tileId   = new TileId { Z = 0, X = 0, Y = 0 };
+            using var mvtTile = MvtDecoder.Decode(tileId, bytes);
             var style       = MinimalStyle();
             var fillLayer   = style.Layers[0];
             var paint       = new Fill.PaintProperties(fillLayer);
-            var features    = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
             var mvtLayer    = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer");
+            var features    = TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0);
             Assert.Greater(features.Count, 0, "Fixture must produce at least one feature");
 
             var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
@@ -305,9 +328,11 @@ namespace MapRenderer.Tests
 
             // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
             var mda = MeshDataPayload.AllocateTracked(1);
+            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
+            int vc; Bounds b;
             StyledFillTileBuilder.WriteMeshData(
-                mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
-                new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out Bounds b);
+                mda[0], features, geometry, paint, 0.0,
+                new double3(tileOrigin.x, 0.0, tileOrigin.y), out vc, out b);
 
             Assert.Greater(vc, 0,
                 "Positive control requires geometry (vertices written). " +
@@ -358,6 +383,12 @@ namespace MapRenderer.Tests
             // not consumed, ensuring HasMeshBuild=true when tiles are evicted.
             view.Config.MaxConsumesPerTick = 0;
             view.Config.MaxMeshBuildsPerTick = 64;
+            // Evict the WHOLE condemned cover on the pan tick. At the default budget of 4 the release order
+            // decides whether the tiles that happen to be released are the ones whose build is still running,
+            // which makes the positive control below a coin flip once fetch completion is spread out by the
+            // decode. Releasing all of them removes the ordering dependence without weakening anything: the
+            // leak assertions are over the whole cover either way.
+            view.Config.MaxReleasesPerTick = 64;
 
             try
             {
@@ -365,9 +396,25 @@ namespace MapRenderer.Tests
 
                 // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
                 view.LateUpdate();
-                Thread.Sleep(5);
-                // Second Tick: fetch complete → mesh build tasks are kicked (build). Not consumed.
-                view.LateUpdate();
+                // The fetch task carries the tile's DECODE now, so a fixed 5 ms sleep no longer guarantees
+                // the fetches are observable by the next Tick — and if they are not, nothing is kicked, no
+                // tile is ever in-flight, and the positive control below reads 0 for a DRIVE reason rather
+                // than a behaviour one. Pump until EVERY cover tile has been kicked instead. Waiting for the
+                // first kick is not enough: fetches now complete at spread-out times, so the first kick tick
+                // may dispatch one or two tiles while the release budget below evicts a different, never-
+                // kicked handful — and the positive control reads 0 with every build still in flight.
+                // Property unchanged; only the drive is.
+                int kicked = 0;
+                for (int f = 0; f < 3000; f++)
+                {
+                    Thread.Sleep(1);
+                    view.LateUpdate();
+                    kicked += view.MeshBuildsKickedLastTick();
+                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+                }
+                Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
+                    "drive precondition: every cover tile's mesh build must have been kicked before the pan, " +
+                    "or the eviction has no in-flight build to race");
 
                 // Pan far east — evicting the original tiles while mesh build is in-flight.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });

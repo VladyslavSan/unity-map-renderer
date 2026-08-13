@@ -250,14 +250,14 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         // Whether tileKey's on-screen coverage this frame is below minCoverage: project its 4 tile-local corners
-        // (ring TL,TR,BR,BL) through the SAME path AnchorRender was built with (SymbolFeatureExtractor.UnpackTileKey
+        // (ring TL,TR,BR,BL) through the SAME path AnchorRender was built with (LabelTileKey.Unpack
         // → TileId.ToLonLat → projection.Project — no MercatorBounds/flat-earth shortcut), then
         // LabelTileCoverage.ScreenCoverage/IsCulled. Called at most once per tile per FilterActive call —
         // ClassifyTile's tileDecisionScratch is the cache, so this needs none of its own.
         private static bool TileIsCulled(long tileKey, IProjection projection, in double3 sceneOriginRender,
             in float4x4 viewProj, in double2 viewportLogicalPx, in float3x3 rebase, double minCoverage)
         {
-            TileId tile = SymbolFeatureExtractor.UnpackTileKey(tileKey);
+            TileId tile = LabelTileKey.Unpack(tileKey);
             double3 topLeft     = ProjectCorner(tile, 0.0, 0.0, projection);
             double3 topRight    = ProjectCorner(tile, 1.0, 0.0, projection);
             double3 bottomRight = ProjectCorner(tile, 1.0, 1.0, projection);

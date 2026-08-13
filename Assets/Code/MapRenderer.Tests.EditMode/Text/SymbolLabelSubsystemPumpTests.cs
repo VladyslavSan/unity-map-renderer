@@ -13,10 +13,10 @@ using UnityEngine.TestTools.Constraints;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
@@ -28,6 +28,7 @@ using MapRenderer.Unity.Text.Placement; // SymbolGatherPlan
 using MapRenderer.Tests; // TestGlyphSource
 using Is = UnityEngine.TestTools.Constraints.Is;
 using Symbol = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Text
 {
@@ -125,7 +126,16 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
+            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
+            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            byte[] bytes = _tileBytes;
+            UniTask.RunOnThreadPool(() =>
+            {
+                var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(tile, bytes));
+                try { pass.RunWorkerAndHandoff(decode); }
+                finally { decode.Release(); }
+            }).Forget();
         }
 
         // E1 D10: production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
@@ -190,21 +200,25 @@ namespace MapRenderer.Tests.Text
             return labels.Count;
         }
 
-        // ── Tooth 5 (Stage B): the decode+extract marker must fire OFF the main thread ──
+        // ── Tooth 5 (Stage B): the symbol EXTRACT marker must fire OFF the main thread ──
         // The core Stage-B claim (and the project principle: do off-main everything that can be). A
-        // main-thread-only recorder on MapRenderer.Symbol.TileDecode must read ZERO across a full build,
-        // while an all-thread recorder reads >=1. A regression that drops SwitchToThreadPool (decode back on
-        // main) flips mainHits to >0 and fails this.
+        // main-thread-only recorder on MapRenderer.Symbol.Extract must read ZERO across a full build, while
+        // an all-thread recorder reads >=1. A regression that drops SwitchToThreadPool (extract back on main)
+        // flips mainHits to >0 and fails this.
+        //
+        // The marker was called MapRenderer.Symbol.TileDecode until the decode moved to fetch-completion;
+        // it never bracketed a decode again after that, so it was renamed rather than left lying. The
+        // quantity measured — which thread the per-tile symbol extract runs on — is unchanged.
         [UnityTest]
-        public IEnumerator SymbolDecodeAndExtract_RunOffTheMainThread()
+        public IEnumerator SymbolExtract_RunsOffTheMainThread()
         {
             UseImmediateGlyphs();
             var tile   = new TileId { Z = 3, X = 0, Y = 0 };
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
-            using var mainOnly  = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode",
+            using var mainOnly  = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.Extract",
                 ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
-            using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.TileDecode",
+            using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Symbol.Extract",
                 ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame);
 
             DriveTileBytesReady(tile);
@@ -227,9 +241,9 @@ namespace MapRenderer.Tests.Text
             for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
             for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits += anyThread.GetSample(i).Count;
 
-            Assert.Greater(anyHits, 0, "sanity: the symbol decode marker fired at all (the async build ran to completion).");
+            Assert.Greater(anyHits, 0, "sanity: the symbol extract marker fired at all (the async build ran to completion).");
             Assert.AreEqual(0, mainHits,
-                "MapRenderer.Symbol.TileDecode must NOT fire on the main thread — Stage B runs decode + feature " +
+                "MapRenderer.Symbol.Extract must NOT fire on the main thread — Stage B runs the feature " +
                 "extract on the thread pool. A regression that drops SwitchToThreadPool fails this.");
         }
 

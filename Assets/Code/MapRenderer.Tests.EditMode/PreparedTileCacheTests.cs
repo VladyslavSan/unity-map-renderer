@@ -16,11 +16,11 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -51,14 +51,14 @@ namespace MapRenderer.Tests
         /// synthetic meshes over identical geometry.</summary>
         private static Mesh BuildFillMesh(byte[] mvtBytes, StyleDocument style, TileId id, double zoom)
         {
-            var mvtTile   = MvtDecoder.Decode(mvtBytes);
+            using var mvtTile = MvtDecoder.Decode(id, mvtBytes);
             var fillLayer = style.Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
-            var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, zoom);
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer.");
-            Assert.Greater(features.Count, 0, "Fixture must produce >=1 feature (non-vacuous).");
-            Mesh mesh = TestTileMeshBuilder.BuildFill(features, paint, zoom, mvtLayer.Extent, id);
+            var selected  = TestTileMeshBuilder.Select(fillLayer, mvtLayer, zoom);
+            Assert.Greater(selected.Count, 0, "Fixture must produce >=1 feature (non-vacuous).");
+            Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(mvtLayer, selected, paint, zoom, id);
             Assert.IsNotNull(mesh, "Fill build must produce geometry.");
             return mesh;
         }

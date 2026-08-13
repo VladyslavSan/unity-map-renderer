@@ -187,6 +187,44 @@ If a member exists solely to satisfy a test, it does not belong in the productio
 
 ---
 
+## Comments: a short doc on every member, nothing that restates the body
+
+**Every member carries an XML doc, and it is short.** A one- or two-line `<summary>`, plus a `<param>` for
+each parameter — plain and simple. A `<returns>` when the summary does not already answer it. This is the
+floor and it is not optional: a reader should learn what a member is for, and what its arguments mean,
+without opening the body.
+
+**It is normally also the ceiling.** Past the summary and the params, add prose only for something the body
+*cannot* say. Three things qualify, and they are the only three:
+
+- **A non-local invariant** — a protocol, lifetime or ordering fact no single body reveals. `DecodedTileLease`
+  cannot know who holds it, so "the creator's reference is released by `TileManager.RenderTeardownRecord`" is
+  load-bearing. Four ownership bugs in one stage are the evidence this category is not obvious.
+- **A non-obvious *why*** — a contested decision, a constant that looks arbitrary, a branch that exists for a
+  defect someone would otherwise "fix" back in.
+- **A limitation with no observing tooth** — where the honest answer to *"which test goes RED if this stops
+  being deliberate?"* is **none can**, prose is the only carrier. Say that it is deliberate, and why.
+
+**`<see cref>` points OUTWARD, never at a callee.** A method the body calls is already visible on the next
+line; a cref to it duplicates the code and floods every Find Usages of that member with documentation hits.
+Point at what the reader *cannot* see from here — the counterpart, the matching release site, the caller that
+establishes the precondition. (A cref binds, so a rename updates it and a typo is CS1574; that property is
+why it is worth using where it carries information, and why it is worth *not* using where it does not.
+`<c>Name</c>` renders identically and creates no reference — the right tag for an incidental prose mention.)
+
+**Design narrative belongs in `docs/`, not in the file.** Rationale, rejected alternatives and review history
+already have an SSOT (`docs/*-design.md`). Link to it; do not inline it. Carrying the argument alongside the
+code is how `DecodedTileLease.cs` reached **93 % comment** and `TileManager.cs` **68 %** across 2 425 lines.
+
+**The gate:** past the summary and params, a doc that runs longer than the member it documents must name
+which of the three reasons applies. If you cannot name one, cut it back to the floor.
+
+*(Established 2026-08-10, after the decode-model epic. The over-documentation is a reflex with a real cause —
+this repo has been burned by stale and false docs, and `e133181a` exists solely to correct four of them. The
+cure is each fact in the right place once, not more prose in every place.)*
+
+---
+
 ## Angles are an `Angle` value type, not a bare `double`
 
 Never pass or store an angle as a bare `double` in camera code. Use the **`Angle` struct** (Core,

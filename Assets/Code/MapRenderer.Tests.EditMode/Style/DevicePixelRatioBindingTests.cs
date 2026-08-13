@@ -343,7 +343,7 @@ namespace MapRenderer.Tests
             // that is the only observation point: nothing downstream of here takes a ratio to compare against.
             foreach (string relativePath in new[]
                      {
-                         "Assets/Code/MapRenderer.Core/Style/Symbol/SymbolFeatureExtractor.cs",
+                         "Assets/Code/MapRenderer.Unity/Text/SymbolFeatureExtractor.cs",
                          "Assets/Code/MapRenderer.Core/Text/Placement/LabelStagingMath.cs",
                          "Assets/Code/MapRenderer.Jobs/SymbolProjectionJob.cs",
                      })

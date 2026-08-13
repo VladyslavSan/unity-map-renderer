@@ -11,7 +11,7 @@ namespace MapRenderer.Core.Style.Symbol
     /// S105 Slice 2: one point feature's extracted, PRE-SHAPING label — everything
     /// <see cref="LabelInstance"/> needs EXCEPT the shaped <c>Layout</c> (which is Unity-side, produced by
     /// <c>GlyphManager</c>/<c>TextQuadLayout</c> in the Slice-3 <c>StyledSymbolTileBuilder</c>). The Core
-    /// extractor (<see cref="SymbolFeatureExtractor"/>) resolves the anchor + text + paint here, engine-free
+    /// extractor (<c>SymbolFeatureExtractor</c>) resolves the anchor + text + paint here, engine-free
     /// and headless-testable; the Unity builder then shapes <see cref="Text"/> into a
     /// <c>TextLayoutResult</c> and emits the final <see cref="LabelInstance"/>.
     /// </summary>
@@ -111,7 +111,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>W1 — the RESOLVED <c>text-pitch-alignment</c> / <c>icon-pitch-alignment</c>
         /// (<see cref="AlignmentResolution.ResolvePitch"/>), NOT the raw layout value: unlike
         /// <see cref="RotationAlignment"/> above (recorded as authored) this one is consumed downstream, so
-        /// the <c>auto</c> chain is collapsed once, in <see cref="SymbolFeatureExtractor"/>, where the
+        /// the <c>auto</c> chain is collapsed once, in <c>SymbolFeatureExtractor</c>, where the
         /// layer's <c>symbol-placement</c> is in hand. Carried onto <c>LabelInstance.PitchAlignment</c> and
         /// from there into the curved staging input, whose <c>Map</c> branch lays the label out in world
         /// metres.</summary>
@@ -168,7 +168,7 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>Road-shields §10 D10: the OWNER's <see cref="FeatureIndex"/>, stamped on BOTH halves of a
         /// proposed pair so <see cref="Placement.LabelPairing"/> can match them. Only unique within one
-        /// <see cref="SymbolFeatureExtractor.Extract"/> call (per layer, per tile) — the resolver also matches
+        /// <c>SymbolFeatureExtractor.Extract</c> call (per layer, per tile) — the resolver also matches
         /// <c>TileKey</c>/<c>MaterialIndex</c> on the downstream <see cref="LabelInstance"/> carrier for that
         /// reason. Meaningless when <see cref="PairRole"/> is <see cref="LabelPairRole.None"/>.</summary>
         public int PairId { get; init; }

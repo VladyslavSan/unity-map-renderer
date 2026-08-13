@@ -1,4 +1,4 @@
-using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -7,8 +7,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// participation in <see cref="TileLayerProcessorRunner"/>. The input is an already-decoded
     /// <see cref="IDecodedTile"/>, not raw bytes — that makes the decode/fan-out boundary structural: a
     /// conforming processor cannot decide to decode the fetched bytes for itself. As of A4 the decode
-    /// boundary is <see cref="IDecodedTileHandle"/> — every runner entry (mesh, source-less, symbol) reads
-    /// through it instead of decoding for its own cadence; as of A6 the decode itself is encoding-driven
+    /// boundary is a <c>SharedDisposable{IDecodedTile}</c> — every runner entry (mesh, source-less, symbol)
+    /// reads through it instead of decoding for its own cadence; as of A6 the decode itself is encoding-driven
     /// (<see cref="ITileDecoder"/>), so this contract is not MVT-specific at all.
     ///
     /// Deliberately independent of mesh disposal and the symbol label sink — the two sibling capability
@@ -25,7 +25,19 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         LayerPhase Phase { get; }
 
         /// <summary>Worker-thread invocation: process this layer's share of <paramref name="tile"/> (already
-        /// decoded once by the runner and shared, by reference, across every processor in the dense pass).</summary>
+        /// decoded once by the runner and shared, by reference, across every processor in the dense pass).
+        ///
+        /// <para><b>EXACTLY TWO PARAMETERS — IR C1 P3, and the count is a pinned tooth</b>
+        /// (<c>NeutralGeometryPathTests</c>). B7 added a third, a pass-scoped <c>TileGeometryStore</c> a
+        /// processor asked for its layer's geometry; P3 deleted it, because the geometry now belongs to the
+        /// layer (<c>ITileLayer.Geometry</c>) and there is nothing left for a sidecar to carry. A future
+        /// stage that wants to "just pass a little extra through here" should cost a visible test edit: the
+        /// detached sidecar is the exact shape that produced the store's mispairing hazard, and it must not
+        /// come back by accretion.</para>
+        ///
+        /// <para>A processor reads <c>tileLayer.Geometry</c> and <b>borrows</b> it: never dispose, never
+        /// mutate, never retain past this call. A processor that is itself a producer (background, which
+        /// synthesizes its quad) mints and owns its own buffer instead.</para></summary>
         void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context);
     }
 }

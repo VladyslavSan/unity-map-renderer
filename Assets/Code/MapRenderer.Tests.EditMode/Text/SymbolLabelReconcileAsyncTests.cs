@@ -14,10 +14,10 @@ using UnityEngine.TestTools;
 using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
@@ -27,6 +27,7 @@ using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests; // TestGlyphSource
 using MapRenderer.Tests.Text.Placement; // SymbolLabelBatchDiff — R1 memo tests (T2b/T5)
 using Symbol = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Text
 {
@@ -105,7 +106,16 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return;
-            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
+            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
+            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            byte[] bytes = _tileBytes;
+            UniTask.RunOnThreadPool(() =>
+            {
+                var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(tile, bytes));
+                try { pass.RunWorkerAndHandoff(decode); }
+                finally { decode.Release(); }
+            }).Forget();
         }
 
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
@@ -661,7 +671,7 @@ namespace MapRenderer.Tests.Text
 
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
         private static SymbolTileLabelStore.Key StoreKey(TileId t) => new SymbolTileLabelStore.Key("s", t);
-        private static long Tk(TileId t) => Symbol.SymbolFeatureExtractor.PackTileKey(t);
+        private static long Tk(TileId t) => LabelTileKey.Pack(t);
 
         private static TextLayoutResult OneQuad(float u) => new TextLayoutResult
         {

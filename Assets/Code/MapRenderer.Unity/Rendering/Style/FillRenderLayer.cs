@@ -6,7 +6,9 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -166,12 +168,15 @@ namespace MapRenderer.Unity.Rendering.Style
             PushPatternScale();
         }
 
+        // IR C1 P2: the `TileId id` parameter B7a left on the seam is gone. Fill's tile address is always
+        // `geometry.Tile`, the producer's own declaration — the same rule that sources the extent from
+        // `geometry.Extent`.
         public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
             out int vertexCount, out Bounds bounds)
             => Meshing.StyledFillTileBuilder.WriteMeshData(
-                md, features, _paint, zoom, extent, id, tileOriginRender, out vertexCount, out bounds,
+                md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
                 projection, _layout, clip);
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);

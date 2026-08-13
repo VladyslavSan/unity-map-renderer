@@ -220,8 +220,21 @@ the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` gener
   relocated verbatim, no fetch/cache/cancel behaviour change). `TileManager` is now **byte-agnostic** — it names
   none of `TileResponse`/`IDataSource`/`TileScheduler`/`SharedTileDecode`/standalone `TileCache`;
   `SourcePipeline` collapsed to `{ ITileFeatureSource FeatureSource }` and `MapView.BuildSourceSpecs` is the one
-  production site naming `MvtTileFeatureSource`. A future non-byte source (GeoJSON/geojson-vt) returns an EAGER
-  handle wrapping a pre-sliced `IDecodedTile` — same interface, no coordinator change.
+  production site naming `MvtTileFeatureSource`. A non-byte source (GeoJSON) returns a **lazy handle too** —
+  ~~an EAGER handle wrapping a pre-sliced `IDecodedTile`~~, which is what this said until GeoJSON S2 and which
+  **leaks under the IR C1 P3 lease**: a decoded tile owns `Allocator.Persistent` memory that only the last
+  scope close frees, and `TileManager.Tick` calls `GetTile` for every cover tile while only a subset ever
+  opens a scope. `GeoJsonTileFeatureSource` therefore mints the same `SharedTileDecode`, over a decoder that
+  carries a projected dataset instead of bytes, and slices inside `GetOrDecode()`. Same interface, no
+  coordinator change — and the slice lands off-main for free, inside the kick's pool lambda.
+
+  **One MVT-reachable behaviour did move, and the record should not say otherwise.** GeoJSON S2 was planned as
+  "only the empty-`source-layer` guard and the resolver dispatch touch a vector path". That is not quite true:
+  `StyleParser` now reads `data` for **every** source type, and `TileManager.SourceKey` includes both that
+  field and `type`, so a **vector** source carrying a `data` key produces a different key than it did before
+  S2. It is inert in practice — no such source exists here, and the only consequence is one pipeline rebuild
+  on the first restyle after the change — but the correct statement is "the key's domain widened for all
+  source types", not "nothing vector-reachable moved".
 
 **Canonical-IR direction (adopted north star, spun out).** Decision X's `uint[]`-kept deferral is a sound *scope
 fence*, not a permanent architecture: the `uint[]` is MVT's wire geometry encoding, so the "neutral" feature is
@@ -242,6 +255,154 @@ deterministic, cacheable, and camera-independent at build time. Scope: only the 
 snapshots shift and must be **intentionally re-baked.** "For now" flags that quantized-to-integer-zoom text
 sizing diverges from continuous-zoom interpolation and may be revisited (see
 `docs/smooth-transitions-design.md` §2). Not built in Epic A.
+
+## S2 open findings — recorded, not fixed
+
+Carried out of the GeoJSON source stage (S2a `cd9dd227` / S2b `75ee9635`) by two independent review arms.
+None blocks the stage; each is here so it is not rediscovered from scratch.
+
+- ~~**`GeoJsonSliceOptions.ValidateExtent` does not cover `SimplifyTolerance`.**~~ **CLOSED by D2
+  (2026-08-09).** The carve-out existed because the slice-time fault a non-zero tolerance produced was the
+  instrument `T5_GetTile_DoesNotSlice_…` used to observe laziness; D1 retired that tooth (the source slices
+  eagerly now; `T5_GetTile_SlicesOffTheMainThread` replaced it), which left the carve-out serving nothing.
+  D2 renamed `ValidateExtent` → `Validate` and added the `SimplifyTolerance != 0` arm, so the whole option
+  set is now checked where the options are ACCEPTED — one validator, called from
+  `GeoJsonTileFeatureSource`'s constructor and from `GeoJsonTileSlicer.Slice`. The construction boundary holds
+  no copy of the predicate; it calls the validator. `Slice` keeps its own tolerance guard, which is a **kept
+  duplicate** — `Slice` calls `Validate()` unconditionally three lines later, so the guard covers no input the
+  validator would miss. It survives for the exception *type* alone: running first is what keeps a direct
+  `Slice` caller's fault a `NotSupportedException`
+  (`T9_NonZeroSimplifyTolerance_ThrowsNotSupported`) rather than the validator's `ArgumentOutOfRangeException`.
+  Unifying the two types is a behaviour change on a public API and was deliberately not D2's.
+  Teeth: `GeoJsonTileSlicerTests.T9b_ANonZeroSimplifyTolerance_IsRejectedByTheValidator` (the validator
+  carries the predicate) and `GeoJsonSourceTests.TheSource_RejectsUnusableOptions_AtConstruction`'s tolerance
+  arm (the construction boundary rejects through it).
+
+- ~~**`ITileFeatureSource.GetTile`'s `ct` is threaded by no production caller.**~~ **CLOSED by D1 (2026-08-09)
+  — decided, not deferred: the parameter is CONTRACT-ONLY, and the interface now says so.** The alternative
+  this finding offered (thread the cover pass's token) was weighed and rejected: it needs a per-record
+  `CancellationTokenSource` in `TileManager` — a new per-tile lifetime object with its own disposal rules —
+  and it *creates a new leak path*, since a decode cancelled after the decoder allocated but before the task
+  result is observed would need its own release site. That is the exact hazard D1 exists to close, added back
+  for no observed benefit. The cancellation that matters (abort the in-flight HTTP request) already flows
+  through `FeatureSource.Release(id)` → `TileScheduler`'s per-tile CTS. `ITileFeatureSource.GetTile`'s XML
+  records the parameter as contract-only with no production caller, which is what keeps a future reader from
+  concluding "dead guard, delete".
+
+- ~~**`GeoJsonTileFeatureSource.GetTile` throws cancellation synchronously while the MVT one faults its
+  task.**~~ **CLOSED by D1 (2026-08-09), as a side effect.** Making the GeoJSON source eager made it `async`,
+  so its `ThrowIfCancellationRequested` now surfaces as a faulted/cancelled `UniTask` exactly as the MVT
+  source's does. The seam no longer leaves it open either: `GetTile`'s XML states that failures are reported
+  through the returned `UniTask`, never thrown synchronously — true of both implementations.
+  `GeoJsonSourceTests.GetTile_ObservesCancellation` is the observing tooth and awaits rather than
+  `GetAwaiter().GetResult()`-ing (a UniTask that has not completed does not block there).
+
+- **`T4_ASlicedGeoJsonLayer_ListsOnlyTheSurvivingFeatures_AndItsOrdinalsAddressTheBuffer` has two arms that
+  cannot fail.** The count arm is pinned by `TileLayerGeometryAdoption.Validate`, which throws during
+  `Decode` before any assertion runs; the ordinal-range arm is tautological because `FeatureSelector`
+  assigns `Ordinal = i` over the very list the guard sized the column against. **This was measured, not
+  argued** — injecting the plan's named defect (`Features` from the dataset, `Geometry` from the slice)
+  fails in the guard. Both arms are labelled as such in the test, and the guard's own RED lives in
+  `WaistOneProducerAgreementTests`. The test's *live* arm — the surviving features are the dataset's
+  non-prefix subset, by name — does fail on the prefix-shaped variant that passes the guard, which is why
+  the test was kept rather than retired.
+
+- **Five of `JsonCanonical.WriteString`'s eight escape arms are uncovered.** Not a comparability hole: none
+  of the five can forge a collision, because an unescaped control character still cannot make two distinct
+  DOM values agree. Documented in the test rather than papered over with five more arms.
+
+## Eager decode: peak resident decoded-tile memory (D1, 2026-08-09) — UNCAPPED by decision
+
+**MAINTAINER DECISION: ship arm A, uncapped, and record the number.** This section is that record. It exists
+because the number is a real cost and because the mitigation that actually works is not the obvious one.
+
+### The bound, stated plainly
+
+**A tile is RESIDENT for as long as any reference to its lease is live** — that is the definition, and it is
+wider than any single stage. Three populations contribute: *fetched-but-not-yet-kicked* records,
+*kicked-but-still-running* builds, and *parked* symbol builds holding an `Acquire()` token across the
+sprite-settle window.
+
+**The newly unbounded contribution is the first one, and it is unbounded.** The other two were there before
+D1 and are paced (kicks by `MaxMeshBuildsPerTick`, parks by the sprite fetch), though note that neither is
+*hard*-capped: there is no cap on how many kicks may be in flight at once, only on how many start per tick.
+
+Before D1 a tile decoded when its kick lambda ran and was freed when that lambda's scope closed, so
+residency self-limited to single digits (`MaxMeshBuildsPerTick = 2` × task duration ÷ tick duration). Under
+the eager decode a tile is resident from **fetch completion**, and nothing paces fetch completion:
+
+- **`TileScheduler` has no concurrency cap** — `Core/Data/TileScheduler.cs` holds dictionaries only: no
+  semaphore, no queue. Every cover tile's `Request` starts immediately.
+- **`TileCache` (LRU 256) means a pan-back or a restyle resolves the whole cover synchronously from bytes**,
+  so every one of those tiles dispatches its decode on the same tick.
+- **Kicks drain at `MaxMeshBuildsPerTick = 2`** (`MapViewConfig.cs:46`), so the backlog leaves slowly.
+
+This sits in tension with the repo's `always-bound-loops` principle. That was raised and the call was made
+deliberately: measure first, and the remedy stays cheap.
+
+### The estimate and its derivation
+
+| quantity | value | source |
+|---|---|---|
+| decoded tile, median | 552 KB | measured 2026-08-09, `docs/tile-geometry-ir-design.md` |
+| decoded tile, peak | 967 KB | same |
+| tilted cover | 40–60 tiles | the shipped selector's tilted-frustum cover |
+| **peak resident** | **~20–60 MB** | median–peak × cover |
+| drain time | ~20–30 ticks | 40–60 tiles ÷ `MaxMeshBuildsPerTick = 2` |
+
+Today's equivalent scenario is ~1–2 MB, so this is a **~20× transient peak**, plus a burst of 40–60
+concurrent `Decode` calls on one tick. It is transient and self-draining; nobody has measured it on a real
+device.
+
+### The remedy, if a device profile ever shows it: **arm C**
+
+**Dispatch the decode at kick-admission rather than at fetch-completion** — roughly ten lines, confined to
+`PumpPending`'s fetch-observe block plus `TileDecodeDispatch`. It **removes the fetched-but-not-kicked
+contribution entirely**, because a tile is only decoded once something is about to consume it — which
+restores the pre-D1 practical profile. It is deliberately **not** described as a hard residency bound: it
+does not add one. Kicks can still overlap without limit (there is a per-tick start cap, not a concurrency
+cap — see `docs/tile-geometry-ir-design.md`), and a parked build's reference can outlive the kick that
+created it, so residency after arm C is bounded only by the same self-limiting behaviour the renderer had
+before this stage. A genuine cap would need a concurrent-kick limit, which is a separate change. Arm C keeps
+every prize D1 bought — *exactly one decode ever*, *no parked re-decode*, *no decode without an owner* — and
+gives back only "as early as possible". It is written down here so nobody has to re-derive it under
+pressure.
+
+**Arm B — a semaphore inside `TileDecodeDispatch` — is NOT the fix, and must not be described as one.** It
+bounds the CPU burst and the thread-pool saturation, which is a different problem. A decoded tile stays
+resident until it is kicked regardless of how its decode was paced, so arm B leaves residency exactly where
+arm A does.
+
+## D1 recorded limitations — two things no tooth can observe
+
+Both surfaced in D1's review and were decided deliberately. They are here because
+`recorded-limitation-needs-an-observing-tooth` asks "which test goes RED if this stops being deliberate?" —
+and for these two the honest answer is **none can**, which is exactly why prose has to carry it.
+
+**1. A throwing `Release()` during teardown aborts the loop, leaving later records untorn.**
+`RenderTeardownRecord` now nulls the record's handle before releasing it, so the funnel itself cannot retry a
+handle it has already released. The residue is in the three callers (`SetSources`, `ReleaseTile`,
+`DoDispose`): each iterates records, and a throw from one record's release abandons the rest of the loop.
+
+*Why no tooth exists.* All three callers pass a **struct copy**, so `lt.Decode = null` is discarded even on
+the happy path — there is no production-observable difference between the two orderings. Reflecting into the
+method cannot see it either: `MethodInfo.Invoke` does not copy a by-ref argument back when the callee throws
+(measured, not assumed). The ordering is therefore pinned **structurally** by
+`TileProcessingStructureTests.RenderTeardownRecord_NullsTheRecordsHandleBeforeItReleases`, RED-verifiable by
+swapping the two statements, and nothing observes the caller-side residue.
+
+*Why it was left.* After D1's transfer fix there is no known route to a throwing `Release()` — it needs a
+decoder whose `IDecodedTile.Dispose()` throws, or a future over-release. This is hardening, not a live bug.
+The two alternatives were rejected with reasons worth keeping: a per-record `try/finally` in all three loops
+changes teardown from **fail-fast to best-effort**, a real semantic change that needs its own tooth and did
+not belong in a fix pass; and making the funnel swallow-and-log a release fault would retire the deliberate
+unbalanced-release diagnostic at the exact site where it is most informative.
+
+**2. A thread pool that accepts a work item and never runs it strands a parked reference.**
+The dequeue→worker-start guard relinquishes ownership once `UniTask.RunOnThreadPool` has returned, so a pool
+that accepts and never dispatches is undetectable from that frame. This is the **same residual the kick lambda
+has carried since A1** — it is not new to the parked path. Closing it needs a completion watchdog rather than
+an ownership guard, and no test can produce the condition.
 
 ## Deliberately left filed (out of scope)
 

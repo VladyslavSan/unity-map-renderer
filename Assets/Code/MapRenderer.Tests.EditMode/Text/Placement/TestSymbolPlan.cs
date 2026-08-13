@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             foreach (long tileKey in order)
             {
-                TileId tile = SymbolFeatureExtractor.UnpackTileKey(tileKey);
+                TileId tile = LabelTileKey.Unpack(tileKey);
                 var key = new SymbolTileLabelStore.Key("s", tile);
                 int gen = _store.BeginBuild(key);
                 SymbolTileLabelBlock block = SymbolTileLabelBlockBaker.Bake(

@@ -5,9 +5,11 @@ using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 using MapRenderer.Core.Expressions;
 using Line = MapRenderer.Core.Style.Line;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -99,12 +101,16 @@ namespace MapRenderer.Unity.Rendering.Style
 
         // `clip` is accepted and IGNORED by decision (see ITileMeshRenderLayer.WriteInto): clipping the input
         // polyline turns the join at the boundary vertex into a cap, trading the seam band for a seam notch.
+        //
+        // IR C1 P2: `geometry` is the source-layer's BORROWED buffer and is now genuinely consumed — the
+        // builder reads its rings, its tile and its extent, and never disposes it.
         public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-            TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
             out int vertexCount, out Bounds bounds)
             => Meshing.StyledLineTileBuilder.WriteMeshData(
-                md, features, _paint, _layout, zoom, extent, id, tileOriginRender, out vertexCount, out bounds, projection);
+                md, selected, geometry, _paint, _layout, zoom, tileOriginRender,
+                out vertexCount, out bounds, projection);
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

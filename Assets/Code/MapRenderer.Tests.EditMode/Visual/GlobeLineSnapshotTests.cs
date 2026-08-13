@@ -8,12 +8,12 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using Line = MapRenderer.Core.Style.Line;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Visual
             var lookAt = new GeoCoordinate { Latitude = 20.0, Longitude = 12.0 }; // over Africa
 
             // ── Build the geolines line mesh on the globe via the real StyledLineTileBuilder. ──
-            MvtTile mvtTile = MvtDecoder.Decode(FixtureBytes());
+            using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, FixtureBytes());
             var style = StyleParser.Parse(LineStyleJson());
             var styleLayer = style.Layers[0];
             var paint  = new Line.PaintProperties(styleLayer);
@@ -38,10 +38,10 @@ namespace MapRenderer.Tests.Visual
 
             var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must contain the geolines layer");
-            var features = FeatureSelector.SelectFeatures(styleLayer, mvtTile, 0.0);
-            Assert.IsNotEmpty(features, "geolines must select features");
+            var selected = TestTileMeshBuilder.Select(styleLayer, mvtLayer, 0.0);
+            Assert.IsNotEmpty(selected, "geolines must select features");
 
-            Mesh mesh = TestTileMeshBuilder.BuildLine(features, paint, layout, 0.0, mvtLayer.Extent, tid, proj);
+            Mesh mesh = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, paint, layout, 0.0, tid, proj);
             Assert.IsNotNull(mesh, "line mesh build must produce a mesh");
 
             // Line material — big world-metre width so borders read at globe scale (~25 km/px in this frame).

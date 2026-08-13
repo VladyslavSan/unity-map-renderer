@@ -54,6 +54,17 @@ essay. Keep the two in sync: when a rule changes, edit `conventions.md` and upda
   `double3`→`Vector3`. Keeps `Core` engine-free and the parity oracles hashing canonical winding. Cause + full
   contract in `docs/coordinates-and-projections.md` §7.1; pinned by `GlobeFill`/`GlobeLineWindingTests`.
 
+- **A short XML doc on EVERY member; nothing that restates the body.** Floor (not optional): a one/two-line
+  `<summary>` + a `<param>` per parameter, plain and simple, plus `<returns>` when the summary does not
+  answer it. That floor is normally also the ceiling — past it, write prose only for a **non-local invariant**
+  (a protocol/lifetime/ordering fact no single body reveals), a **non-obvious why**, or a **limitation no
+  tooth can observe**. **`<see cref>` points OUTWARD** — counterpart, matching release site, the caller that
+  establishes the precondition — **never at a callee the body already names** (duplicates the code, floods
+  that member's Find Usages; use `<c>Name</c>` for an incidental mention, which creates no reference).
+  Design narrative, rationale and rejected alternatives live in `docs/*-design.md`, not in the file.
+  **Gate:** past summary+params, a doc longer than its member must name which of the three reasons applies,
+  or be cut back to the floor.
+
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not
   belong on the production class. Allowed footprint: broaden `private` → `internal` (+ `InternalsVisibleTo`),
   or put computed accessors/adapters as extension methods in the **test** assembly. Not allowed: `public`

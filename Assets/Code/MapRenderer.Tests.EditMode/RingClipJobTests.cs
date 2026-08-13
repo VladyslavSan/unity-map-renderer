@@ -11,9 +11,10 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -209,6 +210,108 @@ namespace MapRenderer.Tests
             finally { result.Dispose(); }
         }
 
+        // ── T1e: the RING INDIRECTION itself (IR B7a review finding R1/B1) ────────────────────────
+
+        /// <summary>
+        /// The job reads <b>the rings <c>RingVisitOrder</c> names, in the order it names them</b> — not
+        /// <c>0..RingVisitOrder.Length</c>. A sparse, permuted order (<c>[2, 0]</c> over three rings) must
+        /// produce ring 2's geometry first, then ring 0's, each carrying <b>its own</b> feature index, and
+        /// ring 1 must not appear at all.
+        ///
+        /// <para><b>Why it exists — this loop was unobserved on the branch that actually runs.</b> B7a replaced
+        /// <c>for (ri = 0; ri &lt; RingCount; ri++)</c> with <c>for (k…) { int ri = RingVisitOrder[k]; … }</c>.
+        /// Every other clip fixture in the repo — the rest of this file, <c>RingWindowClipperParityTests</c>,
+        /// <c>Jobs/TileGeometryMaterializerSeamTests</c>, <c>Jobs/TileGeometryStoreTests</c>,
+        /// <c>Visual/TileSeamSnapshotTests</c> — supplies an <b>identity</b> visit order, under which
+        /// <c>ri == k</c> is true by construction, and the one fixture with a genuinely permuted, subsetted
+        /// order (<c>Meshing/FillSharedBufferTests</c>) ran only with the clip DISABLED, i.e. down the
+        /// <c>RingSelectJob</c> branch. Collapsing the indirection back to <c>int ri = k;</c> was therefore
+        /// inert against the whole gate — while <c>MapViewConfig.FillTileBufferClip = 0.0</c> makes the clip
+        /// branch the PRODUCTION path for every fill layer.</para>
+        ///
+        /// <para>Both output branches are exercised on purpose: ring 2 straddles the window (so the visited
+        /// index feeds Sutherland–Hodgman via <c>rStart</c>) and ring 0 lies wholly inside it (so the visited
+        /// index feeds the verbatim bbox fast path).</para>
+        /// </summary>
+        [Test]
+        public void Clip_VisitsTheRingsTheVisitOrderNames_InThatOrder_WithTheirOwnFeatureIndices()
+        {
+            // Ring 0 — wholly inside, deliberately irregular so a "reconstructed" copy would drift.
+            var interior = new[]
+            {
+                new double2(100.0, 100.0),
+                new double2(300.0, 120.0),
+                new double2(280.0, 340.0),
+                new double2(120.0, 320.0),
+            };
+            // Ring 1 — the DECOY. It is never named by the visit order, so not one of its vertices may appear.
+            var decoy = new[]
+            {
+                new double2(1000.0, 1000.0),
+                new double2(1200.0, 1000.0),
+                new double2(1200.0, 1200.0),
+                new double2(1000.0, 1200.0),
+            };
+            // Ring 2 — straddles x = 4096, so it goes through the half-plane arithmetic rather than the copy.
+            var straddling = new[]
+            {
+                new double2(4000.0, 2000.0),
+                new double2(4200.0, 2000.0),
+                new double2(4200.0, 2200.0),
+                new double2(4000.0, 2200.0),
+            };
+
+            var result = RunClip(
+                new[] { interior, decoy, straddling },
+                TileBufferClip.KeepTileUnits(0.0),
+                visitOrder:     new[] { 2, 0 },
+                ringFeatureIdx: new[] { 7, 8, 9 }); // distinguishable, and NOT equal to the ring index
+            try
+            {
+                Assert.AreEqual(2, result.RingCount,
+                    "the visit order names two rings, so exactly two survive — three means the loop ignored " +
+                    "the order's LENGTH and walked the buffer.");
+
+                // Slot 0 = ring 2, clipped to the window. Under `int ri = k;` this slot would hold ring 0
+                // (the interior quad) instead — different vertices, different count, different feature.
+                double2[] first = result.Ring(0);
+                Assert.AreEqual(4, first.Length,
+                    "visit slot 0 must be ring 2 clipped to x <= 4096.\n  got: " + Describe(first));
+                AssertCyclicallyEqual(
+                    new[]
+                    {
+                        new double2(4000.0, 2000.0),
+                        new double2(4096.0, 2000.0),
+                        new double2(4096.0, 2200.0),
+                        new double2(4000.0, 2200.0),
+                    },
+                    first);
+                Assert.AreEqual(9, result.RingFeatureIdx[0],
+                    "the feature index must be read at the VISITED ring index (2 ⇒ feature 9), not at the " +
+                    "visit slot (0 ⇒ feature 7). A slot-indexed read paints every ring with a neighbour's " +
+                    "per-feature data.");
+
+                // Slot 1 = ring 0, verbatim (bbox fast path). Bit-identical, in input order.
+                double2[] second = result.Ring(1);
+                Assert.AreEqual(interior.Length, second.Length,
+                    "visit slot 1 must be ring 0, copied verbatim.\n  got: " + Describe(second));
+                for (int i = 0; i < interior.Length; i++)
+                {
+                    Assert.AreEqual(interior[i].x, second[i].x, 0.0, $"vertex {i}.x must be BIT-identical.");
+                    Assert.AreEqual(interior[i].y, second[i].y, 0.0, $"vertex {i}.y must be BIT-identical.");
+                }
+                Assert.AreEqual(7, result.RingFeatureIdx[1], "ring 0 carries feature 7.");
+
+                // The decoy is absent — the visit order SUBSETS the buffer, it does not merely reorder it.
+                for (int i = 0; i < result.VertexCount; i++)
+                    foreach (double2 d in decoy)
+                        Assert.IsFalse(result.Vertices[i].Equals(d),
+                            $"output vertex {i} is {result.Vertices[i]}, which belongs to ring 1 — a ring the " +
+                            "visit order never names.");
+            }
+            finally { result.Dispose(); }
+        }
+
         // ── T2: holes and the exterior-sign invariant ─────────────────────────────────────────────
 
         [Test]
@@ -283,7 +386,7 @@ namespace MapRenderer.Tests
         {
             byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
             Assert.IsNotNull(bytes);
-            MvtTile mvtTile = MvtDecoder.Decode(bytes);
+            using MvtTile mvtTile = MvtDecoder.Decode(tileId, bytes);
 
             bool sawAnyLayer      = false;
             int  bufferedLayers   = 0;
@@ -292,21 +395,24 @@ namespace MapRenderer.Tests
                 var layer = mvtTile.GetLayer(layerName);
                 if (layer == null) continue;
 
-                var geoms = new List<uint[]>();
+                double extent = layer.Extent;
+                bool anyPolygon = false;
                 foreach (var f in layer.Features)
-                    if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
-                        geoms.Add(f.Geometry);
-                if (geoms.Count == 0) continue;
+                    if (f.GeometryType == TileGeometryType.Polygon) { anyPolygon = true; break; }
+                if (!anyPolygon) continue;
                 sawAnyLayer = true;
 
-                double extent = layer.Extent;
                 var (bMin, _) = tileId.MercatorBounds();
+
+                // IR C1 P3: ONE buffer, owned by the decoded LAYER and BORROWED by both Schedule calls
+                // (Schedule derives its own private copy of the rings it visits and disposes only that).
+                TileGeometryBuffers geometry = layer.Geometry;
+                NativeArray<int> visitOrder  = TestTileMeshBuilder.FullVisitOrder(geometry);
                 var baseInput = new FillMeshPipeline.LayerInput
                 {
-                    FeatureGeometries = geoms,
-                    Extent            = extent,
-                    Tile              = tileId,
-                    OriginRender      = new double3(bMin.x, 0.0, bMin.y),
+                    Geometry       = geometry,
+                    RingVisitOrder = visitOrder,
+                    OriginRender   = new double3(bMin.x, 0.0, bMin.y),
                 };
 
                 var unclippedInput = baseInput; unclippedInput.Clip = TileBufferClip.Disabled;
@@ -344,6 +450,9 @@ namespace MapRenderer.Tests
                 {
                     unclipped.Dispose();
                     clipped.Dispose();
+                    // The shared buffer outlived BOTH Schedule calls — that is the borrow contract. It is
+                    // NOT disposed here (IR C1 P3): the decoded tile owns it and frees it with `using`.
+                    visitOrder.Dispose();
                 }
             }
 
@@ -394,7 +503,12 @@ namespace MapRenderer.Tests
             }
         }
 
-        private static ClipResult RunClip(double2[][] rings, TileBufferClip clip)
+        /// <param name="visitOrder">IR B7: the ring indices this pass visits, in order. <c>null</c> ⇒ the
+        /// identity order (every ring, in decode order), which is what <c>RingCount</c> used to mean here.</param>
+        /// <param name="ringFeatureIdx">Which feature each ring belongs to. <c>null</c> ⇒ all rings share
+        /// feature 0, which is what the hole teeth need (they rely on shared feature grouping).</param>
+        private static ClipResult RunClip(
+            double2[][] rings, TileBufferClip clip, int[] visitOrder = null, int[] ringFeatureIdx = null)
         {
             Assert.IsTrue(clip.TryWindow(Extent, out double2 clipMin, out double2 clipMax),
                 "the test's clip must be enabled — a Disabled knob never reaches the job.");
@@ -409,7 +523,8 @@ namespace MapRenderer.Tests
             for (int ri = 0; ri < rings.Length; ri++)
             {
                 ringOffsets[ri] = pos;
-                ringFeatIdx[ri] = 0; // one feature — the hole tooth relies on shared feature grouping
+                // Default: one feature — the hole tooth relies on shared feature grouping.
+                ringFeatIdx[ri] = ringFeatureIdx != null ? ringFeatureIdx[ri] : 0;
                 foreach (var v in rings[ri]) verts[pos++] = v;
             }
             ringOffsets[rings.Length] = pos;
@@ -425,12 +540,17 @@ namespace MapRenderer.Tests
                 RingFeatureIdx = new NativeList<int>(math.max(1, rings.Length), Allocator.Persistent),
             };
 
+            // IR B7: the visit order IS the ring set. Default = identity (every ring, in decode order).
+            int[] order = visitOrder ?? IdentityOrder(rings.Length);
+            var visitOrderArr = new NativeArray<int>(order.Length, Allocator.Persistent);
+            for (int i = 0; i < order.Length; i++) visitOrderArr[i] = order[i];
+
             new RingClipJob
             {
                 Vertices          = verts,
                 RingOffsets       = ringOffsets,
                 RingFeatureIdx    = ringFeatIdx,
-                RingCount         = rings.Length,
+                RingVisitOrder    = visitOrderArr,
                 ClipMin           = clipMin,
                 ClipMax           = clipMax,
                 ScratchA          = scratchA,
@@ -441,8 +561,15 @@ namespace MapRenderer.Tests
             }.Run();
 
             verts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
-            scratchA.Dispose(); scratchB.Dispose();
+            scratchA.Dispose(); scratchB.Dispose(); visitOrderArr.Dispose();
             return result;
+        }
+
+        private static int[] IdentityOrder(int count)
+        {
+            var order = new int[count];
+            for (int i = 0; i < count; i++) order[i] = i;
+            return order;
         }
 
         /// <summary>Polygon structure after clip + the real <see cref="RingAssemblyJob"/> — the stage order
@@ -499,12 +626,18 @@ namespace MapRenderer.Tests
             var polyCountArr  = new NativeArray<int>(1, Allocator.Persistent);
             var holeCountArr  = new NativeArray<int>(1, Allocator.Persistent);
 
+            // IR B7: the assembler is kind-gated. Every ring here belongs to the single synthetic feature 0,
+            // and every one of these fixtures is a polygon fixture.
+            var featureKinds = new NativeArray<TileGeometryType>(1, Allocator.Persistent);
+            featureKinds[0] = TileGeometryType.Polygon;
+
             new RingAssemblyJob
             {
                 Vertices             = verts,
                 RingOffsets          = ringOffsets,
                 RingFeatureIdx       = ringFeatIdx,
                 RingCount            = assembleRings.Length,
+                FeatureGeometryType  = featureKinds,
                 OutPolyOuterRingIdx  = polyOuterIdx,
                 OutPolyHoleListStart = polyHoleStart,
                 OutPolyHoleCount     = polyHoleCount,
@@ -525,6 +658,7 @@ namespace MapRenderer.Tests
             verts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
             polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
             holeRingIdxs.Dispose(); polyCountArr.Dispose(); holeCountArr.Dispose();
+            featureKinds.Dispose();
             return result;
         }
 

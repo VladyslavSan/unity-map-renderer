@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Expressions.Ops;
-using MapRenderer.Core.Mvt;
 
 namespace MapRenderer.Core.Expressions
 {

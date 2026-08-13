@@ -89,7 +89,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static long KeyA(out TileId tile)
         {
             tile = TestTileKeys.Containing(new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 }, zoom: 12);
-            return MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor.PackTileKey(tile);
+            return LabelTileKey.Pack(tile);
         }
 
         // Two tiles, so at least one block bakes a nonzero AnchorLocal, and two labels in the first tile, so
@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static List<LabelInstance> AllPointLabels(double3 origin)
         {
             long keyA = KeyA(out TileId tileA);
-            long keyB = MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor.PackTileKey(
+            long keyB = LabelTileKey.Pack(
                 new TileId { X = tileA.X + 1, Y = tileA.Y, Z = tileA.Z });
 
             return new List<LabelInstance>
@@ -111,7 +111,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static List<LabelInstance> AllCurvedLabels(double3 origin)
         {
             long keyA = KeyA(out TileId tileA);
-            long keyB = MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor.PackTileKey(
+            long keyB = LabelTileKey.Pack(
                 new TileId { X = tileA.X + 1, Y = tileA.Y, Z = tileA.Z });
 
             return new List<LabelInstance>
@@ -125,7 +125,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static List<LabelInstance> MixedLabels(double3 origin)
         {
             long keyA = KeyA(out TileId tileA);
-            long keyB = MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor.PackTileKey(
+            long keyB = LabelTileKey.Pack(
                 new TileId { X = tileA.X + 1, Y = tileA.Y, Z = tileA.Z });
 
             return new List<LabelInstance>

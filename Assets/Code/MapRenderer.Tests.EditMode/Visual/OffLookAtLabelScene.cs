@@ -930,7 +930,7 @@ namespace MapRenderer.Tests.Visual
         /// sit ~100 tile widths from their nominal tile origin (the exact
         /// <c>WorldCurvedAbRenderSnapshotTests..._NonzeroAnchorLocal</c> pattern, taken further).</summary>
         private static long TileKeyFor(TileId baseTile, OffLookAtLabelId id)
-            => SymbolFeatureExtractor.PackTileKey(
+            => LabelTileKey.Pack(
                 new TileId { X = baseTile.X + (int)id, Y = baseTile.Y, Z = baseTile.Z });
 
         /// <summary>

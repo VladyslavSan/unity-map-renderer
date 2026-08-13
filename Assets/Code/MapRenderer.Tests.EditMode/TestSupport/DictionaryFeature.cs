@@ -8,15 +8,18 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A simple in-memory <see cref="ITileFeature"/> built from a dictionary — lets the expression engine and
+    /// A simple in-memory <see cref="IFeature"/> built from a dictionary — lets the expression engine and
     /// filter layer be exercised against synthetic features instead of decoded MVT ones.
     ///
-    /// <para>Implements the <see cref="ITileFeature"/> extension (an optional <see cref="Geometry"/> command
-    /// stream) as well as bare <see cref="IFeature"/>, so the same double serves the mesh builders. Leave
-    /// <see cref="Geometry"/> null for pure expression/filter tests — the builders skip a feature with no
-    /// geometry, exactly as they do for a real non-polygon feature.</para>
+    /// <para>Also implements <see cref="ITileCommandStreamFeature"/> (an optional <see cref="Geometry"/>
+    /// command stream), so the same double serves the mesh builders and can be handed to
+    /// <c>MvtGeometryMaterializer</c> through <c>InMemoryTileLayer</c>. Leave <see cref="Geometry"/> null for
+    /// pure expression/filter tests: a null stream materializes as zero commands, so such a feature
+    /// contributes no ring, exactly as a real geometry-less feature does.
+    /// <b>IR C1 P3:</b> the interface this used to name was production's <c>IMvtGeometryCarrier</c>, deleted
+    /// when the decoded LAYER took ownership of geometry; the replacement is test-assembly-only.</para>
     /// </summary>
-    public sealed class DictionaryFeature : ITileFeature
+    public sealed class DictionaryFeature : IFeature, ITileCommandStreamFeature
     {
         private readonly Dictionary<string, Value> _properties;
 

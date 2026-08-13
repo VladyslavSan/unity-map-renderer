@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System.Collections.Generic;
 using System.IO;
@@ -15,13 +16,15 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests; // TestGlyphSource
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// P2 REQUIRED-1 — the `Up` CARRIER CHAIN from Block A, driven end to end through the REAL
     /// <see cref="StyledSymbolTileBuilder.BuildAsync"/> (which itself calls the real
-    /// <see cref="SymbolStyle.SymbolFeatureExtractor.Extract"/>), asserted against a closed form written
+    /// <see cref="SymbolFeatureExtractor.Extract"/>), asserted against a closed form written
     /// out here — never obtained from <see cref="IProjection.ProjectPoint"/> or any production sampler.
     ///
     /// <para><b>Why this exists as its own tooth.</b> T-3 (<c>WorldSurfaceUpPopulationTests</c>) hand-builds
@@ -40,6 +43,12 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolUpCarrierChainTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static readonly TileId TileId0 = new TileId { Z = 10, X = 500, Y = 500 };
         private const uint Extent = 4096;
         private static readonly SphericalProjection Projection = new SphericalProjection();
@@ -107,10 +116,7 @@ namespace MapRenderer.Tests.Text.Placement
                 GeometryType = TileGeometryType.Point,
                 Geometry = new[] { 1u | (1u << 3), ZigZagEncode((long)point.x), ZigZagEncode((long)point.y) },
             };
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            return TestDecodedTiles.Of("points", TileId0, new List<IFeature> { feature }, Extent);
         }
 
         private static readonly double2 LineFrom = new double2(500, 500);
@@ -127,24 +133,7 @@ namespace MapRenderer.Tests.Text.Placement
                     2u | (1u << 3), ZigZagEncode((long)(LineTo.x - LineFrom.x)), ZigZagEncode((long)(LineTo.y - LineFrom.y)),
                 },
             };
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "roads", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
-        }
-
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
+            return TestDecodedTiles.Of("roads", TileId0, new List<IFeature> { feature }, Extent);
         }
 
         // ── (1) point TEXT, unpaired — SymbolFeatureExtractor.EmitTextLabel + StyledSymbolTileBuilder :257 ──

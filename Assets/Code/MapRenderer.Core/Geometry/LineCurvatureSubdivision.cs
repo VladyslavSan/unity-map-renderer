@@ -9,8 +9,8 @@ namespace MapRenderer.Core.Geometry
     /// S4: the shared projection-subdivision POLICY — how many equal sub-segments a tile-local centerline
     /// segment needs so its projected arc stays under a projection's <c>MaxRefineAngleRad</c> tolerance — plus
     /// the managed densifier built on it. <see cref="SegmentSteps"/> is the one piece two callers share:
-    /// <c>MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor</c> (this assembly, over managed
-    /// <c>List&lt;double2&gt;</c>) and the mesh line builder (<c>StyledLineTileBuilder.SubdivideCenterline</c>,
+    /// <c>MapRenderer.Unity.Text.SymbolFeatureExtractor</c> (over managed
+    /// <c>IReadOnlyList&lt;double2&gt;</c>) and the mesh line builder (<c>StyledLineTileBuilder.SubdivideCenterline</c>,
     /// over <c>NativeList&lt;double2&gt;</c> — welded to <c>Unity.Collections</c>, so it cannot live here).
     /// Each caller keeps its own container-specific densification loop; only the curvature math is unified
     /// (duplicating THAT would be the real smell — "unify, don't propagate smell").

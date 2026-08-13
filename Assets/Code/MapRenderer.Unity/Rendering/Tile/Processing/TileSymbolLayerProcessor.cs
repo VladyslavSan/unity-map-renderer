@@ -3,9 +3,10 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -67,6 +68,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>WORKER-SAFE (moved form of the pre-A3 <c>SymbolLabelSubsystem.BuildTileAsync</c>'s
         /// <c>ExtractLayers</c> call, one layer wide): SELECT + project this layer's <see cref="SymbolStyle.StyleLayer"/>
         /// off the main thread.</summary>
+        /// <remarks>IR C1 P3: no store parameter. The extractor reads each symbol layer's source-layer buffer
+        /// off the decoded tile itself, so every symbol layer of this build — and every mesh layer of the
+        /// same kick — reads the SAME buffer per source-layer with nothing to thread through.</remarks>
         public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
         {
             _extracted = _builder.ExtractLayers(

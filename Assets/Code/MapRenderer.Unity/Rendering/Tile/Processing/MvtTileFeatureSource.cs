@@ -2,7 +2,8 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Core.Lifetime;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -13,10 +14,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// behind <see cref="GetTile"/>; the coordinator (<c>TileManager</c>) never names any of them. Wraps the
     /// UNCHANGED <see cref="TileScheduler"/> — this is a boundary re-seam, not a fetch-behaviour change (§D).
     ///
-    /// <para><see cref="GetTile"/> mints a <see cref="SharedTileDecode"/> — the A4/A5b decode-once-shared,
-    /// LAZY handle (§B decision) — relocated verbatim from the old <c>TileManager</c> fetch-observe site.
-    /// No decode happens here; the handle decodes on its first <c>GetOrDecode()</c> caller, off-main, exactly
-    /// as before the raise.</para>
+    /// <para><see cref="GetTile"/> fetches, then DECODES — once, on the pool, through
+    /// <see cref="TileDecodeDispatch.DecodeAsync"/> — and hands back a <see cref="SharedDisposable{T}"/>
+    /// carrying the caller's one reference. The lazy handle it used to mint is gone: a decode that only
+    /// happens when somebody reads is a decode whose drop paths free nothing, which is the leak the
+    /// reference count replaces.</para>
     ///
     /// Internal (not public): constructed only from <c>MapView.BuildSourceSpecs</c> (the one production site
     /// that names this type) and from the test assembly via <c>InternalsVisibleTo</c>.
@@ -41,17 +43,20 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             _scheduler      = new TileScheduler(byteSource, _cache);
         }
 
-        /// <summary>Relocated verbatim from the old <c>TileManager</c> fetch-observe mint: fetch via the
-        /// (unchanged) scheduler, then wrap present bytes in a lazy <see cref="SharedTileDecode"/> — absent
-        /// (<c>!HasData</c>) maps to a null handle, the coordinator's null-for-absent contract. This method
-        /// never hops back to the main thread — the scheduler's own continuation already ends on the pool
-        /// (its internal thread-pool switch), and this method adds only a synchronous mint on top, so the
-        /// drain-spin's <c>configureAwait:false</c> pool-completion invariant is preserved (§G-1).</summary>
-        public async UniTask<IDecodedTileHandle> GetTile(TileId id, CancellationToken ct = default)
+        /// <summary>Fetch via the (unchanged) scheduler, then decode the bytes through
+        /// <see cref="TileDecodeDispatch.DecodeAsync"/> — absent (<c>!HasData</c>) maps to a null handle, the
+        /// coordinator's null-for-absent contract. This method never hops back to the main thread: the
+        /// scheduler's own continuation already ends on the pool (its internal thread-pool switch), and the
+        /// decode adds another pool hop with <c>configureAwait: false</c>, so the drain-spin's
+        /// pool-completion invariant (§G-1) is preserved — and is now PROVIDED BY the shared dispatch rather
+        /// than argued for here.</summary>
+        public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             TileResponse resp = await _scheduler.Request(id, ct);
+            // IR C1 P3: the tile address goes IN here, at the only decode site, and is never supplied again.
+            // Everything downstream reads it off the decoded buffer instead of carrying its own copy.
             return (resp.HasData && resp.Bytes != null)
-                ? new SharedTileDecode(resp.Bytes, TileDecoders.ForEncoding(resp.Encoding))
+                ? await TileDecodeDispatch.DecodeAsync(id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding))
                 : null;
         }
 

@@ -9,13 +9,15 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Background = MapRenderer.Core.Style.Background;
+using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
+                                                        // 'Color' ambiguous with UnityEngine's
 
 namespace MapRenderer.Tests
 {
@@ -51,34 +53,94 @@ namespace MapRenderer.Tests
 
             using var layer = NewBackgroundLayer();
             TileBackgroundLayerProcessor processor = TileBackgroundLayerProcessor.AllocateForKick(layer, materialIndex: 0);
-            processor.ProcessOnWorker(null, in context);
+            processor.ProcessOnWorker(null, in context); // source-less: no decoded tile at all
             IRenderLayerPayload payload = processor.Complete();
             Mesh mesh = payload.Upload();
             payload.Dispose(); // no-op after Upload — belt-and-braces, mirrors production consume
             return (mesh, origin);
         }
 
+        /// <summary>
+        /// B5 T3 — the background quad is the SAME geometry after the corners stopped being a hand-authored
+        /// MVT command stream. A <b>differential against the retired encoding</b>: materialize
+        /// <see cref="FullExtentRingCommandStream"/> (the frozen record of what production used to hold)
+        /// through the MVT producer, materialize the live processor's corners through the path producer, and
+        /// compare the two <c>TileGeometryBuffers</c> element-wise.
+        ///
+        /// <para>Why this shape and not "assert four corners": a corner-value assertion cannot see ring
+        /// COUNT, ring OFFSETS, the trailing SENTINEL or the kind COLUMN — the four things a hand-written
+        /// flatten gets wrong. And an oracle written from the new implementation could only restate it; this
+        /// one is the thing being retired, so it cannot be satisfied by transcribing the replacement.</para>
+        /// </summary>
         [Test]
-        public void SyntheticRing_DecodesToFourTileCorners()
+        public void SyntheticRing_MaterializesIdenticallyToTheRetiredCommandStream()
         {
-            List<List<double2>> paths = MvtGeometry.Decode(TileBackgroundLayerProcessor.FullExtentRingGeometry);
-            Assert.AreEqual(1, paths.Count, "the synthetic geometry must decode to exactly one ring.");
-
             double extent = TileBackgroundLayerProcessor.Extent;
-            var expected = new[]
+            Assert.AreEqual(FullExtentRingCommandStream.Extent, extent,
+                "precondition: the retired stream was authored at the extent the processor still uses");
+
+            // The legacy arm: the exact bytes production hand-authored before B5.
+            var legacyFeature = new InMemoryTileFeature
             {
-                new double2(0, 0), new double2(extent, 0), new double2(extent, extent), new double2(0, extent),
+                GeometryType = TileGeometryType.Polygon,
+                Geometry     = FullExtentRingCommandStream.Commands,
             };
-            List<double2> ring = paths[0];
-            Assert.AreEqual(expected.Length, ring.Count, "the ring must have exactly 4 vertices.");
-            for (int i = 0; i < expected.Length; i++)
+            TileGeometryBuffers legacy = new MvtGeometryMaterializer(
+                CoarseTile, extent,
+                new[] { legacyFeature.GeometryType },
+                new[] { legacyFeature.Geometry }).Materialize();
+
+            // The live arm: PRODUCTION's own corner data and kind column, through production's own path
+            // producer — the same relationship the retired version of this test had to the command stream
+            // it decoded. A test-owned copy of the corners would compare the fixture with itself.
+            TileGeometryBuffers current = new PathGeometryMaterializer(
+                CoarseTile, extent,
+                TileBackgroundLayerProcessor.FullExtentRingKinds,
+                TileBackgroundLayerProcessor.FullExtentRingPaths).Materialize();
+
+            try
             {
-                Assert.AreEqual(expected[i].x, ring[i].x, 1e-9,
-                    $"vertex {i}.x — a mis-encoded zigzag/command integer must fail HERE.");
-                Assert.AreEqual(expected[i].y, ring[i].y, 1e-9,
-                    $"vertex {i}.y — a mis-encoded zigzag/command integer must fail HERE.");
+                // Non-vacuity: both arms really produced a ring, so an all-default comparison cannot pass.
+                Assert.IsTrue(legacy.IsCreated, "precondition: the legacy command stream materialized");
+                Assert.IsTrue(current.IsCreated, "precondition: the live background geometry materialized");
+                Assert.AreEqual(1, legacy.RingCount, "precondition: the legacy stream is exactly one ring");
+                Assert.AreEqual(4, legacy.VertexCount, "precondition: …of exactly four vertices");
+
+                Assert.AreEqual(legacy.RingCount, current.RingCount,
+                    "ring COUNT must match — a flatten that emitted two rings, or none, shows only here");
+                Assert.AreEqual(legacy.VertexCount, current.VertexCount, "vertex COUNT must match");
+                Assert.AreEqual(legacy.FeatureCount, current.FeatureCount, "feature COUNT must match");
+                Assert.AreEqual(legacy.Extent, current.Extent, "both must describe the same extent");
+
+                for (int f = 0; f < legacy.FeatureCount; f++)
+                    Assert.AreEqual(legacy.FeatureGeometryType[f], current.FeatureGeometryType[f],
+                        $"FeatureGeometryType[{f}] — the kind column drives every consumer's ring gate");
+
+                // RingCount + 1 offsets: the trailing SENTINEL is included deliberately. Nothing else in this
+                // fixture would notice its absence, and every downstream span read depends on it.
+                for (int r = 0; r <= legacy.RingCount; r++)
+                    Assert.AreEqual(legacy.RingOffsets[r], current.RingOffsets[r],
+                        $"RingOffsets[{r}] (index {legacy.RingCount} is the trailing sentinel)");
+
+                for (int r = 0; r < legacy.RingCount; r++)
+                    Assert.AreEqual(legacy.RingFeatureIdx[r], current.RingFeatureIdx[r],
+                        $"RingFeatureIdx[{r}] — the join a consumer colours through");
+
+                for (int v = 0; v < legacy.VertexCount; v++)
+                {
+                    Assert.AreEqual(legacy.Vertices[v].x, current.Vertices[v].x, 1e-12,
+                        $"Vertices[{v}].x — corner ORDER is load-bearing, not just membership");
+                    Assert.AreEqual(legacy.Vertices[v].y, current.Vertices[v].y, 1e-12,
+                        $"Vertices[{v}].y");
+                }
+            }
+            finally
+            {
+                legacy.Dispose();
+                current.Dispose();
             }
         }
+
 
         [Test]
         public void BackgroundQuad_FlatOnMercator_NoSubdivision()
@@ -94,6 +156,19 @@ namespace MapRenderer.Tests
                     "Mercator (MaxRefineAngleRad == +∞) must write the flat 4-corner quad — no subdivision.");
                 foreach (var v in verts)
                     Assert.AreEqual(0f, v.y, 1e-3f, "Mercator stored positions must be coplanar y≈0 (origin-relative).");
+
+                // B5 T4 colour clause: every background vertex is exactly opaque white. Before B5 this came
+                // from evaluating a constant {"fill-color":"#ffffff"} paint through the fill builder; B5
+                // passes the literal that expression produced. Nothing else watched that value, so a wrong
+                // literal (or a stray alpha) would have rendered a tinted/translucent background silently.
+                var colors = new List<Color>();
+                mesh.GetColors(colors);
+                Assert.AreEqual(verts.Count, colors.Count,
+                    "every background vertex must carry a colour — the fill stream is not optional here");
+                foreach (Color c in colors)
+                    Assert.AreEqual(new Color(1f, 1f, 1f, 1f), c,
+                        "background vertex colour must be exactly opaque white (linear == sRGB for white); " +
+                        "the material uniform supplies the actual background colour.");
 
                 AssertBoundsMatchesVertexEnvelope(mesh, verts);
                 // RTC contract: stored (origin-relative) positions stay bounded to roughly the TILE's own
@@ -215,6 +290,50 @@ namespace MapRenderer.Tests
             expanded.Expand(1e-2f);
             foreach (var v in verts)
                 Assert.IsTrue(expanded.Contains(v), $"mesh.bounds must encapsulate every stored vertex ({v}).");
+        }
+
+        /// <summary>
+        /// The kind column and the path list are two independent lists joined BY POSITION, so a length
+        /// mismatch would mis-classify every ring rather than fail. <c>PathGeometryMaterializer</c> validates
+        /// that <b>before</b> it allocates — which is what makes the throw safe: after <c>Allocate</c> four
+        /// <c>Allocator.Persistent</c> arrays exist and a throw would strand them on the one exit path no
+        /// caller can dispose.
+        /// <para>Structural rather than behavioural on purpose: production always passes matched lists, so
+        /// this path is unreachable in production and no behavioural test can reach it. That is precisely why
+        /// it needs a tooth — the sibling <c>MvtGeometryMaterializer</c> holds its own unreachable throw path
+        /// to the same standard, "by reading the code, not by arguing reachability".</para>
+        /// </summary>
+        [Test]
+        public void PathMaterializer_KindColumnShorterThanPaths_ThrowsBeforeAllocating()
+        {
+            var paths = new List<IReadOnlyList<IReadOnlyList<double2>>>
+            {
+                new[] { new[] { new double2(0, 0), new double2(1, 0), new double2(1, 1) } },
+                new[] { new[] { new double2(2, 2), new double2(3, 2), new double2(3, 3) } },
+            };
+            // One kind for two features — the desync.
+            var kinds = new List<TileGeometryType> { TileGeometryType.Polygon };
+
+            // Non-vacuity: the matched pair really does materialize, so the throw below is attributable to the
+            // mismatch and not to some other defect in the fixture.
+            var matchedKinds = new List<TileGeometryType>
+                { TileGeometryType.Polygon, TileGeometryType.Polygon };
+            TileGeometryBuffers ok = new PathGeometryMaterializer(
+                CoarseTile, 4096.0, matchedKinds, paths).Materialize();
+            try
+            {
+                Assert.IsTrue(ok.IsCreated, "precondition: matched kinds/paths must materialize");
+                Assert.AreEqual(2, ok.RingCount, "precondition: both features' rings are present");
+            }
+            finally { ok.Dispose(); }
+
+            // Fully qualified: `using System;` would make `Object` ambiguous with UnityEngine.Object at this
+            // file's existing call sites.
+            var ex = Assert.Throws<System.ArgumentException>(
+                () => new PathGeometryMaterializer(CoarseTile, 4096.0, kinds, paths).Materialize(),
+                "a kind column shorter than the path list must be rejected, not silently mis-joined");
+            Assert.That(ex.Message, Does.Contain("one entry per feature"),
+                "the message must name the contract that was violated, so a wiring error is diagnosable");
         }
     }
 }

@@ -4,11 +4,11 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.Filters;
 using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -42,14 +42,17 @@ namespace MapRenderer.Tests
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
             byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
-            MvtTile tile = MvtDecoder.Decode(bytes);
+            // IR C1 P3: decoded at the SAME id the build bakes from — the buffer is the only copy now.
+            using MvtTile tile = MvtDecoder.Decode(id, bytes);
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
-            double extent = mvtLayer?.Extent ?? 4096.0;
-            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
+            Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
+            var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
+            Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
-            // Production path: real projection + real Burst LineRibbonJob + Mercator bake.
-            Mesh mesh = TestTileMeshBuilder.BuildLine(
-                features, layer.Paint, layer.Layout, z, extent, id, new WebMercatorProjection());
+            // Production path: real projection + real Burst LineRibbonJob + Mercator bake, over the layer's
+            // own buffer with this style layer's ordinal-bearing selection.
+            Mesh mesh = TestTileMeshBuilder.BuildLineFromLayer(
+                mvtLayer, selected, layer.Paint, layer.Layout, z, id, new WebMercatorProjection());
             Assert.IsNotNull(mesh, "boundary_3 produced no geometry");
 
             Vector3[] verts = mesh.vertices;

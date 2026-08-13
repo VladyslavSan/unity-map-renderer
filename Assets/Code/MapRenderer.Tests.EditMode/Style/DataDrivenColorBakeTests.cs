@@ -6,8 +6,9 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests
 {
@@ -30,6 +31,14 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class DataDrivenColorBakeTests
     {
+
+        /// <summary>IR C1 P3: the address the committed fixture is decoded at (its buffers are stamped with
+        /// it). z0/0/0 — the fixture's own tile.</summary>
+        private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
+
+        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static byte[] LoadFixture()
         {
             string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
@@ -50,7 +59,7 @@ namespace MapRenderer.Tests
 
         private static MvtLayer LoadCountries()
         {
-            var layer = MvtDecoder.Decode(LoadFixture()).GetLayer("countries");
+            var layer = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTileId, LoadFixture())).GetLayer("countries");
             Assert.IsNotNull(layer, "countries layer must be present in fixture.");
             return layer;
         }

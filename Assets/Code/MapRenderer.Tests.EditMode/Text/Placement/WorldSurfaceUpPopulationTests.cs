@@ -15,7 +15,6 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
@@ -225,7 +224,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(12, v.Length, "3 glyphs x 4 verts");
 
-            // TileKey 0 unpacks to TileId{0,0,0} (SymbolFeatureExtractor.PackTileKey's default) — recover
+            // TileKey 0 unpacks to TileId{0,0,0} (LabelTileKey.Pack's default) — recover
             // the SAME render-space tile origin TestSymbolPlan baked AnchorLocal against, so worldPt below
             // is the glyph's REAL sampled world position, not an approximation.
             double3 tileOriginRender = TileRenderOrigin.Project(new TileId { Z = 0, X = 0, Y = 0 }, projection);

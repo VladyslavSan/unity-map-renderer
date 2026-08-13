@@ -23,7 +23,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional CAMERA
         /// zoom captured at build start (pre-A3 parity — symbol layout/paint always evaluated at display
         /// zoom). A4 keeps BOTH meanings deliberately (design doc §B Q4): the shared decode feed
-        /// (<see cref="IDecodedTileHandle"/>) carries only <c>{bytes → IDecodedTile}</c>, no zoom, no context, so
+        /// (<c>SharedDisposable{IDecodedTile}</c>) carries only <c>{bytes → IDecodedTile}</c>, no zoom, no context, so
         /// sharing the decoded tile across cadences cannot conflate their zoom sources — reconciling the
         /// two belongs to the stage that merges the cadences themselves (A5+), not to the feed.</summary>
         public double Zoom { get; init; }

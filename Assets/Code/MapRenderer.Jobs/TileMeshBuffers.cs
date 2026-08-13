@@ -60,7 +60,8 @@ namespace MapRenderer.Jobs
         /// shaders make no flat-ground assumption. Length = total tile verts.</summary>
         public NativeArray<double3> VertexUp;
 
-        /// <summary>S89 D2: feature index of each merged vertex (into the input FeatureGeometries list).
+        /// <summary>S89 D2: feature index of each merged vertex (into the caller's selected-feature list —
+        /// the same ordinal space <see cref="TileGeometryBuffers.RingFeatureIdx"/> indexes).
         /// Lets the fill stream-write assign per-feature color without re-deriving vertex→feature.</summary>
         public NativeArray<int> VertexFeatureIdx;
 

@@ -5,12 +5,15 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
+using Unity.Collections;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -37,34 +40,36 @@ namespace MapRenderer.Tests.Meshing
         public void JobifiedPipeline_Water_8_135_80_TriangulatesFaithfully()
         {
             byte[] mvtBytes = LoadFixture("water-8-135-80.pbf.bytes");
-            var mvtTile = MvtDecoder.Decode(mvtBytes);
+            var tileId  = new TileId { Z = 8, X = 135, Y = 80 };
+            using var mvtTile = MvtDecoder.Decode(tileId, mvtBytes);
             var layer   = mvtTile.GetLayer("water");
             Assert.IsNotNull(layer, "water layer present");
+
+            // Arm A: the command streams read from the BYTES, independently of the decoder under test.
+            var oracle = MvtFixtureStreams.ReadLayer(mvtBytes, "water");
 
             // Ground truth: managed decode → assemble (PolygonAssembler is unchanged / out of Stage-3
             // scope) gives the polygon structure (outer+holes) for the even-odd coverage + area check.
             // This does NOT triangulate — the triangulation under test comes from the REAL Burst path
             // below, fed into the SAME ground truth via MeshCoverageValidator.ValidateTriangulation.
             var groundTruthPolys = new List<Polygon>();
-            var polyGeoms        = new List<uint[]>();
-            foreach (var f in layer.Features)
+            for (int fi = 0; fi < oracle.Kinds.Count; fi++)
             {
-                if (f.GeometryType != TileGeometryType.Polygon || f.Geometry == null) continue;
-                polyGeoms.Add(f.Geometry);
-                groundTruthPolys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)));
+                if (oracle.Kinds[fi] != TileGeometryType.Polygon || oracle.Commands[fi] == null) continue;
+                groundTruthPolys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(oracle.Commands[fi])));
             }
             Assert.Greater(groundTruthPolys.Count, 0, "water layer has polygons");
 
             double extent = layer.Extent;
-            var tileId    = new TileId { Z = 8, X = 135, Y = 80 };
             var (bMin, _) = tileId.MercatorBounds();
 
+            TileGeometryBuffers geometry = layer.Geometry; // BORROWED (IR C1 P3) — the decoded tile owns it
+            NativeArray<int> visitOrder   = TestTileMeshBuilder.FullVisitOrder(geometry);
             var pipelineInput = new FillMeshPipeline.LayerInput
             {
-                FeatureGeometries = polyGeoms,
-                Extent       = extent,
-                Tile         = tileId,
-                OriginRender = new double3(bMin.x, 0.0, bMin.y),
+                Geometry       = geometry,
+                RingVisitOrder = visitOrder,
+                OriginRender   = new double3(bMin.x, 0.0, bMin.y),
             };
 
             TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
@@ -92,6 +97,8 @@ namespace MapRenderer.Tests.Meshing
             finally
             {
                 buffers.Dispose();
+                visitOrder.Dispose();
+                // geometry is BORROWED from the decoded layer (IR C1 P3) — the `using` frees it.
             }
         }
     }

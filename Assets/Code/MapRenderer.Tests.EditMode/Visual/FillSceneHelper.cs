@@ -6,13 +6,13 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Materials;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Visual
 {
     /// <summary>
@@ -61,7 +61,7 @@ namespace MapRenderer.Tests.Visual
                                            //          the GO itself (e.g. the real ENU-rebase placement, S91-C)
         {
             byte[] bytes = FixtureBytes();
-            MvtTile mvtTile = MvtDecoder.Decode(bytes);
+            using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
 
             // Build a minimal StyleLayer matching the layer name + optional color expression.
             var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression);
@@ -79,12 +79,13 @@ namespace MapRenderer.Tests.Visual
                 return (emptyGo, null);
             }
 
-            var features = FeatureSelector.SelectFeatures(fillStyleLayer, mvtTile, styleZoom);
+            var selected = TestTileMeshBuilder.Select(fillStyleLayer, mvtLayer, styleZoom);
 
-            // Origin is derived from (id, projection) inside BuildFill — a globe projection bakes relative to
-            // the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side origin.
-            Mesh mesh = TestTileMeshBuilder.BuildFill(
-                features, paint, styleZoom, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 }, projection);
+            // Origin is derived from (id, projection) inside the builder — a globe projection bakes relative
+            // to the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side origin.
+            // IR C1 P3: the LAYER's own buffer, borrowed; the decode above used the same id.
+            Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(
+                mvtLayer, selected, paint, styleZoom, new TileId { Z = 0, X = 0, Y = 0 }, projection);
 
             var mapGo = new GameObject("FillSceneHelper");
             var mf = mapGo.AddComponent<MeshFilter>();

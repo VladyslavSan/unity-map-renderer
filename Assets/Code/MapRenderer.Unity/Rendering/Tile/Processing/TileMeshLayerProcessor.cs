@@ -1,8 +1,9 @@
+using System.Collections.Generic;
 using UnityEngine;
-using MapRenderer.Core.Filters;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -45,20 +46,37 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
         {
-            var features = FeatureSelector.SelectFeatures(_layer.StyleLayer, tile, context.Zoom);
-            if (features.Count > 0)
+            // The source layer is resolved FIRST: it is both the selection input and the owner of the buffer
+            // the ordinals index, so resolving it once is what makes "the geometry I borrow is the geometry
+            // my ordinals index" true by construction rather than by matching two lookups.
+            ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
+            if (tileLayer != null)
             {
-                ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
-                if (tileLayer != null)
+                var selected = new List<SelectedTileFeature>();
+                FeatureSelector.SelectFeatures(_layer.StyleLayer, tileLayer, context.Zoom, selected);
+
+                // Preserves the pre-B7 "no selected features ⇒ do nothing" gate. Since IR C1 P3 it no longer
+                // avoids any materialization (the decode already did that, once, for every layer) — it stays
+                // because it is what keeps a filter that matches nothing from calling WriteInto at all.
+                if (selected.Count > 0)
                 {
-                    // If WriteInto throws partway through, control never reaches the two lines below — the
-                    // adapter completes as zero-vertex (Complete()'s _completedNormally == false branch),
-                    // matching today's fallback rather than uploading partially-written data.
-                    _layer.WriteInto(_mda[0], features, context.Zoom, tileLayer.Extent, context.Tile,
-                        context.TileOriginRender, context.Projection, context.BufferClip,
-                        out int verts, out Bounds bounds);
-                    _vertexCount = verts;
-                    _bounds      = bounds;
+                    // BORROWED from the decoded tile — never disposed here, and its Tile/Extent came from the
+                    // decode, so there is no second copy of the address for this call site to get wrong.
+                    TileGeometryBuffers geometry = tileLayer.Geometry;
+
+                    // An empty layer materializes to nothing; skipping WriteInto here is the same zero-vertex
+                    // result the pipeline reached by scheduling over an uncreated buffer.
+                    if (geometry.IsCreated)
+                    {
+                        // If WriteInto throws partway through, control never reaches the two lines below — the
+                        // adapter completes as zero-vertex (Complete()'s _completedNormally == false branch),
+                        // matching today's fallback rather than uploading partially-written data.
+                        _layer.WriteInto(_mda[0], selected, geometry, context.Zoom,
+                            context.TileOriginRender, context.Projection, context.BufferClip,
+                            out int verts, out Bounds bounds);
+                        _vertexCount = verts;
+                        _bounds      = bounds;
+                    }
                 }
             }
 

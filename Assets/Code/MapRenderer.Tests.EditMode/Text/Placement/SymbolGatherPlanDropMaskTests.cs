@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
         private static SymbolTileLabelStore.Key Key(TileId t) => new SymbolTileLabelStore.Key("s", t);
-        private static long Tk(TileId t) => SymbolFeatureExtractor.PackTileKey(t);
+        private static long Tk(TileId t) => LabelTileKey.Pack(t);
 
         private static void SeedTile(SymbolTileLabelStore store, TileId tile, List<LabelInstance> labels)
         {

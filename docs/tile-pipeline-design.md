@@ -223,7 +223,9 @@ semantics, one owner for the spin code.
 
 Stays (~450 code lines): `_loaded` (`Dictionary<LoadedKey, LoadedTile>`), `Tick` (cover key/dirty tracking,
 request/release transition), `PumpPending` (state machine driver calling `_engine.Kick*/Consume`), `ReleaseTile`,
-`RenderTeardownRecord`, `_pendingFetchDisposal` + drain, `ObserveFetchOutcome`/`LogFetchErrorThrottled`,
+`RenderTeardownRecord`, `_pendingFetchDisposal` + drain,
+`TakeDecodeFromFetch`/`DiscardFetchOutcome` (D0 split the single `ObserveFetchOutcome` into the owning and
+the discarding arm)/`LogFetchErrorThrottled`,
 `SymbolTileBytesReady`, `BuildBackend` + backend accessors + `InstancedRebuild`, `CaptureTelemetry` (production
 caller: debug readout), `DoDispose` orchestration.
 

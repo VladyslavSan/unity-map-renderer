@@ -10,7 +10,7 @@
 
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Core.Text.Placement;
 
 namespace MapRenderer.Tests.Text.Placement
 {
@@ -26,9 +26,9 @@ namespace MapRenderer.Tests.Text.Placement
             return new TileId { X = (int)math.floor(x), Y = (int)math.floor(y), Z = zoom };
         }
 
-        /// <summary>The packed <see cref="SymbolFeatureExtractor.PackTileKey"/> of <see cref="Containing"/> —
+        /// <summary>The packed <see cref="LabelTileKey.Pack"/> of <see cref="Containing"/> —
         /// the realistic <c>TileKey</c> a point/icon test label should carry (R1).</summary>
         public static long PackedContaining(in GeoCoordinate geo, int zoom)
-            => SymbolFeatureExtractor.PackTileKey(Containing(geo, zoom));
+            => LabelTileKey.Pack(Containing(geo, zoom));
     }
 }

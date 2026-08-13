@@ -15,9 +15,10 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
@@ -64,12 +65,12 @@ namespace MapRenderer.Tests
             public readonly string SourceId;
             public readonly TileId Tile;
             public bool Ran;
-            public IDecodedTileHandle ReceivedDecode;
+            public SharedDisposable<IDecodedTile> ReceivedDecode;
             public Action OnRun;
 
             public SpySymbolTileWorkerPass(string sourceId, TileId tile) { SourceId = sourceId; Tile = tile; }
 
-            public void RunWorkerAndHandoff(IDecodedTileHandle decode)
+            public void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode)
             {
                 Ran = true;
                 ReceivedDecode = decode;
@@ -309,8 +310,8 @@ namespace MapRenderer.Tests
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle());
 
                 // ONE LateUpdate creates the record + starts the fetch. The kick block can NEVER fire on this
-                // same call (it requires ReadyDecode already set from a PRIOR PumpPending call, and this
-                // record's ReadyDecode starts null) — so TryBeginBuild is provably unreached so far.
+                // same call (it requires lt.Decode already set from a PRIOR PumpPending call, and this
+                // record's Decode starts null) — so TryBeginBuild is provably unreached so far.
                 view.LateUpdate();
                 Assert.AreEqual(0, spy.BeginBuildCalls.Count, "sanity: the kick cannot have fired yet.");
 
@@ -425,8 +426,11 @@ namespace MapRenderer.Tests
 
                 view.LateUpdate();          // Tick 1: cover created (9 tiles), fetches requested
                 Thread.Sleep(5);
-                view.LateUpdate();          // Tick 2: fetches observed → ReadyDecode set for every tile, 0 kicked
-                Assert.AreEqual(0, spy.BeginBuildCalls.Count, "sanity: nothing kicked before the tile has a prior ReadyDecode.");
+                view.LateUpdate();          // Tick 2: fetches observed (if their decodes have landed) → lt.Decode
+                                            // set, 0 kicked. Under the eager decode a fetch task also carries a
+                                            // decode, so a slow tick may observe fewer of them here — the
+                                            // assertion below does not depend on how many were observed.
+                Assert.AreEqual(0, spy.BeginBuildCalls.Count, "sanity: nothing kicked before the tile has a prior lt.Decode.");
 
                 var oldKeys = new List<LoadedTileKey>();
                 view.TileManager.CollectLoadedTileKeys(oldKeys);

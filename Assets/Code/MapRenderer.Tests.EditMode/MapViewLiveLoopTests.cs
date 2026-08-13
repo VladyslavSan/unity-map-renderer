@@ -21,6 +21,8 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -165,18 +167,19 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(liveMesh, "The fill layer must have a built mesh");
 
                 // Direct builder for the same tile.
-                var mvtTile = MapRenderer.Core.Mvt.MvtDecoder.Decode(bytes);
+                using var mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
                 var fillLayer = style.Layers[0]; // countries-fill
                 var paint     = new Fill.PaintProperties(fillLayer);
-                var features  = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(
+                var features  = MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(
                     fillLayer, mvtTile, 0.0);
-                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+                var mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
                 Assert.IsNotNull(mvtLayer, "The fixture must contain the 'countries' MVT layer");
                 Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
 
-                Mesh directMesh = TestTileMeshBuilder.BuildFill(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                Mesh directMesh = TestTileMeshBuilder.BuildFillFromLayer(
+                    mvtLayer, TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), paint, 0.0,
+                    new TileId { Z = 0, X = 0, Y = 0 }, projection: null, layout: null,
                     // Same window as the MapView arm — decoded through the SAME factory the view
                     // uses. Without this the reference arm builds unclipped and the oracle silently
                     // stops being a comparison the moment the config default is non-disabled.

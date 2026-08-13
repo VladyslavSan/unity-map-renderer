@@ -5,9 +5,10 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -55,10 +56,9 @@ namespace MapRenderer.Tests
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
 
-            var mvtTile = MvtDecoder.Decode(File.ReadAllBytes(path));
-            var layer = mvtTile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(path), "countries");
             Assert.IsNotNull(layer);
-            Assert.AreEqual(239, layer.Features.Count, "Expected 239 country features.");
+            Assert.AreEqual(239, layer.Kinds.Count, "Expected 239 country features.");
 
             int featureCount = 0;
             int polygonCount = 0;
@@ -74,11 +74,11 @@ namespace MapRenderer.Tests
             int skipCount = 0;
             int totalForceClips = 0;
 
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.Polygon) continue;
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
 
-                var rings = MvtGeometry.Decode(feature.Geometry);
+                var rings = MvtGeometry.Decode(layer.Commands[fi]);
                 Assert.IsNotNull(rings);
 
                 var polygons = PolygonAssembler.Assemble(rings);
@@ -240,8 +240,7 @@ namespace MapRenderer.Tests
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
 
-            var mvtTile = MvtDecoder.Decode(File.ReadAllBytes(path));
-            var layer = mvtTile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(path), "countries");
             Assert.IsNotNull(layer);
 
             // Worst holed polygon (largest triArea/expected ratio) among ALL holed polygons whose
@@ -252,11 +251,11 @@ namespace MapRenderer.Tests
             Earcut.Result worstResult = default;
             double   worstExpected = 0.0, worstTri = 0.0;
 
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.Polygon) continue;
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
 
-                var rings    = MvtGeometry.Decode(feature.Geometry);
+                var rings    = MvtGeometry.Decode(layer.Commands[fi]);
                 var polygons = PolygonAssembler.Assemble(rings);
 
                 foreach (var polygon in polygons)

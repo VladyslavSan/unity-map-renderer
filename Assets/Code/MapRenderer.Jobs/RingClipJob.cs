@@ -56,7 +56,12 @@ namespace MapRenderer.Jobs
         [ReadOnly] public NativeArray<double2> Vertices;
         [ReadOnly] public NativeArray<int>     RingOffsets;    // length = RingCount + 1 (sentinel)
         [ReadOnly] public NativeArray<int>     RingFeatureIdx; // which feature each ring belongs to
-        [ReadOnly] public int                  RingCount;
+
+        /// <summary>IR B7: ring indices into <see cref="RingOffsets"/>, in the order the consumer wants them
+        /// visited — <b>not</b> <c>0..ringCount</c>. The buffer is shared across consumers now, so which rings
+        /// this clip pass reads, and in what order, is the caller's decision rather than the buffer's extent.
+        /// Its length is the number of rings considered (survivors may be fewer).</summary>
+        [ReadOnly] public NativeArray<int> RingVisitOrder;
 
         /// <summary>Inclusive window corners in tile units — <c>TileBufferClip.TryWindow</c>'s output.</summary>
         public double2 ClipMin;
@@ -81,8 +86,9 @@ namespace MapRenderer.Jobs
             OutRingFeatureIdx.Clear();
             OutRingOffsets.Add(0);
 
-            for (int ri = 0; ri < RingCount; ri++)
+            for (int k = 0; k < RingVisitOrder.Length; k++)
             {
+                int ri     = RingVisitOrder[k];
                 int rStart = RingOffsets[ri];
                 int rLen   = RingOffsets[ri + 1] - rStart;
                 if (rLen <= 0) continue;

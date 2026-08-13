@@ -1,5 +1,6 @@
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Core.Lifetime;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -7,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// Epic A / A5b: the symbol-agnostic seam through which <see cref="Tile.TileManager"/> drives the
     /// symbol worker pass from its per-tile kick — the retired parallel push feed
     /// (<c>SymbolTileBytesReady</c>/<c>OnTileBytesReady</c>) is replaced by this factory. TileManager holds
-    /// only this interface pair (<c>string</c>/<see cref="TileId"/>/<see cref="IDecodedTileHandle"/> types) —
+    /// only this interface pair (<c>string</c>/<see cref="TileId"/>/<see cref="SharedDisposable{T}"/> types) —
     /// it never references a label/store/glyph type; the real implementor
     /// (<c>MapRenderer.Unity.Text.SymbolLabelSubsystem</c>) lives on the other side of the seam.
     /// </summary>
@@ -29,6 +30,6 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// worker pass over the SAME shared decode, then hand the completed worker phase to the
         /// subsystem's main-thread tail pump (thread-safe). Infallible from the caller's view — owns its
         /// own fault domain, never rethrows (the kick site wraps the call too, belt-and-braces).</summary>
-        void RunWorkerAndHandoff(IDecodedTileHandle decode);
+        void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode);
     }
 }

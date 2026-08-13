@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // icon's (±40 px around +200, vs. the icon's ±8 around 0). It lives on its OWN tile key so its
                 // (Kind=Text) quads land in a different world slot than the pair's text half — otherwise a
                 // non-empty text mesh could not be attributed.
-                long blockerTileKey = Symbol.SymbolFeatureExtractor.PackTileKey(new TileId { Z = 1, X = 1, Y = 0 });
+                long blockerTileKey = LabelTileKey.Pack(new TileId { Z = 1, X = 1, Y = 0 });
                 var blockerQuads = new List<SymbolQuad>
                 {
                     new SymbolQuad

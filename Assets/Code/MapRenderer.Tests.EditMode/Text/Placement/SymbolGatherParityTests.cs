@@ -115,7 +115,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(store.CompleteBuild(Key(tile), gen, labels, block), "sanity: block committed");
         }
 
-        private static long Tk(TileId t) => MapRenderer.Core.Style.Symbol.SymbolFeatureExtractor.PackTileKey(t);
+        private static long Tk(TileId t) => LabelTileKey.Pack(t);
 
         // Build the whole production winner-plan pipeline into `plan`, and the reference oracle SoA via Build over
         // the SAME post-FilterActive list. Returns the gathered mirror (materialized as a batch) via `lps`.

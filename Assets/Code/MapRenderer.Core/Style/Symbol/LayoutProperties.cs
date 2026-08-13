@@ -128,7 +128,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// auto-auto pair it resolves to <c>viewport</c> (today's billboard).
         ///
         /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only.</b>
-        /// <see cref="SymbolFeatureExtractor"/> resolves this once per layer and stamps it onto the emitted
+        /// <c>SymbolFeatureExtractor</c> resolves this once per layer and stamps it onto the emitted
         /// label; under <see cref="AlignmentMode.Map"/> <c>LabelStagingMath.StageCurved</c> lays the label out
         /// in WORLD ARC LENGTH rather than screen px, so a glyph advance is a fixed world size and spacing
         /// foreshortens with depth. This is not a dormant key: every shipped line-symbol layer resolves to

@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System.Collections.Generic;
 using System.Text;
@@ -7,13 +8,16 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -26,6 +30,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SymbolShieldExtractionTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // ── Walk-up fixture loaders + the parsed Liberty style live in SymbolTestFixtures (shared with
         //    SymbolPairPredicateTests); these are the local names this file's call sites already use. ──
         private static byte[] LoadBerlinFixtureBytes()
@@ -35,7 +45,11 @@ namespace MapRenderer.Tests
 
         private static readonly TileId BerlinTile = new TileId { Z = 9, X = 274, Y = 168 };
         private static MvtTile _berlinTile;
-        private static MvtTile BerlinFixtureTile() => _berlinTile ??= MvtDecoder.Decode(LoadBerlinFixtureBytes());
+        private static MvtTile BerlinFixtureTile() => _berlinTile ??= MvtDecoder.Decode(BerlinTile, LoadBerlinFixtureBytes());
+
+        /// <summary>IR C1 P3: the cached fixture tile owns native buffers for the whole fixture's life.</summary>
+        [OneTimeTearDown]
+        public void ReleaseCachedFixtureTile() { _berlinTile?.Dispose(); _berlinTile = null; }
 
         // ── Synthetic atlas: road_1..6, us-interstate_1..6, us-highway_1..6, us-state_1..6 ────────────
         private static SpriteAtlasView SyntheticShieldAtlas()
@@ -59,20 +73,6 @@ namespace MapRenderer.Tests
 
         // ── Synthetic tile plumbing — mirrors SymbolFeatureExtractorTests/SymbolFeatureExtractorIconTests'
         //    FixtureDecodedTile/FixtureTileLayer local doubles (test-only, duplicated per convention). ──
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
 
         /// <summary>Hand-encodes an N-point LineString MVT command stream: MoveTo(1) + LineTo(N-1),
@@ -120,13 +120,8 @@ namespace MapRenderer.Tests
                 new double2(500, 500), new double2(3500, 3500)));
             var usHighway = ShieldFeature("us-highway", 1, "9", LineStringGeometry(
                 new double2(500, 1500), new double2(3500, 1500)));
-            var layer = new FixtureTileLayer
-            {
-                Name = "transportation_name",
-                Extent = Extent,
-                Features = new List<ITileFeature> { interstate, usHighway },
-            };
-            return new FixtureDecodedTile(layer);
+            return TestDecodedTiles.Of(
+                "transportation_name", SyntheticTileId, new List<IFeature> { interstate, usHighway }, Extent);
         }
 
         private static int CountIcons(List<SymbolStyle.SymbolLabel> labels)
@@ -156,7 +151,7 @@ namespace MapRenderer.Tests
 
             var labels = new List<SymbolStyle.SymbolLabel>();
             // z10 — below the layer's z11 step boundary — must evaluate to Point placement.
-            SymbolStyle.SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 10.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 10.0, projection, labels, atlas);
 
             Assert.Greater(labels.Count, 0, "point placement on LineString features must emit labels");
             foreach (SymbolStyle.SymbolLabel l in labels)
@@ -169,7 +164,7 @@ namespace MapRenderer.Tests
         }
 
         private static int FeatureSelectorCount(StyleLayer layer)
-            => MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
+            => MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 10.0).Count;
 
         // ── T3 ─────────────────────────────────────────────────────────────────────────────────────────
         [Test]
@@ -181,7 +176,7 @@ namespace MapRenderer.Tests
             // non-us — real fixture, at z13 (above its z11 step ⇒ line/upright placement, the demo's actual view).
             SymbolStyle.StyleLayer nonUs = FindShieldLayer("highway-shield-non-us");
             var nonUsLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, nonUsLabels, atlas);
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, nonUsLabels, atlas);
             int nonUsIcons = CountIcons(nonUsLabels);
             Assert.Greater(nonUsIcons, 0, "highway-shield-non-us must resolve > 0 icons at z13");
             foreach (SymbolStyle.SymbolLabel l in nonUsLabels)
@@ -195,7 +190,7 @@ namespace MapRenderer.Tests
 
             SymbolStyle.StyleLayer interstate = FindShieldLayer("highway-shield-us-interstate");
             var interstateLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(interstate, synthTile, SyntheticTileId, 13.0, projection, interstateLabels, atlas);
+            SymbolFeatureExtractor.Extract(interstate, synthTile, SyntheticTileId, 13.0, projection, interstateLabels, atlas);
             int interstateIcons = CountIcons(interstateLabels);
             Assert.Greater(interstateIcons, 0, "highway-shield-us-interstate must resolve > 0 icons at z13");
             foreach (SymbolStyle.SymbolLabel l in interstateLabels)
@@ -204,7 +199,7 @@ namespace MapRenderer.Tests
 
             SymbolStyle.StyleLayer usShield = FindShieldLayer("road_shield_us");
             var usShieldLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(usShield, synthTile, SyntheticTileId, 13.0, projection, usShieldLabels, atlas);
+            SymbolFeatureExtractor.Extract(usShield, synthTile, SyntheticTileId, 13.0, projection, usShieldLabels, atlas);
             int usShieldIcons = CountIcons(usShieldLabels);
             Assert.Greater(usShieldIcons, 0, "road_shield_us must resolve > 0 icons at z13");
             foreach (SymbolStyle.SymbolLabel l in usShieldLabels)
@@ -222,7 +217,7 @@ namespace MapRenderer.Tests
             var atlas = SyntheticShieldAtlas();
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
 
             Assert.Greater(labels.Count, 0, "z13 (above the step) must still emit labels");
             foreach (SymbolStyle.SymbolLabel l in labels)
@@ -246,7 +241,7 @@ namespace MapRenderer.Tests
             var atlas = SyntheticShieldAtlas();
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
 
             Assert.Greater(labels.Count, 0, "precondition: some labels must be emitted");
             Assert.AreEqual(0, labels.Count % 2, "labels must form consecutive (icon,text) pairs — even count");
@@ -287,13 +282,7 @@ namespace MapRenderer.Tests
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
                 geometryType: TileGeometryType.Point,
                 geometry: SinglePointGeometry(new double2(2000, 2000)));
-            var layer = new FixtureTileLayer
-            {
-                Name = "points",
-                Extent = Extent,
-                Features = new List<ITileFeature> { feature },
-            };
-            var tile = new FixtureDecodedTile(layer);
+            var tile = TestDecodedTiles.Of("points", SyntheticTileId, new List<IFeature> { feature }, Extent);
             var styleLayer = new SymbolStyle.StyleLayer
             {
                 Id = "non-centred-pair-probe",
@@ -304,7 +293,7 @@ namespace MapRenderer.Tests
                     "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"text-offset\":[0,0.6]}"),
             };
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
+            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
                 new WebMercatorProjection(), labels, SyntheticShieldAtlas());
 
             Assert.AreEqual(2, labels.Count, "precondition: text + icon must both be emitted");
@@ -336,17 +325,23 @@ namespace MapRenderer.Tests
             var atlas = SyntheticShieldAtlas();
             var projection = new WebMercatorProjection();
 
-            IReadOnlyList<ITileFeature> selected = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(handBuilt, BerlinFixtureTile(), 13.0);
+            var selected = new List<SelectedTileFeature>();
+            MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(
+                handBuilt, BerlinFixtureTile().GetLayer(handBuilt.SourceLayer), 13.0, selected);
             Assert.Greater(selected.Count, 0, "precondition: the hand-built filter must select > 0 features");
 
+            // IR C1 P3: the command streams come from the BYTES (a decoded feature carries none), joined to
+            // the selection by layer ORDINAL — which is exactly what the buffer's RingFeatureIdx names.
+            MvtFixtureStreams.Layer fixtureStreams =
+                MvtFixtureStreams.ReadLayer(LoadBerlinFixtureBytes(), handBuilt.SourceLayer);
             int eligiblePaths = 0;
-            foreach (ITileFeature f in selected)
-                foreach (List<double2> path in MvtGeometry.Decode(f.Geometry))
+            foreach (SelectedTileFeature f in selected)
+                foreach (List<double2> path in MvtGeometry.Decode(fixtureStreams.Commands[f.Ordinal]))
                     if (path.Count >= 2) eligiblePaths++;
             Assert.Greater(eligiblePaths, 0, "precondition: > 0 eligible (>=2 point) decoded paths");
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(handBuilt, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(handBuilt, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
 
             Assert.Greater(labels.Count, 0, "map-aligned line layer must still emit curved labels");
             Assert.AreEqual(eligiblePaths, labels.Count, "one curved label per eligible decoded path — no drops, no dupes");
@@ -381,14 +376,14 @@ namespace MapRenderer.Tests
             // The real shipped Liberty layer (guarded skip if this fixture selects nothing for it).
             SymbolStyle.StyleLayer highwayNameMajor = FindShieldLayer("highway-name-major");
             Assert.IsNotNull(highwayNameMajor, "precondition: highway-name-major must parse");
-            IReadOnlyList<ITileFeature> majorSelected =
-                MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(highwayNameMajor, BerlinFixtureTile(), 13.0);
+            IReadOnlyList<IFeature> majorSelected =
+                MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(highwayNameMajor, BerlinFixtureTile(), 13.0);
             if (majorSelected.Count == 0)
             {
                 Assert.Pass("known coverage gap: highway-name-major selects nothing from the Berlin fixture at z13");
             }
             var majorLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(highwayNameMajor, BerlinFixtureTile(), BerlinTile, 13.0, projection, majorLabels, atlas);
+            SymbolFeatureExtractor.Extract(highwayNameMajor, BerlinFixtureTile(), BerlinTile, 13.0, projection, majorLabels, atlas);
             Assert.Greater(majorLabels.Count, 0, "highway-name-major (literal line, unset alignment -> map) must still emit curved labels");
             foreach (SymbolStyle.SymbolLabel l in majorLabels)
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "highway-name-major must stay curved");
@@ -418,8 +413,13 @@ namespace MapRenderer.Tests
         private static int EligiblePathCount(SymbolStyle.StyleLayer layer)
         {
             int eligible = 0;
-            foreach (ITileFeature f in MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(layer, BerlinFixtureTile(), 13.0))
-                foreach (List<double2> path in MvtGeometry.Decode(f.Geometry))
+            var selected = new List<SelectedTileFeature>();
+            MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(
+                layer, BerlinFixtureTile().GetLayer(layer.SourceLayer), 13.0, selected);
+            MvtFixtureStreams.Layer fixtureStreams =
+                MvtFixtureStreams.ReadLayer(LoadBerlinFixtureBytes(), layer.SourceLayer);
+            foreach (SelectedTileFeature f in selected)
+                foreach (List<double2> path in MvtGeometry.Decode(fixtureStreams.Commands[f.Ordinal]))
                     if (path.Count >= 2) eligible++;
             Assert.Greater(eligible, 0, "precondition: > 0 eligible (>=2 point) decoded paths");
             return eligible;
@@ -433,15 +433,15 @@ namespace MapRenderer.Tests
 
             // No rotation-alignment declared -> auto -> resolves MAP under line placement (D3).
             SymbolStyle.StyleLayer mapAligned = MapAlignedIconProbeLayer();
-            IReadOnlyList<ITileFeature> selected =
-                MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
+            IReadOnlyList<IFeature> selected =
+                MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(mapAligned, BerlinFixtureTile(), 13.0);
             Assert.Greater(selected.Count, 0, "precondition: > 0 features selected");
 
             // Precondition that the fixture is genuinely ICON-BEARING: the SAME layer with an explicit
             // viewport alignment takes the shipped D4 at-anchors path and emits POINT-shaped icons. Without
             // this, a zero-icon map arm could pass for the wrong reason (an unresolvable sprite).
             var viewportLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
                 BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
             Assert.Greater(CountIcons(viewportLabels), 0,
@@ -451,7 +451,7 @@ namespace MapRenderer.Tests
                     "precondition: a viewport-resolved line icon stays point-shaped (the unchanged D4 path)");
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(mapAligned, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(mapAligned, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
 
             int icons = CountIcons(labels);
             Assert.Greater(icons, 0, "a map-aligned line icon must now emit (the D4 fence is lifted by P-B)");
@@ -489,7 +489,7 @@ namespace MapRenderer.Tests
 
             // (a) line + map-resolved -> ALONG-LINE icon (one curved label per path).
             var mapLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(),
+            SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(),
                 BerlinFixtureTile(), BerlinTile, 13.0, projection, mapLabels, atlas);
             Assert.Greater(CountIcons(mapLabels), 0, "line + map must emit icons");
             foreach (SymbolStyle.SymbolLabel l in mapLabels)
@@ -497,7 +497,7 @@ namespace MapRenderer.Tests
 
             // (b) line + viewport -> the shipped D4 at-anchors icon (point-shaped), UNCHANGED by this stage.
             var viewportLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
                 BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
             Assert.Greater(CountIcons(viewportLabels), 0, "line + viewport must emit icons");
@@ -520,7 +520,7 @@ namespace MapRenderer.Tests
 
             // (c) point placement -> the point icon path, regardless of alignment.
             var pointLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"symbol-placement\":\"point\""),
                 BerlinFixtureTile(), BerlinTile, 13.0, projection, pointLabels, atlas);
             Assert.Greater(CountIcons(pointLabels), 0, "point placement must emit icons");
@@ -541,7 +541,7 @@ namespace MapRenderer.Tests
             // under line placement -> the along-line shape. Anchors/offsets are left at their defaults, which
             // is exactly what makes the centred-pair predicate fire.
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(
                     ",\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"viewport\""),
                 BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
@@ -572,10 +572,7 @@ namespace MapRenderer.Tests
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
                 geometryType: TileGeometryType.Point,
                 geometry: SinglePointGeometry(new double2(2000, 2000)));
-            var tile = new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            var tile = TestDecodedTiles.Of("points", SyntheticTileId, new List<IFeature> { feature }, Extent);
             var styleLayer = new SymbolStyle.StyleLayer
             {
                 Id = "icon-rotate-probe",
@@ -585,7 +582,7 @@ namespace MapRenderer.Tests
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(layoutJson),
             };
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
+            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
                 new WebMercatorProjection(), labels, SyntheticShieldAtlas());
             return labels;
         }
@@ -616,7 +613,7 @@ namespace MapRenderer.Tests
         {
             // The road_one_way_arrow_opposite shape: a map-resolved line icon layer with icon-rotate: 180.
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(",\"icon-rotate\":180"),
+            SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(",\"icon-rotate\":180"),
                 BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
 
             int icons = 0;
@@ -639,13 +636,7 @@ namespace MapRenderer.Tests
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
                 geometryType: TileGeometryType.Point,
                 geometry: SinglePointGeometry(new double2(2000, 2000)));
-            var layer = new FixtureTileLayer
-            {
-                Name = "points",
-                Extent = Extent,
-                Features = new List<ITileFeature> { feature },
-            };
-            var tile = new FixtureDecodedTile(layer);
+            var tile = TestDecodedTiles.Of("points", SyntheticTileId, new List<IFeature> { feature }, Extent);
             var styleLayer = new SymbolStyle.StyleLayer
             {
                 Id = "centred-pair-probe",
@@ -657,7 +648,7 @@ namespace MapRenderer.Tests
                     + (extraLayout == null ? "" : "," + extraLayout) + "}"),
             };
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
+            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
                 new WebMercatorProjection(), labels, SyntheticShieldAtlas());
             return labels;
         }
@@ -1028,8 +1019,8 @@ namespace MapRenderer.Tests
             SymbolStyle.StyleLayer usShield = FindShieldLayer("road_shield_us");
             Assert.IsNotNull(interstate); Assert.IsNotNull(usShield);
 
-            int interstateCount = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(interstate, BerlinFixtureTile(), 13.0).Count;
-            int usShieldCount = MapRenderer.Core.Filters.FeatureSelector.SelectFeatures(usShield, BerlinFixtureTile(), 13.0).Count;
+            int interstateCount = MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(interstate, BerlinFixtureTile(), 13.0).Count;
+            int usShieldCount = MapRenderer.Jobs.Tiles.FeatureSelector.SelectFeatures(usShield, BerlinFixtureTile(), 13.0).Count;
 
             Assert.AreEqual(0, interstateCount, "highway-shield-us-interstate must select 0 features from the Berlin fixture");
             Assert.AreEqual(0, usShieldCount, "road_shield_us must select 0 features from the Berlin fixture");
@@ -1048,15 +1039,14 @@ namespace MapRenderer.Tests
                     GeometryType = TileGeometryType.LineString,
                     Geometry = LineStringGeometry(new double2(-1000, 500), new double2(100, 600)),
                 };
-                var layer = new FixtureTileLayer { Name = "lines", Extent = Extent, Features = new List<ITileFeature> { feature } };
-                var tile = new FixtureDecodedTile(layer);
+                var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-a", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
                     LayoutJson = MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
                 var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
                 Assert.AreEqual(0, labels.Count, "a buffer-dominated path (mid-arc outside [0,extent)) must emit ZERO labels");
             }
 
@@ -1068,15 +1058,14 @@ namespace MapRenderer.Tests
                     GeometryType = TileGeometryType.LineString,
                     Geometry = LineStringGeometry(p0, p1),
                 };
-                var layer = new FixtureTileLayer { Name = "lines", Extent = Extent, Features = new List<ITileFeature> { feature } };
-                var tile = new FixtureDecodedTile(layer);
+                var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-b", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
                     LayoutJson = MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
                 var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
                 Assert.AreEqual(1, labels.Count, "an in-tile mid-arc must emit exactly one label");
 
                 double2 midTile = (p0 + p1) * 0.5;
@@ -1095,8 +1084,7 @@ namespace MapRenderer.Tests
                     GeometryType = TileGeometryType.LineString,
                     Geometry = LineStringGeometry(p0, p1),
                 };
-                var layer = new FixtureTileLayer { Name = "lines", Extent = Extent, Features = new List<ITileFeature> { feature } };
-                var tile = new FixtureDecodedTile(layer);
+                var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-c", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
@@ -1104,7 +1092,7 @@ namespace MapRenderer.Tests
                         "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\",\"symbol-spacing\":100}"),
                 };
                 var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
 
                 Assert.Greater(labels.Count, 0, "an edge-crossing viewport-aligned line must still emit some upright labels");
                 foreach (SymbolStyle.SymbolLabel l in labels)
@@ -1137,8 +1125,7 @@ namespace MapRenderer.Tests
                 GeometryType = TileGeometryType.LineString,
                 Geometry = LineStringGeometry(new double2(500, 500), new double2(3500, 3500)),
             };
-            var layer = new FixtureTileLayer { Name = "lines", Extent = Extent, Features = new List<ITileFeature> { feature } };
-            var tile = new FixtureDecodedTile(layer);
+            var tile = TestDecodedTiles.Of("lines", SyntheticTileId, new List<IFeature> { feature }, Extent);
             var styleLayer = new SymbolStyle.StyleLayer
             {
                 Id = "step-probe", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
@@ -1148,9 +1135,9 @@ namespace MapRenderer.Tests
             var projection = new WebMercatorProjection();
 
             var below = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 10.9, projection, below);
+            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 10.9, projection, below);
             var above = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 11.0, projection, above);
+            SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 11.0, projection, above);
 
             Assert.Greater(below.Count, 0, "z10.9 (below the z11 step) must emit the point shape");
             foreach (SymbolStyle.SymbolLabel l in below)
@@ -1256,24 +1243,21 @@ namespace MapRenderer.Tests
 
         private static IDecodedTile LineTile(params double2[][] paths)
         {
-            var features = new List<ITileFeature>();
+            var features = new List<IFeature>();
             foreach (double2[] path in paths)
                 features.Add(new InMemoryTileFeature
                 {
                     GeometryType = TileGeometryType.LineString,
                     Geometry     = LineStringGeometry(path),
                 });
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "lines", Extent = Extent, Features = features,
-            });
+            return TestDecodedTiles.Of("lines", SyntheticTileId, features, Extent);
         }
 
         private static List<SymbolStyle.SymbolLabel> ExtractLines(
             SymbolStyle.StyleLayer layer, TileId tileId, params double2[][] paths)
         {
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, LineTile(paths), tileId, 1.0,
+            SymbolFeatureExtractor.Extract(layer, LineTile(paths), tileId, 1.0,
                 new WebMercatorProjection(), labels, SyntheticShieldAtlas());
             return labels;
         }

@@ -6,8 +6,9 @@ using System;
 using System.IO;
 using System.Collections.Generic;
 using NUnit.Framework;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Expressions;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Mvt
 {
@@ -23,6 +24,14 @@ namespace MapRenderer.Tests.Mvt
     [TestFixture]
     public class MvtPropertyDecodeTests
     {
+
+        /// <summary>IR C1 P3: the address the committed fixture is decoded at (its buffers are stamped with
+        /// it). z0/0/0 — the fixture's own tile.</summary>
+        private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
+
+        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // ── Fixture loader (walk-up from cwd then AppContext — works in Unity batch mode AND dotnet) ─
 
         private static byte[] LoadFixture()
@@ -46,7 +55,7 @@ namespace MapRenderer.Tests.Mvt
 
         private static MvtLayer LoadCountries()
         {
-            var layer = MvtDecoder.Decode(LoadFixture()).GetLayer("countries");
+            var layer = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTileId, LoadFixture())).GetLayer("countries");
             Assert.IsNotNull(layer, "countries layer must be present in fixture");
             return layer;
         }
@@ -244,7 +253,7 @@ namespace MapRenderer.Tests.Mvt
             // Tile
             byte[] tileBytes = Cat(Tag(3, 2), LengthDelimited(layerBody));
 
-            var tile = MvtDecoder.Decode(tileBytes);
+            var tile = MvtDecoder.Decode(FixtureTileId, tileBytes);
             var layer = tile.GetLayer("test");
             Assert.IsNotNull(layer, "synthetic test layer must be present");
             return layer;
@@ -376,7 +385,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] tileBytes    = Cat(Tag(3, 2), LengthDelimited(layerBody));
 
             MvtTile tile = null;
-            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(tileBytes), "Odd-length tags must not throw");
+            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(FixtureTileId, tileBytes), "Odd-length tags must not throw");
             Assert.IsNotNull(tile);
             var layer = tile.GetLayer("malformed");
             Assert.IsNotNull(layer);
@@ -404,7 +413,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] tileBytes    = Cat(Tag(3, 2), LengthDelimited(layerBody));
 
             MvtTile tile = null;
-            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(tileBytes), "Out-of-range key index must not throw");
+            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(FixtureTileId, tileBytes), "Out-of-range key index must not throw");
             Assert.IsNotNull(tile);
             var layer = tile.GetLayer("oob");
             Assert.IsNotNull(layer);
@@ -429,7 +438,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] tileBytes    = Cat(Tag(3, 2), LengthDelimited(layerBody));
 
             MvtTile tile = null;
-            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(tileBytes), "Out-of-range value index must not throw");
+            Assert.DoesNotThrow(() => tile = MvtDecoder.Decode(FixtureTileId, tileBytes), "Out-of-range value index must not throw");
             var layer = tile.GetLayer("oobv");
             Assert.That(layer.Features[0].Properties.Count, Is.EqualTo(0), "Out-of-range value pair skipped");
         }
@@ -452,7 +461,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] layerBody    = Cat(layerVersion, layerName, layerFeature);
             byte[] tileBytes    = Cat(Tag(3, 2), LengthDelimited(layerBody));
 
-            var tile = MvtDecoder.Decode(tileBytes);
+            var tile = MvtDecoder.Decode(FixtureTileId, tileBytes);
             var layer = tile.GetLayer("zeroid");
             Assert.IsNotNull(layer);
             Assert.That(layer.Features.Count, Is.EqualTo(1));

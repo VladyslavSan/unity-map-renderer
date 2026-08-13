@@ -6,11 +6,13 @@ using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Tiles;
 using Fill = MapRenderer.Core.Style.Fill;
+using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
+                                                        // 'Color' ambiguous with UnityEngine's
 
 namespace MapRenderer.Unity.Rendering.Meshing
 {
@@ -112,8 +114,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// must keep source order (the spec's implicit ordering). An unevaluable key falls to 0, matching
         /// <c>TryEvaluate</c>'s contract elsewhere in this builder.</para>
         /// </summary>
-        private static IReadOnlyList<ITileFeature> OrderBySortKey(
-            IReadOnlyList<ITileFeature> features, Fill.LayoutProperties layout, double zoom)
+        private static IReadOnlyList<SelectedTileFeature> OrderBySortKey(
+            IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom)
         {
             if (layout == null || layout.SortKeyIsDefault) return features;
 
@@ -123,7 +125,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             for (int i = 0; i < count; i++)
             {
                 declaredOrder[i] = i;
-                sortKeys[i] = layout.SortKey.TryEvaluate(zoom, features[i], out float key) ? key : 0f;
+                sortKeys[i] = layout.SortKey.TryEvaluate(zoom, features[i].Feature, out float key) ? key : 0f;
             }
 
             System.Array.Sort(declaredOrder, (left, right) =>
@@ -132,7 +134,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 return byKey != 0 ? byKey : left.CompareTo(right); // stable: declared order breaks ties
             });
 
-            var ordered = new ITileFeature[count];
+            var ordered = new SelectedTileFeature[count];
             for (int i = 0; i < count; i++) ordered[i] = features[declaredOrder[i]];
             return ordered;
         }
@@ -185,25 +187,30 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <para><paramref name="clip"/> is how much of the tile's MVT buffer survives into the mesh
         /// (<see cref="TileBufferClip"/>). It is trailing and optional because <c>default</c> means DISABLED:
         /// every caller that does not pass one keeps the pre-clip geometry exactly.</para>
+        ///
+        /// <para><b>No <c>TileId</c> parameter</b> (B7a review N1): the tile address is
+        /// <c>geometry.Tile</c>, the producer's own declaration, exactly as the extent is
+        /// <c>geometry.Extent</c>. A second copy alongside the buffer is what would let a caller pair a z0
+        /// buffer with a z1 address — base vertices from one tile, pattern scale and globe subdivision from
+        /// another — so the seam does not accept one (<c>ITileGeometryMaterializer</c>, "Self-describing").</para>
         /// </summary>
         public static void WriteMeshData(
-            Mesh.MeshData               md,
-            IReadOnlyList<ITileFeature> selectedFeatures,
-            Fill.PaintProperties        paint,
-            double                      zoom,
-            double                      extent,
-            TileId                      id,
-            double3                     tileOriginRender,
-            out int                     vertexCount,
-            out Bounds                  bounds,
-            IProjection                 projection = null, // null ⇒ WebMercator (launch-time config threads this in)
-            Fill.LayoutProperties       layout     = null, // null ⇒ no fill-sort-key (declared feature order)
-            TileBufferClip              clip       = default) // default ⇒ disabled ⇒ the whole tile buffer is drawn
+            Mesh.MeshData                      md,
+            IReadOnlyList<SelectedTileFeature> selectedFeatures,
+            TileGeometryBuffers                geometry, // BORROWED — the store owns it; never disposed here
+            Fill.PaintProperties               paint,
+            double                             zoom,
+            double3                            tileOriginRender,
+            out int                            vertexCount,
+            out Bounds                         bounds,
+            IProjection                        projection = null, // null ⇒ WebMercator (launch-time config threads this in)
+            Fill.LayoutProperties              layout     = null, // null ⇒ no fill-sort-key (declared feature order)
+            TileBufferClip                     clip       = default) // default ⇒ disabled ⇒ the whole tile buffer is drawn
         {
             vertexCount = 0;
             bounds      = default;
 
-            if (selectedFeatures == null || selectedFeatures.Count == 0)
+            if (selectedFeatures == null || selectedFeatures.Count == 0 || !geometry.IsCreated)
                 return;
 
             // fill-sort-key: features draw in ASCENDING key order, so a higher key lands LATER in the index
@@ -216,15 +223,24 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // ProfilerMarkerTests + MapViewAsyncMeshBuildTests, which read the same const — rename in one place.
             using var sBuild = PmWriteMeshData.Auto();
 
-            // First (Burst): collect this layer's polygon features + their per-feature linear color, then
-            // run the Burst decode→assemble→earcut→project chain via FillMeshPipeline (Run(), so it
-            // works on this worker thread). The managed List<>/array mesh garbage is gone — geometry
-            // lives in NativeArrays. Color stays managed (paint.Color is an expression over string keys).
-            var geoms         = new List<uint[]>(selectedFeatures.Count);
-            var featureColors = new List<Vector4>(selectedFeatures.Count); // linearized sRGB, parallel to geoms
-            foreach (var feature in selectedFeatures)
+            // Bake this layer's per-feature linear colour, and record each surviving polygon feature's RANK —
+            // its position in fill-sort-key order. Both are indexed by the feature's ORDINAL in the source
+            // layer, because that is what the shared buffer's RingFeatureIdx names; a slot-indexed array would
+            // permute colours the moment this layer's filter rejects anything.
+            var featureColors = new Vector4[geometry.FeatureCount];
+            var rankByOrdinal = new int[geometry.FeatureCount];
+            for (int i = 0; i < rankByOrdinal.Length; i++) rankByOrdinal[i] = -1; // -1 ⇒ not drawn by this layer
+
+            int rank = 0;
+            for (int si = 0; si < selectedFeatures.Count; si++)
             {
-                if (feature.GeometryType != TileGeometryType.Polygon || feature.Geometry == null)
+                SelectedTileFeature selected = selectedFeatures[si];
+                IFeature feature = selected.Feature;
+
+                // Polygon-only. Since B7 this is no longer the sole guard — RingAssemblyJob has its own kind
+                // gate — but it stays, because it also decides which ordinals get a colour and how many rings
+                // are gathered. Two independent guards, each RED-verifiable on its own.
+                if (feature.GeometryType != TileGeometryType.Polygon)
                     continue;
 
                 Color featureColor = Color.white;
@@ -246,18 +262,103 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
                     featureAlpha *= opacity;
 
-                geoms.Add(feature.Geometry);
-                featureColors.Add(new Vector4(lin.r, lin.g, lin.b, featureAlpha));
+                featureColors[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
+                rankByOrdinal[selected.Ordinal] = rank++;
             }
 
-            if (geoms.Count == 0)
+            if (rank == 0)
                 return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
+
+            NativeArray<int> ringVisitOrder = BuildRingVisitOrder(geometry, rankByOrdinal, rank);
+            try
+            {
+                WriteGeometry(md, geometry, ringVisitOrder, featureColors,
+                    tileOriginRender, projection, clip, out vertexCount, out bounds);
+            }
+            finally
+            {
+                ringVisitOrder.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// The ring indices this layer wants triangulated, in draw order: a <b>counting sort</b> of the shared
+        /// buffer's rings bucketed on their feature's <c>fill-sort-key</c> rank, skipping rings whose feature
+        /// this layer does not draw (<c>rank == -1</c>).
+        ///
+        /// <para>Two properties make this the byte-identical form of the pre-B7 "reorder the feature list, then
+        /// decode it" shape, and both come free from the counting sort being <b>stable</b>:</para>
+        /// <list type="bullet">
+        /// <item>rings of one feature stay <b>contiguous</b> — <c>RingAssemblyJob</c> resets its exterior sign
+        /// on a feature change, so a split feature's second run would be re-read as a fresh exterior;</item>
+        /// <item>within a feature, rings keep <b>ascending ring index</b> = decode order, which is what makes
+        /// earcut's hole-bridge sort (tiebroken on ring index) land where it did before.</item>
+        /// </list>
+        /// </summary>
+        private static NativeArray<int> BuildRingVisitOrder(
+            TileGeometryBuffers geometry, int[] rankByOrdinal, int rankCount)
+        {
+            var rankStart = new int[rankCount + 1];
+            int visited   = 0;
+            for (int r = 0; r < geometry.RingCount; r++)
+            {
+                int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];
+                if (rank < 0) continue;
+                rankStart[rank + 1]++;
+                visited++;
+            }
+            for (int i = 0; i < rankCount; i++) rankStart[i + 1] += rankStart[i];
+
+            var order  = new NativeArray<int>(visited, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var cursor = (int[])rankStart.Clone();
+            for (int r = 0; r < geometry.RingCount; r++)
+            {
+                int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];
+                if (rank < 0) continue;
+                order[cursor[rank]++] = r;
+            }
+            return order;
+        }
+
+        /// <summary>
+        /// The geometry half of <see cref="WriteMeshData"/>: run the Burst decode→assemble→earcut→project
+        /// chain over an already-built <paramref name="geometry"/> producer and stream the result into
+        /// <paramref name="md"/>, colouring each vertex from <paramref name="featureColors"/> indexed by the
+        /// producer's own feature ordinal.
+        ///
+        /// <para>Split out so a caller whose geometry is <b>not</b> a selected-feature list — the background
+        /// quad, whose four corners come straight from a <c>PathGeometryMaterializer</c> — reuses this path
+        /// verbatim instead of hand-authoring a synthetic feature to feed the loop above.</para>
+        ///
+        /// <para><paramref name="geometry"/> is <b>borrowed</b> (fill's caller borrows it from the store; the
+        /// background quad mints and owns its own), and <paramref name="featureColors"/> is indexed by the
+        /// buffer's own <b>feature ordinal</b> — the same index <c>RingFeatureIdx</c> carries. The tile
+        /// <b>address and extent both come off the buffer</b>, never from a second copy alongside it: the
+        /// address sets the pattern stream's world span and the globe subdivision's tile, so a buffer/id
+        /// mismatch would render base vertices from one tile with pattern coordinates from another.</para>
+        /// </summary>
+        internal static void WriteGeometry(
+            Mesh.MeshData               md,
+            TileGeometryBuffers         geometry,
+            NativeArray<int>            ringVisitOrder,
+            IReadOnlyList<Vector4>      featureColors,
+            double3                     tileOriginRender,
+            IProjection                 projection,
+            TileBufferClip              clip,
+            out int                     vertexCount,
+            out Bounds                  bounds)
+        {
+            vertexCount = 0;
+            bounds      = default;
+
+            // The producer is the sole authority for both (ITileGeometryMaterializer, "Self-describing").
+            TileId id     = geometry.Tile;
+            double extent = geometry.Extent;
 
             TileMeshBuffers buffers = FillMeshPipeline.Schedule(new FillMeshPipeline.LayerInput
             {
-                FeatureGeometries = geoms,
-                Extent            = extent,
-                Tile              = id,
+                Geometry          = geometry,
+                RingVisitOrder    = ringVisitOrder,
                 OriginRender      = tileOriginRender,
                 Projection        = projection ?? DefaultProjection,
                 Clip              = clip,
@@ -352,7 +453,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // the earcut NativeArrays feed the job directly and the refined output lands in Temp-scope NativeLists.
         private static void WriteGlobeSubdivided(
             Mesh.MeshData md,               in TileMeshBuffers buffers, IProjection proj, TileId id, double extent,
-            double3       tileOriginRender, List<Vector4>      featureColors, out int vertexCount, out Bounds bounds)
+            double3       tileOriginRender, IReadOnlyList<Vector4> featureColors, out int vertexCount, out Bounds bounds)
         {
             vertexCount = 0;
             bounds      = default;

@@ -4,8 +4,11 @@
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
+using Unity.Collections;
 using MapRenderer.Jobs;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Tiles;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -120,12 +123,23 @@ namespace MapRenderer.Tests
         [Test]
         public void Schedule_MultiPointMoveTo_Count11_CompletesWithoutOverflow()
         {
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(
+                new IFeature[]
+                {
+                    new InMemoryTileFeature
+                    {
+                        GeometryType = TileGeometryType.Polygon,
+                        Geometry     = MultiPointMoveTo(11),
+                    },
+                },
+                new TileId { Z = 0, X = 0, Y = 0 }, 4096);
+            NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
+
             var input = new FillMeshPipeline.LayerInput
             {
-                FeatureGeometries = new List<uint[]> { MultiPointMoveTo(11) },
-                Extent       = 4096,
-                Tile         = new TileId { Z = 0, X = 0, Y = 0 },
-                OriginRender = default, // all rings degenerate ⇒ no geometry ⇒ origin irrelevant here
+                Geometry       = geometry,
+                RingVisitOrder = visitOrder,
+                OriginRender   = default, // all rings degenerate ⇒ no geometry ⇒ origin irrelevant here
             };
 
             TileMeshBuffers buffers = default;
@@ -136,6 +150,8 @@ namespace MapRenderer.Tests
             // on default, but call it to mirror real caller cleanup.
             if (buffers.IsCreated)
                 buffers.Dispose();
+            visitOrder.Dispose();
+            geometry.Dispose();
         }
 
         /// <summary>MVT geometry: a single MoveTo command with the given point count, plus its 2*count

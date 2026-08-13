@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System;
 using System.Collections.Generic;
@@ -11,12 +12,15 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// I3: <see cref="SymbolStyle.SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
+    /// I3: <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
     /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolLabel"/> (<c>Kind == Icon</c>)
     /// independently of the existing text path (<c>Kind == Text</c>, unchanged). Mirrors
@@ -26,6 +30,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SymbolFeatureExtractorIconTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // Walk-up fixture loader — mirrors SymbolFeatureExtractorTests.LoadFixture.
         private static string LoadSpriteJson()
         {
@@ -69,20 +79,6 @@ namespace MapRenderer.Tests
                 ZigZagEncode((long)p.y),
             };
 
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         private static SymbolStyle.StyleLayer PointLayer(string layoutJson)
             => new SymbolStyle.StyleLayer
             {
@@ -99,8 +95,7 @@ namespace MapRenderer.Tests
                 GeometryType = TileGeometryType.Point,
                 Geometry = SinglePointGeometry(point),
             };
-            var layer = new FixtureTileLayer { Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature } };
-            return new FixtureDecodedTile(layer);
+            return TestDecodedTiles.Of("points", TileId0, new List<IFeature> { feature }, Extent);
         }
 
         [Test]
@@ -113,7 +108,7 @@ namespace MapRenderer.Tests
             var layer = PointLayer("{\"icon-image\":\"star\"}");
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
 
             Assert.AreEqual(1, labels.Count, "an icon-only feature must yield exactly one (icon) label");
             SymbolStyle.SymbolLabel label = labels[0];
@@ -133,7 +128,7 @@ namespace MapRenderer.Tests
 
             var labels = new List<SymbolStyle.SymbolLabel>();
             Assert.DoesNotThrow(() =>
-                SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas));
+                SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas));
 
             Assert.AreEqual(1, labels.Count, "the text label still resolves");
             Assert.AreEqual(LabelKind.Text, labels[0].Kind, "an unresolvable sprite name must not emit an icon label");
@@ -155,7 +150,7 @@ namespace MapRenderer.Tests
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
 
             Assert.AreEqual(2, labels.Count, "a feature with both text-field and icon-image yields two labels");
             Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "the icon (pair owner) is emitted first");
@@ -186,7 +181,7 @@ namespace MapRenderer.Tests
                 "{\"icon-image\":\"marker\",\"icon-size\":2,\"icon-offset\":[2,0],\"icon-anchor\":\"top-left\"}");
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
 
             Assert.AreEqual(1, labels.Count);
             SymbolQuad expected = IconQuadLayout.Layout(MarkerEntry, SheetSize, 2f, TextAnchor.TopLeft, new float2(2f, 0f));
@@ -201,10 +196,10 @@ namespace MapRenderer.Tests
 
             // 5-arg (pre-I3) call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
             var preI3Style = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
 
             var explicitNull = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
 
             Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon label, even with icon-image set");
             Assert.AreEqual(1, explicitNull.Count);
@@ -222,7 +217,7 @@ namespace MapRenderer.Tests
             var layer = PointLayer("{\"text-field\":\"L\"}"); // no icon-image at all
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
 
             Assert.AreEqual(1, labels.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
             Assert.AreEqual(LabelKind.Text, labels[0].Kind);

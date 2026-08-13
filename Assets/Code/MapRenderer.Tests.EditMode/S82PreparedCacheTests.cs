@@ -23,15 +23,16 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -84,20 +85,26 @@ namespace MapRenderer.Tests
         /// </summary>
         private static Color GroundTruthColorAtZoom(byte[] mvtBytes, StyleDocument style, TileId id, double zoom)
         {
-            var mvtTile   = MvtDecoder.Decode(mvtBytes);
+            using var mvtTile = MvtDecoder.Decode(id, mvtBytes);
             var fillLayer = style.Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
-            var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, zoom);
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer.");
+            var features  = TestTileMeshBuilder.Select(fillLayer, mvtLayer, zoom);
             Assert.Greater(features.Count, 0, "Fixture must produce >=1 feature (non-vacuous ground truth).");
 
             var (bMin, _) = id.MercatorBounds();
             var tileOrigin = new double3(bMin.x, 0.0, bMin.y);
 
             var mda = MeshDataPayload.AllocateTracked(1);
-            StyledFillTileBuilder.WriteMeshData(
-                mda[0], features, paint, zoom, mvtLayer.Extent, id, tileOrigin, out int vc, out Bounds b);
+            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
+            int vc; Bounds b;
+            try
+            {
+                StyledFillTileBuilder.WriteMeshData(
+                    mda[0], features, geometry, paint, zoom, tileOrigin, out vc, out b);
+            }
+            finally { /* BORROWED: the decoded tile frees it (IR C1 P3) */ }
             Assert.Greater(vc, 0, "Ground-truth build must produce geometry.");
 
             var payload = new MeshDataPayload(mda, vc, b, "ground-truth", materialIndex: 0);

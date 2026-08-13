@@ -10,11 +10,10 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
@@ -23,6 +22,8 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests; // TestGlyphSource
 using Symbol = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Text
 {
@@ -156,7 +157,16 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
+            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
+            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            byte[] bytes = _tileBytes;
+            UniTask.RunOnThreadPool(() =>
+            {
+                var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(tile, bytes));
+                try { pass.RunWorkerAndHandoff(decode); }
+                finally { decode.Release(); }
+            }).Forget();
         }
 
         /// <summary>Drives the REAL production subsystem to a committed label set — same bytes, same
@@ -187,7 +197,13 @@ namespace MapRenderer.Tests.Text
         /// (<see cref="StyledSymbolTileBuilder.BuildAsync"/>) over a SECOND, independent glyph pipeline fed
         /// the SAME ranges — atlas state is equivalent but independent, so this is not self-referential with
         /// the processor machinery A3 changes (only <c>ExtractLayers</c>/<c>ShapeAsync</c>, which A3 does not
-        /// modify, are shared).</summary>
+        /// modify, are shared).
+        /// <para><b>That independence premise EXPIRED at IR stage B4</b>, which modifies exactly
+        /// <c>ExtractLayers</c>/<c>ShapeAsync</c>. This fixture is therefore no longer independent of the
+        /// symbol geometry path, and must not be cited as the oracle for a change to it —
+        /// <c>SymbolBufferParityTests</c> is that oracle. Recorded here rather than only in the newer file
+        /// because a stale independence claim left where a reader finds it is precisely how this epic
+        /// disarmed a structural tooth once already.</para></summary>
         private List<LabelInstance> BuildOracle()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
@@ -199,7 +215,7 @@ namespace MapRenderer.Tests.Text
             using var oracleGlyphManager = new GlyphManager(TestGlyphSource.FromRanges(ranges), new GlyphAtlas(dim, dim));
             var oracleBuilder = new StyledSymbolTileBuilder(oracleGlyphManager);
 
-            MvtTile mvt = MvtDecoder.Decode(_tileBytes);
+            using MvtTile mvt = MvtDecoder.Decode(Tile, _tileBytes);
             double zoom = _mapCamera.CurrentProperties.Zoom; // same captured camera zoom the production build uses
             var projection = _mapCamera.Projection;
 
@@ -225,7 +241,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(oracle.Count, production.Count, "candidate COUNT must match the oracle");
 
             for (int i = 0; i < oracle.Count; i++)
-                AssertLabelsEqual(oracle[i], production[i], i);
+                LabelInstanceAssert.AreEqual(oracle[i], production[i], i);
         }
 
         [UnityTest]
@@ -302,57 +318,6 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        private static void AssertLabelsEqual(LabelInstance expected, LabelInstance actual, int index)
-        {
-            string at = $" at index {index}";
-            Assert.AreEqual(expected.AnchorRender, actual.AnchorRender, "AnchorRender" + at);
-            Assert.AreEqual(expected.Placement, actual.Placement, "Placement" + at);
-            AssertLayoutEqual(expected.Layout, actual.Layout, at);
-            CollectionAssert.AreEqual(expected.PathRender, actual.PathRender, "PathRender" + at);
-            CollectionAssert.AreEqual(expected.LineAnchors, actual.LineAnchors, "LineAnchors" + at);
-            AssertCurvedGlyphsEqual(expected.CurvedGlyphs, actual.CurvedGlyphs, at);
-            Assert.AreEqual(expected.Text, actual.Text, "Text" + at);
-            Assert.AreEqual(expected.Paint, actual.Paint, "Paint" + at);
-            Assert.AreEqual(expected.TextSizePx, actual.TextSizePx, "TextSizePx" + at);
-            Assert.AreEqual(expected.PaddingPx, actual.PaddingPx, "PaddingPx" + at);
-            Assert.AreEqual(expected.SortKey, actual.SortKey, "SortKey" + at);
-            Assert.AreEqual(expected.MaxAngleDeg, actual.MaxAngleDeg, "MaxAngleDeg" + at);
-            Assert.AreEqual(expected.KeepUpright, actual.KeepUpright, "KeepUpright" + at);
-            Assert.AreEqual(expected.FeatureIndex, actual.FeatureIndex, "FeatureIndex" + at);
-            Assert.AreEqual(expected.TileKey, actual.TileKey, "TileKey" + at);
-            Assert.AreEqual(expected.MaterialIndex, actual.MaterialIndex, "MaterialIndex" + at);
-            Assert.AreEqual(expected.AllowOverlap, actual.AllowOverlap, "AllowOverlap" + at);
-            Assert.AreEqual(expected.IgnorePlacement, actual.IgnorePlacement, "IgnorePlacement" + at);
-            Assert.AreEqual(expected.TranslatePx, actual.TranslatePx, "TranslatePx" + at);
-            Assert.AreEqual(expected.TranslateAnchor, actual.TranslateAnchor, "TranslateAnchor" + at);
-            Assert.AreEqual(expected.RotationAlignment, actual.RotationAlignment, "RotationAlignment" + at);
-        }
-
-        private static void AssertLayoutEqual(TextLayoutResult expected, TextLayoutResult actual, string at)
-        {
-            if (expected == null || actual == null)
-            {
-                Assert.AreEqual(expected == null, actual == null, "Layout null-ness" + at);
-                return;
-            }
-            Assert.AreEqual(expected.BoundsMin, actual.BoundsMin, "Layout.BoundsMin" + at);
-            Assert.AreEqual(expected.BoundsMax, actual.BoundsMax, "Layout.BoundsMax" + at);
-            Assert.AreEqual(expected.LineCount, actual.LineCount, "Layout.LineCount" + at);
-            CollectionAssert.AreEqual(
-                new List<SymbolQuad>(expected.Quads ?? System.Array.Empty<SymbolQuad>()),
-                new List<SymbolQuad>(actual.Quads ?? System.Array.Empty<SymbolQuad>()),
-                "Layout.Quads" + at);
-        }
-
-        private static void AssertCurvedGlyphsEqual(IReadOnlyList<CurvedGlyph> expected, IReadOnlyList<CurvedGlyph> actual, string at)
-        {
-            if (expected == null || actual == null)
-            {
-                Assert.AreEqual(expected == null, actual == null, "CurvedGlyphs null-ness" + at);
-                return;
-            }
-            CollectionAssert.AreEqual(new List<CurvedGlyph>(expected), new List<CurvedGlyph>(actual), "CurvedGlyphs" + at);
-        }
 
         private static byte[] LoadUp(params string[] relative)
         {

@@ -6,8 +6,9 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -152,8 +153,9 @@ namespace MapRenderer.Tests
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
 
-            var mvtTile = MvtDecoder.Decode(File.ReadAllBytes(path));
-            var layer = mvtTile.GetLayer("countries");
+            // IR C1 P3: the ring coordinates for this projection sweep come from the independent fixture
+            // reader plus the managed reference decoder, not from a decoded feature (which carries none).
+            var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(path), "countries");
             Assert.IsNotNull(layer);
 
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
@@ -166,9 +168,9 @@ namespace MapRenderer.Tests
             double marginY = (bMax.y - bMin.y) * 0.05;
 
             int totalChecked = 0;
-            foreach (var feature in layer.Features)
+            foreach (uint[] commands in layer.Commands)
             {
-                var rings = MapRenderer.Core.Mvt.MvtGeometry.Decode(feature.Geometry);
+                var rings = MapRenderer.Tests.TestSupport.MvtGeometry.Decode(commands);
                 foreach (var ring in rings)
                 {
                     if (ring == null || ring.Count == 0) continue;

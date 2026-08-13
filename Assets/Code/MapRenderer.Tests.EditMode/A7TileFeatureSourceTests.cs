@@ -1,8 +1,8 @@
 // Epic A / A7 acceptance: the raised source interface
-// (ITileFeatureSource.GetTile -> IDecodedTileHandle). F-2 proves a BYTELESS source (no IDataSource, no
+// (ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>). F-2 proves a BYTELESS source (no IDataSource, no
 // bytes, no FetchAsync) flows through the UNCHANGED per-layer fan-out — the raise is real, not a rename.
-// F-4 proves the lazy-handle decision (§B): GetTile mints a handle without decoding; a malformed-MVT fetch
-// completes cleanly and only faults on the first GetOrDecode() call.
+// F-4 proves the EAGER-decode decision: GetTile decodes inside its own task, so a malformed-MVT fetch
+// faults the task itself and mints no handle at all — the exact inversion of the lazy contract it replaced.
 
 using System.Collections.Generic;
 using System.Threading;
@@ -11,6 +11,7 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
@@ -18,6 +19,8 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -26,55 +29,32 @@ namespace MapRenderer.Tests
     {
         // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
 
-        /// <summary>An EAGER <see cref="IDecodedTileHandle"/> wrapping a pre-built <see cref="IDecodedTile"/>
-        /// — no bytes, no lazy decode. Proves the handle interface is genuinely polymorphic (§B point 2): the
-        /// MVT source's handle (<see cref="SharedTileDecode"/>) is byte-lazy, this one is eager, and both
-        /// satisfy the SAME <see cref="IDecodedTileHandle"/> contract the runner reads through.</summary>
-        private sealed class EagerHandle : IDecodedTileHandle
-        {
-            private readonly IDecodedTile _tile;
-            public EagerHandle(IDecodedTile tile) => _tile = tile;
-            public IDecodedTile GetOrDecode() => _tile;
-        }
-
         /// <summary>A <see cref="ITileFeatureSource"/> with NO <see cref="MapRenderer.Core.Data.IDataSource"/>,
-        /// no bytes, no fetch at all — every <see cref="GetTile"/> call resolves immediately (synchronously
-        /// completed <see cref="UniTask{T}"/>) to the SAME eager handle. The F-2 falsifier: a coordinator
-        /// still routing through the byte-centric boundary cannot consume this (compile-impossible, since
-        /// there is no <c>IDataSource</c> anywhere to wrap).</summary>
+        /// no bytes, no fetch at all — every <see cref="GetTile"/> call builds a tile and hands back a fresh
+        /// <see cref="SharedDisposable{T}"/> over it. The F-2 falsifier: a coordinator still routing through the
+        /// byte-centric boundary cannot consume this (compile-impossible, since there is no
+        /// <c>IDataSource</c> anywhere to wrap).
+        ///
+        /// <para><b>A fresh wrapper per call, and a fresh tile with it</b> — the shape production now has, and
+        /// a requirement rather than a nicety: the caller owns the ONE reference a wrapper is born with and
+        /// releases it, so handing the same instance to two records would double-acquire the same count. The
+        /// test double this replaced (<c>EagerHandle</c>, a hand-written no-op-scope handle over a shared
+        /// pre-built tile) is exactly what the wrapper IS now, so it is gone.</para></summary>
         private sealed class FakeTileFeatureSource : ITileFeatureSource
         {
-            private readonly IDecodedTileHandle _handle;
+            private readonly System.Func<IDecodedTile> _tileFactory;
             public int GetTileCalls { get; private set; }
-            public FakeTileFeatureSource(IDecodedTileHandle handle) => _handle = handle;
+            public FakeTileFeatureSource(System.Func<IDecodedTile> tileFactory) => _tileFactory = tileFactory;
 
-            public UniTask<IDecodedTileHandle> GetTile(TileId id, CancellationToken ct = default)
+            public UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
             {
                 GetTileCalls++;
-                return UniTask.FromResult(_handle);
+                return UniTask.FromResult(new SharedDisposable<IDecodedTile>(_tileFactory()));
             }
 
             public void Release(TileId id) { }
             public int InFlightCount => 0;
             public void Dispose() { }
-        }
-
-        /// <summary>Minimal engine-free <see cref="IDecodedTile"/>/<see cref="ITileLayer"/> pair — mirrors
-        /// <c>A6NonMvtDecoderTests.FixtureDecodedTile</c>/<c>FixtureTileLayer</c> (test-only, per design §B-4;
-        /// duplicated locally rather than shared since both are private test fixtures, not a production
-        /// type).</summary>
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
         }
 
         private const string FixtureSourceLayerName = "a7-fixture-layer";
@@ -119,19 +99,24 @@ namespace MapRenderer.Tests
             // The fixture tile: one layer, one feature — the A2 full-extent-ring command stream (the SAME
             // oracle A6NonMvtDecoderTests/TileBackgroundQuadProjectionTests assert decodes to the tile's 4
             // corners), carried by the production InMemoryTileFeature.
-            var feature = new InMemoryTileFeature
+            // Built per GetTile call, and OWNED BY THE LEASE that wraps it — the coordinator's release is
+            // what frees its Allocator.Persistent geometry, exactly as for a real decode. A single fixture
+            // tile shared across calls would be disposed by the first release and read freed by the next.
+            IDecodedTile MakeFixtureTile()
             {
-                GeometryType = TileGeometryType.Polygon,
-                Geometry     = TileBackgroundLayerProcessor.FullExtentRingGeometry,
-            };
-            var layer = new FixtureTileLayer
-            {
-                Name     = FixtureSourceLayerName,
-                Extent   = (uint)TileBackgroundLayerProcessor.Extent,
-                Features = new ITileFeature[] { feature },
-            };
-            var fixtureTile = new FixtureDecodedTile(layer);
-            var fake = new FakeTileFeatureSource(new EagerHandle(fixtureTile));
+                var feature = new InMemoryTileFeature
+                {
+                    GeometryType = TileGeometryType.Polygon,
+                    Geometry     = FullExtentRingCommandStream.Commands,
+                };
+                // IR C1 P3: the fixture layer owns its geometry, materialized at construction like a decoded one.
+                var layer = new InMemoryTileLayer(
+                    FixtureSourceLayerName, new TileId { Z = 0, X = 0, Y = 0 }, new IFeature[] { feature },
+                    (uint)TileBackgroundLayerProcessor.Extent);
+                return new InMemoryDecodedTile(layer);
+            }
+
+            var fake = new FakeTileFeatureSource(MakeFixtureTile);
 
             var style = StyleParser.Parse($@"{{
                 ""version"": 8,
@@ -171,39 +156,80 @@ namespace MapRenderer.Tests
             finally { view.Teardown(); Object.DestroyImmediate(go); }
         }
 
-        // ── F-4: GetTile mints a LAZY handle — it must not decode eagerly (the §B decisive tooth) ─────────
+        // ── F-4: GetTile decodes EAGERLY — the inversion of the retired lazy tooth ────────────────────────
 
         // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
-        // throws decoding it — same fixture shape used by SharedTileDecodeTests/A6NonMvtDecoderTests).
+        // throws decoding it — same fixture shape used by A6NonMvtDecoderTests).
         private static readonly byte[] MalformedMvtBytes = { 0x1A, 0x64 };
 
+        /// <summary>
+        /// <b>T-E2 — the decisive falsifier, inverted.</b> This tooth used to assert that <c>GetTile</c>
+        /// completed cleanly over malformed bytes and only faulted at the first <c>GetOrDecode()</c>: the
+        /// proof the handle was LAZY. Under the eager decode the parse happens inside the task, so the task
+        /// itself faults and <b>no handle is ever minted</b>. The same input, the same seam, the opposite
+        /// answer — and the same decisiveness: a lazy implementation would complete this call and hand back
+        /// a handle.
+        ///
+        /// <para>The fault must also arrive as a <c>TileDecodeException</c> and not as a bare decoder
+        /// exception, because that type is the only thing that lets the coordinator tell a malformed tile
+        /// apart from a 5xx and give it its own bounded log. The original decoder exception is preserved
+        /// underneath, so nothing is lost by wrapping.</para>
+        /// </summary>
         [Test]
-        public async Task GetTile_MintsALazyHandle_FaultSurfacesOnlyAtFirstGetOrDecode()
+        public async Task GetTile_MalformedBytes_FaultsTheTask_AndMintsNoHandle()
         {
-            // An eager `GetTile -> IDecodedTile` implementation would decode AT FETCH TIME — with these
-            // malformed bytes, that decode throws, so GetTile itself would fault. The lazy-handle contract
-            // (§B decision) defers the fault to the first GetOrDecode() call instead — the decisive falsifier
-            // for the eager-vs-lazy fork a spy call-count could only observe indirectly (MvtTileFeatureSource
-            // resolves its ITileDecoder internally via TileDecoders.ForEncoding — there is no decoder
-            // injection seam to spy on without adding a test-only production hook).
-            //
-            // Narrower guarantee than the planned spy-count: this observes WHERE the fault surfaces, not
-            // WHEN decode work runs on the happy path. It catches the natural eager rewrite (decode inside
-            // GetTile → GetTile throws) but not a contrived eager impl that re-wraps the fault one layer up;
-            // that shape is unnatural and the production code (MvtTileFeatureSource.GetTile never calls
-            // GetOrDecode) is verified lazy by reading, not only by this tooth.
             var byteSource = TestDataSource.FromBytes(MalformedMvtBytes);
             using var source = new MvtTileFeatureSource(byteSource);
 
-            IDecodedTileHandle handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
+            System.Exception thrown = null;
+            SharedDisposable<IDecodedTile> handle = null;
+            try { handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 }); }
+            catch (System.Exception ex) { thrown = ex; }
 
-            Assert.IsNotNull(handle,
-                "F-4 DECISIVE: GetTile must complete and mint a handle WITHOUT decoding — a fault surfacing " +
-                "here (instead of at GetOrDecode) would mean the source decoded eagerly at fetch time.");
+            Assert.IsNull(handle,
+                "F-4 DECISIVE (inverted): an EAGER GetTile decodes at fetch completion, so malformed bytes " +
+                "must fault the TASK and produce no handle. A handle here would mean the source deferred the " +
+                "decode — the lazy contract this stage deleted, and with it the drop paths that free nothing.");
+            Assert.IsInstanceOf<TileDecodeException>(thrown,
+                "…and the fault must be a TileDecodeException, not the raw decoder throw: it shares a channel " +
+                "with fetch errors now, and only the type distinguishes 'the bytes are bad' from 'the network " +
+                "failed'. Collapsing them would let a broken tile hide inside another failure's log throttle.");
+            Assert.IsInstanceOf<System.InvalidOperationException>(thrown.InnerException,
+                "…with the decoder's own exception preserved underneath, so wrapping costs no diagnosis");
+        }
 
-            Assert.Throws<System.InvalidOperationException>(() => handle.GetOrDecode(),
-                "the malformed bytes must only fault on the first GetOrDecode() call — proving the decode " +
-                "was deferred to here, matching SharedTileDecode's unchanged lazy-decode contract.");
+        /// <summary>
+        /// <b>T-E1 — the happy path of the same inversion.</b> The awaited task hands back a handle whose
+        /// tile is ALREADY built: reading it does no work, cannot fault, and yields the same instance every
+        /// time. Paired with the malformed case above (which proves the decode ran inside the task), this
+        /// pins that a read is a plain field access rather than a deferred parse.
+        ///
+        /// <para>R2: the release-then-read anti-vacuity this used to end on is gone —
+        /// <c>SharedDisposable{T}.Value</c> is undefended by design (no throw after the last
+        /// <see cref="SharedDisposable{T}.Release"/>), so that assertion tested the retired
+        /// <c>DecodedTileLease</c>'s own guard, not a property of this seam. It is not "made to pass"; it is
+        /// retired with the guard, mirroring <c>DecodedTileLeaseTests</c>' fate (decode-refcount plan §1/§5).</para>
+        /// </summary>
+        [Test]
+        public async Task GetTile_HandsBackAnAlreadyDecodedTile_ThatTheCallerOwns()
+        {
+            byte[] fixtureBytes = System.IO.File.ReadAllBytes(
+                System.IO.Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes"));
+            var byteSource = TestDataSource.FromBytes(fixtureBytes);
+            using var source = new MvtTileFeatureSource(byteSource);
+
+            SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
+            Assert.IsNotNull(handle, "sanity: present bytes must mint a handle");
+
+            IDecodedTile first = handle.Value;
+            Assert.IsNotNull(first, "the tile is already decoded — reading it must never return null");
+            Assert.AreSame(first, handle.Value,
+                "…and a second read must hand back the SAME instance. A lazy handle that decoded per read " +
+                "would produce a distinct tile here, and two sets of Allocator.Persistent buffers with one " +
+                "owner between them.");
+
+            // The caller owns the one reference GetTile handed over; releasing it is what frees the buffers.
+            handle.Release();
         }
 
         [Test]
@@ -213,7 +239,7 @@ namespace MapRenderer.Tests
             var byteSource = TestDataSource.Absent();
             using var source = new MvtTileFeatureSource(byteSource);
 
-            IDecodedTileHandle handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
+            SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
 
             Assert.IsNull(handle, "an absent tile (HasData == false) must map to a null handle — the " +
                 "coordinator's null-for-absent contract (Epic A / A7 §G-4).");

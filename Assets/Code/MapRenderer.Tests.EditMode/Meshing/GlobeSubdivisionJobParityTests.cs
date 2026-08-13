@@ -15,9 +15,10 @@ using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -141,16 +142,17 @@ namespace MapRenderer.Tests.Meshing
         {
             var id = new TileId { Z = 6, X = 32, Y = 20 };
             var proj = new SphericalProjection();
-            var layer = MvtDecoder.Decode(LoadFixture("water-6-32-20.pbf.bytes")).GetLayer("water");
+            // IR C1 P3: command streams read from the bytes (MvtFixtureStreams), not off a decoded feature.
+            var layer = MvtFixtureStreams.ReadLayer(LoadFixture("water-6-32-20.pbf.bytes"), "water");
             Assert.IsNotNull(layer);
             double extent = layer.Extent;
 
             var verts = new List<double2>();
             var indices = new List<int>();
-            foreach (var f in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (f.GeometryType != TileGeometryType.Polygon) continue;
-                foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(f.Geometry)))
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
+                foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])))
                 {
                     var res = Earcut.Triangulate(poly.Outer, poly.Holes);
                     int baseIdx = verts.Count;

@@ -20,11 +20,11 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.Filters;
 using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -44,14 +44,15 @@ namespace MapRenderer.Tests
                 if (l.Id == "boundary_3") { layer = l as LineStyleLayer; break; }
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
-            MvtTile tile = MvtDecoder.Decode(File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
+            using MvtTile tile = MvtDecoder.Decode(
+                id, File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture)));
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
-            double extent = mvtLayer?.Extent ?? 4096.0;
-            IReadOnlyList<ITileFeature> features = FeatureSelector.SelectFeatures(layer, tile, z);
-            Assert.Greater(features.Count, 0, "expected boundary_3 line features in this tile");
+            Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
+            var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
+            Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
-            Mesh flat  = TestTileMeshBuilder.BuildLine(features, layer.Paint, layer.Layout, z, extent, id, new WebMercatorProjection());
-            Mesh globe = TestTileMeshBuilder.BuildLine(features, layer.Paint, layer.Layout, z, extent, id, new SphericalProjection());
+            Mesh flat  = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new WebMercatorProjection());
+            Mesh globe = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new SphericalProjection());
             Assert.IsNotNull(flat,  "Mercator line must produce geometry");
             Assert.IsNotNull(globe, "globe line must produce geometry");
 

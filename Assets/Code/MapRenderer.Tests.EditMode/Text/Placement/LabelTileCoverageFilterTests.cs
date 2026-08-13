@@ -41,11 +41,11 @@ namespace MapRenderer.Tests.Text.Placement
 
         // z=0's single tile spans the WHOLE Mercator square (±WorldExtent on both axes, by construction of
         // MaxLatitude) → ~full-viewport coverage.
-        private static readonly long BigTileKey = SymbolFeatureExtractor.PackTileKey(new TileId { Z = 0, X = 0, Y = 0 });
+        private static readonly long BigTileKey = LabelTileKey.Pack(new TileId { Z = 0, X = 0, Y = 0 });
 
         // z=19 tile at the same (lon=0, lat=0) origin: side length ≈ 2·WorldExtent / 2^19 ≈ 76m → NDC span
         // ≈ 3.8e-6 → coverage ≈ 1.4e-11. Vanishingly small regardless of threshold.
-        private static readonly long TinyTileKey = SymbolFeatureExtractor.PackTileKey(new TileId { Z = 19, X = 262144, Y = 262144 });
+        private static readonly long TinyTileKey = LabelTileKey.Pack(new TileId { Z = 19, X = 262144, Y = 262144 });
 
         private const double MinCoverage = 0.05;
         // Below the tiny tile's own ~1.4e-11 coverage — a call at this threshold always reads the tiny tile

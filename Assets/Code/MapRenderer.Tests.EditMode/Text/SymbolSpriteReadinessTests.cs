@@ -10,17 +10,18 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using Symbol = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests
 {
@@ -137,7 +138,16 @@ namespace MapRenderer.Tests
             _tryBeginBuildCalls++;
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return;
-            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
+            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
+            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            byte[] bytes = _tileBytes;
+            UniTask.RunOnThreadPool(() =>
+            {
+                var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(tile, bytes));
+                try { pass.RunWorkerAndHandoff(decode); }
+                finally { decode.Release(); }
+            }).Forget();
         }
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
@@ -264,8 +274,11 @@ namespace MapRenderer.Tests
             var loaded = new List<LoadedTileKey> { Key(Tile0) };
             DriveOnce(Tile0);
 
-            // Well before the deadline: still parked, nothing committed, one entry queued.
-            for (int f = 0; f < 10; f++)
+            // Well before the deadline: still parked, nothing committed, one entry queued. Pumped until the
+            // entry APPEARS rather than for a fixed ten frames — the kick decodes the tile on the pool before
+            // it can park, so the enqueue lands a little later than it used to. The clock is frozen, so extra
+            // frames cannot cross the deadline and cannot weaken either assertion below.
+            for (int f = 0; f < 300 && _subsystem.PendingSpriteCount() == 0; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();

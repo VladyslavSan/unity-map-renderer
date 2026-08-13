@@ -19,10 +19,11 @@ using Unity.Jobs;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Source;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -102,8 +103,7 @@ namespace MapRenderer.Tests
         /// </summary>
         private static (string vertHash, string idxHash) BuildContentHashes(byte[] mvtBytes)
         {
-            var tile  = MvtDecoder.Decode(mvtBytes);
-            var layer = tile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer, "countries layer must be present");
 
             double extent = layer.Extent;
@@ -117,11 +117,11 @@ namespace MapRenderer.Tests
             var idxBytes  = new List<byte>();
             int globalIndexOffset = 0;
 
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.Polygon) continue;
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
 
-                List<List<double2>> rings = MvtGeometry.Decode(feature.Geometry);
+                List<List<double2>> rings = MvtGeometry.Decode(layer.Commands[fi]);
                 if (rings == null || rings.Count == 0) continue;
 
                 List<Polygon> polygons = PolygonAssembler.Assemble(rings);

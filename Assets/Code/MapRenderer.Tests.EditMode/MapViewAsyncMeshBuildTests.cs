@@ -24,9 +24,8 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Jobs;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Filters;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View;
@@ -34,6 +33,8 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -226,12 +227,12 @@ namespace MapRenderer.Tests
         public void Tooth2_BuildMeshData_RunsOffMainThread()
         {
             byte[] bytes     = FixtureBytes();
-            var    mvtTile   = MvtDecoder.Decode(bytes);
+            using var    mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
             var    style     = MinimalStyle();
             var    fillLayer = style.Layers[0];
             var    paint     = new Fill.PaintProperties(fillLayer);
             var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var    mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+            var    mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer, "Fixture must contain 'countries' MVT layer");
             Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
@@ -248,8 +249,10 @@ namespace MapRenderer.Tests
             var task = Task.Run(() =>
             {
                 capturedThreadId = Thread.CurrentThread.ManagedThreadId;
+                // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
+                TileGeometryBuffers geometry = mvtLayer.Geometry;
                 StyledFillTileBuilder.WriteMeshData(
-                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                    mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,
                     new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
                 return vc;
             });
@@ -427,15 +430,16 @@ namespace MapRenderer.Tests
                 Assert.IsNotNull(asyncMesh, "The async path must have built a mesh");
 
                 // Direct sync path for reference.
-                var mvtTile   = MvtDecoder.Decode(bytes);
+                using var mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
                 var fillLayer = style.Layers[0];
                 var paint     = new Fill.PaintProperties(fillLayer);
                 var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-                var mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+                var mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);
 
-                Mesh syncMesh = TestTileMeshBuilder.BuildFill(
-                    features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                Mesh syncMesh = TestTileMeshBuilder.BuildFillFromLayer(
+                    mvtLayer, TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), paint, 0.0,
+                    new TileId { Z = 0, X = 0, Y = 0 }, projection: null, layout: null,
                     // Same window as the MapView arm — decoded through the SAME factory the view
                     // uses. Without this the reference arm builds unclipped and the oracle silently
                     // stops being a comparison the moment the config default is non-disabled.
@@ -657,12 +661,12 @@ namespace MapRenderer.Tests
         public void BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh()
         {
             byte[] bytes     = FixtureBytes();
-            var    mvtTile   = MvtDecoder.Decode(bytes);
+            using var    mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
             var    style     = MinimalStyle();
             var    fillLayer = style.Layers[0];
             var    paint     = new Fill.PaintProperties(fillLayer);
             var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var    mvtLayer  = MapRenderer.Core.Style.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
+            var    mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
 
             Assert.IsNotNull(mvtLayer);
             Assert.Greater(features.Count, 0);
@@ -671,15 +675,18 @@ namespace MapRenderer.Tests
             var tileOrigin = new double2(bMin.x, bMin.y);
 
             // Reference path: build + apply entirely on THIS (main) thread.
-            Mesh syncMesh = TestTileMeshBuilder.BuildFill(
-                features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 });
+            Mesh syncMesh = TestTileMeshBuilder.BuildFillFromLayer(
+                mvtLayer, TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), paint, 0.0,
+                new TileId { Z = 0, X = 0, Y = 0 });
 
             // Split path (production shape): allocate on main, WRITE off the main thread, apply on main.
             var mda = Mesh.AllocateWritableMeshData(1);
             var task = Task.Run(() =>
             {
+                // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
+                TileGeometryBuffers geometry = mvtLayer.Geometry;
                 StyledFillTileBuilder.WriteMeshData(
-                    mda[0], features, paint, 0.0, mvtLayer.Extent, new TileId { Z = 0, X = 0, Y = 0 },
+                    mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,
                     new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
                 return vc;
             });

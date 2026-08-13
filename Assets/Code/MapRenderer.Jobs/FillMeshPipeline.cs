@@ -5,6 +5,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Jobs
 {
@@ -43,7 +44,9 @@ namespace MapRenderer.Jobs
         /// groups them.</summary>
         public static class ProfilerMarkerNames
         {
-            public const string Decode       = "MapRenderer.Pipeline.Decode";
+            // MapRenderer.Pipeline.Decode moved OUT of this class with IR B7 (to TileGeometryStore) and on
+            // to MvtDecoder with IR C1 P3 — the marker follows the decode it brackets, and one left here
+            // would bracket no decode at all.
             public const string Clip         = "MapRenderer.Pipeline.Clip";
             public const string RingAssembly = "MapRenderer.Pipeline.RingAssembly";
             public const string Earcut       = "MapRenderer.Pipeline.Earcut";
@@ -53,8 +56,6 @@ namespace MapRenderer.Jobs
         // Pipeline-stage profiler markers (MapRenderer.Pipeline.*).
         // These sit on the schedule-then-Complete main-thread path — exactly the stall the perf epic measures.
         // Separate path from the live MapView loop; wired for the Profiler window, not for the recorder test.
-        private static readonly ProfilerMarker PmPipelineDecode =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.Decode);
         private static readonly ProfilerMarker PmPipelineClip =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Clip);
         private static readonly ProfilerMarker PmPipelineRingAssembly =
@@ -160,12 +161,21 @@ namespace MapRenderer.Jobs
         /// </summary>
         public struct LayerInput
         {
-            /// <summary>Polygon features: each element is the geometry command array from MvtDecoder.</summary>
-            public List<uint[]> FeatureGeometries;
-            /// <summary>MVT tile extent (typically 4096).</summary>
-            public double Extent;
-            /// <summary>The slippy-map address (z/x/y) of the tile being built.</summary>
-            public TileId Tile;
+            /// <summary>Waist 1's shared tile geometry — <b>BORROWED</b>. <see cref="Schedule"/> never
+            /// disposes it, never writes into it, and does not retain it past the call: it derives its own
+            /// private buffer holding exactly the rings <see cref="RingVisitOrder"/> names, and owns only
+            /// that. It is still the sole authority for the tile address and extent, which
+            /// <see cref="Schedule"/> reads off it, so there is no second copy for a stage to route
+            /// around.</summary>
+            public TileGeometryBuffers Geometry;
+
+            /// <summary>Ring indices into <see cref="Geometry"/>, in the exact order this layer wants them
+            /// triangulated — the caller's selection AND its draw order in one array (fill's
+            /// <c>fill-sort-key</c> rank lives here now). Caller-owned; <see cref="Schedule"/> only reads it.
+            /// <para><b>Must group each feature's rings contiguously</b>: <see cref="RingAssemblyJob"/> resets
+            /// its exterior sign on a feature CHANGE, so a feature's rings split across the order would have
+            /// its second run re-read as a fresh exterior with a fresh sign.</para></summary>
+            public NativeArray<int> RingVisitOrder;
 
             /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
             /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
@@ -193,146 +203,30 @@ namespace MapRenderer.Jobs
         /// </summary>
         public static TileMeshBuffers Schedule(LayerInput input)
         {
-            var features     = input.FeatureGeometries;
-            int featureCount = features == null ? 0 : features.Count;
+            // ── Stage 1: derive this layer's private ring buffer from the shared one. ──────────────
+            // input.Geometry is BORROWED (see LayerInput.Geometry): the decoded LAYER owns it (IR C1 P3),
+            // and several fill layers — plus the symbol pass of the same kick — run against the same one.
+            // Nothing below may dispose or write to it.
+            if (!input.Geometry.IsCreated || !input.RingVisitOrder.IsCreated || input.RingVisitOrder.Length == 0)
+                return default;   // nothing to draw. (Pre-B7 this allocated the Stage-2 arrays first, found
+                                  // polyCount == 0 and returned the same `default` — same output, fewer allocations.)
 
-            if (featureCount == 0)
-                return default;
+            // Read off the shared buffer, once: Tile/Extent are the producer's declaration, not a
+            // caller-supplied second copy.
+            TileId tile   = input.Geometry.Tile;
+            double extent = input.Geometry.Extent;
 
-            // ── Pre-pass: flatten polygon commands → NativeArrays. ─────────────────────────────
-            int totalCommands = 0;
-            for (int fi = 0; fi < featureCount; fi++)
-                totalCommands += features[fi]?.Length ?? 0;
+            TileGeometryBuffers geometry = DeriveVisitedRings(input);
 
-            // Exact sizing: walk every command exactly as MvtDecodeJob does to pre-count the rings and
-            // vertices it will emit (S06 item a). This makes under-allocation — and thus the in-job OOB write
-            // — impossible for ANY input, including a malformed multi-point MoveTo. Each ring is classified
-            // exactly once by RingAssemblyJob (outer / hole / skipped), so polygons and holes each number at
-            // most `exactRings`; sizing those to exactRings is the tight safe bound (they cannot be exact
-            // pre-counted without running the area classification).
-            PrecountRingsAndVertices(features, out int exactRings, out int exactVertices);
-            int maxRings    = exactRings;
-            int maxVertices = exactVertices;
-            int maxPolygons = maxRings;
-            int maxHoles    = maxRings;
-
-            // Note: not using 'using var' because C# 8+ makes 'using var' NativeArrays read-only
-            // (CS1654), preventing index assignment. Dispose manually below.
-            var commands    = new NativeArray<uint>(totalCommands, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var featOffsets = new NativeArray<int>(featureCount,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var featLengths = new NativeArray<int>(featureCount,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-            int cmdPos = 0;
-            for (int fi = 0; fi < featureCount; fi++)
-            {
-                uint[] geom = features[fi];
-                int len = geom?.Length ?? 0;
-                featOffsets[fi] = cmdPos;
-                featLengths[fi] = len;
-                if (geom != null)
-                    for (int k = 0; k < len; k++)
-                        commands[cmdPos + k] = geom[k];
-                cmdPos += len;
-            }
-
-            // ── Allocate decode output buffers. ───────────────────────────────────────────────────
-            var tileVerts   = new NativeArray<double2>(maxVertices, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var ringOffsets = new NativeArray<int>(maxRings + 1,    Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var ringFeatIdx = new NativeArray<int>(maxRings,        Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var ringCountArr = new NativeArray<int>(1,              Allocator.Persistent, NativeArrayOptions.ClearMemory);
-            var vertCountArr = new NativeArray<int>(1,              Allocator.Persistent, NativeArrayOptions.ClearMemory);
-
-            // ── Stage 1: decode. ───────────────────────────────────────────────────────────────────
-            {
-                using var sPipelineDecode = PmPipelineDecode.Auto();
-                new MvtDecodeJob
-                {
-                    Commands            = commands,
-                    FeatureOffsets      = featOffsets,
-                    FeatureLengths      = featLengths,
-                    OutVertices         = tileVerts,
-                    OutRingOffsets      = ringOffsets,
-                    OutRingFeatureIndex = ringFeatIdx,
-                    OutRingCount        = ringCountArr,
-                    OutVertexCount      = vertCountArr,
-                }.Run(); // Run (not Schedule) so the pipeline is callable off the main thread (S89 D2 worker path)
-            }
-
-            commands.Dispose();
-            featOffsets.Dispose();
-            featLengths.Dispose();
-
-            int ringCount = ringCountArr[0];
-            int decodedVertCount = vertCountArr[0];
-            ringCountArr.Dispose();
-            vertCountArr.Dispose();
-
-            // Never-fired backstop: with exact PrecountRingsAndVertices sizing the decode job's reported
-            // ring/vertex counts equal the buffer capacities, so these cannot trip. Kept as defense-in-depth
-            // against a future sizing-vs-decode desync. (S06 gated item a; see EnsureCapacity doc.)
-            EnsureCapacity(ringCount, maxRings, "ring");
-            EnsureCapacity(decodedVertCount, maxVertices, "decoded vertex");
-
-            // ── Stage 1b: clip to the tile-buffer window. ──────────────────────────────────────────
-            // MVT tiles carry geometry past [0, extent) so neighbours join seamlessly; drawing all of it makes
-            // adjacent tiles double-paint the overlap strip (a brighter band under the fill's translucent
-            // ZWrite-off blend). Cutting HERE — after decode, before assembly — means RingAssemblyJob
-            // classifies the geometry that will actually be drawn, and its rLen/degenerate-area filters clean
-            // up the clipped-to-nothing rings for free.
-            //
-            // DISPOSAL (R10): when this stage runs, the decode arrays are freed here and tileVerts/ringOffsets/
-            // ringFeatIdx are rebound to VIEWS over the NativeLists below — a view must never be disposed, so
-            // both exit paths free the lists instead. `clipped` is the single discriminator; the disabled path
-            // allocates nothing and leaves the bookkeeping exactly as it was.
-            var  clipVerts       = default(NativeList<double2>);
-            var  clipRingOffsets = default(NativeList<int>);
-            var  clipRingFeatIdx = default(NativeList<int>);
-            bool clipped         = false;
-
-            if (ringCount > 0 && input.Clip.TryWindow(input.Extent, out double2 clipMin, out double2 clipMax))
-            {
-                using var sPipelineClip = PmPipelineClip.Auto();
-
-                int maxRingLen = 0;
-                for (int ri = 0; ri < ringCount; ri++)
-                    maxRingLen = math.max(maxRingLen, ringOffsets[ri + 1] - ringOffsets[ri]);
-
-                // Per-RING ping-pong scratch at Sutherland–Hodgman's provable bound — not per tile, and not
-                // an extension of the exact decode pre-count (the clip can grow a ring, so that invariant
-                // governs the decode stage only).
-                int scratchCap = math.max(1, maxRingLen * RingClipJob.ScratchLengthMultiplier);
-                var scratchA = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var scratchB = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-                clipVerts       = new NativeList<double2>(math.max(1, decodedVertCount), Allocator.Persistent);
-                clipRingOffsets = new NativeList<int>(ringCount + 1, Allocator.Persistent);
-                clipRingFeatIdx = new NativeList<int>(math.max(1, ringCount), Allocator.Persistent);
-
-                new RingClipJob
-                {
-                    Vertices          = tileVerts,
-                    RingOffsets       = ringOffsets,
-                    RingFeatureIdx    = ringFeatIdx,
-                    RingCount         = ringCount,
-                    ClipMin           = clipMin,
-                    ClipMax           = clipMax,
-                    ScratchA          = scratchA,
-                    ScratchB          = scratchB,
-                    OutVertices       = clipVerts,
-                    OutRingOffsets    = clipRingOffsets,
-                    OutRingFeatureIdx = clipRingFeatIdx,
-                }.Run(); // Run, like every other stage — the pipeline must stay callable off the main thread
-
-                scratchA.Dispose();
-                scratchB.Dispose();
-                tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
-
-                tileVerts   = clipVerts.AsArray();
-                ringOffsets = clipRingOffsets.AsArray();
-                ringFeatIdx = clipRingFeatIdx.AsArray();
-                ringCount   = clipRingOffsets.Length - 1;
-                clipped     = true;
-            }
+            // Stage 2's sizing bound. Each ring is classified exactly once by RingAssemblyJob (outer / hole /
+            // skipped), so polygons and holes each number at most the derived ring count (they cannot be
+            // exact pre-counted without running the area classification). This is the derived buffer's
+            // capacity — list-backed, hence equal to its count — where pre-B7 it was the decode capacity;
+            // both bound polyCount + totalHoles by the same argument, so the never-fired EnsureCapacity
+            // backstop keeps its meaning and stays non-tautological (polyCount is still a job-reported number
+            // compared against a caller-computed capacity).
+            int maxPolygons = math.max(1, geometry.RingCapacity);
+            int maxHoles    = maxPolygons;
 
             // ── Stage 2: ring assembly. ────────────────────────────────────────────────────────────
             var polyOuterIdx  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -346,10 +240,11 @@ namespace MapRenderer.Jobs
                 using var sPipelineRingAssembly = PmPipelineRingAssembly.Auto();
                 new RingAssemblyJob
                 {
-                    Vertices             = tileVerts,
-                    RingOffsets          = ringOffsets,
-                    RingFeatureIdx       = ringFeatIdx,
-                    RingCount            = ringCount,
+                    Vertices             = geometry.Vertices,
+                    RingOffsets          = geometry.RingOffsets,
+                    RingFeatureIdx       = geometry.RingFeatureIdx,
+                    RingCount            = geometry.RingCount,
+                    FeatureGeometryType  = geometry.FeatureGeometryType,
                     OutPolyOuterRingIdx  = polyOuterIdx,
                     OutPolyHoleListStart = polyHoleStart,
                     OutPolyHoleCount     = polyHoleCount,
@@ -367,13 +262,27 @@ namespace MapRenderer.Jobs
             // Never-fired backstop: each ring is classified exactly once (outer / hole / skipped), so
             // polyCount + totalHoles ≤ ringCount ≤ maxRings = maxPolygons = maxHoles. Cannot trip with exact
             // sizing. (S06 gated item a.)
-            EnsureCapacity(polyCount, maxPolygons, "polygon");
-            EnsureCapacity(totalHoles, maxHoles, "hole");
+            //
+            // The buffer and four Stage-2 arrays are already live when these run, so an unguarded throw would
+            // strand all five. The path is unreachable by construction, hence no behavioural test can force
+            // it — the catch exists so the "owner on every exit path" contract holds by READING the code
+            // rather than by arguing reachability. (Mirrors MvtGeometryMaterializer's twin.)
+            try
+            {
+                EnsureCapacity(polyCount, maxPolygons, "polygon");
+                EnsureCapacity(totalHoles, maxHoles, "hole");
+            }
+            catch
+            {
+                geometry.Dispose();
+                polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
+                holeRingIdxs.Dispose();
+                throw;
+            }
 
             if (polyCount == 0)
             {
-                DisposeRingStage(clipped, tileVerts, ringOffsets, ringFeatIdx,
-                                 clipVerts, clipRingOffsets, clipRingFeatIdx);
+                geometry.Dispose();
                 polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
                 holeRingIdxs.Dispose();
                 return default;
@@ -399,9 +308,9 @@ namespace MapRenderer.Jobs
             for (int pi = 0; pi < polyCount; pi++)
             {
                 int outerRi    = polyOuterIdx[pi];
-                perPolyFeatureIdx[pi] = ringFeatIdx[outerRi]; // captured before ringFeatIdx is disposed post-earcut
-                int outerStart = ringOffsets[outerRi];
-                int outerLen   = ringOffsets[outerRi + 1] - outerStart;
+                perPolyFeatureIdx[pi] = geometry.RingFeatureIdx[outerRi]; // captured before the ring stage is disposed post-earcut
+                int outerStart = geometry.RingOffsets[outerRi];
+                int outerLen   = geometry.RingOffsets[outerRi + 1] - outerStart;
                 int holeCount  = polyHoleCount[pi];
                 int hStart     = polyHoleStart[pi];
 
@@ -413,12 +322,12 @@ namespace MapRenderer.Jobs
 
                 Array.Sort(holeRIs, (a, b) =>
                 {
-                    double ax = LeftmostX(tileVerts, ringOffsets[a], ringOffsets[a + 1] - ringOffsets[a]);
-                    double bx = LeftmostX(tileVerts, ringOffsets[b], ringOffsets[b + 1] - ringOffsets[b]);
+                    double ax = LeftmostX(geometry.Vertices, geometry.RingOffsets[a], geometry.RingOffsets[a + 1] - geometry.RingOffsets[a]);
+                    double bx = LeftmostX(geometry.Vertices, geometry.RingOffsets[b], geometry.RingOffsets[b + 1] - geometry.RingOffsets[b]);
                     int cmp = ax.CompareTo(bx);
                     if (cmp != 0) return cmp;
-                    double ay = MinY(tileVerts, ringOffsets[a], ringOffsets[a + 1] - ringOffsets[a]);
-                    double by = MinY(tileVerts, ringOffsets[b], ringOffsets[b + 1] - ringOffsets[b]);
+                    double ay = MinY(geometry.Vertices, geometry.RingOffsets[a], geometry.RingOffsets[a + 1] - geometry.RingOffsets[a]);
+                    double by = MinY(geometry.Vertices, geometry.RingOffsets[b], geometry.RingOffsets[b + 1] - geometry.RingOffsets[b]);
                     cmp = ay.CompareTo(by);
                     if (cmp != 0) return cmp;
                     return a.CompareTo(b);
@@ -427,23 +336,23 @@ namespace MapRenderer.Jobs
                 // Build flat poly verts: outer + holes in sorted order.
                 int polyVC = outerLen;
                 for (int hi = 0; hi < holeCount; hi++)
-                    polyVC += ringOffsets[holeRIs[hi] + 1] - ringOffsets[holeRIs[hi]];
+                    polyVC += geometry.RingOffsets[holeRIs[hi] + 1] - geometry.RingOffsets[holeRIs[hi]];
 
                 var polyVerts        = new NativeArray<double2>(polyVC, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var sortedHoleCounts = new NativeArray<int>(holeCount > 0 ? holeCount : 1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
                 for (int i = 0; i < outerLen; i++)
-                    polyVerts[i] = tileVerts[outerStart + i];
+                    polyVerts[i] = geometry.Vertices[outerStart + i];
 
                 int vPos = outerLen;
                 for (int hi = 0; hi < holeCount; hi++)
                 {
                     int hri    = holeRIs[hi];
-                    int hBegin = ringOffsets[hri];
-                    int hLen   = ringOffsets[hri + 1] - hBegin;
+                    int hBegin = geometry.RingOffsets[hri];
+                    int hLen   = geometry.RingOffsets[hri + 1] - hBegin;
                     sortedHoleCounts[hi] = hLen;
                     for (int i = 0; i < hLen; i++)
-                        polyVerts[vPos++] = tileVerts[hBegin + i];
+                        polyVerts[vPos++] = geometry.Vertices[hBegin + i];
                 }
 
                 perPolyVerts[pi]         = polyVerts;
@@ -484,7 +393,7 @@ namespace MapRenderer.Jobs
                 using var sPipelineEarcut = PmPipelineEarcut.Auto();
                 for (int pi = 0; pi < polyCount; pi++)
                 {
-                    int outerLen  = ringOffsets[polyOuterIdx[pi] + 1] - ringOffsets[polyOuterIdx[pi]];
+                    int outerLen  = geometry.RingOffsets[polyOuterIdx[pi] + 1] - geometry.RingOffsets[polyOuterIdx[pi]];
                     int holeCount = polyHoleCount[pi];
                     new EarcutJob
                     {
@@ -516,9 +425,10 @@ namespace MapRenderer.Jobs
                 }
             }
 
-            // No longer need ring/assembly data.
-            DisposeRingStage(clipped, tileVerts, ringOffsets, ringFeatIdx,
-                             clipVerts, clipRingOffsets, clipRingFeatIdx);
+            // No longer need ring/assembly data. Capture the ring count first — the output buffers below
+            // report it, and reading anything off a disposed buffer is a trap for the next reader.
+            int finalRingCount = geometry.RingCount;
+            geometry.Dispose();
             polyOuterIdx.Dispose(); polyHoleStart.Dispose(); polyHoleCount.Dispose();
             holeRingIdxs.Dispose();
 
@@ -592,7 +502,7 @@ namespace MapRenderer.Jobs
                 var geo = new NativeArray<GeoCoordinate>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 new TileToGeoJob
                 {
-                    Tile = input.Tile, Extent = input.Extent,
+                    Tile = tile, Extent = extent,
                     TileCoords = outMergedVerts, OutGeo = geo,
                 }.Run(totalMergedVerts);
 
@@ -614,7 +524,7 @@ namespace MapRenderer.Jobs
             var holeCountFinal = new NativeArray<int>(1, Allocator.Persistent);
             vertCountFinal[0]  = totalMergedVerts;
             polyCountFinal[0]  = polyCount;
-            ringCountFinal[0]  = ringCount;
+            ringCountFinal[0]  = finalRingCount;
             holeCountFinal[0]  = totalHoles;
 
             return new TileMeshBuffers
@@ -647,25 +557,93 @@ namespace MapRenderer.Jobs
         //  kind; it is NOT fill-specific, so it does not live on this fill pipeline.)
 
         /// <summary>
-        /// Frees the ring-stage buffers exactly once, on either of <see cref="Schedule"/>'s two exit paths.
-        /// When Stage 1b ran, the decode arrays are already gone and the <c>tileVerts</c>/<c>ringOffsets</c>/
-        /// <c>ringFeatIdx</c> the caller holds are <c>NativeList.AsArray()</c> VIEWS — disposing a view is
-        /// invalid, so the lists are freed instead. Passed by value rather than closed over: a local function
-        /// capturing these would hoist the whole set into a per-call display object on a GC-free hot path.
+        /// Builds the private, <b>owned</b> ring buffer this call triangulates: exactly the rings
+        /// <c>input.RingVisitOrder</c> names, in that order, copied out of the borrowed shared buffer.
+        ///
+        /// <para>Two branches, one output shape. With the tile-buffer clip enabled the copy is done by
+        /// <see cref="RingClipJob"/> (which cuts each ring to the window as it goes); with it disabled by
+        /// <see cref="RingSelectJob"/>, which is that job's bbox-inside fast path with the clipping removed.
+        /// The clip is NOT a no-op on a boundary-touching ring — its emit dedups repeated vertices and closes
+        /// the ring — so running it with a full-extent window instead of taking the select branch would move
+        /// geometry.</para>
+        ///
+        /// <para><b>Why fill derives at all, when line and symbol just read the shared buffer.</b> Fill is the
+        /// only consumer that reorders (<c>fill-sort-key</c>), and the only one that honours the clip — every
+        /// other kind accepts the clip and ignores it by decision. A single pre-clipped shared buffer would
+        /// silently start clipping line's input.</para>
         /// </summary>
-        private static void DisposeRingStage(
-            bool clipped,
-            NativeArray<double2> tileVerts, NativeArray<int> ringOffsets, NativeArray<int> ringFeatIdx,
-            NativeList<double2> clipVerts, NativeList<int> clipRingOffsets, NativeList<int> clipRingFeatIdx)
+        private static TileGeometryBuffers DeriveVisitedRings(LayerInput input)
         {
-            if (clipped)
+            TileGeometryBuffers source = input.Geometry;
+            NativeArray<int>    visit  = input.RingVisitOrder;
+
+            int maxRingLen = 0;
+            int totalVerts = 0;
+            for (int k = 0; k < visit.Length; k++)
             {
-                clipVerts.Dispose(); clipRingOffsets.Dispose(); clipRingFeatIdx.Dispose();
+                int ri  = visit[k];
+                int len = source.RingOffsets[ri + 1] - source.RingOffsets[ri];
+                maxRingLen  = math.max(maxRingLen, len);
+                totalVerts += len;
+            }
+
+            // Length-authoritative outputs: whichever job below runs, it reports the ring/vertex counts by
+            // filling these, so the derived buffer is sized exactly. Capacities are hints only.
+            var outVerts   = new NativeList<double2>(math.max(1, totalVerts),  Allocator.Persistent);
+            var outOffsets = new NativeList<int>(visit.Length + 1,             Allocator.Persistent);
+            var outFeatIdx = new NativeList<int>(math.max(1, visit.Length),    Allocator.Persistent);
+
+            if (input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax))
+            {
+                // MVT tiles carry geometry past [0, extent) so neighbours join seamlessly; drawing all of it
+                // makes adjacent tiles double-paint the overlap strip (a brighter band under the fill's
+                // translucent ZWrite-off blend). Cutting HERE — before assembly — means RingAssemblyJob
+                // classifies the geometry that will actually be drawn, and its rLen/degenerate-area filters
+                // clean up the clipped-to-nothing rings for free.
+                using var sPipelineClip = PmPipelineClip.Auto();
+
+                // Per-RING ping-pong scratch at Sutherland–Hodgman's provable bound — not per tile, and sized
+                // over the VISITED rings, which is the exact set this pass will feed it.
+                int scratchCap = math.max(1, maxRingLen * RingClipJob.ScratchLengthMultiplier);
+                var scratchA = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var scratchB = new NativeArray<double2>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+                new RingClipJob
+                {
+                    Vertices          = source.Vertices,
+                    RingOffsets       = source.RingOffsets,
+                    RingFeatureIdx    = source.RingFeatureIdx,
+                    RingVisitOrder    = visit,
+                    ClipMin           = clipMin,
+                    ClipMax           = clipMax,
+                    ScratchA          = scratchA,
+                    ScratchB          = scratchB,
+                    OutVertices       = outVerts,
+                    OutRingOffsets    = outOffsets,
+                    OutRingFeatureIdx = outFeatIdx,
+                }.Run(); // Run, like every other stage — the pipeline must stay callable off the main thread
+
+                scratchA.Dispose();
+                scratchB.Dispose();
             }
             else
             {
-                tileVerts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
+                new RingSelectJob
+                {
+                    Vertices          = source.Vertices,
+                    RingOffsets       = source.RingOffsets,
+                    RingFeatureIdx    = source.RingFeatureIdx,
+                    RingVisitOrder    = visit,
+                    OutVertices       = outVerts,
+                    OutRingOffsets    = outOffsets,
+                    OutRingFeatureIdx = outFeatIdx,
+                }.Run();
             }
+
+            // The kind column is COPIED, not taken: the source is borrowed and must be left owning everything
+            // it owns. Neither job renumbers a feature index, so the copy is valid as-is.
+            return TileGeometryBuffers.AdoptDerivedLists(
+                source.Tile, source.Extent, source.FeatureGeometryType, outVerts, outOffsets, outFeatIdx);
         }
 
         private static double LeftmostX(NativeArray<double2> verts, int start, int len)

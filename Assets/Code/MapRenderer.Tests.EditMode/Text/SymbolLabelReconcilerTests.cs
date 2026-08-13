@@ -38,7 +38,7 @@ namespace MapRenderer.Tests.Text
             => new LabelInstance
             {
                 Placement = SymbolPlacement.Point, AnchorRender = anchor, MaterialIndex = layer,
-                Text = text, IconImage = icon, FeatureIndex = feature, TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                Text = text, IconImage = icon, FeatureIndex = feature, TileKey = LabelTileKey.Pack(tile),
                 PairRole = pairRole, PairId = pairId,
             };
 
@@ -46,7 +46,7 @@ namespace MapRenderer.Tests.Text
             => new LabelInstance
             {
                 Placement = SymbolPlacement.LineCenter, MaterialIndex = 0, Text = text,
-                FeatureIndex = feature, TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                FeatureIndex = feature, TileKey = LabelTileKey.Pack(tile),
             };
 
         // Independent STRING-keyed oracle — the SAME scan order + finest-zoom rule + per-tile blockId assignment
@@ -402,7 +402,7 @@ namespace MapRenderer.Tests.Text
             var result = new SymbolLabelReconcileResult();
             reconciler.Run(snapshot, result);
 
-            long tileKeyDeparting = SymbolFeatureExtractor.PackTileKey(tileDeparting);
+            long tileKeyDeparting = LabelTileKey.Pack(tileDeparting);
 
             Assert.AreEqual(2, result.Output.Count, "exactly the active tile's 2 labels — the departing pair drops together");
             Assert.AreEqual(2, result.ActiveCount);

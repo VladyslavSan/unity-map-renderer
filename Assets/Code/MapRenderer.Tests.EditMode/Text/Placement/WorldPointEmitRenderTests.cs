@@ -153,8 +153,8 @@ namespace MapRenderer.Tests.Text.Placement
             TileId zeroTile = TestTileKeys.Containing(lookAt, zoom: 14);
             TileId nonzeroTile = new TileId { X = zeroTile.X + 1, Y = zeroTile.Y, Z = zeroTile.Z };
             double3 anchorRender = TileRenderOrigin.Project(zeroTile, projection);
-            long zeroTileKey = SymbolFeatureExtractor.PackTileKey(zeroTile);
-            long nonzeroTileKey = SymbolFeatureExtractor.PackTileKey(nonzeroTile);
+            long zeroTileKey = LabelTileKey.Pack(zeroTile);
+            long nonzeroTileKey = LabelTileKey.Pack(nonzeroTile);
 
             var (atlasTexture, layout) = BuildGlyphA();
 
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // presenter each) — exercises the dictionary growing, not just one static slot.
                 for (int i = 0; i < 3; i++)
                 {
-                    long tileKey = SymbolFeatureExtractor.PackTileKey(new TileId { Z = 12, X = 100 + i, Y = 200 });
+                    long tileKey = LabelTileKey.Pack(new TileId { Z = 12, X = 100 + i, Y = 200 });
                     var label = new LabelInstance
                     {
                         AnchorRender = frame.SceneOriginRender, Layout = layout, Paint = LabelPaint.Default,

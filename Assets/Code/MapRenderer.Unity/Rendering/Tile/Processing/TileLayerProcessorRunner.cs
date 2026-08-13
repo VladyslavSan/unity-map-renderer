@@ -1,5 +1,6 @@
-using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Core.Lifetime;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -8,29 +9,32 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// cadence: <see cref="RunWorkerPass"/> (A1, mesh, per-(tile, source) build task),
     /// <see cref="RunSourcelessWorkerPass"/> (A2, background, per covered tile — no bytes, no decode), and
     /// <see cref="RunSymbolWorkerPass"/> (A3, symbol, per queued bytes push). A4: the runner itself stays
-    /// stateless — no <see cref="IDecodedTile"/> cache, no refcount here — retention now lives in the
-    /// caller-owned <see cref="SharedTileDecode"/>, which both byte-consuming entries read through instead
+    /// stateless — no <see cref="IDecodedTile"/> cache, no refcount here — retention lives in the
+    /// caller-owned <see cref="SharedDisposable{T}"/>, which both byte-consuming entries read through instead
     /// of decoding for themselves.
     ///
     /// Stateless: no decoded-tile retention, cache, refcount, budget, or source abstraction.
     /// </summary>
     internal static class TileLayerProcessorRunner
     {
-        /// <summary>Worker-thread entry point: read the shared decode (decoding it if this is the first
-        /// cadence to arrive), run every <paramref name="processors"/> entry in order, then settle every
-        /// one of them exactly once. Preserves the pre-A1 fault policy exactly: a (possibly cached) decode
-        /// fault or a processor exception aborts the REMAINING invocations for this pass, but every
-        /// processor — invoked or not — is still completed, so its kick-allocated mesh array is never
-        /// stranded. Does NOT release <paramref name="decode"/> — the runner does not own the interest; the
-        /// caller does.</summary>
+        /// <summary>Worker-thread entry point: read the already-decoded tile off the handle, run every
+        /// <paramref name="processors"/> entry in order, then settle every one of them exactly once.
+        /// Preserves the pre-A1 fault policy exactly: a processor exception aborts the REMAINING invocations
+        /// for this pass, but every processor — invoked or not — is still completed, so its kick-allocated
+        /// mesh array is never stranded. Does NOT release <paramref name="decode"/> — the runner does not own
+        /// the reference; the caller does.</summary>
         internal static IRenderLayerPayload[] RunWorkerPass(
-            IDecodedTileHandle decode, in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors)
+            SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors)
         {
             int count = processors.Length;
 
             try
             {
-                IDecodedTile tile = decode.GetOrDecode();
+                // IR C1 P3: no pass-scoped store any more. The decoded tile owns one buffer per source-layer,
+                // minted once inside the decode, so a source-layer named by N style layers — across BOTH
+                // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
+                // REFERENCE, not this method.
+                IDecodedTile tile = decode.Value;
                 for (int i = 0; i < count; i++)
                 {
                     ITileMeshLayerProcessor processor = processors[i];
@@ -46,11 +50,24 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     processor.ProcessOnWorker(tile, in context);
                 }
             }
-            catch
+            catch (System.Exception ex)
             {
-                // A malformed tile (decode fault), a processor exception, or an unsupported phase aborts
-                // the remaining invocations for this pass — matching the pre-A1 KickMeshBuild catch. Fall
-                // through so EVERY processor still settles below (no stranded MeshDataArray).
+                // A processor exception or an unsupported phase aborts the remaining invocations for this
+                // pass — matching the pre-A1 KickMeshBuild catch. Fall through so EVERY processor still
+                // settles below (no stranded MeshDataArray).
+                //
+                // The LOG is not decoration. An ordinal out-of-range from the IR C1 P2 re-base lands here, and
+                // so would a processor read against a decoded tile's NativeArray after its buffers were
+                // freed — R2: SharedDisposable is undefended by design (no throw on a released `Value`), so
+                // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
+                // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
+                // fault never reaches here either: the decode happens in the source's GetTile task and faults
+                // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
+                // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
+                // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
+                // exactly as before.
+                UnityEngine.Debug.LogWarning(
+                    $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
             }
 
             // Moved form of the pre-A1 ensure-wrapped loop: settle every processor exactly once, in dense
@@ -128,16 +145,22 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <para>Unlike <see cref="RunWorkerPass"/>/<see cref="RunSourcelessWorkerPass"/> this entry runs NO
         /// settlement loop and invokes NO tail: there is no kick-allocated native memory to strand (symbol
         /// holds only managed state), and the main-thread tail is by definition the caller's step, run after
-        /// this method returns. A (possibly cached) decode fault or a processor exception PROPAGATES to the
-        /// caller (design §B "fault policy: propagate, don't settle") — swallowing it here would let a
-        /// subsequent tail run over an empty/partial extraction and commit an empty label list, an
-        /// observable behaviour change from today's decode-fault → no-store-commit path. Does NOT release
-        /// <paramref name="decode"/> — the caller owns the interest.</para>
+        /// this method returns. A processor exception PROPAGATES to the caller (design §B "fault policy:
+        /// propagate, don't settle") — swallowing it here would let a subsequent tail run over an
+        /// empty/partial extraction and commit an empty label list, an observable behaviour change from the
+        /// fault → no-store-commit path. Does NOT release <paramref name="decode"/> — the caller owns the
+        /// reference.</para>
         /// </summary>
         internal static void RunSymbolWorkerPass(
-            IDecodedTileHandle decode, in TileLayerProcessContext context, ITileWorkerThenMainLayerProcessor[] processors)
+            SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, ITileWorkerThenMainLayerProcessor[] processors)
         {
-            IDecodedTile tile = decode.GetOrDecode();
+            // IR C1 P3: no pass-scoped store. The buffers belong to the decoded tile, and the lifetime
+            // argument moved with them — to the caller's REFERENCE, which is live on BOTH routes into this
+            // method: the un-parked kick lambda holds the transferred one, and the parked-sprite PumpBuilds
+            // dispatch holds the one the park acquired. That is what makes the mesh and symbol passes of one
+            // kick share a single decode — and, since D1, makes the PARKED symbol pass share it too, so the
+            // tile is decoded exactly once no matter which route runs.
+            IDecodedTile tile = decode.Value;
             for (int i = 0; i < processors.Length; i++)
             {
                 ITileWorkerThenMainLayerProcessor processor = processors[i];

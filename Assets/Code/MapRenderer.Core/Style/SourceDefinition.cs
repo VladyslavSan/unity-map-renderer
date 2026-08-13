@@ -59,6 +59,14 @@ namespace MapRenderer.Core.Style
         /// </summary>
         public double[] Bounds;
 
+        /// <summary>
+        /// Style Spec <c>data</c> — <b>either</b> an inline GeoJSON object <b>or</b> a URL string, which is
+        /// why it is a <see cref="JsonValue"/> and not a typed model: the key carries two shapes and this
+        /// type sits outside every decoder folder, so a format-named type in its signature would be a fence
+        /// violation as well as a lie about half the values. Null when the key is absent.
+        /// </summary>
+        public JsonValue Data;
+
         /// <summary>The full original source JSON object (preserves any unknown/forward-compat keys).</summary>
         public JsonValue Raw;
     }

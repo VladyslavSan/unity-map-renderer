@@ -36,8 +36,9 @@ using MapRenderer.Unity.Text.Placement;
 // const cannot drag a name that collides with the Core.* usings above. `MapView` is deliberately NOT aliased
 // to MapViewComponent (as it once was) — the marker SSOT lives on the MapView class itself, and shadowing the
 // name made `MapView.ProfilerMarkerNames` silently resolve to the wrong type.
-using SharedTileDecode     = MapRenderer.Unity.Rendering.Tile.Processing.SharedTileDecode;
+using TileDecodeDispatch   = MapRenderer.Unity.Rendering.Tile.Processing.TileDecodeDispatch;
 using FillMeshPipeline     = MapRenderer.Jobs.FillMeshPipeline;
+using MvtDecoder           = MapRenderer.Jobs.Mvt.MvtDecoder;
 using FillRenderLayer      = MapRenderer.Unity.Rendering.Style.FillRenderLayer;
 using LineRenderLayer      = MapRenderer.Unity.Rendering.Style.LineRenderLayer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
@@ -117,10 +118,10 @@ namespace MapRenderer.Tests
                 TileManager.ProfilerMarkerNames.CoverSelect,
                 TileManager.ProfilerMarkerNames.FetchPoll,
                 TileManager.ProfilerMarkerNames.SchedulerRequest,
-                SharedTileDecode.ProfilerMarkerNames.TileDecode,
+                TileDecodeDispatch.ProfilerMarkerNames.TileDecode,
                 StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData,
                 TileManager.ProfilerMarkerNames.MeshUpload,
-                FillMeshPipeline.ProfilerMarkerNames.Decode,
+                MvtDecoder.ProfilerMarkerNames.Decode, // IR C1 P3: the marker follows the decode it brackets
                 FillMeshPipeline.ProfilerMarkerNames.Clip,
                 FillMeshPipeline.ProfilerMarkerNames.RingAssembly,
                 FillMeshPipeline.ProfilerMarkerNames.Earcut,
@@ -132,7 +133,7 @@ namespace MapRenderer.Tests
                 MapView.ProfilerMarkerNames.SymbolBatch,
                 // Symbol-label markers below read their names from each type's nested ProfilerMarkerNames const
                 // (SSOT), reached via InternalsVisibleTo — renaming a marker is a one-line edit at its source.
-                SymbolLabelSubsystem.ProfilerMarkerNames.TileDecode,
+                SymbolLabelSubsystem.ProfilerMarkerNames.SymbolExtract,
                 SymbolLabelSubsystem.ProfilerMarkerNames.AtlasUpload,
                 SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollect,
                 SymbolLabelSubsystem.ProfilerMarkerNames.BatchCollectClassify,

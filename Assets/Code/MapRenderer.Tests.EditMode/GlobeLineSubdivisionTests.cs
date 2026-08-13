@@ -3,7 +3,6 @@
 // densified proportionally to its great-circle span, a short segment is left alone, and every sub-point
 // lies on the original chord in tile space. A no-op (or wrong-threshold) subdivision fails here.
 
-using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -25,14 +24,15 @@ namespace MapRenderer.Tests
 
         private static int Subdivide(double2 a, double2 b, double3 upA, double3 upB, NativeList<double2> sub)
         {
-            var ring = new List<double2> { a, b };
+            var ring = new NativeArray<double2>(2, Allocator.Temp);
             var up   = new NativeArray<double3>(2, Allocator.Temp);
             try
             {
+                ring[0] = a; ring[1] = b;
                 up[0] = upA; up[1] = upB;
                 return StyledLineTileBuilder.SubdivideCenterline(ring, up, 2, sub, SphericalProjection.MaxCurveSegmentRad);
             }
-            finally { up.Dispose(); }
+            finally { ring.Dispose(); up.Dispose(); }
         }
 
         [Test]

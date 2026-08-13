@@ -122,8 +122,8 @@ namespace MapRenderer.Tests.Text.Placement
             // Two DISTINCT tiles (arbitrary — unrelated to the camera's actual view).
             var tileA = new TileId { Z = 12, X = 100, Y = 200 };
             var tileB = new TileId { Z = 12, X = 105, Y = 200 };
-            long tileAKey = SymbolFeatureExtractor.PackTileKey(tileA);
-            long tileBKey = SymbolFeatureExtractor.PackTileKey(tileB);
+            long tileAKey = LabelTileKey.Pack(tileA);
+            long tileBKey = LabelTileKey.Pack(tileB);
 
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();
@@ -221,7 +221,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var tileA = new TileId { Z = 12, X = 110, Y = 200 }; // arbitrary — unrelated to the camera's view
-            long tileAKey = SymbolFeatureExtractor.PackTileKey(tileA);
+            long tileAKey = LabelTileKey.Pack(tileA);
 
             var atlasTexture = BuildTinyAtlasTexture();
             var spriteTexture = BuildSpriteTexture();

@@ -4,8 +4,8 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests.Filters
 {

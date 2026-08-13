@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests (StyledSymbolTileBuilder
-// and GlyphManager are engine-free despite living under MapRenderer.Unity/Text). Do NOT add UnityEngine.
+// Unity EditMode only. It drives StyledSymbolTileBuilder, whose SymbolFeatureExtractor.Extract call since
+// tile-geometry IR B4 materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections —
+// so this file left Tools/core-tests (no coverage lost, only speed) and must not be re-added to it.
 
 using System;
 using System.Collections.Generic;
@@ -11,11 +12,11 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests; // TestGlyphSource
 
 namespace MapRenderer.Tests.Text.Placement
@@ -67,13 +68,13 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public async Task Build_CentroidsLayer_ShapesRealLabels_NoSyntheticSource()
         {
-            MvtTile tile = MvtDecoder.Decode(LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
+            using MvtTile tile = MvtDecoder.Decode(FixtureTile, LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
             var projection = new WebMercatorProjection();
             SymbolStyle.StyleLayer layer = CentroidsLayer();
 
             // Independent extractor pass (Slice 2) gives the ground-truth text/anchor/ordinal per label.
             var extracted = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
 
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
@@ -117,7 +118,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static async Task<List<LabelInstance>> BuildLabels(SymbolStyle.StyleLayer layer, GlyphManager manager)
         {
-            MvtTile tile = MvtDecoder.Decode(LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
+            using MvtTile tile = MvtDecoder.Decode(FixtureTile, LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
             var builder = new StyledSymbolTileBuilder(manager);
             var labels = new List<LabelInstance>();
             await builder.BuildAsync(tile, FixtureTile, new[] { layer }, 0.0, new WebMercatorProjection(), labels);

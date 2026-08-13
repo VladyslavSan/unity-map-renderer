@@ -11,9 +11,9 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
@@ -21,6 +21,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Tests; // TestGlyphSource
 using Symbol = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Text
 {
@@ -114,7 +115,16 @@ namespace MapRenderer.Tests.Text
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
             if (pass == null) return; // mirrors OnTileBytesReady's no-op guard (no _builder / no layers for source)
-            UniTask.RunOnThreadPool(() => pass.RunWorkerAndHandoff(new SharedTileDecode(_tileBytes, new MvtTileDecoder()))).Forget();
+            // The drive helper mirrors TileManager.KickMeshBuild: the tile is decoded ON THE POOL, the kick
+            // owns the ONE reference the lease is born with, and its `finally` is the matching release —
+            // which is what frees the decoded tile's buffers unless a parked build acquired its own.
+            byte[] bytes = _tileBytes;
+            UniTask.RunOnThreadPool(() =>
+            {
+                var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(tile, bytes));
+                try { pass.RunWorkerAndHandoff(decode); }
+                finally { decode.Release(); }
+            }).Forget();
         }
 
         // ── F-1: the split is real (structural) — re-expressed at A5b (BuildTileAsync no longer exists;
@@ -129,7 +139,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
-            const string runWorkerAndHandoffAnchor = "void RunWorkerAndHandoff(IDecodedTileHandle decode)";
+            const string runWorkerAndHandoffAnchor = "void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode)";
             const string runTailAsyncAnchor        = "UniTaskVoid RunTailAsync(";
             const string shapeCallForm             = ".CompleteOnMainAsync(";
             const string commitCallForm            = ".CompleteBuild(";

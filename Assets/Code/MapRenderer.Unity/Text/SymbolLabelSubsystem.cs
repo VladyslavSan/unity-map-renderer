@@ -14,11 +14,11 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
@@ -91,8 +91,9 @@ namespace MapRenderer.Unity.Text
         // terminal Status) leaves `_spriteFetchTask` Pending forever. Without a bound, parking becomes
         // PERMANENT: zero symbol labels of any kind ever commit for the style (strictly worse than the
         // pre-D6 degradation, which at least showed bare text), and `_pendingSpriteQueue` grows without
-        // bound as the user pans — every parked build retains its `IDecodedTileHandle` (SharedTileDecode's
-        // contract is plain GC reachability, no lifetime cap of its own). `SpriteFetchDeadlineSeconds` bounds
+        // bound as the user pans — every parked build now holds a REFERENCE to a decoded tile, so an
+        // unbounded queue pins unbounded Allocator.Persistent memory, not just managed state.
+        // `SpriteFetchDeadlineSeconds` bounds
         // this: once elapsed, SpritesSettled goes true regardless of the fetch's own status, so PumpBuilds'
         // existing pending-drain (which already tolerates a null `_spriteAtlas` — the T11 absent-sheet path)
         // dispatches every parked build with whatever atlas state exists. This restores the PRE-D6 floor
@@ -143,7 +144,7 @@ namespace MapRenderer.Unity.Text
         /// flat marker search reads as a tree; keep them that way.</summary>
         internal static class ProfilerMarkerNames
         {
-            internal const string TileDecode   = "MapRenderer.Symbol.TileDecode";
+            internal const string SymbolExtract = "MapRenderer.Symbol.Extract";
             internal const string AtlasUpload  = "MapRenderer.Symbol.AtlasUpload";
             internal const string BatchCollect = "MapRenderer.Symbol.BatchBuild.Collect";
             internal const string BatchSoA     = "MapRenderer.Symbol.BatchBuild.SoA";
@@ -154,8 +155,10 @@ namespace MapRenderer.Unity.Text
             internal const string BatchCollectClassify = "MapRenderer.Symbol.BatchBuild.Collect.Classify";
         }
 
-        private static readonly ProfilerMarker PmTileDecode =
-            new(ProfilerCategory.Scripts, ProfilerMarkerNames.TileDecode);
+        // Renamed from TileDecode: under the eager decode this marker brackets the EXTRACT only — the
+        // decode already ran inside the source's GetTile. A marker whose name lies is worse than no marker.
+        private static readonly ProfilerMarker PmSymbolExtract =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolExtract);
         private static readonly ProfilerMarker PmAtlasUpload =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.AtlasUpload);
 
@@ -229,17 +232,23 @@ namespace MapRenderer.Unity.Text
         /// (mirrors <see cref="ReadySymbolTail"/>).</summary>
         internal readonly struct PendingSymbolBuild
         {
-            public readonly SymbolTileLabelStore.Key Key;
-            public readonly int                      Generation;
-            public readonly List<int>                LayerIndices;
-            public readonly List<LabelInstance>      Labels;
-            public readonly TileLayerProcessContext  Context;
-            public readonly IDecodedTileHandle       Decode;
-            public readonly CancellationToken        Ct;
-            public readonly string                   SourceId;
-            public readonly TileId                   Tile;
+            public readonly SymbolTileLabelStore.Key      Key;
+            public readonly int                           Generation;
+            public readonly List<int>                     LayerIndices;
+            public readonly List<LabelInstance>           Labels;
+            public readonly TileLayerProcessContext       Context;
+            /// <summary>This entry's OWN reference, taken at park time (inside <see cref="TryParkBuild"/>'s
+            /// gate) while the kick's reference was still live. R2: no separate release token — the
+            /// reference and its release both live on this SAME <see cref="SharedDisposable{T}"/>. Every path
+            /// that removes an entry from the queue must call <see cref="SharedDisposable{T}.Release"/> on it
+            /// exactly once — the drain's <c>finally</c>, the drain's ct-drop, or
+            /// <see cref="DrainAndDiscardParkedBuilds"/>.</summary>
+            public readonly SharedDisposable<IDecodedTile> Decode;
+            public readonly CancellationToken             Ct;
+            public readonly string                        SourceId;
+            public readonly TileId                        Tile;
             public PendingSymbolBuild(SymbolTileLabelStore.Key key, int generation, List<int> layerIndices,
-                List<LabelInstance> labels, TileLayerProcessContext context, IDecodedTileHandle decode,
+                List<LabelInstance> labels, TileLayerProcessContext context, SharedDisposable<IDecodedTile> decode,
                 CancellationToken ct, string sourceId, TileId tile)
             {
                 Key = key; Generation = generation; LayerIndices = layerIndices; Labels = labels;
@@ -252,6 +261,12 @@ namespace MapRenderer.Unity.Text
         /// drains it once <see cref="SpritesSettled"/>). Same safe-publication carrier as
         /// <see cref="_handoffQueue"/>.</summary>
         internal readonly ConcurrentQueue<PendingSymbolBuild> _pendingSpriteQueue = new();
+
+        // R1: the atomic park's gate — makes TryParkBuild's ct-check + Acquire() + Enqueue exclusive with
+        // DrainAndDiscardParkedBuilds' dequeue + dispose, so a park can never land in the window between a
+        // canceller's cancel and its drain (see TryParkBuild's doc). Never recreated (unlike _buildCts) — the
+        // two parties are always different threads, so plain non-reentrant lock is correct and simplest.
+        private readonly object _parkGate = new();
 
         // Worker-phase-complete builds awaiting their budgeted tail (main-thread only). PumpBuilds' tail-start
         // loop drains this FIFO at most MaxBuildsPerFrame per frame (§D4/§D6).
@@ -412,7 +427,7 @@ namespace MapRenderer.Unity.Text
             _buildCts.Dispose();
             _buildCts = new CancellationTokenSource();
             while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
-            while (_pendingSpriteQueue.TryDequeue(out _)) { } // D6: parked builds die with the old style scope
+            DrainAndDiscardParkedBuilds(); // D6: parked builds die with the old style scope
             _readyTails.Clear();
             DisposePipeline();
 
@@ -536,8 +551,10 @@ namespace MapRenderer.Unity.Text
             // D6: NOT settled — park. The atlas is a TileSymbolLayerProcessor ctor arg, so processors cannot
             // be built yet; carry the raw layerIndices instead and construct them once PumpBuilds' pending
             // drain sees SpritesSettled. Everything else (BeginBuild's reserved slot, the zoom/projection
-            // capture) is unchanged — only the worker step is deferred.
-            return new SymbolTileWorkerPass(key, gen, layerIndices, labels, context, _buildCts.Token, sourceId, tile, _pendingSpriteQueue);
+            // capture) is unchanged — only the worker step is deferred. R1: the park ctor carries `this`
+            // (not the queue directly) — TryParkBuild is the gated site, so the queue and _parkGate stay
+            // private to the subsystem.
+            return new SymbolTileWorkerPass(key, gen, layerIndices, labels, context, _buildCts.Token, sourceId, tile, this);
         }
 
         /// <summary>Epic A / A5b <see cref="Processing.ISymbolTileWorkerPass"/> implementor — the captured
@@ -562,9 +579,8 @@ namespace MapRenderer.Unity.Text
             // D6: park mode — the sprite fetch had not settled at kick time (TryBeginBuild), so the atlas-
             // dependent TileSymbolLayerProcessor[] cannot be built yet. RunWorkerAndHandoff enqueues the raw
             // inputs instead of running the extract; PumpBuilds' pending drain finishes the job once settled.
-            private readonly bool                                 _parked;
-            private readonly List<int>                            _layerIndices; // park mode only
-            private readonly ConcurrentQueue<PendingSymbolBuild>  _pendingQueue;  // park mode only
+            private readonly bool       _parked;
+            private readonly List<int>  _layerIndices; // park mode only
 
             public SymbolTileWorkerPass(SymbolTileLabelStore.Key key, int generation, TileSymbolLayerProcessor[] processors,
                 List<LabelInstance> labels, TileLayerProcessContext context, CancellationToken ct, string sourceId, TileId tile,
@@ -575,14 +591,16 @@ namespace MapRenderer.Unity.Text
                 _parked = false;
             }
 
-            /// <summary>D6 park-mode ctor — see the field docs above.</summary>
+            /// <summary>D6 park-mode ctor — see the field docs above. R1: carries <c>owner</c> rather than the
+            /// queue directly — <see cref="SymbolLabelSubsystem.TryParkBuild"/> is the one gated site, so the
+            /// queue and its gate stay private to the subsystem.</summary>
             public SymbolTileWorkerPass(SymbolTileLabelStore.Key key, int generation, List<int> layerIndices,
                 List<LabelInstance> labels, TileLayerProcessContext context, CancellationToken ct, string sourceId, TileId tile,
-                ConcurrentQueue<PendingSymbolBuild> pendingQueue)
+                SymbolLabelSubsystem owner)
             {
                 _key = key; _generation = generation; _labels = labels;
-                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile;
-                _layerIndices = layerIndices; _pendingQueue = pendingQueue; _parked = true;
+                _context = context; _ct = ct; _sourceId = sourceId; _tile = tile; _owner = owner;
+                _layerIndices = layerIndices; _parked = true;
             }
 
             /// <summary>POOL THREAD (inside TileManager's mesh kick task, after the mesh pass): run this
@@ -590,18 +608,31 @@ namespace MapRenderer.Unity.Text
             /// phase for <see cref="PumpBuilds"/>' main-thread drain. A cancelled token (restyle/teardown
             /// raced ahead of this pool task) is a cheap early-out — never enqueued, so a stale build never
             /// reaches the tail (mirrors the drain-side ct-drop, §Q2 belt-and-braces). D6: in park mode, the
-            /// extract does NOT run here — the decode is retained (legal: <c>SharedTileDecode</c>'s own
-            /// contract is plain GC reachability) and handed to the PENDING queue instead, for
-            /// <see cref="PumpBuilds"/>' drain to finish once the sprite fetch settles.</summary>
-            public void RunWorkerAndHandoff(IDecodedTileHandle decode)
+            /// extract does NOT run here — the HANDLE is retained and queued instead, via
+            /// <see cref="SymbolLabelSubsystem.TryParkBuild"/>, for <see cref="PumpBuilds"/>' drain to finish
+            /// once the sprite fetch settles.
+            ///
+            /// <para><b>The park ACQUIRES a reference, and that reference is the whole point.</b> This used
+            /// to say a parked entry "has nothing to release" — true when the handle was lazy and held only
+            /// bytes, false now: the tile is decoded and owns Allocator.Persistent buffers. The acquire
+            /// happens (inside <see cref="SymbolLabelSubsystem.TryParkBuild"/>'s gate) while the KICK's
+            /// reference is still live (this method runs inside the kick lambda, before its <c>finally</c>),
+            /// so the count can never reach zero between the two and the tile survives the whole
+            /// <c>SetStyle</c>→<c>SpritesSettled</c> window. That is what retires the parked re-decode: the
+            /// drain reads the SAME decoded tile the kick read.</para></summary>
+            public void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode)
             {
                 try
                 {
                     if (_ct.IsCancellationRequested) return;
                     if (_parked)
                     {
-                        _pendingQueue.Enqueue(new PendingSymbolBuild(
-                            _key, _generation, _layerIndices, _labels, _context, decode, _ct, _sourceId, _tile));
+                        // R1: TryParkBuild is the ONE gated site — ct-check, Acquire() and Enqueue all run
+                        // under the SAME lock the abandon-drain takes, so there is no window left between
+                        // them for a canceller to land in (see TryParkBuild's doc). A refusal (false) takes
+                        // no reference and enqueues nothing, so there is nothing left to release here.
+                        _owner.TryParkBuild(_key, _generation, _layerIndices, _labels, _context, decode, _ct,
+                            _sourceId, _tile);
                         return;
                     }
                     _owner.RunSymbolWorkerAndHandoff(decode, in _context, _processors, _key, _generation, _labels,
@@ -621,13 +652,13 @@ namespace MapRenderer.Unity.Text
         /// (the un-parked kick path) and <see cref="PumpBuilds"/>' D6 pending-drain (the parked path, once the
         /// sprite fetch settles) — the two call SAME code, not two copies of it.</summary>
         private void RunSymbolWorkerAndHandoff(
-            IDecodedTileHandle decode, in TileLayerProcessContext context, TileSymbolLayerProcessor[] processors,
+            SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, TileSymbolLayerProcessor[] processors,
             SymbolTileLabelStore.Key key, int generation, List<LabelInstance> labels, CancellationToken ct,
             string sourceId, TileId tile)
         {
             try
             {
-                using (PmTileDecode.Auto())
+                using (PmSymbolExtract.Auto())
                     TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in context, processors);
                 _handoffQueue.Enqueue(new ReadySymbolTail(key, generation, processors, labels, ct, sourceId, tile,
                     context.TileOriginRender));
@@ -635,6 +666,78 @@ namespace MapRenderer.Unity.Text
             catch (Exception ex)
             {
                 Debug.LogWarning($"[SymbolLabelSubsystem] label build failed for tile {tile} (source '{sourceId}'): {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// R1: the ONE gated site for parking a build — makes the park ATOMIC, so idempotency is no longer
+        /// what keeps a racing acquire and drain safe; exclusion does. Called from the pool, inside
+        /// TileManager's kick lambda, via <see cref="SymbolTileWorkerPass.RunWorkerAndHandoff"/>.
+        ///
+        /// <para><b>The invariant.</b> Under <c>lock (_parkGate)</c>: if <paramref name="ct"/> is already
+        /// cancelled, take NO reference and enqueue nothing — return <see langword="false"/>. Otherwise
+        /// <see cref="SharedDisposable{T}.Acquire"/> and enqueue, both inside the SAME lock
+        /// <see cref="DrainAndDiscardParkedBuilds"/> takes around its dequeue. That pairing is what retires
+        /// mouth 5 (the old post-enqueue re-check): a canceller (<see cref="SetStyle"/>, <see cref="DoDispose"/>)
+        /// always cancels <see cref="_buildCts"/> strictly BEFORE calling <see cref="DrainAndDiscardParkedBuilds"/>,
+        /// so a park that reads the gate AFTER that cancel sees it inside the SAME lock the drain would have
+        /// taken and refuses before it ever holds a reference — there is no window left in which it could
+        /// acquire one the drain has already swept past.</para>
+        /// </summary>
+        /// <param name="decode">The kick's decode handle — BORROWED; a successful park takes its own
+        /// reference via <see cref="SharedDisposable{T}.Acquire"/>, never releasing the caller's.</param>
+        /// <param name="ct">This build's style-scoped cancellation token, re-checked here (not trusted from
+        /// the caller's earlier read) because the two reads can straddle a cancel.</param>
+        /// <returns><see langword="true"/> if the build was enqueued (the caller now owns nothing further to
+        /// do); <see langword="false"/> if it was refused (nothing acquired, nothing enqueued).</returns>
+        internal bool TryParkBuild(SymbolTileLabelStore.Key key, int generation, List<int> layerIndices,
+            List<LabelInstance> labels, TileLayerProcessContext context, SharedDisposable<IDecodedTile> decode,
+            CancellationToken ct, string sourceId, TileId tile)
+        {
+            lock (_parkGate)
+            {
+                if (ct.IsCancellationRequested) return false;
+
+                decode.Acquire();
+                try
+                {
+                    _pendingSpriteQueue.Enqueue(new PendingSymbolBuild(
+                        key, generation, layerIndices, labels, context, decode, ct, sourceId, tile));
+                }
+                catch
+                {
+                    // The queue never accepted the entry, so nothing else can ever own this reference —
+                    // release it here (still inside the gate — Release() never re-enters _parkGate).
+                    decode.Release();
+                    throw;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// D6: the SINGLE purge funnel for the parked (pre-atlas) pending-build queue — dequeues every
+        /// entry and throws it away. Both abandonment sites call it: <see cref="SetStyle"/> (parked builds
+        /// die with the old style scope) and <see cref="DoDispose"/> (they die with teardown too).
+        ///
+        /// <para>It exists as a method rather than two bare <c>while (TryDequeue(out _)) { }</c> loops
+        /// because two loops are two places to remember a future per-entry obligation, and one is one. The
+        /// live drain in <see cref="PumpBuilds"/> is deliberately NOT routed through here — it CONSUMES
+        /// entries rather than discarding them, which is the opposite job.</para>
+        /// </summary>
+        private void DrainAndDiscardParkedBuilds()
+        {
+            // FUNNEL 4: each discarded entry holds a REFERENCE to a decoded tile (taken at park time), so
+            // throwing the entry away is not enough — dropping it un-disposed leaks the tile's
+            // Allocator.Persistent buffers. This is exactly the future per-entry obligation the funnel was
+            // extracted to have one home for.
+            //
+            // R1: gated by the SAME _parkGate TryParkBuild takes, so this dequeue-and-dispose loop can never
+            // interleave with a park's own acquire+enqueue — see TryParkBuild's doc for what that buys.
+            lock (_parkGate)
+            {
+                while (_pendingSpriteQueue.TryDequeue(out PendingSymbolBuild dropped)) // no Clear() on ConcurrentQueue<T>
+                    dropped.Decode.Release();
             }
         }
 
@@ -674,35 +777,86 @@ namespace MapRenderer.Unity.Text
             // worker phase (decode + extract) to the pool exactly as the kick would have, landing in
             // _handoffQueue on completion. The extract stays off-main; no new budget knob — the tails still
             // trickle at MaxBuildsPerFrame below. Not settled ⇒ leave the queue alone (checked every pump).
+            //
+            // R1: deliberately UNGATED (no lock (_parkGate) here) — this loop only ever runs on the MAIN
+            // thread, same as TryParkBuild's canceller-side counterpart (DrainAndDiscardParkedBuilds), so
+            // the two can never run concurrently with EACH OTHER; ConcurrentQueue's own safe-publication is
+            // what makes it safe against the park's pool-side TryDequeue race. Only the abandon-drain races
+            // the park's acquire window — this live drain never cancels, so it has no such window to close.
             if (SpritesSettled)
             {
                 while (_pendingSpriteQueue.TryDequeue(out PendingSymbolBuild pending))
                 {
-                    if (pending.Ct.IsCancellationRequested) { CancelledBuildCount++; continue; } // mirrors the _handoffQueue drain above (F-4)
-                    // Reads _builder/_allSymbolLayers LIVE rather than capturing them in PendingSymbolBuild
-                    // (unlike the kick path's `builder` local) — safe only because the ct check above already
-                    // dropped any entry from a stale style scope, and SetStyle/DoDispose drain this queue
-                    // BEFORE DisposePipeline nulls _builder / _allSymbolLayers is rebuilt, so a surviving
-                    // entry's style is still the live one by construction.
-                    var processors = new TileSymbolLayerProcessor[pending.LayerIndices.Count];
-                    for (int k = 0; k < pending.LayerIndices.Count; k++)
+                    if (pending.Ct.IsCancellationRequested)
                     {
-                        int globalIndex = pending.LayerIndices[k];
-                        processors[k] = new TileSymbolLayerProcessor(_builder, _allSymbolLayers[globalIndex], globalIndex,
-                            pending.Labels, _spriteAtlas);
+                        // Funnel 4's third mouth: this entry leaves the queue here and reaches no dispatch,
+                        // so its reference is released HERE or nowhere.
+                        pending.Decode.Release();
+                        CancelledBuildCount++;
+                        continue; // mirrors the _handoffQueue drain above (F-4)
                     }
                     PendingSymbolBuild captured = pending;
-                    // Dispatches through the SAME RunSymbolWorkerAndHandoff the un-parked kick path uses —
-                    // the structure-test invariant (TileProcessingStructureTests) pins
-                    // TileLayerProcessorRunner.RunSymbolWorkerPass to exactly one call site in this class.
-                    UniTask.RunOnThreadPool(
-                        () =>
+                    // OWNERSHIP GUARD over the dequeue→worker-start window. TryDequeue already took the
+                    // queue's reference away, and for a DISPATCHED entry the only release lives inside a
+                    // delegate that has not started yet — so every statement between the dequeue and
+                    // RunOnThreadPool accepting the delegate is a window in which a throw (a stale layer
+                    // index, an allocation failure, the dispatch itself) strands the last reference to a
+                    // decoded tile with no owner anywhere. Ownership is handed over only once the dispatch
+                    // has returned — `handedToWorker` is what makes the two mouths below MUTUALLY EXCLUSIVE
+                    // rather than relying on idempotency: R2's SharedDisposable has no per-acquire token, so a
+                    // release from both mouths for the same entry would be a genuine double-release (an
+                    // unbalanced Release(), caught only by a DEBUG assertion — see SharedDisposable's doc).
+                    bool handedToWorker = false;
+                    try
+                    {
+                        // Reads _builder/_allSymbolLayers LIVE rather than capturing them in
+                        // PendingSymbolBuild (unlike the kick path's `builder` local) — safe only because
+                        // the ct check above already dropped any entry from a stale style scope, and
+                        // SetStyle/DoDispose drain this queue BEFORE DisposePipeline nulls _builder /
+                        // _allSymbolLayers is rebuilt, so a surviving entry's style is still the live one by
+                        // construction.
+                        var processors = new TileSymbolLayerProcessor[captured.LayerIndices.Count];
+                        for (int k = 0; k < captured.LayerIndices.Count; k++)
                         {
-                            if (captured.Ct.IsCancellationRequested) return;
-                            RunSymbolWorkerAndHandoff(captured.Decode, in captured.Context, processors,
-                                captured.Key, captured.Generation, captured.Labels, captured.Ct, captured.SourceId, captured.Tile);
-                        },
-                        configureAwait: false, cancellationToken: captured.Ct).Forget();
+                            int globalIndex = captured.LayerIndices[k];
+                            processors[k] = new TileSymbolLayerProcessor(_builder, _allSymbolLayers[globalIndex], globalIndex,
+                                captured.Labels, _spriteAtlas);
+                        }
+                        // Dispatches through the SAME RunSymbolWorkerAndHandoff the un-parked kick path uses
+                        // — the structure-test invariant (TileProcessingStructureTests) pins
+                        // TileLayerProcessorRunner.RunSymbolWorkerPass to exactly one call site in this class.
+                        // NO `cancellationToken:` argument here, deliberately. A cancelled token would make
+                        // UniTask skip the delegate entirely — and the delegate is the only thing that releases
+                        // this entry's reference, so a cancellation between the check above and the dispatch
+                        // would leak the tile with nothing left to observe it. The in-lambda ct check below is
+                        // the same guard, and it sits INSIDE the try so the `finally` always runs.
+                        UniTask.RunOnThreadPool(
+                            () =>
+                            {
+                                try
+                                {
+                                    if (captured.Ct.IsCancellationRequested) return;
+                                    // This build was parked at kick time, but its reference has held the kick's
+                                    // decoded tile alive ever since — so this reads the SAME IDecodedTile the
+                                    // mesh pass read, with no second decode. That is the cost the refcount buys
+                                    // back; there is no ordering constraint between this dispatch and the kick
+                                    // lambda either way.
+                                    RunSymbolWorkerAndHandoff(captured.Decode, in captured.Context, processors,
+                                        captured.Key, captured.Generation, captured.Labels, captured.Ct, captured.SourceId, captured.Tile);
+                                }
+                                finally
+                                {
+                                    captured.Decode.Release(); // funnel 4's consuming mouth
+                                }
+                            },
+                            configureAwait: false).Forget();
+                        handedToWorker = true;
+                    }
+                    finally
+                    {
+                        // funnel 4's pre-handoff mouth: reached only when the entry never got a worker.
+                        if (!handedToWorker) captured.Decode.Release();
+                    }
                 }
             }
 
@@ -1097,7 +1251,7 @@ namespace MapRenderer.Unity.Text
             _store.ReleasePins(_backSnapshot);
             _buildCts.Dispose();
             while (_handoffQueue.TryDequeue(out _)) { } // BCL ConcurrentQueue<T> has no Clear()
-            while (_pendingSpriteQueue.TryDequeue(out _)) { } // D6: parked builds die with teardown too
+            DrainAndDiscardParkedBuilds(); // D6: parked builds die with teardown too
             _readyTails.Clear(); // A5a: ready-but-untailed builds die with the store slot cleared below
             _store.Clear();
             _frontSnapshot.Clear(); _backSnapshot.Clear();

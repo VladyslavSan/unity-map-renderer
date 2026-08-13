@@ -1,8 +1,10 @@
-// Engine-free despite living under Assets/Code/MapRenderer.Unity/Text (like GlyphManager): references only
-// MapRenderer.Core.* + UniTask, NO `using UnityEngine`. It is co-located with GlyphManager (which it needs,
-// and which is in this assembly) and is compiled by BOTH the Unity EditMode runner and Tools/core-tests
-// (the matching <Compile Include> lives in Tools/core-tests/core-tests.csproj). Do NOT add a UnityEngine
-// reference — that would break the fast core-tests build and this file's headless A4 gate.
+// No `using UnityEngine` — but this file is NO LONGER compiled by Tools/core-tests and must not be re-added
+// to core-tests.csproj (tile-geometry IR B4). It calls SymbolFeatureExtractor.Extract, which now materializes
+// a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections transitively; core-tests has no
+// Unity.Collections and deliberately gets no shim (a hand-written one would be a second implementation of
+// Collections' ownership semantics, and disposing an AsArray() view there is a SILENT no-op — the fast loop
+// would lie about exactly the bug class this epic keeps hitting). Its tests run unchanged in the Unity
+// EditMode runner: no coverage was lost, only iteration speed.
 
 using System.Collections.Generic;
 using System.Threading;
@@ -11,7 +13,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Text
 {
@@ -86,6 +88,10 @@ namespace MapRenderer.Unity.Text
         /// <c>null</c> (the default) yields no icon labels, so every pre-I5a caller (which omits this
         /// argument) is byte-identical to before I5a. The production caller (<c>TileSymbolLayerProcessor</c>)
         /// still omits it — icon draw isn't wired until I5b, so it stays inert in prod for now.</param>
+        /// <remarks>IR C1 P3: no store parameter and no private fallback store. Every layer's geometry is
+        /// read off the decoded tile itself (<c>ITileLayer.Geometry</c>), so N symbol layers naming one
+        /// source-layer read ONE buffer with nothing threaded through and nothing to dispose — and they share
+        /// it with the mesh layers of the same kick, which the pass-scoped store never could.</remarks>
         public List<ExtractedLayer> ExtractLayers(
             IDecodedTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
             double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null,
@@ -93,6 +99,7 @@ namespace MapRenderer.Unity.Text
         {
             var result = new List<ExtractedLayer>(symbolLayers?.Count ?? 0);
             if (tile == null || symbolLayers == null || projection == null) return result;
+
             for (int l = 0; l < symbolLayers.Count; l++)
             {
                 StyleLayer layer = symbolLayers[l];

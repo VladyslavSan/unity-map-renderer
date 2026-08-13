@@ -12,9 +12,11 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
+using MapRenderer.Core.Expressions;
 namespace MapRenderer.Tests
 {
     /// <summary>
@@ -42,14 +44,15 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
 
-            var mvtTile = MvtDecoder.Decode(mvtBytes);
-            var layer   = mvtTile.GetLayer("countries");
+            // IR C1 P3: the command streams come from the independent fixture reader — a decoded feature
+            // carries none, and reading production's own buffer would make this parity self-referential.
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
 
             var polyGeoms = new List<uint[]>();
-            foreach (var f in layer.Features)
-                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
-                    polyGeoms.Add(f.Geometry);
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+                if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
+                    polyGeoms.Add(layer.Commands[fi]);
 
             Assert.Greater(polyGeoms.Count, 0, "Expected polygon features");
 
@@ -131,18 +134,17 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
 
-            var mvtTile = MvtDecoder.Decode(mvtBytes);
-            var layer   = mvtTile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
 
             int managedPolyCount = 0;
             int managedHoleCount = 0;
             var polyGeoms        = new List<uint[]>();
-            foreach (var f in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (f.GeometryType != TileGeometryType.Polygon || f.Geometry == null) continue;
-                polyGeoms.Add(f.Geometry);
-                var rings = MvtGeometry.Decode(f.Geometry);
+                if (layer.Kinds[fi] != TileGeometryType.Polygon || layer.Commands[fi] == null) continue;
+                polyGeoms.Add(layer.Commands[fi]);
+                var rings = MvtGeometry.Decode(layer.Commands[fi]);
                 var polys = PolygonAssembler.Assemble(rings);
                 managedPolyCount += polys.Count;
                 foreach (var p in polys) managedHoleCount += (p.Holes?.Count ?? 0);
@@ -193,10 +195,17 @@ namespace MapRenderer.Tests
 
                 int ringCount = outRingCount[0];
 
+                // IR B7: the assembler is kind-gated. This fixture hand-drives MvtDecodeJob (no
+                // materializer), so the column it would have produced is supplied here — every feature IS a
+                // polygon, which is exactly what the managed reference arm assembles.
+                var featureKinds = new NativeArray<TileGeometryType>(
+                    featureCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                for (int fi = 0; fi < featureCount; fi++) featureKinds[fi] = TileGeometryType.Polygon;
+
                 new RingAssemblyJob
                 {
                     Vertices = outVerts, RingOffsets = outRingOffsets, RingFeatureIdx = outRingFeat,
-                    RingCount = ringCount,
+                    RingCount = ringCount, FeatureGeometryType = featureKinds,
                     OutPolyOuterRingIdx = polyOuterIdx, OutPolyHoleListStart = polyHoleStart,
                     OutPolyHoleCount = polyHoleCount, OutHoleRingIdxs = holeRingIdxs,
                     OutPolygonCount = outPolyCount, OutHoleCount = outHoleCount2,
@@ -209,6 +218,8 @@ namespace MapRenderer.Tests
                     $"Ring assembly job polygon count {jobPolyCount} != managed {managedPolyCount}.");
                 Assert.AreEqual(managedHoleCount, jobHoleCount,
                     $"Ring assembly job hole count {jobHoleCount} != managed {managedHoleCount}.");
+
+                featureKinds.Dispose();
             }
             finally
             {
@@ -228,8 +239,7 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
 
-            var mvtTile = MvtDecoder.Decode(mvtBytes);
-            var layer   = mvtTile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
 
             double extent  = layer.Extent;
@@ -242,17 +252,20 @@ namespace MapRenderer.Tests
                 BuildManagedHash(mvtBytes, "countries", 0, 0, 0, extent, originX, originY);
 
             // ── Jobified path.
-            var polyGeoms = new List<uint[]>();
-            foreach (var f in layer.Features)
-                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
-                    polyGeoms.Add(f.Geometry);
+            var polygonKinds    = new List<TileGeometryType>();
+            var polygonCommands = new List<uint[]>();
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+                if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
+                { polygonKinds.Add(layer.Kinds[fi]); polygonCommands.Add(layer.Commands[fi]); }
 
+            TileGeometryBuffers geometry = new MvtGeometryMaterializer(
+                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands).Materialize();
+            NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var pipelineInput = new FillMeshPipeline.LayerInput
             {
-                FeatureGeometries = polyGeoms,
-                Extent    = extent,
-                Tile      = new TileId { Z = 0, X = 0, Y = 0 },
-                OriginRender = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
+                Geometry       = geometry,
+                RingVisitOrder = visitOrder,
+                OriginRender   = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
             };
 
             TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
@@ -280,6 +293,8 @@ namespace MapRenderer.Tests
             finally
             {
                 buffers.Dispose();
+                visitOrder.Dispose();
+                geometry.Dispose();
             }
         }
 
@@ -293,22 +308,27 @@ namespace MapRenderer.Tests
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
 
-            var mvtTile = MvtDecoder.Decode(mvtBytes);
-            var layer   = mvtTile.GetLayer("countries");
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
 
             double extent = layer.Extent;
-            var polyGeoms = new List<uint[]>();
-            foreach (var f in layer.Features)
-                if (f.GeometryType == TileGeometryType.Polygon && f.Geometry != null)
-                    polyGeoms.Add(f.Geometry);
+            var polygonKinds    = new List<TileGeometryType>();
+            var polygonCommands = new List<uint[]>();
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+                if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
+                { polygonKinds.Add(layer.Kinds[fi]); polygonCommands.Add(layer.Commands[fi]); }
 
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
+            // IR B7: ONE buffer, borrowed by all N+1 Schedule calls below — pre-B7 each call consumed its
+            // own mint, so this is also a live demonstration that Schedule no longer consumes its input.
+            TileGeometryBuffers geometry = new MvtGeometryMaterializer(
+                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands).Materialize();
+            NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var singleInput = new FillMeshPipeline.LayerInput
             {
-                FeatureGeometries = polyGeoms, Extent = extent,
-                Tile = new TileId { Z = 0, X = 0, Y = 0 },
-                OriginRender = new double3(bMin.x, 0.0, bMin.y),
+                Geometry       = geometry,
+                RingVisitOrder = visitOrder,
+                OriginRender   = new double3(bMin.x, 0.0, bMin.y),
             };
 
             // Get single-tile reference.
@@ -354,6 +374,8 @@ namespace MapRenderer.Tests
             finally
             {
                 for (int i = 0; i < N; i++) allBuffers[i].Dispose();
+                visitOrder.Dispose();
+                geometry.Dispose();
             }
         }
 
@@ -369,8 +391,7 @@ namespace MapRenderer.Tests
             int tileZ, int tileX, int tileY,
             double extent, double originX, double originY)
         {
-            var tile  = MvtDecoder.Decode(mvtBytes);
-            var layer = tile.GetLayer(layerName);
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, layerName);
             Assert.IsNotNull(layer, $"Layer '{layerName}' must be present");
 
             var vertBytes  = new List<byte>();
@@ -378,10 +399,10 @@ namespace MapRenderer.Tests
             int forceClips = 0;
             int globalVertBase = 0;
 
-            foreach (var feature in layer.Features)
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
-                if (feature.GeometryType != TileGeometryType.Polygon) continue;
-                var rings    = MvtGeometry.Decode(feature.Geometry);
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
+                var rings    = MvtGeometry.Decode(layer.Commands[fi]);
                 var polygons = PolygonAssembler.Assemble(rings);
 
                 foreach (var polygon in polygons)

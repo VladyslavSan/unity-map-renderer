@@ -427,7 +427,7 @@ namespace MapRenderer.Tests.Text
                 Text = text,
                 IconImage = iconImage,
                 FeatureIndex = feature,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                TileKey = LabelTileKey.Pack(tile),
             };
 
         private static List<LabelInstance> CollectQuantized(SymbolTileLabelStore store, double q)
@@ -654,7 +654,7 @@ namespace MapRenderer.Tests.Text
                 Text = text,
                 IconImage = icon,
                 FeatureIndex = feature,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                TileKey = LabelTileKey.Pack(tile),
             };
 
         private static LabelInstance ParityCurved(string text, int feature, TileId tile)
@@ -664,7 +664,7 @@ namespace MapRenderer.Tests.Text
                 MaterialIndex = 0,
                 Text = text,
                 FeatureIndex = feature,
-                TileKey = SymbolFeatureExtractor.PackTileKey(tile),
+                TileKey = LabelTileKey.Pack(tile),
             };
 
         private struct OracleResult

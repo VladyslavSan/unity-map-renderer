@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It drives SymbolFeatureExtractor.Extract, which since tile-geometry IR B4
+// materializes a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections — so this file left
+// Tools/core-tests (no coverage lost, only iteration speed) and must not be re-added to core-tests.csproj.
 
 using System.Collections.Generic;
 using System.Text;
@@ -7,13 +8,15 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -28,6 +31,12 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SymbolPairPredicateTests
     {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private const uint Extent = 4096;
         private static readonly TileId SyntheticTileId = new TileId { Z = 1, X = 0, Y = 0 };
         private static readonly TileId PlaceTileId = new TileId { Z = 6, X = 32, Y = 20 };
@@ -50,20 +59,6 @@ namespace MapRenderer.Tests
         }
 
         // ── Synthetic tile plumbing — the local doubles every symbol-extraction test file carries. ──
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
 
         private static uint[] SinglePointGeometry(double2 p)
@@ -76,10 +71,7 @@ namespace MapRenderer.Tests
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
                 geometryType: TileGeometryType.Point,
                 geometry: SinglePointGeometry(new double2(2000, 2000)));
-            return new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "points", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            return TestDecodedTiles.Of("points", SyntheticTileId, new List<IFeature> { feature }, Extent);
         }
 
         private static SymbolStyle.StyleLayer PointProbeLayer(string layoutJson)
@@ -95,7 +87,7 @@ namespace MapRenderer.Tests
         private static List<SymbolStyle.SymbolLabel> ExtractPoint(string layoutJson, SpriteAtlasView atlas)
         {
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(PointProbeLayer(layoutJson), OnePointTile(), SyntheticTileId,
+            SymbolFeatureExtractor.Extract(PointProbeLayer(layoutJson), OnePointTile(), SyntheticTileId,
                 0.0, new WebMercatorProjection(), labels, atlas);
             return labels;
         }
@@ -230,7 +222,7 @@ namespace MapRenderer.Tests
             var labels = new List<SymbolStyle.SymbolLabel>();
             // z6 — BELOW label_city's `["step",["zoom"],"circle_11_black",9,""]`, so the dot exists at all.
             // At z >= 9 the icon-image resolves to "" and there is no icon to pair with, let alone orphan.
-            SymbolStyle.SymbolFeatureExtractor.Extract(labelCity, PlaceFixtureTile(), PlaceTileId, 6.0,
+            SymbolFeatureExtractor.Extract(labelCity, PlaceFixtureTile(), PlaceTileId, 6.0,
                 new WebMercatorProjection(), labels, SyntheticAtlas("circle_11_black"));
 
             SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
@@ -311,13 +303,11 @@ namespace MapRenderer.Tests
                 },
                 geometryType: TileGeometryType.Point,
                 geometry: SinglePointGeometry(new double2(2000, 2000)));
-            var tile = new FixtureDecodedTile(new FixtureTileLayer
-            {
-                Name = "aerodrome_label", Extent = Extent, Features = new List<ITileFeature> { feature },
-            });
+            var tile = TestDecodedTiles.Of(
+                "aerodrome_label", BerlinTileId, new List<IFeature> { feature }, Extent);
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(airport, tile, BerlinTileId, 9.0,
+            SymbolFeatureExtractor.Extract(airport, tile, BerlinTileId, 9.0,
                 new WebMercatorProjection(), labels, SyntheticAtlas("airport_11"));
 
             SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
@@ -372,7 +362,7 @@ namespace MapRenderer.Tests
 
             // A null atlas resolves no icon at all, however loudly the layer asks for one.
             var nullAtlasLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(
+            SymbolFeatureExtractor.Extract(
                 PointProbeLayer("{\"text-field\":\"{ref}\",\"icon-image\":\"road_3\",\"text-offset\":[0,0.6]}"),
                 OnePointTile(), SyntheticTileId, 0.0, new WebMercatorProjection(), nullAtlasLabels, null);
             Assert.AreEqual(1, nullAtlasLabels.Count, "a null atlas yields the text half alone");
@@ -403,7 +393,7 @@ namespace MapRenderer.Tests
             };
 
             var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolStyle.SymbolFeatureExtractor.Extract(layer, BerlinFixtureTile(), BerlinTileId, 13.0,
+            SymbolFeatureExtractor.Extract(layer, BerlinFixtureTile(), BerlinTileId, 13.0,
                 new WebMercatorProjection(), labels, SyntheticAtlas("road_3"));
 
             int atAnchorIcons = 0, curvedTexts = 0;
@@ -430,14 +420,22 @@ namespace MapRenderer.Tests
 
         /// <summary>A real z6 tile whose `place` layer carries class=city features (liberty's `label_city`).</summary>
         private static MvtTile PlaceFixtureTile()
-            => _placeTile ??= MvtDecoder.Decode(
+            => _placeTile ??= MvtDecoder.Decode(PlaceTileId,
                 SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "water-6-32-20.pbf.bytes"));
 
         private static MvtTile _berlinTile;
 
         private static MvtTile BerlinFixtureTile()
-            => _berlinTile ??= MvtDecoder.Decode(
+            => _berlinTile ??= MvtDecoder.Decode(BerlinTileId,
                 SymbolTestFixtures.LoadUpBytes("Assets", "Fixtures", "boundary-9-274-168.pbf.bytes"));
+
+        /// <summary>IR C1 P3: the cached fixture tiles own native buffers for the whole fixture's life.</summary>
+        [OneTimeTearDown]
+        public void ReleaseCachedFixtureTiles()
+        {
+            _placeTile?.Dispose();  _placeTile  = null;
+            _berlinTile?.Dispose(); _berlinTile = null;
+        }
 
         // A synthetic quad standing in for a shaped text run — the teeth that need REAL text geometry (T3)
         // lay it out for real; these only need quads.Length > 0 so the half actually stages.

@@ -11,7 +11,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
@@ -20,6 +20,9 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using Fill = MapRenderer.Core.Style.Fill;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests
 {
@@ -34,33 +37,13 @@ namespace MapRenderer.Tests
 
         private const string FixtureSourceLayerName = "non-mvt-fixture-layer";
 
-        /// <summary>A minimal <see cref="IDecodedTile"/>/<see cref="ITileLayer"/> pair with NO production
-        /// user (test-only, per design §B-4) — reuses the production <see cref="InMemoryTileFeature"/> for
-        /// its one feature.</summary>
-        private sealed class FixtureDecodedTile : IDecodedTile
-        {
-            private readonly ITileLayer _layer;
-            public FixtureDecodedTile(ITileLayer layer) => _layer = layer;
-            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
-        }
-
-        // Plain { get; set; } (not init): MapRenderer.Tests.EditMode has no IsExternalInit polyfill of its
-        // own (only Core/Unity define init-only members) — a test-owned type stays mutable rather than
-        // adding a polyfill file for one fixture class.
-        private sealed class FixtureTileLayer : ITileLayer
-        {
-            public string Name { get; set; }
-            public uint Extent { get; set; }
-            public IReadOnlyList<ITileFeature> Features { get; set; }
-        }
-
         /// <summary>Ignores the bytes entirely and returns the fixed fixture tile — the injection point
         /// F-3 proves is actually consumed (not bypassed in favour of a hardcoded MVT decode).</summary>
         private sealed class FakeTileDecoder : ITileDecoder
         {
             private readonly IDecodedTile _tile;
             public FakeTileDecoder(IDecodedTile tile) => _tile = tile;
-            public IDecodedTile Decode(byte[] bytes) => _tile;
+            public IDecodedTile Decode(TileId id, byte[] bytes) => _tile;
         }
 
         /// <summary>Mirrors <see cref="FillRenderLayer.WriteInto"/>'s forward to
@@ -86,11 +69,11 @@ namespace MapRenderer.Tests
             public void Dispose() { }
 
             public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
-                TileId id, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
+                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
                 out int vertexCount, out Bounds bounds)
                 => StyledFillTileBuilder.WriteMeshData(
-                    md, features, _paint, zoom, extent, id, tileOriginRender, out vertexCount, out bounds,
+                    md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
                     projection, layout: null, clip: clip);
         }
 
@@ -103,22 +86,21 @@ namespace MapRenderer.Tests
             var feature = new InMemoryTileFeature
             {
                 GeometryType = TileGeometryType.Polygon,
-                Geometry     = TileBackgroundLayerProcessor.FullExtentRingGeometry,
+                Geometry     = FullExtentRingCommandStream.Commands,
             };
-            var layer = new FixtureTileLayer
-            {
-                Name     = FixtureSourceLayerName,
-                Extent   = (uint)TileBackgroundLayerProcessor.Extent,
-                Features = new ITileFeature[] { feature },
-            };
-            var fixtureTile = new FixtureDecodedTile(layer);
+            var tileId = new TileId { Z = 0, X = 0, Y = 0 };
+            // IR C1 P3: a decoded layer OWNS its geometry, so the fixture layer materializes at construction
+            // exactly as MvtDecoder does — the shared InMemoryTileLayer/InMemoryDecodedTile pair.
+            var layer = new InMemoryTileLayer(
+                FixtureSourceLayerName, tileId, new IFeature[] { feature },
+                (uint)TileBackgroundLayerProcessor.Extent);
+            using var fixtureTile = new InMemoryDecodedTile(layer);
             var fakeDecoder = new FakeTileDecoder(fixtureTile);
 
             var styleLayer = new StyleLayer { Id = "fixture-fill", SourceLayer = FixtureSourceLayerName };
             var paint = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
             var fillLayer = new FakeFillTileMeshRenderLayer(styleLayer, paint);
 
-            var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             var projection = new WebMercatorProjection();
             var context = new TileLayerProcessContext
             {
@@ -128,10 +110,15 @@ namespace MapRenderer.Tests
             };
 
             var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
-            var decode = new SharedTileDecode(MalformedMvtBytes, fakeDecoder);
+            var decode = new SharedDisposable<IDecodedTile>(fakeDecoder.Decode(tileId, MalformedMvtBytes));
 
-            IRenderLayerPayload[] payloads = TileLayerProcessorRunner.RunWorkerPass(
-                decode, in context, new ITileMeshLayerProcessor[] { processor });
+            IRenderLayerPayload[] payloads;
+            try
+            {
+                payloads = TileLayerProcessorRunner.RunWorkerPass(
+                    decode, in context, new ITileMeshLayerProcessor[] { processor });
+            }
+            finally { decode.Release(); }
 
             Assert.AreEqual(1, payloads.Length);
             Assert.IsNotNull(payloads[0], "the worker pass must settle a payload even under the fake decoder.");

@@ -6,9 +6,11 @@ using System;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Json;
-using MapRenderer.Core.Mvt;
 using MapRenderer.Core.Style;
 using Background = MapRenderer.Core.Style.Background;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Geo;
+using MapRenderer.Jobs.Mvt;
 
 namespace MapRenderer.Tests
 {
@@ -99,7 +101,7 @@ namespace MapRenderer.Tests
 
             // The real style's source-layers ("countries"/"geolines"/"centroids") match our MVT fixture:
             // a real style layer resolves features from the real decoded tile.
-            var tile = MvtDecoder.Decode(LoadFixtureBytes());
+            using var tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, LoadFixtureBytes());
             StyleLayer coastline = null;
             foreach (var l in doc.Layers)
                 if (l.Id == "coastline") { coastline = l; break; }
@@ -330,7 +332,7 @@ namespace MapRenderer.Tests
         [Test]
         public void SourceLayerResolution_DrivesFeatureSelectionFromMvt()
         {
-            var tile = MvtDecoder.Decode(LoadFixtureBytes());
+            using var tile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, LoadFixtureBytes());
 
             const string json = @"{
               ""version"": 8,

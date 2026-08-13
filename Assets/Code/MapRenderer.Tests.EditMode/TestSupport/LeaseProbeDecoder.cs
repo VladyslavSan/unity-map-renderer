@@ -1,0 +1,112 @@
+// Shared test instrument — used by SymbolParkedRedecodeTests and EagerDecodeOwnershipTests. Unity EditMode
+// only (it wraps the real MvtTileDecoder over the committed fixture). NOT in core-tests.csproj.
+
+using System.Collections.Generic;
+using System.Threading;
+using MapRenderer.Core.Geo;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Jobs.Tiles;
+
+namespace MapRenderer.Tests
+{
+    /// <summary>
+    /// Wraps a REAL <see cref="ITileDecoder"/> — so the output under test is genuine production output, not
+    /// a stub's — while counting decodes and recording each decoded tile's disposal.
+    ///
+    /// <para><b>Why a probe and not <c>NativeLeakDetection</c>:</b> leak detection is OFF in the batch gate,
+    /// so a real <c>Allocator.Persistent</c> leak is <b>invisible</b> there. Counting who disposed what, and
+    /// how often, is the only instrument in this repo that can fail on one.</para>
+    ///
+    /// <para><b>This is the leak teeth's whole instrument.</b> No production observability exists for the
+    /// reference count and none was added for it: the probe is injected through a fake
+    /// <c>ITileFeatureSource</c> at <c>TileManager.SetSources</c>' <c>SourceSpec.CreateSource</c> seam, which
+    /// already exists. A <c>LiveLeaseCount</c> static with no production caller would violate the
+    /// test-code-bloat rule, and would see strictly less than this does.</para>
+    /// </summary>
+    internal sealed class LeaseProbeDecoder : ITileDecoder
+    {
+        private readonly ITileDecoder _inner;
+        private readonly object _gate = new object();
+        private readonly List<CountingTile> _decoded = new List<CountingTile>();
+
+        internal LeaseProbeDecoder() : this(new MvtTileDecoder()) { }
+        internal LeaseProbeDecoder(ITileDecoder inner) => _inner = inner;
+
+        internal int DecodeCount { get { lock (_gate) return _decoded.Count; } }
+
+        /// <summary>Decoded tiles that were never disposed, or were disposed more than once — either is a
+        /// broken lease, and under <c>Allocator.Persistent</c> the first is a native leak.</summary>
+        internal int UnbalancedCount
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    int bad = 0;
+                    foreach (CountingTile t in _decoded) if (t.DisposeCount != 1) bad++;
+                    return bad;
+                }
+            }
+        }
+
+        /// <summary>How many decoded tiles have been disposed at least once.</summary>
+        internal int DisposedCount
+        {
+            get { lock (_gate) { int n = 0; foreach (CountingTile t in _decoded) if (t.DisposeCount > 0) n++; return n; } }
+        }
+
+        /// <summary>The managed thread each decode ran on, in decode order.</summary>
+        internal int ThreadIdOfDecode(int index) { lock (_gate) return _decoded[index].ThreadId; }
+
+        /// <summary>The decoded tile instance produced by decode <paramref name="index"/> — for an
+        /// <c>AreSame</c> that no count can make.</summary>
+        internal IDecodedTile TileOfDecode(int index) { lock (_gate) return _decoded[index]; }
+
+        /// <summary>The managed threads on which the tile's LAYERS were read, in call order, across every
+        /// decoded tile. A layer read happens inside a worker pass's extract, so this is the instrument for
+        /// "which thread did the extract run on" now that the decode no longer discriminates.</summary>
+        internal IReadOnlyList<int> LayerReadThreadIds
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    var all = new List<int>();
+                    foreach (CountingTile t in _decoded) all.AddRange(t.LayerReadThreadIds);
+                    return all;
+                }
+            }
+        }
+
+        public IDecodedTile Decode(TileId id, byte[] bytes)
+        {
+            var tile = new CountingTile(_inner.Decode(id, bytes), Thread.CurrentThread.ManagedThreadId);
+            lock (_gate) _decoded.Add(tile);
+            return tile;
+        }
+
+        private sealed class CountingTile : IDecodedTile
+        {
+            private readonly IDecodedTile _inner;
+            private readonly object _readGate = new object();
+            private readonly List<int> _layerReadThreadIds = new List<int>();
+            private int _disposeCount;
+
+            internal CountingTile(IDecodedTile inner, int threadId) { _inner = inner; ThreadId = threadId; }
+            internal int ThreadId { get; }
+            internal int DisposeCount => Volatile.Read(ref _disposeCount);
+            internal IReadOnlyList<int> LayerReadThreadIds
+            {
+                get { lock (_readGate) return _layerReadThreadIds.ToArray(); }
+            }
+
+            public ITileLayer GetLayer(string name)
+            {
+                lock (_readGate) _layerReadThreadIds.Add(Thread.CurrentThread.ManagedThreadId);
+                return _inner.GetLayer(name);
+            }
+
+            public void Dispose() { Interlocked.Increment(ref _disposeCount); _inner.Dispose(); }
+        }
+    }
+}

@@ -92,6 +92,52 @@ The data-parallel stages run as Burst jobs across tiles; only mesh creation touc
                                                               (SDF, camera-facing)
 ```
 
+### Module boundaries — what belongs where
+
+**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`.** That is the production target, and its
+architecture, readability and performance are what matter. `MapRenderer.Core` is a **convenience, not a goal**:
+engine-free code is easier to reason about and gets a fast `dotnet test` loop (`Tools/core-tests`, ~0.1s, no
+Editor lock). Core is a good playground. It is **not** the important module, and **not** the preferred home for
+logic.
+
+| assembly | role | what belongs |
+|---|---|---|
+| `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination |
+| `MapRenderer.Jobs` | **the product** | the native/decode assembly: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
+| `MapRenderer.Core` | convenience | code that is *naturally* engine-free: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
+
+> **`Jobs` is not "only Burst-able code" — read the row literally.** Since IR C1 it also holds a hand-rolled
+> **managed** protobuf decoder (`Mvt/MvtDecoder.cs`), the managed selection seam (`Tiles/FeatureSelector.cs`)
+> and a string lookup (`Tiles/SourceLayerResolver.cs`) — none blittable, none Burst. They belong there because
+> they follow `ITileLayer`, and `ITileLayer.Geometry` carries a `NativeArray`-bearing struct; splitting the
+> decoder from the buffer it produces is exactly the misplaced boundary described below. "It isn't blittable"
+> is therefore **not** an argument for moving something out of `Jobs`.
+
+**Placement rule: put code where it belongs architecturally, then test it wherever it lands.** Testability is
+never a placement argument — the Unity EditMode runner tests everything; it is merely slower. The fast runner
+also *shims* what it needs (13 `Unity.Mathematics` types today; `double2` is 22 lines), so "the fast runner
+can't compile it" is usually one shim away from false, and is never on its own a reason to shape production
+code.
+
+> **Never contort a design to keep something in Core.** If keeping a type in Core forces geometry to travel as
+> `uint[]` because Core cannot express a blittable buffer, forces a sidecar object to carry what an existing
+> type should own, or forces an interface to exist for a single implementer — **the boundary is wrong. Move the
+> code to `Jobs`/`Unity`.** Do not invent a workaround that preserves the boundary.
+
+**Why this is written down (it went wrong, three times, from one cause).** The MVT decode seam sat in Core.
+Core cannot express a blittable buffer, so decoded geometry could only travel as a managed `uint[]`. That single
+misplaced boundary produced, in order: `IMvtGeometryCarrier` (a public, MVT-named interface invented to carry
+encoded bytes sideways onto otherwise format-neutral features, with multiple implementers); per-consumer decode
+(geometry materialized once *per style layer* — 108 times per tile on the repo's own default style, 61 of those
+decoding one source layer); and `TileGeometryStore` (a detached cache holding geometry the decoded tile itself
+should own, bound to its tile only by convention — nothing in the type system could tell it had been paired
+with the wrong one). Each workaround was individually reasonable and locally correct. All three were
+consequences of refusing to move ~10 files out of a 206-file assembly.
+
+`Structure/CoreAssemblyBoundaryTests` pins that Core stays runnable outside the Editor — that is the **goal**,
+and it is worth keeping. It is **not** a reason to keep any particular type in Core; enforcing the mechanism
+instead of the goal is what made this boundary feel inviolable.
+
 ### Two geometry classes, two paths
 | Class | Built | Lifetime | Rendered as |
 |---|---|---|---|

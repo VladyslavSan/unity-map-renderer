@@ -114,7 +114,7 @@ namespace MapRenderer.Tests
         private static double3 ResolveTileOrigin(long tileKey, IProjection projection, Dictionary<long, double3> cache)
         {
             if (cache.TryGetValue(tileKey, out double3 origin)) return origin;
-            origin = TileRenderOrigin.Project(SymbolFeatureExtractor.UnpackTileKey(tileKey), projection);
+            origin = TileRenderOrigin.Project(LabelTileKey.Unpack(tileKey), projection);
             cache[tileKey] = origin;
             return origin;
         }
