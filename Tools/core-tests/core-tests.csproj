@@ -182,34 +182,34 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/TestDataSource.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/VerifiedDisposableTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/SharedDisposableTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/AngleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/ConstrainedAngleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/ProjectionMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/CameraPropertiesTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/EarcutTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/PolygonAssemblerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/VerifiedDisposableTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/SharedDisposableTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/AngleTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ConstrainedAngleTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Projection/ProjectionMathTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraPropertiesTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/LineTessellatorTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/ViewMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/ViewInputTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/LineTessellatorTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewMathTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewInputTests.cs" />
 
     <!-- S85: TileCoverStats + FrustumTileSelector aspect/Flat teeth (engine-free; shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TileCoverStatsTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileCoverStatsTests.cs" />
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/CameraInteractionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraInteractionTests.cs" />
 
     <!-- S74: touch gesture recognizer tests (engine-free; B-CLASSIFY/B-CLAMP/B-PANPIN/T-FAKESOURCE) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TouchGestureRecognizerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/TouchGestureRecognizerTests.cs" />
 
     <!-- S72: two-way slider↔camera reconcile tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/CameraSliderBindingTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraSliderBindingTests.cs" />
 
     <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/LayerDrawOrderTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/SnapshotColorTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Rendering/LayerDrawOrderTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotColorTests.cs" />
 
     <!-- S08: style-spec model tests (shared verbatim) -->
 
@@ -251,7 +251,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
     <!-- Epic A / A6: MvtFeatureAdapter fold-verbatim byte-parity guard (F-5) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GlobeTileSelectorTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
 
