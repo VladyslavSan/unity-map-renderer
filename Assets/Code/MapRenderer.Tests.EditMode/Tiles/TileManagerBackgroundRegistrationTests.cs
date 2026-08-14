@@ -5,10 +5,11 @@
 // hierarchy (GameObjectTileRendererTests' pattern) so a single assertion set proves per-tile COUNT, the
 // correct material SLOT, and a non-empty mesh together.
 
+using System.Collections;
 using System.Collections.Generic;
-using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
@@ -44,26 +45,29 @@ namespace MapRenderer.Tests.Tiles
             return (go, view);
         }
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        /// <summary>Pumps the MapView across editor frames until its cover has settled, yielding a frame
+        /// each iteration (never Thread.Sleep — a blocked thread does not advance the player loop and races
+        /// the async decode/mesh-build). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
         // ── Tooth 1: per-covered-tile registration (primary semantic tooth) ──────────────────────────
 
-        [Test]
-        public void BackgroundStyle_RegistersOneQuadPerCoveredTile()
+        [UnityTest]
+        public IEnumerator BackgroundStyle_RegistersOneQuadPerCoveredTile()
         {
             var (go, view) = NewView(RenderBackend.GameObject, zoom: 3); // z3: a multi-tile cover (non-vacuous N)
             try
             {
                 view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
 
                 int loaded = view.LoadedTileCount();
                 Assert.Greater(loaded, 1,
@@ -106,8 +110,8 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Tooth 2: no fetch, no decode for background ───────────────────────────────────────────────
 
-        [Test]
-        public void BackgroundStyle_IssuesNoFetch_AndNeverDecodes()
+        [UnityTest]
+        public IEnumerator BackgroundStyle_IssuesNoFetch_AndNeverDecodes()
         {
             var (go, view) = NewView(RenderBackend.GameObject, zoom: 3);
             // A source that FAULTS if ever invoked — background must never route through the fetch path at
@@ -119,7 +123,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 view.LoadTestStyle(neverCalled, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled());
                 Assert.Greater(view.LoadedTileCount(), 0, "background must still load and register.");
@@ -131,8 +135,8 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Tooth 11: source-less builds honor the build cap (HIGH 2) ─────────────────────────────────
 
-        [Test]
-        public void BackgroundCover_KicksAtMostBuildCapPerTick()
+        [UnityTest]
+        public IEnumerator BackgroundCover_KicksAtMostBuildCapPerTick()
         {
             var (go, view) = NewView(RenderBackend.GameObject, zoom: 3);
             view.Config.MaxMeshBuildsPerTick = 1; // force per-tick throttling
@@ -157,7 +161,7 @@ namespace MapRenderer.Tests.Tiles
                     Assert.LessOrEqual(view.MeshBuildsKickedLastTick(), 1,
                         "at most MaxMeshBuildsPerTick source-less builds may be kicked in a single Tick — " +
                         "never the whole cover synchronously in one burst.");
-                    Thread.Sleep(1);
+                    yield return null;
                 }
                 Assert.IsTrue(view.AllTilesSettled(), "the throttled cover must still fully drain eventually.");
             }
