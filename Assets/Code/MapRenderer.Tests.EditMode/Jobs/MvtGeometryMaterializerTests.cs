@@ -313,8 +313,6 @@ namespace MapRenderer.Tests.Jobs
 
         // ── Fixture helpers ────────────────────────────────────────────────────────────────────────
 
-        private static IReadOnlyList<IFeature> Features(params IFeature[] features) => features;
-
         /// <summary>IR C1 P3: the materializer takes (tile, extent, kinds, commands) rather than a feature
         /// list — the sidecar interface it used to downcast through is gone. This adapter keeps the fixtures
         /// authored as features, which is still the readable shape, and splits the two columns here.</summary>
@@ -333,29 +331,5 @@ namespace MapRenderer.Tests.Jobs
 
         private static IFeature Carrier(TileGeometryType kind, uint[] geometry)
             => new InMemoryTileFeature { GeometryType = kind, Geometry = geometry };
-
-        /// <summary>An <see cref="IFeature"/> that is NOT an <see cref="IMvtGeometryCarrier"/> — what a
-        /// non-MVT source's feature looks like to the MVT materializer. Deliberately not
-        /// <c>DictionaryFeature</c>, which IS a carrier.</summary>
-        /// <summary>Retained: still the double for "a feature with a kind and no geometry", which is now the
-        /// ONLY shape a non-MVT feature can take (IR C1 P3 deleted the carrier interface it used to lack).</summary>
-        private sealed class KindOnlyFeature : IFeature
-        {
-            private static readonly Dictionary<string, Value> None = new Dictionary<string, Value>();
-
-            public KindOnlyFeature(TileGeometryType kind) => GeometryType = kind;
-
-            public TileGeometryType GeometryType { get; }
-            public bool  HasId => false;
-            public Value Id    => Value.Null;
-
-            public bool TryGetProperty(string name, out Value value)
-            {
-                value = Value.Null;
-                return false;
-            }
-
-            public IReadOnlyDictionary<string, Value> Properties => None;
-        }
     }
 }

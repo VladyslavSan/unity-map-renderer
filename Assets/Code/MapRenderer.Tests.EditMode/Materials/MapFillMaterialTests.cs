@@ -134,54 +134,6 @@ namespace MapRenderer.Tests
                 "the raw-ShaderGUI no longer recomputes it. A value of 2000 means the custom queue was " +
                 "lost.");
         }
-#else
-        [Test]
-        public void MapFillMat_Exists()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapFillMat_ReferencesCorrectShader()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapFillMat_HasBaseColorProperty()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapFillMat_HasOpacityProperty()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapFillMat_HasStandardLitProperties()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapLineMat_Exists()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapLineMat_HasBaseColorProperty()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
-
-        [Test]
-        public void MapLineMat_ResolvesToTransparentQueue()
-        {
-            Assert.Inconclusive("Material asset tests require Unity Editor (EditMode only).");
-        }
 #endif
     }
 }

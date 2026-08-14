@@ -38,10 +38,6 @@ namespace MapRenderer.Tests
             Assert.IsTrue(typeof(ShaderGUI).IsAssignableFrom(typeof(FillShaderGUI)));
             Assert.IsTrue(typeof(ShaderGUI).IsAssignableFrom(typeof(LineShaderGUI)));
         }
-#else
-        [Test]
-        public void MapShaderGUI_SubclassesRawShaderGUI_Directly()
-            => Assert.Inconclusive("ShaderGUI types are editor-only (EditMode tests only).");
 #endif
     }
 }
