@@ -43,9 +43,9 @@ namespace MapRenderer.Unity.Rendering.Map
     ///   <c>DefaultExecutionOrder</c>, no whole-map-vs-input latency. And because camera, tiles and labels all
     ///   read the one snapshot, none can lag the others.</para>
     ///
-    /// <para><b>Camera-transform helpers:</b>
-    ///   <see cref="ApplyCameraTransform(CameraProperties)"/> and <see cref="AltitudeForZoom"/> are
-    ///   thin delegates to the Core pose math, used by <c>MapRoot</c> frame-0 framing and by
+    /// <para><b>Camera-transform helper:</b>
+    ///   <see cref="ApplyCameraTransform(CameraProperties)"/> is a thin delegate to the Core pose math
+    ///   (<c>CameraPoseMath</c>), used by <c>MapRoot</c> frame-0 framing and by
     ///   <c>CameraTransformTests</c>.</para>
     ///
     /// <para>Allocation-free <see cref="Update"/>: struct patches, no LINQ, no closures.</para>
@@ -294,12 +294,5 @@ namespace MapRenderer.Unity.Rendering.Map
             // and viewport height come from the props / the camera, not from side config.
             _ = new MapCamera(Camera, props, AltitudeMultiplier);
         }
-
-        /// <summary>
-        /// S42/S45 bridge: computes camera altitude from zoom. Delegates to <see cref="CameraPoseMath"/>.
-        /// Kept <c>public static</c> for <c>CameraTransformTests</c> backward compatibility (tooth 6).
-        /// </summary>
-        public static float AltitudeForZoom(double zoom, float viewportHeightPx, float verticalFovDeg)
-            => (float)CameraPoseMath.AltitudeForZoom(zoom, viewportHeightPx, verticalFovDeg);
     }
 }

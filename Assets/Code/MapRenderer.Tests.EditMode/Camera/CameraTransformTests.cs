@@ -1,4 +1,4 @@
-// Unity EditMode only — tests MapController.ApplyCameraTransform and AltitudeForZoom (S42).
+// Unity EditMode only — tests MapController.ApplyCameraTransform and CameraPoseMath.AltitudeForZoom (S42).
 // Cannot live in Tools/core-tests (needs real Camera / UnityEngine types).
 //
 // Teeth covered:
@@ -175,8 +175,8 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// S42 tooth 2: higher zoom → lower altitude (y). Low zoom (~2) yields altitude orders of
-        /// magnitude larger than high zoom (~16). Both are pinned against the D2 formula via the
-        /// public static AltitudeForZoom method.
+        /// magnitude larger than high zoom (~16). Both are pinned against the D2 formula via
+        /// CameraPoseMath.AltitudeForZoom.
         /// </summary>
         [Test]
         public void HigherZoom_LowerAltitude_Monotonic_AndPinnedAgainstFormula()
@@ -202,10 +202,10 @@ namespace MapRenderer.Tests
                 Assert.Greater(ratio, 1000f,
                     $"z2/z16 altitude ratio must be > 1000 (2^14 ≈ 16384). Got {ratio:F1}.");
 
-                // Pin against D2 formula (use the same AltitudeForZoom static that the runtime uses,
+                // Pin against D2 formula (use the same CameraPoseMath.AltitudeForZoom the runtime uses,
                 // with relative tolerance to avoid float-precision drift on different machines).
-                float expectedLow  = MapController.AltitudeForZoom(2.0,  TestViewportHeight, TestFovDeg);
-                float expectedHigh = MapController.AltitudeForZoom(16.0, TestViewportHeight, TestFovDeg);
+                float expectedLow  = (float)CameraPoseMath.AltitudeForZoom(2.0,  TestViewportHeight, TestFovDeg);
+                float expectedHigh = (float)CameraPoseMath.AltitudeForZoom(16.0, TestViewportHeight, TestFovDeg);
 
                 // Relative tolerance: 0.1% — the formula is deterministic float; main risk is a
                 // factor-of-2 or radians-vs-degrees error, not float rounding.
@@ -248,7 +248,7 @@ namespace MapRenderer.Tests
             double halfFovRad         = fov * 0.5 * System.Math.PI / 180.0;
             float  expected           = (float)((height * metersPerPixel) / (2.0 * System.Math.Tan(halfFovRad)));
 
-            float actual = MapController.AltitudeForZoom(zoom, height, fov);
+            float actual = (float)CameraPoseMath.AltitudeForZoom(zoom, height, fov);
 
             // Relative tolerance 0.01%: both compute the same float expression; only binary rounding matters.
             float tol = expected * 0.0001f;
