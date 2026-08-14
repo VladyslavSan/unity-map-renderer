@@ -417,7 +417,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillAndSymbolStyle());
 
                 view.LateUpdate();          // Tick 1: cover created (9 tiles), fetches requested
-                Thread.Sleep(5);
+                view.DrainMeshBuilds();     // land the fetch decodes deterministically (symbol-silent, per F-4)
                 view.LateUpdate();          // Tick 2: fetches observed (if their decodes have landed) → lt.Decode
                                             // set, 0 kicked. Under the eager decode a fetch task also carries a
                                             // decode, so a slow tick may observe fewer of them here — the
@@ -434,7 +434,7 @@ namespace MapRenderer.Tests.Tiles
                 // its condemnation registers (matching mesh's own pre-existing race, Stall #2) — the point of
                 // this tooth is that the OTHER old tiles (the vast majority) never reach TryBeginBuild.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
-                for (int f = 0; f < 300 && view.ReleaseQueueDepth() > 0; f++) { view.LateUpdate(); Thread.Sleep(1); }
+                for (int f = 0; f < 300 && view.ReleaseQueueDepth() > 0; f++) { view.LateUpdate(); view.DrainMeshBuilds(); }
                 Assert.AreEqual(0, view.ReleaseQueueDepth(), "sanity: the departing backlog must fully drain.");
 
                 int oldTilesKicked = spy.BeginBuildCalls.FindAll(c => oldTiles.Contains(c.Tile)).Count;

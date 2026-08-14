@@ -319,7 +319,16 @@ namespace MapRenderer.Tests
         /// <summary>Pumps <c>LateUpdate</c> until every loaded tile has settled — mirrors
         /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. A multi-tile cover still settles even though the
         /// geojson probe returns definitively-absent null handles for disjoint tiles (plan §7) —
-        /// <c>AllTilesSettled</c> treats those as settled too.</summary>
+        /// <c>AllTilesSettled</c> treats those as settled too.
+        ///
+        /// <para>Thread.Sleep(1) intentionally KEPT here (not DrainMeshBuilds): <c>TileManager.DrainMeshBuilds</c>
+        /// is deliberately "symbol-silent" (its two call sites pass no <c>symbolPass</c>, so the per-consumed-
+        /// layer symbol harvest never fires — see its doc comment). A scene declaring a
+        /// <see cref="SymbolTextVisualLayer"/> would settle its tiles via Drain but never harvest any labels,
+        /// so <see cref="SpinUntilSymbolsReady"/> spins its full 300-frame ceiling and throws (RED-verified:
+        /// three <c>GeoJsonPointLabelFixtureTests</c> failed with LastInputLabelCount=0 after converting this
+        /// to DrainMeshBuilds). This helper is shared by every <see cref="VisualScene"/> consumer, symbol and
+        /// fill-only alike, so it stays on the real per-frame Tick path.</para></summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)

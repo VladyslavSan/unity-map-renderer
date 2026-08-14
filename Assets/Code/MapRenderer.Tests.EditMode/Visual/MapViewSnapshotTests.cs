@@ -81,7 +81,14 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), style: MinimalStyle());
-                // Pump to settle all tiles.
+                // Pump to settle all tiles. Thread.Sleep(1) intentionally KEPT here (not DrainMeshBuilds):
+                // on the default Entities backend, a settle reached in essentially one forced-drain tick
+                // renders BLANK — Entities Graphics needs a few more Rebuild/EG-system ticks after the last
+                // tile is consumed before its BRG batch is cullable (see VisualScene.WarmupFrames, which
+                // exists for exactly this). The many real throttled/async ticks this loop normally takes
+                // incidentally supply that warm-up; DrainMeshBuilds collapsing it to ~1 tick removed it and
+                // this test went blank (RED-verified: MapViewLiveLoop_RendersMultiTileFill_NonBlank failed
+                // with filled=0.0% after the DrainMeshBuilds conversion).
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.LateUpdate();

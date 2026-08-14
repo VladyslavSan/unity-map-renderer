@@ -82,9 +82,9 @@ namespace MapRenderer.Tests.Lifetime
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
+                view.DrainMeshBuilds();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
-                Thread.Sleep(1);
             }
         }
 

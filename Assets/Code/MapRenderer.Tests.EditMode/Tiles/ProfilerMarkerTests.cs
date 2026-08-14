@@ -15,7 +15,6 @@
 
 using System.Collections;
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -82,9 +81,9 @@ namespace MapRenderer.Tests.Tiles
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
+                view.DrainMeshBuilds();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
-                Thread.Sleep(1);
             }
         }
 

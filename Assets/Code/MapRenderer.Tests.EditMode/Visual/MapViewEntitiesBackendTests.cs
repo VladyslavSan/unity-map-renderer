@@ -6,7 +6,6 @@
 // entity's LocalToWorld translation), mirroring BrgBackendSnapshotTests' floating-origin tooth.
 
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -45,8 +44,8 @@ namespace MapRenderer.Tests.Visual
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
+                view.DrainMeshBuilds();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
             }
         }
 
@@ -184,7 +183,7 @@ namespace MapRenderer.Tests.Visual
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0),
                     style: MinimalStyle());
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
-                { view.LateUpdate(); Thread.Sleep(1); }
+                { view.LateUpdate(); view.DrainMeshBuilds(); }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "Entities path must load + settle tiles.");
                 view.LateUpdate(); // staleness: one more frame so the last tile's entity is positioned + uploaded
