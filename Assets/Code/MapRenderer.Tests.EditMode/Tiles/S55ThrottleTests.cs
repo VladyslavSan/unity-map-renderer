@@ -33,9 +33,6 @@
 // Tooth (f): Bounds correctness — mesh.bounds assigned in UploadMesh (baked AABB) equals
 //            Unity's RecalculateBounds() within floating-point tolerance, for both fill and
 //            line builders.
-//
-// Tooth (g): No new per-frame GC — the 3 new int counter resets and budget arithmetic must
-//            not box. Verified with Is.Not.AllocatingGCMemory() on BRG backend in steady state.
 
 using System.Collections;
 using System.IO;
@@ -620,59 +617,6 @@ namespace MapRenderer.Tests
                 Object.DestroyImmediate(mapGo);
                 Object.DestroyImmediate(cameraGo);
                 Object.DestroyImmediate(lightGo);
-            }
-        }
-
-        // ── Tooth (g): No new per-frame GC ───────────────────────────────────────────────────────
-
-        /// <summary>
-        /// The 3 new <c>int</c> counter resets (<c>_mesh buildsKickedLastTick</c> etc.) and
-        /// vertex-budget arithmetic in <c>PumpPending</c> are scalar operations — no boxing.
-        /// Verified with <c>Is.Not.AllocatingGCMemory()</c> on the BRG backend (zero-alloc contract)
-        /// in steady state (all tiles built, no pending work).
-        ///
-        /// Mirrors <see cref="MapViewAsyncMeshBuildTests.Tooth6_SteadyStateTick_DoesNotAllocateGCMemory"/>.
-        /// </summary>
-        [Test]
-        public void Tooth_g_SteadyStateTick_NoNewGC_BrgBackend()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S55_G");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs
-            view.Config.TileSelection.MinZoom = 2; view.Config.TileSelection.MaxZoom = 2; // z=2 = whole world (4×4 tiles); no cover recompute
-            view.WithTestCamera();
-            view.Config.MaxConsumesPerTick        = 64;
-            view.Config.MaxMeshBuildsPerTick = 64; // uncapped for fast settle
-            view.Config.MaxVerticesPerTick      = int.MaxValue;
-
-            try
-            {
-                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: FillStyle());
-                PumpUntilSettled(view);
-                Assert.IsTrue(view.AllTilesSettled(), "Must settle before measuring steady-state alloc.");
-
-                // Prime reused internal buffers to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.LateUpdate();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.LateUpdate();
-
-                // ── (a) within-cover pan: PumpPending resets 3 int counters, then early-exits ──
-                // The counters and budget locals are all scalar ints — must not box.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
-                    "Tooth (g-a): MapView.LateUpdate must not allocate during a within-cover pan. " +
-                    "The 3 new S55 int counter resets must be scalar, never boxing.");
-
-                // ── (b) static frame early-out ──
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
-                    "Tooth (g-b): Static-frame Tick must early-out with zero allocation.");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
             }
         }
 

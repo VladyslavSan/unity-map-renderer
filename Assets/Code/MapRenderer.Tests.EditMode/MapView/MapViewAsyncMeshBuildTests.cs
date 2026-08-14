@@ -583,63 +583,6 @@ namespace MapRenderer.Tests
             }
         }
 
-        // ── Tooth 6: steady-state alloc — Tick is alloc-free once settled ─────────────────────
-
-        /// <summary>
-        /// Mirrors MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory.
-        /// Verifies that the S47 async machinery (task polling, etc.) does not allocate in the
-        /// steady-state Tick path.
-        ///
-        /// The critical path: once all mesh build tasks are consumed and Built==true for all tiles,
-        /// the early-out at "pending == 0 && !_coverDirty" fires, bypassing all async polling.
-        /// </summary>
-        [Test]
-        public void Tooth6_SteadyStateTick_DoesNotAllocateGCMemory()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_T6");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.Backend =
-                RenderBackend.Brg; // zero-alloc is the BRG backend's contract (Entities ticks EG → allocs)
-            var style = MinimalStyle();
-            view.Config.TileSelection.MinZoom = 2;
-            view.Config.TileSelection.MaxZoom = 2;
-            view.WithTestCamera();
-            view.Config.MaxConsumesPerTick   = 64;
-            view.Config.MaxMeshBuildsPerTick = 64;
-
-            try
-            {
-                view.LoadTestStyle(src, Cam(0, 0, 2.0), style: style);
-                PumpUntilSettled(view);
-                Assert.IsTrue(view.AllTilesSettled(), "All tiles must settle before measuring steady state.");
-
-                // Prime reused buffers to steady capacity.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.5, Latitude = 0.0 });
-                view.LateUpdate();
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.LateUpdate();
-
-                // ── (a) within-cover pan: full recompute, zero allocation ──
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 1.0, Latitude = 0.0 });
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
-                    "Tooth 6a: MapView.LateUpdate must not allocate during a within-cover pan. " +
-                    "The S47 async polling loop must allocate only on fetch-completion edges, not here.");
-
-                Assert.AreEqual(16, view.LoadedTileCount(),
-                    "z2 cover is the whole world (4×4); a within-cover pan loads no new tiles.");
-
-                // ── (b) static frame early-out ──
-                Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
-                    "Tooth 6b: A static frame must early-out with zero allocation.");
-            }
-            finally
-            {
-                view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
-                Object.DestroyImmediate(go);
-            }
-        }
-
         // ── BuildMeshData / UploadMesh split sanity ────────────────────────────────────────────
 
         /// <summary>

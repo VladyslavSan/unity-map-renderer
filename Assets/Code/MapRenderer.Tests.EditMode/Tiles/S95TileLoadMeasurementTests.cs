@@ -14,10 +14,9 @@
 //            "every dirty Tick recomputes" behaviour (no throttle exists yet), not the post-fix bound.
 //
 // Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by
-// S55ThrottleTests.Tooth_g_SteadyStateTick_NoNewGC_BrgBackend and
-// MapViewAsyncMeshBuildTests.Tooth6_SteadyStateTick_DoesNotAllocateGCMemory (both assert
-// Is.Not.AllocatingGCMemory() over the budgeted-consume Tick in the all-built steady state). This stage
-// keeps those green rather than re-asserting the same property.
+// MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts
+// Is.Not.AllocatingGCMemory() over the budgeted-consume Tick in the all-built steady state, including an
+// N=50 sweep). This stage keeps that green rather than re-asserting the same property.
 
 using System.IO;
 using System.Threading;
