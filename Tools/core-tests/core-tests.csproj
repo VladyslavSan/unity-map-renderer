@@ -239,9 +239,8 @@
 
     <!-- S11: type assertions + paint evaluator tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/AssertionTests.cs" />
-    <!-- S60: PaintPropertyEvaluatorTests rehomed to StyleProperty<T>; file kept for pass-count parity -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/PaintPropertyEvaluatorTests.cs" />
-    <!-- S60: StylePropertyTests — full coverage for StyleProperty<T> -->
+    <!-- S60: StylePropertyTests — full coverage for StyleProperty<T> (absorbed the retired
+         PaintPropertyEvaluatorTests + DataDrivenPaintEvaluatorTests at cleanup B1) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/StylePropertyTests.cs" />
     <!-- S60: StyleLayerEncapsulationTests — reflection asserts on internal fields -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/StyleLayerEncapsulationTests.cs" />
@@ -254,9 +253,6 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
-
-    <!-- S12 / S60: Engine-free tests (shared verbatim; DataDrivenPaintEvaluatorTests rehomed to StyleProperty<T>) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/DataDrivenPaintEvaluatorTests.cs" />
 
     <!-- S59: per-feature-type Style namespaces (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/PropertyNames.cs" />
