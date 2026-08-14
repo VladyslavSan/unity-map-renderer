@@ -4,3 +4,5 @@ using System.Runtime.CompilerServices;
 // The Tools/core-tests project compiles Core sources directly into its own assembly, so
 // internal members are visible there without this attribute.
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
+[assembly: InternalsVisibleTo("MapRenderer.Tests.Shared")]
+[assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]

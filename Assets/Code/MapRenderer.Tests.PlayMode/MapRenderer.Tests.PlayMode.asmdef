@@ -1,11 +1,10 @@
 {
-    "name": "MapRenderer.Tests.EditMode",
-    "rootNamespace": "MapRenderer.Tests",
+    "name": "MapRenderer.Tests.PlayMode",
+    "rootNamespace": "MapRenderer.Tests.PlayMode",
     "references": [
         "MapRenderer.Core",
         "MapRenderer.Jobs",
         "MapRenderer.Unity",
-        "MapRenderer.Unity.Editor",
         "MapRenderer.Tests.Shared",
         "Unity.Mathematics",
         "Unity.Collections",
@@ -17,12 +16,9 @@
         "Unity.Mathematics.Extensions",
         "Unity.Profiling.Core",
         "UnityEngine.TestRunner",
-        "UnityEditor.TestRunner",
         "UniTask"
     ],
-    "includePlatforms": [
-        "Editor"
-    ],
+    "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
     "overrideReferences": true,

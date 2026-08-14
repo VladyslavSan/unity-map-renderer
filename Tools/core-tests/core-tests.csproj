@@ -157,9 +157,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Value.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Coercions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IFeature.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/ITileCommandStreamFeature.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/DictionaryFeature.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/InMemoryTileFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/ITileCommandStreamFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/DictionaryFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/InMemoryTileFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/EvaluationContext.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Classification.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Expression.cs" />
@@ -179,7 +179,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
     <!-- S81: shared engine-free test double for IDataSource (used by DataSourceTests in both runners) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/TestDataSource.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/TestDataSource.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/VerifiedDisposableTests.cs" />
