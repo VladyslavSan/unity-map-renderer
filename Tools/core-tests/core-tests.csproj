@@ -373,7 +373,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/GlyphManager.cs" />
 
     <!-- S18 Unity-side batch: fake in-memory IGlyphSource test double (mirrors TestDataSource) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/TestGlyphSource.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/TestGlyphSource.cs" />
 
     <!-- S18 Unity-side batch: GlyphManager fetch/decode/cache/atlas tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphManagerTests.cs" />

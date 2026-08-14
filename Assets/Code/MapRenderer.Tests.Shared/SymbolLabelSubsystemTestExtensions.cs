@@ -1,4 +1,6 @@
-// Unity EditMode only. NOT registered in core-tests.csproj (SymbolLabelSubsystem is engine-side).
+// Shared between EditMode and PlayMode (pump-split: ReadyTailCount is read by PlayMode's off-main symbol
+// teeth too — see MapRenderer.Tests.PlayMode.Text.SymbolTailPumpTests / SymbolLabelSubsystemPumpTests).
+// NOT registered in core-tests.csproj (SymbolLabelSubsystem is engine-side).
 //
 // The Stage 4b test seams that used to sit on SymbolLabelSubsystem. Three of them carried a `*ForTest`
 // suffix, which the conventions call out directly: the suffix is the class admitting the member does not
