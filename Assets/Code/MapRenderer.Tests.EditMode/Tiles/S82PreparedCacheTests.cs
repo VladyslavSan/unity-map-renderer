@@ -45,14 +45,6 @@ namespace MapRenderer.Tests
         private static readonly TileId TrackedTile = new TileId { Z = 4, X = 8, Y = 7 };
 
         // ── Fixtures ────────────────────────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static StyleDocument InterpFillStyle()
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
@@ -141,7 +133,7 @@ namespace MapRenderer.Tests
         public void Stall3_MeshRegistrations_StableAcrossCacheRoundTrips_Entities()
         {
             var style = InterpFillStyle();
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_S82_RegBalance");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend               = RenderBackend.Entities; // the ID-route path under test
@@ -181,7 +173,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Revisit_ServesCached_PixelIdentical()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_Revisit");
@@ -259,7 +251,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ZoomBake_AtIdZ_NotStaleCamZoom()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_ZoomBake");
@@ -333,7 +325,7 @@ namespace MapRenderer.Tests
         {
             long baseline = MeshDataPayload.DebugLiveAllocCount;
 
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_NativeArrayInvariant");
@@ -385,7 +377,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CachedMeshes_LiveWhileHeld_DestroyedOnce()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_LiveThenDestroyed");
@@ -445,7 +437,7 @@ namespace MapRenderer.Tests
         [TestCase(RenderBackend.GameObject)]
         public void BackendReuse_OnHit_SnapshotStaysPopulated(RenderBackend backend)
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject($"MapView_S82_BackendReuse_{backend}");
@@ -503,7 +495,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CacheDisabled_Revisit_AlwaysReprepares_NoTransfer()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var style    = InterpFillStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_CacheDisabled");

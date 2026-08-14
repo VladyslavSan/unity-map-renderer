@@ -47,14 +47,6 @@ namespace MapRenderer.Tests.Meshing
     public class SourceLayerBufferSharingTests
     {
         private static readonly TileId Tile = new TileId { Z = 0, X = 0, Y = 0 };
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static TileLayerProcessContext MakeContext() => new TileLayerProcessContext
         {
             Tile             = Tile,
@@ -132,7 +124,7 @@ namespace MapRenderer.Tests.Meshing
         public void OneKick_MaterializesEachSourceLayerOnce_SharedAcrossFillAndSymbolConsumers()
         {
             var decoder = new CountingDecoder();
-            var handle  = new SharedDisposable<IDecodedTile>(decoder.Decode(Tile, FixtureBytes()));
+            var handle  = new SharedDisposable<IDecodedTile>(decoder.Decode(Tile, SampleTileFixture.Bytes()));
             var context = MakeContext();
 
             // Two fill layers over "countries", one over "geolines" (named by EXACTLY ONE style layer, so

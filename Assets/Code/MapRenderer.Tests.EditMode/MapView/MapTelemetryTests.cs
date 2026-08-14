@@ -25,14 +25,6 @@ namespace MapRenderer.Tests
     public class MapTelemetryTests
     {
         // ── Helpers ────────────────────────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -90,7 +82,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CaptureTelemetry_VisibleTileCount_MatchesIndependentSelector_AndChangesAcrossViews()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_Decisive");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -156,7 +148,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MultiSource_VisibleTileCount_DivergesFromLoadedTileCount()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_MultiSource");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -224,7 +216,7 @@ namespace MapRenderer.Tests
         [Test]
         public void FixtureSource_AfterSettle_AllInFlightAndBacklogCountersZero_BuiltEqualsVisible()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_Settled");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -258,7 +250,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_Backlog");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -310,7 +302,7 @@ namespace MapRenderer.Tests
         [Test]
         public void PreparedCache_Snapshot_ReflectsHitsEntryCountBytesHeld_AfterEvictAndRevisit()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S82_PreparedCacheTelemetry");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -372,7 +364,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CaptureTelemetry_PreparedCacheDisabled_ReportsDisabledAndZeroHits()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S82_PreparedCacheDisabled");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -407,7 +399,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapTelemetryPanel_Pull_PopulatesFieldsFromProviderTelemetry()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_Panel");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             GameObject panelGo = null;
@@ -485,7 +477,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapTelemetryPanel_NeverPulled_IsNeverWritten_AndPullingFillsIt()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Telemetry_NeverPulled");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             GameObject panelGo = null;
@@ -565,7 +557,7 @@ namespace MapRenderer.Tests
         [Test]
         public void TileTelemetry_SurvivesACleanTick_WithoutBlankingTheLevels()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Telemetry_CleanTick");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
@@ -609,7 +601,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CaptureTelemetry_AllocationFree_AcrossNTicks()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S85_Alloc");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract
@@ -659,7 +651,7 @@ namespace MapRenderer.Tests
         [Test]
         public void PullTelemetry_IntoAPanel_IsAllocationFree_AcrossNFrames()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Telemetry_PublishAlloc");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract

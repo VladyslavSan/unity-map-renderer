@@ -61,14 +61,6 @@ namespace MapRenderer.Tests
 
         // The z5 cover around (0, 0) — 9 tiles, the same cover TileSymbolKickTests drives.
         private const int CoverZoom = 5;
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -266,7 +258,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ARecordEvictedBeforeItsKick_ReleasesItsDecode()
         {
-            var fake = new ProbeFeatureSource(FixtureBytes()) { Gate = new UniTaskCompletionSource() };
+            var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Evicted");
             try
             {
@@ -307,7 +299,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ARestyle_ReleasesEveryUnkickedRecordsDecode()
         {
-            var fake = new ProbeFeatureSource(FixtureBytes()) { Gate = new UniTaskCompletionSource() };
+            var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Restyle");
             try
             {
@@ -317,7 +309,7 @@ namespace MapRenderer.Tests
                 int midFetchBefore = view.ReleasedMidFetchCount();
 
                 // Restyle onto a source that serves nothing, so the rebuilt cover decodes no second set.
-                var inert = new ProbeFeatureSource(FixtureBytes()) { Serving = false };
+                var inert = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Serving = false };
                 LoadStyleWithSource(view, inert, Cam(0, 0, CoverZoom));
 
                 Assert.AreEqual(midFetchBefore, view.ReleasedMidFetchCount(),
@@ -347,7 +339,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Teardown_ReleasesEveryUnkickedRecordsDecode()
         {
-            var fake = new ProbeFeatureSource(FixtureBytes()) { Gate = new UniTaskCompletionSource() };
+            var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Teardown");
             bool tornDown = false;
             try
@@ -382,7 +374,7 @@ namespace MapRenderer.Tests
         [Test]
         public void AFetchDiscardedMidFlight_ReleasesTheDecodeItCompletesWith()
         {
-            var fake = new ProbeFeatureSource(FixtureBytes()) { Gate = new UniTaskCompletionSource() };
+            var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_MidFlight");
             try
             {

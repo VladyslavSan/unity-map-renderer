@@ -25,13 +25,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class MapViewSetStyleTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         // Spin a (Preserved) UniTask to completion on the main thread — the file:// document loader and the
         // inline-source spec build both complete on the ThreadPool (no PlayerLoop), so this never deadlocks.
         private static void Await(UniTask task, int maxSpins = 10000)
@@ -76,7 +69,7 @@ namespace MapRenderer.Tests
         {
             string dir = Path.Combine(Application.temporaryCachePath, sub);
             Directory.CreateDirectory(Path.Combine(dir, "0", "0"));
-            File.WriteAllBytes(Path.Combine(dir, "0", "0", "0.mvt"), FixtureBytes());
+            File.WriteAllBytes(Path.Combine(dir, "0", "0", "0.mvt"), SampleTileFixture.Bytes());
             return "file://" + Path.Combine(dir, "{z}", "{x}", "{y}.mvt");
         }
 
@@ -169,7 +162,7 @@ namespace MapRenderer.Tests
         [Test]
         public void SetStyle_MultiSource_RoutesEachLayerToItsOwnSource()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var perTemplate = new Dictionary<string, TestDataSource>();
             var view = NewView(out var go);
             view.View.TileSourceFactoryOverride = template =>
@@ -212,7 +205,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Restyle_UnchangedSource_KeepsPipelineAndReusesBytes()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             int constructsForA = 0;
             TestDataSource srcA = null;
             var view = NewView(out var go);

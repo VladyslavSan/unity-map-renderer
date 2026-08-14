@@ -27,13 +27,6 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapViewEntitiesBackendTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -62,7 +55,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_DoesNotConstructEntitiesRenderer()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_EntOff");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();
@@ -88,7 +81,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void EntitiesBackend_BuildsEntities_AtTileLocalToScene()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Ent");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();
@@ -161,7 +154,7 @@ namespace MapRenderer.Tests.Visual
             const byte BgR8 = 26, BgG8 = 28, BgB8 = 38;
             const float MinFill = 0.05f, MaxFill = 0.95f;
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var mapGo = new GameObject("MapView_EntPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3; view.WithTestCamera();

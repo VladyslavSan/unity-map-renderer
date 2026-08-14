@@ -79,14 +79,6 @@ namespace MapRenderer.Tests
         }
 
         // ── Helpers ─────────────────────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -189,7 +181,7 @@ namespace MapRenderer.Tests
         [UnityTest]
         public IEnumerator F2_SymbolRidesKick_SharingOneDecode()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0); // z0 = one tile — a clean single-decode measurement
             var spy = new SpySymbolTileWorkerFactory();
             view.TileManager.SymbolWorkerFactory = spy;
@@ -246,7 +238,7 @@ namespace MapRenderer.Tests
             long allocBefore = MeshDataPayload.DebugLiveAllocCount;
             long meshBefore  = CountMeshObjects();
 
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0);
             var spy = new SpySymbolTileWorkerFactory
             {
@@ -301,7 +293,7 @@ namespace MapRenderer.Tests
         [Test]
         public void F4_DrainMeshBuilds_NeverDrivesSymbolFactory()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0);
             var spy = new SpySymbolTileWorkerFactory();
             view.TileManager.SymbolWorkerFactory = spy;
@@ -332,7 +324,7 @@ namespace MapRenderer.Tests
         [UnityTest]
         public IEnumerator F5_SymbolOnlySourceKicks_MeshOnlySourceRunsNoSymbolPass()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             // Cache DISABLED here to isolate THIS tooth's concern (Q6: does the kick fire for a symbol-only
             // source going through the normal fetch→kick pipeline). The S82 probe gap that once made the
             // cache-on path skip the kick for a zero-dense-layer source — the "every dense layer id is
@@ -382,7 +374,7 @@ namespace MapRenderer.Tests
         [UnityTest]
         public IEnumerator S82_SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0, preparedCacheEnabled: true); // the DEFAULT — the gap's trigger
             var spy = new SpySymbolTileWorkerFactory { ParticipatesFor = sourceId => sourceId == "symsrc" };
             view.TileManager.SymbolWorkerFactory = spy;
@@ -410,7 +402,7 @@ namespace MapRenderer.Tests
         [Test]
         public void F6_DepartedBeforeKick_NeverBeginsSymbolBuild()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_TileSymbolKick_F6");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // known 9-tile z5 cover

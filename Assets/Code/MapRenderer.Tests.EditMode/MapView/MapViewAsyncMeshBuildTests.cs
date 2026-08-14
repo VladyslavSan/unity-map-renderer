@@ -59,14 +59,6 @@ namespace MapRenderer.Tests
         private const int RecorderCapacity = 64;
 
         // ── Helpers ────────────────────────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -119,7 +111,7 @@ namespace MapRenderer.Tests
         [Test]
         public void TileCover_RecomputesOnTiltChange_FarFieldGrows()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_TiltCover");
             var view  = go.AddComponent<MapView>().WithTestMaterials().WithTestCamera();
             var style = MinimalStyle();
@@ -168,7 +160,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth1_MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_T1");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -226,7 +218,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth2_BuildMeshData_RunsOffMainThread()
         {
-            byte[] bytes     = FixtureBytes();
+            byte[] bytes     = SampleTileFixture.Bytes();
             using var    mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
             var    style     = MinimalStyle();
             var    fillLayer = style.Layers[0];
@@ -304,7 +296,7 @@ namespace MapRenderer.Tests
             const string buildMarkerName  = StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData;
             const string uploadMarkerName = "MapRenderer.Mesh.Upload";
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_T2b");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -402,7 +394,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var    src   = TestDataSource.FromBytes(bytes);
             var    go    = new GameObject("MapView_T3");
             var    view  = go.AddComponent<MapView>().WithTestMaterials();
@@ -499,7 +491,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth4_ReleasedMidFlight_NoGameObjectCreated()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_T4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -559,7 +551,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth5_DrainMeshBuilds_SettlesAllTiles()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_T5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -604,7 +596,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth6_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_T6");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend =
@@ -660,7 +652,7 @@ namespace MapRenderer.Tests
         [Test]
         public void BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh()
         {
-            byte[] bytes     = FixtureBytes();
+            byte[] bytes     = SampleTileFixture.Bytes();
             using var    mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
             var    style     = MinimalStyle();
             var    fillLayer = style.Layers[0];

@@ -51,13 +51,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class S51DisposalLeakGuardTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -118,7 +111,7 @@ namespace MapRenderer.Tests
         [Test]
         public void BuildAndRelease_NoOrphanedMesh()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_LeakGuard_A");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -190,7 +183,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_LeakGuard_B");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -309,7 +302,7 @@ namespace MapRenderer.Tests
         [Test]
         public void NativeArray_PositiveControl_LeakedAlloc_CounterNonZero()
         {
-            byte[] bytes    = FixtureBytes();
+            byte[] bytes    = SampleTileFixture.Bytes();
             var    tileId   = new TileId { Z = 0, X = 0, Y = 0 };
             using var mvtTile = MvtDecoder.Decode(tileId, bytes);
             var style       = MinimalStyle();
@@ -373,7 +366,7 @@ namespace MapRenderer.Tests
         {
             long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -503,7 +496,7 @@ namespace MapRenderer.Tests
         {
             long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Consume");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -562,7 +555,7 @@ namespace MapRenderer.Tests
         [Test]
         public void DrainThenDestroy_NoOrphanedMesh()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_LeakGuard_C");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();

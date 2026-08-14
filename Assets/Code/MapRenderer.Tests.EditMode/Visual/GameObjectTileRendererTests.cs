@@ -294,13 +294,6 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapViewGameObjectBackendTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -327,7 +320,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void GameObjectBackend_BuildsContainers_AtTileLocalToScene_AndIsExclusive()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Go");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();

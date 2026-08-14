@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Visual
             var lookAt = new GeoCoordinate { Latitude = 20.0, Longitude = 12.0 }; // over Africa
 
             // ── Build the geolines line mesh on the globe via the real StyledLineTileBuilder. ──
-            using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, FixtureBytes());
+            using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
             var style = StyleParser.Parse(LineStyleJson());
             var styleLayer = style.Layers[0];
             var paint  = new Line.PaintProperties(styleLayer);
@@ -113,14 +113,6 @@ namespace MapRenderer.Tests.Visual
                 Object.DestroyImmediate(mapGo);
             }
         }
-
-        private static byte[] FixtureBytes()
-        {
-            string p = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(p), $"Fixture missing: {p}");
-            return File.ReadAllBytes(p);
-        }
-
         private static string LineStyleJson() => @"{
     ""version"": 8,
     ""name"": ""GlobeLine"",

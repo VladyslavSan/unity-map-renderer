@@ -70,14 +70,6 @@ namespace MapRenderer.Tests
         private const int RecorderCapacity = 64;
 
         // ── Helpers ─────────────────────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -152,7 +144,7 @@ namespace MapRenderer.Tests
         /// </summary>
         private static (GameObject go, MapView view) SetupBlockedBacklog(StyleDocument style)
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S87");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -194,7 +186,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth_a_MeshBuildCapBinds()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S55_A");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -311,7 +303,7 @@ namespace MapRenderer.Tests
             // Run 1: tight throttle.
             int countThrottled;
             {
-                var src  = TestDataSource.FromBytes(FixtureBytes());
+                var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                 var go   = new GameObject("MapView_S55_D_Throttled");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -332,7 +324,7 @@ namespace MapRenderer.Tests
             // Run 2: uncapped.
             int countUncapped;
             {
-                var src  = TestDataSource.FromBytes(FixtureBytes());
+                var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                 var go   = new GameObject("MapView_S55_D_Uncapped");
                 var view = go.AddComponent<MapView>().WithTestMaterials();
                 view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -368,7 +360,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth_f_BakedBoundsMatchRecalculateBounds()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S55_F");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
@@ -583,7 +575,7 @@ namespace MapRenderer.Tests
             {
                 var cam3 = new CameraProperties(
                     new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, Zoom, 0, 0);
-                view.LoadTestStyle(TestDataSource.FromBytes(FixtureBytes()),
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()),
                     cam3, style: FillStyle());
 
                 // Pump to settle — throttle spreads kicks/consumes across many ticks.
@@ -644,7 +636,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Tooth_g_SteadyStateTick_NoNewGC_BrgBackend()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S55_G");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc contract; Entities ticks EG → allocs

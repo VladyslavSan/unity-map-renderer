@@ -35,13 +35,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class TileLayerProcessorRunnerTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         /// <summary>IR C1 P3: the ONE address these teeth use — the decode's id and the context's tile are
         /// the same thing now, so a fixture that let them drift would be building the mispairing C1 removes.</summary>
         private static readonly TileId ContextTile = new TileId { Z = 0, X = 0, Y = 0 };
@@ -295,7 +288,7 @@ namespace MapRenderer.Tests
             };
             var context = MakeContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             IRenderLayerPayload[] payloads;
             try { payloads = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
@@ -340,7 +333,7 @@ namespace MapRenderer.Tests
             var processors = new ITileMeshLayerProcessor[] { p0, p1, p2 };
             var context = MakeContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             IRenderLayerPayload[] payloads;
             try { payloads = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
@@ -388,7 +381,7 @@ namespace MapRenderer.Tests
             var processors = new ITileMeshLayerProcessor[] { p0 };
             var context = MakeNamedContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(NamedTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(NamedTile, SampleTileFixture.Bytes()));
             IRenderLayerPayload[] payloads;
             try { payloads = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
@@ -418,7 +411,7 @@ namespace MapRenderer.Tests
             var processors = new ITileMeshLayerProcessor[] { p0 };
             var context = MakeContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             IRenderLayerPayload[] payloads;
             try { payloads = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
@@ -448,7 +441,7 @@ namespace MapRenderer.Tests
                 "AllocateForKick must track its writable MeshDataArray (MeshDataPayload.AllocateTracked)");
 
             var context = MakeContext();
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             IRenderLayerPayload[] payloads;
             try
             {

@@ -38,13 +38,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class S95TileLoadMeasurementTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -91,7 +84,7 @@ namespace MapRenderer.Tests
         [Test]
         public void TileScheduler_Request_CacheHit_IsAllocFree()
         {
-            byte[] bytes     = FixtureBytes();
+            byte[] bytes     = SampleTileFixture.Bytes();
             var    src       = TestDataSource.FromBytes(bytes);
             var    cache     = new TileCache(capacity: 16);
             var    scheduler = new TileScheduler(src, cache);
@@ -160,7 +153,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_DeepCoverSelect_SubTileNudge_IsAllocFreeAtStallScale()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_S95_DeepCover");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -251,7 +244,7 @@ namespace MapRenderer.Tests
         [Test]
         public void CoverRecomputesLastTick_SumsToN_ForNSubTileNudges_BaselineNoThrottleYet()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_S95_Counter");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;

@@ -54,14 +54,6 @@ namespace MapRenderer.Tests
         private const int RecorderCapacity = 64;
 
         // ── Helpers (mirrors MapViewLiveLoopTests; duplicated to keep test file self-contained) ──
-
-        private static byte[] FixtureBytes()
-        {
-            string path = System.IO.Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -218,7 +210,7 @@ namespace MapRenderer.Tests
 
             try
             {
-                view.LoadTestStyle(TestDataSource.FromBytes(FixtureBytes()), Cam(0, 0, 0.0),
+                view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()), Cam(0, 0, 0.0),
                     style: MinimalStyle());
 
                 // Drive the tile load synchronously (FixtureSource returns immediately).

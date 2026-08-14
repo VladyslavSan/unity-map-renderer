@@ -44,13 +44,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class SharedDisposableSharingTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         /// <summary>The address these teeth decode at — the same one <see cref="MakeContext"/> processes at,
         /// because IR C1 P3 makes the decode's id the buffers' id and a mismatch would be a mispairing.</summary>
         private static readonly TileId Tile = new TileId { Z = 0, X = 0, Y = 0 };
@@ -65,7 +58,7 @@ namespace MapRenderer.Tests
 
         /// <summary>The production mint shape, minus the pool hop.</summary>
         private static SharedDisposable<IDecodedTile> Mint() =>
-            new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(Tile, FixtureBytes()));
+            new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(Tile, SampleTileFixture.Bytes()));
 
         // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
 
@@ -158,7 +151,7 @@ namespace MapRenderer.Tests
         public void TwoDecodesOfTheSameBytes_ProduceDistinctTiles()
         {
             var decoder = new MvtTileDecoder();
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             IDecodedTile a = decoder.Decode(Tile, bytes);
             IDecodedTile b = decoder.Decode(Tile, bytes);
             try

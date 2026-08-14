@@ -1,0 +1,23 @@
+// Unity EditMode only — reads the committed fixture off Application.dataPath.
+
+using System.IO;
+using NUnit.Framework;
+using UnityEngine;
+
+namespace MapRenderer.Tests
+{
+    /// <summary>
+    /// Shared reader for the committed sample MVT tile (<c>Assets/Fixtures/sample-tile.bytes</c>).
+    /// Replaces the byte-identical <c>FixtureBytes()</c> copies that had accumulated across the suite.
+    /// </summary>
+    internal static class SampleTileFixture
+    {
+        /// <summary>The raw bytes of the committed sample MVT tile; asserts the fixture is present.</summary>
+        public static byte[] Bytes()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
+            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            return File.ReadAllBytes(path);
+        }
+    }
+}

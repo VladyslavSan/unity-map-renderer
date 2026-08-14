@@ -33,13 +33,6 @@ namespace MapRenderer.Tests
         /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8, ""name"": ""Test"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
@@ -53,7 +46,7 @@ namespace MapRenderer.Tests
 
         private static (ITileLayer layer, List<SelectedTileFeature> selection, Fill.PaintProperties paint) Setup()
         {
-            var mvtTile   = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, FixtureBytes()));
+            var mvtTile   = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, SampleTileFixture.Bytes()));
             var fillLayer = MinimalStyle().Layers[0];
             var paint     = new Fill.PaintProperties(fillLayer);
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);

@@ -18,13 +18,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class Stall2ReleaseBudgetTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -68,7 +61,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ReleaseQueue_BoundsReleasesPerTick_AndDrainsBacklog()
         {
-            var src        = TestDataSource.FromBytes(FixtureBytes());
+            var src        = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(releaseBudget: 2);
             try
             {
@@ -102,7 +95,7 @@ namespace MapRenderer.Tests
         [Test]
         public void ReleaseQueue_PanOutPanBack_RevalidatesAndKeepsDeferredTiles()
         {
-            var src        = TestDataSource.FromBytes(FixtureBytes());
+            var src        = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(releaseBudget: 1);
             try
             {

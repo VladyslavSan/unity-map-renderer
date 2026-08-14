@@ -51,14 +51,6 @@ namespace MapRenderer.Tests.Visual
     public class BrgBackendSnapshotTests
     {
         // ── Test fixture infrastructure ────────────────────────────────────────────────────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties MakeCam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -192,7 +184,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void Backend_Default_IsEntities_NotBrg()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView_Tooth1");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -240,7 +232,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_EmitsDraw_InAscendingRenderQueueOrder()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_Tooth2");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -361,7 +353,7 @@ namespace MapRenderer.Tests.Visual
             {
                 // ── Render A: line(blue) declared before fill(red) → fill on top → RED expected ──
                 {
-                    var src  = TestDataSource.FromBytes(FixtureBytes());
+                    var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgOrderA");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
@@ -404,7 +396,7 @@ namespace MapRenderer.Tests.Visual
 
                 // ── Render B: fill(red) declared before line(blue) → line on top → BLUE expected ──
                 {
-                    var src   = TestDataSource.FromBytes(FixtureBytes());
+                    var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgOrderB");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
@@ -579,7 +571,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_InstanceMatrix_MatchesTileLocalToScene()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_Tooth4");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -685,7 +677,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_Teardown_DisposesRendererAndBuffer()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_Tooth5");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
@@ -747,7 +739,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void BrgBackend_Rebuild_NoManagedAllocInSteadyState()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_NoAlloc");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
@@ -825,7 +817,7 @@ namespace MapRenderer.Tests.Visual
             // Sample rect for color-channel mean: central 80% of the frame, avoiding edge artifacts.
             const int ColorSX0 = 50, ColorSY0 = 50, ColorSX1 = 462, ColorSY1 = 462;
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var mapGo = new GameObject("MapView_BrgPixel");
             var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 3; view.Config.TileSelection.MaxZoom = 3;
@@ -1060,7 +1052,7 @@ namespace MapRenderer.Tests.Visual
             {
                 // ── Render at zoom=1 (narrow line: ~4px) ─────────────────────────────────────
                 {
-                    var src   = TestDataSource.FromBytes(FixtureBytes());
+                    var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgZoomLow");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 2;
@@ -1105,7 +1097,7 @@ namespace MapRenderer.Tests.Visual
 
                 // ── Render at zoom=5 (wide line: ~400px) ─────────────────────────────────────
                 {
-                    var src   = TestDataSource.FromBytes(FixtureBytes());
+                    var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgZoomHigh");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;
@@ -1290,7 +1282,7 @@ namespace MapRenderer.Tests.Visual
 
                 // ── Render via Entities (default backend) ─────────────────────────────────────
                 {
-                    var src   = TestDataSource.FromBytes(FixtureBytes());
+                    var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgParityEntities");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;
@@ -1332,7 +1324,7 @@ namespace MapRenderer.Tests.Visual
 
                 // ── Render via BRG ─────────────────────────────────────────────────────────────
                 {
-                    var src   = TestDataSource.FromBytes(FixtureBytes());
+                    var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
                     var mapGo = new GameObject("BrgParityBrg");
                     var view  = mapGo.AddComponent<MapView>().WithTestMaterials();
                     view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 6;

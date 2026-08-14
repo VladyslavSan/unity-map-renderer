@@ -34,14 +34,6 @@ namespace MapRenderer.Tests.Visual
         private const float DefaultViewSize = 100f;
 
         // ── Fixture loading ──────────────────────────────────────────────────────
-
-        internal static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         // ── Single-layer fill GO ─────────────────────────────────────────────────
 
         /// <summary>
@@ -60,7 +52,7 @@ namespace MapRenderer.Tests.Visual
             bool fitToView = true)         // false ⇒ leave the transform at identity so the caller can place
                                            //          the GO itself (e.g. the real ENU-rebase placement, S91-C)
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
 
             // Build a minimal StyleLayer matching the layer name + optional color expression.

@@ -38,13 +38,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class TileSymbolWorkerPassTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static readonly TileId ContextTile = new TileId { Z = 0, X = 0, Y = 0 };
 
         private static TileLayerProcessContext MakeContext() => new TileLayerProcessContext
@@ -108,7 +101,7 @@ namespace MapRenderer.Tests
             var processors = new ITileWorkerThenMainLayerProcessor[] { p0, p1, p2 };
             var context = MakeContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             try { TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in context, processors); }
             finally { decode.Release(); }
 
@@ -148,7 +141,7 @@ namespace MapRenderer.Tests
             var processors = new ITileWorkerThenMainLayerProcessor[] { p0 };
             var context = MakeContext();
 
-            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, FixtureBytes()));
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
             try
             {
                 Assert.Throws<NotSupportedException>(

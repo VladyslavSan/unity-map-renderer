@@ -30,14 +30,6 @@ namespace MapRenderer.Tests
         private static readonly TileId Tile0 = new TileId { Z = 3, X = 1, Y = 1 };
 
         // ── Fixtures (coexistence tooth only — real fixture styles, not synthetic meshes) ─────────
-
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static StyleDocument LoadStyle(string fileName)
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", fileName);
@@ -105,7 +97,7 @@ namespace MapRenderer.Tests
             // Genuinely DIFFERENT-colored styles per styleId (stronger than two tokens over identical
             // synthetic geometry): interp-fill-style.json (zoom-interpolated, red<->blue) vs
             // coexist-fill-style.json (constant green), both over the same fixture tile/layer.
-            byte[] bytes  = FixtureBytes();
+            byte[] bytes  = SampleTileFixture.Bytes();
             var styleDocA = LoadStyle("interp-fill-style.json");
             var styleDocB = LoadStyle("coexist-fill-style.json");
             Mesh meshA = BuildFillMesh(bytes, styleDocA, Tile0, zoom: 3.0);

@@ -39,13 +39,6 @@ namespace MapRenderer.Tests
     [TestFixture]
     public class MapViewLiveLoopTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
@@ -90,7 +83,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_CoverDrivesTileSelection_AndEvictionReleases()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -140,7 +133,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_GoLive_ProducesSameGeometryAsDirectBuilder()
         {
-            byte[] bytes = FixtureBytes();
+            byte[] bytes = SampleTileFixture.Bytes();
             var src   = TestDataSource.FromBytes(bytes);
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
@@ -208,7 +201,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
@@ -285,7 +278,7 @@ namespace MapRenderer.Tests
         [Test]
         public void MapView_SteadyStateTick_Entities_AllocationVerdict()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();

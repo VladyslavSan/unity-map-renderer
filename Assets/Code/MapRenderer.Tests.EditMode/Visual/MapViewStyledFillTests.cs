@@ -65,13 +65,6 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapViewStyledFillTests
     {
-        private static byte[] FixtureBytes()
-        {
-            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
-            return File.ReadAllBytes(path);
-        }
-
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 500)
         {
@@ -124,7 +117,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_TwoFillLayers_ProducesTwoDistinctChildRenderersWithOrderedQueues()
         {
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = TwoFillLayerStyle();
@@ -193,7 +186,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_InterleavedFillLineFill_QueuesFollowStyleOrderNotType()
         {
-            var src  = TestDataSource.FromBytes(FixtureBytes());
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go   = new GameObject("MapView");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
@@ -277,7 +270,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapView_ContinentMatchStyle_BakesAtLeastTwoDistinctVertexColors()
         {
-            var bytes = FixtureBytes();
+            var bytes = SampleTileFixture.Bytes();
             var src   = TestDataSource.FromBytes(bytes);
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
@@ -385,7 +378,7 @@ namespace MapRenderer.Tests.Visual
                 ]
             }";
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
@@ -535,7 +528,7 @@ namespace MapRenderer.Tests.Visual
                 }]
             }";
 
-            var src   = TestDataSource.FromBytes(FixtureBytes());
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView");
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = StyleParser.Parse(styleJson);
