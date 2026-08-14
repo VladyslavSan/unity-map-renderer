@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.Visual
         // Deterministic single-source cover: an INTERIOR look-at (never a Mercator tile-grid corner — lon=0/
         // lat=0 sits exactly on a 4-tile seam at every integer zoom ≥1, which would put the sample regions on
         // a sub-pixel gap between adjacent per-tile background quads) at a fixed zoom, mirroring
-        // S82PreparedCacheTests' TrackedTile pattern.
+        // PreparedCacheTests' TrackedTile pattern.
         private const int Zoom = 4;
         private static readonly CameraProperties LookAt =
             new CameraProperties(new GeoCoordinate3D { Longitude = 10, Latitude = 10, Altitude = 0 }, Zoom, 0, 0);

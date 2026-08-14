@@ -38,7 +38,7 @@ namespace MapRenderer.Tests.Text
 
             // Block-bodied lambda (not an expression lambda): Append returns a value (GlyphAtlasEntry),
             // and Assert.That needs a void TestDelegate here — an expression lambda binds to the wrong
-            // overload and fails with "actual value must be a TestDelegate" (see S95TileLoadMeasurementTests).
+            // overload and fails with "actual value must be a TestDelegate" (see TileLoadMeasurementTests).
             Assert.That(() => { atlas.Append(glyph); }, Is.Not.AllocatingGCMemory(),
                 "re-appending an already-decoded glyph (same codepoint, same cell height, same open shelf) " +
                 "must not allocate: GrowToFit no-ops once the shelf's used height stops increasing, and " +

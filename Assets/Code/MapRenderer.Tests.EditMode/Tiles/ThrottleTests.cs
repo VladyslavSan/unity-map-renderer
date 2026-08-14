@@ -58,7 +58,7 @@ namespace MapRenderer.Tests
     /// S55 throttle acceptance tests. Engine-side: all tests are Unity EditMode.
     /// </summary>
     [TestFixture]
-    public class S55ThrottleTests
+    public class ThrottleTests
     {
         /// <summary>
         /// Ring capacity requested from every <see cref="ProfilerRecorder"/> here, and therefore the only

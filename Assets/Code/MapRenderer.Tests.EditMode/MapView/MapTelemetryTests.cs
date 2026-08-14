@@ -369,7 +369,7 @@ namespace MapRenderer.Tests
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             // Set BEFORE WithTestCamera() — TileManager reads PreparedCache.Enabled once at construction
-            // (mirrors S82PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
+            // (mirrors PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
             view.Config.PreparedCache.Enabled = false;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick        = 64;

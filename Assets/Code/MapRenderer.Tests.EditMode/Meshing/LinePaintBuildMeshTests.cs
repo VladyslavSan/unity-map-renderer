@@ -33,7 +33,7 @@ namespace MapRenderer.Tests
     /// Uses the "geolines" LineString layer from the fixture (6 features with real MVT geometry).
     /// </summary>
     [TestFixture]
-    public class LinePaintS14BuildMeshTests
+    public class LinePaintBuildMeshTests
     {
         // ── Fixture loader ─────────────────────────────────────────────────────
 

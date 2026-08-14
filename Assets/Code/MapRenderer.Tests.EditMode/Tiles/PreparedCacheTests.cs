@@ -37,7 +37,7 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     [TestFixture]
-    public class S82PreparedCacheTests
+    public class PreparedCacheTests
     {
         // z=4 tile containing (lon=10, lat=10) — verified (via the standard slippy-map formula) to sit
         // comfortably inside a tile, away from any tile-boundary floating-point edge case (unlike lon=0/

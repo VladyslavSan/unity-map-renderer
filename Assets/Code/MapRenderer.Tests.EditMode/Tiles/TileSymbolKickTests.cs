@@ -111,7 +111,7 @@ namespace MapRenderer.Tests
 
         /// <param name="preparedCacheEnabled">Set BEFORE <c>WithTestCamera()</c> — that call constructs
         /// <c>MapView</c>/<c>TileManager</c>, which reads <c>PreparedCache.Enabled</c> once at construction
-        /// (mirrors <c>S82PreparedCacheTests</c>' documented ordering requirement).</param>
+        /// (mirrors <c>PreparedCacheTests</c>' documented ordering requirement).</param>
         private static (GameObject go, MapView view) NewView(int zoom, bool preparedCacheEnabled = true)
         {
             var go   = new GameObject("MapView_TileSymbolKick");
@@ -135,7 +135,7 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Mirrors S51DisposalLeakGuardTests' helper — counts alive <see cref="Mesh"/> objects
+        /// <summary>Mirrors DisposalLeakGuardTests' helper — counts alive <see cref="Mesh"/> objects
         /// (over-counts editor built-ins; compare deltas, not absolutes).</summary>
         private static int CountMeshObjects() => Resources.FindObjectsOfTypeAll<Mesh>().Length;
 
@@ -228,7 +228,7 @@ namespace MapRenderer.Tests
         // UploadMesh (the built fill geometry is thrown away, never registered with the backend) and never
         // disposes the kick-allocated writable MeshDataArray (a genuine native-memory leak). So the tile
         // DOES settle either way — "never settle" was never the accurate failure mode. The decisive
-        // observable is MeshDataPayload.DebugLiveAllocCount (mirrors S51DisposalLeakGuardTests' pattern):
+        // observable is MeshDataPayload.DebugLiveAllocCount (mirrors DisposalLeakGuardTests' pattern):
         // WITH the wrap, the task always completes with a real MeshBuildResult, so consume runs normally
         // (fill geometry registered, array disposed); WITHOUT it, the array leaks past settle. RED-verified
         // (see the A5b stage report): before=0/after=1 without the wrap, 0/0 with it.
@@ -331,7 +331,7 @@ namespace MapRenderer.Tests
             // cached" loop (TileManager.cs) is VACUOUSLY true for a source with ZERO dense mesh layers, so
             // the cover loop took BuildTileFromCache on every entry and never kicked — is now FIXED
             // (allCached = denseLayerIds.Count > 0) and is covered with the cache ENABLED by
-            // S82_SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled below.
+            // SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled below.
             var (go, view) = NewView(zoom: 0, preparedCacheEnabled: false);
             var spy = new SpySymbolTileWorkerFactory { ParticipatesFor = sourceId => sourceId == "symsrc" };
             view.TileManager.SymbolWorkerFactory = spy;
@@ -372,7 +372,7 @@ namespace MapRenderer.Tests
         //    `allCached = denseLayerIds.Count > 0`. This is F-5's twin WITHOUT the cache disabled — F-5 had to
         //    set preparedCacheEnabled:false precisely to dodge this gap; here it stays on, so the gap is the tooth.
         [UnityTest]
-        public IEnumerator S82_SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled()
+        public IEnumerator SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0, preparedCacheEnabled: true); // the DEFAULT — the gap's trigger

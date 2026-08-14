@@ -49,7 +49,7 @@ namespace MapRenderer.Tests
     ///       tile-owned Meshes).
     /// </summary>
     [TestFixture]
-    public class S51DisposalLeakGuardTests
+    public class DisposalLeakGuardTests
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);

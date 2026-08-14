@@ -35,7 +35,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests
 {
     [TestFixture]
-    public class S95TileLoadMeasurementTests
+    public class TileLoadMeasurementTests
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);

@@ -37,7 +37,7 @@ namespace MapRenderer.Tests
             return StyleParser.Parse(File.ReadAllText(path));
         }
 
-        /// <summary>Real fill-layer mesh build (mirrors S82PreparedCacheTests.GroundTruthColorAtZoom, minus
+        /// <summary>Real fill-layer mesh build (mirrors PreparedCacheTests.GroundTruthColorAtZoom, minus
         /// the Core-only leak-tracked allocator — this is a cache-unit test, not a NativeArray-invariant
         /// one) — used to prove coexistence with genuinely different baked colors per style, not just two
         /// synthetic meshes over identical geometry.</summary>
@@ -55,7 +55,7 @@ namespace MapRenderer.Tests
             return mesh;
         }
 
-        /// <summary>Mirrors S82PreparedCacheTests's FirstVertexColor/ColorsClose — a fill-color expression
+        /// <summary>Mirrors PreparedCacheTests's FirstVertexColor/ColorsClose — a fill-color expression
         /// with no per-feature "get" is a pure function of zoom, so every vertex shares one color.</summary>
         private static Color FirstVertexColor(Mesh mesh)
         {
