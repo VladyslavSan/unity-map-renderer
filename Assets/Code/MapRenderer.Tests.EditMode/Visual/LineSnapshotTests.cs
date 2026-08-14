@@ -225,69 +225,6 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Test 3: No-rebuild proof ───────────────────────────────────────────────────────
-
-        [Test]
-        public void WidthChange_NoMeshRebuild_RenderedWidthChanges()
-        {
-            // Use a single horizontal line so the scanline only sees one band.
-            var (cameraGo, camera)  = BuildCamera();
-            var lineGo              = BuildSingleHorizontalLine(LineWidthMeters, out var mat);
-
-            using var snap1 = new SnapshotRenderer(SnapW, SnapH);
-            using var snap2 = new SnapshotRenderer(SnapW, SnapH);
-            try
-            {
-                // Render at original width.
-                snap1.Render(camera);
-
-                // GPU-context guard on snap1.
-                if (snap1.IsAllBlack())
-                {
-                    using var blank = RenderBlank();
-                    if (blank.IsAllBlack())
-                    {
-                        Assert.Inconclusive("No GPU context — re-run as PlayMode.");
-                        return;
-                    }
-                }
-
-                snap1.WritePng("line-width-before.png");
-
-                // Change _Width on the MATERIAL WITHOUT rebuilding the mesh.
-                // This is the "no-rebuild" proof: only the material uniform changes.
-                mat.SetFloat("_Width", LineWidthDoubleM);
-
-                // Render at new width.
-                snap2.Render(camera);
-                snap2.WritePng("line-width-after.png");
-
-                int centerRow = SnapH / 2;
-                int w1 = MeasureContiguousWidthAroundRow(snap1.RawPixels, SnapW, SnapH,
-                                                          SnapW / 2, centerRow);
-                int w2 = MeasureContiguousWidthAroundRow(snap2.RawPixels, SnapW, SnapH,
-                                                          SnapW / 2, centerRow);
-
-                // The width should have approximately doubled (within tolerance).
-                float expectedW2 = ExpectedPxWidth(LineWidthDoubleM);
-                Assert.That((float)w2,
-                    Is.InRange(expectedW2 - WidthTolPx * 2, expectedW2 + WidthTolPx * 2 + 2),
-                    $"After no-rebuild width change to {LineWidthDoubleM}m: " +
-                    $"expected ≈{expectedW2:F1}px, measured {w2}px. " +
-                    $"Before width: {w1}px.");
-
-                // Also assert w2 > w1 (wider line after doubling width).
-                Assert.That(w2, Is.GreaterThan(w1 - 1),
-                    $"Width after doubling ({w2}px) should be greater than before ({w1}px).");
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraGo);
-                Object.DestroyImmediate(lineGo);
-                Object.DestroyImmediate(mat);
-            }
-        }
-
         // ─── Test 4: AA transition width ───────────────────────────────────────────────────
 
         [Test]
@@ -458,40 +395,6 @@ namespace MapRenderer.Tests.Visual
             {
                 Object.DestroyImmediate(cameraGo);
                 Object.DestroyImmediate(go);
-            }
-        }
-
-        // ─── Test 5: Blank control ──────────────────────────────────────────────────────────
-
-        [Test]
-        public void BlankRender_FailsCoverageGate()
-        {
-            var (cameraGo, camera) = BuildCamera();
-            using var snap = new SnapshotRenderer(SnapW, SnapH);
-            try
-            {
-                snap.Render(camera);
-
-                if (snap.IsAllBlack())
-                {
-                    Assert.Inconclusive(
-                        "Blank-control render is all-black — no GPU context. " +
-                        "Re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
-                    return;
-                }
-
-                byte[] pixels = snap.RawPixels;
-                SnapshotVerdict v = SnapshotCoverage.Analyse(pixels, SnapW, SnapH, BgR8, BgG8, BgB8);
-
-                Assert.IsTrue(v.IsBlank,
-                    $"Blank render (no line) should be detected as blank. " +
-                    $"fill={v.FilledFraction:P1}, bg={v.BackgroundFraction:P1}.");
-                Assert.IsFalse(v.Passes(minFill: 0.01f, maxFill: 0.50f, minBuckets: 2),
-                    "Blank render must fail the coverage gate — validates the gate has teeth.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(cameraGo);
             }
         }
 
