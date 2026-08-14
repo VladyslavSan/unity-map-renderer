@@ -18,11 +18,12 @@
 // ABOVE the text queue the test hand-writes — inert in all of them for the reason above; the first such
 // site carries the worked example.
 //
-// Tooth 1's occluder is a wide LINE ribbon, not a fill quad: a hand-built Vector3[]/Vector2[] quad (the
-// technique LayerOrderSnapshotTests.BuildFillQuad uses) carries only the generic Lit vertex streams, not
-// the real production line vertex layout (StyledLineTileBuilder.LinePositionNormal/LineWidthColor) — and
-// was found (this stage) to render invisible headless, silently passing LayerOrderSnapshotTests' own
-// variance tooth because that test never actually asserts the TOP fill's colour, only region uniformity.
+// Tooth 1's occluder is a wide LINE ribbon, not a fill quad, so it exercises the REAL production line
+// vertex layout (StyledLineTileBuilder.LinePositionNormal/LineWidthColor) rather than the generic Lit
+// vertex streams a hand-built Vector3[]/Vector2[] quad carries. (A hand-built quad DOES render headless
+// once wound Unity-front — see LayerOrderSnapshotTests.BuildFillQuad and its §7.11 winding note — and that
+// file's variance tooth now carries a non-vacuous top-fill guard; the line here is a vertex-layout choice,
+// not a workaround for an invisible quad.)
 // SyntheticLineMesh builds the real production vertex layout, proven to render headless (it backs
 // LayerOrderSnapshotTests.BuildWideLine). renderQueue-vs-symbol compositing doesn't care which layer KIND
 // produced the geometry, so a line still proves tooth 1's claim (higher-queue geometry composites over a

@@ -229,10 +229,10 @@ namespace MapRenderer.Tests
         /// the formula without needing a live camera.
         ///
         /// Hand computation:
-        ///   metersPerPixel = 40075016.686 / (256 * 2^10) = 40075016.686 / 262144 ≈ 152.874
+        ///   metersPerPixel = 40075016.686 / (512 * 2^10) = 40075016.686 / 524288 ≈ 76.437
         ///   halfFovRad     = 30° * π/180 ≈ 0.52360
         ///   tan(halfFov)   ≈ 0.57735
-        ///   altitude       = (1080 * 152.874) / (2 * 0.57735) ≈ 143053.7
+        ///   altitude       = (1080 * 76.437) / (2 * 0.57735) ≈ 71492.1
         /// </summary>
         [Test]
         public void AltitudeForZoom_MatchesD2Formula_HandComputed()

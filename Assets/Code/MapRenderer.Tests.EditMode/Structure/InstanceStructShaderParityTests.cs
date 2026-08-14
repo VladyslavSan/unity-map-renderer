@@ -14,13 +14,13 @@
 //   Adding a struct field no shader declares → fails reverse.
 //
 // Exact counts (lessons.md: assert the exact known total, never `>`):
-//   struct material-prop fields == 29, Line DOTS props == 24, Fill DOTS props == 19.
+//   struct material-prop fields == 31, Line DOTS props == 24, Fill DOTS props == 21.
 //   A regex/reflection pass that silently matches nothing fails the exact count, not the
 //   forward/reverse check.
 //
 // History: introduced S76 to lock struct+shader counts and prevent re-introducing the BRG line-prop bug.
-//   Counts dropped by 2 line props (31→29, 26→24) when _MetersPerPixel (S104) and _AaEdgeWidth (line-AA
-//   removal, 0b910c7) were retired; the set-equality/forward/reverse checks confirm the removal is consistent.
+//   Counts dropped by 2 line props (struct 33→31, Line DOTS 26→24) when _MetersPerPixel (S104) and
+//   _AaEdgeWidth (line-AA removal, 0b910c7) were retired; the set-equality/forward/reverse checks confirm it.
 //   Migrated out of Tools/core-tests (folder-move path breakage) with the struct-side text-parse
 //   replaced by reflection.
 
@@ -88,9 +88,9 @@ namespace MapRenderer.Tests
         // ── Exact count guards (lessons.md: assert exact, never >) ───────────────────────────
 
         /// <summary>
-        /// Struct must have exactly 29 material-prop fields (excludes unity_* transforms).
-        /// Delta from today: 19 pre-existing + 10 line props = 29 (was 12 line props before
-        /// _MetersPerPixel (S104) and _AaEdgeWidth (line-AA removal) were retired).
+        /// Struct must have exactly 31 material-prop fields (excludes unity_* transforms).
+        /// Breakdown: 21 non-line (14 common Lit+Opacity + 7 fill-only) + 10 line-only = 31 (was 12
+        /// line-only before _MetersPerPixel (S104) and _AaEdgeWidth (line-AA removal) were retired).
         /// A vacuous regex (matches nothing) fails this immediately.
         /// </summary>
         [Test]
@@ -98,7 +98,7 @@ namespace MapRenderer.Tests
         {
             var fields = ParseStructMaterialFields(out _);
             Assert.That(fields.Count, Is.EqualTo(31),
-                $"MapInstanceData must have exactly 29 material-prop fields " +
+                $"MapInstanceData must have exactly 31 material-prop fields " +
                 $"(14 common Lit+Opacity + 7 fill-only + 10 line-only). " +
                 $"Found {fields.Count}: {string.Join(", ", fields.Keys)}");
         }
@@ -120,7 +120,7 @@ namespace MapRenderer.Tests
             var props = ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
             Assert.That(props.Count, Is.EqualTo(21),
                 $"Fill_LitInput.hlsl DOTS block must have exactly 21 UNITY_DOTS_INSTANCED_PROP entries " +
-                $"(13 common Lit + _Opacity + 5 fill-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
+                $"(13 common Lit + _Opacity + 7 fill-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
         }
 
         // ── Forward parity: each DOTS prop → struct field of matching float-count ─────────────

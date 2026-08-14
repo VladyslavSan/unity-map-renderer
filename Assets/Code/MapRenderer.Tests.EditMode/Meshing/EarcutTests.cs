@@ -54,7 +54,7 @@ namespace MapRenderer.Tests
         [Test]
         public void Square_NoHoles_Produces2Triangles()
         {
-            // CW in Y-down tile space (positive shoelace).
+            // Exterior winding: positive shoelace (canonical CCW in tile space; reads CW on a Y-down screen).
             var square = new List<double2>
             {
                 new double2(0, 0),
@@ -101,7 +101,7 @@ namespace MapRenderer.Tests
         [Test]
         public void SquareWithSquareHole_Produces8Triangles()
         {
-            // Outer: CW in tile space (positive area2)
+            // Outer: exterior ring (positive shoelace)
             var outer = new List<double2>
             {
                 new double2(0, 0),
@@ -110,7 +110,7 @@ namespace MapRenderer.Tests
                 new double2(0, 200),
             };
 
-            // Hole: CCW in tile space (negative area2, opposite winding from outer)
+            // Hole: opposite winding (negative shoelace)
             var hole = new List<double2>
             {
                 new double2(50, 50),

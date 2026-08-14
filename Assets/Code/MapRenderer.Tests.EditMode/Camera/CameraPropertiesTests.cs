@@ -77,7 +77,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// CameraPoseMath.AltitudeForZoom matches the hand-computed D2 value at zoom 10.
-        /// Hand: metersPerPixel = 40075016.686 / (256 * 2^10) ≈ 152.874; alt ≈ 143053.7
+        /// Hand: metersPerPixel = 40075016.686 / (512 * 2^10) ≈ 76.437; alt ≈ 71492.1
         /// </summary>
         [Test]
         public void AltitudeForZoom_MatchesHandComputedValue()

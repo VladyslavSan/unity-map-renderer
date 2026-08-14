@@ -333,13 +333,13 @@ namespace MapRenderer.Tests
         public IEnumerator F5_SymbolOnlySourceKicks_MeshOnlySourceRunsNoSymbolPass()
         {
             var src  = TestDataSource.FromBytes(FixtureBytes());
-            // Pre-existing S82 edge case (found while developing this tooth, NOT an A5b regression, out of
-            // this stage's scope to fix): the prepared-cache probe's "every dense layer id is cached" check
-            // (TileManager.cs, the allCached loop) is VACUOUSLY true for a source with ZERO dense mesh
-            // layers — a symbol-only source — so with the cache enabled it takes the BuildTileFromCache path
-            // on every cover entry (never fetches, never reaches the kick block at all). Disabled here so
-            // this tooth isolates its OWN concern (Q6: does the kick fire for a symbol-only source that DOES
-            // go through the normal fetch→kick pipeline), not the unrelated S82 probe gap.
+            // Cache DISABLED here to isolate THIS tooth's concern (Q6: does the kick fire for a symbol-only
+            // source going through the normal fetch→kick pipeline). The S82 probe gap that once made the
+            // cache-on path skip the kick for a zero-dense-layer source — the "every dense layer id is
+            // cached" loop (TileManager.cs) is VACUOUSLY true for a source with ZERO dense mesh layers, so
+            // the cover loop took BuildTileFromCache on every entry and never kicked — is now FIXED
+            // (allCached = denseLayerIds.Count > 0) and is covered with the cache ENABLED by
+            // S82_SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled below.
             var (go, view) = NewView(zoom: 0, preparedCacheEnabled: false);
             var spy = new SpySymbolTileWorkerFactory { ParticipatesFor = sourceId => sourceId == "symsrc" };
             view.TileManager.SymbolWorkerFactory = spy;

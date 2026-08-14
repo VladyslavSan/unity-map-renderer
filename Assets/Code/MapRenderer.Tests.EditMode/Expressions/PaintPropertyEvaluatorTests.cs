@@ -151,20 +151,18 @@ namespace MapRenderer.Tests.Expressions
         // ── 4. Feature / Composite → Evaluate(zoom) throws ────────────────────
 
         [Test]
-        public void FeatureKind_ThrowsAtConstruction()
+        public void FeatureKind_Evaluate_Throws()
         {
-            // S60: construction no longer throws; Evaluate(zoom) throws instead.
-            // Renamed to: FeatureKind_Evaluate_Throws
-            // (kept for pass-count parity under original test name)
+            // S60: construction no longer throws; Evaluate(zoom) throws instead (hence the name).
             var prop = NumProp("[\"get\", \"width\"]");
             Assert.Throws<ArgumentException>(() => prop.Evaluate(0.0),
                 "Feature-kind Evaluate(zoom) must throw.");
         }
 
         [Test]
-        public void CompositeKind_ThrowsAtConstruction()
+        public void CompositeKind_Evaluate_Throws()
         {
-            // S60: construction no longer throws; Evaluate(zoom) throws instead.
+            // S60: construction no longer throws; Evaluate(zoom) throws instead (hence the name).
             var prop = NumProp("[\"interpolate\",[\"linear\"],[\"zoom\"],5,[\"get\",\"w\"],10,5.0]");
             Assert.Throws<ArgumentException>(() => prop.Evaluate(0.0),
                 "Composite-kind Evaluate(zoom) must throw.");
