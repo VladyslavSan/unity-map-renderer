@@ -12,30 +12,13 @@ using UnityEngine;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 
 namespace MapRenderer.Tests
 {
     [TestFixture]
     public class MapViewBackgroundRestyleTests
     {
-        private static string BackgroundOnlyStyle(string colorHex) => $@"{{
-            ""version"": 8,
-            ""layers"": [ {{ ""id"": ""bg"", ""type"": ""background"",
-                             ""paint"": {{ ""background-color"": ""{colorHex}"" }} }} ]
-        }}";
-
-        // A style whose ONE fetching layer resolves via TileJSON (url-only source, no inline tiles[]) — so
-        // MapView.BuildSourceSpecs' await(loader) genuinely suspends until the test releases the gate.
-        private const string BackgroundPlusUrlSourceStyle = @"{
-            ""version"": 8,
-            ""sources"": { ""s"": { ""type"": ""vector"", ""url"": ""https://example.com/tilejson.json"" } },
-            ""layers"": [
-                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#ff0000"" } },
-                { ""id"": ""f"",  ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""countries"",
-                  ""paint"": { ""fill-color"": ""#0000ff"" } }
-            ]
-        }";
-
         private static MapView NewView(out GameObject go)
         {
             go = new GameObject("MapViewBackgroundRestyle");
@@ -50,47 +33,6 @@ namespace MapRenderer.Tests
             // convention: every non-file:// test either overrides the factory or stays fully offline).
             view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
             return view;
-        }
-
-        /// <summary>A gated document loader: <c>await</c>ing <see cref="Load"/> suspends (returns control to
-        /// the caller) until <see cref="Release"/> is called — entirely on the MAIN thread throughout (a
-        /// <see cref="UniTaskCompletionSource{T}"/>-backed task, never a ThreadPool hop), so
-        /// <see cref="Release"/> can run the REST of MapView.SetStyle's synchronous commit (which touches
-        /// Unity APIs — Object.DestroySafely et al. — main-thread only) inline, exactly like production's
-        /// UnityWebRequest-backed loader resuming on the main thread. Lets the test observe SetStyle's
-        /// mid-resolution state deterministically, without a real network.</summary>
-        private sealed class GatedLoader
-        {
-            private readonly UniTaskCompletionSource<string> _tcs = new UniTaskCompletionSource<string>();
-            public string TileJsonText = @"{ ""tilejson"":""3.0.0"", ""tiles"":[""https://example.com/{z}/{x}/{y}.pbf""], ""minzoom"":0, ""maxzoom"":0 }";
-            public int CallCount;
-
-            public UniTask<string> Load(string uri, CancellationToken ct)
-            {
-                Interlocked.Increment(ref CallCount);
-                return _tcs.Task;
-            }
-
-            public void Release() => _tcs.TrySetResult(TileJsonText);
-        }
-
-        /// <summary>Spins to completion WITHOUT observing the result — used where the caller expects (and
-        /// separately asserts on) a fault/cancel.</summary>
-        private static void SpinToCompleted(UniTask task, int maxSpins = 20000)
-        {
-            var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
-        }
-
-        /// <summary>Spins to completion and RE-THROWS on fault/cancel — used where the caller expects
-        /// success, so a regression surfaces as the real exception instead of a silently-stale assertion.</summary>
-        private static void SpinToSucceeded(UniTask task, int maxSpins = 20000)
-        {
-            var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
-            t.GetAwaiter().GetResult();
         }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
@@ -122,9 +64,7 @@ namespace MapRenderer.Tests
                 UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B").Preserve();
 
                 // Mid-resolution: OLD identity/layers/background must still be live — nothing mutated yet.
-                Assert.AreEqual("A", view.StyleId, "identity must not change before the commit.");
-                Assert.AreSame(bgMaterialA, view.Layers[0].Material,
-                    "the OLD background layer/material must still be live during resolution (no blank window).");
+                AssertOldStyleIntact(view, bgMaterialA, because: "nothing may mutate before the commit (no blank window).");
                 Assert.AreEqual(1, view.Layers.Count, "the OLD (one-layer) RenderLayerSet must be untouched.");
 
                 // Release the gate — resolution completes, the commit runs.
@@ -164,9 +104,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(restyleTask.Status == UniTaskStatus.Canceled || restyleTask.Status == UniTaskStatus.Faulted,
                     $"a cancelled restyle's task must not succeed (status={restyleTask.Status}).");
-                Assert.AreEqual("A", view.StyleId, "a cancelled restyle must leave the OLD identity intact.");
-                Assert.AreSame(bgMaterialA, view.Layers[0].Material,
-                    "a cancelled restyle must leave the OLD background layer/material intact (no destroyed-material draw).");
+                AssertOldStyleIntact(view, bgMaterialA, because: "a cancelled restyle must leave the OLD style intact (no destroyed-material draw).");
                 Assert.AreSame(layersRef, view.Layers, "the RenderLayerSet instance itself is unchanged.");
                 Assert.AreEqual(1, view.Layers.Count, "Layers.Build must NEVER have run for the cancelled style.");
             }
@@ -191,8 +129,7 @@ namespace MapRenderer.Tests
 
                 Assert.IsTrue(restyleTask.Status == UniTaskStatus.Canceled || restyleTask.Status == UniTaskStatus.Faulted,
                     $"an already-cancelled token must abort SetStyle (status={restyleTask.Status}).");
-                Assert.AreEqual("A", view.StyleId, "an already-cancelled restyle must leave the OLD identity intact.");
-                Assert.AreSame(bgMaterialA, view.Layers[0].Material, "the OLD background layer/material must be intact.");
+                AssertOldStyleIntact(view, bgMaterialA, because: "an already-cancelled restyle must leave the OLD style intact.");
             }
             finally { view.Teardown(); Object.DestroyImmediate(go); }
         }

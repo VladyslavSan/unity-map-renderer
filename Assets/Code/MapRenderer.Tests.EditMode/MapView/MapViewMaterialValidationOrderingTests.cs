@@ -13,28 +13,13 @@ using UnityEngine;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Materials;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 
 namespace MapRenderer.Tests
 {
     [TestFixture]
     public class MapViewMaterialValidationOrderingTests
     {
-        private static string BackgroundOnlyStyle(string colorHex) => $@"{{
-            ""version"": 8,
-            ""layers"": [ {{ ""id"": ""bg"", ""type"": ""background"",
-                             ""paint"": {{ ""background-color"": ""{colorHex}"" }} }} ]
-        }}";
-
-        private const string BackgroundPlusUrlSourceStyle = @"{
-            ""version"": 8,
-            ""sources"": { ""s"": { ""type"": ""vector"", ""url"": ""https://example.com/tilejson.json"" } },
-            ""layers"": [
-                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#ff0000"" } },
-                { ""id"": ""f"",  ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""countries"",
-                  ""paint"": { ""fill-color"": ""#0000ff"" } }
-            ]
-        }";
-
         /// <summary>A THROWAWAY MapMaterialSet (never the shared production asset — nulling a base field
         /// here must never mutate the committed asset other tests in the same batch also load).</summary>
         private static MapMaterialSet NewThrowawaySet()
@@ -62,39 +47,6 @@ namespace MapRenderer.Tests
             // throw BEFORE SetSources would ever construct a real source from it.
             view.View.TileSourceFactoryOverride = _ => TestDataSource.Absent();
             return view;
-        }
-
-        /// <summary>A <see cref="UniTaskCompletionSource{T}"/>-backed gated loader: <c>await</c>ing
-        /// <see cref="Load"/> suspends entirely on the MAIN thread (no ThreadPool hop), so
-        /// <see cref="Release"/> runs the REST of MapView.SetStyle's synchronous commit inline (Unity APIs
-        /// are main-thread only) — mirrors production's UnityWebRequest-backed loader resuming on the main
-        /// thread, unlike a ThreadPool-hopping stub.</summary>
-        private sealed class GatedLoader
-        {
-            private readonly UniTaskCompletionSource<string> _tcs = new UniTaskCompletionSource<string>();
-            public string TileJsonText = @"{ ""tilejson"":""3.0.0"", ""tiles"":[""https://example.com/{z}/{x}/{y}.pbf""], ""minzoom"":0, ""maxzoom"":0 }";
-
-            public UniTask<string> Load(string uri, CancellationToken ct) => _tcs.Task;
-
-            public void Release() => _tcs.TrySetResult(TileJsonText);
-        }
-
-        /// <summary>Spins to completion WITHOUT observing the result — used where the caller expects (and
-        /// separately asserts on) a fault.</summary>
-        private static void SpinToCompleted(UniTask task, int maxSpins = 20000)
-        {
-            var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
-        }
-
-        /// <summary>Spins to completion and RE-THROWS on fault — used where the caller expects success.</summary>
-        private static void SpinToSucceeded(UniTask task, int maxSpins = 20000)
-        {
-            var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
-            t.GetAwaiter().GetResult();
         }
 
         private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
@@ -144,10 +96,8 @@ namespace MapRenderer.Tests
                     $"(got {thrown.GetType()}: {thrown.Message}).");
                 StringAssert.Contains("FillMaterial", thrown.Message);
 
-                Assert.AreEqual("A", view.StyleId,
-                    "identity must be UNCHANGED by a failed commit — the throw happens before _style/StyleId mutate.");
-                Assert.AreSame(bgMaterialA, view.Layers[0].Material,
-                    "the OLD layers/materials must be UNCHANGED — Layers.Build must never have run.");
+                AssertOldStyleIntact(view, bgMaterialA,
+                    because: "a failed commit must not mutate _style/StyleId or run Layers.Build.");
                 Assert.AreEqual(1, view.Layers.Count, "the OLD (one-layer) RenderLayerSet must be untouched.");
             }
             finally
