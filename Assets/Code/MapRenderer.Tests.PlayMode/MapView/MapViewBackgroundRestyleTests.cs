@@ -3,18 +3,20 @@
 // now depends on TileManager.SetSources — if identity/layer mutation ran BEFORE the one await
 // (BuildSourceSpecs), a delayed or cancelled restyle would blank the background and/or report the NEW
 // identity while still rendering the OLD tiles. The fix (MapView.SetStyle, §E step 3) moves ALL mutation
-// into the synchronous post-await commit.
+// into the synchronous post-await commit. PlayMode: settle-polls yield real frames (never Thread.Sleep).
 
+using System.Collections;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 
-namespace MapRenderer.Tests.MapViews
+namespace MapRenderer.Tests.PlayMode.MapViews
 {
     [TestFixture]
     public class MapViewBackgroundRestyleTests
@@ -22,7 +24,9 @@ namespace MapRenderer.Tests.MapViews
         private static MapView NewView(out GameObject go)
         {
             go = new GameObject("MapViewBackgroundRestyle");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64; view.Config.MaxMeshBuildsPerTick = 64;
@@ -35,25 +39,25 @@ namespace MapRenderer.Tests.MapViews
             return view;
         }
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
-        [Test]
-        public void DelayedRestyle_KeepsPreviousBackgroundRendered_UntilCommit()
+        [UnityTest]
+        public IEnumerator DelayedRestyle_KeepsPreviousBackgroundRendered_UntilCommit()
         {
             var view = NewView(out var go);
             try
             {
                 // Style A: background-only (no fetching layer, so its own SetStyle commits synchronously).
-                SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
-                PumpUntilSettled(view);
+                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
                 Assert.IsNotNull(bgMaterialA);
@@ -69,8 +73,8 @@ namespace MapRenderer.Tests.MapViews
 
                 // Release the gate — resolution completes, the commit runs.
                 gate.Release();
-                SpinToSucceeded(restyleTask);
-                PumpUntilSettled(view);
+                yield return SpinToSucceeded(restyleTask);
+                yield return PumpUntilSettled(view);
 
                 Assert.AreEqual("B", view.StyleId, "after commit, the NEW identity must be reported.");
                 Assert.AreEqual(2, view.Layers.Count, "after commit, the NEW (two-layer) RenderLayerSet is live.");
@@ -78,14 +82,14 @@ namespace MapRenderer.Tests.MapViews
             finally { view.Teardown(); Object.DestroyImmediate(go); }
         }
 
-        [Test]
-        public void CancelledDuringResolution_LeavesPreviousStyleIntact()
+        [UnityTest]
+        public IEnumerator CancelledDuringResolution_LeavesPreviousStyleIntact()
         {
             var view = NewView(out var go);
             try
             {
-                SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
-                PumpUntilSettled(view);
+                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 var layersRef = view.Layers; // same instance across restyle (rebuilt in place)
                 Material bgMaterialA = view.Layers[0].Material;
@@ -100,7 +104,7 @@ namespace MapRenderer.Tests.MapViews
                 Assert.AreEqual("A", view.StyleId, "cancel mid-resolution must not have touched identity yet.");
 
                 gate.Release(); // let the (now-doomed) resolution finish so the task can observe the token
-                SpinToCompleted(restyleTask);
+                yield return SpinToCompleted(restyleTask);
 
                 Assert.IsTrue(restyleTask.Status == UniTaskStatus.Canceled || restyleTask.Status == UniTaskStatus.Faulted,
                     $"a cancelled restyle's task must not succeed (status={restyleTask.Status}).");
@@ -111,21 +115,21 @@ namespace MapRenderer.Tests.MapViews
             finally { view.Teardown(); Object.DestroyImmediate(go); }
         }
 
-        [Test]
-        public void AlreadyCancelledToken_LeavesPreviousStyleIntact()
+        [UnityTest]
+        public IEnumerator AlreadyCancelledToken_LeavesPreviousStyleIntact()
         {
             var view = NewView(out var go);
             try
             {
-                SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
-                PumpUntilSettled(view);
+                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
 
                 using var cts = new CancellationTokenSource();
                 cts.Cancel(); // already cancelled BEFORE SetStyle is even called
                 UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#ff0000")), "B", cts.Token).Preserve();
-                SpinToCompleted(restyleTask);
+                yield return SpinToCompleted(restyleTask);
 
                 Assert.IsTrue(restyleTask.Status == UniTaskStatus.Canceled || restyleTask.Status == UniTaskStatus.Faulted,
                     $"an already-cancelled token must abort SetStyle (status={restyleTask.Status}).");

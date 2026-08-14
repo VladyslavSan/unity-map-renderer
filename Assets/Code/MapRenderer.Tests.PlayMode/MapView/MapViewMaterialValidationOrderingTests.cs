@@ -3,19 +3,21 @@
 // validating at SetStyle ENTRY (round-3 placement) would pass, then a concurrent mutation during the await
 // could still let a null base reach Layers.Build (the exact crash/leak DECISION 2 exists to prevent). The
 // fix validates a CAPTURED MapMaterialSet reference immediately before the synchronous commit, with no await
-// between validate and use.
+// between validate and use. PlayMode: the settle-poll yields real frames (never Thread.Sleep).
 
 using System;
+using System.Collections;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Style;
 using MapRenderer.Unity.Rendering.Materials;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 
-namespace MapRenderer.Tests.MapViews
+namespace MapRenderer.Tests.PlayMode.MapViews
 {
     [TestFixture]
     public class MapViewMaterialValidationOrderingTests
@@ -38,6 +40,7 @@ namespace MapRenderer.Tests.MapViews
         {
             go = new GameObject("MapViewMaterialValidationOrdering");
             var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.Config.MaterialSet = materialSet;
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
@@ -49,26 +52,26 @@ namespace MapRenderer.Tests.MapViews
             return view;
         }
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
-        [Test]
-        public void DelayedRestyle_NullingFillMaterialMidResolution_ThrowsAtCommit_BeforeMutation()
+        [UnityTest]
+        public IEnumerator DelayedRestyle_NullingFillMaterialMidResolution_ThrowsAtCommit_BeforeMutation()
         {
             var materialSet = NewThrowawaySet();
             var view = NewView(out var go, materialSet);
             try
             {
                 // Style A commits normally (all three bases assigned).
-                SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
-                PumpUntilSettled(view);
+                yield return SpinToSucceeded(view.SetStyle(StyleParser.Parse(BackgroundOnlyStyle("#00ff00")), "A"));
+                yield return PumpUntilSettled(view);
                 Assert.AreEqual("A", view.StyleId);
                 Material bgMaterialA = view.Layers[0].Material;
                 Assert.IsNotNull(bgMaterialA);
@@ -84,7 +87,7 @@ namespace MapRenderer.Tests.MapViews
                 // it must still catch this.
                 materialSet.FillMaterial = null;
                 gate.Release();
-                SpinToCompleted(restyleTask);
+                yield return SpinToCompleted(restyleTask);
 
                 // The commit must THROW at Validate() — BEFORE Layers.Build/identity are mutated.
                 Exception thrown = null;

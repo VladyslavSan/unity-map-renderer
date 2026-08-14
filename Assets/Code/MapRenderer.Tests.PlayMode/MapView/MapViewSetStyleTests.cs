@@ -1,12 +1,14 @@
-// Unity EditMode only — drives the live MapView.SetStyle path (MonoBehaviour + NativeArray jobs).
-// NOT included in Tools/core-tests.
+// PlayMode — drives the live MapView.SetStyle path (MonoBehaviour + NativeArray jobs) over real frames,
+// yielding a frame per settle iteration (never Thread.Sleep). NOT included in Tools/core-tests.
 
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
@@ -14,7 +16,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Source;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests.MapViews
+namespace MapRenderer.Tests.PlayMode.MapViews
 {
     /// <summary>
     /// S83b acceptance — the live <see cref="MapView.SetStyle"/> path: file:// offline (zero network),
@@ -25,30 +27,33 @@ namespace MapRenderer.Tests.MapViews
     [TestFixture]
     public class MapViewSetStyleTests
     {
-        // Spin a (Preserved) UniTask to completion on the main thread — the file:// document loader and the
-        // inline-source spec build both complete on the ThreadPool (no PlayerLoop), so this never deadlocks.
-        private static void Await(UniTask task, int maxSpins = 10000)
+        // Yield frames until a (Preserved) UniTask completes on the main thread — the file:// document loader
+        // and the inline-source spec build both complete on the ThreadPool (no PlayerLoop), so a real frame
+        // gives them wall-clock. Never Thread.Sleep.
+        private static IEnumerator Await(UniTask task, int maxSpins = 10000)
         {
             var t = task.Preserve();
             int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
             t.GetAwaiter().GetResult();
         }
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
         private static MapView NewView(out GameObject go)
         {
             go = new GameObject("MapView");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64; view.Config.MaxMeshBuildsPerTick = 64;
@@ -75,8 +80,8 @@ namespace MapRenderer.Tests.MapViews
 
         // ── THE decisive tooth: a file:// style whose vector source resolves to file:// tiles renders with
         //    ZERO network — no UnityWebRequestDataSource is ever constructed across SetStyle + settle. ──────
-        [Test]
-        public void SetStyle_FileUriChain_RendersOffline_ZeroNetwork()
+        [UnityTest]
+        public IEnumerator SetStyle_FileUriChain_RendersOffline_ZeroNetwork()
         {
             string tilesTemplate = WriteFileTileFixture("s83b-offline-tiles");
             string styleDir = Path.Combine(Application.temporaryCachePath, "s83b-offline-style");
@@ -89,8 +94,8 @@ namespace MapRenderer.Tests.MapViews
             var view = NewView(out var go);
             try
             {
-                Await(view.SetStyle(styleUri));          // file:// style doc → parse → resolve (inline) → wire
-                PumpUntilSettled(view);
+                yield return Await(view.SetStyle(styleUri));   // file:// style doc → parse → resolve (inline) → wire
+                yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
                     "the file:// tile must build from the local fixture");
@@ -104,8 +109,8 @@ namespace MapRenderer.Tests.MapViews
 
         // ── Inline tiles[] short-circuit (fetch side): a source with inline tiles triggers ZERO TileJSON
         //    document fetches. ─────────────────────────────────────────────────────────────────────────
-        [Test]
-        public void SetStyle_InlineTiles_FetchesNoTileJson()
+        [UnityTest]
+        public IEnumerator SetStyle_InlineTiles_FetchesNoTileJson()
         {
             string tilesTemplate = WriteFileTileFixture("s83b-inline-tiles");
             int docFetches = 0;
@@ -114,8 +119,8 @@ namespace MapRenderer.Tests.MapViews
             try
             {
                 var style = StyleParser.Parse(OneFillStyle("src", tilesTemplate.Replace("\\", "/")));
-                Await(view.SetStyle(style, "inline-style"));
-                PumpUntilSettled(view);
+                yield return Await(view.SetStyle(style, "inline-style"));
+                yield return PumpUntilSettled(view);
 
                 Assert.AreEqual(0, docFetches,
                     "an inline-tiles[] source must trigger NO TileJSON document fetch (fetch-side short-circuit).");
@@ -126,8 +131,8 @@ namespace MapRenderer.Tests.MapViews
         }
 
         // ── A url (TileJSON) source fetches the TileJSON exactly once and resolves its tiles from it. ──────
-        [Test]
-        public void SetStyle_TileJsonUrlSource_FetchesOnceAndResolves()
+        [UnityTest]
+        public IEnumerator SetStyle_TileJsonUrlSource_FetchesOnceAndResolves()
         {
             string tilesTemplate = WriteFileTileFixture("s83b-tilejson-tiles").Replace("\\", "/");
             int docFetches = 0;
@@ -147,8 +152,8 @@ namespace MapRenderer.Tests.MapViews
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""src"", ""source-layer"":""countries"",
                                     ""paint"": { ""fill-color"": [""rgba"",200,50,50,1] } } ]
                 }");
-                Await(view.SetStyle(style, "tilejson-style"));
-                PumpUntilSettled(view);
+                yield return Await(view.SetStyle(style, "tilejson-style"));
+                yield return PumpUntilSettled(view);
 
                 Assert.AreEqual(1, docFetches, "a url-only source fetches its TileJSON exactly once");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 0, X = 0, Y = 0 }),
@@ -159,8 +164,8 @@ namespace MapRenderer.Tests.MapViews
 
         // ── Multi-source per-source routing: two vector sources A,B each with a layer; each source's own
         //    counting IDataSource is fetched (both > 0). A single-source shortcut drives one to 0 → fails. ──
-        [Test]
-        public void SetStyle_MultiSource_RoutesEachLayerToItsOwnSource()
+        [UnityTest]
+        public IEnumerator SetStyle_MultiSource_RoutesEachLayerToItsOwnSource()
         {
             byte[] bytes = SampleTileFixture.Bytes();
             var perTemplate = new Dictionary<string, TestDataSource>();
@@ -186,8 +191,8 @@ namespace MapRenderer.Tests.MapViews
                           ""paint"": { ""fill-color"": [""rgba"",50,50,200,1] } }
                     ]
                 }");
-                Await(view.SetStyle(style, "multi"));
-                PumpUntilSettled(view);
+                yield return Await(view.SetStyle(style, "multi"));
+                yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(perTemplate.ContainsKey("https://a/{z}/{x}/{y}.pbf"), "source A pipeline built");
                 Assert.IsTrue(perTemplate.ContainsKey("https://b/{z}/{x}/{y}.pbf"), "source B pipeline built");
@@ -202,8 +207,8 @@ namespace MapRenderer.Tests.MapViews
 
         // ── Restyle reuses an UNCHANGED source's pipeline: it is not re-created (construct count stays 1)
         //    and its cached bytes are reused (FetchCount unchanged across the second SetStyle). ────────────
-        [Test]
-        public void Restyle_UnchangedSource_KeepsPipelineAndReusesBytes()
+        [UnityTest]
+        public IEnumerator Restyle_UnchangedSource_KeepsPipelineAndReusesBytes()
         {
             byte[] bytes = SampleTileFixture.Bytes();
             int constructsForA = 0;
@@ -217,25 +222,25 @@ namespace MapRenderer.Tests.MapViews
             try
             {
                 // Style 1: source A + a red fill layer.
-                Await(view.SetStyle(StyleParser.Parse(@"{
+                yield return Await(view.SetStyle(StyleParser.Parse(@"{
                     ""version"":8,
                     ""sources"": { ""A"": { ""type"":""vector"", ""tiles"":[""https://a/{z}/{x}/{y}.pbf""] } },
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
                                     ""paint"": { ""fill-color"": [""rgba"",200,50,50,1] } } ]
                 }"), "v1"));
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
                 Assert.AreEqual(1, constructsForA, "source A constructed once on first SetStyle");
                 int fetchesAfterV1 = srcA.FetchCount;
                 Assert.Greater(fetchesAfterV1, 0, "source A fetched its tile on v1");
 
                 // Style 2: SAME source A (unchanged def ⇒ same SourceKey), DIFFERENT layer paint (green).
-                Await(view.SetStyle(StyleParser.Parse(@"{
+                yield return Await(view.SetStyle(StyleParser.Parse(@"{
                     ""version"":8,
                     ""sources"": { ""A"": { ""type"":""vector"", ""tiles"":[""https://a/{z}/{x}/{y}.pbf""] } },
                     ""layers"": [ { ""id"":""f"", ""type"":""fill"", ""source"":""A"", ""source-layer"":""countries"",
                                     ""paint"": { ""fill-color"": [""rgba"",50,200,50,1] } } ]
                 }"), "v2"));
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
 
                 Assert.AreEqual(1, constructsForA,
                     "an UNCHANGED source must NOT be re-created on restyle (kept pipeline ⇒ identity preserved)");

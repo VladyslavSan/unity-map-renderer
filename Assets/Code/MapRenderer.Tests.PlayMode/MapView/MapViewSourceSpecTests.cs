@@ -2,16 +2,20 @@
 // the MVT-fetching layers (fill/line/symbol with a non-empty source) — background is source-less by design,
 // and raster/circle/hillshade/unknown are unsupported-for-now and must never have TileJSON/document loaded
 // or a tile source constructed for them (RenderLayerFactory.TryGetFetchSource is the ONE registry).
+//
+// PlayMode: drives the real async SetStyle + tile-settle over real frames (yield, never Thread.Sleep).
 
+using System.Collections;
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests.MapViews
+namespace MapRenderer.Tests.PlayMode.MapViews
 {
     [TestFixture]
     public class MapViewSourceSpecTests
@@ -36,33 +40,37 @@ namespace MapRenderer.Tests.MapViews
         private static MapView NewView(out GameObject go)
         {
             go = new GameObject("MapViewSourceSpec");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64; view.Config.MaxMeshBuildsPerTick = 64;
             return view;
         }
 
-        private static void SpinToCompleted(UniTask task, int maxSpins = 20000)
+        /// <summary>Yields frames until the (Preserved) style task completes, then propagates its result —
+        /// the loaders complete on the ThreadPool, so a real frame gives them wall-clock. Never Thread.Sleep.</summary>
+        private static IEnumerator SpinToCompleted(UniTask task, int maxSpins = 20000)
         {
             var t = task.Preserve();
             int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
             t.GetAwaiter().GetResult();
         }
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
-        [Test]
-        public void MixedStyle_ResolvesOnlyTheFillsSource_NoRasterOrBackgroundFetch()
+        [UnityTest]
+        public IEnumerator MixedStyle_ResolvesOnlyTheFillsSource_NoRasterOrBackgroundFetch()
         {
             var view = NewView(out var go);
             int docFetches = 0;
@@ -77,8 +85,8 @@ namespace MapRenderer.Tests.MapViews
             };
             try
             {
-                SpinToCompleted(view.SetStyle(StyleParser.Parse(MixedStyle), "mixed"));
-                PumpUntilSettled(view);
+                yield return SpinToCompleted(view.SetStyle(StyleParser.Parse(MixedStyle), "mixed"));
+                yield return PumpUntilSettled(view);
 
                 Assert.AreEqual(0, docFetches,
                     "no TileJSON/document load may be issued for the raster (or background) layer.");

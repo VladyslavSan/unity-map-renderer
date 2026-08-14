@@ -1,19 +1,20 @@
 // Stall #2 (release storm) — the deferred-release queue budgets how many (tile, source) records are freed
 // per Tick (backend removal + mesh destroy + scheduler release), so a zoom-out/fast-pan no longer frees the
 // whole departing cover in one frame. These teeth drive the real MapView tile loop (BRG backend, to avoid
-// the EG backend's intermittent alloc noise). Unity-only; excluded from core-tests.csproj.
+// the EG backend's intermittent alloc noise). PlayMode: the async mesh build settles over real frames, so
+// each settle-poll is a [UnityTest] that yields a frame (never Thread.Sleep). Excluded from core-tests.csproj.
 
-using System.IO;
-using System.Threading;
+using System.Collections;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests.Tiles
+namespace MapRenderer.Tests.PlayMode.Tiles
 {
     [TestFixture]
     public class Stall2ReleaseBudgetTests
@@ -33,20 +34,25 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        private static void PumpUntilSettled(MapView view, int maxFrames = 3000)
+        /// <summary>Pumps the MapView across real frames until its cover has settled, yielding a frame each
+        /// iteration so the ThreadPool mesh build lands (never Thread.Sleep — a blocked thread does not
+        /// advance the player loop). Callers are <c>[UnityTest]</c> coroutines: <c>yield return</c> this.</summary>
+        private static IEnumerator PumpUntilSettled(MapView view, int maxFrames = 3000)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
-                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) yield break;
+                yield return null;
             }
         }
 
         private static (GameObject go, MapView view) NewView(int releaseBudget)
         {
             var go   = new GameObject("MapView_Stall2");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
+            var view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
             view.Config.Backend               = RenderBackend.Brg;
             view.Config.TileSelection.MinZoom = 0;
             view.Config.TileSelection.MaxZoom = 8;
@@ -58,15 +64,15 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── Budget: no single Tick releases more than MaxReleasesPerTick; the backlog drains over frames ──
-        [Test]
-        public void ReleaseQueue_BoundsReleasesPerTick_AndDrainsBacklog()
+        [UnityTest]
+        public IEnumerator ReleaseQueue_BoundsReleasesPerTick_AndDrainsBacklog()
         {
             var src        = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(releaseBudget: 2);
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 7.0), style: MinimalStyle());
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 3, "need > budget tiles so the release budget actually defers work.");
 
@@ -92,15 +98,15 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── Re-validation: a tile that leaves cover then returns before its dequeue is KEPT, not churned ──
-        [Test]
-        public void ReleaseQueue_PanOutPanBack_RevalidatesAndKeepsDeferredTiles()
+        [UnityTest]
+        public IEnumerator ReleaseQueue_PanOutPanBack_RevalidatesAndKeepsDeferredTiles()
         {
             var src        = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(releaseBudget: 1);
             try
             {
                 view.LoadTestStyle(src, Cam(0, 0, 7.0), style: MinimalStyle());
-                PumpUntilSettled(view);
+                yield return PumpUntilSettled(view);
                 int loadedBefore = view.LoadedTileCount();
                 Assert.GreaterOrEqual(loadedBefore, 4, "need enough tiles that a naive pan-back would free clearly > the transient.");
 

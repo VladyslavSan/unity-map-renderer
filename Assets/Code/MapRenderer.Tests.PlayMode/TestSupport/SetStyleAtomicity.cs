@@ -1,8 +1,9 @@
-// Unity EditMode only — shared scaffold for the MapView.SetStyle commit-atomicity tests
+// PlayMode — shared scaffold for the MapView.SetStyle commit-atomicity tests
 // (MapViewBackgroundRestyleTests + MapViewMaterialValidationOrderingTests). A restyle must keep the
 // PREVIOUS style live until the single synchronous post-await commit; both files drive that seam through a
 // main-thread gated loader and assert the old style survives resolution/cancel/validation-failure.
 
+using System.Collections;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
@@ -60,22 +61,23 @@ namespace MapRenderer.Tests
             public void Release() => _tcs.TrySetResult(TileJsonText);
         }
 
-        /// <summary>Spins to completion WITHOUT observing the result — used where the caller expects (and
-        /// separately asserts on) a fault/cancel.</summary>
-        public static void SpinToCompleted(UniTask task, int maxSpins = 20000)
+        /// <summary>Yields frames to completion WITHOUT observing the result — used where the caller expects
+        /// (and separately asserts on) a fault/cancel. Callers <c>yield return</c> this.</summary>
+        public static IEnumerator SpinToCompleted(UniTask task, int maxSpins = 20000)
         {
             var t = task.Preserve();
             int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
         }
 
-        /// <summary>Spins to completion and RE-THROWS on fault/cancel — used where the caller expects
-        /// success, so a regression surfaces as the real exception instead of a silently-stale assertion.</summary>
-        public static void SpinToSucceeded(UniTask task, int maxSpins = 20000)
+        /// <summary>Yields frames to completion and RE-THROWS on fault/cancel — used where the caller expects
+        /// success, so a regression surfaces as the real exception instead of a silently-stale assertion.
+        /// Callers <c>yield return</c> this.</summary>
+        public static IEnumerator SpinToSucceeded(UniTask task, int maxSpins = 20000)
         {
             var t = task.Preserve();
             int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            while (!t.Status.IsCompleted() && s++ < maxSpins) yield return null;
             t.GetAwaiter().GetResult();
         }
 

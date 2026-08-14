@@ -4,21 +4,24 @@
 // with "UnityWebRequestException: Unknown Error" published from UniTask's ExceptionHolder.Finalize() —
 // i.e. fetch tasks cancelled mid-flight by cover churn were never observed.
 //
-// Unity-only (MonoBehaviour + MapView + ThreadPool fetch). Excluded from core-tests.csproj.
+// PlayMode (MonoBehaviour + MapView + ThreadPool fetch): the test body yields real frames so the ThreadPool
+// fetches kick/fault (never Thread.Sleep in the test loop). Excluded from core-tests.csproj.
 
 using System;
+using System.Collections;
 using System.IO;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests.Tiles
+namespace MapRenderer.Tests.PlayMode.Tiles
 {
     [TestFixture]
     public class TileFetchCancellationTests
@@ -43,6 +46,8 @@ namespace MapRenderer.Tests.Tiles
         /// fault is deliberate: UniTask tends to suppress unobserved OCE, so an OCE-based fake would let the
         /// test pass vacuously (with or without the fix). This faults the way the real bug does. Driven
         /// through the shared <see cref="TestDataSource"/> (S81) via its (id, ct) delegate ctor.
+        /// The Thread.Sleep here is the simulated fetch latency ON THE THREADPOOL (not a test-frame wait) —
+        /// it stays; the settle waits in the test body yield real frames.
         /// </summary>
         private static async UniTask<TileResponse> SpinThenFault(TileId id, CancellationToken ct)
         {
@@ -54,8 +59,8 @@ namespace MapRenderer.Tests.Tiles
             throw new InvalidOperationException(FaultMarker);
         }
 
-        [Test]
-        public void RapidRelease_MidFetch_DoesNotPublishUnobservedExceptions()
+        [UnityTest]
+        public IEnumerator RapidRelease_MidFetch_DoesNotPublishUnobservedExceptions()
         {
             bool unobservedFired = false;
             Action<Exception> handler = ex =>
@@ -67,7 +72,9 @@ namespace MapRenderer.Tests.Tiles
 
             var        src  = new TestDataSource(SpinThenFault);
             GameObject go   = new GameObject("MapView_S84");
-            MapView    view = go.AddComponent<MapView>().WithTestMaterials();
+            MapView    view = go.AddComponent<MapView>();
+            view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
+            view.WithTestMaterials();
             try
             {
                 view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
@@ -77,9 +84,9 @@ namespace MapRenderer.Tests.Tiles
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
 
-                // Tiles enter cover; fetches kick and stay in-flight (CancelFaultingSource never returns).
+                // Tiles enter cover; fetches kick and stay in-flight (SpinThenFault never returns).
                 view.LateUpdate();
-                Thread.Sleep(5);
+                for (int i = 0; i < 3; i++) yield return null; // real frames: let the ThreadPool fetches kick
                 view.LateUpdate();
 
                 // Churn: pan far so the original tiles are released while their fetch is still in-flight.
@@ -96,7 +103,7 @@ namespace MapRenderer.Tests.Tiles
                 for (int f = 0; f < 300; f++)
                 {
                     view.LateUpdate();
-                    Thread.Sleep(1);
+                    yield return null;
                 }
 
                 view.Teardown();

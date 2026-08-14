@@ -1,18 +1,18 @@
-// S85 acceptance tests — render/tile telemetry (live plumbing, multi-source, load-progress, backlog,
-// panel forwarding, allocation). Unity-only (MonoBehaviour + MapView + ThreadPool fetch); the
-// TileCoverStats + FrustumTileSelector aspect/Flat teeth live in the engine-free TileCoverStatsTests.cs
-// (shared verbatim with the fast core-tests project).
+// S85 acceptance tests — render/tile telemetry (live plumbing, panel forwarding, allocation). Unity-only
+// (MonoBehaviour + MapView + ThreadPool fetch); the TileCoverStats + FrustumTileSelector aspect/Flat teeth
+// live in the engine-free TileCoverStatsTests.cs (shared verbatim with the fast core-tests project).
+//
+// EditMode half: the D2 GC.Alloc teeth (PlayMode's per-frame engine allocations would pollute the measured
+// region) and the trivial unwired-panel no-op. The async-settle + multi-source/backlog/prepared-cache
+// teeth live in the PlayMode half (MapRenderer.Tests.PlayMode.MapViews.MapTelemetryTests). Settle is
+// deterministic here via DrainMeshBuilds (no Thread.Sleep).
 
-using System.Collections.Generic;
-using System.IO;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
@@ -35,415 +35,17 @@ namespace MapRenderer.Tests.MapViews
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        /// <summary>Two distinct rendered sources — the S83b multi-source discriminator (each gets its own
-        /// TileManager pipeline / <c>_loaded</c> record per cover tile).</summary>
-        private static StyleDocument TwoSourceStyle() => StyleParser.Parse(@"{
-            ""version"": 8, ""name"": ""S85-multi"",
-            ""sources"": {
-                ""src-a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
-                ""src-b"": { ""type"": ""vector"", ""tiles"": [""https://example.com/b/{z}/{x}/{y}.pbf""] }
-            },
-            ""layers"": [
-                { ""id"": ""a-fill"", ""type"": ""fill"", ""source"": ""src-a"", ""source-layer"": ""countries"",
-                  ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
-                { ""id"": ""b-fill"", ""type"": ""fill"", ""source"": ""src-b"", ""source-layer"": ""countries"",
-                  ""paint"": { ""fill-color"": [""rgba"", 50, 50, 200, 1] } }
-            ]
-        }");
-
-        /// <summary>Pumps Tick() until every loaded tile has settled or a spin budget is hit (mirrors
-        /// <c>MapViewAsyncMeshBuildTests.PumpUntilSettled</c>).</summary>
-        private static void PumpUntilSettled(MapView view, int maxFrames = 2500)
+        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
+        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
+        /// them. No frame yielding — mirrors <c>PreparedCacheTests.PumpUntilSettled</c>.</summary>
+        private static void PumpUntilSettled(MapView view, int maxTicks = 2500)
         {
-            for (int f = 0; f < maxFrames; f++)
+            for (int f = 0; f < maxTicks; f++)
             {
                 view.LateUpdate();
+                view.DrainMeshBuilds();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
                     return;
-                Thread.Sleep(1);
-            }
-        }
-
-        /// <summary>A fetch that stays in-flight (spins on the ThreadPool) until <paramref name="release"/>
-        /// is cancelled, then resolves absent — mirrors <c>TileFetchCancellationTests.SpinThenFault</c>, but
-        /// resolves cleanly instead of faulting (this stage wants a deterministic pending window, not a
-        /// cancellation race).</summary>
-        private static async UniTask<TileResponse> SpinUntilReleased(CancellationTokenSource release)
-        {
-            await UniTask.SwitchToThreadPool();
-            int spins = 0;
-            while (!release.IsCancellationRequested && spins++ < 60000) // ~60s safety cap
-                Thread.Sleep(1);
-            return TileResponse.Absent(TileEncoding.Mvt);
-        }
-
-        // ── THE decisive test: independent recompute + must-change ───────────────────────────────
-
-        [Test]
-        public void CaptureTelemetry_VisibleTileCount_MatchesIndependentSelector_AndChangesAcrossViews()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S85_Decisive");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                // Pin Flat + the planar far policy so the independent selector can't diverge for reasons
-                // unrelated to telemetry plumbing (ScreenSpaceLod / RaySphereFarPlane vs GeometryAwareFarPlane).
-                view.Config.TileSelection.LodMode        = TileLodMode.Flat;
-                view.Config.TileSelection.MinZoom        = 0;
-                view.Config.TileSelection.MaxZoom        = 14;
-                view.Config.TileSelection.OnScreenTilePx = 512;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 4.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-
-                var snap = view.CaptureTelemetry();
-                Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
-
-                // Independently recompute the SAME cover from the SAME view inputs MapView itself feeds the
-                // selector (BuildTileSelectionConfig/EnsureSelector) — same min/max zoom, on-screen px, Flat
-                // LOD, GeometryAwareFarPlane (planar default), same camera + framing viewport.
-                var independent = new FrustumTileSelector(
-                    view.Config.TileSelection.MinZoom, view.Config.TileSelection.MaxZoom, view.Config.TileSelection.OnScreenTilePx,
-                    new FlatLodStrategy(), new GeometryAwareFarPlane());
-                var independentView = new ViewContext
-                {
-                    Camera     = view.Camera.CurrentProperties,
-                    ViewportPx = view.Camera.ViewportPx / view.Config.DevicePixelRatio,
-                    Projection = view.Camera.Projection,
-                };
-                var independentCover = new List<TileId>();
-                independent.SelectVisibleTiles(in independentView, independentCover);
-
-                Assert.AreEqual(independentCover.Count, snap.VisibleTileCount,
-                    "VisibleTileCount must equal an independently recomputed cover over the same view inputs " +
-                    "— a shallow impl returning a constant or 0 diverges here.");
-
-                // Must CHANGE between two materially different views (a zoom change). NOTE: zoom 4 → 8 does
-                // NOT change the count here — the S88 512-px on-screen-tile convention keeps the near-field
-                // grid size roughly CONSTANT across zoom for a fixed square viewport (by design: altitude and
-                // tile ground size scale together), so a zoom change only "changes" VisibleTileCount below the
-                // saturation point. Confirmed directly (FrustumTileSelector over this viewport): z0=1, z1=4,
-                // z2..z4=16 (constant thereafter) — so 4 → 1 is the smallest genuinely material zoom change.
-                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 1.0 });
-                PumpUntilSettled(view);
-                int changed = view.CaptureTelemetry().VisibleTileCount;
-
-                Assert.Greater(changed, 0);
-                Assert.AreNotEqual(snap.VisibleTileCount, changed,
-                    "VisibleTileCount must change between materially different views (zoom 4 → 1).");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── Multi-source discriminator ────────────────────────────────────────────────────────────
-
-        [Test]
-        public void MultiSource_VisibleTileCount_DivergesFromLoadedTileCount()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S85_MultiSource");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: TwoSourceStyle());
-                PumpUntilSettled(view);
-
-                var snap = view.CaptureTelemetry();
-                Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
-                Assert.AreEqual(snap.VisibleTileCount * 2, snap.LoadedTileCount,
-                    "two rendered sources ⇒ two (tile, source) records per cover tile (_loaded ≈ 2×cover)");
-                Assert.AreNotEqual(snap.VisibleTileCount, snap.LoadedTileCount,
-                    "the discriminator: VisibleTileCount must NOT be confused with _loaded.Count under multi-source " +
-                    "— strictly stronger than the single-source structural grep, where the two are count-equal.");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── Built/pending lag while loading ───────────────────────────────────────────────────────
-
-        [Test]
-        public void InFlightFetch_EverythingPending_NothingBuiltYet()
-        {
-            var release = new CancellationTokenSource();
-            var src     = new TestDataSource((id, ct) => SpinUntilReleased(release));
-            var go      = new GameObject("MapView_S85_Pending");
-            var view    = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                view.LateUpdate(); // requests the cover; fetches kick and stay in-flight (SpinUntilReleased never returns)
-
-                var snap = view.CaptureTelemetry();
-                Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
-                Assert.Greater(snap.InFlightFetches, 0,
-                    "positive control: fetches must actually be in-flight, else the assertions below are vacuous");
-                Assert.AreEqual(snap.VisibleTileCount, snap.PendingTileCount,
-                    "every cover tile is pending while its fetch is stuck in-flight (single source ⇒ Loaded==Visible)");
-                Assert.AreEqual(0, snap.LoadedTileCount - snap.PendingTileCount, "built == Loaded − Pending == 0");
-            }
-            finally
-            {
-                // Release the held fetches and drain so nothing leaks (observe-on-teardown discipline).
-                release.Cancel();
-                for (int f = 0; f < 300; f++) { view.LateUpdate(); Thread.Sleep(1); }
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        [Test]
-        public void FixtureSource_AfterSettle_AllInFlightAndBacklogCountersZero_BuiltEqualsVisible()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S85_Settled");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-                Assert.IsTrue(view.AllTilesSettled(), "all tiles must settle before measuring the settled state");
-
-                var snap = view.CaptureTelemetry();
-                Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
-                Assert.AreEqual(0, snap.InFlightFetches);
-                Assert.AreEqual(0, snap.PendingTileCount);
-                Assert.AreEqual(0, snap.ConsumeBacklog);
-                Assert.AreEqual(snap.VisibleTileCount, snap.LoadedTileCount - snap.PendingTileCount,
-                    "built (Loaded − Pending) must equal the cover once settled (single source ⇒ Loaded==Visible)");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── ConsumeBacklog: the S95 "measure first" signal ────────────────────────────────────────
-
-        [Test]
-        public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S85_Backlog");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
-                view.Config.MaxMeshBuildsPerTick = 64; // don't cap mesh build kicks
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-
-                // Mesh builds complete one at a time on the ThreadPool, so ConsumeBacklog trickles up
-                // (1, 2, ... ) across several Ticks before every loaded tile has finished building.
-                // Wait for it to STABILIZE at PendingTileCount (⇒ no record is still fetch/tess-in-flight) —
-                // stopping at the first non-zero backlog would race a partially-arrived batch.
-                TileTelemetrySnapshot snap = default;
-                for (int f = 0; f < 3000; f++)
-                {
-                    view.LateUpdate();
-                    snap = view.CaptureTelemetry();
-                    if (snap.PendingTileCount > 0 && snap.ConsumeBacklog == snap.PendingTileCount) break;
-                    Thread.Sleep(1);
-                }
-
-                Assert.Greater(snap.ConsumeBacklog, 0,
-                    "with MaxConsumesPerTick=0, completed mesh builds must pile up as backlog, not be reported " +
-                    "as a constant 0 (which would fail this throttled side).");
-                Assert.AreEqual(snap.PendingTileCount, snap.ConsumeBacklog,
-                    "nothing here is fetch/mesh build-in-flight — Pending IS the backlog in this scenario");
-                Assert.AreEqual(0, snap.InFlightFetches);
-
-                // Raise the budget and drain — proves the OTHER side: real state that drains, not a stuck counter.
-                view.Config.MaxConsumesPerTick = 64;
-                for (int f = 0; f < 200 && !view.AllTilesSettled(); f++)
-                    view.LateUpdate();
-
-                Assert.IsTrue(view.AllTilesSettled(), "raising the budget must let the tiles finish settling");
-                Assert.AreEqual(0, view.CaptureTelemetry().ConsumeBacklog, "the backlog must drain to 0");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── S82: PreparedTileCache utilization on the telemetry surface ───────────────────────────
-
-        [Test]
-        public void PreparedCache_Snapshot_ReflectsHitsEntryCountBytesHeld_AfterEvictAndRevisit()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S82_PreparedCacheTelemetry");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-
-                var afterLoad = view.CaptureTelemetry();
-                Assert.IsTrue(afterLoad.PreparedCacheEnabled, "positive control: default config has the cache enabled");
-                Assert.Greater(afterLoad.PreparedCacheMisses, 0, "the first prepare must register >=1 miss");
-                Assert.AreEqual(0, afterLoad.PreparedCacheEntryCount,
-                    "nothing has been evicted into the cache yet — the live cover still owns every built mesh");
-                Assert.AreEqual(0, afterLoad.PreparedCacheBytesHeld);
-
-                // Evict the whole cover — pan far away; every Built tile transfers into the PreparedTileCache
-                // in THIS tick (release is unthrottled — the whole _toRelease diff is processed synchronously
-                // inside one Tick, no need to PumpUntilSettled to "finish" the eviction). Deliberately do NOT
-                // PumpUntilSettled here: letting the away-location's fresh fetches reach Built before panning
-                // back would transfer THEM into the cache too on the very next Tick (a released-but-Built
-                // tile always transfers), contaminating the entry-count assertions below with unrelated
-                // entries that have nothing to do with the revisit under test.
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
-                view.LateUpdate();
-
-                var afterEvict = view.CaptureTelemetry();
-                Assert.Greater(afterEvict.PreparedCacheEntryCount, 0,
-                    "evicted Built tiles must land in the PreparedTileCache — EntryCount must reflect reality.");
-                Assert.Greater(afterEvict.PreparedCacheBytesHeld, 0,
-                    "cached meshes must report non-zero held bytes — BytesHeld must reflect reality.");
-
-                // Revisit — pan back to the original (lon,lat) BEFORE the away-location tiles have had any
-                // chance to reach Built (see note above): the cache must serve a hit for every originally-
-                // cached tile, handing ownership (and the entry) back OUT (Model B TryTake).
-                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 0.0, Latitude = 0.0 });
-                view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
-                var afterRevisitTick = view.CaptureTelemetry();
-
-                Assert.Greater(afterRevisitTick.PreparedCacheHits, 0,
-                    "DECISIVE: the revisit tick must register >=1 PreparedCacheHits — a hit must increment Hits.");
-                Assert.Less(afterRevisitTick.PreparedCacheEntryCount, afterEvict.PreparedCacheEntryCount,
-                    "TryTake (Model B) removes the entry on a hit — a revisit that hits every originally-cached " +
-                    "tile must strictly DECREASE EntryCount (a shallow impl that never drains EntryCount, or " +
-                    "that only grows it, fails this).");
-
-                PumpUntilSettled(view);
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        [Test]
-        public void CaptureTelemetry_PreparedCacheDisabled_ReportsDisabledAndZeroHits()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S82_PreparedCacheDisabled");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-            // Set BEFORE WithTestCamera() — TileManager reads PreparedCache.Enabled once at construction
-            // (mirrors PreparedCacheTests.CacheDisabled_Revisit_AlwaysReprepares_NoTransfer).
-            view.Config.PreparedCache.Enabled = false;
-            view.WithTestCamera();
-            view.Config.MaxConsumesPerTick        = 64;
-            view.Config.MaxMeshBuildsPerTick = 64;
-
-            try
-            {
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-
-                var snap = view.CaptureTelemetry();
-                Assert.IsFalse(snap.PreparedCacheEnabled, "the snapshot must reflect the disabled toggle.");
-                Assert.AreEqual(0, snap.PreparedCacheHits, "a disabled cache must never register a hit.");
-                Assert.Greater(snap.PreparedCacheMisses, 0,
-                    "positive control: the probe still counts a miss when disabled (it never finds anything cached).");
-                Assert.AreEqual(0, snap.PreparedCacheEntryCount, "a disabled cache never transfers a Built tile in.");
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── MapTelemetryPanel pulls each provider's telemetry ─────────────────────────────────────
-
-        [Test]
-        public void MapTelemetryPanel_Pull_PopulatesFieldsFromProviderTelemetry()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_S85_Panel");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            GameObject panelGo = null;
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-
-                panelGo = new GameObject("S85_TelemetryPanel");
-                var panel = panelGo.AddComponent<MapTelemetryPanel>();
-                panel.Map = view;
-                view.LateUpdate();   // the providers refresh their own structs during the frame
-                panel.Pull();        // what the panel's Update does; the EditMode runner has no game loop
-
-                var snap = view.CaptureTelemetry();
-                Assert.Greater(snap.VisibleTileCount, 0, "positive control: the cover must be non-empty");
-                Assert.AreEqual(snap.VisibleTileCount, panel.VisibleTileCount);
-                Assert.AreEqual(snap.LoadedTileCount, panel.LoadedTileCount);
-                Assert.AreEqual(snap.ConsumeBacklog, panel.ConsumeBacklog);
-
-                // S82: the cache section forwards too — positive control on Misses (the first prepare) so
-                // this isn't a vacuous 0==0 comparison.
-                Assert.Greater(snap.PreparedCacheMisses, 0, "positive control: the first prepare must register a miss");
-                Assert.AreEqual(snap.PreparedCacheEnabled, panel.PreparedCacheEnabled);
-                Assert.AreEqual(snap.PreparedCacheHits, panel.PreparedCacheHits);
-                Assert.AreEqual(snap.PreparedCacheMisses, panel.PreparedCacheMisses);
-                Assert.AreEqual(snap.PreparedCacheEntryCount, panel.PreparedCacheEntryCount);
-                Assert.AreEqual(snap.PreparedCacheBytesHeld, panel.PreparedCacheBytesHeld);
-                Assert.AreEqual(snap.PreparedCacheByteBudget, panel.PreparedCacheByteBudget);
-                Assert.AreEqual(snap.PreparedCacheEvictions, panel.PreparedCacheEvictions);
-                double expectedHitRate = (double)snap.PreparedCacheHits / (snap.PreparedCacheHits + snap.PreparedCacheMisses) * 100.0;
-                Assert.AreEqual(expectedHitRate, panel.PreparedCacheHitRatePercent, 1e-9,
-                    "the panel must derive the hit-rate percent from the same Hits/Misses the snapshot reports.");
-            }
-            finally
-            {
-                if (panelGo != null) Object.DestroyImmediate(panelGo);
-                view.Teardown();
-                Object.DestroyImmediate(go);
             }
         }
 
@@ -460,139 +62,6 @@ namespace MapRenderer.Tests.MapViews
             finally
             {
                 Object.DestroyImmediate(panelGo);
-            }
-        }
-
-        /// <summary>
-        /// docs/telemetry-design.md §2 under the pull model: a panel that is never pulled is never written — which
-        /// is exactly a DISABLED panel, because a disabled MonoBehaviour gets no <c>Update</c>. Pulling once fills
-        /// it (the positive control: without it this would also pass if the pull were simply broken), and a panel
-        /// whose reference is cleared stops updating again.
-        ///
-        /// <para>Note what the pull model makes this test STRONGER at: the old subscription version could only
-        /// assert on <c>HasSubscribers</c> — the state the early-out read — and admitted it could not distinguish
-        /// "did not capture" from "captured and told nobody". Here the panel's own fields ARE the evidence: frames
-        /// pass, the providers refresh, and the panel stays zero because nothing read it.</para>
-        /// </summary>
-        [Test]
-        public void MapTelemetryPanel_NeverPulled_IsNeverWritten_AndPullingFillsIt()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_Telemetry_NeverPulled");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            GameObject panelGo = null;
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick   = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-
-                Assert.Greater(view.CaptureTelemetry().VisibleTileCount, 0,
-                    "positive control: there IS a non-zero level to read, so a zero below means 'not written'.");
-
-                panelGo = new GameObject("TelemetryPanel_NeverPulled");
-                var panel = panelGo.AddComponent<MapTelemetryPanel>();
-                panel.Map = view;   // wired, but never pulled — exactly a DISABLED panel's state
-
-                for (int i = 0; i < 8; i++) view.LateUpdate();
-
-                Assert.AreEqual(0, panel.VisibleTileCount,
-                    "eight frames of live providers must leave an unpulled panel untouched — wiring the Inspector " +
-                    "reference is not what makes it cost anything; Update is.");
-                Assert.AreEqual(0, panel.LoadedTileCount);
-                Assert.AreEqual(0, panel.SymbolActiveLabelTiles);
-
-                panel.Pull();
-
-                Assert.AreEqual(view.CaptureTelemetry().VisibleTileCount, panel.VisibleTileCount,
-                    "positive control: one pull fills the panel from the provider's live struct.");
-                Assert.Greater(panel.VisibleTileCount, 0);
-
-                // Clearing the reference is what a panel switched off mid-session looks like to Pull(). Zeroing the
-                // mirror fields by hand first is what gives this teeth: a Pull that ignored the null Map would
-                // write them straight back to the non-zero values above.
-                panel.Map = null;
-                panel.VisibleTileCount = 0;
-                panel.LoadedTileCount  = 0;
-
-                for (int i = 0; i < 4; i++) { view.LateUpdate(); panel.Pull(); }
-
-                Assert.AreEqual(0, panel.VisibleTileCount,
-                    "an unwired panel must stay unwritten even while its Update keeps calling Pull.");
-                Assert.AreEqual(0, panel.LoadedTileCount);
-            }
-            finally
-            {
-                if (panelGo != null) Object.DestroyImmediate(panelGo);
-                view.Teardown();
-                Object.DestroyImmediate(go);
-            }
-        }
-
-        // ── Each owner publishes its own telemetry (docs/telemetry-design.md §3) ──────────────────
-        //
-        // The two LABEL providers are tested where they are actually driven — SymbolLabelSubsystemPumpTests
-        // and LabelFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
-        // test can reach CurrentBatch / Labels.Tick at all (see the design doc's §6 note).
-
-        /// <summary>
-        /// A CLEAN tick must not blank the readout. <c>TileManager.Tick</c> returns early when the cover is
-        /// unchanged, so a refresh reached from inside that path would leave the levels reading zero exactly when
-        /// the camera goes still — the state you stare at longest. This is why the refresh sits in a shell around
-        /// <c>TickCore</c> rather than at the end of the work.
-        ///
-        /// <para><b>Weaker than the push-model test it replaces, deliberately, and here is exactly how.</b> The old
-        /// version counted publish CALLBACKS, so it could assert "one publish per tick, including the early-return
-        /// path". A pull has no callback to count, and no captured value can be perturbed from a test without adding
-        /// production surface the no-test-only-members rule forbids — so "the refresh ran" is no longer directly
-        /// observable. What survives IS falsifiable: a clean tick that refreshed from the early-return path would
-        /// produce zeros, and the loop below would fail. "The refresh runs at all" is now guaranteed structurally
-        /// instead — it is one line in <c>Tick</c>, outside <c>TickCore</c>, where the early return cannot reach it.
-        /// Reinstating a per-refresh stamp on the snapshot would make it observable again.</para>
-        /// </summary>
-        [Test]
-        public void TileTelemetry_SurvivesACleanTick_WithoutBlankingTheLevels()
-        {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("MapView_Telemetry_CleanTick");
-            var view = go.AddComponent<MapView>().WithTestMaterials();
-            try
-            {
-                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
-                view.WithTestCamera();
-                view.Config.MaxConsumesPerTick   = 64;
-                view.Config.MaxMeshBuildsPerTick = 64;
-
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
-                PumpUntilSettled(view);
-                Assert.IsTrue(view.AllTilesSettled(), "the camera must be still and the cover clean before measuring.");
-
-                // Bound by reference: this aliases the provider's own field, so every clean tick below is observed
-                // through the same storage the production readers use.
-                ref readonly TileTelemetrySnapshot live = ref view.View.TileManager.Telemetry;
-
-                int settledVisible = view.CaptureTelemetry().VisibleTileCount;
-                Assert.Greater(settledVisible, 0,
-                    "positive control: the cover is non-empty, so a zero below is a blanked readout, not an empty map.");
-
-                // Nothing moves: no camera change, no config change, so every one of these is a clean tick.
-                for (int i = 0; i < 8; i++)
-                {
-                    view.LateUpdate();
-
-                    Assert.AreEqual(settledVisible, live.VisibleTileCount,
-                        $"clean tick {i} blanked or changed the cover level — a refresh reached from TickCore's " +
-                        "early-return path is how that happens, and it is a readout that dies when the map stills.");
-                }
-            }
-            finally
-            {
-                view.Teardown();
-                Object.DestroyImmediate(go);
             }
         }
 
@@ -689,6 +158,65 @@ namespace MapRenderer.Tests.MapViews
             finally
             {
                 if (panelGo != null) Object.DestroyImmediate(panelGo);
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        // ── ConsumeBacklog: the S95 "measure first" signal ────────────────────────────────────────
+        // EditMode-only (the ONE justified Thread.Sleep in the migrated suite): this test blocks CONSUME
+        // (MaxConsumesPerTick=0) so completed mesh builds pile up as an unconsumed backlog. It needs the
+        // ThreadPool builds to COMPLETE (wall-clock) WITHOUT being consumed — DrainMeshBuilds would consume
+        // them to Built (backlog→0, defeating the scenario), and a PlayMode yield-pump stalls the pipeline
+        // under consume=0 backpressure. Thread.Sleep(1) gives the ThreadPool wall-clock while consume stays
+        // blocked — the only mechanism that fits.
+        [Test]
+        public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = new GameObject("MapView_S85_Backlog");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            try
+            {
+                view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
+                view.WithTestCamera();
+                view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
+                view.Config.MaxMeshBuildsPerTick = 64; // don't cap mesh build kicks
+
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
+
+                // Mesh builds complete one at a time on the ThreadPool, so ConsumeBacklog trickles up across
+                // several Ticks. Wait for it to STABILIZE at PendingTileCount (⇒ no record still in-flight);
+                // Thread.Sleep gives each iteration the wall-clock a completed build needs (see note above).
+                TileTelemetrySnapshot snap = default;
+                for (int f = 0; f < 3000; f++)
+                {
+                    view.LateUpdate();
+                    snap = view.CaptureTelemetry();
+                    if (snap.PendingTileCount > 0 && snap.ConsumeBacklog == snap.PendingTileCount) break;
+                    Thread.Sleep(1);
+                }
+
+                Assert.Greater(snap.ConsumeBacklog, 0,
+                    "with MaxConsumesPerTick=0, completed mesh builds must pile up as backlog, not be reported " +
+                    "as a constant 0 (which would fail this throttled side).");
+                Assert.AreEqual(snap.PendingTileCount, snap.ConsumeBacklog,
+                    "nothing here is fetch/mesh build-in-flight — Pending IS the backlog in this scenario");
+                Assert.AreEqual(0, snap.InFlightFetches);
+
+                // Raise the budget and drain — proves the OTHER side: real state that drains, not a stuck counter.
+                view.Config.MaxConsumesPerTick = 64;
+                for (int f = 0; f < 200 && !view.AllTilesSettled(); f++)
+                {
+                    view.LateUpdate();
+                    view.DrainMeshBuilds();
+                }
+
+                Assert.IsTrue(view.AllTilesSettled(), "raising the budget must let the tiles finish settling");
+                Assert.AreEqual(0, view.CaptureTelemetry().ConsumeBacklog, "the backlog must drain to 0");
+            }
+            finally
+            {
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }
