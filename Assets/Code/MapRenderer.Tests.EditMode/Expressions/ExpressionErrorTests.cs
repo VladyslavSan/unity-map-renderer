@@ -15,16 +15,11 @@ namespace MapRenderer.Tests.Expressions
     public class ExpressionErrorTests
     {
         // Each of these is an EVALUATION error: TryEvaluate returns false with a message, never throws.
-        [TestCase("[\"to-number\", \"abc\"]")]
-        [TestCase("[\"to-color\", \"not-a-color\"]")]
-        [TestCase("[\"to-rgba\", 5]")]
-        [TestCase("[\"at\", 9, [\"literal\", [1, 2]]]")]
-        [TestCase("[\"at\", -1, [\"literal\", [1, 2]]]")]
-        [TestCase("[\"length\", 5]")]
-        [TestCase("[\"<\", 1, \"a\"]")]
-        [TestCase("[\"+\", 1, \"x\"]")]
-        [TestCase("[\"rgb\", 999, 0, 0]")]
-        [TestCase("[\"rgba\", 0, 0, 0, 5]")]
+        // Only the ops with NO per-op `_IsError` twin remain here (! and upcase). The coercion / lookup /
+        // comparison / math / color rows were duplicates of the per-op error tests (same op + same error
+        // condition, several byte-identical) and were retired to those files
+        // (LiteralType/Lookup/Decision/MathOp/Color) — this stays the boundary-never-crashes table for the
+        // two ops those files do not cover.
         [TestCase("[\"!\", 5]")]                 // ! on a non-boolean
         [TestCase("[\"upcase\", 5]")]            // upcase on a non-string
         public void EvaluationError_ReturnsFalse_NeverThrows(string json)
