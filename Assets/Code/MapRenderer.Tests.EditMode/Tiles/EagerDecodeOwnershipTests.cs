@@ -180,7 +180,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(0, fake.Probe.DecodeCount, "sanity: the gate really held every fetch before its decode");
 
             fake.Gate.TrySetResult(); // decode every tile with NO tick running, so nothing can be kicked
-            for (int f = 0; f < 3000 && fake.Probe.DecodeCount < loaded; f++) Thread.Sleep(1);
+            fake.Probe.WaitUntil(() => fake.Probe.DecodeCount >= loaded, 10000);
             Assert.AreEqual(loaded, fake.Probe.DecodeCount,
                 "ANTI-VACUITY: every cover tile must really have decoded. UnbalancedCount over zero decodes " +
                 "is trivially zero, so without this every tooth in this fixture passes against a broken funnel.");
@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Tiles
         {
             if (expectedDecodes >= 0)
             {
-                for (int f = 0; f < 3000 && fake.Probe.DisposedCount < expectedDecodes; f++) Thread.Sleep(1);
+                fake.Probe.WaitUntil(() => fake.Probe.DisposedCount >= expectedDecodes, 10000);
                 Assert.AreEqual(expectedDecodes, fake.Probe.DecodeCount,
                     $"POPULATION: exactly {expectedDecodes} tiles must have decoded for {funnel} — " +
                     $"{fake.Probe.DecodeCount} did. A count below it means the drive finished while decodes " +
@@ -231,7 +231,10 @@ namespace MapRenderer.Tests.Tiles
             }
             else
             {
-                for (int f = 0; f < 600 && fake.Probe.DisposedCount < fake.Probe.DecodeCount; f++) Thread.Sleep(1);
+                // No new assert here: 234 only ever `break`s, and the fall-through Asserts immediately below
+                // (DecodeCount == DisposedCount, then UnbalancedCount == 0) ARE its trailing teeth — the wait
+                // cannot mask a defect that would fail either of them.
+                fake.Probe.WaitUntil(() => fake.Probe.DisposedCount >= fake.Probe.DecodeCount, 10000);
             }
 
             Assert.AreEqual(fake.Probe.DecodeCount, fake.Probe.DisposedCount,
@@ -276,7 +279,6 @@ namespace MapRenderer.Tests.Tiles
                     view.LateUpdate();
                     if (f > 2 && view.ReleaseQueueDepth() == 0 &&
                         fake.Probe.DisposedCount >= fake.Probe.DecodeCount) break;
-                    Thread.Sleep(1);
                 }
                 Assert.AreEqual(0, view.ReleaseQueueDepth(), "sanity: the departing backlog must fully drain");
 
@@ -389,7 +391,6 @@ namespace MapRenderer.Tests.Tiles
                     view.LateUpdate();
                     if (view.LoadedTileCount() == loaded && loaded >= 4) break;
                     loaded = view.LoadedTileCount();
-                    Thread.Sleep(1);
                 }
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 4,
                     "sanity: a multi-tile cover, so the mid-flight release is not a one-tile coincidence");
@@ -405,7 +406,6 @@ namespace MapRenderer.Tests.Tiles
                 {
                     view.LateUpdate();
                     if (f > 2 && view.ReleaseQueueDepth() == 0) break;
-                    Thread.Sleep(1);
                 }
 
                 // THE FIXED POPULATION, read once and never re-read. Every record stashed on the
@@ -425,7 +425,7 @@ namespace MapRenderer.Tests.Tiles
                 // assertion has run and leak unobserved, invisible to the balance and to UnbalancedCount
                 // alike. The bound cannot mask a defect: a tile the funnel never releases never arrives.
                 fake.Gate.TrySetResult();
-                for (int f = 0; f < 3000 && fake.Probe.DecodeCount < abandoned; f++) Thread.Sleep(1);
+                fake.Probe.WaitUntil(() => fake.Probe.DecodeCount >= abandoned, 10000);
                 Assert.AreEqual(abandoned, fake.Probe.DecodeCount,
                     $"ANTI-VACUITY, against a FIXED population: all {abandoned} abandoned fetches must really " +
                     $"have decoded before the balance is asserted ({fake.Probe.DecodeCount} did). If they did " +
@@ -436,7 +436,6 @@ namespace MapRenderer.Tests.Tiles
                 for (int f = 0; f < 600 && fake.Probe.DisposedCount < abandoned; f++)
                 {
                     view.LateUpdate();
-                    Thread.Sleep(1);
                 }
 
                 AssertEveryTileFreedExactlyOnce(fake, "the mid-flight fetch pen (DiscardFetchOutcome)", abandoned);

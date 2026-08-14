@@ -19,6 +19,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Jobs;
+using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Jobs
 {
@@ -37,8 +38,7 @@ namespace MapRenderer.Tests.Jobs
                 catch (Exception e) { ex = e; }
             }, configureAwait: false).Preserve();
 
-            int spins = 0;
-            while (!task.Status.IsCompleted() && spins++ < 20000) Thread.Sleep(1);
+            task.WaitOffPlayerLoop(20000);
 
             workerThreadId = tid;
             workerEx = ex;

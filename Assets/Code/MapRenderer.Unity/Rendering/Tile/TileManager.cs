@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
@@ -1311,14 +1310,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// true for all currently loaded tiles.
         ///
         /// This is a full drain: it handles tiles at any stage of the pipeline:
-        ///   (a) Fetch in-flight: spins until the fetch UniTask completes, then kicks mesh build inline.
-        ///   (b) Mesh build in-flight: spins until the UniTask completes, then consumes inline.
+        ///   (a) Fetch in-flight: parks until the fetch UniTask completes, then kicks mesh build inline.
+        ///   (b) Mesh build in-flight: parks until the UniTask completes, then consumes inline.
         ///   (c) Neither (tile not yet fetched): marks Built=true (nothing to do).
         ///
         /// Safe: both fetch and mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
-        /// so they complete on the ThreadPool and IsCompleted becomes true without needing the Unity
-        /// PlayerLoop to advance. Spinning on IsCompleted from the main thread therefore does not
-        /// deadlock (no PlayerLoop dependency to dead-end on).
+        /// so they complete on the ThreadPool and their continuation fires there without needing the Unity
+        /// PlayerLoop to advance. Parking on that completion via <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/>
+        /// from the main thread therefore does not deadlock (no PlayerLoop dependency to dead-end on).
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
         /// </summary>
@@ -1342,15 +1341,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (!lt.FetchCompleted)
                 {
                     var req = lt.Request;
-                    // Spin: fetch UniTask completes on the ThreadPool (configureAwait: false /
-                    // SwitchToThreadPool pattern), so IsCompleted becomes true without the PlayerLoop.
-                    // Thread.Sleep(1) yields real CPU time so the ThreadPool can run the continuation
-                    // from FetchAndCacheAsync (which also uses SwitchToThreadPool internally).
-                    // Thread.Sleep(0) is insufficient: it yields only to threads of equal priority
-                    // and may not let the ThreadPool continuation run before the spin limit.
-                    int spins = 0;
-                    while (!req.Status.IsCompleted() && spins++ < 10000)
-                        Thread.Sleep(1);
+                    // Parks on a kernel event via WaitOffPlayerLoop: the fetch UniTask completes on the
+                    // ThreadPool (configureAwait: false / SwitchToThreadPool pattern), so its continuation
+                    // fires ThreadPool-side and wakes this wait without needing the PlayerLoop — no deadlock.
+                    req.WaitOffPlayerLoop(10000);
 
                     lt.FetchCompleted = true;
 
@@ -1417,12 +1411,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (lt.HasMeshBuild)
                 {
                     var tessTask = lt.MeshBuildTask;
-                    // Safe spin: mesh build UniTask uses configureAwait: false (RunOnThreadPool),
-                    // so IsCompleted is true on the ThreadPool without needing the PlayerLoop.
-                    // Thread.Sleep(1) yields real CPU time so the ThreadPool can complete the work.
-                    int spins = 0;
-                    while (!tessTask.Status.IsCompleted() && spins++ < 10000)
-                        Thread.Sleep(1);
+                    // Parks on a kernel event via WaitOffPlayerLoop: mesh build UniTask uses
+                    // configureAwait: false (RunOnThreadPool), so its continuation fires ThreadPool-side and
+                    // wakes this wait without needing the PlayerLoop.
+                    tessTask.WaitOffPlayerLoop(10000);
                     // Drain ignores per-frame caps: unbounded budget consumes ALL layers in one call → Built.
                     ConsumeMeshBuild(id, ref lt, int.MaxValue, int.MaxValue, out _, out _);
                 }
@@ -1432,6 +1424,46 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
 
                 _loaded[key] = lt;
+            }
+        }
+
+        /// <summary>Blocks until every in-flight fetch/mesh-build task among <c>_loaded</c> tiles completes,
+        /// parking via <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/> instead of polling. Consumes,
+        /// kicks, and harvests NOTHING — a cap-deferred tile (fetch observed but no build kicked yet) is
+        /// skipped, since there is no in-flight task to park on; the real <c>LateUpdate</c> Tick kicks and
+        /// consumes it. Callers that need the mesh actually consumed still tick <c>LateUpdate</c>; this method
+        /// only supplies the ThreadPool wall-clock. See <see cref="DrainMeshBuilds"/> for the consuming peer
+        /// this method deliberately does not replicate.
+        ///
+        /// <para>Pump callers invoke this once per settle iteration, re-scanning <c>_loaded</c> each time. A
+        /// task that <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/> reports as timed out is STILL
+        /// pending, and re-parking on a still-pending task double-registers its single continuation (see that
+        /// method's contract). So a per-task timeout throws <see cref="System.TimeoutException"/> — a hung
+        /// fetch/build is a hard failure surfaced loudly, never silently re-waited. A healthy task completes
+        /// in milliseconds and never approaches <paramref name="timeoutMs"/>.</para></summary>
+        /// <param name="timeoutMs">The maximum time to wait per parked task, in milliseconds.</param>
+        /// <exception cref="System.TimeoutException">A loaded tile's fetch or mesh-build task did not complete
+        /// within <paramref name="timeoutMs"/> (a hang).</exception>
+        internal void AwaitInFlightMeshBuilds(int timeoutMs)
+        {
+            foreach (var kv in _loaded)
+            {
+                LoadedTile lt = kv.Value;
+                if (lt.Built) continue;
+
+                bool completed;
+                if (!lt.FetchCompleted)
+                    completed = lt.Request.WaitOffPlayerLoop(timeoutMs);
+                else if (lt.HasMeshBuild)
+                    completed = lt.MeshBuildTask.WaitOffPlayerLoop(timeoutMs);
+                else
+                    continue; // fetch observed but not yet kicked (cap-deferred) — no in-flight task to park on.
+
+                if (!completed)
+                    throw new System.TimeoutException(
+                        $"AwaitInFlightMeshBuilds: tile {kv.Key.Tile} did not complete within {timeoutMs}ms — " +
+                        "a hung fetch or mesh-build task. Re-parking a still-pending task would double-register " +
+                        "its single continuation, so this fails loud instead of retrying.");
             }
         }
 
@@ -2388,19 +2420,16 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _loaded.Clear();
 
-            // S48: drain the mid-flight-discard holding pen — spin to completion, then dispose the
+            // S48: drain the mid-flight-discard holding pen — park to completion, then dispose the
             // NativeArray payload; we're tearing down and must not leak. Runs AFTER the teardown loop
             // above, so it also absorbs every mesh build that loop just stashed.
-            // Safe spin: mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool), so
-            // IsCompleted becomes true on the ThreadPool without needing the PlayerLoop. Spinning here on
-            // the main thread is therefore deadlock-free. Thread.Sleep(1) yields real CPU time so the
-            // ThreadPool can complete the task.
+            // Mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool), so they complete on
+            // the ThreadPool and their continuation fires there — WaitOffPlayerLoop parks on a kernel event
+            // set by that continuation, deadlock-free (no PlayerLoop dependency).
             for (int i = 0; i < _pendingDisposal.Count; i++)
             {
-                var task  = _pendingDisposal[i];
-                int spins = 0;
-                while (!task.Status.IsCompleted() && spins++ < 10000)
-                    Thread.Sleep(1);
+                var task = _pendingDisposal[i];
+                task.WaitOffPlayerLoop(10000);
 
                 if (task.Status == UniTaskStatus.Succeeded)
                     DisposeWholeResult(task.GetAwaiter().GetResult());
@@ -2408,16 +2437,14 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             _pendingDisposal.Clear();
 
-            // S84: the FETCH pen, drained the same way — spin, then observe-and-discard through the single
+            // S84: the FETCH pen, drained the same way — park, then observe-and-discard through the single
             // abandonment funnel, so no fetch task is dropped unobserved (UnityWebRequestException flood on
             // the abort). Also absorbs what the teardown loop above stashed, whose requests it already
             // cancelled.
             for (int i = 0; i < _pendingFetchDisposal.Count; i++)
             {
-                var task  = _pendingFetchDisposal[i];
-                int spins = 0;
-                while (!task.Status.IsCompleted() && spins++ < 10000)
-                    Thread.Sleep(1);
+                var task = _pendingFetchDisposal[i];
+                task.WaitOffPlayerLoop(10000);
                 DiscardFetchOutcome(task);
             }
 

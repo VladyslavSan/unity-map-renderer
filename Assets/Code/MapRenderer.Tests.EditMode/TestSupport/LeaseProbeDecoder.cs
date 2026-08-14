@@ -1,6 +1,7 @@
 // Shared test instrument — used by SymbolParkedRedecodeTests and EagerDecodeOwnershipTests. Unity EditMode
 // only (it wraps the real MvtTileDecoder over the committed fixture). NOT in core-tests.csproj.
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using MapRenderer.Core.Geo;
@@ -80,19 +81,55 @@ namespace MapRenderer.Tests
 
         public IDecodedTile Decode(TileId id, byte[] bytes)
         {
-            var tile = new CountingTile(_inner.Decode(id, bytes), Thread.CurrentThread.ManagedThreadId);
-            lock (_gate) _decoded.Add(tile);
+            var tile = new CountingTile(_inner.Decode(id, bytes), Thread.CurrentThread.ManagedThreadId, _gate);
+            lock (_gate)
+            {
+                _decoded.Add(tile);
+                Monitor.PulseAll(_gate);
+            }
             return tile;
+        }
+
+        /// <summary>Blocks the calling thread until <paramref name="predicate"/> is true, or
+        /// <paramref name="timeoutMs"/> elapses — parks on <c>Monitor.Wait(_gate)</c> instead of polling.
+        /// <paramref name="predicate"/> typically reads <see cref="DecodeCount"/>/<see cref="DisposedCount"/>/
+        /// <see cref="UnbalancedCount"/>, each of which re-locks <see cref="_gate"/>; the C# <c>lock</c> is
+        /// reentrant, so calling them from inside this method's own <c>lock (_gate)</c> is safe.
+        /// <c>Decode</c>/<c>CountingTile.Dispose</c> pulse <see cref="_gate"/> whenever a counted quantity
+        /// changes, waking this wait to re-check.</summary>
+        /// <param name="predicate">The condition to wait for; re-checked on every pulse.</param>
+        /// <param name="timeoutMs">The maximum time to wait, in milliseconds.</param>
+        /// <returns>True if <paramref name="predicate"/> became true within <paramref name="timeoutMs"/>;
+        /// otherwise the predicate's final (false) value.</returns>
+        internal bool WaitUntil(Func<bool> predicate, int timeoutMs)
+        {
+            int deadline = Environment.TickCount + timeoutMs;
+            lock (_gate)
+            {
+                while (!predicate())
+                {
+                    int remaining = deadline - Environment.TickCount;
+                    if (remaining <= 0) return predicate();
+                    Monitor.Wait(_gate, remaining);
+                }
+                return true;
+            }
         }
 
         private sealed class CountingTile : IDecodedTile
         {
             private readonly IDecodedTile _inner;
             private readonly object _readGate = new object();
+            private readonly object _parentGate;
             private readonly List<int> _layerReadThreadIds = new List<int>();
             private int _disposeCount;
 
-            internal CountingTile(IDecodedTile inner, int threadId) { _inner = inner; ThreadId = threadId; }
+            internal CountingTile(IDecodedTile inner, int threadId, object parentGate)
+            {
+                _inner      = inner;
+                ThreadId    = threadId;
+                _parentGate = parentGate;
+            }
             internal int ThreadId { get; }
             internal int DisposeCount => Volatile.Read(ref _disposeCount);
             internal IReadOnlyList<int> LayerReadThreadIds
@@ -106,7 +143,14 @@ namespace MapRenderer.Tests
                 return _inner.GetLayer(name);
             }
 
-            public void Dispose() { Interlocked.Increment(ref _disposeCount); _inner.Dispose(); }
+            public void Dispose()
+            {
+                Interlocked.Increment(ref _disposeCount);
+                _inner.Dispose();
+                // Runs on arbitrary threads; pulse the PARENT's gate (not _readGate) so a WaitUntil parked
+                // on DisposeCount/UnbalancedCount/DisposedCount wakes and re-checks.
+                lock (_parentGate) Monitor.PulseAll(_parentGate);
+            }
         }
     }
 }

@@ -36,7 +36,6 @@
 
 using System.Collections;
 using System.IO;
-using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -50,6 +49,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Tests.Visual;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Tiles
@@ -159,15 +159,16 @@ namespace MapRenderer.Tests.Tiles
             int kicked = 0;
             for (int f = 0; f < 3000; f++)
             {
-                Thread.Sleep(1);
                 view.LateUpdate();
+                view.AwaitInFlightMeshBuilds();
                 kicked += view.MeshBuildsKickedLastTick();
                 if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
             }
             Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
                 "drive precondition: every cover tile must have been kicked, or there is no backlog to budget");
 
-            Thread.Sleep(2000);                    // wait for every mesh build to complete
+            // Pure build-completion wait, no consume (MaxConsumesPerTick=0 keeps the cap intact).
+            view.AwaitInFlightMeshBuilds();
             return (go, view);
         }
 
@@ -209,15 +210,17 @@ namespace MapRenderer.Tests.Tiles
                 // tick, and the cap assertion reads 0 for a reason that has nothing to do with the cap. The
                 // DRIVE is what changed; the property is identical, and the assertion below is if anything
                 // sharper: on the first tick that kicks anything at all, it must kick exactly one.
-                // Thread.Sleep(1) intentionally KEPT here (not DrainMeshBuilds): the tooth is the exact
-                // MeshBuildsKickedLastTick()==1 value bound by MaxMeshBuildsPerTick=1 — DrainMeshBuilds
-                // ignores per-frame caps and would settle the whole cover in one call, destroying the
-                // per-tick-cap observation this loop exists to make (see DrainMeshBuilds's own doc comment).
+                // AwaitInFlightMeshBuilds neither kicks nor consumes, so the cap observation is untouched:
+                // the tooth is the exact MeshBuildsKickedLastTick()==1 value bound by MaxMeshBuildsPerTick=1
+                // — DrainMeshBuilds ignores per-frame caps and would settle the whole cover in one call,
+                // destroying the per-tick-cap observation this loop exists to make (see DrainMeshBuilds's own
+                // doc comment).
                 int kickTickFrames = 0;
                 while (view.MeshBuildsKickedLastTick() == 0 && kickTickFrames++ < 3000)
                 {
-                    Thread.Sleep(1);
                     view.LateUpdate();
+                    if (view.MeshBuildsKickedLastTick() > 0) break;
+                    view.AwaitInFlightMeshBuilds();
                 }
 
                 Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
@@ -579,19 +582,20 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(TestDataSource.FromBytes(SampleTileFixture.Bytes()),
                     cam3, style: FillStyle());
 
-                // Pump to settle — throttle spreads kicks/consumes across many ticks. Thread.Sleep(1)
-                // intentionally KEPT here (not DrainMeshBuilds): on the default Entities backend, a settle
-                // reached in essentially one forced-drain tick renders BLANK — Entities Graphics needs a few
-                // more Rebuild/EG-system ticks after the last tile is consumed before its BRG batch is
-                // cullable (see VisualScene.WarmupFrames, which exists for exactly this). The many real
-                // throttled ticks this loop normally takes incidentally supply that warm-up; DrainMeshBuilds
-                // collapsing it to ~1 tick removed it and this test went blank (RED-verified:
+                // Pump to settle — throttle spreads kicks/consumes across many ticks. AwaitInFlightMeshBuilds
+                // (not DrainMeshBuilds) KEPT here: on the default Entities backend, a settle reached in
+                // essentially one forced-drain tick renders BLANK — Entities Graphics needs a few more
+                // Rebuild/EG-system ticks after the last tile is consumed before its BRG batch is cullable
+                // (see VisualScene.WarmupFrames, which exists for exactly this). AwaitInFlightMeshBuilds keeps
+                // ONE real LateUpdate tick per loop iteration (it only supplies the ThreadPool wall-clock, no
+                // consume/kick of its own), so the warm-up survives — unlike DrainMeshBuilds, which collapsed
+                // the tick count to ~1 and made this test go blank (RED-verified:
                 // Tooth_e_ThrottledRender_NonBlankCoverage_EntitiesBackend failed with IsBlank=true after
                 // the DrainMeshBuilds conversion).
                 for (int f = 0; f < 5000 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.LateUpdate();
-                    Thread.Sleep(1);
+                    view.AwaitInFlightMeshBuilds();
                 }
 
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
@@ -663,12 +667,15 @@ namespace MapRenderer.Tests.Tiles
                 // Block further kicks-into-consume timing is irrelevant; we measure after teardown.
                 view.Camera.Apply(
                     new CameraPropertiesUpdate { Longitude = 150.0, Latitude = 70.0 });
-                // Thread.Sleep(5) intentionally KEPT here (not DrainMeshBuilds): MaxReleasesPerTick=4 throttles
-                // the departing z=5 (9-tile) cover's release across several ticks, so some of these still sit
-                // in _loaded, partially consumed (cap=1), on the early ticks. DrainMeshBuilds ignores
-                // MaxConsumesPerTick and would fully consume them before ReleaseTile ever sees them mid-consume
-                // — disarming the tooth (it would pass even if RenderTeardownRecord's partial-tile dispose broke).
-                for (int i = 0; i < 6; i++) { view.LateUpdate(); Thread.Sleep(5); } // release old + drain holding pen
+                // Plain LateUpdate ticks (not DrainMeshBuilds): MaxReleasesPerTick=4 throttles the departing
+                // z=5 (9-tile) cover's release across several ticks, so some of these still sit in _loaded,
+                // partially consumed (cap=1), on the early ticks. DrainMeshBuilds ignores MaxConsumesPerTick
+                // and would fully consume them before ReleaseTile ever sees them mid-consume — disarming the
+                // tooth (it would pass even if RenderTeardownRecord's partial-tile dispose broke). No wall-clock
+                // wait needed here: the measurement below runs AFTER view.Teardown(), which itself drains the
+                // pen via a parked WaitOffPlayerLoop (TileManager.Teardown, §2) — these 6 ticks only need to
+                // spread the release across enough frames for ReleaseTile to see mid-consume tiles.
+                for (int i = 0; i < 6; i++) view.LateUpdate(); // release old + drain holding pen
             }
             finally
             {

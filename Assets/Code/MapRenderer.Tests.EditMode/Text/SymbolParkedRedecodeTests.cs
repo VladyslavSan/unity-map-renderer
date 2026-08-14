@@ -670,6 +670,13 @@ namespace MapRenderer.Tests.Text
                 bg.Start();
 
                 // THE RENDEZVOUS (see the summary above for why this is deterministic, not a timing race).
+                // Deliberately KEPT out of the zero-busy-wait conversion (design doc "Open findings"): this
+                // is not a UniTask completion wait, so there is no kernel event to park WaitOffPlayerLoop on.
+                // It polls raw Thread.ThreadState — a transition this process cannot subscribe to — and the
+                // Sleep(2) dwell is load-bearing: it confirms the blocked state is SUSTAINED, not transient,
+                // which is the precondition the trailing Assert.IsTrue(blocked, ...) needs to be non-vacuous.
+                // A signal-before-lock handshake would only prove "about to block", weakening that
+                // precondition — the exact disarmed-tooth failure mode this stage exists to avoid.
                 bool blocked = false;
                 for (int i = 0; i < 2000 && !blocked; i++)
                 {

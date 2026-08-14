@@ -11,12 +11,12 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Rendering.Tile;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using RenderBackend = MapRenderer.Unity.Rendering.Map.RenderBackend;
@@ -308,11 +308,10 @@ namespace MapRenderer.Tests
         /// <summary>Blocks the calling thread until <paramref name="task"/> completes — mirrors
         /// <c>GeoJsonSourceTests.SpinToCompleted</c> (not reused directly: that helper is private to its own
         /// fixture).</summary>
-        private static void SpinToCompleted(UniTask task, int maxSpins = 20000)
+        private static void SpinToCompleted(UniTask task, int timeoutMs = 20000)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
         }
 
@@ -321,21 +320,21 @@ namespace MapRenderer.Tests
         /// geojson probe returns definitively-absent null handles for disjoint tiles (plan §7) —
         /// <c>AllTilesSettled</c> treats those as settled too.
         ///
-        /// <para>Thread.Sleep(1) intentionally KEPT here (not DrainMeshBuilds): <c>TileManager.DrainMeshBuilds</c>
-        /// is deliberately "symbol-silent" (its two call sites pass no <c>symbolPass</c>, so the per-consumed-
-        /// layer symbol harvest never fires — see its doc comment). A scene declaring a
-        /// <see cref="SymbolTextVisualLayer"/> would settle its tiles via Drain but never harvest any labels,
-        /// so <see cref="SpinUntilSymbolsReady"/> spins its full 300-frame ceiling and throws (RED-verified:
-        /// three <c>GeoJsonPointLabelFixtureTests</c> failed with LastInputLabelCount=0 after converting this
-        /// to DrainMeshBuilds). This helper is shared by every <see cref="VisualScene"/> consumer, symbol and
-        /// fill-only alike, so it stays on the real per-frame Tick path.</para></summary>
+        /// <para>The real <c>LateUpdate</c> Tick does the consume + symbol harvest every iteration (unlike
+        /// <c>TileManager.DrainMeshBuilds</c>, which is deliberately "symbol-silent" — its two call sites pass
+        /// no <c>symbolPass</c>, so the per-consumed-layer symbol harvest never fires). Between ticks,
+        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> only supplies the ThreadPool wall-clock — it
+        /// consumes and harvests nothing itself, so it cannot reintroduce the symbol-silent regression
+        /// (RED-verified: three <c>GeoJsonPointLabelFixtureTests</c> failed with LastInputLabelCount=0 when this
+        /// loop was converted to DrainMeshBuilds instead). This helper is shared by every <see cref="VisualScene"/>
+        /// consumer, symbol and fill-only alike, so it stays on the real per-frame Tick path.</para></summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
             {
                 view.LateUpdate();
                 if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
-                Thread.Sleep(1);
+                view.AwaitInFlightMeshBuilds();
             }
         }
 

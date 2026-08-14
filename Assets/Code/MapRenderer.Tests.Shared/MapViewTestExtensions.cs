@@ -190,6 +190,15 @@ namespace MapRenderer.Tests
             view.TileManager.DrainMeshBuilds(view.Camera.CurrentProperties);
         }
 
+        /// <summary>Blocks until every in-flight fetch/mesh-build task among loaded tiles completes. Consumes/
+        /// kicks/harvests NOTHING — pair with a real <c>view.LateUpdate()</c> tick to actually settle. Throws
+        /// <see cref="System.TimeoutException"/> if a task hangs past <paramref name="timeoutMs"/>. See
+        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> for the full contract.</summary>
+        public static void AwaitInFlightMeshBuilds(this MapViewComponent view, int timeoutMs = 10000)
+        {
+            if (view.TileManager != null) view.TileManager.AwaitInFlightMeshBuilds(timeoutMs);
+        }
+
         // ── Backend handles (null unless the matching backend is selected and Initialise has run) ─
 
         /// <summary>The live BRG renderer; lets tests read instance buffer state without GPU readback.</summary>

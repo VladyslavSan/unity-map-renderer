@@ -1,10 +1,8 @@
 // S85 acceptance tests — render/tile telemetry (live plumbing, multi-source, load-progress, backlog,
 // panel forwarding). PlayMode half: the async-settle teeth, which settle over real frames (yield, never
-// Thread.Sleep in the test body). One exception: InFlightFetch's teardown drain runs in a `finally` block,
-// where `yield return` is illegal (CS1625) — that drain stays Thread.Sleep out of language necessity, not
-// choice. The allocation-free teeth (D2 GC.Alloc) and the trivial unwired-panel no-op stay in the EditMode
-// half (MapRenderer.Tests.MapViews.MapTelemetryTests) — PlayMode's per-frame engine allocations would
-// pollute the measured region. NOT included in Tools/core-tests.
+// Thread.Sleep in the test body). The allocation-free teeth (D2 GC.Alloc) and the trivial unwired-panel
+// no-op stay in the EditMode half (MapRenderer.Tests.MapViews.MapTelemetryTests) — PlayMode's per-frame
+// engine allocations would pollute the measured region. NOT included in Tools/core-tests.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -67,17 +65,20 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        /// <summary>A fetch that stays in-flight (spins on the ThreadPool) until <paramref name="release"/>
-        /// is cancelled, then resolves absent — mirrors <c>TileFetchCancellationTests.SpinThenFault</c>, but
-        /// resolves cleanly instead of faulting (this stage wants a deterministic pending window, not a
-        /// cancellation race). The Thread.Sleep here is a fetch-latency SIM (inside the UniTask body after
-        /// SwitchToThreadPool), not a settle-poll — it stays as-is.</summary>
+        /// <summary>A fetch that stays in-flight until <paramref name="release"/> is cancelled, then resolves
+        /// absent — mirrors <c>TileFetchCancellationTests.SpinThenFault</c>, but resolves cleanly instead of
+        /// faulting (this stage wants a deterministic pending window, not a cancellation race). A blocking
+        /// wait on the cancellation token's WaitHandle is a fetch-latency SIM (inside the UniTask body after
+        /// SwitchToThreadPool), not a settle-poll — it stays as-is, parked rather than polled.</summary>
         private static async UniTask<TileResponse> SpinUntilReleased(CancellationTokenSource release)
         {
             await UniTask.SwitchToThreadPool();
-            int spins = 0;
-            while (!release.IsCancellationRequested && spins++ < 60000) // ~60s safety cap
-                Thread.Sleep(1);
+            // Park until cancelled or the ~60s safety cap. Guard the WaitHandle access: if the release path
+            // disposed the CTS before this ThreadPool continuation ran, `release.Token.WaitHandle` throws
+            // ObjectDisposedException — a disposed source means the fetch WAS released, so resolve absent as
+            // if it had woken cleanly, rather than faulting the fetch with an unexpected ODE.
+            try { release.Token.WaitHandle.WaitOne(60000); }
+            catch (System.ObjectDisposedException) { }
             return TileResponse.Absent(TileEncoding.Mvt);
         }
 

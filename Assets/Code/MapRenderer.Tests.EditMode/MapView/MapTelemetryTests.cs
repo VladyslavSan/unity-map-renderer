@@ -7,7 +7,6 @@
 // teeth live in the PlayMode half (MapRenderer.Tests.PlayMode.MapViews.MapTelemetryTests). Settle is
 // deterministic here via DrainMeshBuilds (no Thread.Sleep).
 
-using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools.Constraints;
@@ -164,12 +163,12 @@ namespace MapRenderer.Tests.MapViews
         }
 
         // ── ConsumeBacklog: the S95 "measure first" signal ────────────────────────────────────────
-        // EditMode-only (the ONE justified Thread.Sleep in the migrated suite): this test blocks CONSUME
-        // (MaxConsumesPerTick=0) so completed mesh builds pile up as an unconsumed backlog. It needs the
-        // ThreadPool builds to COMPLETE (wall-clock) WITHOUT being consumed — DrainMeshBuilds would consume
-        // them to Built (backlog→0, defeating the scenario), and a PlayMode yield-pump stalls the pipeline
-        // under consume=0 backpressure. Thread.Sleep(1) gives the ThreadPool wall-clock while consume stays
-        // blocked — the only mechanism that fits.
+        // EditMode-only: this test blocks CONSUME (MaxConsumesPerTick=0) so completed mesh builds pile up
+        // as an unconsumed backlog. It needs the ThreadPool builds to COMPLETE (wall-clock) WITHOUT being
+        // consumed — DrainMeshBuilds would consume them to Built (backlog→0, defeating the scenario), and a
+        // PlayMode yield-pump stalls the pipeline under consume=0 backpressure. AwaitInFlightMeshBuilds gives
+        // each iteration the ThreadPool wall-clock a completed build needs WITHOUT consuming — the only
+        // mechanism that fits.
         [Test]
         public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
         {
@@ -187,14 +186,15 @@ namespace MapRenderer.Tests.MapViews
 
                 // Mesh builds complete one at a time on the ThreadPool, so ConsumeBacklog trickles up across
                 // several Ticks. Wait for it to STABILIZE at PendingTileCount (⇒ no record still in-flight);
-                // Thread.Sleep gives each iteration the wall-clock a completed build needs (see note above).
+                // AwaitInFlightMeshBuilds gives each iteration the wall-clock a completed build needs (see
+                // note above) WITHOUT consuming, so the backlog it measures stays intact.
                 TileTelemetrySnapshot snap = default;
                 for (int f = 0; f < 3000; f++)
                 {
                     view.LateUpdate();
                     snap = view.CaptureTelemetry();
                     if (snap.PendingTileCount > 0 && snap.ConsumeBacklog == snap.PendingTileCount) break;
-                    Thread.Sleep(1);
+                    view.AwaitInFlightMeshBuilds();
                 }
 
                 Assert.Greater(snap.ConsumeBacklog, 0,

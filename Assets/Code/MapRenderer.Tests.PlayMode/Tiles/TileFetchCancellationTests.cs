@@ -46,15 +46,20 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         /// fault is deliberate: UniTask tends to suppress unobserved OCE, so an OCE-based fake would let the
         /// test pass vacuously (with or without the fix). This faults the way the real bug does. Driven
         /// through the shared <see cref="TestDataSource"/> (S81) via its (id, ct) delegate ctor.
-        /// The Thread.Sleep here is the simulated fetch latency ON THE THREADPOOL (not a test-frame wait) —
-        /// it stays; the settle waits in the test body yield real frames.
+        /// A blocking wait on the cancellation token's WaitHandle simulates the fetch latency ON THE
+        /// THREADPOOL (not a test-frame wait) — it stays; the settle waits in the test body yield real
+        /// frames. Parks (no poll) until cancelled or the ~60s safety cap.
         /// </summary>
         private static async UniTask<TileResponse> SpinThenFault(TileId id, CancellationToken ct)
         {
             await UniTask.SwitchToThreadPool();
-            int spins = 0;
-            while (!ct.IsCancellationRequested && spins++ < 60000) // ~60s safety cap
-                Thread.Sleep(1);
+            // Park until cancelled or the ~60s safety cap. Guard the WaitHandle access: Release cancels AND
+            // disposes the linked CTS, and if that disposal wins the race to here (ThreadPool starvation),
+            // `ct.WaitHandle` throws ObjectDisposedException. Swallowing it and falling through to the fault
+            // is correct — a disposed source means the fetch WAS released — and it keeps the FaultMarker
+            // oracle armed (an escaping ODE would carry no marker and pass the test vacuously).
+            try { ct.WaitHandle.WaitOne(60000); }
+            catch (ObjectDisposedException) { }
             // Always fault non-OCE (even on the safety-cap path) so a dropped task would be unobserved.
             throw new InvalidOperationException(FaultMarker);
         }

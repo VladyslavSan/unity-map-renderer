@@ -90,11 +90,10 @@ namespace MapRenderer.Tests.GeoJsons
         private static CameraProperties Cam(double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom, 0, 0);
 
-        private static void SpinToCompleted(UniTask task, int maxSpins = 20000)
+        private static void SpinToCompleted(UniTask task, int timeoutMs = 20000)
         {
             var t = task.Preserve();
-            int s = 0;
-            while (!t.Status.IsCompleted() && s++ < maxSpins) Thread.Sleep(1);
+            t.WaitOffPlayerLoop(timeoutMs);
             t.GetAwaiter().GetResult();
         }
 

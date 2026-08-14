@@ -1,5 +1,4 @@
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -81,18 +80,19 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 view.LoadTestStyle(src, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 3.0, 0, 0), style: MinimalStyle());
-                // Pump to settle all tiles. Thread.Sleep(1) intentionally KEPT here (not DrainMeshBuilds):
-                // on the default Entities backend, a settle reached in essentially one forced-drain tick
-                // renders BLANK — Entities Graphics needs a few more Rebuild/EG-system ticks after the last
-                // tile is consumed before its BRG batch is cullable (see VisualScene.WarmupFrames, which
-                // exists for exactly this). The many real throttled/async ticks this loop normally takes
-                // incidentally supply that warm-up; DrainMeshBuilds collapsing it to ~1 tick removed it and
-                // this test went blank (RED-verified: MapViewLiveLoop_RendersMultiTileFill_NonBlank failed
-                // with filled=0.0% after the DrainMeshBuilds conversion).
+                // Pump to settle all tiles. AwaitInFlightMeshBuilds (not DrainMeshBuilds) KEPT here: on the
+                // default Entities backend, a settle reached in essentially one forced-drain tick renders
+                // BLANK — Entities Graphics needs a few more Rebuild/EG-system ticks after the last tile is
+                // consumed before its BRG batch is cullable (see VisualScene.WarmupFrames, which exists for
+                // exactly this). AwaitInFlightMeshBuilds keeps ONE real LateUpdate tick per loop iteration (it
+                // only supplies the ThreadPool wall-clock, no consume/kick of its own), so the warm-up
+                // survives — unlike DrainMeshBuilds, which collapsed the tick count to ~1 and made this test
+                // go blank (RED-verified: MapViewLiveLoop_RendersMultiTileFill_NonBlank failed with
+                // filled=0.0% after the DrainMeshBuilds conversion).
                 for (int f = 0; f < 2500 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
                 {
                     view.LateUpdate();
-                    Thread.Sleep(1);
+                    view.AwaitInFlightMeshBuilds();
                 }
                 Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
                     "live loop must load + build the tile cover");

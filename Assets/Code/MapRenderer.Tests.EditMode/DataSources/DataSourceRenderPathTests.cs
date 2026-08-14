@@ -9,7 +9,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -22,6 +21,7 @@ using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Source;
+using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
@@ -62,14 +62,11 @@ namespace MapRenderer.Tests.DataSources
                 using var fileSource = new FileDataSource(tempRoot);
                 // S51: FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
                 // synchronously, so calling .GetAwaiter().GetResult() immediately throws
-                // "Not yet completed". Spin-wait until the UniTask completes on the ThreadPool.
-                // Thread.Sleep(1) yields real CPU time so the ThreadPool can run the continuation.
+                // "Not yet completed". Parks until the ThreadPool fetch completes.
                 var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
-                int spins = 0;
-                while (!fetchTask.Status.IsCompleted() && spins++ < 10000)
-                    Thread.Sleep(1);
+                fetchTask.WaitOffPlayerLoop(10000);
                 Assert.IsTrue(fetchTask.Status.IsCompleted(),
-                    "FileDataSource.FetchAsync must complete within 10 seconds (10000 × 1ms).");
+                    "FileDataSource.FetchAsync must complete within 10 seconds.");
                 var fileResp = fetchTask.GetAwaiter().GetResult();
                 Assert.IsTrue(fileResp.HasData, "FileDataSource must return HasData=true");
                 fileBytes = fileResp.Bytes;

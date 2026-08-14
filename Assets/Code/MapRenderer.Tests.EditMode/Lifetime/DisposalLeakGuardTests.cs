@@ -20,7 +20,6 @@
 
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -33,6 +32,7 @@ using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
@@ -218,10 +218,18 @@ namespace MapRenderer.Tests.Lifetime
                 // may dispatch one or two tiles while the release budget below evicts a different, never-
                 // kicked handful — and the positive control reads 0 with every build still in flight.
                 // Property unchanged; only the drive is.
+                // AwaitInFlightMeshBuilds runs BEFORE LateUpdate, not after: it only supplies wall-clock for
+                // tiles kicked on an EARLIER iteration. The tile(s) kicked on the tick that satisfies the
+                // break condition are never awaited by this loop — their mesh-build task is still genuinely
+                // in-flight (Status.IsCompleted()==false) when eviction runs immediately below, which is what
+                // RenderTeardownRecord's ReleasedMidFlightCount actually counts (line ~2218: only a task that
+                // has NOT yet completed). Calling Await AFTER LateUpdate here (mirroring the ThrottleTests
+                // SetupBlockedBacklog rewrite) forces the just-kicked task to finish before the loop can
+                // break, defeating the positive control — RED-verified against this exact site.
                 int kicked = 0;
                 for (int f = 0; f < 3000; f++)
                 {
-                    Thread.Sleep(1);
+                    view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
                     kicked += view.MeshBuildsKickedLastTick();
                     if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
@@ -397,10 +405,18 @@ namespace MapRenderer.Tests.Lifetime
                 // may dispatch one or two tiles while the release budget below evicts a different, never-
                 // kicked handful — and the positive control reads 0 with every build still in flight.
                 // Property unchanged; only the drive is.
+                // AwaitInFlightMeshBuilds runs BEFORE LateUpdate, not after: it only supplies wall-clock for
+                // tiles kicked on an EARLIER iteration. The tile(s) kicked on the tick that satisfies the
+                // break condition are never awaited by this loop — their mesh-build task is still genuinely
+                // in-flight (Status.IsCompleted()==false) when eviction runs immediately below, which is what
+                // RenderTeardownRecord's ReleasedMidFlightCount actually counts (line ~2218: only a task that
+                // has NOT yet completed). Calling Await AFTER LateUpdate here (mirroring the ThrottleTests
+                // SetupBlockedBacklog rewrite) forces the just-kicked task to finish before the loop can
+                // break, defeating the positive control — RED-verified against this exact site.
                 int kicked = 0;
                 for (int f = 0; f < 3000; f++)
                 {
-                    Thread.Sleep(1);
+                    view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
                     kicked += view.MeshBuildsKickedLastTick();
                     if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
@@ -420,33 +436,24 @@ namespace MapRenderer.Tests.Lifetime
                     "assertion would be vacuously true.");
 
                 // ── Non-vacuous holding-pen assertion (DECISIVE — acceptance tooth #4) ────────────
-                // Spin on the ThreadPool until the stashed mesh build task completes and allocates
-                // its NativeArray payload (Interlocked.Increment inside BuildMeshData, line 318 of
-                // StyledFillTileBuilder). While the payload sits undisposed in _pendingDisposal,
-                // DebugLiveAllocCount must be > countBefore — proving a real allocation passed
-                // through the holding pen.
+                // No wait is needed here, and none is correct. DebugLiveAllocCount is bumped SYNCHRONOUSLY
+                // AT KICK on the main thread — MeshDataPayload.AllocateTracked (Interlocked.Increment) runs
+                // inside TileMeshLayerProcessor.AllocateForKick, in KickMeshBuild's main-thread prologue,
+                // BEFORE the RunOnThreadPool dispatch — not when the ThreadPool build finishes. So every
+                // tile the kick-pump above kicked has already incremented the counter, and the payloads the
+                // pan just stashed in _pendingDisposal sit there undisposed: held > countBefore holds the
+                // instant we read it.
                 //
-                // CRITICAL: do NOT call Tick() here. Tick() calls DrainPendingDisposal() which
-                // would dispose the payload and decrement the counter before we can observe it —
-                // defeating the purpose of this assertion.
-                //
-                // The spin mirrors the DrainMeshBuilds / Teardown patterns (Thread.Sleep(1) to
-                // yield real CPU time to the ThreadPool; bounded by spins < 10000 to avoid infinite
-                // wait on unexpected failure).
-                long held = countBefore;
-                {
-                    int spins = 0;
-                    while ((held = MeshDataPayload.DebugLiveAllocCount) <= countBefore
-                           && spins++ < 10000)
-                        Thread.Sleep(1);
-                }
+                // CRITICAL: do NOT call Tick() here. Tick() calls DrainPendingDisposal() which would dispose
+                // the payload and decrement the counter before we can observe it — defeating this assertion.
+                long held = MeshDataPayload.DebugLiveAllocCount;
 
                 Assert.Greater(held, countBefore,
                     $"Non-vacuous leak guard (DECISIVE): DebugLiveAllocCount must be > countBefore " +
                     $"(baseline={countBefore}, held={held}) while the stashed mesh build payload sits " +
-                    "undisposed in _pendingDisposal. This proves a real NativeArray allocation passed " +
-                    "through the holding pen — deleting _pendingDisposal.Add in ReleaseTile or the " +
-                    "disposal in DrainPendingDisposal would not make this assertion vacuous. " +
+                    "undisposed in _pendingDisposal. This proves a real NativeArray allocation was kicked and " +
+                    "sits live in the holding pen (premature disposal on the eviction path would drop it below " +
+                    "countBefore). " +
                     "If this fails with held==countBefore, the z5 fixture produced no geometry " +
                     "(confirm NativeArray_PositiveControl_LeakedAlloc_CounterNonZero still passes).");
 

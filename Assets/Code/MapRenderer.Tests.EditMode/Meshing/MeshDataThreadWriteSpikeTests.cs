@@ -9,11 +9,11 @@
 // main thread" — which is why allocation happens at kick and apply at consume, both on the main thread.)
 
 using System;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
+using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Meshing
 {
@@ -52,8 +52,7 @@ namespace MapRenderer.Tests.Meshing
                 catch (Exception e) { workerEx = e; }
             }, configureAwait: false).Preserve();
 
-            int spins = 0;
-            while (!task.Status.IsCompleted() && spins++ < 10000) Thread.Sleep(1);
+            task.WaitOffPlayerLoop(10000);
 
             if (workerEx != null)
             {

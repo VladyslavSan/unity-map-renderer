@@ -19,7 +19,6 @@
 // N=50 sweep). This stage keeps that green rather than re-asserting the same property.
 
 using System.IO;
-using System.Threading;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -30,6 +29,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.Tiles
@@ -94,8 +94,7 @@ namespace MapRenderer.Tests.Tiles
             // cache.Put has already run (FetchAndCacheAsync's SwitchToThreadPool + lock + Put happen BEFORE
             // the outer UniTask's IsCompleted flips true — no race with the assertion below).
             var first  = scheduler.Request(id);
-            int spins  = 0;
-            while (!first.Status.IsCompleted() && spins++ < 10000) Thread.Sleep(1);
+            first.WaitOffPlayerLoop(10000);
             Assert.IsTrue(first.Status.IsCompleted(), "warm-up fetch must complete before measuring the cache-hit path.");
 
             // Block-bodied lambda (not an expression lambda): Request returns a value, and Assert.That needs
