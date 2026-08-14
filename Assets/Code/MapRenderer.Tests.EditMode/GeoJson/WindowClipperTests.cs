@@ -5,7 +5,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// The two window clippers, in tile-local coordinates: rings (Sutherland–Hodgman) and open polylines

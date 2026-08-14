@@ -11,7 +11,7 @@
 using System.Collections.Generic;
 using System.Globalization;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// A style layer bound to a source BY ID — the composer never resolves the binding itself; a dangling

@@ -26,7 +26,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Globe
 {
     /// <summary>A curved, RIGHT-handed projection: un-swapped ECEF (det(TangentBasis) = +1), the mirror of
     /// <see cref="SphericalProjection"/>'s left-handed swap. Only the geometry surface is real (the line builder

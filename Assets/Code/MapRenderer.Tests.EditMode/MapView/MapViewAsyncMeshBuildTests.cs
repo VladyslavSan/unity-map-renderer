@@ -36,7 +36,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
     /// S47 async non-blocking mesh build acceptance tests.

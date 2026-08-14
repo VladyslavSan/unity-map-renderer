@@ -73,7 +73,7 @@ using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>Which ground direction a fixture label runs along.</summary>
     internal enum OffLookAtDirection

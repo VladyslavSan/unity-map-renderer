@@ -9,7 +9,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Jobs;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
     /// T8 — <see cref="RingWindowClipper"/> (managed, <c>MapRenderer.Core</c>) and <see cref="RingClipJob"/>

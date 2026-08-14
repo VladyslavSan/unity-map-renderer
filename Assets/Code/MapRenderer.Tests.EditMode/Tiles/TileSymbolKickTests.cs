@@ -26,7 +26,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class TileSymbolKickTests

@@ -10,7 +10,7 @@ using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Style.Line;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S44 — <see cref="LineOffset"/>: perpendicular band-center shift, sign/symmetry,

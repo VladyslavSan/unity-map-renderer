@@ -5,7 +5,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Alpha-weighted coverage recovery from a rendered RGBA32 buffer — the measurement

@@ -7,7 +7,7 @@ using System.Threading;
 using NUnit.Framework;
 using MapRenderer.Core.Json;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Json
 {
     /// <summary>
     /// <c>JsonCanonical.Write</c> — the serialization <c>TileManager.SourceKey</c> keys an inline

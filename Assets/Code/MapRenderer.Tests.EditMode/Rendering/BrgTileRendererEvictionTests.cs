@@ -17,7 +17,7 @@ using MapRenderer.Core.Style;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Style;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
     /// White-box test of the BRG eviction/compaction invariant (the "MeshID &lt;null&gt;" bug):

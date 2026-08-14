@@ -3,7 +3,7 @@ using System.Linq;
 using NUnit.Framework;
 using MapRenderer.Core.Rendering;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
     /// S07 — painter's-algorithm queue-assignment tests for <see cref="LayerDrawOrder"/>.

@@ -6,7 +6,7 @@ using System.IO;
 using NUnit.Framework;
 using UnityEngine;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
     public class TouchInputStackTests

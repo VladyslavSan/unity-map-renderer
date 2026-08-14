@@ -13,7 +13,7 @@ using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Projection
 {
     [TestFixture]
     public class ProjectionMathUnityTests

@@ -9,7 +9,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// P2 regression — the sprite sheet must be fetched for a style that has <b>no symbol layers</b>.

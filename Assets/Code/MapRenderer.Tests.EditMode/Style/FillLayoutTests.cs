@@ -6,7 +6,7 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
 using Fill = MapRenderer.Core.Style.Fill;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// P3 — <see cref="Fill.LayoutProperties"/>: parsing <c>fill-sort-key</c>.

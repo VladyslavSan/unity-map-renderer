@@ -6,7 +6,7 @@
 
 using Unity.Mathematics;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     internal static class WorldSymbolInkAnalysis
     {

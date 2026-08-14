@@ -6,7 +6,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// The tilt fixture's measurement oracle. Pure — no render. Every quantity here is obtained by

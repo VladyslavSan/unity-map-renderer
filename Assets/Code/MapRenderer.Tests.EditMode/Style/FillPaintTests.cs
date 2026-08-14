@@ -13,7 +13,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S13 / S60 — <see cref="Fill.PaintProperties"/>: classification, pinned values, BakeNumbers

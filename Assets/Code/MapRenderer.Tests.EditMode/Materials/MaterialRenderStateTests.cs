@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
     public class MaterialRenderStateTests

@@ -4,9 +4,10 @@
 using NUnit.Framework;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
+using MapRenderer.Tests.Style; // SymbolTestFixtures lives in the Style test folder
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// P1 (pitch-alignment epic) — pins <see cref="AlignmentResolution.ResolvePitch"/>: the spec's

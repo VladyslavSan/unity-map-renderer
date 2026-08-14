@@ -12,7 +12,7 @@ using MapController   = MapRenderer.Unity.Rendering.Map.Controller;
 using TouchController = MapRenderer.Unity.Rendering.Map.TouchController;
 using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
     /// S41 wiring tests for <see cref="Bootstrapper.Wire"/>.

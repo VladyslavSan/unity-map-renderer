@@ -3,7 +3,7 @@ using System.IO;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Off-screen render helper for snapshot tests.

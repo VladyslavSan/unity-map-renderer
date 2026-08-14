@@ -6,7 +6,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// I3: <see cref="IconQuadLayout.Layout"/> over the committed <c>sample-sprite.json</c> fixture's own

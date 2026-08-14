@@ -1,7 +1,7 @@
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Unity.Rendering.Materials;
-namespace MapRenderer.Tests.EditMode
+namespace MapRenderer.Tests.Materials
 {
     /// <summary>
     /// Contract for <see cref="MaterialExtensions.CloneWithParent"/> — the per-layer material cloning

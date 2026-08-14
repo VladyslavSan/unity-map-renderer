@@ -14,7 +14,7 @@ using UnityEngine;
 using UnityEditor;
 #endif
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
     public class MapFillMaterialTests

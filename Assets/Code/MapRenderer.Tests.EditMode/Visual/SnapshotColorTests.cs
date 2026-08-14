@@ -1,6 +1,6 @@
 using NUnit.Framework;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Visual
 {
     /// <summary>
     /// S07 — unit tests for the region samplers added to <see cref="SnapshotCoverage"/>

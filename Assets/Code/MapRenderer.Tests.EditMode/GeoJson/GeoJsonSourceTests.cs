@@ -24,7 +24,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// GeoJSON S2 — the source, end to end: <b>T1</b> (an inline geojson source actually renders through

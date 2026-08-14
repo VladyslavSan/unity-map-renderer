@@ -31,7 +31,7 @@ using System.Reflection;
 using NUnit.Framework;
 using MapRenderer.Unity.Rendering.Backend.BRG;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Structure
 {
     [TestFixture]
     public class InstanceStructShaderParityTests

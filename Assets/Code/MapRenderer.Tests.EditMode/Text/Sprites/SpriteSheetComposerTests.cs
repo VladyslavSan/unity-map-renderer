@@ -5,7 +5,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Sprites;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// Teeth for the padded repack's PIXEL half (<see cref="SpriteSheetComposer"/>). Two properties carry

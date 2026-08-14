@@ -33,7 +33,7 @@ using Line = MapRenderer.Core.Style.Line;
 using Fill = MapRenderer.Core.Style.Fill;
 using Symbol = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     [TestFixture]
     public class DevicePixelRatioBindingTests

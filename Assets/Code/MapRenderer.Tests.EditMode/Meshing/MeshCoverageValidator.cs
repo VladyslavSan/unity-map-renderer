@@ -7,7 +7,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests.Meshing
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Test-side validator for the polygon triangulation stage (decode → assemble → earcut). Checks that a

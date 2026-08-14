@@ -32,7 +32,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class TileLoadMeasurementTests

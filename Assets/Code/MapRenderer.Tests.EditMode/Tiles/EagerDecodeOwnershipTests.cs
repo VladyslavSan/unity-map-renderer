@@ -17,7 +17,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// <b>The leak class of the eager decode, one test per abandonment funnel.</b>

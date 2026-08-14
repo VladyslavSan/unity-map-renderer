@@ -17,7 +17,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// S14 acceptance Tooth #2: data-driven per-feature color baking end-to-end through

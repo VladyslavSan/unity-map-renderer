@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Jobs;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Globe
 {
     public class GlobeFillSubdividerTests
     {

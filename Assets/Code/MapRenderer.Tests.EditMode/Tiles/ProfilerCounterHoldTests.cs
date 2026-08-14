@@ -15,7 +15,7 @@ using NUnit.Framework;
 using Unity.Profiling;
 using UnityEngine.TestTools;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class ProfilerCounterHoldTests

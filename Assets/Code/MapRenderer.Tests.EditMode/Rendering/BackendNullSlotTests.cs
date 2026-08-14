@@ -19,7 +19,7 @@ using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
     /// E1 §3.3 risk 3: all three <see cref="ITileRenderBackend"/> implementations must tolerate a null

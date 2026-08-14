@@ -42,7 +42,7 @@ using MvtDecoder           = MapRenderer.Jobs.Mvt.MvtDecoder;
 using FillRenderLayer      = MapRenderer.Unity.Rendering.Style.FillRenderLayer;
 using LineRenderLayer      = MapRenderer.Unity.Rendering.Style.LineRenderLayer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class ProfilerMarkerTests

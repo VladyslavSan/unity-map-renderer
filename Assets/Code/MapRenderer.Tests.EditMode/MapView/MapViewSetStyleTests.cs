@@ -14,7 +14,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Source;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
     /// S83b acceptance — the live <see cref="MapView.SetStyle"/> path: file:// offline (zero network),

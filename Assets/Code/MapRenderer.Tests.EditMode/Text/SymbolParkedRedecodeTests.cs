@@ -26,7 +26,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using Symbol = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// Tooth <b>D2</b> — the sprite-PARKED path end-to-end: the one production site where the decode model's

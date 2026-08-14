@@ -7,7 +7,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
     public class AngleTests

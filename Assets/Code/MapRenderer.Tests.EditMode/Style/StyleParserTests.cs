@@ -12,7 +12,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Core.Geo;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S08 acceptance: a MapLibre Style JSON parses into the typed model; spec defaults applied;

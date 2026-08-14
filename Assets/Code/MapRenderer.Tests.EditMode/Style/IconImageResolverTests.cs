@@ -8,7 +8,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// I3: <see cref="SymbolStyle.IconImageResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND expression

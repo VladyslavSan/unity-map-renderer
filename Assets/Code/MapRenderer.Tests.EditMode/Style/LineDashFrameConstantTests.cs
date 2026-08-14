@@ -33,7 +33,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     [TestFixture]
     public class LineDashFrameConstantTests

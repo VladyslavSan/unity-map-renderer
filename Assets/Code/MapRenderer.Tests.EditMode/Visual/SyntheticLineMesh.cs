@@ -8,7 +8,7 @@ using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Builds a synthetic line mesh from a <see cref="LineTessellator.Result"/> (or a polyline point list),

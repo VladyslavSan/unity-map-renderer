@@ -10,7 +10,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// Rung 2 (EditMode, the source of truth): build the REAL boundary_3 line mesh through the production

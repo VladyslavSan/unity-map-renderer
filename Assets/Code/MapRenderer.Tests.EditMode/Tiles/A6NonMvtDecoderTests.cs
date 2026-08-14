@@ -24,7 +24,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class A6NonMvtDecoderTests

@@ -17,7 +17,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// IR C1 fix stage, B2/B3: <b>the symbol consumer reads its tile address, its extent and its feature

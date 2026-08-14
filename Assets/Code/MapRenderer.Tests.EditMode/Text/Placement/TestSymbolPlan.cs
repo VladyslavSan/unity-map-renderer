@@ -22,7 +22,7 @@ using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Builds a production <see cref="SymbolGatherPlan"/> from a flat label list, grouping by

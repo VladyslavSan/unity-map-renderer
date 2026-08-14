@@ -23,7 +23,7 @@ using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     internal static class LabelPlacementSystemTestExtensions
     {

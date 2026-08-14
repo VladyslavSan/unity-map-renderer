@@ -16,7 +16,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Jobs
 {
     [TestFixture]
     public class RingClipJobTests

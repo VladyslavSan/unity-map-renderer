@@ -10,7 +10,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// S06 Batch A, item (a): exact sizing pre-count + its never-fired capacity backstop.

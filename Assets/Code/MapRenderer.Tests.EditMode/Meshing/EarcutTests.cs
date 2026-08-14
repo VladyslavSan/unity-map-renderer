@@ -4,7 +4,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// EditMode tests for the clean-room Earcut triangulator.

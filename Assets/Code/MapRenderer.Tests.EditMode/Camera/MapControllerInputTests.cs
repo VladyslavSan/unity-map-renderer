@@ -10,7 +10,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapController = MapRenderer.Unity.Rendering.Map.Controller;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
     public class MapControllerInputTests

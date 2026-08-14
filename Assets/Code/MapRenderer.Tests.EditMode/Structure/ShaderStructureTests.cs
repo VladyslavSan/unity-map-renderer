@@ -26,7 +26,7 @@ using System.Linq;
 using System.Text;
 using NUnit.Framework;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Structure
 {
     [TestFixture]
     public class ShaderStructureTests

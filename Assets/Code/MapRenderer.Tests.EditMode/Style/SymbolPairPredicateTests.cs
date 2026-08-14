@@ -18,7 +18,7 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// P-A — the icon+text PAIRING predicate is "this feature resolved both halves", not "the two halves

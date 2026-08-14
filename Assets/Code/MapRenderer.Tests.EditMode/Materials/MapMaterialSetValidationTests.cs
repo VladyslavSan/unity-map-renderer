@@ -8,7 +8,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Unity.Rendering.Materials;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
     public class MapMaterialSetValidationTests

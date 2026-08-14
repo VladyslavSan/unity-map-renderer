@@ -18,7 +18,7 @@ using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Configuration for <see cref="TiltedGroundScene"/>. A plain data carrier: object-initializer

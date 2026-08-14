@@ -34,7 +34,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class PreparedCacheTests

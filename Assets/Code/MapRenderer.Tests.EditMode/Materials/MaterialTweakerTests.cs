@@ -17,7 +17,7 @@ using MapRenderer.Unity.Editor;
 using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
 using LineMaterialTweaker = MapRenderer.Unity.Rendering.Materials.LineTweaker;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
     public class MaterialTweakerTests

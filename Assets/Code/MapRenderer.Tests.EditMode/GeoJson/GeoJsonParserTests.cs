@@ -8,7 +8,7 @@ using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// RFC 7946 parsing: the rejections this source makes loudly (T4a, T4c, T11), the attribute mapping

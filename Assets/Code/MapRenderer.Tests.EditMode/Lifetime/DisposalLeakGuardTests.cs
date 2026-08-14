@@ -36,7 +36,7 @@ using MapRenderer.Unity.Rendering.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>
     /// S51 acceptance tooth 5: disposal/leak guard for load→release race.

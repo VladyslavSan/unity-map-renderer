@@ -19,7 +19,7 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// Road shields (docs/road-shields-design.md, revision 2): G1-G6 acceptance teeth over the real Liberty

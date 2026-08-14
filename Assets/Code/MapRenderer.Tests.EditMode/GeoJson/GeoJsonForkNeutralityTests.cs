@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// T12 — a structural guard on where the GeoJSON stack is allowed to live.

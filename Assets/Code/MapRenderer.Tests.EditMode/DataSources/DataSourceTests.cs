@@ -16,7 +16,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.DataSources
 {
     /// <summary>
     /// S03 acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,

@@ -7,7 +7,7 @@
 // (docs/../geojson-visual-kit-plan.md §1 decision 2).
 
 #if UNITY_EDITOR
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// A named style source the <see cref="VisualScene"/> composer can bind layers to by id. Emits ONE

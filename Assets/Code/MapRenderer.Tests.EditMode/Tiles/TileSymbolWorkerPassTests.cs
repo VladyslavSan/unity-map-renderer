@@ -17,7 +17,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// Epic A / A3 acceptance tooth #5: proves

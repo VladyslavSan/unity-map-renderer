@@ -2,7 +2,7 @@
 
 using MapRenderer.Core.Text.Placement;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Test-assembly-only comparator (no production surface) for two <see cref="SymbolLabelBatch"/> mirror

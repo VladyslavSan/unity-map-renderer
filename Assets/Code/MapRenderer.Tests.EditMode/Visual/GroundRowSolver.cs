@@ -4,7 +4,7 @@
 using NUnit.Framework;
 using UnityEngine;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>Screen-row → world-z inversion for fixtures that measure a ground-plane ribbon on the
     /// world line <c>(0, 0, z)</c>. Shared by <see cref="LineDashSnapshotTests"/> and

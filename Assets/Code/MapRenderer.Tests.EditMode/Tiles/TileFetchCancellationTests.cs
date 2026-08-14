@@ -18,7 +18,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class TileFetchCancellationTests

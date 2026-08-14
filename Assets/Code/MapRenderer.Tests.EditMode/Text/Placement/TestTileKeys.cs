@@ -12,7 +12,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Placement;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     internal static class TestTileKeys
     {

@@ -20,7 +20,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Structure
 {
     [TestFixture]
     public class NoRawStringMaterialAccessGuardTests

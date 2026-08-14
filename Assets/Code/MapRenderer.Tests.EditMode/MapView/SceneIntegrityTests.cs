@@ -13,7 +13,7 @@ using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     [TestFixture]
     public class SceneIntegrityTests

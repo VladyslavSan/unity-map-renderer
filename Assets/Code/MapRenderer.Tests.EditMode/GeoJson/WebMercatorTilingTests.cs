@@ -4,7 +4,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// The projection boundary of the GeoJSON source (T5, T5b, T4b): geodetic → unit square → tile-local, and

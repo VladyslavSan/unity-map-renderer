@@ -22,7 +22,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.DataSources
 {
     [TestFixture]
     public class A7TileFeatureSourceTests

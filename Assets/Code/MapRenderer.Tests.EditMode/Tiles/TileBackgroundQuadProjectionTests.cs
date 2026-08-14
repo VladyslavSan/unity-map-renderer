@@ -19,7 +19,7 @@ using Background = MapRenderer.Core.Style.Background;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class TileBackgroundQuadProjectionTests

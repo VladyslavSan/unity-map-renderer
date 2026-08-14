@@ -23,7 +23,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
     /// S40 live loop tests for <see cref="MapView"/> with per-layer styled fill rendering.

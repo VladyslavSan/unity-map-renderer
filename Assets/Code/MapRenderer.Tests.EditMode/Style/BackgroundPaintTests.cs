@@ -7,7 +7,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Background = MapRenderer.Core.Style.Background;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// E3 — <see cref="Background.PaintProperties"/>: spec defaults, explicit parse, and zoom

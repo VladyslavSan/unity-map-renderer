@@ -12,7 +12,7 @@ using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Unity.Rendering.Source;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// I4 acceptance: <see cref="FixtureSpriteSource"/> serves the committed fixture sheet (mirrors

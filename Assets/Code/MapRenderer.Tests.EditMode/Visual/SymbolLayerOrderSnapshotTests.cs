@@ -109,7 +109,7 @@ namespace MapRenderer.Tests.Visual
                 // Epic A / A1 Risk R1: a realistic containing tile (BuildOverheadScene's look-at) keeps the
                 // world-anchored bake float32-safe — TileKey=0 is ~2e7m away (see
                 // SymbolAtlasOrientationSnapshotTests' identical note).
-                TileKey = MapRenderer.Tests.Text.Placement.TestTileKeys.PackedContaining(
+                TileKey = TestTileKeys.PackedContaining(
                     new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
                 MaterialIndex = materialIndex,
                 AllowOverlap = allowOverlap,

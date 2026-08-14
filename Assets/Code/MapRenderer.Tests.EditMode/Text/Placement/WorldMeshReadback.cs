@@ -13,7 +13,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Text.Placement;
 
-namespace MapRenderer.Tests.Text.Placement
+namespace MapRenderer.Tests
 {
     internal static class WorldMeshReadback
     {

@@ -22,7 +22,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Tests.Text.Placement; // WorldSymbolInkAnalysis
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>Ink-run segmentation over an <see cref="OffLookAtLabelScene"/> frame (row 0 = TOP scanline,
     /// the convention <c>OffLookAtLabelScene.InkPixels</c> and <c>RenderIsolated</c> both return).</summary>

@@ -12,7 +12,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Projection
 {
     [TestFixture]
     public class ProjectionMathTests

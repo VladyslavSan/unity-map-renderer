@@ -18,7 +18,7 @@ using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S105 Slice 2 (A3): <see cref="SymbolFeatureExtractor.Extract"/> over the committed fixture's

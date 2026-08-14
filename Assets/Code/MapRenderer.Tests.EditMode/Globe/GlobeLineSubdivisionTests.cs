@@ -9,7 +9,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Unity.Rendering.Meshing;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Globe
 {
     public class GlobeLineSubdivisionTests
     {

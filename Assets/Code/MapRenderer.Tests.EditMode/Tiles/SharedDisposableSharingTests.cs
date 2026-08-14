@@ -15,7 +15,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// Epic A / A4 acceptance teeth, carried onto the reference-counted <see cref="SharedDisposable{T}"/>: the

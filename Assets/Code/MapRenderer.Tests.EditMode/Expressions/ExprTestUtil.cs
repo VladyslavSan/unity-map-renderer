@@ -6,7 +6,7 @@ using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
 
-namespace MapRenderer.Tests.Expressions
+namespace MapRenderer.Tests
 {
     /// <summary>Shared helpers for the S09 expression tests (parse + evaluate over the JSON form).</summary>
     internal static class Expr

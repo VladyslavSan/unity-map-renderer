@@ -11,7 +11,7 @@ using System;
 using NUnit.Framework;
 using MapRenderer.Core.Lifetime;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>Minimal concrete <see cref="VerifiedDisposable"/> used only to exercise the base's contract.</summary>
     internal sealed class TestVerifiedDisposable : VerifiedDisposable

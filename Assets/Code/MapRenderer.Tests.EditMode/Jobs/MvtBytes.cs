@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Text;
 using MapRenderer.Core.Tiles;
 
-namespace MapRenderer.Tests.Jobs
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// A minimal MVT protobuf writer — the inverse of the slice of the spec <c>MvtDecoder</c> reads, and the

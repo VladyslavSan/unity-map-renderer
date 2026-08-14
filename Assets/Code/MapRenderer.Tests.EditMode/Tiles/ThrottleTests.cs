@@ -52,7 +52,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// S55 throttle acceptance tests. Engine-side: all tests are Unity EditMode.

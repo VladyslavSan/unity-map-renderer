@@ -10,7 +10,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Geo;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S12 / S60 — data-driven paint evaluation over the real fixture: <see cref="StyleProperty{T}"/>

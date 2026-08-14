@@ -7,7 +7,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Sprites;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// Teeth for the padded repack's RECT half (<see cref="SpriteSheetPadder"/>): every sprite ends up with

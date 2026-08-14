@@ -14,7 +14,7 @@ using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, GatedLoader, SpinTo*, AssertOldStyleIntact
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     [TestFixture]
     public class MapViewBackgroundRestyleTests

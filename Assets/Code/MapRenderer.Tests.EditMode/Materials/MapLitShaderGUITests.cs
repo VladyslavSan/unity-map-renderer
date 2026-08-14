@@ -10,7 +10,7 @@ using UnityEditor;                 // raw ShaderGUI
 using MapRenderer.Unity.Editor;    // MapShaderGUI / FillShaderGUI / LineShaderGUI
 #endif
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
     public class MapShaderGUITests

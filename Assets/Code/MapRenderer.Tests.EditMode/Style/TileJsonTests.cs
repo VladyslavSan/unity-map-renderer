@@ -8,7 +8,7 @@ using NUnit.Framework;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S83a acceptance: a TileJSON document parses into the typed <see cref="TileJson"/> model (tolerant,

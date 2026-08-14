@@ -22,7 +22,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
     public class DevicePixelRatioFramingTests

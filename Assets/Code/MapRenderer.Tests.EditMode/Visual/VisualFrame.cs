@@ -7,7 +7,7 @@ using UnityEngine;
 using MapRenderer.Core.Style;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// The result of a <see cref="VisualScene.Render"/> call: the decoded RGBA32 frame plus the seams a

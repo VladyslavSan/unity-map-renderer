@@ -21,7 +21,7 @@ using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
 using Symbol = MapRenderer.Core.Style.Symbol;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
     /// E1 — the render-layer unification round-2 structural teeth: one ordered <see cref="RenderLayerSet"/>

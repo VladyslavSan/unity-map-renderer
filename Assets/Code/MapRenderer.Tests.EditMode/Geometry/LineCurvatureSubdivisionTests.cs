@@ -7,7 +7,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
     /// S4: unit tests for <see cref="LineCurvatureSubdivision"/> — the shared projection-subdivision policy

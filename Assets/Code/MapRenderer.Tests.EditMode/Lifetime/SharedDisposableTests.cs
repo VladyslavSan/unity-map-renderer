@@ -14,7 +14,7 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using MapRenderer.Core.Lifetime;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>A disposable that counts how many times (thread-safely) it was disposed — the value a
     /// <see cref="SharedDisposable{T}"/> owns, so a test can assert "disposed exactly once, at the last release".</summary>

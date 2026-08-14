@@ -15,7 +15,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     [TestFixture]
     public class MeshDataThreadWriteSpikeTests

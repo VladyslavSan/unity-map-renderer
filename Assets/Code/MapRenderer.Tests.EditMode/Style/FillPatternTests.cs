@@ -11,7 +11,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Text.Sprites;
 using Fill = MapRenderer.Core.Style.Fill;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// P2 — <see cref="Fill.FillPattern"/>: resolving a <c>fill-pattern</c> sprite name against a sheet into

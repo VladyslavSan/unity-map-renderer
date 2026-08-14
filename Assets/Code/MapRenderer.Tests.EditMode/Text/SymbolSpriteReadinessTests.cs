@@ -23,7 +23,7 @@ using MapRenderer.Unity.Text;
 using Symbol = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// D6 (road-shields, docs/road-shields-design.md §3 D6) — the sprite-atlas readiness race. Before D6, a

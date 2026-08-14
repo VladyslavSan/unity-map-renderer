@@ -22,7 +22,7 @@ using System.IO;
 using System.Linq;
 using NUnit.Framework;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Structure
 {
     [TestFixture]
     public class MaterialPropertyRegistryParityTests

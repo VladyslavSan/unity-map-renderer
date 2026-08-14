@@ -10,7 +10,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// Full-pipeline headless test: decode → assemble → earcut over all 239 country features.

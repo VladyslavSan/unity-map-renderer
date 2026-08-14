@@ -10,7 +10,7 @@ using Unity.Mathematics;
 using Line = MapRenderer.Core.Style.Line;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S43 / S60 — <see cref="Line.LineDash"/>: dash coverage function, zoom-stability, width

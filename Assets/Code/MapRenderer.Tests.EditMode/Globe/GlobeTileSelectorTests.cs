@@ -9,7 +9,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Globe
 {
     public class GlobeTileSelectorTests
     {

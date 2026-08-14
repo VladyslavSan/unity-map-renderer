@@ -15,7 +15,7 @@ using MapRenderer.Core.View.Camera;
 using MapController = MapRenderer.Unity.Rendering.Map.Controller;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
     public class CameraTransformTests

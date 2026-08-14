@@ -11,7 +11,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// Planar differential oracle for <see cref="LineRibbonJob"/> (3D, Burst) vs the managed 2D reference

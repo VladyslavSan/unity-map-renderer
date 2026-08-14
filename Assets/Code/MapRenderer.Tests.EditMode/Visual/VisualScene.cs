@@ -21,7 +21,7 @@ using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using RenderBackend = MapRenderer.Unity.Rendering.Map.RenderBackend;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Fluent driver for a declarative visual-test scene: named inline-GeoJSON sources, fill layers bound to

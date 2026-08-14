@@ -10,7 +10,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Projection
 {
     /// <summary>
     /// EditMode tests for TileToGeoJob + ProjectPointsJob&lt;TProj&gt; (WebMercator + Spherical).

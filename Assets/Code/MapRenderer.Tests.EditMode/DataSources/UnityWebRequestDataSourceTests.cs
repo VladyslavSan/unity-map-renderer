@@ -23,7 +23,7 @@ using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Unity.Rendering.Source;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.DataSources
 {
     /// <summary>
     /// S51 review fix — acceptance tests for <see cref="UnityWebRequestDataSource"/>.

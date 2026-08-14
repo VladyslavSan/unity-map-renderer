@@ -22,7 +22,7 @@ using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     [TestFixture]
     public class PreparedTileCacheTests

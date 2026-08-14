@@ -17,7 +17,7 @@ using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// Parity and integration tests for the jobified decode + mesh pipeline (S04).

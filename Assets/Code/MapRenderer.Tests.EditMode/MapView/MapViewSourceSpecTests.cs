@@ -11,7 +11,7 @@ using UnityEngine;
 using MapRenderer.Core.Style;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.MapViews
 {
     [TestFixture]
     public class MapViewSourceSpecTests

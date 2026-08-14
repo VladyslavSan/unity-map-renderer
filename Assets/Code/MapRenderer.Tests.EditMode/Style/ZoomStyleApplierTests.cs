@@ -22,7 +22,7 @@ using MapRenderer.Tests.Visual;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 using MapRenderer.Unity.Rendering.Style;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S11 — <see cref="ZoomStyleApplier"/> integration tests.

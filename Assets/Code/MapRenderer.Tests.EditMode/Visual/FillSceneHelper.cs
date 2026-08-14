@@ -13,7 +13,7 @@ using FillMaterialTweaker = MapRenderer.Unity.Rendering.Materials.FillTweaker;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// Replaces the retired <c>MapFillBootstrap</c> in snapshot tests (S54).

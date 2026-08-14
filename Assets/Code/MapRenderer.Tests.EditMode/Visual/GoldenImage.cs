@@ -17,7 +17,7 @@ using System.IO;
 using Unity.Mathematics;
 using UnityEngine;
 
-namespace MapRenderer.Tests.Visual
+namespace MapRenderer.Tests
 {
     /// <summary>
     /// The golden-image comparer: <see cref="Assert"/> is the entry point a fixture calls after

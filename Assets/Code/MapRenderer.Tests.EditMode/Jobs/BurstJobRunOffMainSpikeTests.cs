@@ -20,7 +20,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Jobs;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Jobs
 {
     [TestFixture]
     public class BurstJobRunOffMainSpikeTests

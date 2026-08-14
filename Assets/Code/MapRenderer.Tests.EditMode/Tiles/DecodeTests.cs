@@ -7,7 +7,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
     /// Headless validation of the Batch-1 decode + coordinate path against the real fixture tile.

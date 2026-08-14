@@ -9,7 +9,7 @@ using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
     /// Client-side slicing end to end — parse → project → cut one tile: the straddle partition (T1), the

@@ -17,7 +17,7 @@ using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// I3: <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied

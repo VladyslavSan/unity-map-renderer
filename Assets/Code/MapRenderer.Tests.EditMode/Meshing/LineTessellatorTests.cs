@@ -4,7 +4,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// Unit tests for <see cref="LineTessellator"/>.

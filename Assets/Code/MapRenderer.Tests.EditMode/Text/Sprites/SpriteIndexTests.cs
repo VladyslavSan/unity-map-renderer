@@ -7,7 +7,7 @@ using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Text.Sprites;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// I1 acceptance: a MapLibre sprite JSON index parses into name-keyed <see cref="SpriteEntry"/>

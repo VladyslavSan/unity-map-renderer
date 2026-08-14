@@ -10,7 +10,7 @@ using UnityEngine;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Unity.Text;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Text.Sprites
 {
     /// <summary>
     /// I4 acceptance: <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel

@@ -25,7 +25,7 @@ using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.DataSources
 {
     /// <summary>
     /// Proves that <see cref="FileDataSource"/> feeds the render path correctly: bytes round-trip

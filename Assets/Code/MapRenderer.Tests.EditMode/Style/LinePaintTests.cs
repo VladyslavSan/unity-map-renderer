@@ -9,7 +9,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 
-namespace MapRenderer.Tests
+namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S14 / S60 — <see cref="Line.PaintProperties"/> / <see cref="Line.LayoutProperties"/>:
