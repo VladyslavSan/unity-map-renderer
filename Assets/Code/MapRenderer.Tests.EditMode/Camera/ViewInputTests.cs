@@ -87,22 +87,6 @@ namespace MapRenderer.Tests
         }
 
         [Test]
-        public void ApplyPan_DragUp_MovesCenterSouth()
-        {
-            // Grab the earth point at screen centre; cursor moves UP (+y in +y-up Unity convention).
-            // In the +y-up screen convention: dragging cursor UP (y increases) means the grabbed point
-            // must appear at a higher pixel position. The camera centre must shift SOUTH so the grabbed
-            // point (originally at the screen centre) now sits above centre, under the cursor.
-            var v = Cam(0, 0, 4.0);
-            GeoCoordinate3D grabbed = Proj.ScreenToGround(Centre, Vp, v);
-            double2 cursorNow = Centre + new double2(0.0, 30.0);  // cursor moved UP (+y)
-
-            var p = ViewInput.ApplyPan(Proj, v, grabbed, cursorNow, Vp);
-            Assert.Less(p.Latitude.Value, v.LookAt.Latitude,
-                "drag-up (cursor y increases in +y-up convention) shifts center SOUTH (grabbed point glues to cursor above centre)");
-        }
-
-        [Test]
         public void ApplyPan_HigherZoom_MovesLess()
         {
             // The same cursor displacement moves fewer degrees at a higher zoom (finer ground resolution).

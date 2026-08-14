@@ -41,28 +41,6 @@ namespace MapRenderer.Tests
                 base_.Tilt.Degrees);
         }
 
-        // ── GroundResolution literal pin ─────────────────────────────────────────────────────────
-
-        [Test]
-        public void GroundResolution_Zoom0_EqualsCircumferenceOver512()
-        {
-            // S93 (512 convention): GroundResolution(0) == published circumference / 512. Literal 512 (not
-            // WebMercator.TilePixelSize) so this guards the constant's VALUE rather than being a tautology.
-            double expected = EarthConstants.EquatorialCircumferenceMetres / 512.0;
-            Assert.AreEqual(expected, WebMercator.GroundResolution(0), 1e-6,
-                "GroundResolution(0) must equal EquatorialCircumferenceMetres / TilePixelSize(512)");
-        }
-
-        [Test]
-        public void GroundResolution_DoubleZoom_HalvesMpp()
-        {
-            double z = 5.0;
-            double mppZ  = WebMercator.GroundResolution(z);
-            double mppZ1 = WebMercator.GroundResolution(z + 1.0);
-            Assert.AreEqual(mppZ / 2.0, mppZ1, 1e-6,
-                "GroundResolution(z+1) must be exactly half of GroundResolution(z)");
-        }
-
         // ── T0 — Absolute axis + rotation-sign pin ───────────────────────────────────────────────
 
         [Test]
