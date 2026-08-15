@@ -600,10 +600,28 @@ namespace MapRenderer.Unity.Rendering.Map
         /// </summary>
         public void Teardown()
         {
-            TileManager.Dispose(); // tiles first — their renderers reference Layers' materials
-            Layers.Dispose();
-            Labels.Dispose();
-            Symbols.Dispose(); // S105: destroy the shared glyph atlas texture + manager
+            // Defense-in-depth: dispose each subsystem independently so a fault in ONE cannot strand the
+            // others. Learned the hard way — on Play-mode Stop Unity tears down the Entities World before this
+            // runs, and an unguarded entity touch inside TileManager.Dispose() threw straight out of here,
+            // leaving Layers/Labels/Symbols (and everything TileManager disposes after the throw) undisposed:
+            // the whole-graph "finalized without Dispose()" flood. The exception is LOGGED, never swallowed
+            // silently, so a genuine teardown bug is still loud. Order is preserved (see the summary): tiles
+            // before Layers (renderers reference layer materials), Layers before Labels (E2 presenter/slot-mesh).
+            DisposeStep(TileManager, nameof(TileManager)); // tiles first — their renderers reference Layers' materials
+            DisposeStep(Layers,      nameof(Layers));
+            DisposeStep(Labels,      nameof(Labels));
+            DisposeStep(Symbols,     nameof(Symbols));     // S105: destroy the shared glyph atlas texture + manager
+
+            static void DisposeStep(System.IDisposable subsystem, string name)
+            {
+                try { subsystem?.Dispose(); }
+                catch (System.Exception ex)
+                {
+                    UnityEngine.Debug.LogError(
+                        $"[MapView.Teardown] {name}.Dispose() threw — continuing so the remaining subsystems " +
+                        $"still release (a partial teardown beats a stranded graph). {ex}");
+                }
+            }
         }
     }
 }

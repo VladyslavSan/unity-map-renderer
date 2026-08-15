@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
@@ -605,6 +606,24 @@ namespace MapRenderer.Unity.Rendering.Tile
         // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Dispose
         // are all main-thread). No locking is required.
         private readonly List<UniTask<MeshBuildResult>> _pendingDisposal = new(8);
+
+        // ── teardown-cancel: the manager-lifetime token ───────────────────────────────────────────
+        // Cancelled ONCE, at the very top of DoDispose, so every in-flight mesh build aborts before the
+        // pen drains below wait on it (a cancelled build still settles to a zero-vertex result via
+        // RunWorkerPass's unconditional settle loop, so the drain's existing "if Succeeded" disposal path
+        // frees it — no new disposal code). Single owner, main-thread only. A field initializer (not the
+        // constructor): DoDispose is terminal + idempotent (VerifiedDisposable guard), so this token is
+        // never re-created across a SetSources restyle — restyle stashes-but-does-not-cancel, which is the
+        // structural guarantee that builds cancel ONLY on teardown.
+        private readonly CancellationTokenSource _lifetimeCts = new();
+
+        /// <summary>Test-only park: when non-null, EVERY mesh-build worker parks on this jointly with the
+        /// lifetime token before running (the field is intentionally NOT self-clearing — unlike its cited
+        /// precedent, which parks once), so a test can hold builds genuinely in-flight and observe that
+        /// teardown-cancel releases every parked worker promptly. The test releases them by setting the gate
+        /// or by tearing down (which cancels the token both parked workers also wait on). Mirrors
+        /// <see cref="MapRenderer.Unity.Text.SymbolLabelReconciler.GateForTest"/>. Internal test-only.</summary>
+        internal ManualResetEventSlim MeshBuildGateForTest;
 
         // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
         // When a tile is released before its fetch completes (rapid zoom/cover churn), the preserved
@@ -1760,10 +1779,19 @@ namespace MapRenderer.Unity.Rendering.Tile
             };
 
             decode.Acquire(); // the kick's OWN reference — see the ownership comment above
+            CancellationToken token = _lifetimeCts.Token; // captured as a local so the lambda closes over the token, not `this`
             try
             {
                 return UniTask.RunOnThreadPool(() =>
                 {
+                    // teardown-cancel test gate: when non-null, park jointly on the test gate and the lifetime
+                    // token before doing any work, so a test can hold a build genuinely in-flight (and thereby
+                    // force the cancel-settle path at teardown). Read into a local so the null-check and the
+                    // wait see the same value. Released by the test setting the gate, or by teardown cancelling
+                    // the token. Not a busy-wait — a kernel WaitHandle.WaitAny park.
+                    var gate = MeshBuildGateForTest;
+                    if (gate != null) WaitHandle.WaitAny(new[] { gate.WaitHandle, token.WaitHandle });
+
                     // FUNNEL 3 successor: the kick's OWN reference, acquired in the main-thread prologue above —
                     // no longer a transfer of the record's. It covers the mesh pass AND the un-parked symbol pass
                     // below, which is what makes those two cadences share a single decoded tile (and, with it,
@@ -1777,7 +1805,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // this-source processor once in dense order against that same tile, then settle every one
                         // of them exactly once — the moved form of today's ensure-wrapped loop.
                         Style.IRenderLayerPayload[] payloads =
-                            Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors);
+                            Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors, token);
                         var result = new MeshBuildResult { Payloads = payloads }; // mesh domain closed, arrays settled
 
                         // Epic A / A5b (§Q5): fault domain 2, disjoint from the mesh domain above — the mesh
@@ -1786,9 +1814,16 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // outer guard makes that invariant STRUCTURAL rather than a trust in the contract —
                         // belt-and-braces over the pass's own inner guard, exactly A1's per-processor
                         // Complete() guard precedent (RunWorkerPass above).
+                        //
+                        // teardown-cancel: skip the handoff once the lifetime token is cancelled.
+                        // RunWorkerAndHandoff may TryParkBuild -> enqueue into SymbolLabelSubsystem, which
+                        // MapView.Teardown disposes AFTER TileManager.DoDispose returns (TileManager -> Layers
+                        // -> Labels -> Symbols) — enqueuing into a subsystem about to be torn down is exactly
+                        // the SymbolTileLabelBlock leak vector this stage exists to close.
                         try
                         {
-                            symbolPass?.RunWorkerAndHandoff(decode);
+                            if (!token.IsCancellationRequested)
+                                symbolPass?.RunWorkerAndHandoff(decode);
                         }
                         catch (System.Exception)
                         { /* a contract-violating throw must not strand the mesh arrays */
@@ -1851,10 +1886,12 @@ namespace MapRenderer.Unity.Rendering.Tile
                 BufferClip       = _bufferClip,
             };
 
+            CancellationToken token = _lifetimeCts.Token; // captured as a local so the lambda closes over the token, not `this`
+
             return UniTask.RunOnThreadPool(() =>
             {
                 Style.IRenderLayerPayload[] payloads =
-                    Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass(in context, processors);
+                    Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass(in context, processors, token);
                 return new MeshBuildResult { Payloads = payloads };
             }, configureAwait: false).Preserve();
         }
@@ -2394,6 +2431,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         protected override void DoDispose()
         {
+            // teardown-cancel constraint 2: cancel FIRST, before either pen drain below waits on anything.
+            // A cancelled build still settles (RunWorkerPass's unconditional settle loop), so the drains
+            // below complete in milliseconds instead of blocking WaitOffPlayerLoop(10000) per stashed task.
+            // Ordering among the two "cancel-first" acts (this, and the fetch-release loop right below) is
+            // immaterial — cancellation is a cheap flag flip — but this MUST precede both drains.
+            _lifetimeCts.Cancel();
+
             // Teardown routes EVERY record through the SINGLE record-teardown funnel,
             // RenderTeardownRecord — the same one cover-change, eviction (ReleaseTile) and restyle
             // (SetSources) already use. It unregisters the record's instanced draw items, destroys
@@ -2463,6 +2507,13 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // S83b: dispose every source pipeline (each scheduler + its owned source).
             DisposePipelines();
+
+            // teardown-cancel: dispose the CTS LAST. Both pen drains above have already completed (every
+            // worker returned) by this point, so no worker is still parked on token.WaitHandle — only the
+            // Tooth-B test gate blocks on the handle at all; the production worker only polls
+            // IsCancellationRequested. Disposing here is safe either way, but doing it after both drains
+            // avoids any risk of a parked wait observing an ObjectDisposedException.
+            _lifetimeCts.Dispose();
         }
 
         /// <summary>S83b: disposes and clears every source pipeline — Epic A / A7: one

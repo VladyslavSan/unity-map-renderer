@@ -1,3 +1,4 @@
+using System.Threading;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs.Tiles;
@@ -22,52 +23,76 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// Preserves the pre-A1 fault policy exactly: a processor exception aborts the REMAINING invocations
         /// for this pass, but every processor — invoked or not — is still completed, so its kick-allocated
         /// mesh array is never stranded. Does NOT release <paramref name="decode"/> — the runner does not own
-        /// the reference; the caller does.</summary>
+        /// the reference; the caller does.
+        ///
+        /// <para>Teardown cancellation (constraint 1, no new disposal path): if <paramref name="token"/> is
+        /// already cancelled, the processing block above is skipped entirely — a build queued in the
+        /// ThreadPool but not yet started never touches <c>decode.Value</c>, which matters because
+        /// <see cref="SharedDisposable{T}"/> is undefended by design and its buffers may be racing teardown.
+        /// A build already mid-pass aborts at the next per-iteration check. Either way control falls straight
+        /// through to the unconditional settle loop below, which wraps every processor's (possibly untouched)
+        /// kick-allocated array as a zero-vertex <see cref="MeshDataPayload"/> —
+        /// the task still Succeeds, so the existing pen-drain "if Succeeded, DisposeWholeResult" funnel frees
+        /// it exactly once. No Canceled status, no second disposal path.</para></summary>
+        /// <param name="decode">The caller-owned shared decode lease this pass reads (never released here).</param>
+        /// <param name="context">Per-tile projection/origin/zoom context, unchanged by cancellation.</param>
+        /// <param name="processors">One this-source processor per dense layer id, in declared order.</param>
+        /// <param name="token">The teardown/lifetime token; defaults to <see cref="CancellationToken.None"/>
+        /// for callers outside <c>KickMeshBuild</c> (existing tests) that have no lifetime to observe.</param>
         internal static IRenderLayerPayload[] RunWorkerPass(
-            SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors)
+            SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors,
+            CancellationToken token = default)
         {
             int count = processors.Length;
 
-            try
+            if (!token.IsCancellationRequested)
             {
-                // IR C1 P3: no pass-scoped store any more. The decoded tile owns one buffer per source-layer,
-                // minted once inside the decode, so a source-layer named by N style layers — across BOTH
-                // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
-                // REFERENCE, not this method.
-                IDecodedTile tile = decode.Value;
-                for (int i = 0; i < count; i++)
+                try
                 {
-                    ITileMeshLayerProcessor processor = processors[i];
+                    // IR C1 P3: no pass-scoped store any more. The decoded tile owns one buffer per source-layer,
+                    // minted once inside the decode, so a source-layer named by N style layers — across BOTH
+                    // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
+                    // REFERENCE, not this method.
+                    IDecodedTile tile = decode.Value;
+                    for (int i = 0; i < count; i++)
+                    {
+                        // Teardown cancellation: abort the remaining layers of a build already mid-pass
+                        // (real multi-layer covers). Falls through to the settle loop below, same as the
+                        // top-of-function skip.
+                        if (token.IsCancellationRequested) break;
 
-                    // A1 only choreographs WorkerOnly. WorkerThenMain is reserved for A3; running it here
-                    // would silently execute a phase this runner has no main-thread tail for — treat it as
-                    // a programming error inside the SAME settlement boundary as any other fault (still
-                    // caught below, still settled in the loop after).
-                    if (processor.Phase != LayerPhase.WorkerOnly)
-                        throw new System.NotSupportedException(
-                            $"{processor.Phase} is not supported by A1's worker pass (reserved for A3).");
+                        ITileMeshLayerProcessor processor = processors[i];
 
-                    processor.ProcessOnWorker(tile, in context);
+                        // A1 only choreographs WorkerOnly. WorkerThenMain is reserved for A3; running it here
+                        // would silently execute a phase this runner has no main-thread tail for — treat it as
+                        // a programming error inside the SAME settlement boundary as any other fault (still
+                        // caught below, still settled in the loop after).
+                        if (processor.Phase != LayerPhase.WorkerOnly)
+                            throw new System.NotSupportedException(
+                                $"{processor.Phase} is not supported by A1's worker pass (reserved for A3).");
+
+                        processor.ProcessOnWorker(tile, in context);
+                    }
                 }
-            }
-            catch (System.Exception ex)
-            {
-                // A processor exception or an unsupported phase aborts the remaining invocations for this
-                // pass — matching the pre-A1 KickMeshBuild catch. Fall through so EVERY processor still
-                // settles below (no stranded MeshDataArray).
-                //
-                // The LOG is not decoration. An ordinal out-of-range from the IR C1 P2 re-base lands here, and
-                // so would a processor read against a decoded tile's NativeArray after its buffers were
-                // freed — R2: SharedDisposable is undefended by design (no throw on a released `Value`), so
-                // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
-                // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
-                // fault never reaches here either: the decode happens in the source's GetTile task and faults
-                // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
-                // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
-                // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
-                // exactly as before.
-                UnityEngine.Debug.LogWarning(
-                    $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
+                catch (System.Exception ex)
+                {
+                    // A processor exception or an unsupported phase aborts the remaining invocations for this
+                    // pass — matching the pre-A1 KickMeshBuild catch. Fall through so EVERY processor still
+                    // settles below (no stranded MeshDataArray).
+                    //
+                    // The LOG is not decoration. An ordinal out-of-range from the IR C1 P2 re-base lands here, and
+                    // so would a processor read against a decoded tile's NativeArray after its buffers were
+                    // freed — R2: SharedDisposable is undefended by design (no throw on a released `Value`), so
+                    // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
+                    // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
+                    // fault never reaches here either: the decode happens in the source's GetTile task and faults
+                    // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
+                    // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
+                    // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
+                    // exactly as before.
+                    UnityEngine.Debug.LogWarning(
+                        $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
+                }
             }
 
             // Moved form of the pre-A1 ensure-wrapped loop: settle every processor exactly once, in dense
@@ -96,32 +121,44 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <paramref name="processors"/> entry with a <c>null</c> <see cref="IDecodedTile"/> — source-less
         /// processors (<see cref="TileBackgroundLayerProcessor"/>) ignore it entirely — then settles every
         /// one of them exactly once, mirroring <see cref="RunWorkerPass"/>'s settlement/fault contract
-        /// exactly (abort-remaining-on-fault, then unconditional per-processor settle).</summary>
+        /// exactly (abort-remaining-on-fault, then unconditional per-processor settle). The
+        /// <paramref name="token"/> is the same teardown-cancel token <see cref="RunWorkerPass"/> takes: a
+        /// cancelled pass skips processing but still runs the unconditional settle loop, so a build cancelled
+        /// mid-teardown settles to a zero-vertex payload the existing pen-drain funnel frees — never strands a
+        /// native <c>Mesh.MeshDataArray</c> (design constraint 1, same as the source-backed path).</summary>
         internal static IRenderLayerPayload[] RunSourcelessWorkerPass(
-            in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors)
+            in TileLayerProcessContext context, ITileMeshLayerProcessor[] processors,
+            CancellationToken token = default)
         {
             int count = processors.Length;
 
-            try
+            if (!token.IsCancellationRequested)
             {
-                for (int i = 0; i < count; i++)
+                try
                 {
-                    ITileMeshLayerProcessor processor = processors[i];
+                    for (int i = 0; i < count; i++)
+                    {
+                        // Teardown cancellation: abort the remaining layers of a build already mid-pass,
+                        // same as the top-of-function skip. Falls through to the settle loop below.
+                        if (token.IsCancellationRequested) break;
 
-                    // A2 only choreographs WorkerOnly, same as A1's RunWorkerPass.
-                    if (processor.Phase != LayerPhase.WorkerOnly)
-                        throw new System.NotSupportedException(
-                            $"{processor.Phase} is not supported by A2's source-less worker pass.");
+                        ITileMeshLayerProcessor processor = processors[i];
 
-                    // null decoded tile — source-less processors (TileBackgroundLayerProcessor) ignore it;
-                    // the two overloads serve disjoint processor sets (design §B Q2 / §G risk 6).
-                    processor.ProcessOnWorker(null, in context);
+                        // A2 only choreographs WorkerOnly, same as A1's RunWorkerPass.
+                        if (processor.Phase != LayerPhase.WorkerOnly)
+                            throw new System.NotSupportedException(
+                                $"{processor.Phase} is not supported by A2's source-less worker pass.");
+
+                        // null decoded tile — source-less processors (TileBackgroundLayerProcessor) ignore it;
+                        // the two overloads serve disjoint processor sets (design §B Q2 / §G risk 6).
+                        processor.ProcessOnWorker(null, in context);
+                    }
                 }
-            }
-            catch
-            {
-                // Abort the remaining invocations for this pass — matching RunWorkerPass. Fall through so
-                // EVERY processor still settles below (no stranded MeshDataArray).
+                catch
+                {
+                    // Abort the remaining invocations for this pass — matching RunWorkerPass. Fall through so
+                    // EVERY processor still settles below (no stranded MeshDataArray).
+                }
             }
 
             var payloads = new IRenderLayerPayload[count];

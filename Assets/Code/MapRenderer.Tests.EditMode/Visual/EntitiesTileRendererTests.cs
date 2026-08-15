@@ -149,6 +149,58 @@ namespace MapRenderer.Tests.Visual
             finally { r.Dispose(); }
         }
 
+        // ── Play-mode Stop race: RemoveItems tolerates the World being torn down first (GPU-independent) ──
+        // On Play-mode Stop, Unity disposes EVERY Entities World — this backend's MapEntitiesWorld included —
+        // BEFORE MapViewComponent.OnDestroy → TileManager.DoDispose → RenderTeardownRecord → RemoveItems runs.
+        // Before the _world.IsCreated guard, RemoveItems touched the deallocated EntityManager (_em.Exists) and
+        // threw ObjectDisposedException, aborting DoDispose mid-loop and stranding the whole subsystem graph
+        // (the demo's "finalized without Dispose()" flood). This reproduces that exact ordering at the unit
+        // level — the fix is a direct guard on RemoveItems, so this tooth is immune to the sibling defense-in-
+        // depth catch in MapView.Teardown (a different layer). RED-verify: delete the guard → this throws.
+
+        [Test]
+        public void RemoveItems_AfterWorldDisposedExternally_DoesNotTouchDeadEntityManager()
+        {
+            World prevDefault = World.DefaultGameObjectInjectionWorld; // capture BEFORE the backend hijacks it
+            var (mesh, mat) = FixtureFill();
+            var r = new EntitiesTileRenderer(new[] { mat, mat, mat });
+            try
+            {
+                var tid = new TileId { Z = 0, X = 0, Y = 0 };
+                double3 o = FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin();
+                int h0 = r.AddTileLayer(mesh, o, 0, tid);
+                int h1 = r.AddTileLayer(mesh, o, 1, tid);
+                int h2 = r.AddTileLayer(mesh, o, 2, tid);
+                Assert.AreEqual(3, r.DrawItemCount(),
+                    "precondition: real handles must be registered so RemoveItems REACHES the _em.Exists touch — " +
+                    "an empty span would skip the loop and pass vacuously without exercising the guard.");
+
+                // Simulate Unity's Stop ordering: dispose the World out from under the still-live backend.
+                World world = r._em.World;
+                Assert.IsTrue(world.IsCreated, "precondition: the backend's World is alive before we dispose it.");
+                world.Dispose();
+                Assert.IsFalse(world.IsCreated,
+                    "precondition: the World is dead — the exact state RemoveItems must tolerate.");
+                Assert.IsFalse(r.IsDisposed,
+                    "precondition: the backend itself is NOT disposed (only its World) — so the existing " +
+                    "IsDisposed early-return is NOT what saves us; the _world.IsCreated guard is.");
+
+                // The tooth: RemoveItems must skip the dead EntityManager, not throw out of teardown.
+                Assert.DoesNotThrow(() => r.RemoveItems(new[] { h0, h1, h2 }),
+                    "RemoveItems must tolerate an externally-disposed World (the _world.IsCreated guard) instead " +
+                    "of touching the deallocated EntityManager and throwing ObjectDisposedException.");
+            }
+            finally
+            {
+                r.Dispose();
+                // The external World disposal made the backend's own DefaultGameObjectInjectionWorld restore
+                // (guarded by _world.IsCreated) a no-op; restore it so later Entities tests see a clean global.
+                if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
+                    World.DefaultGameObjectInjectionWorld = prevDefault;
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
         // ── Entities Hierarchy naming: layer entity is named after its style layer, not the material ──
 
         [Test]

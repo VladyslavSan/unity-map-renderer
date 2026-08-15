@@ -23,9 +23,11 @@ using System.IO;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Entities;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -159,6 +161,102 @@ namespace MapRenderer.Tests.Lifetime
                 $"After destroy: {meshAfterDestroy}. " +
                 "Teardown must explicitly destroy all tile Mesh assets (Unity does not do so when " +
                 "the containing GameObject is destroyed). Zero orphaned Mesh after real load + full release.");
+        }
+
+        // ── Play-mode Stop race: teardown after the Entities World was disposed first ─────────
+        //
+        // The real MapDemo Stop leak. On Play-mode Stop, Unity disposes the Entities World (this backend's
+        // MapEntitiesWorld) BEFORE MapViewComponent.OnDestroy runs. The record-teardown loop then called into
+        // the backend's RemoveItems, which touched the deallocated EntityManager and threw straight out of
+        // DoDispose — stranding _prepared, the backend, the pipelines, and (via MapView.Teardown)
+        // Layers/Labels/Symbols: the whole-graph "finalized without Dispose()" flood, independent of whether
+        // any tile was still loading (which is why an idle Stop leaked too). This drives the exact ordering by
+        // disposing the World out from under the live map, then asserts Teardown runs to completion.
+        //
+        // Unlike the mid-flight teardown tooth (which cannot reproduce the symptom headlessly — Teardown
+        // always ran to completion there), this one DOES: the trigger is a dead World, reproducible directly.
+        // RED-verify: (1) delete RemoveItems' _world.IsCreated guard, keep MapView.Teardown's per-subsystem
+        // catch → DoDispose dies at RemoveItems before DestroyTrackedMeshes / _prepared / _instanced /
+        // pipelines; the catch swallows the throw so DoesNotThrow still passes, but the Mesh-baseline and the
+        // VerifiedDisposable-leak assertions go RED (tile meshes stranded; PreparedTileCache, the backend, the
+        // scheduler and pipelines never disposed). (2) additionally delete MapView.Teardown's catch → Teardown
+        // itself throws and DoesNotThrow goes RED (Layers/Labels/Symbols strand too — the original flood).
+
+        /// <summary>
+        /// Teardown must complete — no throw, tile Meshes released to baseline, zero VerifiedDisposable
+        /// finalizer leaks — even when Unity has already disposed the Entities World before OnDestroy (the
+        /// Play-mode Stop ordering). Exercises the RemoveItems guard end-to-end plus the MapView.Teardown /
+        /// DoDispose defense-in-depth so no single fault can strand the graph again.
+        /// </summary>
+        [Test]
+        public void Teardown_AfterEntitiesWorldDisposed_ReleasesGraph_NoThrow_NoLeaks()
+        {
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go    = new GameObject("MapView_LeakGuard_WorldGone");
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
+            var style = MinimalStyle();
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.Backend = MapRenderer.Unity.Rendering.Map.RenderBackend.Entities; // the backend Unity tears down first
+
+            World prevDefault = World.DefaultGameObjectInjectionWorld; // captured before the backend hijacks it
+            var captured = new List<string>();
+            System.Action<string> original = VerifiedDisposable.LeakReporter;
+            VerifiedDisposable.LeakReporter = msg => captured.Add(msg);
+
+            int meshBefore = CountMeshObjects();
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.AllTilesSettled() && view.LoadedTileCount() > 0,
+                    "Non-vacuous: the Entities path must load + settle a tile so the record holds real entities + Meshes.");
+
+                int createdCount = CountMeshObjects() - meshBefore;
+                Assert.Greater(createdCount, 0, "Non-vacuous: a real load must create Mesh objects.");
+
+                var ent = view.EntitiesRenderer();
+                Assert.IsNotNull(ent, "Entities renderer must be constructed when Backend == Entities.");
+                Assert.Greater(ent.DrawItemCount(), 0,
+                    "Non-vacuous: at least one tile-layer entity must exist, so RemoveItems has real handles to touch _em with.");
+
+                // Simulate Unity's Play-mode Stop: dispose the Entities World out from under the still-live map.
+                World world = ent._em.World;
+                Assert.IsTrue(world.IsCreated, "precondition: World alive before external disposal.");
+                world.Dispose();
+                Assert.IsFalse(world.IsCreated, "precondition: World is dead before Teardown — the state teardown must tolerate.");
+
+                // The symptom fix: Teardown must NOT throw despite the dead World, and must run to completion.
+                Assert.DoesNotThrow(() => view.Teardown(),
+                    "Teardown must tolerate an already-disposed Entities World (the Play-mode Stop race) instead " +
+                    "of throwing out of DoDispose and stranding the subsystem graph.");
+                Object.DestroyImmediate(go);
+                go = null;
+
+                int meshAfter = CountMeshObjects();
+                Assert.LessOrEqual(meshAfter, meshBefore,
+                    $"Tile Mesh assets must be released even when the World died first. Baseline {meshBefore}, " +
+                    $"after load +{createdCount}, after teardown {meshAfter}. A throw out of the record-teardown " +
+                    "loop would skip DestroyTrackedMeshes and strand these meshes.");
+
+                System.GC.Collect();
+                System.GC.WaitForPendingFinalizers();
+                System.GC.Collect();
+                Assert.IsEmpty(captured,
+                    "Zero VerifiedDisposable finalizer leaks: with the World-disposed-first race handled, every " +
+                    $"subsystem still reaches its Dispose(). Captured: [{string.Join("; ", captured)}].");
+            }
+            finally
+            {
+                VerifiedDisposable.LeakReporter = original;
+                if (go != null) { view.Teardown(); Object.DestroyImmediate(go); }
+                // The external World disposal made the backend's own DefaultGameObjectInjectionWorld restore a
+                // no-op (it is guarded by _world.IsCreated); restore it so later Entities tests see a clean global.
+                if (World.DefaultGameObjectInjectionWorld == null || !World.DefaultGameObjectInjectionWorld.IsCreated)
+                    World.DefaultGameObjectInjectionWorld = prevDefault;
+            }
         }
 
         // ── Tooth 5b: Release mid-flight — no orphaned Mesh ──────────────────────────────────

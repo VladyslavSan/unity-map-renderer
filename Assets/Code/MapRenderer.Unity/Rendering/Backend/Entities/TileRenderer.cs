@@ -452,6 +452,15 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             EntitiesDestroyedLastRemove    = 0;
             if (IsDisposed) return;
 
+            // Play-mode Stop disposes EVERY Entities World — this backend's MapEntitiesWorld included — before
+            // our MapViewComponent.OnDestroy runs, so at teardown the EntityManager may already be deallocated
+            // while this backend is NOT yet disposed (IsDisposed == false). The layer entities are already gone
+            // with the World, so there is nothing to remove; touching _em below (_em.Exists) would instead throw
+            // ObjectDisposedException, aborting the caller TileManager.RenderTeardownRecord → DoDispose mid-loop
+            // and stranding every subsystem disposed after it (the "finalized without Dispose()" leak flood).
+            // Mirror DoDispose's own _world.IsCreated guard; inert during normal runtime (World alive).
+            if (_world is not { IsCreated: true }) return;
+
             _destroyScratch.Clear();
             for (int i = 0; i < handles.Length; i++)
             {
