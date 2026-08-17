@@ -11,6 +11,11 @@ milestone, and
 workflow) — check it before debugging a shader/material/test-harness surprise.
 Proprietary / all rights reserved.
 
+`docs/*-design.md` describe *why the code is the way it is* (decisions, history — the code leads, the doc
+explains). `specs/*.md` are **normative**: they state the *contract* a mechanism must hold, and are
+**authoritative** — where the code and a spec disagree, the code has a bug. Cite requirements by number in
+reviews (e.g. *"violates SPEC-DPR R-9"*). See `specs/README.md` for the doc type and index.
+
 ## Project layout
 
 **The product is `MapRenderer.Unity` + `MapRenderer.Jobs`; `MapRenderer.Core` is a convenience, not a goal —

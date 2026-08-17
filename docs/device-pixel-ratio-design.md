@@ -1,7 +1,9 @@
 # Device-pixel ratio — one logical-pixel convention for the whole map
 
 **Status:** **Stages 1 + 2 LANDED (S107); Stage 3 LANDED (S108); Stage 4a LANDED (S109); Stage 4b is a
-written-up decision brief AWAITING THE MAINTAINER.** SSOT for the DPR epic.
+written-up decision brief AWAITING THE MAINTAINER.** SSOT for the DPR **epic** — the decisions, history and
+rationale. The DPR **contract** (the standing requirements a conforming implementation must hold) is the
+normative [`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md); this doc is its *why*.
 **Symptom that opened it:** symbols look "barely visible"; sliding `DevicePixelRatio` live changes the zoom
 level and the label sizes, but **road widths do not move**.
 
