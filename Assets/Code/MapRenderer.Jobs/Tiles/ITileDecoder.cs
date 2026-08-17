@@ -37,7 +37,19 @@ namespace MapRenderer.Jobs.Tiles
     /// <c>MvtDecoder.Decode(</c> call site after A6 (structurally asserted).</summary>
     public sealed class MvtTileDecoder : ITileDecoder
     {
-        public IDecodedTile Decode(TileId id, byte[] bytes) => MvtDecoder.Decode(id, bytes); // MvtTile is-a IDecodedTile
+        private readonly MvtPropertyStorage _propertyStorage;
+
+        /// <param name="propertyStorage">Threaded straight through to <see cref="MvtDecoder.Decode"/> — see
+        /// its own doc for the A/B semantics. Defaults to <see cref="MvtPropertyStorage.Dictionary"/>, same
+        /// as <see cref="MvtDecoder.Decode"/> itself, so a caller that builds this decoder without naming a
+        /// storage gets today's byte-identical behaviour.</param>
+        public MvtTileDecoder(MvtPropertyStorage propertyStorage = MvtPropertyStorage.Dictionary)
+        {
+            _propertyStorage = propertyStorage;
+        }
+
+        public IDecodedTile Decode(TileId id, byte[] bytes) =>
+            MvtDecoder.Decode(id, bytes, _propertyStorage); // MvtTile is-a IDecodedTile
     }
 
     /// <summary>Resolves the <see cref="ITileDecoder"/> for a <see cref="TileEncoding"/>. No production
@@ -45,9 +57,14 @@ namespace MapRenderer.Jobs.Tiles
     /// tests injecting a fake <see cref="ITileDecoder"/> directly, not a new enum member — design §B-3).</summary>
     public static class TileDecoders
     {
-        public static ITileDecoder ForEncoding(TileEncoding encoding) => encoding switch
+        /// <param name="encoding">Selects which decoder to build.</param>
+        /// <param name="propertyStorage">Forwarded to <see cref="MvtTileDecoder"/> when
+        /// <paramref name="encoding"/> resolves to MVT; ignored otherwise.</param>
+        public static ITileDecoder ForEncoding(
+            TileEncoding encoding, MvtPropertyStorage propertyStorage = MvtPropertyStorage.Dictionary) => encoding switch
         {
-            TileEncoding.Mvt => new MvtTileDecoder(), // a shared singleton is a dev refinement, not required here
+            // a shared singleton is a dev refinement, not required here
+            TileEncoding.Mvt => new MvtTileDecoder(propertyStorage),
             _ => throw new System.NotSupportedException($"No decoder for encoding {encoding}"),
         };
     }

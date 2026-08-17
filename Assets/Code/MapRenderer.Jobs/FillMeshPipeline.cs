@@ -302,8 +302,22 @@ namespace MapRenderer.Jobs
             var scratchIsEar         = new NativeArray<bool>[polyCount];
             var perPolyIdxArrays     = new NativeArray<int>[polyCount];
             var perPolyMergedVertCnt = new NativeArray<int>[polyCount]; // EarcutJob.OutMergedVertexCount (Stage 3)
-            int[] perPolyMergedVC    = new int[polyCount];
-            int[] perPolyFeatureIdx  = new int[polyCount]; // S89 D2: feature index of each polygon (for per-vertex color)
+            // Plain int scratch → NativeArray (off the GC heap, allocation ladder rung 2). Unlike the 13
+            // NativeArray<T>[] handle-arrays above — managed arrays OF native handles, which can't nest — these
+            // hold plain ints, so the native form is a straight swap. Disposed after the aggregation below.
+            var perPolyMergedVC   = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var perPolyFeatureIdx = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); // S89 D2: feature index of each polygon (for per-vertex color)
+
+            // Per-polygon allocation kill: the hole-ring sort used a `new int[holeCount]` MANAGED array per
+            // polygon (a GC alloc every iteration, including `new int[0]` for hole-less polygons). Sort in a
+            // single REUSED NativeArray instead — off the GC heap entirely (allocation ladder rung 2) — via a
+            // struct comparer passed by generic constraint to NativeSortExtension.Sort (no boxing). (The inline
+            // lambda it replaced was already hoisted+cached to one delegate per call by the compiler, so it
+            // was never the per-polygon cost the array was.)
+            var holeComparer = new HoleRingComparer(geometry);
+            int maxHoleCount = 0;
+            for (int pi = 0; pi < polyCount; pi++) maxHoleCount = math.max(maxHoleCount, polyHoleCount[pi]);
+            var holeRIs = new NativeArray<int>(math.max(1, maxHoleCount), Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
 
             for (int pi = 0; pi < polyCount; pi++)
             {
@@ -314,24 +328,16 @@ namespace MapRenderer.Jobs
                 int holeCount  = polyHoleCount[pi];
                 int hStart     = polyHoleStart[pi];
 
-                // Collect and sort hole ring indices for deterministic bridge order.
+                // Collect and sort hole ring indices for deterministic bridge order into the reused buffer.
                 // Sort: (leftmost-x, min-y, ring-index) — must match managed validHoles.Sort.
-                int[] holeRIs = new int[holeCount];
                 for (int hi = 0; hi < holeCount; hi++)
                     holeRIs[hi] = holeRingIdxs[hStart + hi];
 
-                Array.Sort(holeRIs, (a, b) =>
-                {
-                    double ax = LeftmostX(geometry.Vertices, geometry.RingOffsets[a], geometry.RingOffsets[a + 1] - geometry.RingOffsets[a]);
-                    double bx = LeftmostX(geometry.Vertices, geometry.RingOffsets[b], geometry.RingOffsets[b + 1] - geometry.RingOffsets[b]);
-                    int cmp = ax.CompareTo(bx);
-                    if (cmp != 0) return cmp;
-                    double ay = MinY(geometry.Vertices, geometry.RingOffsets[a], geometry.RingOffsets[a + 1] - geometry.RingOffsets[a]);
-                    double by = MinY(geometry.Vertices, geometry.RingOffsets[b], geometry.RingOffsets[b + 1] - geometry.RingOffsets[b]);
-                    cmp = ay.CompareTo(by);
-                    if (cmp != 0) return cmp;
-                    return a.CompareTo(b);
-                });
+                // Sort only [0, holeCount) via a view over the reused native buffer — the tail holds stale
+                // indices from a prior polygon and is never read (every consumer below indexes hi < holeCount).
+                // Skip the trivial 0/1 cases.
+                if (holeCount > 1)
+                    holeRIs.GetSubArray(0, holeCount).Sort(holeComparer);
 
                 // Build flat poly verts: outer + holes in sorted order.
                 int polyVC = outerLen;
@@ -386,6 +392,8 @@ namespace MapRenderer.Jobs
                 scratchRemoved[pi]   = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 scratchIsEar[pi]     = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
+
+            holeRIs.Dispose(); // reused only within the collect/sort loop above; the earcut stage never reads it.
 
             // Run all earcut jobs sequentially (each polygon is independent — Run, not Schedule, so the
             // pipeline is callable off the main thread; per-polygon parallelism is a later throughput knob).
@@ -493,6 +501,9 @@ namespace MapRenderer.Jobs
                 scratchPrev[pi].Dispose(); scratchNext[pi].Dispose();
                 scratchIsBridge[pi].Dispose(); scratchRemoved[pi].Dispose(); scratchIsEar[pi].Dispose();
             }
+
+            perPolyMergedVC.Dispose();
+            perPolyFeatureIdx.Dispose(); // both are fully read by the aggregation above; the project stage never touches them.
 
             // ── Stage 4: tile→geodetic, then project to world space (S91). ─────────────────────────
             {
@@ -660,6 +671,44 @@ namespace MapRenderer.Jobs
             for (int i = 0; i < len; i++)
                 if (verts[start + i].y < minY) minY = verts[start + i].y;
             return minY;
+        }
+
+        /// <summary>
+        /// Orders hole ring indices by (leftmost-x, then min-y, then ring index) — the deterministic bridge
+        /// order that must match managed <c>validHoles.Sort</c>. A <b>struct</b> comparer so
+        /// <c>NativeArray.Sort&lt;int, HoleRingComparer&gt;</c> takes it by generic constraint with no boxing —
+        /// the sort of the reused native hole buffer allocates nothing.
+        /// </summary>
+        /// <remarks><c>internal</c> (not <c>private</c>) so <c>FillHoleRingComparerAllocationTests</c> can
+        /// measure that sorting a <see cref="Unity.Collections.NativeArray{T}"/> through it allocates no
+        /// managed memory — the property this stage creates (versus the retired managed <c>int[]</c> + managed
+        /// <c>Array.Sort</c>). Jobs grants <c>InternalsVisibleTo("MapRenderer.Tests.EditMode")</c>.</remarks>
+        internal readonly struct HoleRingComparer : IComparer<int>
+        {
+            private readonly TileGeometryBuffers _geometry;
+
+            /// <summary>Binds the comparer to the tile geometry whose rings it orders.</summary>
+            /// <param name="geometry">The tile geometry whose ring vertices and offsets the ordering reads.</param>
+            public HoleRingComparer(TileGeometryBuffers geometry) => _geometry = geometry;
+
+            /// <summary>Total order: leftmost-x, then min-y, then the ring index itself as the tiebreak.</summary>
+            /// <param name="a">First hole ring index.</param>
+            /// <param name="b">Second hole ring index.</param>
+            /// <returns>Negative, zero, or positive per <see cref="IComparer{T}"/>.</returns>
+            public int Compare(int a, int b)
+            {
+                NativeArray<int>     offsets = _geometry.RingOffsets;
+                NativeArray<double2> verts   = _geometry.Vertices;
+                double ax = LeftmostX(verts, offsets[a], offsets[a + 1] - offsets[a]);
+                double bx = LeftmostX(verts, offsets[b], offsets[b + 1] - offsets[b]);
+                int cmp = ax.CompareTo(bx);
+                if (cmp != 0) return cmp;
+                double ay = MinY(verts, offsets[a], offsets[a + 1] - offsets[a]);
+                double by = MinY(verts, offsets[b], offsets[b + 1] - offsets[b]);
+                cmp = ay.CompareTo(by);
+                if (cmp != 0) return cmp;
+                return a.CompareTo(b);
+            }
         }
     }
 }

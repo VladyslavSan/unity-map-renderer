@@ -10,14 +10,14 @@ namespace MapRenderer.Core.Expressions.Ops
     public static class Decision
     {
         public static Expression Eq(Expression[] args, bool negate)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 bool eq = vals[0].Equals(vals[1]);
                 return Value.Bool(negate ? !eq : eq);
             }, args, ValueType.Boolean);
 
         public static Expression Compare(string op, Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 int cmp = CompareValues(op, vals[0], vals[1]);
                 bool result;
@@ -47,7 +47,7 @@ namespace MapRenderer.Core.Expressions.Ops
 
         public static Expression Not(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.Bool(!vals[0].AsBool()),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.Bool(!vals[0].AsBool()),
                 new[] { arg }, ValueType.Boolean);
     }
 }

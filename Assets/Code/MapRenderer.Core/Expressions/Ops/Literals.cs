@@ -8,11 +8,11 @@ namespace MapRenderer.Core.Expressions.Ops
     {
         public static Expression TypeOf(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.String(ValueTypes.TypeOfName(vals[0].Type)),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.String(ValueTypes.TypeOfName(vals[0].Type)),
                 new[] { arg }, ValueType.String);
 
         public static Expression ToNumber(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 foreach (var v in vals)
                     if (Coercions.TryToNumber(v, out double n))
@@ -23,16 +23,16 @@ namespace MapRenderer.Core.Expressions.Ops
 
         public static Expression ToString(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.String(Coercions.ToStringValue(vals[0])),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.String(Coercions.ToStringValue(vals[0])),
                 new[] { arg }, ValueType.String);
 
         public static Expression ToBoolean(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.Bool(Coercions.ToBoolean(vals[0])),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.Bool(Coercions.ToBoolean(vals[0])),
                 new[] { arg }, ValueType.Boolean);
 
         public static Expression ToColor(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 foreach (var v in vals)
                     if (Coercions.TryToColor(v, out Color c))
@@ -42,7 +42,7 @@ namespace MapRenderer.Core.Expressions.Ops
             }, args, ValueType.Color);
 
         public static Expression ToRgba(Expression arg)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 if (vals[0].Type != ValueType.Color)
                     throw new ExpressionEvaluationException("to-rgba: expected a color.");

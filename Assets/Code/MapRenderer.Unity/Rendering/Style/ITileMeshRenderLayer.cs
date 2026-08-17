@@ -5,6 +5,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -43,10 +44,14 @@ namespace MapRenderer.Unity.Rendering.Style
         /// join at that vertex into a cap — trading the alpha band for a notch at every seam — so the line
         /// equivalent is clipping the tessellated RIBBON, a different and harder operation that is
         /// deliberately not attempted here.</para>
+        ///
+        /// <para><paramref name="scratch"/> (perf/gc-elimination) is this build's rented per-build scratch —
+        /// <c>null</c> for a caller with no pool to draw from (tests, direct harness calls). An implementation
+        /// that has no use for it (line, today) simply ignores it.</para>
         /// </summary>
         void WriteInto(
             Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
             double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-            out int vertexCount, out Bounds bounds);
+            TileBuildScratch scratch, out int vertexCount, out Bounds bounds);
     }
 }

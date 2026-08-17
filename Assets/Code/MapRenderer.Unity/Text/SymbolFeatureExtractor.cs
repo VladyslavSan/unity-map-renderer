@@ -9,6 +9,7 @@
 // SymbolLabels instead of a Mesh.
 
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
@@ -203,12 +204,28 @@ namespace MapRenderer.Unity.Text
             // the stable S20 FeatureIndex tiebreak, so path order is observable output, not an implementation
             // detail). Contiguity is NOT assumed: a counting sort is stable and correct either way.
             // RingCount is the DECODED count, not RingCapacity; RingOffsets carries a trailing sentinel.
-            var ringStart = new int[layerFeatureCount + 1];
-            for (int r = 0; r < geometry.RingCount; r++) ringStart[geometry.RingFeatureIdx[r] + 1]++;
-            for (int i = 0; i < layerFeatureCount; i++) ringStart[i + 1] += ringStart[i];
-            var ringOrder = new int[geometry.RingCount];
-            var cursor    = (int[])ringStart.Clone();
-            for (int r = 0; r < geometry.RingCount; r++) ringOrder[cursor[geometry.RingFeatureIdx[r]]++] = r;
+            // Rank 3 GC fix: the counting-sort scratch is native now (no per-tile managed garbage). `using var`
+            // — construction and disposal are one statement per handle, so a constructor throw partway through
+            // leaves nothing stranded and there is no hand-rolled finally to keep in sync. Allocator.Persistent,
+            // NOT TempJob: this extract runs off-main and can span >4 main-thread frames, tripping TempJob's
+            // 4-frame lifetime check. ClearMemory (the
+            // default 2-arg ctor) is REQUIRED — ringStart is accumulated from 0 via ringStart[idx+1]++.
+            // `cursor` MUST stay a separate buffer: ringStart is read again in the feature loop (pathCount =
+            // ringStart[f+1]-ringStart[f]) while cursor is mutated here.
+            using var ringStart = new NativeArray<int>(layerFeatureCount + 1, Allocator.Persistent);
+            using var ringOrder = new NativeArray<int>(geometry.RingCount, Allocator.Persistent);
+            using var cursor    = new NativeArray<int>(layerFeatureCount + 1, Allocator.Persistent);
+            // A `using`-declared local is read-only for index-ASSIGNMENT (CS1654) — reads through
+            // ringStart/ringOrder/cursor below are unaffected; only writes need a plain-local alias.
+            // GetSubArray(0, Length) is a normal method call returning a NativeArray<T> VIEW over the same
+            // memory, assignable to a non-readonly local.
+            NativeArray<int> ringStartWritable = ringStart.GetSubArray(0, ringStart.Length);
+            NativeArray<int> ringOrderWritable = ringOrder.GetSubArray(0, ringOrder.Length);
+            NativeArray<int> cursorWritable    = cursor.GetSubArray(0, cursor.Length);
+            for (int r = 0; r < geometry.RingCount; r++) ringStartWritable[geometry.RingFeatureIdx[r] + 1]++;
+            for (int i = 0; i < layerFeatureCount; i++) ringStartWritable[i + 1] += ringStartWritable[i];
+            NativeArray<int>.Copy(ringStartWritable, cursorWritable);
+            for (int r = 0; r < geometry.RingCount; r++) ringOrderWritable[cursorWritable[geometry.RingFeatureIdx[r]]++] = r;
 
             // Walks the SELECTION, in selection order — which is decode order, because the selector appends in
             // Features order — and addresses the bucketed rings by each entry's layer ordinal. That pairing is
@@ -569,8 +586,11 @@ namespace MapRenderer.Unity.Text
                     }
                 }
             }
-            // No disposal, and no try/finally to hold one: the buffer read above is BORROWED from the decoded
-            // tile, which frees it when its decode scope closes. This method mints nothing.
+
+            // The buffer read in the loop above is BORROWED from the decoded tile (the layer owns it and frees
+            // it when its decode scope closes), so it is NEVER disposed here — only this method's own native
+            // counting-sort scratch is (via the `using var` declarations above), never geometry (that would be
+            // a double free; pinned by the SymbolExtractorStructureTests borrow tooth).
         }
 
         /// <summary>Copies ring <paramref name="r"/>'s tile-local span out of the shared buffer into a managed

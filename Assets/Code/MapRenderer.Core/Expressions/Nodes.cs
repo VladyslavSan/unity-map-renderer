@@ -22,7 +22,13 @@ namespace MapRenderer.Core.Expressions
     /// </summary>
     public sealed class FunctionExpression : Expression
     {
-        public delegate Value Impl(Value[] args, in EvaluationContext context);
+        /// <summary>The operator body, invoked with the already-evaluated arguments.</summary>
+        /// <param name="args">The evaluated arguments, in declared order. This is a per-thread pooled buffer
+        /// borrowed only for the duration of the call — read from it, but never store, convert, or return it
+        /// (see <see cref="EvalArgBuffers"/> and <see cref="Evaluate"/>'s rent/return).</param>
+        /// <param name="context">The evaluation context (zoom, feature, …).</param>
+        /// <returns>The operator's result value.</returns>
+        public delegate Value Impl(ReadOnlySpan<Value> args, in EvaluationContext context);
 
         private readonly Impl _impl;
         private readonly Expression[] _args;
@@ -50,10 +56,22 @@ namespace MapRenderer.Core.Expressions
 
         public override Value Evaluate(in EvaluationContext context)
         {
-            var vals = new Value[_args.Length];
-            for (int i = 0; i < _args.Length; i++)
-                vals[i] = _args[i].Evaluate(context);
-            return _impl(vals, context);
+            // Rent a per-thread scratch buffer instead of a per-call `new Value[]` — this node is the hottest
+            // managed allocator during feature selection. The buffer MUST be returned in `finally`: an arg's
+            // Evaluate or a typed Value accessor can throw mid-fill, and a leaked buffer drains the pool back
+            // to allocating. See EvalArgBuffers for the thread-affinity + re-entrancy contract.
+            int count = _args.Length;
+            Value[] buffer = EvalArgBuffers.Rent(count);
+            try
+            {
+                for (int i = 0; i < count; i++)
+                    buffer[i] = _args[i].Evaluate(context);
+                return _impl(buffer.AsSpan(0, count), context);
+            }
+            finally
+            {
+                EvalArgBuffers.Return(buffer);
+            }
         }
     }
 }

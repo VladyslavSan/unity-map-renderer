@@ -45,73 +45,102 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         {
             int count = processors.Length;
 
-            if (!token.IsCancellationRequested)
+            // perf/gc-elimination: rent THIS build's scratch once, for its whole worker pass — every layer/
+            // feature this pass processes reuses the same instance (sequential within a build) — and return it
+            // unconditionally so a faulted or cancelled build still gives it back (never stranded, never leaked
+            // to a build that never returns it). Two RunWorkerPass calls never share one instance: each runs on
+            // its own ThreadPool task and rents its OWN scratch from the thread-safe pool.
+            TileBuildScratch scratch = TileBuildScratchPool.Rent();
+            try
             {
-                try
+                // Only the Scratch field differs from the caller's context — copied field-for-field rather
+                // than mutating `context` (a `readonly struct` taken `in`), and rather than `with` (C# 9's
+                // record-only form; this project's language version does not extend it to plain structs).
+                var scratchContext = new TileLayerProcessContext
                 {
-                    // IR C1 P3: no pass-scoped store any more. The decoded tile owns one buffer per source-layer,
-                    // minted once inside the decode, so a source-layer named by N style layers — across BOTH
-                    // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
-                    // REFERENCE, not this method.
-                    IDecodedTile tile = decode.Value;
-                    for (int i = 0; i < count; i++)
+                    Tile             = context.Tile,
+                    Zoom             = context.Zoom,
+                    TileOriginRender = context.TileOriginRender,
+                    Projection       = context.Projection,
+                    BufferClip       = context.BufferClip,
+                    Scratch          = scratch,
+                };
+
+                if (!token.IsCancellationRequested)
+                {
+                    try
                     {
-                        // Teardown cancellation: abort the remaining layers of a build already mid-pass
-                        // (real multi-layer covers). Falls through to the settle loop below, same as the
-                        // top-of-function skip.
-                        if (token.IsCancellationRequested) break;
+                        // IR C1 P3: no pass-scoped store any more. The decoded tile owns one buffer per source-layer,
+                        // minted once inside the decode, so a source-layer named by N style layers — across BOTH
+                        // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
+                        // REFERENCE, not this method.
+                        IDecodedTile tile = decode.Value;
+                        for (int i = 0; i < count; i++)
+                        {
+                            // Teardown cancellation: abort the remaining layers of a build already mid-pass
+                            // (real multi-layer covers). Falls through to the settle loop below, same as the
+                            // top-of-function skip.
+                            if (token.IsCancellationRequested) break;
 
-                        ITileMeshLayerProcessor processor = processors[i];
+                            ITileMeshLayerProcessor processor = processors[i];
 
-                        // A1 only choreographs WorkerOnly. WorkerThenMain is reserved for A3; running it here
-                        // would silently execute a phase this runner has no main-thread tail for — treat it as
-                        // a programming error inside the SAME settlement boundary as any other fault (still
-                        // caught below, still settled in the loop after).
-                        if (processor.Phase != LayerPhase.WorkerOnly)
-                            throw new System.NotSupportedException(
-                                $"{processor.Phase} is not supported by A1's worker pass (reserved for A3).");
+                            // A1 only choreographs WorkerOnly. WorkerThenMain is reserved for A3; running it here
+                            // would silently execute a phase this runner has no main-thread tail for — treat it as
+                            // a programming error inside the SAME settlement boundary as any other fault (still
+                            // caught below, still settled in the loop after).
+                            if (processor.Phase != LayerPhase.WorkerOnly)
+                                throw new System.NotSupportedException(
+                                    $"{processor.Phase} is not supported by A1's worker pass (reserved for A3).");
 
-                        processor.ProcessOnWorker(tile, in context);
+                            processor.ProcessOnWorker(tile, in scratchContext);
+                        }
+                    }
+                    catch (System.Exception ex)
+                    {
+                        // A processor exception or an unsupported phase aborts the remaining invocations for this
+                        // pass — matching the pre-A1 KickMeshBuild catch. Fall through so EVERY processor still
+                        // settles below (no stranded MeshDataArray).
+                        //
+                        // The LOG is not decoration. An ordinal out-of-range from the IR C1 P2 re-base lands here, and
+                        // so would a processor read against a decoded tile's NativeArray after its buffers were
+                        // freed — R2: SharedDisposable is undefended by design (no throw on a released `Value`), so
+                        // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
+                        // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
+                        // fault never reaches here either: the decode happens in the source's GetTile task and faults
+                        // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
+                        // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
+                        // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
+                        // exactly as before.
+                        UnityEngine.Debug.LogWarning(
+                            $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
                     }
                 }
-                catch (System.Exception ex)
-                {
-                    // A processor exception or an unsupported phase aborts the remaining invocations for this
-                    // pass — matching the pre-A1 KickMeshBuild catch. Fall through so EVERY processor still
-                    // settles below (no stranded MeshDataArray).
-                    //
-                    // The LOG is not decoration. An ordinal out-of-range from the IR C1 P2 re-base lands here, and
-                    // so would a processor read against a decoded tile's NativeArray after its buffers were
-                    // freed — R2: SharedDisposable is undefended by design (no throw on a released `Value`), so
-                    // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
-                    // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
-                    // fault never reaches here either: the decode happens in the source's GetTile task and faults
-                    // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
-                    // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
-                    // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
-                    // exactly as before.
-                    UnityEngine.Debug.LogWarning(
-                        $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
-                }
-            }
 
-            // Moved form of the pre-A1 ensure-wrapped loop: settle every processor exactly once, in dense
-            // order, regardless of how far the loop above got.
-            var payloads = new IRenderLayerPayload[count];
-            for (int i = 0; i < count; i++)
-            {
-                // Per-processor guard (reconciliation refinement #1): UNREACHABLE in production — the real
-                // adapter's Complete() only wraps an already-allocated array and cannot throw. It exists so a
-                // hypothetical contract-violating throw from one processor's Complete() does not strand its
-                // SIBLINGS' arrays (each still settles). Residual risk if it ever did fire: only the throwing
-                // processor's OWN array leaks (the wrap that would free it is exactly what threw) — a bounded
-                // native leak, never a crash. The null slot it leaves is tolerated downstream
-                // (ConsumeMeshBuild's `payload == null` guard + DisposeResult's `?.Dispose()`). A1 merge-step
-                // follow-up: documented-as-unreachable rather than asserted, so the guard keeps tolerating.
-                try { payloads[i] = processors[i].Complete(); }
-                catch { payloads[i] = null; }
+                // Moved form of the pre-A1 ensure-wrapped loop: settle every processor exactly once, in dense
+                // order, regardless of how far the loop above got.
+                var payloads = new IRenderLayerPayload[count];
+                for (int i = 0; i < count; i++)
+                {
+                    // Per-processor guard (reconciliation refinement #1): UNREACHABLE in production — the real
+                    // adapter's Complete() only wraps an already-allocated array and cannot throw. It exists so a
+                    // hypothetical contract-violating throw from one processor's Complete() does not strand its
+                    // SIBLINGS' arrays (each still settles). Residual risk if it ever did fire: only the throwing
+                    // processor's OWN array leaks (the wrap that would free it is exactly what threw) — a bounded
+                    // native leak, never a crash. The null slot it leaves is tolerated downstream
+                    // (ConsumeMeshBuild's `payload == null` guard + DisposeResult's `?.Dispose()`). A1 merge-step
+                    // follow-up: documented-as-unreachable rather than asserted, so the guard keeps tolerating.
+                    try { payloads[i] = processors[i].Complete(); }
+                    catch { payloads[i] = null; }
+                }
+                return payloads;
             }
-            return payloads;
+            finally
+            {
+                // Runs on every exit — success, an aborted pass, or (in principle) a throw that unwinds past
+                // the settle loop above — so a build never strands its rented scratch: the NEXT Rent() would
+                // otherwise starve the pool into minting a fresh instance forever instead of reusing this one.
+                TileBuildScratchPool.Return(scratch);
+            }
         }
 
         /// <summary>Epic A / A2 (design §B Q2): the decode-free sibling of <see cref="RunWorkerPass"/> for
@@ -132,44 +161,66 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         {
             int count = processors.Length;
 
-            if (!token.IsCancellationRequested)
+            // Same rent-for-the-whole-pass / return-in-finally contract as RunWorkerPass (see its comment) —
+            // the background processor itself never reads Scratch today (it calls WriteGeometry directly, which
+            // has no sort-key/rank scratch to pool), but this keeps every worker-pass entry point consistent
+            // and ready for a future source-less consumer of the pool.
+            TileBuildScratch scratch = TileBuildScratchPool.Rent();
+            try
             {
-                try
+                var scratchContext = new TileLayerProcessContext
                 {
-                    for (int i = 0; i < count; i++)
+                    Tile             = context.Tile,
+                    Zoom             = context.Zoom,
+                    TileOriginRender = context.TileOriginRender,
+                    Projection       = context.Projection,
+                    BufferClip       = context.BufferClip,
+                    Scratch          = scratch,
+                };
+
+                if (!token.IsCancellationRequested)
+                {
+                    try
                     {
-                        // Teardown cancellation: abort the remaining layers of a build already mid-pass,
-                        // same as the top-of-function skip. Falls through to the settle loop below.
-                        if (token.IsCancellationRequested) break;
+                        for (int i = 0; i < count; i++)
+                        {
+                            // Teardown cancellation: abort the remaining layers of a build already mid-pass,
+                            // same as the top-of-function skip. Falls through to the settle loop below.
+                            if (token.IsCancellationRequested) break;
 
-                        ITileMeshLayerProcessor processor = processors[i];
+                            ITileMeshLayerProcessor processor = processors[i];
 
-                        // A2 only choreographs WorkerOnly, same as A1's RunWorkerPass.
-                        if (processor.Phase != LayerPhase.WorkerOnly)
-                            throw new System.NotSupportedException(
-                                $"{processor.Phase} is not supported by A2's source-less worker pass.");
+                            // A2 only choreographs WorkerOnly, same as A1's RunWorkerPass.
+                            if (processor.Phase != LayerPhase.WorkerOnly)
+                                throw new System.NotSupportedException(
+                                    $"{processor.Phase} is not supported by A2's source-less worker pass.");
 
-                        // null decoded tile — source-less processors (TileBackgroundLayerProcessor) ignore it;
-                        // the two overloads serve disjoint processor sets (design §B Q2 / §G risk 6).
-                        processor.ProcessOnWorker(null, in context);
+                            // null decoded tile — source-less processors (TileBackgroundLayerProcessor) ignore it;
+                            // the two overloads serve disjoint processor sets (design §B Q2 / §G risk 6).
+                            processor.ProcessOnWorker(null, in scratchContext);
+                        }
+                    }
+                    catch
+                    {
+                        // Abort the remaining invocations for this pass — matching RunWorkerPass. Fall through so
+                        // EVERY processor still settles below (no stranded MeshDataArray).
                     }
                 }
-                catch
-                {
-                    // Abort the remaining invocations for this pass — matching RunWorkerPass. Fall through so
-                    // EVERY processor still settles below (no stranded MeshDataArray).
-                }
-            }
 
-            var payloads = new IRenderLayerPayload[count];
-            for (int i = 0; i < count; i++)
-            {
-                // Same unreachable-in-production per-processor settle guard as RunWorkerPass (see its comment):
-                // tolerates a hypothetical Complete() throw without stranding siblings; null slot handled downstream.
-                try { payloads[i] = processors[i].Complete(); }
-                catch { payloads[i] = null; }
+                var payloads = new IRenderLayerPayload[count];
+                for (int i = 0; i < count; i++)
+                {
+                    // Same unreachable-in-production per-processor settle guard as RunWorkerPass (see its comment):
+                    // tolerates a hypothetical Complete() throw without stranding siblings; null slot handled downstream.
+                    try { payloads[i] = processors[i].Complete(); }
+                    catch { payloads[i] = null; }
+                }
+                return payloads;
             }
-            return payloads;
+            finally
+            {
+                TileBuildScratchPool.Return(scratch);
+            }
         }
 
         /// <summary>Epic A / A3 (design §B Q1/Q2): the symbol cadence's worker-pass entry — read the

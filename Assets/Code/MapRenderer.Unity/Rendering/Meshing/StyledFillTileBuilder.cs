@@ -10,6 +10,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 using Fill = MapRenderer.Core.Style.Fill;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's
@@ -113,19 +114,52 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <c>Array.Sort</c> is an introsort and is not stable on its own, and features with equal sort keys
         /// must keep source order (the spec's implicit ordering). An unevaluable key falls to 0, matching
         /// <c>TryEvaluate</c>'s contract elsewhere in this builder.</para>
+        ///
+        /// <para><paramref name="scratch"/> (perf/gc-elimination): when non-null, the working buffers and the
+        /// sort comparer are drawn from the caller's pooled <see cref="TileBuildScratch"/> instead of being
+        /// allocated fresh — byte-identical output, zero managed allocation once the buffers have grown to
+        /// this tile's peak feature count. <c>null</c> (tests, non-pooled callers) keeps the original
+        /// allocating behaviour verbatim.</para>
         /// </summary>
         private static IReadOnlyList<SelectedTileFeature> OrderBySortKey(
-            IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom)
+            IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom,
+            TileBuildScratch scratch)
         {
             if (layout == null || layout.SortKeyIsDefault) return features;
 
             int count = features.Count;
-            var sortKeys      = new float[count];
-            var declaredOrder = new int[count];
+            float[] sortKeys;
+            int[]   declaredOrder;
+            if (scratch != null)
+            {
+                sortKeys      = scratch.SortKeys(count);
+                declaredOrder = scratch.DeclaredOrder(count);
+            }
+            else
+            {
+                sortKeys      = new float[count];
+                declaredOrder = new int[count];
+            }
+
             for (int i = 0; i < count; i++)
             {
                 declaredOrder[i] = i;
                 sortKeys[i] = layout.SortKey.TryEvaluate(zoom, features[i].Feature, out float key) ? key : 0f;
+            }
+
+            if (scratch != null)
+            {
+                // The pool's reusable IComparer<int> field — no per-call closure/delegate allocation, unlike
+                // the lambda overload below. Sorted range is [0, count) — the backing arrays may be LONGER
+                // (grow-only, sized to a prior build's peak), so the 3-arg range overload is load-bearing,
+                // not cosmetic.
+                System.Array.Sort(declaredOrder, 0, count, scratch.SortKeyComparer(sortKeys));
+
+                SelectedTileFeature[] orderedBuffer = scratch.OrderedFeaturesBuffer(count);
+                for (int i = 0; i < count; i++) orderedBuffer[i] = features[declaredOrder[i]];
+                // A fixed-length [0, count) VIEW over the buffer, never the raw (possibly longer) array —
+                // returning the array itself would let a shorter later build's Count read as a stale larger one.
+                return scratch.OrderedFeaturesView(count);
             }
 
             System.Array.Sort(declaredOrder, (left, right) =>
@@ -193,6 +227,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <c>geometry.Extent</c>. A second copy alongside the buffer is what would let a caller pair a z0
         /// buffer with a z1 address — base vertices from one tile, pattern scale and globe subdivision from
         /// another — so the seam does not accept one (<c>ITileGeometryMaterializer</c>, "Self-describing").</para>
+        ///
+        /// <para><paramref name="scratch"/> (perf/gc-elimination): this build's rented <see cref="TileBuildScratch"/>,
+        /// threaded into <see cref="OrderBySortKey"/> and <see cref="BuildRingVisitOrder"/> so the pooled worker
+        /// path (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) reuses its scratch buffers instead of
+        /// allocating fresh ones every build. <c>null</c> (every non-pooled caller, incl. tests) keeps the
+        /// original allocating behaviour.</para>
         /// </summary>
         public static void WriteMeshData(
             Mesh.MeshData                      md,
@@ -205,7 +245,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             out Bounds                         bounds,
             IProjection                        projection = null, // null ⇒ WebMercator (launch-time config threads this in)
             Fill.LayoutProperties              layout     = null, // null ⇒ no fill-sort-key (declared feature order)
-            TileBufferClip                     clip       = default) // default ⇒ disabled ⇒ the whole tile buffer is drawn
+            TileBufferClip                     clip       = default, // default ⇒ disabled ⇒ the whole tile buffer is drawn
+            TileBuildScratch                   scratch    = null) // null ⇒ allocate (non-pooled caller)
         {
             vertexCount = 0;
             bounds      = default;
@@ -217,7 +258,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // buffer and therefore ON TOP — this layer's features share one mesh drawn under a
             // painter's-algorithm ZWrite-Off contract, where triangle order IS draw order for coincident
             // polygons. Absent key ⇒ no sort at all, keeping the source's declared order byte-for-byte.
-            selectedFeatures = OrderBySortKey(selectedFeatures, layout, zoom);
+            selectedFeatures = OrderBySortKey(selectedFeatures, layout, zoom, scratch);
 
             // The marker string (ProfilerMarkerNames.WriteMeshData) is a telemetry contract asserted by
             // ProfilerMarkerTests + MapViewAsyncMeshBuildTests, which read the same const — rename in one place.
@@ -227,9 +268,22 @@ namespace MapRenderer.Unity.Rendering.Meshing
             // its position in fill-sort-key order. Both are indexed by the feature's ORDINAL in the source
             // layer, because that is what the shared buffer's RingFeatureIdx names; a slot-indexed array would
             // permute colours the moment this layer's filter rejects anything.
-            var featureColors = new Vector4[geometry.FeatureCount];
-            var rankByOrdinal = new int[geometry.FeatureCount];
-            for (int i = 0; i < rankByOrdinal.Length; i++) rankByOrdinal[i] = -1; // -1 ⇒ not drawn by this layer
+            // Rank 3 GC fix: the two per-feature columns are NativeArray, disposed via `using var` (ClearMemory
+            // zero-init) — construction and disposal are a single statement, so a partial-construction throw
+            // can't strand an already-built handle. Allocator.Persistent, NOT TempJob: this runs off-main
+            // (UniTask.RunOnThreadPool) and a build can span >4 main-thread frames — TempJob's 4-frame lifetime
+            // check would flag/reclaim it mid-build. Persistent has no frame limit; `using var` still disposes.
+            using var featureColors = new NativeArray<Vector4>(geometry.FeatureCount, Allocator.Persistent);
+            using var rankByOrdinal = new NativeArray<int>(geometry.FeatureCount, Allocator.Persistent);
+            // A `using`-declared local is read-only for index-ASSIGNMENT (CS1654) — reads through
+            // featureColors/rankByOrdinal (including passing them by value to WriteGeometry below) are
+            // unaffected; only the writes need a plain-local alias. GetSubArray(0, Length) is a normal method
+            // call returning a NativeArray<T> VIEW over the same memory, assignable to a non-readonly local.
+            NativeArray<Vector4> featureColorsWritable = featureColors.GetSubArray(0, featureColors.Length);
+            NativeArray<int>     rankByOrdinalWritable = rankByOrdinal.GetSubArray(0, rankByOrdinal.Length);
+            // KEEP the -1 fill: a default NativeArray<int> is 0, a VALID rank — so without this, non-drawn
+            // features (never ranked below) would read rank 0 and BuildRingVisitOrder would visit their rings.
+            for (int i = 0; i < rankByOrdinalWritable.Length; i++) rankByOrdinalWritable[i] = -1; // -1 ⇒ not drawn by this layer
 
             int rank = 0;
             for (int si = 0; si < selectedFeatures.Count; si++)
@@ -262,23 +316,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
                     featureAlpha *= opacity;
 
-                featureColors[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
-                rankByOrdinal[selected.Ordinal] = rank++;
+                featureColorsWritable[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
+                rankByOrdinalWritable[selected.Ordinal] = rank++;
             }
 
             if (rank == 0)
                 return; // no polygon geometry — md left untouched; caller disposes the unused MeshData
 
-            NativeArray<int> ringVisitOrder = BuildRingVisitOrder(geometry, rankByOrdinal, rank);
-            try
-            {
-                WriteGeometry(md, geometry, ringVisitOrder, featureColors,
-                    tileOriginRender, projection, clip, out vertexCount, out bounds);
-            }
-            finally
-            {
-                ringVisitOrder.Dispose();
-            }
+            using var ringVisitOrder = BuildRingVisitOrder(geometry, rankByOrdinal, rank, scratch);
+            WriteGeometry(md, geometry, ringVisitOrder, featureColors,
+                tileOriginRender, projection, clip, out vertexCount, out bounds);
         }
 
         /// <summary>
@@ -294,12 +341,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <item>within a feature, rings keep <b>ascending ring index</b> = decode order, which is what makes
         /// earcut's hole-bridge sort (tiebroken on ring index) land where it did before.</item>
         /// </list>
+        ///
+        /// <para><paramref name="scratch"/> (perf/gc-elimination): when non-null, <c>rankStart</c> and the
+        /// cursor it seeds are drawn from the pool instead of a fresh <c>new int[]</c> + <c>Array.Clone</c> —
+        /// same counting-sort arithmetic, byte-identical <c>order</c>. The returned <see cref="NativeArray{T}"/>
+        /// itself is UNCHANGED by pooling — still a fresh <c>Allocator.Persistent</c> array the caller disposes
+        /// (D1a idiom); only the two MANAGED <c>int[]</c> scratch buffers move to the pool.</para>
         /// </summary>
         private static NativeArray<int> BuildRingVisitOrder(
-            TileGeometryBuffers geometry, int[] rankByOrdinal, int rankCount)
+            TileGeometryBuffers geometry, NativeArray<int> rankByOrdinal, int rankCount, TileBuildScratch scratch)
         {
-            var rankStart = new int[rankCount + 1];
-            int visited   = 0;
+            int   rankStartLength = rankCount + 1;
+            int[] rankStart       = scratch != null ? scratch.RankStart(rankStartLength) : new int[rankStartLength];
+            int   visited         = 0;
             for (int r = 0; r < geometry.RingCount; r++)
             {
                 int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];
@@ -309,8 +363,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
             }
             for (int i = 0; i < rankCount; i++) rankStart[i + 1] += rankStart[i];
 
-            var order  = new NativeArray<int>(visited, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var cursor = (int[])rankStart.Clone();
+            // Allocator.Persistent, NOT TempJob: owned + disposed by the caller (WriteMeshData) via `using var`,
+            // but off-main a build can span >4 main-thread frames, so TempJob's 4-frame check would trip.
+            var order = new NativeArray<int>(visited, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            int[] cursor;
+            if (scratch != null)
+            {
+                cursor = scratch.RankCursor(rankStartLength);
+                System.Array.Copy(rankStart, cursor, rankStartLength); // pooled Clone() replacement
+            }
+            else
+            {
+                cursor = (int[])rankStart.Clone();
+            }
             for (int r = 0; r < geometry.RingCount; r++)
             {
                 int rank = rankByOrdinal[geometry.RingFeatureIdx[r]];
@@ -341,7 +406,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             Mesh.MeshData               md,
             TileGeometryBuffers         geometry,
             NativeArray<int>            ringVisitOrder,
-            IReadOnlyList<Vector4>      featureColors,
+            NativeArray<Vector4>        featureColors,
             double3                     tileOriginRender,
             IProjection                 projection,
             TileBufferClip              clip,
@@ -453,7 +518,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // the earcut NativeArrays feed the job directly and the refined output lands in Temp-scope NativeLists.
         private static void WriteGlobeSubdivided(
             Mesh.MeshData md,               in TileMeshBuffers buffers, IProjection proj, TileId id, double extent,
-            double3       tileOriginRender, IReadOnlyList<Vector4> featureColors, out int vertexCount, out Bounds bounds)
+            double3       tileOriginRender, NativeArray<Vector4> featureColors, out int vertexCount, out Bounds bounds)
         {
             vertexCount = 0;
             bounds      = default;
@@ -461,67 +526,62 @@ namespace MapRenderer.Unity.Rendering.Meshing
             int srcVerts   = buffers.VertexCount[0];
             int srcIndices = buffers.TotalIndexCount;
 
-            var outV  = new NativeList<GlobeFillVertex>(srcVerts * 4, Allocator.Persistent);
-            var outIx = new NativeList<int>(srcIndices           * 4, Allocator.Persistent);
-            try
+            // Allocator.Persistent, NOT TempJob: off-main build can span >4 main-thread frames (TempJob's
+            // 4-frame lifetime check would trip). `using var` — construction and disposal are one statement.
+            using var outV  = new NativeList<GlobeFillVertex>(srcVerts * 4, Allocator.Persistent);
+            using var outIx = new NativeList<int>(srcIndices           * 4, Allocator.Persistent);
+
+            GlobeFillSubdivideDispatch.Run(
+                proj, buffers.TileVertices, buffers.TriangleIndices, buffers.VertexFeatureIdx,
+                srcVerts, srcIndices, id, extent, tileOriginRender,
+                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
+                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices, outV, outIx);
+
+            int n = outV.Length, ni = outIx.Length;
+            if (n == 0 || ni == 0) return;
+
+            md.SetVertexBufferParams(n, FillVertexDescriptors);
+            NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
+            NativeArray<Vector2>            s1 = md.GetVertexData<Vector2>(1);
+            NativeArray<Vector4>            s2 = md.GetVertexData<Vector4>(2);
+            NativeArray<Vector4>            s3 = md.GetVertexData<Vector4>(3);
+            md.SetIndexBufferParams(ni, IndexFormat.UInt32);
+            NativeArray<int> indices = md.GetIndexData<int>();
+
+            double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
+            double tileSpanWorldUnits = TileSpanWorldUnits(id);
+            float3 bMin      = new float3(float.MaxValue);
+            float3 bMax      = new float3(float.MinValue);
+            for (int i = 0; i < n; i++)
             {
-                GlobeFillSubdivideDispatch.Run(
-                    proj, buffers.TileVertices, buffers.TriangleIndices, buffers.VertexFeatureIdx,
-                    srcVerts, srcIndices, id, extent, tileOriginRender,
-                    GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                    GlobeFillSubdivideDispatch.DefaultMaxOutputVertices, outV, outIx);
-
-                int n = outV.Length, ni = outIx.Length;
-                if (n == 0 || ni == 0) return;
-
-                md.SetVertexBufferParams(n, FillVertexDescriptors);
-                NativeArray<FillPositionNormal> s0 = md.GetVertexData<FillPositionNormal>(0);
-                NativeArray<Vector2>            s1 = md.GetVertexData<Vector2>(1);
-                NativeArray<Vector4>            s2 = md.GetVertexData<Vector4>(2);
-                NativeArray<Vector4>            s3 = md.GetVertexData<Vector4>(3);
-                md.SetIndexBufferParams(ni, IndexFormat.UInt32);
-                NativeArray<int> indices = md.GetIndexData<int>();
-
-                double extentInv = extent > 0.0 ? 1.0 / extent : 0.0;
-                double tileSpanWorldUnits = TileSpanWorldUnits(id);
-                float3 bMin      = new float3(float.MaxValue);
-                float3 bMax      = new float3(float.MinValue);
-                for (int i = 0; i < n; i++)
-                {
-                    GlobeFillVertex fv = outV[i];
-                    float3          v  = (float3)fv.World;
-                    bMin = math.min(bMin, v);
-                    bMax = math.max(bMax, v);
-                    float3 up = (float3)fv.Up;
-                    s0[i] = new FillPositionNormal
-                        { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
-                    s1[i] = PatternCoord(fv.Tile, extentInv, tileSpanWorldUnits);
-                    float3 east = (float3)fv.East;
-                    s2[i] = new Vector4(east.x, east.y, east.z, 1f); // w=+1: same TBN handedness as the Mercator path
-                    s3[i] = featureColors[fv.Feature];
-                }
-
-                // Reverse winding at the GPU-index boundary (same as the flat path above): the subdivided output
-                // inherits the canonical earcut CCW order, flipped here to Unity-front for stock Cull Back.
-                for (int i = 0; i + 2 < ni; i += 3)
-                {
-                    indices[i + 0] = outIx[i + 0];
-                    indices[i + 1] = outIx[i + 2]; // 2nd/3rd
-                    indices[i + 2] = outIx[i + 1]; // swapped
-                }
-
-                md.subMeshCount = 1;
-                md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);
-                vertexCount = n;
-                float3 c3 = (bMin + bMax) * 0.5f;
-                float3 sz = bMax - bMin;
-                bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
+                GlobeFillVertex fv = outV[i];
+                float3          v  = (float3)fv.World;
+                bMin = math.min(bMin, v);
+                bMax = math.max(bMax, v);
+                float3 up = (float3)fv.Up;
+                s0[i] = new FillPositionNormal
+                    { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) };
+                s1[i] = PatternCoord(fv.Tile, extentInv, tileSpanWorldUnits);
+                float3 east = (float3)fv.East;
+                s2[i] = new Vector4(east.x, east.y, east.z, 1f); // w=+1: same TBN handedness as the Mercator path
+                s3[i] = featureColors[fv.Feature];
             }
-            finally
+
+            // Reverse winding at the GPU-index boundary (same as the flat path above): the subdivided output
+            // inherits the canonical earcut CCW order, flipped here to Unity-front for stock Cull Back.
+            for (int i = 0; i + 2 < ni; i += 3)
             {
-                outV.Dispose();
-                outIx.Dispose();
+                indices[i + 0] = outIx[i + 0];
+                indices[i + 1] = outIx[i + 2]; // 2nd/3rd
+                indices[i + 2] = outIx[i + 1]; // swapped
             }
+
+            md.subMeshCount = 1;
+            md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);
+            vertexCount = n;
+            float3 c3 = (bMin + bMax) * 0.5f;
+            float3 sz = bMax - bMin;
+            bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
         }
     }
 }

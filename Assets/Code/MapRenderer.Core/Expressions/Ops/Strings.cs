@@ -11,7 +11,7 @@ namespace MapRenderer.Core.Expressions.Ops
     public static class Strings
     {
         public static Expression Concat(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 var sb = new StringBuilder();
                 foreach (var v in vals)
@@ -21,12 +21,12 @@ namespace MapRenderer.Core.Expressions.Ops
 
         public static Expression Upcase(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.String(vals[0].AsString().ToUpperInvariant()),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.String(vals[0].AsString().ToUpperInvariant()),
                 new[] { arg }, ValueType.String);
 
         public static Expression Downcase(Expression arg)
             => new FunctionExpression(
-                (Value[] vals, in EvaluationContext ctx) => Value.String(vals[0].AsString().ToLowerInvariant()),
+                (System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) => Value.String(vals[0].AsString().ToLowerInvariant()),
                 new[] { arg }, ValueType.String);
     }
 }

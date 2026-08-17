@@ -10,7 +10,9 @@ engineering gotchas). This file is for *how we write code*, not *what the system
 
 ---
 
-## Math types: `Unity.Mathematics` only
+## Math & numeric types
+
+### Math types: `Unity.Mathematics` only
 
 Use **`Unity.Mathematics`** for all vector / matrix / quaternion math:
 
@@ -50,7 +52,7 @@ into `Core` or the Jobs layer.
 
 *(Established S60.)*
 
-### `System.Math` and `UnityEngine.Mathf` are banned
+#### `System.Math` and `UnityEngine.Mathf` are banned
 
 Starting S62, `System.Math.*` is **banned in all production `.cs` files** (`Core/`, `Jobs/`, `Unity/`).
 Use the equivalent `Unity.Mathematics.math.*` free function instead.
@@ -95,9 +97,48 @@ causes const-expression compile failures when used in `const double` field initi
 test-enforced: `System.Math` never had a structure test either, and the honest reason both hold is that
 the list of offenders is a one-line grep away.)*
 
+### Angles are an `Angle` value type, not a bare `double`
+
+Never pass or store an angle as a bare `double` in camera code. Use the **`Angle` struct** (Core,
+engine-free) instead — it stores degrees internally and is the project's **sole** home of the
+`* math.PI_DBL / 180.0` conversion. Every trig call reads `.Sin` / `.Cos` or `.Radians` off the struct
+instead of repeating the multiply.
+
+**Construction is always explicit.** Use `Angle.FromDegrees(x)` or `Angle.FromRadians(x)` — the unit
+must be visible at the construction site. There is **no implicit `double` conversion** on `Angle`; reading
+a value always requires `.Degrees` or `.Radians`.
+
+**Camera orientation params use `ConstrainedAngle`.** `CameraProperties.Heading` and `CameraProperties.Tilt`
+are `ConstrainedAngle` — an `Angle` together with a `[lo, hi]` range and an
+`AngleConstraint {Clamp, Wrap}` strategy. The stored value is always already in-range; the constraint
+is enforced at construction, not on every read. Presets:
+- `ConstrainedAngle.Heading(degrees)` — `[0, 360)` Wrap. Replaces the retired
+  `CameraProperties.NormalizeHeading`.
+- `ConstrainedAngle.Tilt(degrees)` — `[0, 90]` Clamp. `tilt=0` is top-down (camera forward =
+  inverse of earth normal); `tilt=90` is parallel to the surface (horizon).
+- `ConstrainedAngle.Clamped(degrees, lo, hi)` — runtime `[lo, hi]` Clamp (e.g. a per-call
+  `maxPitch` limit distinct from the `[0, 90]` type invariant).
+
+**What not to do:**
+- `double heading = props.Heading;` — compile error (no implicit `double`); write
+  `props.Heading.Degrees` or `props.Heading.Value` (the `Angle`).
+- Open-coding `x * math.PI_DBL / 180.0` anywhere outside `Angle.cs` in camera code — the struct
+  provides `Sin`/`Cos`/`Radians` to avoid it.
+- Adding angle operators (`Angle + Angle`, `Angle - Angle`) speculatively. Add them only when an
+  actual swept call site demands it. `ConstrainedAngle + Angle` does exist (accumulates a delta
+  and re-applies the constraint) with its sole swept use in `ViewInput.ApplyTilt`.
+
+**Out of scope for this rule** (explicitly): the 7 non-camera π/180 sites in `WebMercator.cs`,
+`Ecef.cs`, `TileId.cs`, `Expressions/Color.cs`, and the geometry builders/Jobs use geo/projection
+math, not camera-orientation angles, and are not required to wrap in `Angle`.
+
+*(Established S68.)*
+
 ---
 
-## Pass large read-only structs by `in`
+## Types & data modeling
+
+### Pass large read-only structs by `in`
 
 When a method only **reads** a struct parameter and that struct is larger than a couple of machine words
 (roughly **> 16 bytes**), declare the parameter **`in`**. Passing by value copies the whole struct at every
@@ -142,9 +183,7 @@ applies; prefer it for the larger blittable aggregates passed into `Execute`.
 *(Established 2026-06-26 — noticed in S62's `ViewInput` / `CameraProperties` by-value pass; `in
 EvaluationContext` is the prior-art that got it right.)*
 
----
-
-## Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`
+### Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`
 
 **Prefer object initializers over positional constructors.** When a type is a plain data carrier (no
 validation or computed construction), expose **`init`-only auto-properties** and construct with named
@@ -171,23 +210,142 @@ that is the projection *math*, not a naming choice — do the swap at the projec
 
 ---
 
-## Test code must not bloat the production codebase
+## Geometry & meshing
 
-If a member exists solely to satisfy a test, it does not belong in the production class.
+### Type-explicit builder naming
 
-- **`internal` + `InternalsVisibleTo`** — the only acceptable production footprint: broaden a `private`
-  member to `internal` when a test needs it. Nothing else changes on the production type.
-- **Extension methods in the test assembly** — computed accessors, adapters, drain/settle helpers: add
-  them as `static` extension methods in the test assembly (e.g. `MapViewTestExtensions`), forwarding
-  through `internal` members. No production-class changes required.
-- **Not allowed:** `public` members with no production caller; members annotated `// for testing only`;
-  test setup helpers or factories inside production classes.
+A type that **builds or owns a single geometry kind** must name that kind explicitly —
+`StyledFillTileBuilder`, `StyledLineTileBuilder` — not a generic `MeshBuilder` or `TileMeshFactory`.
+Generic, type-agnostic names are **reserved for genuinely type-agnostic dispatchers**: a `MeshBuilder`
+should be a thing that builds *any* mesh by delegating to the kind-specific builders, never a fill-only
+builder wearing a generic coat.
 
-*(Established 865cf5f — MapView / TileManager test-surface refactor.)*
+**Why:** a generic name on a single-kind builder lies about its scope — a reader (or an agent extending it)
+assumes it handles lines too, and bolts line logic onto a fill builder. The retired Gen-1
+`MeshBuilder` / `TileMeshFactory` were exactly this offence, and they are why the rule exists.
+
+*(Established S54 — the retired Gen-1 `MeshBuilder` / `TileMeshFactory` were the naming offenders this rule
+targets.)*
+
+### Geometry producers declare their output winding; boundaries convert
+
+A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`)
+must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
+method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
+whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens
+at **exactly one place per mesh kind**: the GPU mesh-write boundary (`StyledFillTileBuilder` /
+`StyledLineTileBuilder`), where the canonical CCW is reversed to Unity-front for stock **Cull Back**.
+
+**The rule in two halves — producers declare, boundaries convert:**
+- A producer **never bakes the render convention** into its output. Winding-for-Unity-culling is a consumer-side
+  concern (the same "convert at the Unity boundary, never upstream" rule as `double`→`float` / `double3`→`Vector3`).
+  Baking it upstream would (a) leak a Unity assumption into engine-free `Core`, and (b) break the parity oracles
+  that hash the canonical IR (`JobifiedPipelineTests`, `GlobeSubdivisionJobParityTests`).
+- The conversion lives at **one** boundary per kind, stated in a comment that names the reflection cause
+  (`docs/coordinates-and-projections.md` §7.1). Don't scatter per-projection or per-path winding flips — the
+  winding is uniform by construction, so one reversal serves every projection.
+
+**Why:** the winding a producer emits in 2D tile space is *inverted* by the time it reaches Unity's left-handed
+render space (the load-bearing ECEF reflection, §7.1). If each producer's convention isn't stated, every consumer
+re-derives the sign by hand — the exact "why do we reverse this?" confusion this rule removes. Pinned by
+`GlobeFillWindingTests` / `GlobeLineWindingTests` (absolute: front face points out of the surface).
 
 ---
 
-## Comments: a short doc on every member, nothing that restates the body
+## Memory, performance & lifetime
+
+### Hot-path allocations: none, then native, then pooled
+
+A **hot path** is anything that runs per feature / per vertex / per glyph / per tile-build / per frame — the
+loops that recur under pan and zoom. A managed allocation there is not a local cost: Unity's GC is
+**stop-the-world**, so a single `new` on a worker thread can freeze *every* thread, main included, mid-frame.
+(The rapid-zoom frame-rate stutter was exactly this — per-feature managed objects in off-thread decode and
+mesh build.) The rule is a **descending ladder**; take the highest rung the situation allows, and only drop
+to the next when the one above is genuinely impossible.
+
+1. **Allocate nothing.** Reuse a buffer you already own, write in place, or hoist the allocation out of the
+   loop (once per build, not once per element). For a small bounded collection, `FixedList*Bytes<T>` keeps it
+   inline with no heap at all; `stackalloc` does the same for an **unmanaged** element type.
+
+2. **Blittable/unmanaged data → native containers, not managed arrays.** If the elements are unmanaged
+   (numbers, `float3`, indices, blittable structs), use `NativeArray<T>` / `NativeList<T>` / the native
+   containers — they live **off the GC heap** (so they never trigger a collection) and they cross the
+   job/Burst boundary. Choose the `Allocator` by **lifetime and thread**, not by habit:
+   - **Off-main build scratch → `Allocator.Persistent`** (disposed via a `using`). `TempJob`'s 4-frame
+     lifetime is measured in *main-thread* frames, which an off-main build (a worker spanning many main
+     frames under load) overruns — the safety system then logs `deleting an allocation … older than 4
+     frames` and can reclaim the buffer mid-build.
+   - **Main-thread method scratch → `Allocator.Temp` / `TempJob`**, disposed within the frame.
+   - Ownership and disposal follow the mesh-lifetime rule above (data is a value type, disposed
+     deterministically at the consume boundary).
+
+3. **Managed data that can't be native → pool it; never `new` per call.** Some element types hold references
+   and cannot live in a `NativeArray` — e.g. `Value` carries a `string` / list / dictionary. Don't allocate
+   one per call:
+   - **Simple, non-reentrant temporaries → `System.Buffers.ArrayPool<T>.Shared`** (`Rent` / `Return` in a
+     `finally`). It returns **oversized** arrays, so it is only safe where the consumer takes an explicit
+     **length or `Span`** and never trusts `array.Length`.
+   - **Managed collections/objects on the MAIN thread → `UnityEngine.Pool`** (`ListPool<T>`, `ObjectPool<T>`,
+     `CollectionPool`, `GenericPool`) — the house tool for a `List` / `HashSet` / `Dictionary` / object rented
+     and released within a scope (prior art across `MapRenderer.Unity`). It is **not thread-safe** (a bare
+     `Stack`), so an **off-main** hot path (decode, mesh build, symbol extract) must use a per-thread pool
+     instead — a `[ThreadStatic]` free-list, the `TileBuildScratch` per-build pool — whatever assembly it is
+     in. `UnityEngine.Pool` is also engine-only, so engine-free `Core` reaches for `ArrayPool` / a hand-rolled
+     pool — but that is a *consequence* of correct placement, never a reason to keep code in Core: per
+     `ARCHITECTURE.md` §2, if a type would be materially better with a Unity pool it belongs in Unity/Jobs
+     (Core is a convenience, not a placement argument).
+   - **Pool only scoped scratch, never a borrowed container.** Rent/release must bracket a scope the object
+     never escapes. Releasing a `List` another object still references — a decoded layer's feature list handed
+     out to consumers — clears it out from under the holder: a correctness bug, not a perf tweak.
+   - **Reentrant or cross-thread hot paths → a `[ThreadStatic]` free-list of whole buffers.** When evaluation
+     nests (one frame's buffer is still live while a nested frame borrows another) *and* the structure is
+     shared across worker threads, a single shared buffer aliases and `ArrayPool` adds bookkeeping you don't
+     need. A thread-local **free-list of distinct arrays** gives each live frame its own buffer with no
+     cross-thread state. Prior art: `EvalArgBuffers` (the expression-evaluator argument buffers).
+   - **Contract for any pool:** every `Rent` is paired with a `Return` in a `finally` — a throw mid-use
+     (a failed coercion, a nested evaluation error) must not leak the buffer out of the pool, or the pool
+     silently drains back to per-call allocation.
+
+4. **Prove it with a tooth.** A GC-elimination change carries a **zero-allocation test, RED-verified** against
+   the un-fixed code (re-inserting the allocation must make the test fail — otherwise the meter is dead, not
+   the allocation). The working meter is **runner-specific**: use `Is.Not.AllocatingGCMemory()` (the
+   Recorder-based constraint) in the Unity EditMode runner — `GC.GetAllocatedBytesForCurrentThread()` returns
+   0 there for any allocation and a byte-delta tooth is vacuous; the thread-local byte delta works only in the
+   `Tools/core-tests` real-.NET runner. Warm the exact measured delegate before asserting (the constraint can
+   false-positive on the one-shot JIT of a microscopic path).
+
+**Out of scope — cold paths.** Style/expression parse, static-table initialization, one-per-load setup, and
+`$"…"` on an exception path run once (or only on failure). Pooling them trades readability for nothing; the
+ladder is for the recurring loops only.
+
+### Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class
+
+Two resource classes, kept strictly apart (platform-forced, not stylistic — jobs can't touch a
+`UnityEngine.Object`, and only the main thread can create/destroy the GPU resource):
+
+- **Blittable geometry *data* = value-type structs in the job world** (`NativeArray`, `Mesh.MeshData`,
+  `LayerMeshData`). Written by Burst/worker jobs, disposed **deterministically at the
+  `ApplyAndDisposeWritableMeshData` boundary**, never held past consume — so a job-side struct **never carries
+  a dispose-once guard** (a struct copy has its own flag; mutable dispose-state on a value type is a footgun).
+- **The `Mesh` GPU *resource* = a reference-type class with exactly ONE owner.** Created/destroyed on the main
+  thread only, owned by exactly one place at all times (`TileManager._loaded` in cover, `PreparedTileCache`
+  out of cover — **Model B**); an ownership transfer **nulls the source reference** so the mesh is destroyed
+  exactly once (that null-on-transfer is the double-free guard). Teardown is always **destroy meshes → dispose
+  backend**.
+- **Corollary:** dispose-guard machinery (a `VerifiedDisposable`-style base, the `CountMeshObjects` leak
+  baseline) touches only the **class** side; struct data stays trivial. Two leak-guard systems, one per class:
+  `NativeArray` alloc-vs-dispose (`DebugLiveAllocCount`) for data, `Mesh` created-vs-destroyed
+  (`CountMeshObjects`) for the resource. (This is why S82 caches the `Mesh`, not the `NativeArray`.)
+
+**Full contract** — the four disposal exit paths, cancellation-≠-cleanup, and the leak-guard teeth — lives in
+**`docs/async-architecture.md` §"Disposal & cancellation contract"**; that doc is canonical, this is the
+one-screen summary.
+
+---
+
+## Documentation & tests
+
+### Comments: a short doc on every member, nothing that restates the body
 
 **Every member carries an XML doc, and it is short.** A one- or two-line `<summary>`, plus a `<param>` for
 each parameter — plain and simple. A `<returns>` when the summary does not already answer it. This is the
@@ -223,104 +381,16 @@ which of the three reasons applies. If you cannot name one, cut it back to the f
 this repo has been burned by stale and false docs, and `e133181a` exists solely to correct four of them. The
 cure is each fact in the right place once, not more prose in every place.)*
 
----
+### Test code must not bloat the production codebase
 
-## Angles are an `Angle` value type, not a bare `double`
+If a member exists solely to satisfy a test, it does not belong in the production class.
 
-Never pass or store an angle as a bare `double` in camera code. Use the **`Angle` struct** (Core,
-engine-free) instead — it stores degrees internally and is the project's **sole** home of the
-`* math.PI_DBL / 180.0` conversion. Every trig call reads `.Sin` / `.Cos` or `.Radians` off the struct
-instead of repeating the multiply.
+- **`internal` + `InternalsVisibleTo`** — the only acceptable production footprint: broaden a `private`
+  member to `internal` when a test needs it. Nothing else changes on the production type.
+- **Extension methods in the test assembly** — computed accessors, adapters, drain/settle helpers: add
+  them as `static` extension methods in the test assembly (e.g. `MapViewTestExtensions`), forwarding
+  through `internal` members. No production-class changes required.
+- **Not allowed:** `public` members with no production caller; members annotated `// for testing only`;
+  test setup helpers or factories inside production classes.
 
-**Construction is always explicit.** Use `Angle.FromDegrees(x)` or `Angle.FromRadians(x)` — the unit
-must be visible at the construction site. There is **no implicit `double` conversion** on `Angle`; reading
-a value always requires `.Degrees` or `.Radians`.
-
-**Camera orientation params use `ConstrainedAngle`.** `CameraProperties.Heading` and `CameraProperties.Tilt`
-are `ConstrainedAngle` — an `Angle` together with a `[lo, hi]` range and an
-`AngleConstraint {Clamp, Wrap}` strategy. The stored value is always already in-range; the constraint
-is enforced at construction, not on every read. Presets:
-- `ConstrainedAngle.Heading(degrees)` — `[0, 360)` Wrap. Replaces the retired
-  `CameraProperties.NormalizeHeading`.
-- `ConstrainedAngle.Tilt(degrees)` — `[0, 90]` Clamp. `tilt=0` is top-down (camera forward =
-  inverse of earth normal); `tilt=90` is parallel to the surface (horizon).
-- `ConstrainedAngle.Clamped(degrees, lo, hi)` — runtime `[lo, hi]` Clamp (e.g. a per-call
-  `maxPitch` limit distinct from the `[0, 90]` type invariant).
-
-**What not to do:**
-- `double heading = props.Heading;` — compile error (no implicit `double`); write
-  `props.Heading.Degrees` or `props.Heading.Value` (the `Angle`).
-- Open-coding `x * math.PI_DBL / 180.0` anywhere outside `Angle.cs` in camera code — the struct
-  provides `Sin`/`Cos`/`Radians` to avoid it.
-- Adding angle operators (`Angle + Angle`, `Angle - Angle`) speculatively. Add them only when an
-  actual swept call site demands it. `ConstrainedAngle + Angle` does exist (accumulates a delta
-  and re-applies the constraint) with its sole swept use in `ViewInput.ApplyTilt`.
-
-**Out of scope for this rule** (explicitly): the 7 non-camera π/180 sites in `WebMercator.cs`,
-`Ecef.cs`, `TileId.cs`, `Expressions/Color.cs`, and the geometry builders/Jobs use geo/projection
-math, not camera-orientation angles, and are not required to wrap in `Angle`.
-
-*(Established S68.)*
-
----
-
-## Type-explicit builder naming
-
-A type that **builds or owns a single geometry kind** must name that kind explicitly —
-`StyledFillTileBuilder`, `StyledLineTileBuilder` — not a generic `MeshBuilder` or `TileMeshFactory`.
-Generic, type-agnostic names are **reserved for genuinely type-agnostic dispatchers**: a `MeshBuilder`
-should be a thing that builds *any* mesh by delegating to the kind-specific builders, never a fill-only
-builder wearing a generic coat.
-
-**Why:** a generic name on a single-kind builder lies about its scope — a reader (or an agent extending it)
-assumes it handles lines too, and bolts line logic onto a fill builder. The retired Gen-1
-`MeshBuilder` / `TileMeshFactory` were exactly this offence, and they are why the rule exists.
-
-*(Established S54 — the retired Gen-1 `MeshBuilder` / `TileMeshFactory` were the naming offenders this rule
-targets.)*
-
-## Geometry producers declare their output winding; boundaries convert
-
-A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`)
-must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
-method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
-whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens
-at **exactly one place per mesh kind**: the GPU mesh-write boundary (`StyledFillTileBuilder` /
-`StyledLineTileBuilder`), where the canonical CCW is reversed to Unity-front for stock **Cull Back**.
-
-**The rule in two halves — producers declare, boundaries convert:**
-- A producer **never bakes the render convention** into its output. Winding-for-Unity-culling is a consumer-side
-  concern (the same "convert at the Unity boundary, never upstream" rule as `double`→`float` / `double3`→`Vector3`).
-  Baking it upstream would (a) leak a Unity assumption into engine-free `Core`, and (b) break the parity oracles
-  that hash the canonical IR (`JobifiedPipelineTests`, `GlobeSubdivisionJobParityTests`).
-- The conversion lives at **one** boundary per kind, stated in a comment that names the reflection cause
-  (`docs/coordinates-and-projections.md` §7.1). Don't scatter per-projection or per-path winding flips — the
-  winding is uniform by construction, so one reversal serves every projection.
-
-**Why:** the winding a producer emits in 2D tile space is *inverted* by the time it reaches Unity's left-handed
-render space (the load-bearing ECEF reflection, §7.1). If each producer's convention isn't stated, every consumer
-re-derives the sign by hand — the exact "why do we reverse this?" confusion this rule removes. Pinned by
-`GlobeFillWindingTests` / `GlobeLineWindingTests` (absolute: front face points out of the surface).
-
-## Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class
-
-Two resource classes, kept strictly apart (platform-forced, not stylistic — jobs can't touch a
-`UnityEngine.Object`, and only the main thread can create/destroy the GPU resource):
-
-- **Blittable geometry *data* = value-type structs in the job world** (`NativeArray`, `Mesh.MeshData`,
-  `LayerMeshData`). Written by Burst/worker jobs, disposed **deterministically at the
-  `ApplyAndDisposeWritableMeshData` boundary**, never held past consume — so a job-side struct **never carries
-  a dispose-once guard** (a struct copy has its own flag; mutable dispose-state on a value type is a footgun).
-- **The `Mesh` GPU *resource* = a reference-type class with exactly ONE owner.** Created/destroyed on the main
-  thread only, owned by exactly one place at all times (`TileManager._loaded` in cover, `PreparedTileCache`
-  out of cover — **Model B**); an ownership transfer **nulls the source reference** so the mesh is destroyed
-  exactly once (that null-on-transfer is the double-free guard). Teardown is always **destroy meshes → dispose
-  backend**.
-- **Corollary:** dispose-guard machinery (a `VerifiedDisposable`-style base, the `CountMeshObjects` leak
-  baseline) touches only the **class** side; struct data stays trivial. Two leak-guard systems, one per class:
-  `NativeArray` alloc-vs-dispose (`DebugLiveAllocCount`) for data, `Mesh` created-vs-destroyed
-  (`CountMeshObjects`) for the resource. (This is why S82 caches the `Mesh`, not the `NativeArray`.)
-
-**Full contract** — the four disposal exit paths, cancellation-≠-cleanup, and the leak-guard teeth — lives in
-**`docs/async-architecture.md` §"Disposal & cancellation contract"**; that doc is canonical, this is the
-one-screen summary.
+*(Established 865cf5f — MapView / TileManager test-surface refactor.)*

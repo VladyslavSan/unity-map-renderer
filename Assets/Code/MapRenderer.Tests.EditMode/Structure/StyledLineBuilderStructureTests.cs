@@ -105,6 +105,87 @@ namespace MapRenderer.Tests.Structure
                 "behavioural signal is missing.");
         }
 
+        [Test]
+        public void WriteMeshData_StagesRibbonInNativeScratch_NotManagedLists()
+        {
+            string body = StripLineComments(ExtractMethodBody(LineBuilderSource(), WriteMeshDataAnchor));
+
+            // Non-vacuity: an anchor miss would extract an empty or wrong body and pass every count below.
+            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty WriteMeshData body");
+            StringAssert.Contains("LineRibbonJob", body,
+                "precondition: the extracted body really is the one that builds the ribbon");
+
+            Assert.AreEqual(0, CountOccurrences(body, "new List<"),
+                "the ribbon-staging accumulators must be NativeList<>, not managed List<> — a managed List " +
+                "allocates on the GC heap every WriteMeshData call.");
+
+            // Element types unique to the new cross-ring accumulators (not the pre-existing per-ring
+            // NativeList<int>/NativeList<LineRibbonVertex> scratch), so this half is discriminating rather
+            // than satisfied by scratch that already existed before this stage.
+            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<LinePositionNormal>"), 1,
+                "expected a NativeList<LinePositionNormal> staging accumulator (stream 0)");
+            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<LineWidthColor>"), 1,
+                "expected a NativeList<LineWidthColor> staging accumulator (stream 3)");
+            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<Vector2>"), 1,
+                "expected a NativeList<Vector2> staging accumulator (stream 2)");
+        }
+
+        /// <summary>
+        /// Idiom rework (native-scratch cleanup pass): <c>WriteMeshData</c> disposes every owned native
+        /// handle via `using`, not a hand-rolled <c>= default;</c> + try/finally.
+        ///
+        /// <para><b>What this replaces.</b> The prior form of this tooth (<c>…ConstructsNativeContainersInsideTry
+        /// _NotBeforeCleanupScope</c>) pinned that every <c>new NativeList&lt;</c>/<c>new NativeArray&lt;</c> sat
+        /// AFTER a <c>try</c> token — guarding against a constructor throw before the try leaving an
+        /// already-built handle outside `finally`'s reach. That hazard is now structurally impossible: a
+        /// `using var`/`using (…)` declaration wraps ITS OWN construction and disposal in one statement
+        /// (the compiler emits the try/finally), so a throw partway through a run of declarations still
+        /// disposes every handle already built — with no default-init dance needed to make it safe. The
+        /// invariant survives; the mechanism that was pinning it is retired along with the pattern it guarded.</para>
+        /// </summary>
+        [Test]
+        public void WriteMeshData_DisposesNativeScratchViaUsing_NotHandRolledTryFinally()
+        {
+            string body = StripLineComments(ExtractMethodBody(LineBuilderSource(), WriteMeshDataAnchor));
+
+            // Non-vacuity: an anchor miss would extract an empty or wrong body and pass every count below.
+            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty WriteMeshData body");
+            Assert.GreaterOrEqual(
+                CountOccurrences(body, "new NativeList<") + CountOccurrences(body, "new NativeArray<"), 1,
+                "precondition: the extracted body really does construct native scratch — without this the " +
+                "assertions below would pass vacuously on a body with none");
+
+            // No hand-rolled default-init: a NativeList/NativeArray handle declared `= default;` (then
+            // constructed later) is the retired try/finally shape, not the `using`-based one.
+            Assert.AreEqual(0,
+                Regex.Matches(body, @"Native(List|Array)<[^;=]*>\s+\w+\s*=\s*default;").Count,
+                "WriteMeshData must not default-init a NativeList/NativeArray handle before constructing it " +
+                "— that pattern belongs to the retired hand-rolled try/finally, not `using`-based disposal.");
+
+            // No hand-rolled cleanup scope and no manual .Dispose() call on owned scratch — every native
+            // handle is released by a `using` declaration going out of scope, never by hand. Word-boundary +
+            // brace-anchored, not a bare substring: "finally" alone would false-positive on prose (this very
+            // file's class doc uses "the consumer that finally OBSERVES...", and a future comment here could
+            // too) — `\bfinally\s*\{` only matches the keyword immediately opening a block.
+            Assert.AreEqual(0, Regex.Matches(body, @"\bfinally\s*\{").Count,
+                "WriteMeshData must contain no `finally` block — disposal is `using`-based now, so there is " +
+                "no hand-rolled cleanup scope left to guard.");
+            Assert.AreEqual(0, CountOccurrences(body, ".Dispose()"),
+                "WriteMeshData must contain no explicit '.Dispose()' call on its own scratch — every owned " +
+                "native handle is released by a `using` declaration going out of scope, never by hand.");
+
+            // Both `using` FORMS must be present: `using var` for the buffers that live through the mesh copy
+            // at the end (the per-feature columns + the cross-ring accumulators), and a nested `using (…) { }`
+            // block for the 11 per-ring scratch buffers, which release BEFORE the mesh copy — a block is what
+            // lets them dispose earlier than the method's own end (the old manual early-Dispose() call this
+            // replaces).
+            Assert.GreaterOrEqual(CountOccurrences(body, "using var "), 1,
+                "expected at least one `using var` scratch declaration (the buffers that live to the mesh copy)");
+            Assert.GreaterOrEqual(CountOccurrences(body, "using ("), 1,
+                "expected at least one nested `using (…)` block (the per-ring scratch, released before the " +
+                "mesh copy to keep peak native memory down)");
+        }
+
         private static string LineBuilderSource()
         {
             string path = Path.Combine(

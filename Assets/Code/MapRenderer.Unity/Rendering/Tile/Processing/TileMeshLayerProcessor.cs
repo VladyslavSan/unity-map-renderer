@@ -73,7 +73,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                         // matching today's fallback rather than uploading partially-written data.
                         _layer.WriteInto(_mda[0], selected, geometry, context.Zoom,
                             context.TileOriginRender, context.Projection, context.BufferClip,
-                            out int verts, out Bounds bounds);
+                            context.Scratch, out int verts, out Bounds bounds);
                         _vertexCount = verts;
                         _bounds      = bounds;
                     }

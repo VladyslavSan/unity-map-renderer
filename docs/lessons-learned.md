@@ -117,6 +117,14 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
 
 ## DOTS / Entities Graphics
 
+- **GC is stop-the-world, so an allocation's cost surfaces as a phantom CPU spike in an unrelated
+  marker.** A collection freezes every thread and the profiler charges the frozen time to whichever marker
+  is on the stack — so a heavy cost that *wanders between markers frame to frame* and *always co-occurs with
+  a GC-Alloc spike* is GC, not that marker. Off-thread allocations freeze the main thread too. The full
+  narrative, the current allocation state, and the allocation-hunting discipline are in
+  [`gc-and-allocation-design.md`](gc-and-allocation-design.md); the ladder rule is in
+  [`conventions.md`](conventions.md); the GC-meter caveats are under **Test workflow** below.
+
 - **An Entities-Graphics entity renders NOTHING in a headless EditMode test until you tick its system
   groups manually.** EG submits draws from `EntitiesGraphicsSystem`, which runs in the player-loop
   presentation group — and that loop does not tick in EditMode (`camera.Render()` alone won't drive it).

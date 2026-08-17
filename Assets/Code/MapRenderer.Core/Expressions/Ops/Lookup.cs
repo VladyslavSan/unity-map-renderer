@@ -11,7 +11,7 @@ namespace MapRenderer.Core.Expressions.Ops
     {
         /// <summary><c>["at", index, array]</c>: the element at index; out-of-range is an error.</summary>
         public static Expression At(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 double idxD = vals[0].AsNumber();
                 var array = vals[1].AsArray();
@@ -26,7 +26,7 @@ namespace MapRenderer.Core.Expressions.Ops
         /// membership when haystack is an array. Returns a boolean.
         /// </summary>
         public static Expression In(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 Value needle = vals[0];
                 Value haystack = vals[1];
@@ -51,7 +51,7 @@ namespace MapRenderer.Core.Expressions.Ops
 
         /// <summary><c>["length", x]</c>: length of a string (chars) or array (elements).</summary>
         public static Expression Length(Expression arg)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 Value v = vals[0];
                 if (v.Type == ValueType.String) return Value.Number(v.AsString().Length);

@@ -341,7 +341,7 @@ namespace MapRenderer.Tests.Jobs
             public void WriteInto(
                 Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
                 double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                out int vertexCount, out Bounds bounds)
+                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
             {
                 WriteIntoCallCount++;
                 ObservedSelection = selected;

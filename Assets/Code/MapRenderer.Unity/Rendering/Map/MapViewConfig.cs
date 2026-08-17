@@ -56,6 +56,13 @@ namespace MapRenderer.Unity.Rendering.Map
                  "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
         public int MaxReleasesPerTick = 4;
 
+        [Tooltip("D1a: feature-property storage picked at decode time. Dense (default) keeps the wire's " +
+                 "(keyIdx,valIdx) tag pairs instead of expanding each feature into a per-feature " +
+                 "Dictionary<string,Value> — the GC-lean path, proven byte-identical to Dictionary by a " +
+                 "differential test. Dictionary is the legacy eager-dict storage, kept for A/B comparison; " +
+                 "prefer Dense unless diagnosing a storage-specific regression.")]
+        public PropertyStorageMode PropertyStorage = PropertyStorageMode.Dense;
+
         [Header("Meshing")]
         [Tooltip("How much of each tile's MVT buffer the FILL meshes keep, in tile units at extent 4096 " +
                  "(scaled to the layer's own extent). Tiles carry geometry past their edge so neighbours " +
@@ -101,6 +108,20 @@ namespace MapRenderer.Unity.Rendering.Map
             ByteBudget = 128L * 1024 * 1024,
             MaxCount   = 1024,
         };
+    }
+
+    /// <summary>
+    /// D1a: which feature-property representation a decode builds. Deliberately NOT named after a wire
+    /// format — <see cref="MapViewConfig"/> sits outside the decoder folders
+    /// (<c>NeutralGeometryPathTests.NoProductionTypeOutsideTheDecoderFolders_HasAFormatNamedTypeInAMemberSignature</c>),
+    /// so it cannot name <c>MapRenderer.Jobs.Mvt.MvtPropertyStorage</c> in a member signature. The
+    /// MVT-specific value this selects is resolved at the one wiring site that already knows it is
+    /// building an MVT source — <see cref="MapView.BuildSourceSpecs"/> — never upstream of it.
+    /// </summary>
+    public enum PropertyStorageMode
+    {
+        Dictionary = 0,
+        Dense = 1,
     }
 
     /// <summary>

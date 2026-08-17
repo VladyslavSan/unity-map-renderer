@@ -115,7 +115,7 @@ namespace MapRenderer.Tests.Tiles
             public void WriteInto(
                 Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
                 double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                out int vertexCount, out Bounds bounds)
+                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
             {
                 throw new InvalidOperationException("ThrowingTileMeshRenderLayer deliberate fault (test)");
             }
@@ -187,7 +187,7 @@ namespace MapRenderer.Tests.Tiles
             public void WriteInto(
                 Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
                 double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                out int vertexCount, out Bounds bounds)
+                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
             {
                 WriteIntoCallCount++;
                 Assert.IsTrue(geometry.IsCreated, "the processor must hand WriteInto a live shared buffer");

@@ -3,6 +3,7 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
+using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
@@ -25,22 +26,30 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     internal sealed class MvtTileFeatureSource : ITileFeatureSource
     {
-        private readonly IDataSource   _byteSource;
-        private readonly bool          _ownsByteSource;
-        private readonly TileScheduler _scheduler;
-        private readonly TileCache     _cache;
+        private readonly IDataSource        _byteSource;
+        private readonly bool               _ownsByteSource;
+        private readonly TileScheduler      _scheduler;
+        private readonly TileCache          _cache;
+        private readonly MvtPropertyStorage _propertyStorage;
 
         /// <param name="byteSource">The byte fetcher. Owned (disposed on <see cref="Dispose"/>) iff
         /// <paramref name="ownsByteSource"/> — mirrors the exact ownership <c>TileManager.SetSources</c> used
         /// to apply itself before the raise.</param>
         /// <param name="cacheCapacity">LRU capacity for the internal <see cref="TileCache"/> — moved here from
         /// the old <c>TileManager.SetSources</c>'s <c>new TileCache(capacity: 256)</c>.</param>
-        public MvtTileFeatureSource(IDataSource byteSource, int cacheCapacity = 256, bool ownsByteSource = true)
+        /// <param name="propertyStorage">Forwarded to <see cref="TileDecoders.ForEncoding"/> at each
+        /// <see cref="GetTile"/> — the wiring seat for <c>MapViewConfig.PropertyStorage</c>. Defaults to
+        /// <see cref="MvtPropertyStorage.Dictionary"/>, same as the decoder it reaches, so tests that
+        /// construct this source without naming a storage are unaffected.</param>
+        public MvtTileFeatureSource(
+            IDataSource byteSource, int cacheCapacity = 256, bool ownsByteSource = true,
+            MvtPropertyStorage propertyStorage = MvtPropertyStorage.Dictionary)
         {
-            _byteSource     = byteSource;
-            _ownsByteSource = ownsByteSource;
-            _cache          = new TileCache(cacheCapacity);
-            _scheduler      = new TileScheduler(byteSource, _cache);
+            _byteSource      = byteSource;
+            _ownsByteSource  = ownsByteSource;
+            _cache           = new TileCache(cacheCapacity);
+            _scheduler       = new TileScheduler(byteSource, _cache);
+            _propertyStorage = propertyStorage;
         }
 
         /// <summary>Fetch via the (unchanged) scheduler, then decode the bytes through
@@ -56,7 +65,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // IR C1 P3: the tile address goes IN here, at the only decode site, and is never supplied again.
             // Everything downstream reads it off the decoded buffer instead of carrying its own copy.
             return (resp.HasData && resp.Bytes != null)
-                ? await TileDecodeDispatch.DecodeAsync(id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding))
+                ? await TileDecodeDispatch.DecodeAsync(
+                    id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding, _propertyStorage))
                 : null;
         }
 

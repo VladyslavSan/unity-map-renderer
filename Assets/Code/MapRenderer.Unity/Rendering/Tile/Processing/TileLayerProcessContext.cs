@@ -38,5 +38,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>How much of the tile's MVT buffer the fill mesh keeps — the single global knob, read live
         /// off <c>MapViewConfig</c> each Tick. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
         public TileBufferClip BufferClip { get; init; }
+
+        /// <summary>This build's rented <see cref="TileBuildScratch"/> (perf/gc-elimination) — populated by
+        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/>/<see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>
+        /// for the duration of their worker pass, <c>null</c> everywhere else (tests, the symbol cadence, any
+        /// context built outside those two entries). A processor that reads a <c>null</c> Scratch must fall
+        /// back to allocating its own scratch, exactly as it did before pooling existed — never assume this is
+        /// non-null.</summary>
+        public TileBuildScratch Scratch { get; init; }
     }
 }

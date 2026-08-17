@@ -43,11 +43,26 @@ namespace MapRenderer.Jobs.Mvt
         public bool HasId;
 
         /// <summary>
-        /// Decoded properties resolved from the layer's key/value tables. Populated by
-        /// <see cref="MvtDecoder"/> after the full layer message is read (two-pass: raw tags are
-        /// held until keys/values are complete, then resolved). Always non-null.
+        /// The property store backing <see cref="Properties"/> and <see cref="IFeature.TryGetProperty"/> —
+        /// Dictionary or Dense, selected per <see cref="MvtPropertyStorage"/> and set by
+        /// <see cref="MvtDecoder"/> once the layer's key/value tables are complete. Internal: production
+        /// code goes through the decoder, never hand-assembles a store.
         /// </summary>
-        public Dictionary<string, Value> Properties = new Dictionary<string, Value>();
+        internal IMvtPropertyStore Store { get; set; }
+
+        /// <summary>
+        /// Decoded properties, materialized from <see cref="Store"/>. Always non-null. The setter wraps
+        /// the given map in a <see cref="DictionaryPropertyStore"/> — a convenience for direct test
+        /// construction (object-initializer syntax); it has no production caller, kept only so the
+        /// pre-D1a fold-parity tests (<c>A6AdapterFoldTests</c>) stay byte-identical.
+        /// </summary>
+        public IReadOnlyDictionary<string, Value> Properties
+        {
+            get => Store?.AsDictionary() ?? EmptyProperties;
+            set => Store = value == null ? null : new DictionaryPropertyStore(value);
+        }
+
+        private static readonly Dictionary<string, Value> EmptyProperties = new Dictionary<string, Value>();
 
         // ── IFeature — the retired MvtFeatureAdapter's semantics, folded verbatim ────────────────────
 
@@ -61,14 +76,12 @@ namespace MapRenderer.Jobs.Mvt
 
         bool IFeature.TryGetProperty(string name, out Value value)
         {
-            if (Properties != null && Properties.TryGetValue(name, out value))
-                return true;
+            if (Store != null) return Store.TryGet(name, out value);
             value = Value.Null;
             return false;
         }
 
-        IReadOnlyDictionary<string, Value> IFeature.Properties =>
-            (IReadOnlyDictionary<string, Value>)Properties ?? new Dictionary<string, Value>();
+        IReadOnlyDictionary<string, Value> IFeature.Properties => Properties;
     }
 
     /// <summary>

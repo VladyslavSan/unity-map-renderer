@@ -63,7 +63,6 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         // over the fill-base clone (design §B). This is the literal the retired {"fill-color":"#ffffff"}
         // paint evaluated to: Color.white.linear == white, and the constant opacity never depended on a
         // feature, so no evaluation is lost. Clean-room: public Style Spec, no MapLibre source.
-        private static readonly Vector4[] WhiteColor = { new Vector4(1f, 1f, 1f, 1f) };
 
         private readonly int                _materialIndex;
         private readonly string             _payloadName;
@@ -107,31 +106,41 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // The clip is threaded through even though it is behaviourally inert here — the synthetic ring sits
             // exactly ON the window at any margin ≥ 0, and the boundary is inclusive — so the background quad
             // and the fill layers over it can never be built under different windows.
-            TileGeometryBuffers geometry = new PathGeometryMaterializer(
+            // All OURS: the materializer transfers the buffer to us (we are the producer); the visit order and
+            // the white-colour buffer below are allocated here too. Nothing else may free them. `using` —
+            // construction and disposal are one statement per handle, so a constructor throw partway through
+            // leaves nothing stranded and there is no hand-rolled finally to keep in sync. Dispose() is
+            // idempotent, so a `using` here is safe even when Materialize() returns an uncreated buffer.
+            using TileGeometryBuffers geometry = new PathGeometryMaterializer(
                 context.Tile, Extent, FullExtentRingKinds, FullExtentRingPaths).Materialize();
             if (geometry.IsCreated)
             {
                 // The trivial visit order: one feature, every ring, in decode order. Fill's rank/selection
-                // machinery has nothing to say about a synthesized single-feature quad.
-                var visitOrder = new NativeArray<int>(
+                // machinery has nothing to say about a synthesized single-feature quad. Allocator.Persistent,
+                // NOT TempJob: this runs off-main (RunOnThreadPool) and can span >4 main-thread frames, which
+                // would trip TempJob's 4-frame lifetime check. `using var` still guarantees disposal.
+                using var visitOrder = new NativeArray<int>(
                     geometry.RingCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                try
-                {
-                    for (int r = 0; r < geometry.RingCount; r++) visitOrder[r] = r;
+                // One white vertex colour — native now that WriteGeometry takes a NativeArray<Vector4>
+                // (Rank 3). One element, indexed by the quad's single feature ordinal 0.
+                using var whiteColor = new NativeArray<Vector4>(1, Allocator.Persistent);
 
-                    StyledFillTileBuilder.WriteGeometry(
-                        _mda[0], geometry, visitOrder, WhiteColor, context.TileOriginRender,
-                        context.Projection, context.BufferClip, out int verts, out Bounds bounds);
-                    _vertexCount = verts;
-                    _bounds      = bounds;
-                }
-                finally
-                {
-                    // Both are OURS: the materializer transferred the buffer to us (we are the producer), and
-                    // the visit order was allocated here. Nothing else may free either.
-                    visitOrder.Dispose();
-                    geometry.Dispose();
-                }
+                // A `using`-declared local is read-only for index-ASSIGNMENT (CS1654) — passing
+                // visitOrder/whiteColor by value into WriteGeometry below is unaffected; only the writes here
+                // need a plain-local alias (GetSubArray(0, Length) — a method call returning a NativeArray<T>
+                // VIEW over the same memory). The alias must be a named local, not indexed straight off the
+                // call: assigning through an indexer on a temporary return value is CS1612.
+                NativeArray<Vector4> whiteColorWritable = whiteColor.GetSubArray(0, 1);
+                whiteColorWritable[0] = new Vector4(1f, 1f, 1f, 1f);
+
+                NativeArray<int> visitOrderWritable = visitOrder.GetSubArray(0, visitOrder.Length);
+                for (int r = 0; r < geometry.RingCount; r++) visitOrderWritable[r] = r;
+
+                StyledFillTileBuilder.WriteGeometry(
+                    _mda[0], geometry, visitOrder, whiteColor, context.TileOriginRender,
+                    context.Projection, context.BufferClip, out int verts, out Bounds bounds);
+                _vertexCount = verts;
+                _bounds      = bounds;
             }
 
             // Reached only if the above didn't throw.

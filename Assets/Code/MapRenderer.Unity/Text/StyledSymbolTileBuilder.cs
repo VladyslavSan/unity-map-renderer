@@ -141,6 +141,12 @@ namespace MapRenderer.Unity.Text
         {
             if (extractedLayers == null || output == null) return;
 
+            // A PER-CALL local (not an instance field): SymbolLabelSubsystem shares one _builder across
+            // tails whose starts are budgeted per frame but never awaited to completion (RunTailAsync /
+            // PumpBuilds), so two ShapeAsync calls can be interleaved on the main thread. A local lives in
+            // this call's own async state machine, so concurrent calls never share it.
+            var glyphScratch = new List<PositionedGlyph>();
+
             for (int el = 0; el < extractedLayers.Count; el++)
             {
                 ExtractedLayer    layerEx       = extractedLayers[el];
@@ -249,12 +255,17 @@ namespace MapRenderer.Unity.Text
                         }
 
                         resolver ??= _glyphManager.CreateResolver(fontStack);
-                        ShapedRun run = _shaper.Shape(new ShapingRequest
+                        // Zero-alloc overload: fills the reused glyphScratch instead of Shape(in) allocating
+                        // its own List<PositionedGlyph>. The wrapping ShapedRun is still a fresh (small)
+                        // allocation — TextQuadLayout/CurvedTextLayout.Layout both take a ShapedRun, and
+                        // there is no caller-buffer variant of that adapter.
+                        TextDirection direction = _shaper.Shape(new ShapingRequest
                         {
                             Text = s.Text,
                             FontStack = fontStack,
                             Metrics = resolver,
-                        });
+                        }, glyphScratch);
+                        ShapedRun run = new ShapedRun { Glyphs = glyphScratch, Direction = direction };
                         if (s.Placement == SymbolPlacement.Point)
                         {
                             // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/

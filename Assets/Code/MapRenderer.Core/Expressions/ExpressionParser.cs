@@ -248,7 +248,7 @@ namespace MapRenderer.Core.Expressions
             {
                 // get(key, object) -> object member
                 var pair = Two("get", args, scope);
-                return new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+                return new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
                 {
                     string name = vals[0].AsString();
                     var obj = vals[1].AsObject();
@@ -274,7 +274,7 @@ namespace MapRenderer.Core.Expressions
             if (args.Count == 2)
             {
                 var pair = Two("has", args, scope);
-                return new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+                return new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
                 {
                     string name = vals[0].AsString();
                     var obj = vals[1].AsObject();

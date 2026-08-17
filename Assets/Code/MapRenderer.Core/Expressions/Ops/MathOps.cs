@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Expressions.Ops
     {
         // + and * are variadic (identity-seeded); - and / are binary (with - also unary negation).
         public static Expression Variadic(string op, Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 double acc = op == "+" ? 0.0 : 1.0;
                 foreach (var v in vals)
@@ -22,14 +22,14 @@ namespace MapRenderer.Core.Expressions.Ops
             }, args, ValueType.Number);
 
         public static Expression Subtract(Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 if (vals.Length == 1) return Value.Number(-vals[0].AsNumber());
                 return Value.Number(vals[0].AsNumber() - vals[1].AsNumber());
             }, args, ValueType.Number);
 
         public static Expression Binary(string op, Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 double a = vals[0].AsNumber(), b = vals[1].AsNumber();
                 switch (op)
@@ -42,7 +42,7 @@ namespace MapRenderer.Core.Expressions.Ops
             }, args, ValueType.Number);
 
         public static Expression Unary(string op, Expression arg)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 double a = vals[0].AsNumber();
                 switch (op)
@@ -66,7 +66,7 @@ namespace MapRenderer.Core.Expressions.Ops
             }, new[] { arg }, ValueType.Number);
 
         public static Expression MinMax(string op, Expression[] args)
-            => new FunctionExpression((Value[] vals, in EvaluationContext ctx) =>
+            => new FunctionExpression((System.ReadOnlySpan<Value> vals, in EvaluationContext ctx) =>
             {
                 if (vals.Length == 0)
                     throw new ExpressionEvaluationException($"{op}: requires at least one argument.");

@@ -506,16 +506,19 @@ namespace MapRenderer.Tests.Meshing
                 new PathGeometryMaterializer(tile, extent, kinds, paths).Materialize();
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var mda = Mesh.AllocateWritableMeshData(1);
+            var featureColors = new NativeArray<Vector4>(1, Allocator.Persistent);
+            featureColors[0]  = new Vector4(1f, 1f, 1f, 1f);
             try
             {
                 StyledFillTileBuilder.WriteGeometry(
-                    mda[0], geometry, visitOrder, new[] { new Vector4(1f, 1f, 1f, 1f) },
+                    mda[0], geometry, visitOrder, featureColors,
                     TileRenderOrigin.Project(tile, null), null, default,
                     out int vertexCount, out Bounds bounds);
                 return Finish(mda, vertexCount, bounds);
             }
             finally
             {
+                featureColors.Dispose();
                 visitOrder.Dispose();
                 geometry.Dispose();
             }

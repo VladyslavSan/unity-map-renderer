@@ -154,35 +154,57 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JoinType joinType = layout.Join;
             CapType  capType  = layout.Cap;
 
+            // IR C1 P2: the per-feature columns below are sized to the LAYER and indexed by
+            // SelectedTileFeature.Ordinal, because the ordinal is what the buffer's RingFeatureIdx names. A
+            // slot-indexed column would permute colours and widths the moment this layer's filter rejects
+            // anything — the geometry would stay right and only the attribution would be wrong.
+
+            // S55: tight AABB accumulator — centerline positions only (parity with old RecalculateBounds).
+            float3 bMin = new float3(float.MaxValue);
+            float3 bMax = new float3(float.MinValue);
+
+            projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via WriteInto
+            double maxRefineAngleRad = projection.MaxRefineAngleRad; // ∞ ⇒ flat sheet, subdivide never fires
+            double3 tileOrigin3 = tileOriginRender; // the caller-supplied SW-corner render origin
+
+            // Every owned native handle below is `using`-declared: construction and disposal are one
+            // statement, so a constructor throw partway through a run of declarations still disposes every
+            // handle already built — no default-init dance, no hand-rolled finally. Allocator.Persistent, NOT
+            // TempJob: this build runs off the main thread (UniTask.RunOnThreadPool) and a heavy/contended build
+            // can span MORE than 4 main-thread frames, which trips TempJob's 4-frame lifetime check (Unity
+            // flags — and can reclaim — the buffer mid-build). Persistent has no frame lifetime; `using var`
+            // still guarantees disposal. (Temp is out too: thread-local, disallowed off-main / in jobs.)
+
             // ── Waist 1 pre-pass: three index-aligned per-feature columns over the WHOLE source layer. ──
             // The buffer is shared with every other style layer naming this source-layer, so it holds every
-            // feature of the layer — not just this layer's selection, and not just the LineStrings. Its
-            // FeatureGeometryType column is therefore what makes the ring kind gate below DISCRIMINATING.
-            //
-            // IR C1 P2: the columns are sized to the LAYER and indexed by SelectedTileFeature.Ordinal, because
-            // the ordinal is what the buffer's RingFeatureIdx names. A slot-indexed column would permute
-            // colours and widths the moment this layer's filter rejects anything — the geometry would stay
-            // right and only the attribution would be wrong.
-            var featColors = new Vector4[geometry.FeatureCount];
-            var featWidths = new float[geometry.FeatureCount];
-            // Selection membership, by ordinal. Kept SEPARATE from the kind gate below rather than folded into
-            // it: the two are independent guards over the same ring loop and each is RED-verifiable on its own
-            // (the same split StyledFillTileBuilder makes between `rank == -1` and its polygon check).
-            var featSelected = new bool[geometry.FeatureCount];
-
+            // feature of the layer — not just this layer's selection, and not just the LineStrings. Native +
+            // ClearMemory zero-init: an unselected or non-LineString ordinal must read default false/0
+            // (featSelected gates the ring loop below; a garbage-true slot would render an unselected ring).
+            // `using var`: these live through the mesh copy at the end of this method.
+            using var featColors   = new NativeArray<Vector4>(geometry.FeatureCount, Allocator.Persistent);
+            using var featWidths   = new NativeArray<float>(geometry.FeatureCount, Allocator.Persistent);
+            using var featSelected = new NativeArray<bool>(geometry.FeatureCount, Allocator.Persistent);
+            // A `using`-declared local is read-only for index-ASSIGNMENT purposes (CS1654: the compiler
+            // can't verify NativeArray<T>'s indexer setter leaves the disposal target alone) — reads through
+            // featColors/featWidths/featSelected are unaffected, only writes need a plain-local alias.
+            // GetSubArray(0, Length) is a normal method call returning a NativeArray<T> VIEW over the exact
+            // same memory, assignable to a non-readonly local — the same "call a method to get a writable
+            // view" idiom `NativeList<T>.AsArray()` already uses elsewhere in this method.
+            NativeArray<Vector4> featColorsWritable   = featColors.GetSubArray(0, featColors.Length);
+            NativeArray<float>   featWidthsWritable   = featWidths.GetSubArray(0, featWidths.Length);
+            NativeArray<bool>    featSelectedWritable = featSelected.GetSubArray(0, featSelected.Length);
             for (int si = 0; si < selectedFeatures.Count; si++)
             {
                 SelectedTileFeature selected = selectedFeatures[si];
                 IFeature            feature  = selected.Feature;
                 int                 ordinal  = selected.Ordinal;
 
-                featSelected[ordinal] = true;
-                featColors[ordinal]   = WhiteColor;
-                featWidths[ordinal]   = 1f;
+                featSelectedWritable[ordinal] = true;
+                featColorsWritable[ordinal]   = WhiteColor;
+                featWidthsWritable[ordinal]   = 1f;
 
-                // The paint bakes stay LINE-ONLY, exactly as before the rewire: a non-LineString feature's
-                // rings are dropped by the kind gate, so evaluating its expressions would be new work with no
-                // output.
+                // The paint bakes stay LINE-ONLY: a non-LineString feature's rings are dropped by the kind
+                // gate, so evaluating its expressions would be new work with no output.
                 if (feature.GeometryType != TileGeometryType.LineString)
                     continue;
 
@@ -192,15 +214,21 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 {
                     var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
                     var linear     = unityColor.linear;
-                    featColors[ordinal] = new Vector4(linear.r, linear.g, linear.b, linear.a);
+                    featColorsWritable[ordinal] = new Vector4(linear.r, linear.g, linear.b, linear.a);
                 }
 
                 // S14 data-driven opacity: bake evaluated opacity into vertex alpha, ONLY when opacity depends
                 // on the feature (else BindLinePaintToApplier already bound _Opacity and baking double-applies).
+                // NativeArray's indexer returns a value, not a variable, so this is a read-modify-write — an
+                // in-place `featColorsWritable[ordinal].w *= …` would not compile.
                 if (paint.Opacity.DependsOnFeature)
                 {
                     if (paint.Opacity.TryEvaluate(zoom, feature, out float opacityVal))
-                        featColors[ordinal].w *= opacityVal;
+                    {
+                        Vector4 col = featColorsWritable[ordinal];
+                        col.w *= opacityVal;
+                        featColorsWritable[ordinal] = col;
+                    }
                 }
 
                 // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
@@ -212,40 +240,36 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 if (paint.Width.DependsOnFeature)
                 {
                     if (paint.Width.TryEvaluate(zoom, feature, out float widthVal))
-                        featWidths[ordinal] = math.max(0f, widthVal);
+                        featWidthsWritable[ordinal] = math.max(0f, widthVal);
                 }
             }
 
-            // First, build all features into temporary managed lists.
-            var tempVerts0  = new List<LinePositionNormal>(512);
-            var tempVerts1  = new List<Vector3>(512);
-            var tempVerts2  = new List<Vector2>(512);
-            var tempVerts3  = new List<LineWidthColor>(512);
-            var tempIndices = new List<int>(1024);
-            // S55: tight AABB accumulator — centerline positions only (parity with old RecalculateBounds).
-            float3 bMin = new float3(float.MaxValue);
-            float3 bMax = new float3(float.MinValue);
-
-            projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via WriteInto
-            double maxRefineAngleRad = projection.MaxRefineAngleRad; // ∞ ⇒ flat sheet, subdivide never fires
-            double3 tileOrigin3 = tileOriginRender; // the caller-supplied SW-corner render origin
+            // Cross-ring staging (native, no GC). The final Mesh.MeshData vertex/index count is the SUM of the
+            // per-ring LineRibbonJob outputs and is not known until every ribbon has run, so SetVertexBufferParams
+            // cannot be called up front — the mesh is accumulated here first, then block-copied below. `using
+            // var`: these live through the mesh copy, unlike the per-ring scratch below.
+            using var tempVerts0  = new NativeList<LinePositionNormal>(512,  Allocator.Persistent);
+            using var tempVerts1  = new NativeList<Vector3>(512,             Allocator.Persistent);
+            using var tempVerts2  = new NativeList<Vector2>(512,             Allocator.Persistent);
+            using var tempVerts3  = new NativeList<LineWidthColor>(512,      Allocator.Persistent);
+            using var tempIndices = new NativeList<int>(1024,                Allocator.Persistent);
 
             // Reusable Burst scratch: NativeLists own their own grow-only capacity (Resize sizes each ring; the
             // list keeps the high-water buffer), so there is no per-ring malloc/free churn. Sequential .Run() means
-            // each buffer is free for reuse before the next ring.
-            var inTile    = new NativeList<double2>(Allocator.Persistent);       // original ring tile coords
-            var geoOrig   = new NativeList<GeoCoordinate>(Allocator.Persistent);  // original ring → geodetic
-            var upOrig    = new NativeList<double3>(Allocator.Persistent);        // original-point surface up (subdivision metric)
-            var subTile   = new NativeList<double2>(Allocator.Persistent);        // curvature-subdivided tile centerline
-            var subGeo    = new NativeList<GeoCoordinate>(Allocator.Persistent);  // subdivided → geodetic
-            var world     = new NativeList<double3>(Allocator.Persistent);        // subdivided, projected, origin-relative
-            var up        = new NativeList<double3>(Allocator.Persistent);        // subdivided per-point surface up
-            var outV      = new NativeList<LineRibbonVertex>(Allocator.Persistent);
-            var outI      = new NativeList<int>(Allocator.Persistent);
-            var vcArr = new NativeArray<int>(1, Allocator.Persistent);
-            var icArr = new NativeArray<int>(1, Allocator.Persistent);
-
-            try
+            // each buffer is free for reuse before the next ring. Scoped to a nested `using` block, not `using
+            // var`, so it disposes right after the ring loop below — BEFORE the mesh-copy section, keeping peak
+            // native memory down (this replaces the old manual early-Dispose() call).
+            using (var inTile  = new NativeList<double2>(Allocator.Persistent))       // original ring tile coords
+            using (var geoOrig = new NativeList<GeoCoordinate>(Allocator.Persistent)) // original ring → geodetic
+            using (var upOrig  = new NativeList<double3>(Allocator.Persistent))       // original-point surface up (subdivision metric)
+            using (var subTile = new NativeList<double2>(Allocator.Persistent))       // curvature-subdivided tile centerline
+            using (var subGeo  = new NativeList<GeoCoordinate>(Allocator.Persistent)) // subdivided → geodetic
+            using (var world   = new NativeList<double3>(Allocator.Persistent))       // subdivided, projected, origin-relative
+            using (var up      = new NativeList<double3>(Allocator.Persistent))       // subdivided per-point surface up
+            using (var outV    = new NativeList<LineRibbonVertex>(Allocator.Persistent))
+            using (var outI    = new NativeList<int>(Allocator.Persistent))
+            using (var vcArr   = new NativeArray<int>(1, Allocator.Persistent))
+            using (var icArr   = new NativeArray<int>(1, Allocator.Persistent))
             {
             for (int r = 0; r < geometry.RingCount; r++)
             {
@@ -281,18 +305,23 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 inTile.Resize(n, NativeArrayOptions.UninitializedMemory);
                 geoOrig.Resize(n, NativeArrayOptions.UninitializedMemory);
                 upOrig.Resize(n, NativeArrayOptions.UninitializedMemory);
-                for (int k = 0; k < n; k++) inTile[k] = geometry.Vertices[rStart + k];
+                // `.AsArray()` — a method call, so legal on a `using`-declared NativeList (CS1654 only bars
+                // index-ASSIGNMENT through the `using` variable itself) — returns a NativeArray<T> VIEW over
+                // the same buffer, reused below for both the direct write and the job's input field.
+                NativeArray<double2> inTileWritable = inTile.AsArray();
+                for (int k = 0; k < n; k++) inTileWritable[k] = geometry.Vertices[rStart + k];
                 new TileToGeoJob
                 {
                     Tile = geometry.Tile, Extent = geometry.Extent,
-                    TileCoords = inTile.AsArray(), OutGeo = geoOrig.AsArray(),
+                    TileCoords = inTileWritable, OutGeo = geoOrig.AsArray(),
                 }.Run(n);
-                for (int k = 0; k < n; k++) upOrig[k] = projection.ProjectPoint(geoOrig[k]).Up;
+                NativeArray<double3> upOrigWritable = upOrig.AsArray();
+                for (int k = 0; k < n; k++) upOrigWritable[k] = projection.ProjectPoint(geoOrig[k]).Up;
 
                 // 2) Curvature-subdivide the centerline in TILE space (linear sub-points that project onto the
                 //    surface). Driven entirely by the projection's tolerance — ∞ ⇒ 1 step/segment ⇒ the
                 //    original ring, so the flat Mercator path is the degenerate value, not a branch.
-                int m = SubdivideCenterline(inTile.AsArray(), upOrig.AsArray(), n, subTile, maxRefineAngleRad);
+                int m = SubdivideCenterline(inTileWritable, upOrigWritable, n, subTile, maxRefineAngleRad);
 
                 // 3) Project the SUBDIVIDED centerline to the origin-relative (point, up) render-space array.
                 subGeo.Resize(m, NativeArrayOptions.UninitializedMemory);
@@ -303,11 +332,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     Tile = geometry.Tile, Extent = geometry.Extent,
                     TileCoords = subTile.AsArray(), OutGeo = subGeo.AsArray(),
                 }.Run(m);
+                NativeArray<double3> worldWritable = world.AsArray();
+                NativeArray<double3> upWritable    = up.AsArray();
                 for (int k = 0; k < m; k++)
                 {
                     ProjectedPoint pp = projection.ProjectPoint(subGeo[k]);
-                    world[k] = pp.World - tileOrigin3; // origin-relative (RTC); translation-invariant ribbon math
-                    up[k]    = pp.Up;
+                    worldWritable[k] = pp.World - tileOrigin3; // origin-relative (RTC); translation-invariant ribbon math
+                    upWritable[k]    = pp.Up;
                 }
 
                 // 4) Build the ribbon in 3D from the (point, up) array — one path, winding by construction.
@@ -315,8 +346,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 outI.Resize(LineRibbonJob.MaxIndexCount(m, DefaultRoundSegments),  NativeArrayOptions.UninitializedMemory);
                 new LineRibbonJob
                 {
-                    Points         = world.AsArray(),
-                    Ups            = up.AsArray(),
+                    Points         = worldWritable,
+                    Ups            = upWritable,
                     PointCount     = m,
                     Join           = joinType,
                     Cap            = capType,
@@ -332,7 +363,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 int ni = icArr[0];
                 if (nv == 0 || ni == 0) continue;
 
-                int offset = tempVerts0.Count;
+                int offset = tempVerts0.Length;
                 for (int k = 0; k < nv; k++)
                 {
                     LineRibbonVertex rv = outV[k];
@@ -370,37 +401,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 }
             }
             }
-            finally
-            {
-                inTile.Dispose();
-                geoOrig.Dispose();
-                upOrig.Dispose();
-                subTile.Dispose();
-                subGeo.Dispose();
-                world.Dispose();
-                up.Dispose();
-                outV.Dispose();
-                outI.Dispose();
-                vcArr.Dispose();
-                icArr.Dispose();
-                // IR C1 P2/P3: `geometry` is NOT freed here. It is BORROWED from the decoded LAYER, which
-                // owns it and lends the same buffer to every style layer naming this source-layer — and to
-                // the symbol pass of the same kick; disposing it here would free geometry a sibling
-                // consumer is still reading. On
-                // THIS path that second free is LOUD, not quiet: the store hands back an array-backed buffer
-                // whose Dispose frees three real NativeArrays, and P2's R6 sweep measured the double free as
-                // 32 failures across 19 fixtures — two of them with no line involvement at all, the
-                // heap-corruption signature. The rule is also pinned structurally
-                // (StyledLineBuilderStructureTests) so it fails on the offending LINE rather than as a
-                // scatter of unrelated red fixtures.
-            }
+            // The nested `using` block above just disposed the 11 per-ring scratch buffers — everything past
+            // this point reads only the tempVerts0..3 / tempIndices staging lists (and bMin/bMax), never those
+            // 11 — so holding them alive through the MeshData allocation + copy below would only raise peak
+            // native memory.
 
-            if (tempVerts0.Count == 0 || tempIndices.Count == 0)
+            if (tempVerts0.Length == 0 || tempIndices.Length == 0)
                 return; // no geometry — md left untouched; caller disposes the unused MeshData
 
             // Then declare the mesh buffers on the MeshData and grab stream views.
-            int vCount = tempVerts0.Count;
-            int iCount = tempIndices.Count;
+            int vCount = tempVerts0.Length;
+            int iCount = tempIndices.Length;
 
             md.SetVertexBufferParams(vCount, LineVertexDescriptors);
             NativeArray<LinePositionNormal> s0 = md.GetVertexData<LinePositionNormal>(0);
@@ -428,6 +439,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
             float3 c3 = (bMin + bMax) * 0.5f;
             float3 sz = bMax - bMin;
             bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
+
+            // IR C1 P2/P3: `geometry` is NEVER disposed here (see the BORROWED note on the parameter above).
+            // It is lent by the decoded LAYER to every style layer naming this source-layer — and to the
+            // symbol pass of the same kick — so freeing it here would free geometry a sibling consumer is
+            // still reading. On this path that second free is LOUD, not quiet: the store hands back an
+            // array-backed buffer whose Dispose frees three real NativeArrays, and P2's R6 sweep measured the
+            // double free as 32 failures across 19 fixtures — two of them with no line involvement at all, the
+            // heap-corruption signature. The rule is also pinned structurally (StyledLineBuilderStructureTests)
+            // so it fails on the offending LINE rather than as a scatter of unrelated red fixtures.
         }
 
         // ── Curvature subdivision (projection-policy driven) ────────────────────────────────────────

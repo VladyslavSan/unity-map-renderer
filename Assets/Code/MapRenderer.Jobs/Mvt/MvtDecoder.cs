@@ -72,7 +72,11 @@ namespace MapRenderer.Jobs.Mvt
         /// <param name="id">The slippy-map address these tile-local coordinates belong to. Stamped into every
         /// layer's buffer, and thereafter the only copy — see the type doc.</param>
         /// <param name="data">The MVT protobuf bytes.</param>
-        public static MvtTile Decode(TileId id, byte[] data)
+        /// <param name="propertyStorage">Which <c>IMvtPropertyStore</c> to build for each decoded feature
+        /// (D1a — GC-eliminating dense storage behind an A/B flag). Defaults to
+        /// <see cref="MvtPropertyStorage.Dictionary"/> — today's byte-identical production behaviour.</param>
+        public static MvtTile Decode(
+            TileId id, byte[] data, MvtPropertyStorage propertyStorage = MvtPropertyStorage.Dictionary)
         {
             var tile = new MvtTile();
             try
@@ -86,7 +90,7 @@ namespace MapRenderer.Jobs.Mvt
                     if (field == TileLayers && wt == 2)
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        tile.Layers.Add(DecodeLayer(id, r.Slice(s, e)));
+                        tile.Layers.Add(DecodeLayer(id, r.Slice(s, e), propertyStorage));
                     }
                     else
                     {
@@ -105,16 +109,28 @@ namespace MapRenderer.Jobs.Mvt
             return tile;
         }
 
-        private static MvtLayer DecodeLayer(TileId id, ProtobufReader r)
+        private static MvtLayer DecodeLayer(TileId id, ProtobufReader r, MvtPropertyStorage propertyStorage)
         {
             var layer = new MvtLayer();
+
+            // Pre-size every per-feature / per-table list from a read-only counting pass over the layer bytes
+            // (a struct COPY of the cursor, like ReadPackedUInt32). MVT decode is streaming — the true counts
+            // are only known after the read loop — so without this the Features / Keys / Values lists and the
+            // two per-feature scratch lists grow by doubling, discarding a chain of backing arrays per layer.
+            // The extra scan is off-main CPU traded for less GC (the goal). A miscount could only mis-SIZE a
+            // list, never change what is decoded, so this is behaviour-preserving by construction.
+            var (featureCount, keyCount, valueCount) = CountLayerElements(r);
+            layer.Features.Capacity = featureCount;
+            layer.Keys.Capacity     = keyCount;
+            layer.Values.Capacity   = valueCount;
+
             // Keep raw tag arrays per-feature; resolve to Properties after the full layer is read.
             // This is order-independent: keys/values may follow features in the serialised stream.
-            var rawTagsList = new List<uint[]>();
+            var rawTagsList = new List<uint[]>(featureCount);
             // IR C1 P3: the per-feature command streams live HERE, in a local, for the duration of this
             // decode only. They are consumed by the materializer below and then dropped — a decoded feature
             // carries no geometry at all.
-            var geometryList = new List<uint[]>();
+            var geometryList = new List<uint[]>(featureCount);
 
             while (r.HasMore)
             {
@@ -156,10 +172,23 @@ namespace MapRenderer.Jobs.Mvt
                 }
             }
 
-            // Two-pass resolve: keys/values are now complete; resolve each feature's raw tags
-            // into its Properties dictionary.
+            // Two-pass resolve: keys/values are now complete; build each feature's property store
+            // (D1a). The key→index map is built HERE — once per layer, inside the decode, before any
+            // store exists — never lazily on first read: a decoded tile is published across threads
+            // afterwards, and a first-read build would be a write racing concurrent readers (the same
+            // publication hazard MvtLayer.Geometry documents for lazy per-layer geometry).
+            var keyIndex = new Dictionary<string, int>(layer.Keys.Count);
+            for (int i = 0; i < layer.Keys.Count; i++)
+                keyIndex[layer.Keys[i]] = i;
+            var propertyResolver = new MvtLayerPropertyResolver(layer.Keys, layer.Values, keyIndex);
+
             for (int i = 0; i < layer.Features.Count; i++)
-                ResolveProperties(layer.Features[i], rawTagsList[i], layer.Keys, layer.Values);
+            {
+                layer.Features[i].Store = propertyStorage == MvtPropertyStorage.Dense
+                    ? new DensePropertyStore(rawTagsList[i], propertyResolver)
+                    : (IMvtPropertyStore)new DictionaryPropertyStore(
+                        propertyResolver.ResolveToDictionary(rawTagsList[i]));
+            }
 
             // IR C1 P3: materialize this layer's rings NOW, from the command streams collected above, and let
             // them fall out of scope. `layer.Extent` is fully resolved by this point — the extent field may
@@ -262,39 +291,51 @@ namespace MapRenderer.Jobs.Mvt
                         break;
                 }
             }
-            return (f, rawTags ?? new uint[0], geometry);
+            return (f, rawTags ?? System.Array.Empty<uint>(), geometry);
         }
 
         /// <summary>
-        /// Resolves a feature's raw tag pairs into its <see cref="MvtFeature.Properties"/> dictionary.
-        /// Tag pairs are (keyIndex, valueIndex) in the layer's key/value tables.
-        ///
-        /// Skip-tolerant: an odd-length tag array stops at the last complete pair; an out-of-range
-        /// key or value index skips that pair without throwing, matching the decoder's overall
-        /// skip-tolerant style for malformed input.
+        /// Counts a layer's feature / key / value entries in a single read-only pass over its bytes, so the
+        /// decode can pre-size its lists exactly and skip the doubling reallocations of a streaming build. Runs
+        /// on a struct COPY of the reader (an independent cursor over the same slice), so the real decode cursor
+        /// is untouched. A miscount is harmless — it only mis-sizes a list, never changes decoded content.
         /// </summary>
-        private static void ResolveProperties(
-            MvtFeature feature, uint[] rawTags, List<string> keys, List<Value> values)
+        /// <param name="r">A reader positioned at the start of the layer's bytes; copied, not advanced.</param>
+        /// <returns>The number of Feature, Keys and Values entries the layer declares.</returns>
+        private static (int features, int keys, int values) CountLayerElements(ProtobufReader r)
         {
-            if (rawTags == null || rawTags.Length == 0) return;
-            // Walk tag pairs; stop before last element if odd count (last pair is incomplete).
-            int pairCount = rawTags.Length / 2;
-            for (int i = 0; i < pairCount; i++)
+            var counter = r;                       // struct copy — independent cursor over the same [s,e] slice
+            int features = 0, keys = 0, values = 0;
+            while (counter.HasMore)
             {
-                int keyIdx = (int)rawTags[i * 2];
-                int valIdx = (int)rawTags[i * 2 + 1];
-                // Defensive: skip out-of-range indices rather than throwing.
-                if (keyIdx < 0 || keyIdx >= keys.Count) continue;
-                if (valIdx < 0 || valIdx >= values.Count) continue;
-                feature.Properties[keys[keyIdx]] = values[valIdx];
+                uint tag = counter.ReadTag();
+                int field = ProtobufReader.FieldNumber(tag);
+                int wt = ProtobufReader.WireType(tag);
+                if (wt == 2)
+                {
+                    if (field == LayerFeatures) features++;
+                    else if (field == LayerKeys) keys++;
+                    else if (field == LayerValues) values++;
+                }
+                counter.SkipField(wt);
             }
+            return (features, keys, values);
         }
 
+        /// <summary>
+        /// Reads a packed-varint field (MVT tags / geometry command stream) into an exact-sized array.
+        /// Two-pass count-then-fill — counts on a throwaway cursor copy, then fills once — so exactly one
+        /// array is allocated: no growing <c>List&lt;uint&gt;</c>, no <c>ToArray()</c> duplicate.
+        /// </summary>
         private static uint[] ReadPackedUInt32(ProtobufReader r)
         {
-            var list = new List<uint>();
-            while (r.HasMore) list.Add((uint)r.ReadVarint());
-            return list.ToArray();
+            var counter = r;                       // struct copy — independent cursor over the same [s,e] slice
+            int n = 0;
+            while (counter.HasMore) { counter.ReadVarint(); n++; }
+            if (n == 0) return System.Array.Empty<uint>();
+            var result = new uint[n];
+            for (int i = 0; i < n; i++) result[i] = (uint)r.ReadVarint();
+            return result;
         }
     }
 }

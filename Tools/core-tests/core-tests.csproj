@@ -164,6 +164,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Classification.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Expression.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Nodes.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/EvalArgBuffers.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/ExpressionException.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/ExpressionParser.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Literals.cs" />

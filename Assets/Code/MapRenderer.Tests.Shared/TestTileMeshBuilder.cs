@@ -98,7 +98,10 @@ namespace MapRenderer.Tests
             // A parity oracle comparing this against the MapView path MUST pass the same clip the view is
             // configured with; leaving it default builds the reference arm under a DIFFERENT window, and the
             // comparison silently stops being one.
-            TileBufferClip clip = default)
+            TileBufferClip clip = default,
+            // perf/gc-elimination: null ⇒ the original allocating path; a caller measuring the pooled path's
+            // steady-state GC footprint passes its own TileBuildScratch and reuses it across calls.
+            MapRenderer.Unity.Rendering.Tile.Processing.TileBuildScratch scratch = null)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
@@ -109,7 +112,7 @@ namespace MapRenderer.Tests
             try
             {
                 StyledFillTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, zoom,
-                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip);
+                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, scratch);
                 return Finish(mda, vertexCount, bounds, "TestFill");
             }
             finally { geometry.Dispose(); }

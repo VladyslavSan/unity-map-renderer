@@ -71,10 +71,10 @@ namespace MapRenderer.Tests.Tiles
             public void WriteInto(
                 Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
                 double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                out int vertexCount, out Bounds bounds)
+                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
                 => StyledFillTileBuilder.WriteMeshData(
                     md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
-                    projection, layout: null, clip: clip);
+                    projection, layout: null, clip: clip, scratch: scratch);
         }
 
         [Test]

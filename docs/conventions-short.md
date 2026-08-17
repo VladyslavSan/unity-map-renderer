@@ -5,78 +5,124 @@ without opening anything else. For the *why* — rationale, tables, examples, go
 section (same title) in **[`conventions.md`](conventions.md)**, the canonical human-facing reference.
 
 This file is the summary `AGENTS.md` imports, so agents always carry the rules without carrying the whole
-essay. Keep the two in sync: when a rule changes, edit `conventions.md` and update the matching line here.
+essay. It is grouped into topic chapters; each rule is a bolded lead line with its details as sub-entries.
+Keep the two files in sync: when a rule changes, edit `conventions.md` and update the matching entry here.
 
 ---
+
+## Math & numeric types
 
 - **`Unity.Mathematics` for all math (types *and* functions); `System.Math` and `UnityEngine.Mathf` are
   prohibited.**
   - *Types:* `float2/3/4`, `double2/3`, `int2/3`, `quaternion`, `float4x4` — **not** `UnityEngine.Vector2/3/4`
     / `Quaternion` / `Matrix4x4` for our own math or storage. `Core` is engine-free, so `UnityEngine.Vector*`
-    is forbidden there outright. Sole exception: a Unity boundary API that *demands* a `VectorN`
-    (mesh/material/transform) — convert at that call site, never upstream.
-  - *Functions:* the `math.*` free functions — `math.sin`, `math.sqrt`, `math.abs`, `math.pow`,
-    `math.min/max`, … — **not** `System.Math.*` (banned in production). For double-precision π/e use
-    **`math.PI_DBL` / `math.E_DBL`**, not `math.PI` (a single-precision float that silently injects ~1e-7
-    error and breaks `const double` initializers). **`UnityEngine.Mathf.*` is banned on the same terms** —
+    is forbidden there outright.
+  - *Sole type exception:* a Unity boundary API that *demands* a `VectorN` (mesh/material/transform) — convert
+    at that call site, never upstream.
+  - *Functions:* the `math.*` free functions (`math.sin`, `math.sqrt`, `math.abs`, `math.pow`, `math.min/max`,
+    …) — **not** `System.Math.*` (banned in production). `UnityEngine.Mathf.*` is banned on the same terms:
     `Mathf.Max` → `math.max`, `Mathf.Clamp01` → `math.saturate`, `Mathf.Deg2Rad/Rad2Deg` → the `Angle` type.
-    `Mathf` is float-only, so a `Mathf` call inside a `double` expression has already narrowed the value —
-    check precision when migrating, don't just swap the token. Vendored `ThirdParty/` code is out of scope.
+  - *Precision traps:* for double-precision π/e use **`math.PI_DBL` / `math.E_DBL`**, not `math.PI` (a
+    single-precision float that injects ~1e-7 error and breaks `const double` initializers). `Mathf` is
+    float-only, so a `Mathf` call inside a `double` expression has already narrowed — check precision when
+    migrating, don't just swap the token.
+  - *Out of scope:* vendored `ThirdParty/` code.
 
-- **Pass large read-only structs by `in`.** A method that only *reads* a struct param bigger than ~16 bytes
-  (camera state, eval contexts, descriptors) takes it `in` — a read-only reference, no per-call copy, intent
-  explicit. **Gate: `in` ⟺ `readonly struct`** — on a non-readonly struct, member access through `in`
-  forces a *defensive copy* per read (worse than by-value). Small structs (`float3`, `double2`, `TileId`)
-  stay by value. Prior art: `in EvaluationContext`.
+- **Angles are an `Angle` value type, not a bare `double`.**
+  - The `* math.PI_DBL / 180.0` conversion lives **once**, inside `Angle.cs`; every trig site reads
+    `.Sin`/`.Cos`/`.Radians` off the struct.
+  - Construction is explicit — `Angle.FromDegrees`/`FromRadians`, no implicit `double` conversion.
+  - Camera orientation params (`Heading`, `Tilt`) are `ConstrainedAngle` (an `Angle` + `[lo, hi]` +
+    `AngleConstraint{Clamp,Wrap}`) that enforce their range at construction. *(S68)*
 
-- **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.** Plain data
-  carriers expose `init`-only auto-properties and are built with named members
-  (`new GeoCoordinate { Latitude = …, Longitude = … }`), not positional ctors. Spell names out (`Latitude`,
-  not `Lat`). Geodetic types are **latitude-first** `(Latitude, Longitude[, Altitude])`; the lon-first swap
-  happens only at the projection boundary. (`init` needs the one-line `IsExternalInit` polyfill per
-  assembly under Unity.)
+## Types & data modeling
 
-- **Angles are an `Angle` value type, not a bare `double`.** The `* math.PI_DBL / 180.0` conversion
-  lives **once**, inside `Angle.cs`; every trig site reads `.Sin`/`.Cos`/`.Radians` off the struct.
-  Camera orientation params (`Heading`, `Tilt`) are `ConstrainedAngle` (an `Angle` + `[lo, hi]` +
-  `AngleConstraint{Clamp,Wrap}` strategy) that enforce their range at construction. `Angle` uses
-  explicit `FromDegrees`/`FromRadians` factories — no implicit `double` conversion. *(S68)*
+- **Pass large read-only structs by `in`.**
+  - A method that only *reads* a struct param bigger than ~16 bytes (camera state, eval contexts, descriptors)
+    takes it `in` — a read-only reference, no per-call copy, intent explicit. Prior art: `in EvaluationContext`.
+  - **Gate: `in` ⟺ `readonly struct`** — on a non-readonly struct, member access through `in` forces a
+    *defensive copy* per read (worse than by-value).
+  - Small structs (`float3`, `double2`, `TileId`) stay by value.
 
-- **Type-explicit builder naming.** A type that builds/owns a single geometry kind names it explicitly
-  (`StyledFillTileBuilder`, `StyledLineTileBuilder`); generic names (`MeshBuilder`, `TileMeshFactory`) are
-  reserved for genuinely type-agnostic dispatchers.
+- **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.**
+  - Plain data carriers expose `init`-only auto-properties and are built with named members
+    (`new GeoCoordinate { Latitude = …, Longitude = … }`), not positional ctors.
+  - Spell names out (`Latitude`, not `Lat`).
+  - Geodetic types are **latitude-first** `(Latitude, Longitude[, Altitude])`; the lon-first swap happens only
+    at the projection boundary.
+  - `init` needs the one-line `IsExternalInit` polyfill per assembly under Unity.
 
-- **Geometry producers declare their output winding; boundaries convert.** A triangle-producing type (`Earcut`,
-  `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`) states its output winding + coordinate space in
-  its XML summary. There is **one canonical winding** (CCW in tile space); the producer never bakes the render
-  convention. The Unity-front reversal for stock Cull Back happens at **one** boundary per mesh kind
-  (`StyledFill`/`StyledLineTileBuilder`) — same "convert at the Unity boundary, never upstream" rule as
-  `double3`→`Vector3`. Keeps `Core` engine-free and the parity oracles hashing canonical winding. Cause + full
-  contract in `docs/coordinates-and-projections.md` §7.1; pinned by `GlobeFill`/`GlobeLineWindingTests`.
+## Geometry & meshing
 
-- **A short XML doc on EVERY member; nothing that restates the body.** Floor (not optional): a one/two-line
-  `<summary>` + a `<param>` per parameter, plain and simple, plus `<returns>` when the summary does not
-  answer it. That floor is normally also the ceiling — past it, write prose only for a **non-local invariant**
-  (a protocol/lifetime/ordering fact no single body reveals), a **non-obvious why**, or a **limitation no
-  tooth can observe**. **`<see cref>` points OUTWARD** — counterpart, matching release site, the caller that
-  establishes the precondition — **never at a callee the body already names** (duplicates the code, floods
-  that member's Find Usages; use `<c>Name</c>` for an incidental mention, which creates no reference).
-  Design narrative, rationale and rejected alternatives live in `docs/*-design.md`, not in the file.
-  **Gate:** past summary+params, a doc longer than its member must name which of the three reasons applies,
-  or be cut back to the floor.
+- **Type-explicit builder naming.**
+  - A type that builds/owns a single geometry kind names it explicitly (`StyledFillTileBuilder`,
+    `StyledLineTileBuilder`).
+  - Generic names (`MeshBuilder`, `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers.
 
-- **Test code must not bloat the production codebase.** A member that exists solely for a test does not
-  belong on the production class. Allowed footprint: broaden `private` → `internal` (+ `InternalsVisibleTo`),
-  or put computed accessors/adapters as extension methods in the **test** assembly. Not allowed: `public`
-  members with no production caller, `// for testing only` members, test helpers/factories inside production
-  classes.
+- **Geometry producers declare their output winding; boundaries convert.**
+  - A triangle-producing type (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`) states
+    its output winding + coordinate space in its XML summary.
+  - There is **one canonical winding** (CCW in tile space); the producer never bakes the render convention.
+  - The Unity-front reversal for stock Cull Back happens at **one** boundary per mesh kind
+    (`StyledFill`/`StyledLineTileBuilder`) — same "convert at the Unity boundary, never upstream" rule as
+    `double3`→`Vector3`.
+  - Keeps `Core` engine-free and the parity oracles hashing canonical winding. Cause + full contract in
+    `docs/coordinates-and-projections.md` §7.1; pinned by `GlobeFill`/`GlobeLineWindingTests`.
 
-- **Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class.** Blittable geometry
-  *data* (`NativeArray`/`Mesh.MeshData`/`LayerMeshData`) are **value-type structs** the jobs write, disposed
-  deterministically at the `ApplyAndDisposeWritableMeshData` boundary — never held, never a dispose-once guard.
-  The `Mesh` GPU *resource* is a **reference-type class** created/destroyed **main-thread only** and held by
-  **exactly one owner** (`TileManager._loaded` in cover / `PreparedTileCache` out of cover — Model B); a
-  transfer **nulls the source** so it's destroyed once (the double-free guard); teardown = destroy meshes →
-  dispose backend. Dispose-guard machinery + the `CountMeshObjects` leak baseline touch only the **class**
-  side; structs stay trivial. Full contract (exit paths, cancellation, teeth) in
-  **`docs/async-architecture.md` §"Disposal & cancellation contract"**.
+## Memory, performance & lifetime
+
+- **Hot-path allocations: none → native → pooled (a descending ladder).** In any loop that recurs per
+  feature / vertex / glyph / tile-build / frame, a managed `new` is not local: Unity's GC is
+  **stop-the-world**, so one worker-thread allocation freezes every thread mid-frame. Take the highest rung:
+  - **(1) allocate nothing** — reuse, hoist out of the loop, `FixedList*Bytes<T>` or `stackalloc` (unmanaged)
+    for a small bounded collection.
+  - **(2) unmanaged elements → native containers** (`NativeArray`/`NativeList`, off the GC heap), `Allocator`
+    by lifetime+thread — **off-main scratch = `Persistent`** (TempJob's 4-frame cap counts *main-thread*
+    frames, which an off-main build overruns), main-thread scratch = `Temp`/`TempJob`.
+  - **(3) managed elements that can't be native** (hold refs, e.g. `Value`) **→ pool, never `new` per call** —
+    `ArrayPool<T>.Shared` for simple array temporaries (returns **oversized** arrays, so the consumer takes a
+    length/`Span` and never trusts `.Length`); `UnityEngine.Pool` (`ListPool`/`ObjectPool`) for **main-thread**
+    managed collections/objects (**not thread-safe** — off-main paths need a per-thread pool); a
+    **`[ThreadStatic]` free-list of whole arrays** for reentrant/cross-thread hot paths (prior art
+    `EvalArgBuffers`, `TileBuildScratch`). Every pool pairs `Rent`/`Return` in a `finally` so a throw can't
+    drain it, and pools only **scoped scratch, never a borrowed container** (releasing a `List` a consumer
+    still holds clears it under them). `UnityEngine.Pool` is engine-only, but that never keeps code in Core —
+    placement follows architecture, not the fast-test loop (ARCHITECTURE.md §2).
+  - **Prove it:** a GC-elimination change ships a **zero-alloc tooth, RED-verified**; the EditMode meter is
+    `Is.Not.AllocatingGCMemory()` (`GetAllocatedBytesForCurrentThread()` is dead there — vacuous), the
+    thread-local byte delta works only in `Tools/core-tests`.
+  - **Out of scope:** cold paths (parse, static init, throw-path `$"…"`).
+
+- **Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class.**
+  - Blittable geometry *data* (`NativeArray`/`Mesh.MeshData`/`LayerMeshData`) are **value-type structs** the
+    jobs write, disposed deterministically at the `ApplyAndDisposeWritableMeshData` boundary — never held,
+    never a dispose-once guard.
+  - The `Mesh` GPU *resource* is a **reference-type class** created/destroyed **main-thread only** and held by
+    **exactly one owner** (`TileManager._loaded` in cover / `PreparedTileCache` out of cover — Model B); a
+    transfer **nulls the source** so it's destroyed once (the double-free guard); teardown = destroy meshes →
+    dispose backend.
+  - Dispose-guard machinery + the `CountMeshObjects` leak baseline touch only the **class** side; structs stay
+    trivial. Full contract (exit paths, cancellation, teeth) in
+    **`docs/async-architecture.md` §"Disposal & cancellation contract"**.
+
+## Documentation & tests
+
+- **A short XML doc on EVERY member; nothing that restates the body.**
+  - Floor (not optional): a one/two-line `<summary>` + a `<param>` per parameter, plus `<returns>` when the
+    summary does not answer it.
+  - That floor is normally also the ceiling — past it, write prose only for a **non-local invariant**
+    (a protocol/lifetime/ordering fact no single body reveals), a **non-obvious why**, or a **limitation no
+    tooth can observe**.
+  - **`<see cref>` points OUTWARD** — counterpart, matching release site, the caller that establishes the
+    precondition — **never at a callee the body already names** (use `<c>Name</c>` for an incidental mention,
+    which creates no reference).
+  - Design narrative, rationale and rejected alternatives live in `docs/*-design.md`, not in the file.
+  - **Gate:** past summary+params, a doc longer than its member must name which of the three reasons applies,
+    or be cut back to the floor.
+
+- **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
+  on the production class.
+  - Allowed footprint: broaden `private` → `internal` (+ `InternalsVisibleTo`), or put computed
+    accessors/adapters as extension methods in the **test** assembly.
+  - Not allowed: `public` members with no production caller, `// for testing only` members, test
+    helpers/factories inside production classes.
