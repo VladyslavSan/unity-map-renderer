@@ -14,14 +14,14 @@ namespace MapRenderer.Jobs.Mvt
     internal sealed class MvtLayerPropertyResolver
     {
         private readonly List<string> _keys;
-        private readonly List<Value> _values;
+        private readonly List<MvtValue> _values;
         private readonly Dictionary<string, int> _keyIndex;
 
         /// <param name="keys">The layer's key table (declaration order).</param>
         /// <param name="values">The layer's value table (declaration order).</param>
         /// <param name="keyIndex">Key string → index into <paramref name="keys"/>, built by the caller
         /// once <paramref name="keys"/> is complete.</param>
-        public MvtLayerPropertyResolver(List<string> keys, List<Value> values, Dictionary<string, int> keyIndex)
+        public MvtLayerPropertyResolver(List<string> keys, List<MvtValue> values, Dictionary<string, int> keyIndex)
         {
             _keys = keys;
             _values = values;
@@ -30,7 +30,7 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>The layer's decoded value table, by index — shared (not copied) so a
         /// <see cref="DensePropertyStore"/> can index into it directly.</summary>
-        public List<Value> Values => _values;
+        public List<MvtValue> Values => _values;
 
         /// <summary>True and yields the key's table index when <paramref name="name"/> is one of this
         /// layer's keys.</summary>
@@ -55,7 +55,7 @@ namespace MapRenderer.Jobs.Mvt
                 int valIdx = (int)rawTags[i * 2 + 1];
                 if (keyIdx < 0 || keyIdx >= _keys.Count) continue;
                 if (valIdx < 0 || valIdx >= _values.Count) continue;
-                result[_keys[keyIdx]] = _values[valIdx];
+                result[_keys[keyIdx]] = _values[valIdx].ToValue();
             }
             return result;
         }

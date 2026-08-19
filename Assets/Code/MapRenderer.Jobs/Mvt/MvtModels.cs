@@ -157,10 +157,12 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>
         /// Layer value table (MVT Layer field 4): decoded variant values in declaration order.
-        /// String, float, double, int, uint, sint, bool variants are all mapped to
-        /// <see cref="Value"/> (String → Value.String; numerics → Value.Number; bool → Value.Bool).
+        /// String, float, double, int, uint, sint, bool variants are all mapped to the compact
+        /// <see cref="MvtValue"/> (String → MvtValue.String; numerics → MvtValue.Number; bool →
+        /// MvtValue.Bool) — narrower than <see cref="Value"/> (no Color/Array/Object), reconstituted to
+        /// <see cref="Value"/> at the read boundary via <see cref="MvtValue.ToValue"/>.
         /// </summary>
-        public readonly List<Value> Values = new List<Value>();
+        public readonly List<MvtValue> Values = new List<MvtValue>();
 
         // ── ITileLayer — zero-copy: List<MvtFeature> satisfies IReadOnlyList<IFeature> by
         // IReadOnlyList<out T> covariance (MvtFeature : IFeature), so this is a forward, not a copy. ──

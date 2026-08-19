@@ -270,12 +270,12 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>
         /// Decodes one Value sub-message per MVT spec §4.4. All numeric variants map to
-        /// <see cref="Value.Number"/> (double); string → <see cref="Value.String"/>;
-        /// bool → <see cref="Value.Bool"/>. Unknown fields are skipped.
+        /// <see cref="MvtValue.Number"/> (double); string → <see cref="MvtValue.String"/>;
+        /// bool → <see cref="MvtValue.Bool"/>. Unknown fields are skipped.
         /// </summary>
-        private static Value DecodeValue(ProtobufReader r)
+        private static MvtValue DecodeValue(ProtobufReader r)
         {
-            Value result = Value.Null;
+            MvtValue result = MvtValue.Null;
             while (r.HasMore)
             {
                 uint tag = r.ReadTag();
@@ -284,26 +284,26 @@ namespace MapRenderer.Jobs.Mvt
                 switch (field)
                 {
                     case ValueString when wt == 2:
-                        result = Value.String(r.ReadString());
+                        result = MvtValue.String(r.ReadString());
                         break;
                     case ValueFloat when wt == 5:
-                        result = Value.Number((double)r.ReadFloat());
+                        result = MvtValue.Number((double)r.ReadFloat());
                         break;
                     case ValueDouble when wt == 1:
-                        result = Value.Number(r.ReadDouble());
+                        result = MvtValue.Number(r.ReadDouble());
                         break;
                     case ValueInt when wt == 0:
                         // int64: read as raw varint, reinterpret as signed (two's complement)
-                        result = Value.Number((double)(long)r.ReadVarint());
+                        result = MvtValue.Number((double)(long)r.ReadVarint());
                         break;
                     case ValueUint when wt == 0:
-                        result = Value.Number((double)r.ReadVarint());
+                        result = MvtValue.Number((double)r.ReadVarint());
                         break;
                     case ValueSint when wt == 0:
-                        result = Value.Number((double)r.ReadSInt64());
+                        result = MvtValue.Number((double)r.ReadSInt64());
                         break;
                     case ValueBool when wt == 0:
-                        result = Value.Bool(r.ReadVarint() != 0);
+                        result = MvtValue.Bool(r.ReadVarint() != 0);
                         break;
                     default:
                         r.SkipField(wt);

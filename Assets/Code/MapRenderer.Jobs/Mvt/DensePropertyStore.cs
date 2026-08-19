@@ -37,14 +37,14 @@ namespace MapRenderer.Jobs.Mvt
         {
             if (_resolver.TryGetKeyIndex(name, out int keyIdx))
             {
-                List<Value> values = _resolver.Values;
+                List<MvtValue> values = _resolver.Values;
                 int pairCount = _rawTags.Length / 2;
                 for (int i = pairCount - 1; i >= 0; i--)
                 {
                     if ((int)_rawTags[i * 2] != keyIdx) continue;
                     int valIdx = (int)_rawTags[i * 2 + 1];
                     if (valIdx < 0 || valIdx >= values.Count) continue;
-                    value = values[valIdx];
+                    value = values[valIdx].ToValue();
                     return true;
                 }
             }
