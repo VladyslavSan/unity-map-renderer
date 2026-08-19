@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Json;
@@ -87,7 +88,7 @@ namespace MapRenderer.Core.Style.Symbol
         {
             try
             {
-                Expression expr = ExpressionParser.Parse(expressionJson);
+                Expression expr = ParsedExpressions.GetValue(expressionJson, ParseCallback);
                 Value result = expr.Evaluate(new EvaluationContext(0.0, feature));
                 return result.IsNull ? null : result.ToDisplayString();
             }
@@ -96,5 +97,24 @@ namespace MapRenderer.Core.Style.Symbol
                 return null;
             }
         }
+
+        // ---- expression-parse memo ---------------------------------------------------------------------
+        //
+        // Resolve() runs once per selected feature (SymbolFeatureExtractor's selection loop), and the
+        // expression-array form of a given layer's `text-field` is the SAME JsonValue node on every one of
+        // those calls — re-parsing it per feature is pure waste. Mirrors FeatureSelector.FilterFor's memo
+        // (Assets/Code/MapRenderer.Jobs/Tiles/FeatureSelector.cs) verbatim: a ConditionalWeakTable keyed on
+        // the JSON node (not on the owning StyleLayer, which is mutable — see FilterFor's own doc comment
+        // for why), so a re-parse only happens if the node itself is replaced. Tile processing runs off the
+        // main thread, hence the thread-safe CWT rather than a plain Dictionary; a racing pair of callers may
+        // both parse, but only one Expression is published and Parse is pure, so the loser is harmless
+        // garbage. A malformed expression throws out of GetValue exactly as it did before memoization, and
+        // nothing is cached, so the next call throws too.
+        private static readonly ConditionalWeakTable<JsonValue, Expression> ParsedExpressions =
+            new ConditionalWeakTable<JsonValue, Expression>();
+
+        // Hoisted so the lookup allocates no delegate per call.
+        private static readonly ConditionalWeakTable<JsonValue, Expression>.CreateValueCallback ParseCallback =
+            json => ExpressionParser.Parse(json);
     }
 }

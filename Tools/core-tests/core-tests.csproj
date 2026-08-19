@@ -34,6 +34,7 @@
     <Compile Include="Shim/**/*.cs" />
     <Compile Include="SphericalProjectionTests.cs" />
     <Compile Include="TileBufferClipTests.cs" />
+    <Compile Include="SymbolExpressionResolverMemoAllocationTests.cs" />
 
     <!-- Real production sources (single source of truth). Mostly MapRenderer.Core; the tile-decode seam
          moved to MapRenderer.Jobs in IR C1 and is still engine-free managed C#, so it compiles here
