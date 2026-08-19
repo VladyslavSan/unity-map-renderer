@@ -105,9 +105,8 @@ namespace MapRenderer.Tests.Jobs
                 MvtCommandStream.Ring(100, 100, 200, 100, 200, 200, 100, 200) // 4 points
             );
 
-            var materializer = MakeMaterializer(SampleTile, SampleExtent, Carrier(TileGeometryType.Polygon, stream));
-
-            TileGeometryBuffers geometry = materializer.Materialize();
+            TileGeometryBuffers geometry =
+                MaterializeFeatures(SampleTile, SampleExtent, Carrier(TileGeometryType.Polygon, stream));
             try
             {
                 Assert.IsTrue(geometry.IsCreated, "precondition: the materializer produced a buffer");
@@ -149,36 +148,47 @@ namespace MapRenderer.Tests.Jobs
             uint[] stream = MvtCommandStream.Feature(
                 MvtCommandStream.Ring(100, 100, 200, 100, 200, 200, 100, 200));
 
-            var materializer = MakeMaterializer(SampleTile, SampleExtent, Carrier(TileGeometryType.Polygon, stream));
+            // 2a: the flattened INPUT buffers are borrowed, not owned by the materializer, precisely so this
+            // still works — a materializer that consumed/disposed its input on the first call would fault
+            // reading it on the second. `flat` outlives both `Materialize()` calls, disposed once at the end.
+            var materializer = MakeMaterializer(
+                SampleTile, SampleExtent, out var flat, Carrier(TileGeometryType.Polygon, stream));
+            try
+            {
+                TileGeometryBuffers first  = materializer.Materialize();
+                TileGeometryBuffers second = materializer.Materialize();
 
-            TileGeometryBuffers first  = materializer.Materialize();
-            TileGeometryBuffers second = materializer.Materialize();
+                // Non-vacuity: two `default` results would satisfy every claim below trivially.
+                Assert.IsTrue(first.IsCreated, "the first call must mint a buffer");
+                Assert.IsTrue(second.IsCreated, "the second call must mint a buffer");
+                Assert.AreEqual(4, first.VertexCount, "precondition: the first buffer really holds the decode");
+                Assert.AreEqual(4, second.VertexCount, "precondition: the second buffer really holds the decode");
 
-            // Non-vacuity: two `default` results would satisfy every claim below trivially.
-            Assert.IsTrue(first.IsCreated, "the first call must mint a buffer");
-            Assert.IsTrue(second.IsCreated, "the second call must mint a buffer");
-            Assert.AreEqual(4, first.VertexCount, "precondition: the first buffer really holds the decode");
-            Assert.AreEqual(4, second.VertexCount, "precondition: the second buffer really holds the decode");
+                // Distinct allocations: writing through one must not be visible through the other.
+                first.Vertices[0] = new double2(-1.0, -1.0);
+                Assert.AreEqual(new double2(100.0, 100.0), second.Vertices[0],
+                    "the two calls must return distinct allocations — a cached buffer would alias here and " +
+                    "double-free on the second Dispose");
 
-            // Distinct allocations: writing through one must not be visible through the other.
-            first.Vertices[0] = new double2(-1.0, -1.0);
-            Assert.AreEqual(new double2(100.0, 100.0), second.Vertices[0],
-                "the two calls must return distinct allocations — a cached buffer would alias here and " +
-                "double-free on the second Dispose");
+                first.Dispose();
+                Assert.DoesNotThrow(() => { var _ = second.Vertices[0]; },
+                    "disposing one result must leave the other usable");
 
-            first.Dispose();
-            Assert.DoesNotThrow(() => { var _ = second.Vertices[0]; },
-                "disposing one result must leave the other usable");
-
-            second.Dispose();
-            Assert.DoesNotThrow(() => first.Dispose(), "re-disposing is a no-op, not a double free");
-            Assert.DoesNotThrow(() => second.Dispose(), "re-disposing is a no-op, not a double free");
+                second.Dispose();
+                Assert.DoesNotThrow(() => first.Dispose(), "re-disposing is a no-op, not a double free");
+                Assert.DoesNotThrow(() => second.Dispose(), "re-disposing is a no-op, not a double free");
+            }
+            finally { flat.Dispose(); }
 
             // The empty-input exit path allocates nothing and hands back a buffer nobody has to free.
-            var empty = MakeMaterializer(SampleTile, SampleExtent);
-            TileGeometryBuffers nothing = empty.Materialize();
-            Assert.IsFalse(nothing.IsCreated, "an empty feature list must materialize to default, not to an allocation");
-            Assert.DoesNotThrow(() => nothing.Dispose(), "disposing the empty result must be a no-op");
+            var empty = MakeMaterializer(SampleTile, SampleExtent, out var emptyFlat);
+            try
+            {
+                TileGeometryBuffers nothing = empty.Materialize();
+                Assert.IsFalse(nothing.IsCreated, "an empty feature list must materialize to default, not to an allocation");
+                Assert.DoesNotThrow(() => nothing.Dispose(), "disposing the empty result must be a no-op");
+            }
+            finally { emptyFlat.Dispose(); }
         }
 
         /// <summary>
@@ -240,7 +250,7 @@ namespace MapRenderer.Tests.Jobs
             uint[] first  = MvtCommandStream.Feature(MvtCommandStream.Ring(10, 10, 20, 10, 20, 20));
             uint[] second = MvtCommandStream.Feature(MvtCommandStream.Ring(30, 30, 40, 30, 40, 40));
 
-            TileGeometryBuffers geometry = MakeMaterializer(SampleTile, SampleExtent, Carrier(TileGeometryType.LineString, first), Carrier(TileGeometryType.Polygon, second)).Materialize();
+            TileGeometryBuffers geometry = MaterializeFeatures(SampleTile, SampleExtent, Carrier(TileGeometryType.LineString, first), Carrier(TileGeometryType.Polygon, second));
             try
             {
                 // Non-vacuity: the buffer really decoded, so the column below is not merely a zeroed
@@ -285,17 +295,20 @@ namespace MapRenderer.Tests.Jobs
             // column are joined by POSITION, so a length mismatch would mis-classify every ring. It must
             // throw BEFORE Allocate (the same standard PathGeometryMaterializer is held to), or four
             // Allocator.Persistent arrays are stranded with no caller able to free them.
-            var ex = Assert.Throws<ArgumentException>(
-                () => new MvtGeometryMaterializer(
-                        SampleTile, SampleExtent,
-                        new List<TileGeometryType> { TileGeometryType.Polygon },      // 1 kind
-                        new List<uint[]> { stream, stream }).Materialize(),           // 2 command streams
-                "a kind column that does not span every feature must throw, not silently mis-classify rings");
-            StringAssert.Contains("2", ex.Message,
-                "the message must name the feature count the column had to match");
+            using (var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { stream, stream })) // 2 command streams
+            {
+                var ex = Assert.Throws<ArgumentException>(
+                    () => new MvtGeometryMaterializer(
+                            SampleTile, SampleExtent,
+                            new List<TileGeometryType> { TileGeometryType.Polygon },      // 1 kind
+                            flat.Commands, flat.FeatureOffsets, flat.FeatureLengths).Materialize(),
+                    "a kind column that does not span every feature must throw, not silently mis-classify rings");
+                StringAssert.Contains("2", ex.Message,
+                    "the message must name the feature count the column had to match");
+            }
 
             // The contract's other half, in the SAME test: a carrier with no stream is zero commands.
-            TileGeometryBuffers geometry = MakeMaterializer(SampleTile, SampleExtent, Carrier(TileGeometryType.Polygon, stream), Carrier(TileGeometryType.Point, null)).Materialize();
+            TileGeometryBuffers geometry = MaterializeFeatures(SampleTile, SampleExtent, Carrier(TileGeometryType.Polygon, stream), Carrier(TileGeometryType.Point, null));
             try
             {
                 Assert.IsTrue(geometry.IsCreated, "a null stream must not suppress the other feature's rings");
@@ -315,18 +328,38 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>IR C1 P3: the materializer takes (tile, extent, kinds, commands) rather than a feature
         /// list — the sidecar interface it used to downcast through is gone. This adapter keeps the fixtures
-        /// authored as features, which is still the readable shape, and splits the two columns here.</summary>
-        private static MvtGeometryMaterializer MakeMaterializer(
+        /// authored as features, which is still the readable shape, and splits the two columns here.
+        /// 2a: flattens the split columns via <see cref="MvtGeometryMaterializerTestFactory"/> and
+        /// materializes once — the shape almost every test in this file wants.</summary>
+        private static TileGeometryBuffers MaterializeFeatures(
             TileId tile, double extent, params IFeature[] features)
         {
-            var kinds    = new List<TileGeometryType>(features.Length);
-            var commands = new List<uint[]>(features.Length);
+            SplitFeatures(features, out List<TileGeometryType> kinds, out List<uint[]> commands);
+            return MvtGeometryMaterializerTestFactory.Materialize(tile, extent, kinds, commands);
+        }
+
+        /// <summary>Low-level counterpart of <see cref="MaterializeFeatures"/> for a test that must hold the
+        /// materializer across more than one <c>Materialize()</c> call: hands back both the materializer and
+        /// the flattened input buffers it borrows, so the caller disposes <paramref name="flat"/> once, after
+        /// every call that needed it has run (see <c>Materialize_TransfersOwnership_AndMintsAFreshBufferPerCall</c>).</summary>
+        private static MvtGeometryMaterializer MakeMaterializer(
+            TileId tile, double extent, out MvtGeometryMaterializerTestFactory.FlatGeometry flat,
+            params IFeature[] features)
+        {
+            SplitFeatures(features, out List<TileGeometryType> kinds, out List<uint[]> commands);
+            return MvtGeometryMaterializerTestFactory.Create(tile, extent, kinds, commands, out flat);
+        }
+
+        private static void SplitFeatures(
+            IFeature[] features, out List<TileGeometryType> kinds, out List<uint[]> commands)
+        {
+            kinds    = new List<TileGeometryType>(features.Length);
+            commands = new List<uint[]>(features.Length);
             foreach (IFeature f in features)
             {
                 kinds.Add(f.GeometryType);
                 commands.Add((f as ITileCommandStreamFeature)?.Geometry);
             }
-            return new MvtGeometryMaterializer(tile, extent, kinds, commands);
         }
 
         private static IFeature Carrier(TileGeometryType kind, uint[] geometry)

@@ -8,62 +8,77 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs
 {
     /// <summary>
-    /// The MVT implementation of Waist 1's producer seam: flattens one layer's per-feature geometry command
-    /// streams into native buffers, runs <see cref="MvtDecodeJob"/> over them, and returns the decoded rings.
+    /// The MVT implementation of Waist 1's producer seam: runs <see cref="MvtDecodeJob"/> over one layer's
+    /// already-flat geometry command buffer and returns the decoded rings.
     ///
-    /// <para>The payload — the command streams plus the tile address and extent they are quantized against —
+    /// <para>The payload — the command buffer plus the tile address and extent they are quantized against —
     /// is captured at construction, because the formats behind <see cref="ITileGeometryMaterializer"/> do not
     /// share an input shape. This object is therefore the sole authority for the buffer's
     /// <c>Tile</c>/<c>Extent</c>; see the interface doc.</para>
     ///
-    /// <para><b>IR C1 P3 — the input is raw commands, not features.</b> Until P3 this took an
-    /// <c>IReadOnlyList&lt;IFeature&gt;</c> and cast each element to the sidecar interface
-    /// <c>IMvtGeometryCarrier</c> to reach the bytes. That sidecar existed only because the geometry did not
-    /// belong to anything; now the decoded layer owns its buffer and calls this producer <i>while it still
-    /// holds its own command streams</i>, so the bytes are passed directly. The parameter list is deliberately
-    /// the same shape as <see cref="PathGeometryMaterializer"/>'s — <c>(tile, extent, kinds, geometry)</c> —
-    /// so the two producers of Waist 1 read alike, and it inherits that sibling's explicit length guard in
-    /// place of the retired cast.</para>
+    /// <para><b>2a — the input is a native-flat buffer, not per-feature arrays.</b> Until 2a this took an
+    /// <c>IReadOnlyList&lt;uint[]&gt;</c> — one managed command array per feature — and copied/flattened it
+    /// into a native buffer here on every call. <c>MvtDecoder</c> now flattens directly off the wire into the
+    /// exact same native shape <see cref="MvtDecodeJob"/> consumes, so this constructor takes it as-is: no
+    /// managed per-feature array and no copy exist anywhere in the decode path. A test that still authors
+    /// fixtures as <c>uint[]</c> per feature flattens them via
+    /// <c>MvtGeometryMaterializerTestFactory</c> (test assembly) before constructing this type.</para>
     ///
-    /// <para><b>Ownership transfers on return</b> (interface contract). Nothing here is cached: each call mints
-    /// a fresh buffer, so one materializer may legitimately be materialized more than once.</para>
+    /// <para><b>The three command buffers are BORROWED, never disposed here.</b> The caller (production:
+    /// <c>MvtDecoder.DecodeLayer</c>; tests: whatever flattened them) owns them and is responsible for
+    /// disposal — this mirrors <see cref="MvtDecodeJob"/>'s own <c>[ReadOnly]</c> attribute on the same
+    /// arrays. This is why <b>ownership transfers on return</b> still holds for the OUTPUT buffer only
+    /// (interface contract): nothing here is cached, each call mints a fresh output buffer by re-running the
+    /// job over the same borrowed input, so one materializer may legitimately be materialized more than once
+    /// (<c>Materialize_TransfersOwnership_AndMintsAFreshBufferPerCall</c> does exactly that).</para>
     /// </summary>
     public sealed class MvtGeometryMaterializer : ITileGeometryMaterializer
     {
         private readonly TileId                          _tile;
         private readonly double                          _extent;
         private readonly IReadOnlyList<TileGeometryType> _featureGeometryTypes;
-        private readonly IReadOnlyList<uint[]>           _featureCommands;
+        private readonly NativeArray<uint>               _commands;
+        private readonly NativeArray<int>                _featureOffsets;
+        private readonly NativeArray<int>                _featureLengths;
 
         /// <param name="tile">The slippy-map address whose tile-local space the streams are expressed in.</param>
         /// <param name="extent">The quantization range of those coordinates (MVT extent, typically 4096).</param>
         /// <param name="featureGeometryTypes">Each feature's declared geometry kind, read from the source's own
         /// declaration and never inferred from the coordinates (interface contract, "Kind, not shape").</param>
-        /// <param name="featureCommands">Each feature's MVT geometry command stream, index-aligned with
-        /// <paramref name="featureGeometryTypes"/>, in the order <c>RingFeatureIdx</c> joins back through.
-        /// A null element is legal — zero commands.</param>
+        /// <param name="commands">Every feature's MVT geometry command words, concatenated in feature order —
+        /// the same flat buffer <see cref="MvtDecodeJob"/> reads. BORROWED: the caller disposes it, before or
+        /// after this instance is materialized (never touched outside a <see cref="Materialize"/> call).</param>
+        /// <param name="featureOffsets">Per-feature start offset into <paramref name="commands"/>, index-aligned
+        /// with <paramref name="featureGeometryTypes"/>. Its length is this materializer's feature count.
+        /// BORROWED, same lifetime contract as <paramref name="commands"/>.</param>
+        /// <param name="featureLengths">Per-feature command-word count. A zero length is legal — zero
+        /// commands, the flat-buffer equivalent of the old "null <c>uint[]</c> element". BORROWED, same
+        /// lifetime contract as <paramref name="commands"/>.</param>
         public MvtGeometryMaterializer(
             TileId tile, double extent,
             IReadOnlyList<TileGeometryType> featureGeometryTypes,
-            IReadOnlyList<uint[]> featureCommands)
+            NativeArray<uint> commands, NativeArray<int> featureOffsets, NativeArray<int> featureLengths)
         {
             _tile                 = tile;
             _extent               = extent;
             _featureGeometryTypes = featureGeometryTypes;
-            _featureCommands      = featureCommands;
+            _commands             = commands;
+            _featureOffsets       = featureOffsets;
+            _featureLengths       = featureLengths;
         }
 
         public TileGeometryBuffers Materialize()
         {
-            int featureCount = _featureCommands == null ? 0 : _featureCommands.Count;
+            int featureCount = _featureOffsets.IsCreated ? _featureOffsets.Length : 0;
 
             if (featureCount == 0)
                 return default;
 
-            // The kind column is a SECOND list joined to the command list by position. Validated BEFORE
-            // anything is allocated, exactly as PathGeometryMaterializer does: a mismatch would mis-classify
-            // every ring rather than fail loudly, and a throw after Allocate would strand four
-            // Allocator.Persistent arrays no caller can reach.
+            // The kind column is a SECOND list joined to the offsets/lengths columns by position. Validated
+            // BEFORE anything is allocated, exactly as PathGeometryMaterializer does: a mismatch would
+            // mis-classify every ring rather than fail loudly, and a throw after Allocate would strand the
+            // output buffer no caller can reach (the INPUT buffers are borrowed, so they are never at risk
+            // here — the caller's own finally frees them regardless of how this call exits).
             if (_featureGeometryTypes == null || _featureGeometryTypes.Count != featureCount)
                 throw new ArgumentException(
                     $"featureGeometryTypes must have one entry per feature ({featureCount}); got " +
@@ -71,40 +86,11 @@ namespace MapRenderer.Jobs
                     "position, so a mismatch mis-classifies every ring rather than failing loudly.",
                     nameof(_featureGeometryTypes));
 
-            // The command streams, in feature order. Copied into a List so the exact-sizing pre-pass and the
-            // flatten loop below walk the SAME sequence.
-            var features = new List<uint[]>(featureCount);
-            for (int fi = 0; fi < featureCount; fi++)
-                features.Add(_featureCommands[fi]); // null is fine — zero commands
-
-            // ── Pre-pass: flatten polygon commands → NativeArrays. ─────────────────────────────
-            int totalCommands = 0;
-            for (int fi = 0; fi < featureCount; fi++)
-                totalCommands += features[fi]?.Length ?? 0;
-
             // Exact sizing: walk every command exactly as MvtDecodeJob does to pre-count the rings and
             // vertices it will emit (S06 item a). This makes under-allocation — and thus the in-job OOB write
             // — impossible for ANY input, including a malformed multi-point MoveTo.
-            FillMeshPipeline.PrecountRingsAndVertices(features, out int exactRings, out int exactVertices);
-
-            // Note: not using 'using var' because C# 8+ makes 'using var' NativeArrays read-only
-            // (CS1654), preventing index assignment. Dispose manually below.
-            var commands    = new NativeArray<uint>(totalCommands, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var featOffsets = new NativeArray<int>(featureCount,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var featLengths = new NativeArray<int>(featureCount,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-
-            int cmdPos = 0;
-            for (int fi = 0; fi < featureCount; fi++)
-            {
-                uint[] geom = features[fi];
-                int len = geom?.Length ?? 0;
-                featOffsets[fi] = cmdPos;
-                featLengths[fi] = len;
-                if (geom != null)
-                    for (int k = 0; k < len; k++)
-                        commands[cmdPos + k] = geom[k];
-                cmdPos += len;
-            }
+            FillMeshPipeline.PrecountRingsAndVertices(
+                _commands, _featureOffsets, _featureLengths, out int exactRings, out int exactVertices);
 
             // ── Allocate decode output buffers. ───────────────────────────────────────────────────
             var geometry = TileGeometryBuffers.Allocate(_tile, _extent, featureCount, exactRings, exactVertices);
@@ -119,19 +105,15 @@ namespace MapRenderer.Jobs
             // ── Decode. ────────────────────────────────────────────────────────────────────────────
             new MvtDecodeJob
             {
-                Commands            = commands,
-                FeatureOffsets      = featOffsets,
-                FeatureLengths      = featLengths,
+                Commands            = _commands,
+                FeatureOffsets      = _featureOffsets,
+                FeatureLengths      = _featureLengths,
                 OutVertices         = geometry.Vertices,
                 OutRingOffsets      = geometry.RingOffsets,
                 OutRingFeatureIndex = geometry.RingFeatureIdx,
                 OutRingCount        = ringCountArr,
                 OutVertexCount      = vertCountArr,
             }.Run(); // Run (not Schedule) so the pipeline is callable off the main thread (S89 D2 worker path)
-
-            commands.Dispose();
-            featOffsets.Dispose();
-            featLengths.Dispose();
 
             geometry.RingCount   = ringCountArr[0];
             geometry.VertexCount = vertCountArr[0];

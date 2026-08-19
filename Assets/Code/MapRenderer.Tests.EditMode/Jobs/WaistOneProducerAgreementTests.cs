@@ -80,8 +80,8 @@ namespace MapRenderer.Tests.Jobs
                 TileGeometryType.LineString, TileGeometryType.Point, TileGeometryType.Polygon,
             };
 
-            TileGeometryBuffers fromMvt = new MvtGeometryMaterializer(
-                Tile, 4096.0, kinds, new List<uint[]> { null, null, null }).Materialize();
+            TileGeometryBuffers fromMvt = MvtGeometryMaterializerTestFactory.Materialize(
+                Tile, 4096.0, kinds, new List<uint[]> { null, null, null });
             TileGeometryBuffers fromPaths = new PathGeometryMaterializer(
                 Tile, 4096.0, kinds,
                 new List<IReadOnlyList<IReadOnlyList<double2>>> { null, null, null }).Materialize();
@@ -102,8 +102,8 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void BothWaistOneProducers_NoFeatures_AllocateNothing()
         {
-            TileGeometryBuffers fromMvt = new MvtGeometryMaterializer(
-                Tile, 4096.0, new List<TileGeometryType>(), new List<uint[]>()).Materialize();
+            TileGeometryBuffers fromMvt = MvtGeometryMaterializerTestFactory.Materialize(
+                Tile, 4096.0, new List<TileGeometryType>(), new List<uint[]>());
             TileGeometryBuffers fromPaths = new PathGeometryMaterializer(
                 Tile, 4096.0, new List<TileGeometryType>(),
                 new List<IReadOnlyList<IReadOnlyList<double2>>>()).Materialize();
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Jobs
             var kinds    = new List<TileGeometryType>(featureCount);
             var commands = new List<uint[]>(featureCount);
             for (int i = 0; i < featureCount; i++) { kinds.Add(TileGeometryType.Point); commands.Add(null); }
-            return new MvtGeometryMaterializer(Tile, 4096.0, kinds, commands).Materialize();
+            return MvtGeometryMaterializerTestFactory.Materialize(Tile, 4096.0, kinds, commands);
         }
 
         [Test]

@@ -1,9 +1,11 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using Unity.Profiling;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Protobuf;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs;
 
 namespace MapRenderer.Jobs.Mvt
 {
@@ -18,8 +20,11 @@ namespace MapRenderer.Jobs.Mvt
     ///
     /// <para><b>IR C1 P3 — the decode takes the <see cref="TileId"/> and materializes EAGERLY.</b> Each
     /// layer's rings are flattened into its own <c>TileGeometryBuffers</c> before <see cref="Decode"/>
-    /// returns, and the per-feature <c>uint[]</c> command arrays are dropped on the way out — they exist only
-    /// inside this call now.</para>
+    /// returns. <b>2a:</b> no per-feature <c>uint[]</c> command array is ever minted to get there — each
+    /// feature's geometry field is captured as a byte-range only (see <c>DecodeFeature</c>'s doc) and every
+    /// feature's commands are flattened directly into one shared <c>Allocator.Persistent</c>
+    /// <c>NativeArray&lt;uint&gt;</c>, consumed by <c>MvtGeometryMaterializer</c> and freed before this call
+    /// returns.</para>
     ///
     /// <para><b>Why eager, and why the id is a parameter.</b> Lazy per-layer materialization would mutate the
     /// tile on a second thread <i>after</i> the wrapping <c>SharedDisposable{IDecodedTile}</c> publishes it,
@@ -127,10 +132,13 @@ namespace MapRenderer.Jobs.Mvt
             // Keep raw tag arrays per-feature; resolve to Properties after the full layer is read.
             // This is order-independent: keys/values may follow features in the serialised stream.
             var rawTagsList = new List<uint[]>(featureCount);
-            // IR C1 P3: the per-feature command streams live HERE, in a local, for the duration of this
-            // decode only. They are consumed by the materializer below and then dropped — a decoded feature
-            // carries no geometry at all.
-            var geometryList = new List<uint[]>(featureCount);
+            // 2a: per-feature geometry BYTE BOUNDS only (two small int lists, not a uint[] per feature) — the
+            // command words themselves are never parsed into managed memory. See DecodeFeature's doc. Lists,
+            // not fixed arrays, for the same reason rawTagsList is a List: CountLayerElements's count is a
+            // hint (a miscount only mis-sizes the capacity, never breaks decoding — see its doc), so the
+            // real loop must not assume the counted and actual feature counts are identical.
+            var geomStart = new List<int>(featureCount);
+            var geomEnd   = new List<int>(featureCount);
 
             while (r.HasMore)
             {
@@ -160,10 +168,11 @@ namespace MapRenderer.Jobs.Mvt
                     case LayerFeatures when wt == 2:
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        var (feature, rawTags, geometry) = DecodeFeature(r.Slice(s, e));
+                        var (feature, rawTags, fGeomStart, fGeomEnd) = DecodeFeature(r.Slice(s, e));
                         layer.Features.Add(feature);
                         rawTagsList.Add(rawTags);
-                        geometryList.Add(geometry);
+                        geomStart.Add(fGeomStart);
+                        geomEnd.Add(fGeomEnd);
                         break;
                     }
                     default:
@@ -198,8 +207,63 @@ namespace MapRenderer.Jobs.Mvt
             for (int i = 0; i < layer.Features.Count; i++)
                 kinds.Add(layer.Features[i].GeometryType);
 
-            using (PmDecode.Auto())
-                layer.AdoptGeometry(new MvtGeometryMaterializer(id, layer.Extent, kinds, geometryList).Materialize());
+            // 2a: flatten every feature's recorded [geomStart, geomEnd) byte slice straight into ONE shared
+            // Allocator.Persistent NativeArray<uint> — the native shape MvtDecodeJob already consumes. Same
+            // two-pass count-then-fill technique as ReadPackedUInt32 (a throwaway counter cursor, then an
+            // exact-sized fill), just walking N feature slices into one buffer instead of N managed uint[]s.
+            // These buffers are BORROWED by the materializer (never disposed by it — see its ctor doc), so
+            // this method remains the sole owner and frees them in `finally`, on every exit path.
+            //
+            // The count/fill loops re-read raw varints from the tile's own bytes (ReadVarint throws on a
+            // truncated/over-long varint — reachable on a malformed tile), so BOTH loops sit inside the try:
+            // a throw there must not leak whichever of the three buffers already exists. Each is declared
+            // `default` first and disposed under an IsCreated guard, because a throw from the FIRST
+            // allocation (or the count loop, which runs between the first two) leaves the others
+            // un-allocated — and IsCreated on a default NativeArray is false without touching a safety
+            // handle, so the guard itself never throws.
+            int featCount = layer.Features.Count;
+            var featOffsets = default(NativeArray<int>);
+            var featLengths = default(NativeArray<int>);
+            var commands    = default(NativeArray<uint>);
+            try
+            {
+                featOffsets = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                featLengths = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                int totalWords = 0;
+                for (int i = 0; i < featCount; i++)
+                {
+                    int n = 0;
+                    if (geomEnd[i] > geomStart[i])
+                    {
+                        var counter = r.Slice(geomStart[i], geomEnd[i]); // struct copy — independent cursor
+                        while (counter.HasMore) { counter.ReadVarint(); n++; }
+                    }
+                    featOffsets[i] = totalWords;
+                    featLengths[i] = n;
+                    totalWords += n;
+                }
+                commands = new NativeArray<uint>(totalWords, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                for (int i = 0; i < featCount; i++)
+                {
+                    int len = featLengths[i];
+                    if (len == 0) continue;
+                    var fill = r.Slice(geomStart[i], geomEnd[i]);
+                    int pos = featOffsets[i];
+                    for (int k = 0; k < len; k++) commands[pos + k] = (uint)fill.ReadVarint();
+                }
+
+                using (PmDecode.Auto())
+                {
+                    var materializer = new MvtGeometryMaterializer(id, layer.Extent, kinds, commands, featOffsets, featLengths);
+                    layer.AdoptGeometry(materializer.Materialize());
+                }
+            }
+            finally
+            {
+                if (commands.IsCreated) commands.Dispose();
+                if (featOffsets.IsCreated) featOffsets.Dispose();
+                if (featLengths.IsCreated) featLengths.Dispose();
+            }
 
             return layer;
         }
@@ -252,14 +316,24 @@ namespace MapRenderer.Jobs.Mvt
         /// <summary>
         /// Decodes one Feature sub-message. Returns the feature (geometry type + id), the raw tag uint array
         /// (to be resolved after the layer's key/value tables are fully read) and the geometry command
-        /// stream — both of the latter as OUT-OF-BAND results the caller consumes and then drops, because
-        /// neither belongs on the feature (IR C1 P3). Feature id (field 1) is set on the feature directly.
+        /// stream's byte bounds — all three as OUT-OF-BAND results the caller consumes, because none belongs
+        /// on the feature (IR C1 P3). Feature id (field 1) is set on the feature directly.
+        ///
+        /// <para><b>2a: the geometry field is NOT parsed here.</b> <c>ReadLengthDelimited</c> returns
+        /// <c>[start,end)</c> as absolute offsets into the tile's root byte buffer (every
+        /// <see cref="ProtobufReader"/> slice shares the same backing array — see <c>ProtobufReader.Slice</c>),
+        /// so the caller can re-open that exact byte range later with its OWN reader and flatten every
+        /// feature's commands straight into one shared <c>NativeArray&lt;uint&gt;</c> — no per-feature managed
+        /// <c>uint[]</c> ever exists. A second (or later) occurrence of the field overwrites the bounds,
+        /// matching the old last-wins behaviour where a repeated <c>ReadPackedUInt32</c> call discarded the
+        /// previous array. Absent field ⇒ <c>(0, 0)</c>, the same "zero commands" default the old
+        /// <c>null</c> geometry meant.</para>
         /// </summary>
-        private static (MvtFeature feature, uint[] rawTags, uint[] geometry) DecodeFeature(ProtobufReader r)
+        private static (MvtFeature feature, uint[] rawTags, int geomStart, int geomEnd) DecodeFeature(ProtobufReader r)
         {
             var f = new MvtFeature();
-            uint[] rawTags  = null;
-            uint[] geometry = null;
+            uint[] rawTags = null;
+            int geomStart = 0, geomEnd = 0;
             while (r.HasMore)
             {
                 uint tag = r.ReadTag();
@@ -281,17 +355,14 @@ namespace MapRenderer.Jobs.Mvt
                         f.GeometryType = (TileGeometryType)r.ReadUInt32();
                         break;
                     case FeatureGeometry when wt == 2:
-                    {
-                        var (s, e) = r.ReadLengthDelimited();
-                        geometry = ReadPackedUInt32(r.Slice(s, e));
+                        (geomStart, geomEnd) = r.ReadLengthDelimited();
                         break;
-                    }
                     default:
                         r.SkipField(wt);
                         break;
                 }
             }
-            return (f, rawTags ?? System.Array.Empty<uint>(), geometry);
+            return (f, rawTags ?? System.Array.Empty<uint>(), geomStart, geomEnd);
         }
 
         /// <summary>

@@ -258,8 +258,8 @@ namespace MapRenderer.Tests.Tiles
                 if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
                 { polygonKinds.Add(layer.Kinds[fi]); polygonCommands.Add(layer.Commands[fi]); }
 
-            TileGeometryBuffers geometry = new MvtGeometryMaterializer(
-                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands).Materialize();
+            TileGeometryBuffers geometry = MvtGeometryMaterializerTestFactory.Materialize(
+                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands);
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var pipelineInput = new FillMeshPipeline.LayerInput
             {
@@ -321,8 +321,8 @@ namespace MapRenderer.Tests.Tiles
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
             // IR B7: ONE buffer, borrowed by all N+1 Schedule calls below — pre-B7 each call consumed its
             // own mint, so this is also a live demonstration that Schedule no longer consumes its input.
-            TileGeometryBuffers geometry = new MvtGeometryMaterializer(
-                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands).Materialize();
+            TileGeometryBuffers geometry = MvtGeometryMaterializerTestFactory.Materialize(
+                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands);
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var singleInput = new FillMeshPipeline.LayerInput
             {

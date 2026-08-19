@@ -68,7 +68,7 @@ namespace MapRenderer.Tests
                 kinds.Add(f?.GeometryType ?? MapRenderer.Core.Tiles.TileGeometryType.Unknown);
                 commands.Add((f as ITileCommandStreamFeature)?.Geometry);
             }
-            return new MvtGeometryMaterializer(id, extent, kinds, commands).Materialize();
+            return MvtGeometryMaterializerTestFactory.Materialize(id, extent, kinds, commands);
         }
 
         /// <summary>

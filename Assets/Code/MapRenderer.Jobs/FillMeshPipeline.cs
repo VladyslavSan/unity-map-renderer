@@ -97,22 +97,28 @@ namespace MapRenderer.Jobs
         /// The counts computed here still match what the job writes, so the sizing is correct regardless; the
         /// input-read hardening is tracked separately.
         /// </summary>
-        public static void PrecountRingsAndVertices(List<uint[]> features, out int rings, out int vertices)
+        /// <remarks>2a: takes the same native-flat <c>(commands, featureOffsets, featureLengths)</c> shape
+        /// <see cref="MvtDecodeJob"/> reads — the caller (<see cref="MvtGeometryMaterializer.Materialize"/>)
+        /// no longer holds a per-feature managed <c>uint[]</c> to precount from. A feature with
+        /// <c>featureLengths[fi] == 0</c> is skipped, the flat-buffer equivalent of the old null element.</remarks>
+        public static void PrecountRingsAndVertices(
+            NativeArray<uint> commands, NativeArray<int> featureOffsets, NativeArray<int> featureLengths,
+            out int rings, out int vertices)
         {
             rings    = 0;
             vertices = 0;
-            if (features == null) return;
+            if (!featureOffsets.IsCreated) return;
 
-            for (int fi = 0; fi < features.Count; fi++)
+            for (int fi = 0; fi < featureOffsets.Length; fi++)
             {
-                uint[] geom = features[fi];
-                if (geom == null) continue;
+                int start = featureOffsets[fi];
+                int len   = featureLengths[fi];
+                if (len == 0) continue;
 
                 int i = 0;
-                int len = geom.Length;
                 while (i < len)
                 {
-                    uint commandInteger = geom[i++];
+                    uint commandInteger = commands[start + i++];
                     uint command = commandInteger & 0x7u;
                     uint count   = commandInteger >> 3;
 

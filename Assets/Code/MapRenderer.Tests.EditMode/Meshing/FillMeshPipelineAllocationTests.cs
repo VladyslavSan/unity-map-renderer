@@ -78,7 +78,7 @@ namespace MapRenderer.Tests.Meshing
                 { kinds.Add(layer.Kinds[fi]); commands.Add(layer.Commands[fi]); }
 
             var tile = new TileId { Z = 0, X = 0, Y = 0 };
-            TileGeometryBuffers geometry = new MvtGeometryMaterializer(tile, layer.Extent, kinds, commands).Materialize();
+            TileGeometryBuffers geometry = MvtGeometryMaterializerTestFactory.Materialize(tile, layer.Extent, kinds, commands);
             NativeArray<int> visitOrder  = TestTileMeshBuilder.FullVisitOrder(geometry);
             var (bMin, _) = tile.MercatorBounds();
 

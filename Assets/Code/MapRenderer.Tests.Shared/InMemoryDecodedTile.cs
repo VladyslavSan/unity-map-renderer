@@ -45,7 +45,7 @@ namespace MapRenderer.Tests
                 commands.Add((Features[i] as ITileCommandStreamFeature)?.Geometry);
             }
 
-            Geometry = new MvtGeometryMaterializer(tile, extent, kinds, commands).Materialize();
+            Geometry = MvtGeometryMaterializerTestFactory.Materialize(tile, extent, kinds, commands);
         }
 
         public void Dispose()

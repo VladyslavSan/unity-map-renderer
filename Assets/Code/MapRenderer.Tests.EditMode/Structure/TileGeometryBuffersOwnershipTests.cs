@@ -50,6 +50,8 @@ namespace MapRenderer.Tests.Structure
         private const string ScheduleSignatureAnchor    = "TileMeshBuffers Schedule(LayerInput";
         private const string DeriveSignatureAnchor      = "TileGeometryBuffers DeriveVisitedRings(LayerInput";
         private const string MaterializeSignatureAnchor = "TileGeometryBuffers Materialize(";
+        private const string DecodeLayerSignatureAnchor =
+            "MvtLayer DecodeLayer(TileId id, ProtobufReader r, MvtPropertyStorage propertyStorage)";
 
         private const string BufferDisposeCallForm = "geometry.Dispose()";
         private const string AllocateCallForm      = "TileGeometryBuffers.Allocate(";
@@ -210,11 +212,16 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
-        /// <summary>B2 T5a: the MVT scratch the materializer allocates for <c>MvtDecodeJob</c> is freed inside
-        /// the same method, exactly once each. These are <c>Allocator.Persistent</c> allocations on a
-        /// worker-thread path, so a missing free is a leak no EditMode assertion can observe.</summary>
+        /// <summary>B2 T5a → 2a re-point: <c>commands</c>/<c>featOffsets</c>/<c>featLengths</c> flipped from
+        /// scratch <c>Materialize</c> minted and owned to a BORROWED constructor input — since 2a,
+        /// <c>MvtDecoder.DecodeLayer</c> flattens them directly off the wire and owns disposal (see
+        /// <see cref="DecodeLayerFreesTheMvtCommandBuffersItBuilds_ExactlyOnceOnEveryExitPath"/>, the other
+        /// end of this move). A dispose reappearing here would fault the second of two <c>Materialize()</c>
+        /// calls on one instance (<c>Materialize_TransfersOwnership_AndMintsAFreshBufferPerCall</c> does
+        /// exactly that) and double-free once the caller also disposes. <c>ringCountArr</c>/<c>vertCountArr</c>
+        /// are still local scratch <c>Materialize</c> mints and owns itself, unaffected by the move.</summary>
         [Test]
-        public void MaterializeFreesItsMvtScratchExactlyOnce()
+        public void MaterializeFreesOnlyItsOwnOutputScratch_AndNeverTheBorrowedMvtCommandBuffers()
         {
             string body = StripLineComments(
                 ExtractMethodBody(MaterializerSource(), MaterializeSignatureAnchor, MaterializerPath()));
@@ -224,15 +231,79 @@ namespace MapRenderer.Tests.Structure
             StringAssert.Contains("MvtDecodeJob", body,
                 "precondition: the extracted body really is the one that runs the MVT decode");
 
-            foreach (string callForm in new[]
-                     {
-                         "commands.Dispose()", "featOffsets.Dispose()", "featLengths.Dispose()",
-                         "ringCountArr.Dispose()", "vertCountArr.Dispose()",
-                     })
+            foreach (string callForm in new[] { "ringCountArr.Dispose()", "vertCountArr.Dispose()" })
             {
                 Assert.AreEqual(1, CountOccurrences(body, callForm),
-                    $"Materialize must free its own scratch through '{callForm}' exactly once.");
+                    $"Materialize must free its own output scratch through '{callForm}' exactly once.");
             }
+
+            foreach (string callForm in new[]
+                     { "commands.Dispose()", "featOffsets.Dispose()", "featLengths.Dispose()" })
+            {
+                Assert.AreEqual(0, CountOccurrences(body, callForm),
+                    $"Materialize must NOT call '{callForm}' — since 2a these three are BORROWED constructor " +
+                    "inputs the caller owns and frees, not scratch Materialize mints itself.");
+            }
+        }
+
+        /// <summary>2a: the other end of the ownership move above. <c>MvtDecoder.DecodeLayer</c> flattens
+        /// every feature's geometry command words directly off the wire into these three
+        /// <c>Allocator.Persistent</c> native buffers and, since they are no longer handed off for the
+        /// materializer to free, must free each itself — exactly once, on EVERY exit path, including a
+        /// thrown <c>ArgumentException</c> from a mismatched kind column AND a thrown
+        /// <c>InvalidOperationException</c> from a malformed varint in either count/fill loop (both re-read
+        /// raw wire bytes, so both are reachable on a malformed tile). A missing free here is a leak no
+        /// EditMode assertion can observe (worker-thread native memory) — this is why the try must open
+        /// BEFORE the first allocation, not just wrap the materializer call: an allocation made outside the
+        /// try leaks if a LATER loop throws, which is exactly the regression this pins.</summary>
+        [Test]
+        public void DecodeLayerFreesTheMvtCommandBuffersItBuilds_ExactlyOnceOnEveryExitPath()
+        {
+            string path = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs", "Mvt", "MvtDecoder.cs");
+            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
+            string body = StripLineComments(
+                ExtractMethodBody(File.ReadAllText(path), DecodeLayerSignatureAnchor, path));
+
+            // Non-vacuity: a renamed method or a moved construct would make every count below trivially 0.
+            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty DecodeLayer body");
+            StringAssert.Contains("MvtGeometryMaterializer", body,
+                "precondition: the extracted body really does construct the materializer");
+
+            foreach (string callForm in new[]
+                     { "commands.Dispose()", "featOffsets.Dispose()", "featLengths.Dispose()" })
+            {
+                Assert.AreEqual(1, CountOccurrences(body, callForm),
+                    $"DecodeLayer must free the native buffer it built through '{callForm}' exactly once.");
+            }
+
+            string normalised = NormaliseWhitespace(body);
+
+            // Shape, not just count: the three frees must sit in a finally wrapping the materializer
+            // construct+Materialize call, EACH guarded by IsCreated — a throw from the FIRST allocation (or
+            // from the count loop, which runs between the first two allocations) leaves the others
+            // un-allocated, and disposing a default NativeArray would itself throw without the guard.
+            StringAssert.Contains(
+                "finally { if (commands.IsCreated) commands.Dispose(); " +
+                "if (featOffsets.IsCreated) featOffsets.Dispose(); " +
+                "if (featLengths.IsCreated) featLengths.Dispose(); }",
+                normalised,
+                "the three frees must sit in a finally around the materializer construct+Materialize call, " +
+                "each guarded by IsCreated.");
+
+            // The regression this whole tooth exists to catch: an allocation made BEFORE the try leaks if a
+            // later loop throws. Both the count loop and the fill loop re-read raw wire bytes via
+            // ReadVarint, which throws on a malformed tile — so both loops, and every allocation, must be
+            // INSIDE the try. Pinned structurally: `try {` must appear before the first native allocation.
+            int firstAllocIndex = normalised.IndexOf("new NativeArray<int>(featCount", StringComparison.Ordinal);
+            int tryIndex = normalised.IndexOf("try {", StringComparison.Ordinal);
+            Assert.GreaterOrEqual(firstAllocIndex, 0,
+                "precondition: expected to find DecodeLayer's featOffsets allocation " +
+                "('new NativeArray<int>(featCount')");
+            Assert.GreaterOrEqual(tryIndex, 0, "precondition: expected DecodeLayer to open a try block");
+            Assert.Less(tryIndex, firstAllocIndex,
+                "the try must open BEFORE the first native allocation (featOffsets) — an allocation made " +
+                "outside the try is unreachable to the finally if a later loop throws, which is a native leak " +
+                "no EditMode assertion besides this structural read can see.");
         }
 
         private static string MaterializerPath() => Path.Combine(

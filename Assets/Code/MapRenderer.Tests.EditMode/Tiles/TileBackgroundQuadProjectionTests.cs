@@ -85,10 +85,10 @@ namespace MapRenderer.Tests.Tiles
                 GeometryType = TileGeometryType.Polygon,
                 Geometry     = FullExtentRingCommandStream.Commands,
             };
-            TileGeometryBuffers legacy = new MvtGeometryMaterializer(
+            TileGeometryBuffers legacy = MvtGeometryMaterializerTestFactory.Materialize(
                 CoarseTile, extent,
                 new[] { legacyFeature.GeometryType },
-                new[] { legacyFeature.Geometry }).Materialize();
+                new[] { legacyFeature.Geometry });
 
             // The live arm: PRODUCTION's own corner data and kind column, through production's own path
             // producer — the same relationship the retired version of this test had to the command stream

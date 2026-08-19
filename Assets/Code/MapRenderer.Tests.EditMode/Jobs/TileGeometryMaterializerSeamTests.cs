@@ -252,9 +252,10 @@ namespace MapRenderer.Tests.Jobs
             return maxX;
         }
 
-        /// <summary>Re-encodes the slice's OWN tile-local integer rings as an MVT command stream, so the two
-        /// arms differ only in which producer put the identical numbers into the buffer.</summary>
-        private static MvtGeometryMaterializer MvtArm(TileSlice slice)
+        /// <summary>Re-encodes the slice's OWN tile-local integer rings as an MVT command stream and
+        /// materializes it, so the two arms differ only in which producer put the identical numbers into the
+        /// buffer.</summary>
+        private static TileGeometryBuffers MvtArm(TileSlice slice)
         {
             var kinds    = new List<TileGeometryType>(slice.Features.Count);
             var commands = new List<uint[]>(slice.Features.Count);
@@ -267,7 +268,7 @@ namespace MapRenderer.Tests.Jobs
                 commands.Add(MvtCommandStream.Feature(rings));
             }
 
-            return new MvtGeometryMaterializer(slice.Tile, slice.Extent, kinds, commands);
+            return MvtGeometryMaterializerTestFactory.Materialize(slice.Tile, slice.Extent, kinds, commands);
         }
 
         /// <summary>The GeoJSON arm, driven through the <b>production</b> decoder — parse → project → slice →
@@ -298,7 +299,7 @@ namespace MapRenderer.Tests.Jobs
         /// buffer, so this one frees it.</summary>
         private static TileMeshBuffers RunMvt(TileSlice slice, TileBufferClip clip)
         {
-            TileGeometryBuffers geometry = MvtArm(slice).Materialize();
+            TileGeometryBuffers geometry = MvtArm(slice);
             try     { return Run(geometry, clip); }
             finally { geometry.Dispose(); }
         }

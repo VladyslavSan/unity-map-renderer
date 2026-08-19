@@ -143,7 +143,7 @@ namespace MapRenderer.Tests.Tiles
                 }
                 // Deliberately NOT counted as a Features read: the buffer is built here, once, exactly as the
                 // decoder builds a real layer's — so any read the runner performs is the runner's own.
-                Geometry = new MvtGeometryMaterializer(tile, Extent, kinds, commands).Materialize();
+                Geometry = MvtGeometryMaterializerTestFactory.Materialize(tile, Extent, kinds, commands);
             }
 
             public string Name   { get; }

@@ -76,16 +76,21 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void PrecountRingsAndVertices_MultiPointMoveTo_Count11_ExactCounts()
         {
-            var features = new List<uint[]> { MultiPointMoveTo(11) };
+            uint[] geom = MultiPointMoveTo(11);
 
-            FillMeshPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
+            // 2a: PrecountRingsAndVertices takes the native-flat (commands, offsets, lengths) shape now —
+            // flatten this single feature the same way MvtGeometryMaterializerTestFactory (and, in
+            // production, MvtDecoder) does.
+            using var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { geom });
+            FillMeshPipeline.PrecountRingsAndVertices(
+                flat.Commands, flat.FeatureOffsets, flat.FeatureLengths, out int rings, out int vertices);
 
             Assert.AreEqual(11, rings,    "MoveTo count=11 starts 11 rings");
             Assert.AreEqual(11, vertices, "MoveTo count=11 emits 11 vertices");
 
             // Sanity: the old heuristic under-allocated rings for exactly this input.
-            int totalCommands = features[0].Length;                 // 1 header + 22 params = 23
-            int oldMaxRings   = totalCommands / 3 + features.Count + 2; // 23/3 + 1 + 2 = 10
+            int totalCommands = geom.Length;                        // 1 header + 22 params = 23
+            int oldMaxRings   = totalCommands / 3 + 1 + 2;           // 23/3 + 1 feature + 2 = 10
             Assert.Less(oldMaxRings, rings,
                 "regression guard: the replaced heuristic under-allocated for this stream");
         }
@@ -103,9 +108,9 @@ namespace MapRenderer.Tests.Meshing
                 (1u << 3) | 1u, 0u, 0u,            // MoveTo count=1
                 (3u << 3) | 2u, 0u, 0u, 0u, 0u, 0u, 0u, // LineTo count=3
             };
-            var features = new List<uint[]> { geom };
-
-            FillMeshPipeline.PrecountRingsAndVertices(features, out int rings, out int vertices);
+            using var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { geom });
+            FillMeshPipeline.PrecountRingsAndVertices(
+                flat.Commands, flat.FeatureOffsets, flat.FeatureLengths, out int rings, out int vertices);
 
             Assert.AreEqual(1, rings);
             Assert.AreEqual(4, vertices);
