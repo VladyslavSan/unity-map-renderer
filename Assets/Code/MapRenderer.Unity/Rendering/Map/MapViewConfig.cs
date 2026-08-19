@@ -56,6 +56,24 @@ namespace MapRenderer.Unity.Rendering.Map
                  "queued for release linger (still pumped) a few frames until drained. Default 4. 0 = uncapped.")]
         public int MaxReleasesPerTick = 4;
 
+        [Tooltip("Tile-load smoothness: CONCURRENCY cap on admitted, not-yet-Built (tile,source) records — " +
+                 "the whole request→consumed span (fetch/decode/kicked-or-in-flight-build/partial-consume). " +
+                 "Distinct from the per-tick RATE caps above (MaxMeshBuildsPerTick/MaxConsumesPerTick/" +
+                 "MaxVerticesPerTick/MaxReleasesPerTick bound work STARTED or FINISHED per frame; this bounds " +
+                 "the total ACTIVE set at once). Without this cap, a cover-wide cover/zoom transition fetches " +
+                 "every newly-entering tile in one burst. A tunable starting value — too low starves the " +
+                 "fill (center paints, edges lag); too high reapproaches the old unbounded burst. Default 12. " +
+                 "0 or negative = uncapped (reverts to today's unbounded admission).")]
+        public int MaxConcurrentTileLoads = 12;
+
+        [Tooltip("Tile-load smoothness: which render-space distance ranks not-yet-admitted tiles for " +
+                 "loading (both admission order AND the PumpPending build/consume order use this — a " +
+                 "corner tile must never win the per-tick kick/consume race just because of Dictionary " +
+                 "enumeration order). GroundDistanceToLookAt (default) prioritizes what's actually centred " +
+                 "on screen. CameraDistance prioritizes whatever the camera is nearest to — under tilt this " +
+                 "favours the near/bottom edge of the frustum instead of the visual centre.")]
+        public TilePriorityStrategy PriorityStrategy = TilePriorityStrategy.GroundDistanceToLookAt;
+
         [Tooltip("D1a: feature-property storage picked at decode time. Dense (default) keeps the wire's " +
                  "(keyIdx,valIdx) tag pairs instead of expanding each feature into a per-feature " +
                  "Dictionary<string,Value> — the GC-lean path, proven byte-identical to Dictionary by a " +

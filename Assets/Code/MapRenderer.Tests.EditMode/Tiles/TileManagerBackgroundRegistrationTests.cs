@@ -144,15 +144,19 @@ namespace MapRenderer.Tests.Tiles
             {
                 view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
 
-                // The FIRST LateUpdate both (a) recomputes the cover — creating N pending source-less
-                // records — and (b) runs PumpPending BEFORE that recompute in the SAME Tick call, so the
-                // just-created records cannot be kicked this same frame (§E step 4: Tick's cover-request loop
-                // only CREATES a pending record; PumpPending is the sole kicker).
+                // Tile-load smoothness: admission now runs EVERY Tick — including the SAME Tick as the
+                // cover recompute that creates these pending records — so PumpPending's kick for the FIRST
+                // (highest-priority) record can fire on tick 1 itself (time-to-first-paint improvement; the
+                // old "records cannot be kicked this same frame" behaviour was an artifact of PumpPending
+                // running BEFORE the request loop, not a load-bearing invariant (the intended behaviour is
+                // exactly the opposite: time-to-first-paint at the center drops). The per-Tick CAP itself is
+                // unchanged and still the property under test here.
                 view.LateUpdate();
                 int loaded = view.LoadedTileCount();
                 Assert.Greater(loaded, 1, "non-vacuous: must cover more than one tile.");
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
-                    "the cover-recompute tick creates pending records but kicks none this same frame.");
+                Assert.LessOrEqual(view.MeshBuildsKickedLastTick(), 1,
+                    "at most MaxMeshBuildsPerTick source-less builds may be kicked on the cover-recompute " +
+                    "tick, same as any other tick — the cap binds even on tick 1.");
 
                 int guard = 0;
                 while (!view.AllTilesSettled() && guard++ < 10000)

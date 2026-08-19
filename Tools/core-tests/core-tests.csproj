@@ -112,6 +112,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraPropertiesUpdate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraPoseMath.cs" />
+    <!-- Tile-load smoothness: priority math for center-first loading (Core, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TilePriority.cs" />
     <!-- S72: pure two-way slider↔camera reconcile (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraSliderBinding.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/IDataSource.cs" />
@@ -198,6 +200,9 @@
 
     <!-- S85: TileCoverStats + FrustumTileSelector aspect/Flat teeth (engine-free; shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileCoverStatsTests.cs" />
+
+    <!-- Tile-load smoothness T6: TilePriority monotonicity/determinism (engine-free; shared verbatim) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TilePriorityTests.cs" />
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraInteractionTests.cs" />

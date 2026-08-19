@@ -590,6 +590,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 MaxMeshBuildsPerTick = _config.MaxMeshBuildsPerTick,
                 MaxVerticesPerTick   = _config.MaxVerticesPerTick,
                 MaxReleasesPerTick   = _config.MaxReleasesPerTick,
+                MaxConcurrentTileLoads = _config.MaxConcurrentTileLoads,
+                PriorityStrategy       = _config.PriorityStrategy,
                 // Negative means "do not run the clip stage at all", which is not the same as a zero margin
                 // ("cut at the tile boundary"). The decode lives in the value type so the parity oracles can
                 // reach it — their reference arm must build under the SAME window as the arm it is compared

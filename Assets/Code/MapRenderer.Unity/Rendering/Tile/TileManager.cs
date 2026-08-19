@@ -130,6 +130,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// Default 4 (mirrors <see cref="MaxConsumesPerTick"/>).</summary>
             public int MaxReleasesPerTick;
 
+            /// <summary>Tile-load smoothness: CONCURRENCY cap on admitted, not-yet-<see cref="LoadedTile.Built"/>
+            /// (tile,source) records — orthogonal to the per-tick RATE caps above (see
+            /// <see cref="Map.MapViewConfig.MaxConcurrentTileLoads"/> for the full contract). 0 or negative
+            /// means uncapped.</summary>
+            public int MaxConcurrentTileLoads;
+
+            /// <summary>Tile-load smoothness: which render-space distance ranks not-yet-admitted tiles for
+            /// loading (admission order AND PumpPending's build/consume order — see
+            /// <see cref="Map.MapViewConfig.PriorityStrategy"/>).</summary>
+            public TilePriorityStrategy PriorityStrategy;
+
             /// <summary>How much of each tile's MVT buffer the FILL meshes keep before triangulation — one
             /// global knob (<c>MapViewConfig.FillTileBufferClip</c>), read live like the budgets above.
             ///
@@ -525,6 +536,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         // heading-change tick that churns an edge tile.
         private readonly HashSet<LoadedKey> _releaseQueued = new(64);
 
+        // Tile-load smoothness: the DESIRED list — (tile, source) keys that want to load but are not yet
+        // admitted (no _loaded record, no fetch, no build). Kept in priority order across Ticks (re-sorted
+        // every Tick — AdmitFromDesired). _desiredSet mirrors _releaseQueued's dedup role (O(1) membership
+        // test on the cover-loop's "already wanted?" check). Pre-sized like the release-queue pair above so
+        // steady-state cover churn never lazily allocates the HashSet's buckets.
+        private readonly List<LoadedKey>    _desired    = new(64);
+        private readonly HashSet<LoadedKey> _desiredSet = new(64);
+
+        // Reused scratch for TilePriority.SortByPriority-style insertion sorts over _desired / PumpPending's
+        // per-tick work list — grown (never shrunk) to fit the largest list sorted so far. Never reallocated
+        // in steady state (the cover size that drives both lists' capacity stabilizes quickly).
+        private double[] _priorityKeysScratch = new double[64];
+
         // S105/A5b: the symbol-agnostic seam through which the DECOUPLED symbol-label subsystem is driven —
         // TileManager holds only this interface (never a label/store/glyph type). The per-tile mesh KICK
         // (PumpPending) calls TryBeginBuild on the MAIN THREAD, isolated (a throwing factory must never fault
@@ -692,6 +716,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             // (a queued key referencing the old layer indexing / backend must not survive a restyle).
             _releaseQueue.Clear();
             _releaseQueued.Clear();
+            // Tile-load smoothness: same reasoning — a desired (tile, source-SLOT) key is only valid against
+            // THIS registry's _pipelines indexing; SetSources rebuilds _pipelines with fresh slots below, so
+            // a surviving entry would admit against a re-slotted or removed pipeline (wrong source, or an
+            // out-of-range _pipelines[slot] access). No re-request is lost: the next Tick's recompute rebuilds
+            // desired from the (unchanged) cover against the new registry.
+            _desired.Clear();
+            _desiredSet.Clear();
 
             // S82: purge the PreparedTileCache on EVERY SetSources call (first style AND every restyle) —
             // a restyle rebuilds RenderLayerSet's layer indexing, so a held entry's layerId may no longer
@@ -866,6 +897,20 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// existing assertion is preserved.</summary>
         internal int LoadedTileCount => _loaded.Count;
 
+        /// <summary>Tile-load smoothness: the ACTIVE set <see cref="AdmitFromDesired"/> bounds against
+        /// <see cref="TileSelectionConfig.MaxConcurrentTileLoads"/> — admitted, not-yet-<see cref="LoadedTile.Built"/>
+        /// (tile,source) records. Test observability for the concurrency-cap tooth (T2).</summary>
+        internal int ActiveLoadCount => CountActiveLoads();
+
+        /// <summary>Tile-load smoothness: number of (tile,source) keys wanting to load but not yet admitted
+        /// (no <see cref="_loaded"/> record). Test observability for the admission-gate teeth.</summary>
+        internal int DesiredCount => _desired.Count;
+
+        /// <summary>Tile-load smoothness: the TileId at the head of the not-yet-admitted desired list — the
+        /// next tile <see cref="AdmitFromDesired"/> will admit. <see cref="TileId"/>'s own default
+        /// (Z=X=Y=0) if the desired list is empty. Test observability for the re-prioritization tooth (T4).</summary>
+        internal TileId DesiredHeadTile => _desired.Count > 0 ? _desired[0].Tile : default;
+
         /// <summary>
         /// A-1 pull surface: fill <paramref name="into"/> with the current loaded <c>(source, tile)</c>
         /// membership — every record in <see cref="_loaded"/> mapped from its pipeline slot to its source-id.
@@ -882,6 +927,22 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 into.Add(new LoadedTileKey(_pipelines[kv.Key.Slot].SourceId, kv.Key.Tile));
             }
+        }
+
+        /// <summary>Tile-load smoothness test observability: every currently-ADMITTED tile's <see cref="TileId"/>
+        /// (may repeat across sources — mirrors <see cref="CollectLoadedTileKeys"/>, TileId-only).</summary>
+        internal void CollectLoadedTileIds(List<TileId> into)
+        {
+            into.Clear();
+            foreach (var kv in _loaded) into.Add(kv.Key.Tile);
+        }
+
+        /// <summary>Tile-load smoothness test observability: every DESIRED-but-not-yet-admitted tile's
+        /// <see cref="TileId"/>, in current priority order (index 0 == <see cref="DesiredHeadTile"/>).</summary>
+        internal void CollectDesiredTileIds(List<TileId> into)
+        {
+            into.Clear();
+            for (int i = 0; i < _desired.Count; i++) into.Add(_desired[i].Tile);
         }
 
         /// <summary>
@@ -1077,11 +1138,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             => _instanced != null ? _instanced.ComputeSceneBounds(tileSizeWorld) : default;
 
         /// <summary>
-        /// Test-only: true once every loaded tile has finished building (or is definitively absent).
-        /// S47/S51: returns false while any tile has a pending mesh build.
+        /// Test-only: true once every loaded tile has finished building (or is definitively absent) AND
+        /// nothing remains in the not-yet-admitted <see cref="_desired"/> list. S47/S51: returns false while
+        /// any tile has a pending mesh build. Tile-load smoothness: a concurrency-capped run leaves entries
+        /// in <see cref="_desired"/> that a <c>_loaded</c>-only check would silently miss (they have no
+        /// record at all until admitted) — without this, "settled" could read true while the desired list
+        /// still wants to load tiles the cap deferred.
         /// </summary>
         internal bool AllTilesSettled()
         {
+            if (_desired.Count > 0) return false;
+
             foreach (var kv in _loaded)
             {
                 if (!kv.Value.Built)
@@ -1158,167 +1225,111 @@ namespace MapRenderer.Unity.Rendering.Tile
             // S84: observe any completed mid-flight-released fetch tasks (no unobserved-exception flood).
             DrainPendingFetchDisposal();
 
-            // PumpPending always runs (above) so pending tiles keep progressing every frame. The EXPENSIVE
-            // cover recompute below (select descent + request/release diff) is gated on _coverDirty ALONE:
-            // a clean camera with tiles still pending must NOT re-run the descent — the cover set is
-            // unchanged, so the request/release loops would be pure no-ops that just re-tax the frame the
-            // consume is already loading (stall #6). PumpPending's pending count is no longer part of the gate.
-            PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick);
+            // Tile-load smoothness: the shared render-space priority context for THIS Tick — computed once
+            // (matches FrustumTileSelector's "look-at at the origin" frame exactly) and reused by BOTH the
+            // admission gate and PumpPending's paint-order sort below, so a corner tile can never win either
+            // race just because of Dictionary/list enumeration order.
+            var priorityCtx = TilePriorityContext.From(in cam, cfg.FramingViewportPx, cfg.Projection,
+                cfg.PriorityStrategy);
 
-            if (!_coverDirty)
+            // The EXPENSIVE cover recompute (select descent + desired-list merge) is gated on _coverDirty
+            // ALONE: a clean camera with tiles still pending must NOT re-run the descent — the cover set is
+            // unchanged, so the merge would be a pure no-op that just re-taxes the frame the consume is
+            // already loading (stall #6).
+            if (_coverDirty)
             {
-                // Clean tick: the cover is unchanged, so _coverSet is still current — drain a budgeted slice of
-                // the deferred-release backlog (re-validated against it, stall #2) and skip the expensive
-                // recompute (stall #6). The drain runs EVERY frame, so a zoom-out backlog keeps whittling down
-                // even while the camera sits still.
-                DrainReleaseQueue(cfg.MaxReleasesPerTick);
-                return;
-            }
+                CoverRecomputesLastTick = 1; // S95: the full recompute (descent + diff) runs this Tick
 
-            CoverRecomputesLastTick = 1; // S95: the full recompute (descent + diff) runs this Tick
+                // NOT `using var` — closed explicitly right after the merge below (correct CoverSelect
+                // attribution; admission/pump/drain are separate costs, measured by their own markers).
+                var sCoverSel = PmCoverSelect.Auto();
 
-            // NOT `using var` — closed explicitly before DrainReleaseQueue at the end so the release cost is
-            // not mis-attributed to the CoverSelect marker (the drain must run AFTER _coverSet is updated below
-            // so its pan-back re-validation sees this frame's cover).
-            var sCoverSel = PmCoverSelect.Auto();
-
-            // S71: select through the seam. Build the per-frame view context (camera + framing viewport +
-            // active projection); the request/release transition below is unchanged (instant swap).
-            ViewContext view = new ViewContext
-            {
-                Camera     = cam,
-                ViewportPx = cfg.FramingViewportPx,
-                Projection = cfg.Projection,
-            };
-            Selector.SelectVisibleTiles(in view, _cover);
-
-            _coverSet.Clear();
-            for (int i = 0; i < _cover.Count; i++)
-                _coverSet.Add(_cover[i]);
-
-            // Request tiles newly entering the cover — one record per (tile, source pipeline) whose resolved
-            // zoom range admits the tile (decision 10: one camera-driven cover, per-pipeline zoom clamp).
-            for (int i = 0; i < _cover.Count; i++)
-            {
-                TileId id = _cover[i];
-                for (int s = 0; s < _pipelines.Count; s++)
+                // S71: select through the seam. Build the per-frame view context (camera + framing viewport +
+                // active projection); the request/release transition below is unchanged (instant swap).
+                ViewContext view = new ViewContext
                 {
-                    var p = _pipelines[s];
-                    if (id.Z < p.MinZoom || id.Z > p.MaxZoom) continue; // source doesn't serve this zoom
-                    var key = new LoadedKey(id, p.Slot);
-                    if (!_loaded.ContainsKey(key))
+                    Camera     = cam,
+                    ViewportPx = cfg.FramingViewportPx,
+                    Projection = cfg.Projection,
+                };
+                Selector.SelectVisibleTiles(in view, _cover);
+
+                _coverSet.Clear();
+                for (int i = 0; i < _cover.Count; i++)
+                    _coverSet.Add(_cover[i]);
+
+                // Tile-load smoothness (E3/E5 merge, NOT rebuild): tiles newly entering the cover — one key
+                // per (tile, source pipeline) whose resolved zoom range admits the tile (decision 10: one
+                // camera-driven cover, per-pipeline zoom clamp) — join the DESIRED list instead of fetching
+                // immediately; admission is priority-ordered and concurrency-capped (AdmitFromDesired, below
+                // — every Tick, so entries added THIS Tick still admit THIS Tick).
+                for (int i = 0; i < _cover.Count; i++)
+                {
+                    TileId id = _cover[i];
+                    for (int s = 0; s < _pipelines.Count; s++)
                     {
-                        // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake
-                        // (threaded into WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) ==
-                        // MercatorBounds().min bit-for-bit, so placement is unchanged from the pre-S91 path.
-                        double3 origin = TileRenderOrigin.Project(id, cfg.Projection);
-
-                        // Epic A / A2 (design §B Q1, HIGH 2): a source-less (background) record only CREATES
-                        // a pending record here — it does NOT kick the mesh build inline. The kick moves to
-                        // PumpPending (below) so it rides the SAME MaxMeshBuildsPerTick cap as a real fetch's
-                        // kick, instead of one synchronous cover-wide burst on every cover/zoom transition.
-                        // From here the EXISTING PumpPending consume / ReleaseTile eviction / teardown handle
-                        // this record with no further new code — no cache probe (source-less records skip
-                        // PreparedTileCache transfer entirely, design §B Lifecycle).
-                        if (p.IsSourceless)
-                        {
-                            _loaded[key] = new LoadedTile
-                            {
-                                FetchCompleted   = true,
-                                Built            = false,
-                                TileOriginRender = origin,
-                            };
-                            continue;
-                        }
-
-                        // S82: probe the PreparedTileCache BEFORE kicking a fetch — a full-tile hit (every
-                        // dense layerId of this (tile, source) present in the cache) skips decode/build/
-                        // upload AND the fetch itself; the feature source's own byte-level cache is simply
-                        // never consulted on a hit. Disabled (_cacheEnabled == false) skips the probe
-                        // entirely — every tile is treated as a miss, reverting to pre-S82 always-fetch/
-                        // -prepare behaviour.
-                        bool allCached = false;
-                        if (_cacheEnabled)
-                        {
-                            ComputeDenseLayerIds(p.SourceId, _denseLayerIdsScratch);
-                            // Seed from dense-layer COUNT, not an unconditional true: a source with zero dense
-                            // mesh layers (a symbol-only source) has nothing in the prepared cache to hit, and
-                            // the loop below never runs to falsify it — so an unconditional `true` made
-                            // `allCached` vacuously true on every cover entry, sending the tile down
-                            // BuildTileFromCache forever (no fetch, no kick), so its labels never built with the
-                            // cache on (the default). A zero-dense source is never "all cached" — it must fetch.
-                            allCached = _denseLayerIdsScratch.Count > 0;
-                            for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
-                            {
-                                if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIdsScratch[d])))
-                                {
-                                    allCached = false;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (allCached)
-                        {
-                            _prepared.Hits++;
-                            _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
-                            // S105/A-1: a cache HIT re-shows the tile with NO fetch (so no bytes-ready). The
-                            // symbol subsystem now PULLS this tile back into its loaded set and reconciles —
-                            // restoring its kept-warm labels — instead of us pushing a restore callback here.
-                        }
-                        else
-                        {
-                            _prepared.Misses++;
-                            UniTask<SharedDisposable<IDecodedTile>> fetchReq;
-                            {
-                                using var sSchedReq = PmSchedulerReq.Auto();
-                                // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
-                                fetchReq = p.FeatureSource.GetTile(id).Preserve();
-                            }
-                            _loaded[key] = new LoadedTile
-                            {
-                                Request          = fetchReq,
-                                Built            = false,
-                                TileOriginRender = origin,
-                            };
-                        }
+                        var p = _pipelines[s];
+                        if (id.Z < p.MinZoom || id.Z > p.MaxZoom) continue; // source doesn't serve this zoom
+                        var key = new LoadedKey(id, p.Slot);
+                        if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
+                        if (_desiredSet.Add(key)) _desired.Add(key);
                     }
                 }
+
+                // E5(ii/iii): drop desired entries whose tile left the cover on this recompute — an
+                // already-admitted (_loaded) record is NEVER touched here (no cancel-in-flight; T3), and a
+                // still-desired entry still in cover is simply kept for the next AdmitFromDesired pass.
+                for (int i = _desired.Count - 1; i >= 0; i--)
+                {
+                    LoadedKey dk = _desired[i];
+                    if (!_coverSet.Contains(dk.Tile))
+                    {
+                        _desiredSet.Remove(dk);
+                        _desired.RemoveAt(i);
+                    }
+                }
+
+                // Stall #2: records whose tile left the cover are ENQUEUED for deferred release, not freed
+                // here. DrainReleaseQueue (below, every frame) frees up to MaxReleasesPerTick of them per
+                // Tick. _releaseQueued dedups a record already queued by an earlier recompute.
+                _toRelease.Clear();
+                foreach (var kv in _loaded)
+                {
+                    if (!_coverSet.Contains(kv.Key.Tile))
+                        _toRelease.Add(kv.Key);
+                }
+
+                for (int i = 0; i < _toRelease.Count; i++)
+                {
+                    LoadedKey key = _toRelease[i];
+                    if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
+                }
+
+                _coverKeyLon         = cam.LookAt.Longitude;
+                _coverKeyLat         = cam.LookAt.Latitude;
+                _coverKeyZoom        = cam.Zoom;
+                _coverKeyHeading     = cam.Heading.Degrees;
+                _coverKeyTilt        = cam.Tilt.Degrees;
+                _coverKeyViewportX   = cfg.FramingViewportPx.x;
+                _coverKeyViewportY   = cfg.FramingViewportPx.y;
+                _coverKeyInitialised = true;
+
+                _coverDirty = false;
+
+                sCoverSel.Dispose();
             }
 
-            // Stall #2: records whose tile left the cover are ENQUEUED for deferred release, not freed here.
-            // DrainReleaseQueue (above, every frame) frees up to MaxReleasesPerTick of them per Tick.
-            // _releaseQueued dedups a record already queued by an earlier recompute.
-            _toRelease.Clear();
-            foreach (var kv in _loaded)
-            {
-                if (!_coverSet.Contains(kv.Key.Tile))
-                    _toRelease.Add(kv.Key);
-            }
+            // Runs EVERY Tick — clean or dirty — so pending tiles keep progressing every frame and a
+            // concurrency cap reached on a dirty Tick keeps draining once the camera goes still (admission
+            // must not be gated on _coverDirty, unlike the recompute above: the desired list can still hold
+            // deferred entries long after the cover itself stopped changing).
+            AdmitFromDesired(in priorityCtx, cfg.MaxConcurrentTileLoads);
+            PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
-            for (int i = 0; i < _toRelease.Count; i++)
-            {
-                LoadedKey key = _toRelease[i];
-                if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
-            }
-
-            _coverKeyLon         = cam.LookAt.Longitude;
-            _coverKeyLat         = cam.LookAt.Latitude;
-            _coverKeyZoom        = cam.Zoom;
-            _coverKeyHeading     = cam.Heading.Degrees;
-            _coverKeyTilt        = cam.Tilt.Degrees;
-            _coverKeyViewportX   = cfg.FramingViewportPx.x;
-            _coverKeyViewportY   = cfg.FramingViewportPx.y;
-            _coverKeyInitialised = true;
-
-            _coverDirty = false;
-
-            sCoverSel.Dispose(); // close the CoverSelect marker BEFORE the release drain (correct attribution)
-
-            // Stall #2: drain a budgeted slice of the deferred-release backlog AFTER the recompute updated
-            // _coverSet — so the re-validation sees this frame's cover (a tile that just re-entered on a
-            // pan-back is skipped/kept, not destroyed-and-refetched) — and the departures this recompute just
-            // enqueued start freeing this same frame, bounded to MaxReleasesPerTick.
+            // Stall #2: drain a budgeted slice of the deferred-release backlog EVERY Tick (re-validated
+            // against the current _coverSet, so a tile that just re-entered on a pan-back is skipped/kept,
+            // not destroyed-and-refetched) — runs after admission/pump so this Tick's departures start
+            // freeing immediately, bounded to MaxReleasesPerTick.
             DrainReleaseQueue(cfg.MaxReleasesPerTick);
         }
 
@@ -1339,9 +1350,23 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// from the main thread therefore does not deadlock (no PlayerLoop dependency to dead-end on).
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
+        ///
+        /// <para>Tile-load smoothness: admits EVERY entry in <see cref="_desired"/> first (uncapped —
+        /// <see cref="AdmitFromDesired"/> with <see cref="int.MaxValue"/>), so a concurrency-capped run
+        /// still reaches the "fully-settled state is unchanged" invariant: this is the deterministic full
+        /// drain, so it ignores the concurrency cap exactly as it already ignores the per-tick rate caps.
+        /// Order doesn't matter when admitting everything, so no priority sort runs here. Uses the
+        /// <c>_projection</c> cached by the last real <see cref="Tick"/> — this method is only ever called
+        /// after at least one Tick has run (mirrors <see cref="KickMeshBuild"/>'s existing reliance on the
+        /// same cached field).</para>
         /// </summary>
         internal void DrainMeshBuilds(CameraProperties cam)
         {
+            // Only .Projection is read on this uncapped path (cap == int.MaxValue skips the priority sort
+            // entirely — order is moot when admitting everything) — the other fields are never touched.
+            var admitCtx = new TilePriorityContext(_projection, default, default, default, default);
+            AdmitFromDesired(in admitCtx, int.MaxValue);
+
             // Collect all unsettled records.
             var unsettled = new List<LoadedKey>(8);
             foreach (var kv in _loaded)
@@ -1502,13 +1527,22 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///
         /// Returns the count of tiles still pending (fetch or mesh build in-flight, or cap-deferred).
         ///
+        /// Tile-load smoothness: the work list built below is sorted by <paramref name="priorityCtx"/>
+        /// before the processing loop — this is the PAINT-order seam (as load-bearing as the admission
+        /// gate): without it, a corner tile can still win the ≤N-kicks/consumes-per-Tick race purely from
+        /// Dictionary enumeration order, even with priority-ordered admission (the "middle stays white"
+        /// symptom). H3: the sort reuses the shared <c>_toRelease</c> scratch FIELD — safe because it is
+        /// filled and fully consumed within this one single-threaded call (never live across calls), the same
+        /// discipline the "departing" vs. "unsettled" dual-use of this scratch list already relies on.
+        ///
         /// Greppability note: there is NO .Schedule().Complete() in this method.
         /// </summary>
         private int PumpPending(
             CameraProperties cam,
             int              maxConsumesPerTick,
             int              maxMeshBuildsPerTick,
-            int              maxVerticesPerTick)
+            int              maxVerticesPerTick,
+            in TilePriorityContext priorityCtx)
         {
             using var sFetchPoll = PmFetchPoll.Auto();
 
@@ -1532,6 +1566,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (!kv.Value.Built)
                     _toRelease.Add(kv.Key);
             }
+
+            // Tile-load smoothness (E4): nearest-center-first paint order — the same priority the admission
+            // gate uses, so the ≤buildCap kicks and ≤consumeCap/vertsCap consumes below reach the center
+            // before the edges.
+            SortByPriority(_toRelease, in priorityCtx);
 
             int pending          = 0;
             int buildsKicked     = 0;
@@ -2157,6 +2196,201 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             lt.Meshes          = null;
             lt.MaterialIndices = null;
+        }
+
+        /// <summary>
+        /// Tile-load smoothness: the number of <see cref="_loaded"/> records not yet
+        /// <see cref="LoadedTile.Built"/> — the ACTIVE set <see cref="AdmitFromDesired"/> bounds against
+        /// <see cref="TileSelectionConfig.MaxConcurrentTileLoads"/>. Recomputed fresh each call rather than
+        /// tracked incrementally (H1: a stale counter field would need write-back on every mutation site of
+        /// <c>_loaded</c> — a struct-copy hazard this avoids by construction). Cheap: bounded by the cover
+        /// size (dozens of records), same cost class as the existing <c>_toRelease</c>/telemetry loops.
+        /// </summary>
+        private int CountActiveLoads()
+        {
+            int n = 0;
+            foreach (var kv in _loaded)
+                if (!kv.Value.Built) n++;
+            return n;
+        }
+
+        /// <summary>
+        /// Admits one DESIRED (tile, source) key: exactly today's pre-desired-list per-key body — probe the
+        /// PreparedTileCache (a hit builds the tile synchronously, <see cref="LoadedTile.Built"/> true, so it
+        /// never occupies an active slot), else kick a fetch and create the pending <see cref="_loaded"/>
+        /// record. Shared by the per-Tick admission gate (<see cref="AdmitFromDesired"/>, capped) and the
+        /// deterministic drain (<see cref="DrainMeshBuilds"/>, uncapped — admits every desired entry so a
+        /// capped run still settles to the full cover, matching the "fully-settled state is unchanged"
+        /// invariant).
+        /// </summary>
+        private void AdmitTile(TileId id, int slot, IProjection projection)
+        {
+            var p = _pipelines[slot];
+            var key = new LoadedKey(id, slot);
+
+            // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake (threaded into
+            // WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) == MercatorBounds().min
+            // bit-for-bit, so placement is unchanged from the pre-desired-list path.
+            double3 origin = TileRenderOrigin.Project(id, projection);
+
+            // Epic A / A2 (design §B Q1, HIGH 2): a source-less (background) record only CREATES a pending
+            // record here — it does NOT kick the mesh build inline. The kick moves to PumpPending so it
+            // rides the SAME MaxMeshBuildsPerTick cap as a real fetch's kick, instead of one synchronous
+            // cover-wide burst. No cache probe (source-less records skip PreparedTileCache transfer
+            // entirely, design §B Lifecycle).
+            if (p.IsSourceless)
+            {
+                _loaded[key] = new LoadedTile
+                {
+                    FetchCompleted   = true,
+                    Built            = false,
+                    TileOriginRender = origin,
+                };
+                return;
+            }
+
+            // S82: probe the PreparedTileCache BEFORE kicking a fetch — a full-tile hit (every dense
+            // layerId of this (tile, source) present in the cache) skips decode/build/upload AND the fetch
+            // itself; the feature source's own byte-level cache is simply never consulted on a hit.
+            // Disabled (_cacheEnabled == false) skips the probe entirely — every tile is treated as a miss,
+            // reverting to pre-S82 always-fetch/-prepare behaviour.
+            bool allCached = false;
+            if (_cacheEnabled)
+            {
+                ComputeDenseLayerIds(p.SourceId, _denseLayerIdsScratch);
+                // Seed from dense-layer COUNT, not an unconditional true: a source with zero dense mesh
+                // layers (a symbol-only source) has nothing in the prepared cache to hit, and the loop below
+                // never runs to falsify it — so an unconditional `true` made `allCached` vacuously true on
+                // every cover entry, sending the tile down BuildTileFromCache forever (no fetch, no kick),
+                // so its labels never built with the cache on (the default). A zero-dense source is never
+                // "all cached" — it must fetch.
+                allCached = _denseLayerIdsScratch.Count > 0;
+                for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
+                {
+                    if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIdsScratch[d])))
+                    {
+                        allCached = false;
+                        break;
+                    }
+                }
+            }
+
+            if (allCached)
+            {
+                _prepared.Hits++;
+                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
+                // S105/A-1: a cache HIT re-shows the tile with NO fetch (so no bytes-ready). The symbol
+                // subsystem now PULLS this tile back into its loaded set and reconciles — restoring its
+                // kept-warm labels — instead of us pushing a restore callback here.
+            }
+            else
+            {
+                _prepared.Misses++;
+                UniTask<SharedDisposable<IDecodedTile>> fetchReq;
+                {
+                    using var sSchedReq = PmSchedulerReq.Auto();
+                    // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
+                    fetchReq = p.FeatureSource.GetTile(id).Preserve();
+                }
+                _loaded[key] = new LoadedTile
+                {
+                    Request          = fetchReq,
+                    Built            = false,
+                    TileOriginRender = origin,
+                };
+            }
+        }
+
+        /// <summary>
+        /// Tile-load smoothness: admits from the head of <see cref="_desired"/> — priority-sorted first —
+        /// while the ACTIVE set (<see cref="CountActiveLoads"/>) stays under <paramref name="cap"/>. Runs
+        /// EVERY Tick (not only on a cover recompute): admission must keep draining the desired list as
+        /// slots free from completed builds even while the camera sits still, or a cap reached on a dirty
+        /// Tick would stall forever once <c>_coverDirty</c> goes false. <paramref name="cap"/> ≤ 0 or
+        /// <see cref="int.MaxValue"/> admits everything unconditionally (uncapped / deterministic drain) and
+        /// skips the sort — order is moot when nothing is deferred.
+        /// </summary>
+        private void AdmitFromDesired(in TilePriorityContext priorityCtx, int cap)
+        {
+            if (_desired.Count == 0) return;
+            if (cap <= 0) cap = int.MaxValue; // convention: 0/negative = uncapped, matching the rate caps
+
+            // Sort BEFORE checking capacity — even while the active set is already saturated, the desired
+            // list's HEAD must reflect the LATEST priority: a recompute that re-centers the view while
+            // capped must promote the new-center tile to the front immediately, not only once a slot frees
+            // (T4). Skipped only when uncapped (order is moot when everything admits regardless).
+            if (cap < int.MaxValue) SortDesiredByPriority(priorityCtx);
+
+            int activeCount = CountActiveLoads();
+            int admitted    = 0;
+            while (admitted < _desired.Count && activeCount < cap)
+            {
+                LoadedKey key = _desired[admitted];
+                AdmitTile(key.Tile, key.Slot, priorityCtx.Projection);
+                _desiredSet.Remove(key);
+                // A PreparedTileCache hit settles synchronously (Built=true) and never occupies a slot —
+                // recommendation §3.7: a hit does not consume an X slot (it does no fetch/build).
+                if (!_loaded[key].Built) activeCount++;
+                admitted++;
+            }
+
+            if (admitted > 0) _desired.RemoveRange(0, admitted);
+        }
+
+        /// <summary>
+        /// Sorts <see cref="_desired"/> ascending by <see cref="TilePriority.Key"/> — stable insertion sort
+        /// over <see cref="LoadedKey"/> (the Core <see cref="TilePriority.SortByPriority"/> overload operates
+        /// on bare <see cref="TileId"/>; <c>LoadedKey</c> is private to this Unity-side type, so the same
+        /// small algorithm is mirrored here rather than exposing it across the assembly boundary), TileId-
+        /// then-Slot tiebreak on an exact key tie. Shared by <see cref="AdmitFromDesired"/> (admission order)
+        /// and <see cref="PumpPending"/> (paint order) — both sort with the SAME priority so a corner tile
+        /// can never win either race just because of enumeration order.
+        /// </summary>
+        private void SortByPriority(List<LoadedKey> list, in TilePriorityContext ctx)
+        {
+            int n = list.Count;
+            if (_priorityKeysScratch.Length < n)
+                _priorityKeysScratch = new double[math.max(n, _priorityKeysScratch.Length * 2)];
+
+            double[] keys = _priorityKeysScratch;
+            for (int i = 0; i < n; i++)
+            {
+                TileId tile = list[i].Tile;
+                keys[i] = TilePriority.Key(in tile, in ctx);
+            }
+
+            for (int i = 1; i < n; i++)
+            {
+                double    k    = keys[i];
+                LoadedKey item = list[i];
+                int       j    = i - 1;
+                while (j >= 0 && IsAfter(keys[j], list[j], k, item))
+                {
+                    keys[j + 1] = keys[j];
+                    list[j + 1] = list[j];
+                    j--;
+                }
+
+                keys[j + 1] = k;
+                list[j + 1] = item;
+            }
+        }
+
+        /// <summary>Sorts <see cref="_desired"/> in place by the shared priority (helper so call sites read
+        /// as intent, not mechanism).</summary>
+        private void SortDesiredByPriority(in TilePriorityContext ctx) => SortByPriority(_desired, in ctx);
+
+        /// <summary>True iff (keyA, a) sorts strictly AFTER (keyB, b) — smaller priority key first,
+        /// TileId (Z, X, Y) then Slot tiebreak on an exact key match (mirrors
+        /// <see cref="TilePriority.SortByPriority"/>'s tiebreak, extended with the per-source Slot since a
+        /// tile drawn from N sources can appear up to N times).</summary>
+        private static bool IsAfter(double keyA, LoadedKey a, double keyB, LoadedKey b)
+        {
+            if (keyA != keyB) return keyA > keyB;
+            if (a.Tile.Z != b.Tile.Z) return a.Tile.Z > b.Tile.Z;
+            if (a.Tile.X != b.Tile.X) return a.Tile.X > b.Tile.X;
+            if (a.Tile.Y != b.Tile.Y) return a.Tile.Y > b.Tile.Y;
+            return a.Slot > b.Slot;
         }
 
         /// <summary>

@@ -119,6 +119,32 @@ namespace MapRenderer.Tests
         /// <summary>Number of currently loaded (or loading) tiles.</summary>
         public static int LoadedTileCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.LoadedTileCount : 0;
 
+        /// <summary>Tile-load smoothness: the ACTIVE (admitted, not-yet-Built) set size — what
+        /// <c>MaxConcurrentTileLoads</c> bounds.</summary>
+        public static int ActiveLoadCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ActiveLoadCount : 0;
+
+        /// <summary>Tile-load smoothness: number of (tile,source) keys wanting to load but not yet admitted.</summary>
+        public static int DesiredCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredCount : 0;
+
+        /// <summary>Tile-load smoothness: the tile at the head of the not-yet-admitted desired list (next to
+        /// admit) — default <see cref="TileId"/> if the desired list is empty.</summary>
+        public static TileId DesiredHeadTile(this MapViewComponent view) => view.TileManager != null ? view.TileManager.DesiredHeadTile : default;
+
+        /// <summary>Tile-load smoothness: every currently-ADMITTED tile's <see cref="TileId"/>.</summary>
+        public static void CollectLoadedTileIds(this MapViewComponent view, List<TileId> into)
+        {
+            if (view.TileManager != null) view.TileManager.CollectLoadedTileIds(into);
+            else into.Clear();
+        }
+
+        /// <summary>Tile-load smoothness: every DESIRED-but-not-yet-admitted tile's <see cref="TileId"/>, in
+        /// current priority order.</summary>
+        public static void CollectDesiredTileIds(this MapViewComponent view, List<TileId> into)
+        {
+            if (view.TileManager != null) view.TileManager.CollectDesiredTileIds(into);
+            else into.Clear();
+        }
+
         /// <summary>Number of source pipelines that actually own a feature source (the source-less
         /// background pipeline excluded) — "how many sources did the style wire?".</summary>
         public static int WiredFeatureSourceCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.WiredFeatureSourceCount : 0;
