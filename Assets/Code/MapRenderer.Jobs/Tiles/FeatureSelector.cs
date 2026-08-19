@@ -93,19 +93,67 @@ namespace MapRenderer.Jobs.Tiles
         /// </summary>
         public static void SelectFeatures(
             StyleLayer layer, ITileLayer tileLayer, double zoom, List<SelectedTileFeature> into)
+            => SelectFeatures(layer, tileLayer?.Features, zoom, into);
+
+        /// <summary>The <see cref="List{T}"/> selection over an ALREADY-FETCHED feature list (the caller read
+        /// <see cref="ITileLayer.Features"/> once). Clears <paramref name="into"/> first; a null
+        /// <paramref name="features"/> leaves it empty. See the <see cref="ITileLayer"/> overload for the
+        /// selection contract.</summary>
+        public static void SelectFeatures(
+            StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into)
         {
             into.Clear();
-            if (tileLayer == null) return;
+            if (features == null) return;
 
             var filter = FilterFor(layer);
 
-            IReadOnlyList<IFeature> features = tileLayer.Features;
             for (int i = 0; i < features.Count; i++)
             {
                 IFeature feature = features[i];
                 if (filter.Matches(feature, zoom))
                     into.Add(new SelectedTileFeature { Feature = feature, Ordinal = i });
             }
+        }
+
+        /// <summary>
+        /// The scratch-buffer form of <see cref="SelectFeatures(StyleLayer, ITileLayer, double, List{SelectedTileFeature})"/>:
+        /// appends matches into <paramref name="into"/> starting at index 0 and returns the count written,
+        /// instead of growing a <see cref="List{T}"/> by doubling. Rung-1 "allocate nothing" for the mesh-build
+        /// worker pass — the caller passes a grow-only array sized to at least <c>tileLayer.Features.Count</c>
+        /// (the selection can never exceed the source layer's own feature count), e.g.
+        /// <c>TileBuildScratch.SelectionBuffer</c> in <c>MapRenderer.Unity</c>.
+        ///
+        /// <para>Unlike the <see cref="List{T}"/> overload, this does <b>not</b> clear <paramref name="into"/>
+        /// first — the caller is expected to read only the returned <c>[0, count)</c> prefix, exactly the
+        /// grow-only-buffer contract a pooled scratch array already carries.</para>
+        /// </summary>
+        public static int SelectFeatures(
+            StyleLayer layer, ITileLayer tileLayer, double zoom, SelectedTileFeature[] into)
+            => SelectFeatures(layer, tileLayer?.Features, zoom, into);
+
+        /// <summary>
+        /// The scratch-buffer selection over an ALREADY-FETCHED feature list — the caller reads
+        /// <c>ITileLayer.Features</c> ONCE and passes it here, so a worker pass that also sizes its scratch
+        /// buffer from <c>features.Count</c> touches the <c>Features</c> accessor exactly once per layer, not
+        /// twice (pinned by <c>RunWorkerPass_ObtainsGeometryWithoutReReadingTheFeatureList</c>). Appends
+        /// matches into <paramref name="into"/> at <c>[0, count)</c> and returns the count; does not clear
+        /// <paramref name="into"/> (grow-only-buffer contract).
+        /// </summary>
+        public static int SelectFeatures(
+            StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into)
+        {
+            if (features == null) return 0;
+
+            var filter = FilterFor(layer);
+
+            int count = 0;
+            for (int i = 0; i < features.Count; i++)
+            {
+                IFeature feature = features[i];
+                if (filter.Matches(feature, zoom))
+                    into[count++] = new SelectedTileFeature { Feature = feature, Ordinal = i };
+            }
+            return count;
         }
 
         // ---- compiled-filter memo ---------------------------------------------------------------------

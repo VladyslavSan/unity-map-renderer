@@ -250,7 +250,9 @@ namespace MapRenderer.Tests.Filters
             }
 
             // Null-tolerance, matching the IDecodedTile overload: an unresolvable layer selects nothing.
-            FeatureSelector.SelectFeatures(layer, null, 0.0, selected);
+            // Cast disambiguates the null between the ITileLayer overload and its IReadOnlyList<IFeature>
+            // sibling (added for the read-once worker path) — this pins the ITileLayer one specifically.
+            FeatureSelector.SelectFeatures(layer, (ITileLayer)null, 0.0, selected);
             Assert.AreEqual(0, selected.Count, "a null tile layer must leave the output empty");
         }
 

@@ -96,6 +96,13 @@ namespace MapRenderer.Tests.Meshing
                 "SortKeyComparer is a stored instance re-fielded per call — NOT a fresh delegate/closure the way Array.Sort's lambda overload allocates.");
             Assert.AreSame(scratch.OrderedFeaturesView(4), scratch.OrderedFeaturesView(4),
                 "OrderedFeaturesView is a stored IReadOnlyList instance, not a fresh wrapper per call.");
+
+            Assert.AreSame(scratch.SelectionBuffer(8), scratch.SelectionBuffer(8), "SelectionBuffer reuses its backing array.");
+            Assert.AreSame(scratch.SelectionView(4), scratch.SelectionView(4),
+                "SelectionView is a stored IReadOnlyList instance, not a fresh wrapper per call.");
+            Assert.AreNotSame(scratch.OrderedFeaturesBuffer(8), scratch.SelectionBuffer(8),
+                "SelectionBuffer must be a DISTINCT array from OrderedFeaturesBuffer — OrderBySortKey reads a " +
+                "layer's selection while writing the reordered result, so aliasing the two would corrupt the sort.");
         }
 
         /// <summary>

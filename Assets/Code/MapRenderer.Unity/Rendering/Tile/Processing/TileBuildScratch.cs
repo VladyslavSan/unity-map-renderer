@@ -6,9 +6,11 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Per-build reusable scratch buffers for the fill mesh-build worker path (<see cref="Meshing.StyledFillTileBuilder"/>'s
-    /// <c>OrderBySortKey</c> and <c>BuildRingVisitOrder</c>) — rented from <see cref="TileBuildScratchPool"/> for
-    /// the whole duration of ONE build (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>/
+    /// Per-build reusable scratch buffers for the mesh-build worker path — the per-layer feature selection
+    /// (<see cref="TileMeshLayerProcessor.ProcessOnWorker"/>) plus the fill sort/visit-order machinery
+    /// (<see cref="Meshing.StyledFillTileBuilder"/>'s <c>OrderBySortKey</c> and <c>BuildRingVisitOrder</c>) —
+    /// rented from <see cref="TileBuildScratchPool"/> for the whole duration of ONE build
+    /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>/
     /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>) and returned when it completes. A build
     /// reuses this one instance across every layer/feature it processes — sequential within a build — and never
     /// shares it with another build running concurrently; see the pool for the rent/return contract that makes
@@ -25,19 +27,24 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     public sealed class TileBuildScratch
     {
-        private float[]                _sortKeys        = Array.Empty<float>();
-        private int[]                  _declaredOrder   = Array.Empty<int>();
-        private SelectedTileFeature[]  _orderedFeatures = Array.Empty<SelectedTileFeature>();
-        private int[]                  _rankStart       = Array.Empty<int>();
-        private int[]                  _rankCursor      = Array.Empty<int>();
+        private float[]                _sortKeys         = Array.Empty<float>();
+        private int[]                  _declaredOrder    = Array.Empty<int>();
+        private SelectedTileFeature[]  _orderedFeatures  = Array.Empty<SelectedTileFeature>();
+        private int[]                  _rankStart        = Array.Empty<int>();
+        private int[]                  _rankCursor       = Array.Empty<int>();
+
+        // DISTINCT array from _orderedFeatures — see SelectionBuffer's doc for why aliasing the two would
+        // corrupt OrderBySortKey (it reads a layer's selection while writing the reordered result).
+        private SelectedTileFeature[]  _selectedFeatures = Array.Empty<SelectedTileFeature>();
 
         // Reused CLASS instances (not per-call closures/wrappers): the whole point of pooling is that a
-        // steady-state build touches no managed heap, so the comparer and the view below are allocated once
+        // steady-state build touches no managed heap, so the comparer and the views below are allocated once
         // (first Rent to grow past zero capacity) and re-fielded on every call, never re-`new`'d. Named
         // distinctly from the accessor methods below (RankSortComparer/RankSortView vs SortKeyComparer/
         // OrderedFeaturesView) — CS0102 forbids a member and a nested type sharing one name.
-        private readonly RankSortComparer _sortKeyComparer     = new();
-        private readonly RankSortView     _orderedFeaturesView = new();
+        private readonly RankSortComparer _sortKeyComparer      = new();
+        private readonly RankSortView     _orderedFeaturesView  = new();
+        private readonly RankSortView     _selectedFeaturesView = new();
 
         /// <summary>The per-feature sort-key scratch for <c>OrderBySortKey</c>, sized to at least <paramref name="count"/>.</summary>
         internal float[] SortKeys(int count) => Ensure(ref _sortKeys, count);
@@ -69,6 +76,29 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             _orderedFeaturesView.Array = buffer;
             _orderedFeaturesView.Count = count;
             return _orderedFeaturesView;
+        }
+
+        /// <summary>The WRITABLE per-layer feature-selection scratch <c>FeatureSelector.SelectFeatures</c> fills,
+        /// sized to at least <paramref name="count"/> — the caller passes the source layer's own feature count,
+        /// an upper bound the selection (a filtered subset) can never exceed. Pair with <see cref="SelectionView"/>
+        /// to hand the result back — never return this raw array to a caller.
+        ///
+        /// <para><b>Distinct array from <see cref="OrderedFeaturesBuffer"/>, deliberately.</b>
+        /// <c>StyledFillTileBuilder.OrderBySortKey</c> reads a layer's selection (via <see cref="SelectionView"/>)
+        /// element-by-element WHILE writing the reordered result into <see cref="OrderedFeaturesBuffer"/>; sharing
+        /// one backing array between the two would have that write clobber a selection entry not yet read.</para>
+        /// </summary>
+        internal SelectedTileFeature[] SelectionBuffer(int count) => Ensure(ref _selectedFeatures, count);
+
+        /// <summary>The feature-selection result, exposed as a fixed-length <paramref name="count"/> view over
+        /// the (possibly longer, grow-only) buffer <see cref="SelectionBuffer"/> filled — never the raw array
+        /// itself, whose <c>Length</c> would over-report once the buffer has grown past this call's count.</summary>
+        internal IReadOnlyList<SelectedTileFeature> SelectionView(int count)
+        {
+            SelectedTileFeature[] buffer = Ensure(ref _selectedFeatures, count); // no-op: already sized by SelectionBuffer
+            _selectedFeaturesView.Array = buffer;
+            _selectedFeaturesView.Count = count;
+            return _selectedFeaturesView;
         }
 
         /// <summary>The counting-sort bucket-start array for <c>BuildRingVisitOrder</c>, sized <paramref name="count"/>

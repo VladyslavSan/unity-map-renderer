@@ -52,8 +52,28 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
             if (tileLayer != null)
             {
-                var selected = new List<SelectedTileFeature>();
-                FeatureSelector.SelectFeatures(_layer.StyleLayer, tileLayer, context.Zoom, selected);
+                // perf/gc-elimination: a pooled worker pass (RunWorkerPass/RunSourcelessWorkerPass) hands a
+                // non-null Scratch, so selection is appended into its grow-only SelectedTileFeature[] instead
+                // of a fresh `new List<>()` per (tile × style-layer) — this was the single biggest managed
+                // allocator on the mesh-build path (~318 KB/tile-build). `null` (tests, non-pooled callers)
+                // keeps the original allocating behaviour verbatim, mirroring StyledFillTileBuilder.OrderBySortKey.
+                // Read Features ONCE per layer (the accessor may be a lease/decorator, and re-reading it is
+                // exactly the "re-derive the buffer" shape RunWorkerPass_ObtainsGeometryWithoutReReadingThe-
+                // FeatureList forbids): the same list sizes the scratch buffer and drives the selection loop.
+                var features = tileLayer.Features; // IReadOnlyList<IFeature> — read the accessor ONCE
+                IReadOnlyList<SelectedTileFeature> selected;
+                if (context.Scratch != null)
+                {
+                    SelectedTileFeature[] buffer = context.Scratch.SelectionBuffer(features.Count);
+                    int selectedCount = FeatureSelector.SelectFeatures(_layer.StyleLayer, features, context.Zoom, buffer);
+                    selected = context.Scratch.SelectionView(selectedCount);
+                }
+                else
+                {
+                    var list = new List<SelectedTileFeature>();
+                    FeatureSelector.SelectFeatures(_layer.StyleLayer, features, context.Zoom, list);
+                    selected = list;
+                }
 
                 // Preserves the pre-B7 "no selected features ⇒ do nothing" gate. Since IR C1 P3 it no longer
                 // avoids any materialization (the decode already did that, once, for every layer) — it stays
