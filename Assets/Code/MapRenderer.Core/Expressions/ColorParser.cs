@@ -64,20 +64,22 @@ namespace MapRenderer.Core.Expressions
         private static bool TryParseHex(string s, out Color color)
         {
             color = default;
-            string h = s.Substring(1);
+            // Read the hex digits in place, indexing past the leading '#' (offset +1) — the old
+            // s.Substring(1) allocated a throwaway string on every colour parse.
+            int n = s.Length - 1;
             int r, g, b, a = 255;
             try
             {
-                if (h.Length == 3 || h.Length == 4)
+                if (n == 3 || n == 4)
                 {
-                    r = HexNibble(h[0]); g = HexNibble(h[1]); b = HexNibble(h[2]);
+                    r = HexNibble(s[1]); g = HexNibble(s[2]); b = HexNibble(s[3]);
                     r = r * 16 + r; g = g * 16 + g; b = b * 16 + b;
-                    if (h.Length == 4) { a = HexNibble(h[3]); a = a * 16 + a; }
+                    if (n == 4) { a = HexNibble(s[4]); a = a * 16 + a; }
                 }
-                else if (h.Length == 6 || h.Length == 8)
+                else if (n == 6 || n == 8)
                 {
-                    r = HexByte(h, 0); g = HexByte(h, 2); b = HexByte(h, 4);
-                    if (h.Length == 8) a = HexByte(h, 6);
+                    r = HexByte(s, 1); g = HexByte(s, 3); b = HexByte(s, 5);
+                    if (n == 8) a = HexByte(s, 7);
                 }
                 else
                 {
