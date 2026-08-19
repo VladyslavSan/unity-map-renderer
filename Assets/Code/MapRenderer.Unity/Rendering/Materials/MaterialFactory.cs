@@ -4,6 +4,7 @@ using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Fill = MapRenderer.Core.Style.Fill;
 using Background = MapRenderer.Core.Style.Background;
+using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Unity.Rendering.Materials
@@ -94,6 +95,91 @@ namespace MapRenderer.Unity.Rendering.Materials
             // back to fill-color, whose default is opaque black.
             mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, paint.PatternName != null ? 1f : 0f);
             mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
+        }
+
+        /// <summary>
+        /// S23 I3 — creates a per-style-layer fill-extrusion Material by cloning
+        /// <paramref name="settings"/>'s <see cref="MapMaterialSet.FillExtrusionMaterial"/> base (a dedicated
+        /// <c>Map/FillExtrusion</c> material, replacing I1's reuse of the flat fill base). Applies
+        /// <see cref="FillExtrusionTweaker.ApplyElevatedContract"/> — the ELEVATED-3D contract (opaque,
+        /// depth-writing), NOT the flat painter contract the FILL/LINE materials use: buildings are the first
+        /// geometry that must occupy the depth buffer to occlude one another and their own walls.
+        ///
+        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — mirrors
+        /// <see cref="CreateFillMaterial"/> / the <c>SymbolIconWorld</c> optional-with-warn precedent.</para>
+        /// </summary>
+        public static Material CreateFillExtrusionMaterial(MapMaterialSet settings)
+        {
+            Material baseMat = settings != null ? settings.FillExtrusionMaterial : null;
+            if (baseMat == null)
+            {
+                Debug.LogWarning("[MaterialFactory] No fill-extrusion base material configured " +
+                                 "(MapMaterialSet.FillExtrusionMaterial is null) — fill-extrusion layers will " +
+                                 "not render. Assign a Material Set on the map component.");
+                return null;
+            }
+
+            var mat = baseMat.CloneWithParent();
+            mat.name = "MapView_FillExtrusion";
+            FillExtrusionTweaker.ApplyElevatedContract(mat);
+            return mat;
+        }
+
+        /// <summary>
+        /// S23 I2b — binds constant/zoom fill-extrusion paint properties from <paramref name="paint"/> to the
+        /// dedicated <c>Map/FillExtrusion</c> material (I1 bound onto the reused FILL material; I2b binds
+        /// onto <see cref="CreateFillExtrusionMaterial"/>'s own material and its own shader properties).
+        ///
+        /// <para>Height/Base: Constant/Zoom → the <c>_ExtrusionHeight</c>/<c>_ExtrusionBase</c> uniforms the
+        /// VS lerps by (S11 path); Feature/Composite → skipped here AND explicitly zeroed (defensive
+        /// identity, same reasoning as the pattern reset below) — <see cref="Meshing.StyledFillExtrusionTileBuilder"/>
+        /// bakes the evaluated value per-vertex instead (S12 path), and the VS composes uniform+bake
+        /// additively, so a stray non-zero uniform under the baked path would double the elevation.</para>
+        ///
+        /// <para><c>fill-extrusion-color</c>'s alpha channel is NOT special-cased to 1 — matches
+        /// <see cref="BindFillPaintToApplier"/>'s reasoning (opacity multiplies the color's own alpha rather
+        /// than overriding it).</para>
+        /// </summary>
+        /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
+        /// <param name="applier">The layer's per-frame zoom→uniform applier; constant bindings apply
+        /// immediately, Zoom-kind bindings queue for the next <see cref="Style.ZoomStyleApplier.ApplyZoom"/>.</param>
+        /// <param name="mat">The layer's cloned material instance (from <see cref="CreateFillExtrusionMaterial"/>)
+        /// to bind onto and defensively reset.</param>
+        public static void BindFillExtrusionPaintToApplier(FillExtrusion.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
+        {
+            if (!paint.Color.DependsOnFeature)
+                applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
+
+            if (!paint.Opacity.DependsOnFeature)
+                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+
+            // fill-extrusion-height / fill-extrusion-base: Constant/Zoom rides the uniform; data-driven is
+            // baked per-vertex by the builder instead, and the uniform is pinned to 0 so the VS's additive
+            // `lerp(_ExtrusionBase + bakedBase, _ExtrusionHeight + bakedHeight, t)` does not double-count.
+            if (!paint.Height.DependsOnFeature)
+                applier.BindFloat(paint.Height, ShaderProperties.FillExtrusion.PropertyId.ExtrusionHeight);
+            else
+                mat.SetFloat(ShaderProperties.FillExtrusion.PropertyId.ExtrusionHeight, 0f);
+
+            if (!paint.Base.DependsOnFeature)
+                applier.BindFloat(paint.Base, ShaderProperties.FillExtrusion.PropertyId.ExtrusionBase);
+            else
+                mat.SetFloat(ShaderProperties.FillExtrusion.PropertyId.ExtrusionBase, 0f);
+
+            // fill-extrusion-vertical-gradient (0/1): gates the wall-base darkening consumed in the shader
+            // (FillExtrusionVerticalGradientFactor). Core collapses any data-driven value to the 1.0 default.
+            applier.BindFloat(paint.VerticalGradient, ShaderProperties.FillExtrusion.PropertyId.VerticalGradient);
+
+            // fill-extrusion-translate: a px offset consumed through FillExtrusion_VertexModify's
+            // MapPixelsToWorld — same device-px space fill-translate/line-translate live in (S107).
+            applier.BindDevicePixelVector(paint.Translate, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslate);
+            if (!paint.TranslateAnchor.DependsOnFeature)
+                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslateAnchor);
+
+            // No Fill-pattern defensive reset here (unlike BindBackgroundPaintToApplier): Map/FillExtrusion
+            // (I2b) is its OWN dedicated shader with its OWN CBUFFER — it declares no _FillPattern/
+            // _FillTranslate properties at all, so there is nothing inherited from a Fill Variant to clobber.
+            // That defence was I1-only, back when this layer reused the flat FILL material verbatim.
         }
 
         /// <summary>Background material: a clone of the FILL base (§3.6 — the fill shader's flat lit path IS

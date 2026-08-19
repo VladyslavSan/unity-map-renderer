@@ -123,41 +123,17 @@ namespace MapRenderer.Core.Style.Line
         /// its array literals bare (e.g. <c>[2,1]</c>, or the per-stop outputs of
         /// <c>["step",["zoom"],[1,1],10,[2,1]]</c>), but the strict expression parser rejects an array
         /// whose first element is not an operator string. So bare arrays are wrapped as
-        /// <c>["literal", …]</c> — at the top level and in an operator's direct arguments (which covers
-        /// step / interpolate stop outputs). Returns null for a null or malformed value (→ render
-        /// solid; never throws).
+        /// <c>["literal", …]</c> (<see cref="ExpressionParser.WrapBareArrayLiterals"/>, S23 I2b — shared
+        /// with <c>FillExtrusion.PaintProperties</c>'s translate parse) — at the top level and in an
+        /// operator's direct arguments (which covers step / interpolate stop outputs). Returns null for a
+        /// null or malformed value (→ render solid; never throws).
         /// </summary>
         public static Expression ParseDashArray(JsonValue json)
         {
-            JsonValue toParse = WrapBareArrayLiterals(json);
+            JsonValue toParse = ExpressionParser.WrapBareArrayLiterals(json);
             if (toParse == null) return null;
             try { return ExpressionParser.Parse(toParse); }
             catch (ExpressionParseException) { return null; }
-        }
-
-        // Wrap a bare array (first element not an operator string) as ["literal", array]. For an
-        // operator call, do the same to its direct arguments (one level — enough for step/interpolate
-        // dash outputs), except "literal" whose argument is a raw value, not an expression.
-        private static JsonValue WrapBareArrayLiterals(JsonValue json)
-        {
-            if (json == null || !json.IsArray || json.Items.Count == 0)
-                return json;
-
-            if (json.Items[0].Kind != JsonKind.String)
-                return JsonValue.OfArray(new List<JsonValue>(2) { JsonValue.OfString("literal"), json });
-
-            if (json.Items[0].AsString(null) == "literal")
-                return json;
-
-            var outItems = new List<JsonValue>(json.Items.Count) { json.Items[0] };
-            for (int i = 1; i < json.Items.Count; i++)
-            {
-                JsonValue a = json.Items[i];
-                outItems.Add(a.IsArray && a.Items.Count > 0 && a.Items[0].Kind != JsonKind.String
-                    ? JsonValue.OfArray(new List<JsonValue>(2) { JsonValue.OfString("literal"), a })
-                    : a);
-            }
-            return JsonValue.OfArray(outItems);
         }
 
         /// <summary>

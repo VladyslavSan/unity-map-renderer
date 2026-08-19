@@ -23,7 +23,14 @@ namespace MapRenderer.Unity.Rendering.Materials
 
         [Tooltip("Base material for all line layers. Cloned per style layer.")]
         [SerializeField] public Material LineMaterial;
-        
+
+        [Tooltip("S23 I2b (Map/FillExtrusion): base material for the 3D-building roof+wall draw path. " +
+                 "Cloned per style layer (MaterialFactory.CreateFillExtrusionMaterial). Optional — unassigned " +
+                 "means fill-extrusion layers will not render (a warning is logged); NOT enforced by " +
+                 "Validate() (mirrors SymbolIconWorld — enforcing it would red every pre-existing scene/test " +
+                 "asset that predates this field).")]
+        [SerializeField] public Material FillExtrusionMaterial;
+
         [Tooltip("Epic A / A1 (Map/Symbol/TextWorld): base material for the world-anchored point-text draw " +
                  "path. Cloned per style layer (SymbolRenderLayer.WorldTextMaterial). REQUIRED — enforced by " +
                  "Validate(), because A1 retired the screen-space point-text path: an unassigned base means " +

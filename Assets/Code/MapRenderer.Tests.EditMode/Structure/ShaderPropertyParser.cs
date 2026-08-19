@@ -42,8 +42,10 @@ namespace MapRenderer.Tests
 
         public static string ShadersDir   => Path.Combine(UnityAssemblyRoot, "Shaders");
         public static string RenderingDir => Path.Combine(UnityAssemblyRoot, "Rendering");
+        public static string MapDir       => Path.Combine(ShadersDir, "Map");
         public static string MapFillDir   => Path.Combine(ShadersDir, "Map", "Fill");
         public static string MapLineDir   => Path.Combine(ShadersDir, "Map", "Line");
+        public static string MapExtrusionDir => Path.Combine(ShadersDir, "Map", "FillExtrusion");
         public static string CommonDir    => Path.Combine(ShadersDir, "Common");
 
         private static string ResolveUnityAssemblyRoot()

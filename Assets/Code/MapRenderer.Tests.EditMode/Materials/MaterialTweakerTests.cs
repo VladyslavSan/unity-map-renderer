@@ -24,6 +24,7 @@ namespace MapRenderer.Tests.Materials
     {
         private static Material NewFill() => new Material(Shader.Find("Map/Fill"));
         private static Material NewLine() => new Material(Shader.Find("Map/Line"));
+        private static Material NewFillExtrusion() => new Material(Shader.Find("Map/FillExtrusion"));
 
         private static void AssertWhite(Color c, string what)
         {
@@ -84,6 +85,75 @@ namespace MapRenderer.Tests.Materials
             }
         }
 
+        // ── 1b. Elevated-3D contract: fill-extrusion is opaque + depth-writing, NOT the flat painter state ──
+        // These two are the B1 guard: fill-extrusion is the first geometry that must occupy the depth buffer
+        // (so buildings — and a single building's own near/far walls, one mesh, unsortable — occlude via
+        // depth, not draw order). Routing it through the FILL painter contract (ZWrite Off + transparent)
+        // silently defeats that. RED-verify: revert ApplyElevatedContract to FillTweaker.ApplyPainterContract
+        // (or point CreateFillExtrusionMaterial back at it) and both fail.
+        [Test]
+        public void FillExtrusionTweaker_ApplyElevatedContract_SetsDepthWriteOpaqueAndWhiteIdentity()
+        {
+            var m = NewFillExtrusion();
+            try
+            {
+                // Simulate a base .mat left in the flat/transparent state — the elevated contract must OVERRIDE it.
+                m.SetFloat(ShaderProperties.PropertyNames.ZWrite, 0f);
+                m.SetFloat(ShaderProperties.PropertyNames.SrcBlend, (int)BlendMode.SrcAlpha);
+                m.SetFloat(ShaderProperties.PropertyNames.DstBlend, (int)BlendMode.OneMinusSrcAlpha);
+                m.EnableKeyword(FillMaterialTweaker.SurfaceTypeTransparentKeyword);
+                m.SetColor(ShaderProperties.PropertyNames.BaseColor, Color.red);
+
+                FillExtrusionTweaker.ApplyElevatedContract(m);
+
+                Assert.AreEqual((int)DepthWrite.On, (int)m.GetFloat(ShaderProperties.PropertyNames.ZWrite),
+                    "elevated-3D → ZWrite ON (buildings must occupy the depth buffer to self-occlude).");
+                Assert.AreEqual((int)CompareFunction.LessEqual, (int)m.GetFloat(ShaderProperties.PropertyNames.ZTest),
+                    "elevated-3D → ZTest LEqual.");
+                Assert.AreEqual((int)BlendMode.One, (int)m.GetFloat(ShaderProperties.PropertyNames.SrcBlend),
+                    "elevated-3D → opaque One src blend (NOT the fill's SrcAlpha).");
+                Assert.AreEqual((int)BlendMode.Zero, (int)m.GetFloat(ShaderProperties.PropertyNames.DstBlend),
+                    "elevated-3D → opaque Zero dst blend.");
+                Assert.IsFalse(m.IsKeywordEnabled(FillMaterialTweaker.SurfaceTypeTransparentKeyword),
+                    "elevated-3D → opaque: _SURFACE_TYPE_TRANSPARENT must be DISABLED (else URP alpha-blends the building).");
+                AssertWhite(m.GetColor(ShaderProperties.PropertyNames.BaseColor), "_BaseColor");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
+        [Test]
+        public void CreateFillExtrusionMaterial_AppliesElevatedContract_NotFlatPainter()
+        {
+            // Guards the wiring, not just the tweaker: CreateFillExtrusionMaterial must route through the
+            // ELEVATED contract. (The B1 regression was that it called FillTweaker.ApplyPainterContract.)
+            var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
+            settings.FillExtrusionMaterial = NewFillExtrusion();
+            try
+            {
+                Material mat = MaterialFactory.CreateFillExtrusionMaterial(settings);
+                Assert.IsNotNull(mat, "a configured fill-extrusion base must yield a material.");
+                try
+                {
+                    Assert.AreEqual((int)DepthWrite.On, (int)mat.GetFloat(ShaderProperties.PropertyNames.ZWrite),
+                        "CreateFillExtrusionMaterial must apply the elevated contract (ZWrite On), not the flat painter one.");
+                    Assert.IsFalse(mat.IsKeywordEnabled(FillMaterialTweaker.SurfaceTypeTransparentKeyword),
+                        "CreateFillExtrusionMaterial must produce an OPAQUE material (no _SURFACE_TYPE_TRANSPARENT).");
+                }
+                finally
+                {
+                    Object.DestroyImmediate(mat);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(settings.FillExtrusionMaterial);
+                Object.DestroyImmediate(settings);
+            }
+        }
+
         // ── 2. Editor keyword sync (the shader GUIs' ValidateMaterial) reads the material ──
         // Emission is driven by the material's GI emissive flags (URP's mechanism), not the colour directly.
         // ValidateMaterial first runs the editor-only MaterialEditor.FixupEmissiveFlag, which reconciles the
@@ -122,6 +192,33 @@ namespace MapRenderer.Tests.Materials
                 m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
                 new LineShaderGUI().ValidateMaterial(m);
                 Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "RealtimeEmissive/white → _EMISSION on");
+            }
+            finally
+            {
+                Object.DestroyImmediate(m);
+            }
+        }
+
+        [Test]
+        public void FillExtrusionShaderGUI_ValidateMaterial_EmissionTogglesFromGI()
+        {
+            // S23 I5: fill-extrusion needs a material editor. Map/FillExtrusion mirrors full URP Lit with
+            // shader_feature keywords (_EMISSION, _NORMALMAP, …), so without a ShaderGUI running the editor
+            // keyword sync those keywords are never derived from the material's properties and features like
+            // emission silently do nothing. FillExtrusionShaderGUI declares no keyword of its own, so this
+            // exercises that it correctly INHERITS LitShaderGUI's sync.
+            var m = NewFillExtrusion();
+            try
+            {
+                m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.black);
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.EmissiveIsBlack;
+                new FillExtrusionShaderGUI().ValidateMaterial(m);
+                Assert.IsFalse(m.IsKeywordEnabled(ShaderKeywords.Emission), "EmissiveIsBlack/black → _EMISSION off");
+
+                m.SetColor(ShaderProperties.PropertyNames.EmissionColor, Color.white);
+                m.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
+                new FillExtrusionShaderGUI().ValidateMaterial(m);
+                Assert.IsTrue(m.IsKeywordEnabled(ShaderKeywords.Emission), "BakedEmissive/white → _EMISSION on");
             }
             finally
             {

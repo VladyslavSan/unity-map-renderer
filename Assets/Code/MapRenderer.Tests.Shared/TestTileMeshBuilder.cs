@@ -14,6 +14,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Jobs;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
+using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
@@ -114,6 +115,26 @@ namespace MapRenderer.Tests
                 StyledFillTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, zoom,
                     renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, scratch);
                 return Finish(mda, vertexCount, bounds, "TestFill");
+            }
+            finally { geometry.Dispose(); }
+        }
+
+        /// <summary>S23 I2b: synchronous fill-extrusion-layer mesh build (roof + walls). Returns null when the
+        /// layer produces no geometry. Mirrors <see cref="BuildFill"/>'s synthetic-feature shape (materialize
+        /// the whole feature list, ordinals 0..n-1, production <c>WriteMeshData</c>).</summary>
+        public static Mesh BuildFillExtrusion(
+            IReadOnlyList<IFeature> features, FillExtrusion.PaintProperties paint,
+            double zoom, double extent, TileId id, IProjection projection = null,
+            TileBufferClip clip = default)
+        {
+            var mda = Mesh.AllocateWritableMeshData(1);
+            double3 renderOrigin = TileRenderOrigin.Project(id, projection);
+            TileGeometryBuffers geometry = Materialize(features, id, extent);
+            try
+            {
+                StyledFillExtrusionTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, zoom,
+                    renderOrigin, out int vertexCount, out Bounds bounds, projection, clip);
+                return Finish(mda, vertexCount, bounds, "TestFillExtrusion");
             }
             finally { geometry.Dispose(); }
         }

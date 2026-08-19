@@ -195,6 +195,16 @@ is exact under every projection at every zoom.
 
 ## 5. The duplication question — verified duplication, do not reopen S66
 
+**Superseded (S23 I2a):** the trigger below fired — FillExtrusion (S23 I2b) needed the same measurement as
+a third carrier — and S66 was reopened deliberately rather than accumulating a third sentinel block. The
+block now lives once, at `Shaders/Map/PixelsToWorld.hlsl`, included as `../PixelsToWorld.hlsl` by every
+carrier (following the `SymbolWorldPitchAlign.hlsl` precedent, itself already shared the same way). The
+sentinel mechanism and `ShaderStructureTests.SharedShaderBlocks_AreIdenticalAcrossLayers` described below
+are retired; `MapLayerFiles_DoNotIncludeCommonFolder` was repurposed to
+`MapLayerFiles_ShareOnlyViaSanctionedInclude` (still forbids `Common/`, now also caps cross-folder
+includes to the one sanctioned path). The analysis below is kept as the historical record of why
+duplication was chosen first.
+
 `FillPixelsToWorld` and the line's inline measurement are the same twenty lines. S66 made every layer
 folder self-contained and `ShaderStructureTests.MapLayerFiles_DoNotIncludeCommonFolder` pins it; the fill
 epic hit this, backed a `Map/Common/MapScreenSpace.hlsl` extraction out entirely, and duplicated with a

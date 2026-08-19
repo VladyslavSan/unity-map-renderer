@@ -68,12 +68,21 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         Map/Line/Line_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
         Map/Line/Line_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
         Map/Line/Line_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Map/FillExtrusion/FillExtrusion.shader                 ← Lit.shader
+        Map/FillExtrusion/FillExtrusion_LitInput.hlsl          ← LitInput.hlsl
+        Map/FillExtrusion/FillExtrusion_LitForwardPass.hlsl    ← LitForwardPass.hlsl
+        Map/FillExtrusion/FillExtrusion_LitGBufferPass.hlsl    ← LitGBufferPass.hlsl
+        Map/FillExtrusion/FillExtrusion_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
+        Map/FillExtrusion/FillExtrusion_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
+        Map/FillExtrusion/FillExtrusion_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
         Common/LitInput.Template.hlsl        ← LitInput.hlsl (Map-flavoured skeleton template; S66)
 
   (c) Bespoke map helpers — original clean-room work, NOT Unity-derived; listed here only so the
       shader tree's provenance is unambiguous:
-        Map/Line/Line_VertexExtrude.hlsl   — world-space ribbon extrusion + line coverage
-        Map/Fill/Fill_VertexModify.hlsl    — fill vertex hook
+        Map/Line/Line_VertexExtrude.hlsl              — world-space ribbon extrusion + line coverage
+        Map/Fill/Fill_VertexModify.hlsl                — fill vertex hook
+        Map/FillExtrusion/FillExtrusion_VertexModify.hlsl — fill-extrusion height extrusion + translate hook (S23 I2b)
+        Map/PixelsToWorld.hlsl                         — shared px→world measurement (S23 I2a)
 
 Fill triangulation is a clean-room implementation of the ear-clipping algorithm. The Mapbox
 "earcut" project (ISC) was consulted only as an algorithm reference; no source was copied.

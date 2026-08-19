@@ -784,8 +784,9 @@ does not carry over.
 `Fill_VertexModify.hlsl` carries the character-identical `MapPixelsToWorld` block. That conflates two
 different things, and a future reader must not re-derive the wrong conclusion from the shared block:
 
-- **What transfers:** only the **px→world scale measurement helper** (`MAP-SHARED-BEGIN: PixelsToWorld`,
-  `Fill_VertexModify.hlsl:42-78`). It is a ruler, not a coverage mechanism.
+- **What transfers:** only the **px→world scale measurement helper**, `MapPixelsToWorld`
+  (hoisted S23 I2a to `Shaders/Map/PixelsToWorld.hlsl`, included by Fill and Line — previously a
+  sentinel-pinned copy at `Fill_VertexModify.hlsl:42-78`). It is a ruler, not a coverage mechanism.
 - **What does not transfer:** the **distance field the entire straddle keys on.** A line carries `side` — a
   per-vertex *signed distance from the centreline*, normalized to ±1 at the lateral edge and interpolated
   across the ribbon (`LineRibbonJob.cs:549-558`). `|side|`, `fwidth(side)`, `innerFrac` and the `_Blur` mask
@@ -1004,11 +1005,16 @@ lives, and each was found by measurement rather than review.
 ## 10. Constraints the implementation must respect
 
 - `Map/` shader files may **NOT** include `Map/Common` — shared HLSL is duplicated per layer on purpose and
-  pinned by `ShaderStructureTests.MapLayerFiles_DoNotIncludeCommonFolder` and
+  was pinned by `ShaderStructureTests.MapLayerFiles_DoNotIncludeCommonFolder` and
   `SharedShaderBlocks_AreIdenticalAcrossLayers` via the `MAP-SHARED-BEGIN/END` sentinels
-  (`Line_VertexExtrude.hlsl:19-30`). Note that the fill's copy of `MapPixelsToWorld` is a *ruler*, not a
-  coverage mechanism — its existence is not evidence that this epic's approach extends to fills (§9.1). If a
-  future fill epic needs shared HLSL, it is **copied verbatim**, never extracted.
+  (`Line_VertexExtrude.hlsl:19-30`). **Superseded S23 I2a:** `MapPixelsToWorld` is the one sanctioned
+  exception — hoisted to `Shaders/Map/PixelsToWorld.hlsl`, included as `../PixelsToWorld.hlsl`; the
+  sentinel mechanism and both named tests above are retired, replaced by
+  `SharedPixelsToWorldInclude_ReferencedByEveryCarrier` and
+  `MapLayerFiles_ShareOnlyViaSanctionedInclude`. Note that `MapPixelsToWorld` is a *ruler*, not a coverage
+  mechanism — its sharing is not evidence that this epic's coverage approach extends to fills (§9.1). Any
+  OTHER shared HLSL (a pass, a coverage mechanism) is still **copied verbatim**, never extracted — the
+  sanctioned exception is this one measurement helper, not a general license to share.
 - **Never name an internal shader property after a MapLibre style term** — the styler binds `line-X → _X` and
   silently overwrites collisions; that is how AA was off on every backend for weeks
   (`docs/lessons-learned.md` § Shaders & HLSL). The recommendation adds exactly one property,

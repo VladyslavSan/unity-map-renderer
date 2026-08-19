@@ -9,6 +9,8 @@
 //   • _NORMALMAP / _METALLICSPECGLOSSMAP pragmas are present (required for teeth #1 and #3)
 //   • THIRD-PARTY-NOTICES.txt has a UCL entry
 //   • UCL license text file exists
+//   • Shaders/Map/PixelsToWorld.hlsl (S23 I2a) is the one sanctioned cross-folder include — every carrier
+//     references it via ../PixelsToWorld.hlsl and none locally re-defines MapPixelsToWorld
 //
 // Runs in the Unity EditMode test assembly (moved from Tools/core-tests, which used
 // test-binary-relative path arithmetic that broke on the Assets/Code/ folder move). Paths are now
@@ -16,14 +18,16 @@
 // Complement to the Unity EditMode GPU tests in LitFillSnapshotTests.cs.
 //
 // History: originally S34 (flat Shaders/). Updated for S58 (the redundant _MapColor tint was
-// collapsed into _BaseColor), S56 (reorg into Common/ + Map/<Layer>/), and S66 (each layer is
-// self-contained; Common/ holds only LitInput.Template.hlsl; files renamed to <Layer>_<Pass>).
+// collapsed into _BaseColor), S56 (reorg into Common/ + Map/<Layer>/), S66 (each layer is
+// self-contained; Common/ holds only LitInput.Template.hlsl; files renamed to <Layer>_<Pass>), and
+// S23 I2a (the shared px→world measurement was hoisted out of per-layer sentinel-pinned copies into
+// Shaders/Map/PixelsToWorld.hlsl — the one sanctioned exception to self-containment).
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 
 namespace MapRenderer.Tests.Structure
@@ -34,8 +38,10 @@ namespace MapRenderer.Tests.Structure
         private static string RepoRoot   => ShaderPropertyParser.RepoRoot;
         private static string ShadersDir => ShaderPropertyParser.ShadersDir;
         private static string CommonDir  => ShaderPropertyParser.CommonDir;
+        private static string MapDir     => ShaderPropertyParser.MapDir;
         private static string MapFillDir => ShaderPropertyParser.MapFillDir;
         private static string MapLineDir => ShaderPropertyParser.MapLineDir;
+        private static string MapExtrusionDir => ShaderPropertyParser.MapExtrusionDir;
 
         // ── File existence (S66 layout) ───────────────────────────────────────
 
@@ -57,6 +63,15 @@ namespace MapRenderer.Tests.Structure
                 (MapLineDir, "Line.shader"),
                 (MapLineDir, "Line_LitInput.hlsl"),
                 (MapLineDir, "Line_LitForwardPass.hlsl"),
+                // FillExtrusion layer (S23 I2b) — self-contained under Map/FillExtrusion/
+                (MapExtrusionDir, "FillExtrusion.shader"),
+                (MapExtrusionDir, "FillExtrusion_LitInput.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_VertexModify.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_LitForwardPass.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_LitGBufferPass.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_ShadowCasterPass.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_DepthOnlyPass.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_DepthNormalsPass.hlsl"),
                 // Common/ — reference template only, no .shader includes it
                 (CommonDir,  "LitInput.Template.hlsl"),
             };
@@ -215,6 +230,56 @@ namespace MapRenderer.Tests.Structure
                 "Line_LitForwardPass.hlsl must carry a UCL attribution header.");
         }
 
+        [Test]
+        public void FillExtrusionLitInput_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_LitInput.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_LitInput.hlsl must carry a UCL attribution header.");
+            Assert.That(text, Does.Contain("Unity Technologies"),
+                "FillExtrusion_LitInput.hlsl must attribute © Unity Technologies ApS.");
+        }
+
+        [Test]
+        public void FillExtrusionLitForwardPass_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_LitForwardPass.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_LitForwardPass.hlsl must carry a UCL attribution header.");
+        }
+
+        [Test]
+        public void FillExtrusionLitGBufferPass_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_LitGBufferPass.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_LitGBufferPass.hlsl must carry a UCL attribution header.");
+        }
+
+        [Test]
+        public void FillExtrusionShadowCasterPass_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_ShadowCasterPass.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_ShadowCasterPass.hlsl must carry a UCL attribution header.");
+        }
+
+        [Test]
+        public void FillExtrusionDepthOnlyPass_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_DepthOnlyPass.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_DepthOnlyPass.hlsl must carry a UCL attribution header.");
+        }
+
+        [Test]
+        public void FillExtrusionDepthNormalsPass_HasUCLAttributionHeader()
+        {
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion_DepthNormalsPass.hlsl");
+            Assert.That(text, Does.Contain("Unity Companion License"),
+                "FillExtrusion_DepthNormalsPass.hlsl must carry a UCL attribution header.");
+        }
+
         // ── InitializeStandardLitSurfaceData usage ────────────────────────────
         // The decisive structural gate: SurfaceData must NOT be hand-assembled.
 
@@ -268,6 +333,50 @@ namespace MapRenderer.Tests.Structure
                 "Forward pass must reference vColor.rgb in albedo modulation.");
             Assert.That(text, Does.Contain("_Opacity"),
                 "Forward pass must reference _Opacity in alpha modulation.");
+        }
+
+        [Test]
+        public void FillExtrusionVerticalGradient_FactorDefinedAndFoldedIntoVColor()
+        {
+            // I4: fill-extrusion-vertical-gradient. The shading term (declared+bound but unused through
+            // I2b/I3) must now (a) exist as a per-vertex factor GATED on _VerticalGradient, and (b) be FOLDED
+            // into vColor by BOTH colour passes, so the fragment's existing `albedo *= vColor.rgb` applies the
+            // wall-base darkening with no extra interpolator. Structural (headless cannot render fragments) —
+            // RED-verify by deleting the vColor fold in a pass, or the helper body.
+            string vmod = ReadShaderFile(MapExtrusionDir, "FillExtrusion_VertexModify.hlsl");
+            Assert.That(vmod, Does.Contain("half FillExtrusionVerticalGradientFactor(float t)"),
+                "FillExtrusion_VertexModify.hlsl must define the vertical-gradient factor helper.");
+            // Anchor on the executable gate EXPRESSION, not the bare keyword — `_VerticalGradient` also
+            // appears in this file's comments, so a bare Does.Contain would stay green if a regression dropped
+            // the gate but left the comment (both review arms flagged this over-claim).
+            Assert.That(vmod, Does.Contain("lerp(1.0, FILL_EXTRUSION_VGRADIENT_BASE, _VerticalGradient)"),
+                "the vertical-gradient factor must be GATED on _VerticalGradient in the helper BODY " +
+                "(0 ⇒ no darkening), anchored to the executable expression.");
+
+            foreach (string pass in new[] { "FillExtrusion_LitForwardPass.hlsl", "FillExtrusion_LitGBufferPass.hlsl" })
+            {
+                string text = ReadShaderFile(MapExtrusionDir, pass);
+                int vColorIdx = text.IndexOf("output.vColor = input.color;", StringComparison.Ordinal);
+                int foldIdx   = text.IndexOf("output.vColor.rgb *= FillExtrusionVerticalGradientFactor(", StringComparison.Ordinal);
+                Assert.That(vColorIdx, Is.GreaterThanOrEqualTo(0), $"{pass}: vColor assignment not found.");
+                Assert.That(foldIdx, Is.GreaterThan(vColorIdx),
+                    $"{pass}: the vertical-gradient factor must be folded into vColor AFTER its assignment, so " +
+                    "the fragment's albedo *= vColor.rgb applies wall-base darkening.");
+                Assert.That(text, Does.Contain("FillExtrusionVerticalGradientFactor(input.extrudeUpAndT.w)"),
+                    $"{pass}: the factor must be evaluated at the vertex's t (extrudeUpAndT.w).");
+            }
+        }
+
+        [Test]
+        public void FillExtrusionShader_WiresCustomEditor()
+        {
+            // I5: the material editor must be WIRED, not just authored — the shader's CustomEditor is what
+            // makes LitShaderGUI.ValidateMaterial run in the inspector (deriving _EMISSION/_NORMALMAP/… from
+            // material properties). Without this line the GUI class exists but never drives keyword sync.
+            // RED-verify by deleting the CustomEditor directive.
+            string text = ReadShaderFile(MapExtrusionDir, "FillExtrusion.shader");
+            Assert.That(text, Does.Contain("CustomEditor \"MapRenderer.Unity.Editor.FillExtrusionShaderGUI\""),
+                "Map/FillExtrusion must declare CustomEditor \"MapRenderer.Unity.Editor.FillExtrusionShaderGUI\".");
         }
 
         // ── CBUFFER location ──────────────────────────────────────────────────
@@ -346,104 +455,78 @@ namespace MapRenderer.Tests.Structure
                 "Line_LitForwardPass.hlsl must not reference old MapLineInput.hlsl (stale after S66 rename).");
         }
 
-        // ── No cross-folder Common/ includes from Map/ ────────────────────────
+        // ── Cross-folder includes from Map/ are self-containment's one sanctioned exception ────
 
         [Test]
-        public void MapLayerFiles_DoNotIncludeCommonFolder()
+        public void MapLayerFiles_ShareOnlyViaSanctionedInclude()
         {
-            // S66: no file under Map/ should reach into Common/ via ../../Common/...
+            // S66 requires each layer folder to be self-contained (no reach into Common/). S23 I2a punches
+            // exactly one sanctioned hole in that rule: ../PixelsToWorld.hlsl, the shared px→world
+            // measurement hoisted out of per-layer sentinel-pinned copies (I2b adds FillExtrusion to this
+            // enumeration). Assert BOTH halves so this test still catches what it always caught (no Common/
+            // reach) plus the new invariant (the only cross-folder include anywhere is the sanctioned one —
+            // any other ../ include is an unreviewed reach this test exists to block).
             foreach (var file in Directory.EnumerateFiles(MapFillDir, "*.hlsl")
                 .Concat(Directory.EnumerateFiles(MapFillDir, "*.shader"))
                 .Concat(Directory.EnumerateFiles(MapLineDir, "*.hlsl"))
-                .Concat(Directory.EnumerateFiles(MapLineDir, "*.shader")))
+                .Concat(Directory.EnumerateFiles(MapLineDir, "*.shader"))
+                .Concat(Directory.EnumerateFiles(MapExtrusionDir, "*.hlsl"))
+                .Concat(Directory.EnumerateFiles(MapExtrusionDir, "*.shader")))
             {
                 string text = File.ReadAllText(file, Encoding.UTF8);
                 Assert.That(text, Does.Not.Contain("Common/"),
                     $"{Path.GetFileName(file)} must not reach into Common/ (S66: each layer is self-contained).");
+
+                // #include_with_pragmas is a distinct directive (ShaderLab keyword-conditional include) —
+                // matched too, so a cross-folder reach hiding behind it cannot slip the guard.
+                foreach (Match m in Regex.Matches(text, "#include(?:_with_pragmas)?\\s+\"(\\.\\./[^\"]*)\""))
+                {
+                    Assert.That(m.Groups[1].Value, Is.EqualTo("../PixelsToWorld.hlsl"),
+                        $"{Path.GetFileName(file)} has an unsanctioned cross-folder include " +
+                        $"'{m.Groups[1].Value}' — the only sanctioned cross-folder reach out of Map/<Layer>/ " +
+                        "is ../PixelsToWorld.hlsl (S23 I2a).");
+                }
             }
         }
 
-        // ── Verified duplication of shared blocks ─────────────────────────────
+        // ── Shared px→world include (S23 I2a) ─────────────────────────────────
 
         /// <summary>
-        /// S66 forbids a layer reaching into Common/, so genuinely shared HLSL is DUPLICATED per layer. That
-        /// leaves drift as the failure mode — and it had already happened: the px→world measurement was
-        /// copied from the line into the fill, then the fill's copy was fixed (per-axis, anchor-aware) while
-        /// the line's was not, which is how line-translate ended up applying a screen-pixel offset as raw
-        /// metres. See docs/line-translate-parity-design.md.
-        ///
-        /// <para>So the duplication is verified instead of trusted: each copy is bracketed by
-        /// MAP-SHARED-BEGIN/END sentinels, and the text between them must match character for character.
-        /// Everything outside the sentinels — the per-layer comment explaining the arrangement — is free to
-        /// differ.</para>
-        ///
-        /// <para>Removing the block from BOTH files is the deliberate opt-out (a visible, reviewable act).
-        /// Removing it from only one fails here, so a half-finished divergence cannot pass as intentional.</para>
+        /// <c>MapPixelsToWorld</c> is genuinely shared by every layer that converts a screen-pixel offset to
+        /// world metres in the vertex shader. S66 forbade reaching into <c>Common/</c>, so before S23 I2a
+        /// this was DUPLICATED per layer instead — sentinel-pinned copies verified byte-identical by the
+        /// (now-retired) <c>SharedShaderBlocks_AreIdenticalAcrossLayers</c>. That test only ever caught
+        /// drift between existing copies; it said nothing if a copy came back after the hoist. This is the
+        /// positive replacement: the shared file exists and every carrier includes it, AND — the clause that
+        /// actually catches re-duplication — no carrier locally re-defines the function.
         /// </summary>
         [Test]
-        public void SharedShaderBlocks_AreIdenticalAcrossLayers()
+        public void SharedPixelsToWorldInclude_ReferencedByEveryCarrier()
         {
+            string sharedPath = Path.Combine(MapDir, "PixelsToWorld.hlsl");
+            Assert.That(File.Exists(sharedPath), Is.True,
+                "Shaders/Map/PixelsToWorld.hlsl must exist — the S23 I2a shared px→world include.");
+            string sharedText = File.ReadAllText(sharedPath, Encoding.UTF8);
+            Assert.That(sharedText, Does.Contain("float MapPixelsToWorld("),
+                "Shaders/Map/PixelsToWorld.hlsl must define MapPixelsToWorld — that is the point of the hoist.");
+
+            // Carriers, not a hardcoded count — I2b appends FillExtrusion/FillExtrusion_VertexModify.hlsl.
             (string dir, string file)[] carriers =
             {
                 (MapFillDir, "Fill_VertexModify.hlsl"),
                 (MapLineDir, "Line_VertexExtrude.hlsl"),
+                (MapExtrusionDir, "FillExtrusion_VertexModify.hlsl"),
             };
-            const string blockName = "PixelsToWorld";
-
-            var found = new List<(string file, string body)>();
-            var missing = new List<string>();
 
             foreach (var (dir, file) in carriers)
             {
-                string text = File.ReadAllText(Path.Combine(dir, file), Encoding.UTF8);
-                if (TryExtractSharedBlock(text, blockName, file, out string body))
-                    found.Add((file, body));
-                else
-                    missing.Add(file);
+                string text = ReadShaderFile(dir, file);
+                Assert.That(text, Does.Contain("#include \"../PixelsToWorld.hlsl\""),
+                    $"{file} must include ../PixelsToWorld.hlsl (the sanctioned S23 I2a shared px→world include).");
+                Assert.That(text, Does.Not.Contain("float MapPixelsToWorld("),
+                    $"{file} must NOT locally re-define MapPixelsToWorld — it is shared via " +
+                    "../PixelsToWorld.hlsl now; a local re-definition would silently re-duplicate it.");
             }
-
-            if (found.Count == 0)
-                Assert.Ignore(
-                    $"Shared block '{blockName}' is absent from every carrier — treated as the deliberate " +
-                    "opt-out (the layers have diverged on purpose). Delete this test's entry if that is permanent.");
-
-            Assert.That(missing, Is.Empty,
-                $"Shared block '{blockName}' is present in {string.Join(", ", found.ConvertAll(f => f.file))} " +
-                $"but missing from {string.Join(", ", missing)}. A one-sided removal is exactly the drift this " +
-                "test exists to catch: either mirror the block back, or remove it from every carrier to " +
-                "deliberately un-share it.");
-
-            for (int i = 1; i < found.Count; i++)
-                Assert.That(found[i].body, Is.EqualTo(found[0].body),
-                    $"Shared block '{blockName}' has DRIFTED between {found[0].file} and {found[i].file}. " +
-                    "S66 keeps each layer self-contained, so this code is duplicated on purpose — but the " +
-                    "copies must stay character-identical. Paste the edited version into every carrier.");
-        }
-
-        /// <summary>Pulls the text strictly between the sentinel lines. Returns false when the block is
-        /// absent; throws when it is malformed (one sentinel without the other, or reversed), because that
-        /// is a broken marker rather than an intentional opt-out.</summary>
-        private static bool TryExtractSharedBlock(string text, string blockName, string file, out string body)
-        {
-            string begin = $"// MAP-SHARED-BEGIN: {blockName}";
-            string end   = $"// MAP-SHARED-END: {blockName}";
-
-            int b = text.IndexOf(begin, StringComparison.Ordinal);
-            int e = text.IndexOf(end, StringComparison.Ordinal);
-
-            body = null;
-            if (b < 0 && e < 0) return false;
-
-            Assert.That(b, Is.GreaterThanOrEqualTo(0),
-                $"{file}: found '{end}' with no matching '{begin}'.");
-            Assert.That(e, Is.GreaterThan(b),
-                $"{file}: '{end}' must appear after '{begin}'.");
-
-            // Normalize line endings so a CRLF/LF difference between the copies is not reported as drift —
-            // that would be a false positive about whitespace, not about the code.
-            body = text.Substring(b + begin.Length, e - (b + begin.Length))
-                       .Replace("\r\n", "\n");
-            return true;
         }
 
         // ── MapEdgeAA deleted ─────────────────────────────────────────────────
@@ -502,6 +585,8 @@ namespace MapRenderer.Tests.Structure
                 "Fill.shader must declare Shader \"Map/Fill\" (S56 rename).");
             Assert.That(ReadShaderFile(MapLineDir, "Line.shader"), Does.Contain("Shader \"Map/Line\""),
                 "Line.shader must declare Shader \"Map/Line\" (S56 rename).");
+            Assert.That(ReadShaderFile(MapExtrusionDir, "FillExtrusion.shader"), Does.Contain("Shader \"Map/FillExtrusion\""),
+                "FillExtrusion.shader must declare Shader \"Map/FillExtrusion\" (S23 I2b).");
         }
 
         // ── License files ─────────────────────────────────────────────────────
@@ -516,6 +601,8 @@ namespace MapRenderer.Tests.Structure
                 "THIRD-PARTY-NOTICES.txt must have a UCL entry (S34 license requirement).");
             Assert.That(text, Does.Contain("Fill_LitInput.hlsl"),
                 "THIRD-PARTY-NOTICES.txt UCL entry must list the mirrored files (e.g. Fill_LitInput.hlsl).");
+            Assert.That(text, Does.Contain("FillExtrusion_LitInput.hlsl"),
+                "THIRD-PARTY-NOTICES.txt UCL entry must list the FillExtrusion mirrored files (S23 I2b).");
         }
 
         [Test]

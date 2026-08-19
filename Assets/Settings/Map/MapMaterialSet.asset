@@ -14,5 +14,6 @@ MonoBehaviour:
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapMaterialSet
   FillMaterial: {fileID: 2100000, guid: fcbc652aad19f496999d2a827430c2b9, type: 2}
   LineMaterial: {fileID: 2100000, guid: dcd09bd3c233842c39a12f0bd2c29b3b, type: 2}
+  FillExtrusionMaterial: {fileID: 2100000, guid: 63bbef5333d3b47afb6a6f0953a9844a, type: 2}
   SymbolTextWorld: {fileID: 2100000, guid: 000104bafaa9477c953ad2927e0c3409, type: 2}
   SymbolIconWorld: {fileID: 2100000, guid: 7dea481d6c8246d09606fed74943881e, type: 2}

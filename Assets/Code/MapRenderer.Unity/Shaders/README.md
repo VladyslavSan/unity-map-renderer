@@ -4,7 +4,9 @@ The map renderer's HLSL shader tree. Layout, include rules, and naming conventio
 future layer (or a file move) has a rule to follow rather than a precedent to reverse-engineer.
 
 Updated in **S66** (structural cleanup): each layer is now self-contained; `Common/` holds only
-a reference template, not the live framework.
+a reference template, not the live framework. Updated in **S23 I2a**: the one sanctioned exception to
+self-containment is a shared px→world include at `Shaders/Map/PixelsToWorld.hlsl` — see "Shared px→world
+include" below.
 
 ## Architecture (rendering logic)
 
@@ -160,10 +162,11 @@ Shaders/
   Common/
     LitInput.Template.hlsl   reference skeleton — copy when adding a new layer; NO .shader includes it
   Map/
+    PixelsToWorld.hlsl      shared px→world measurement (S23 I2a) — the one sanctioned cross-folder include
     Fill/
       Fill.shader
       Fill_LitInput.hlsl       CBUFFER + DOTS bridge + InitializeStandardLitSurfaceData + fill paint props
-      Fill_VertexModify.hlsl   MapVertexModify body (fill-translate)
+      Fill_VertexModify.hlsl   MapVertexModify body (fill-translate); includes ../PixelsToWorld.hlsl
       Fill_LitForwardPass.hlsl
       Fill_LitGBufferPass.hlsl
       Fill_ShadowCasterPass.hlsl
@@ -172,7 +175,7 @@ Shaders/
     Line/
       Line.shader
       Line_LitInput.hlsl         CBUFFER + DOTS bridge + InitializeStandardLitSurfaceData + line paint props
-      Line_VertexExtrude.hlsl    LineAttributes struct + Line_VertexExtrude() + LineCoverage() — shared by all line passes (S67)
+      Line_VertexExtrude.hlsl    LineAttributes struct + Line_VertexExtrude() + LineCoverage() — shared by all line passes (S67); includes ../PixelsToWorld.hlsl
       Line_LitForwardPass.hlsl
       Line_LitGBufferPass.hlsl   (S67, capability-only — inert for transparent lines)
       Line_ShadowCasterPass.hlsl (S67, capability-only — inert for transparent lines)
@@ -182,12 +185,15 @@ Shaders/
 
 - `Map/<Layer>/` holds one geometry kind's `.shader`, its `<Layer>_LitInput.hlsl`, its pass bodies,
   and (Fill only) `Fill_VertexModify.hlsl`. Each layer is fully self-contained — no cross-folder
-  `../../Common/…` includes.
+  `../../Common/…` includes — **except the sanctioned `../PixelsToWorld.hlsl`** (S23 I2a; see "Shared
+  px→world include" below).
 - `Common/` holds only `LitInput.Template.hlsl`, a Map-flavoured skeleton that **no `.shader` ever
   includes** (the `.Template.hlsl` infix signals "reference only"). New layers copy it and add their
   own paint props at the `// ── <Layer> paint props go here ──` markers.
-- `Common/` grows only when a pass or helper is **genuinely shared by two or more layers**. Never
-  speculatively; this entire stage is the cost of having done so once.
+- A helper **genuinely shared by two or more layers** lives at `Shaders/Map/` (their sibling-parent),
+  not in `Common/` — the pattern `SymbolWorldPitchAlign.hlsl` set and `PixelsToWorld.hlsl` (S23 I2a)
+  follows. `Common/` itself grows only for a reference template, never speculatively; this entire stage
+  was the cost of having blurred that once.
 
 ## Include order (every pass, every layer)
 
@@ -231,14 +237,28 @@ input's UV set, so they cannot share an input header. The two layers fork their 
 duplication, co-located and visible, rather than a speculative `Common/` abstraction that never
 actually shared.
 
+## Shared px→world include
+
+`Fill_VertexModify.hlsl` and `Line_VertexExtrude.hlsl` (and, from S23 I2b, `FillExtrusion_VertexModify.hlsl`)
+each `#include "../PixelsToWorld.hlsl"` — a shared `MapPixelsToWorld(centerWS, dirWS)` measurement at
+`Shaders/Map/PixelsToWorld.hlsl`, the sibling-parent of `Fill/`, `Line/`, and `FillExtrusion/`. Before S23
+I2a each carrier held a sentinel-pinned, character-identical copy of the same block, kept honest only by a
+test comparing the copies byte for byte — real duplication, verified rather than trusted, and it had
+already drifted once (see `docs/line-translate-parity-design.md`). One copy retires that mechanism; the
+placement mirrors the existing `SymbolWorldPitchAlign.hlsl` precedent (`Shaders/Map/Symbol/`, included by
+both `Symbol/Text/` and `Symbol/Icon/`).
+
 ## Extract to `Common/` only when truly shared
 
 Only extract a pass or helper to `Common/` when a **second layer genuinely needs it**. Never
 speculatively. The cost of extracting speculatively (a shared framework used by one layer, confusing
-naming, a `Common/` that is not common) was the motivation for this whole stage.
+naming, a `Common/` that is not common) was the motivation for this whole stage. A genuinely-shared map
+*helper* (not a Unity-mirrored pass/input) lives at `Shaders/Map/` instead — `Common/` stays
+template-only (see "Shared px→world include" above).
 
 Intra-folder includes are bare (`#include "Fill_LitInput.hlsl"`). There are no cross-folder
-`../../Common/…` includes from any layer.
+`../../Common/…` includes from any layer — the one sanctioned cross-folder include anywhere in `Map/` is
+`../PixelsToWorld.hlsl`.
 
 ## DOTS / BRG instancing
 

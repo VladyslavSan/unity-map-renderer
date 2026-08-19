@@ -99,17 +99,18 @@ namespace MapRenderer.Core.Style
             string rawType = json.GetString("type");
             StyleLayerType layerType = StyleLayerTypeExtensions.ParseLayerType(rawType);
 
-            // Factory: line/fill/symbol/background get their typed subclass (which exposes parsed
-            // Paint/Layout); every other type uses the generic base. The typed views parse lazily from
-            // PaintJson/LayoutJson on access.
+            // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass (which exposes
+            // parsed Paint/Layout); every other type uses the generic base. The typed views parse lazily
+            // from PaintJson/LayoutJson on access.
             StyleLayer layer;
             switch (layerType)
             {
-                case StyleLayerType.Line:       layer = new Line.StyleLayer();       break;
-                case StyleLayerType.Fill:       layer = new Fill.StyleLayer();       break;
-                case StyleLayerType.Symbol:     layer = new Symbol.StyleLayer();     break;
-                case StyleLayerType.Background: layer = new Background.StyleLayer(); break;
-                default:                        layer = new StyleLayer();            break;
+                case StyleLayerType.Line:          layer = new Line.StyleLayer();          break;
+                case StyleLayerType.Fill:          layer = new Fill.StyleLayer();          break;
+                case StyleLayerType.Symbol:        layer = new Symbol.StyleLayer();        break;
+                case StyleLayerType.Background:    layer = new Background.StyleLayer();    break;
+                case StyleLayerType.FillExtrusion: layer = new FillExtrusion.StyleLayer(); break;
+                default:                           layer = new StyleLayer();               break;
             }
 
             layer.Raw = json;

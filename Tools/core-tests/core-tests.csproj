@@ -263,6 +263,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/LayoutProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillLayoutTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillPatternTests.cs" />
+    <!-- S23 I1: fill-extrusion style plumbing (Core source, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PropertyNames.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PaintProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/StyleLayer.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillExtrusionPaintTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LayoutProperties.cs" />

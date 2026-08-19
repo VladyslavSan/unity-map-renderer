@@ -10,7 +10,9 @@
 //
 // P-B: the along-line tangent branch (Stage AC's, ported VERBATIM from SymbolTextWorld_ForwardPass.hlsl —
 // the duplication is the convention: a Map/ shader layer may not include another's pass, see
-// docs/meshing-design.md §"Folder layout" — pinned by ShaderStructureTests.MapLayerFiles_DoNotIncludeCommonFolder).
+// docs/meshing-design.md §"Folder layout" — pinned by ShaderStructureTests.MapLayerFiles_ShareOnlyViaSanctionedInclude,
+// renamed S23 I2a; a genuinely shared HELPER like ../PixelsToWorld.hlsl is the one sanctioned exception,
+// not a shared PASS, which this rule still forbids).
 // Without it a map-aligned line icon
 // (road_one_way_arrow*) would draw unrotated — every arrow pointing screen-right regardless of the road.
 //

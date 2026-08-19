@@ -479,6 +479,46 @@ namespace MapRenderer.Core.Expressions
             return new VarExpression(name, bound);
         }
 
+        // ---- bare array literals (S23 I2b, hoisted from the former LineDash-private helper) --------
+
+        /// <summary>
+        /// Wrap a bare array (first element not an operator string) as <c>["literal", array]</c>. For an
+        /// operator call, do the same to its direct arguments (one level — enough for step/interpolate
+        /// stop outputs), except <c>"literal"</c> whose argument is a raw value, not an expression.
+        ///
+        /// <para>A property whose spec type is itself an array (<c>line-dasharray</c>, <c>fill-extrusion-
+        /// translate</c>, …) is commonly written as a bare JSON array — <c>[2, 1]</c>, or the per-stop
+        /// outputs of <c>["step",["zoom"],[1,1],10,[2,1]]</c> — but <see cref="ParseArray"/> rejects an
+        /// array whose first element is not an operator string (<c>"Expression operator must be a
+        /// string."</c>), because the Style Spec requires wrapping a literal array/object in
+        /// <c>["literal", …]</c> to disambiguate it from an operator call. Calling this FIRST on such a
+        /// property's raw JSON restores that wrapping before <see cref="Parse(JsonValue)"/> sees it, so a
+        /// zoom/interpolate array-valued expression parses and classifies instead of throwing.</para>
+        /// </summary>
+        /// <param name="json">The property's raw JSON value (may itself be a bare array, an operator call,
+        /// or neither — anything else passes through unchanged).</param>
+        public static JsonValue WrapBareArrayLiterals(JsonValue json)
+        {
+            if (json == null || !json.IsArray || json.Items.Count == 0)
+                return json;
+
+            if (json.Items[0].Kind != JsonKind.String)
+                return JsonValue.OfArray(new List<JsonValue>(2) { JsonValue.OfString("literal"), json });
+
+            if (json.Items[0].AsString(null) == "literal")
+                return json;
+
+            var outItems = new List<JsonValue>(json.Items.Count) { json.Items[0] };
+            for (int i = 1; i < json.Items.Count; i++)
+            {
+                JsonValue a = json.Items[i];
+                outItems.Add(a.IsArray && a.Items.Count > 0 && a.Items[0].Kind != JsonKind.String
+                    ? JsonValue.OfArray(new List<JsonValue>(2) { JsonValue.OfString("literal"), a })
+                    : a);
+            }
+            return JsonValue.OfArray(outItems);
+        }
+
         // ---- JSON -> Value (for literal / match labels / object literals) --------------------------
 
         internal static Value JsonToValue(JsonValue node)
