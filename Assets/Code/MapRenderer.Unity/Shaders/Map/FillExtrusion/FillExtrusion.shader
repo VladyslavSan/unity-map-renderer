@@ -106,9 +106,6 @@ Shader "Map/FillExtrusion"
         _ExtrusionHeight ("Extrusion Height (m)", Float) = 0.0
         _ExtrusionBase ("Extrusion Base (m)", Float) = 0.0
 
-        // fill-extrusion-vertical-gradient (0/1): gates the wall-base darkening (FillExtrusion_VertexModify).
-        _VerticalGradient ("Vertical Gradient", Float) = 1.0
-
         // fill-extrusion-translate: xy = pixel offset (world/viewport per _FillExtrusionTranslateAnchor).
         _FillExtrusionTranslate ("FillExtrusion Translate (xy px)", Vector) = (0, 0, 0, 0)
         _FillExtrusionTranslateAnchor ("FillExtrusion Translate Anchor", Float) = 0.0

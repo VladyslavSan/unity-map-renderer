@@ -12,10 +12,6 @@
 // height-agnostic) and T5 (uniform vs bake) for the invariant this hook must preserve: changing
 // `_ExtrusionHeight` must NEVER require a re-mesh.
 //
-// fill-extrusion-vertical-gradient (I4): FillExtrusionVerticalGradientFactor darkens the WALL sides toward
-// the base to fake ambient occlusion. It is a per-vertex factor the passes fold into vColor (see the
-// function doc) rather than a term read here — MapVertexModify only moves position.
-//
 // fill-extrusion-translate (I2b): the SAME anchor-aware px→world pattern as Fill_VertexModify, applied
 // AFTER the height extrusion (so the translate's "map" anchor tangent frame reads the ALREADY-extruded
 // vertex — correct for a roof vertex whose position has moved along extrudeUp).
@@ -24,22 +20,6 @@
 // MapPixelsToWorld is shared with Fill and Line via ../PixelsToWorld.hlsl (S23 I2a/I2b) — FillExtrusion is
 // the THIRD carrier; see Shaders/README.md "Shared px→world include".
 #include "../PixelsToWorld.hlsl"
-
-// fill-extrusion-vertical-gradient (I4): the wall-base brightness when the gradient is ON. The spec property
-// is a BOOLEAN (no amount), so this AO look is a fixed constant, derived clean-room and visually tunable.
-#define FILL_EXTRUSION_VGRADIENT_BASE 0.6
-
-// Per-vertex vertical-gradient multiplier for the surface color. Darkens toward the base (t=0) and fades to
-// no-op at the roof (t=1). The passes fold it into vColor in the vertex shader — because the factor is LINEAR
-// in t, per-vertex interpolation equals a per-fragment evaluation across a flat wall quad, so no extra
-// fragment interpolator is needed; the fragment's existing `albedo *= vColor.rgb` applies it. Roof-cap verts
-// carry t=1 (StyledFillExtrusionTileBuilder.WriteFlatRoof/WriteGlobeRoof) ⇒ factor 1 ⇒ the roof is never
-// darkened. Gated by _VerticalGradient (spec default 1 = on; 0 = off ⇒ factor 1 everywhere).
-half FillExtrusionVerticalGradientFactor(float t)
-{
-    float baseBrightness = lerp(1.0, FILL_EXTRUSION_VGRADIENT_BASE, _VerticalGradient); // _VG=0 → 1 (off)
-    return (half)lerp(baseBrightness, 1.0, t);                                          // t=0 base → 1 roof
-}
 
 // Must be #included AFTER FillExtrusion_LitInput.hlsl (which declares the CBUFFER props used below).
 // FillExtrusion.shader includes FillExtrusion_LitInput.hlsl → FillExtrusion_VertexModify.hlsl →

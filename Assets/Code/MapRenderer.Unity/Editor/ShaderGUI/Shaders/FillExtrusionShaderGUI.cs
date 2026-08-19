@@ -32,7 +32,6 @@ namespace MapRenderer.Unity.Editor
             Prop(ShaderProperties.PropertyNames.Opacity,                                    "Opacity (fill-extrusion-opacity)");
             Prop(ShaderProperties.FillExtrusion.PropertyNames.ExtrusionHeight,               "Height (fill-extrusion-height)");
             Prop(ShaderProperties.FillExtrusion.PropertyNames.ExtrusionBase,                 "Base (fill-extrusion-base)");
-            Prop(ShaderProperties.FillExtrusion.PropertyNames.VerticalGradient,              "Vertical Gradient (fill-extrusion-vertical-gradient)");
             Prop(ShaderProperties.FillExtrusion.PropertyNames.FillExtrusionTranslate,        "Translate (fill-extrusion-translate)");
             Prop(ShaderProperties.FillExtrusion.PropertyNames.FillExtrusionTranslateAnchor,  "Translate Anchor");
         }

@@ -6,7 +6,7 @@
 // Copyright © 2020 Unity Technologies ApS
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream: full UnityPerMaterial + fill-extrusion paint properties (_Opacity,
-//   _ExtrusionHeight, _ExtrusionBase, _VerticalGradient, _FillExtrusionTranslate,
+//   _ExtrusionHeight, _ExtrusionBase, _FillExtrusionTranslate,
 //   _FillExtrusionTranslateAnchor); DOTS bridge extended for those props; InitializeStandardLitSurfaceData
 //   preserved verbatim. No fill-pattern texture (the spec has no fill-extrusion-pattern).
 //
@@ -61,15 +61,12 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 // _ExtrusionHeight             — fill-extrusion-height (constant/zoom path; data-driven bakes per-vertex
 //                                 instead — S23 I2b mesh builder). NOT named _Height (reserved).
 // _ExtrusionBase               — fill-extrusion-base (constant/zoom path).
-// _VerticalGradient            — fill-extrusion-vertical-gradient (0/1). Gates the wall-base darkening in
-//                                 FillExtrusionVerticalGradientFactor (FillExtrusion_VertexModify.hlsl).
 // _FillExtrusionTranslate      — fill-extrusion-translate: xy = pixel offset (world/viewport per
 //                                 _FillExtrusionTranslateAnchor). zw unused; packed as float4 for alignment.
 // _FillExtrusionTranslateAnchor — 0 = map world-space, 1 = viewport screen-space.
 float  _Opacity;
 float  _ExtrusionHeight;
 float  _ExtrusionBase;
-float  _VerticalGradient;
 float4 _FillExtrusionTranslate;
 float  _FillExtrusionTranslateAnchor;
 CBUFFER_END
@@ -98,7 +95,6 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float , _ExtrusionHeight)
     UNITY_DOTS_INSTANCED_PROP(float , _ExtrusionBase)
-    UNITY_DOTS_INSTANCED_PROP(float , _VerticalGradient)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillExtrusionTranslate)
     UNITY_DOTS_INSTANCED_PROP(float , _FillExtrusionTranslateAnchor)
 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
@@ -122,7 +118,6 @@ static float  unity_DOTS_Sampled_DetailNormalMapScale;
 static float  unity_DOTS_Sampled_Opacity;
 static float  unity_DOTS_Sampled_ExtrusionHeight;
 static float  unity_DOTS_Sampled_ExtrusionBase;
-static float  unity_DOTS_Sampled_VerticalGradient;
 static float4 unity_DOTS_Sampled_FillExtrusionTranslate;
 static float  unity_DOTS_Sampled_FillExtrusionTranslateAnchor;
 
@@ -144,7 +139,6 @@ void SetupDOTSMapFillExtrusionMaterialPropertyCaches()
     unity_DOTS_Sampled_Opacity              = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _Opacity);
     unity_DOTS_Sampled_ExtrusionHeight      = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _ExtrusionHeight);
     unity_DOTS_Sampled_ExtrusionBase        = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _ExtrusionBase);
-    unity_DOTS_Sampled_VerticalGradient     = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _VerticalGradient);
     unity_DOTS_Sampled_FillExtrusionTranslate       = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float4, _FillExtrusionTranslate);
     unity_DOTS_Sampled_FillExtrusionTranslateAnchor = UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_DEFAULT(float , _FillExtrusionTranslateAnchor);
 }
@@ -173,7 +167,6 @@ void SetupDOTSMapFillExtrusionMaterialPropertyCaches()
 #define _Opacity                          unity_DOTS_Sampled_Opacity
 #define _ExtrusionHeight                  unity_DOTS_Sampled_ExtrusionHeight
 #define _ExtrusionBase                    unity_DOTS_Sampled_ExtrusionBase
-#define _VerticalGradient                 unity_DOTS_Sampled_VerticalGradient
 #define _FillExtrusionTranslate           unity_DOTS_Sampled_FillExtrusionTranslate
 #define _FillExtrusionTranslateAnchor     unity_DOTS_Sampled_FillExtrusionTranslateAnchor
 

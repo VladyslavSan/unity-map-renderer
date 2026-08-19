@@ -336,34 +336,25 @@ namespace MapRenderer.Tests.Structure
         }
 
         [Test]
-        public void FillExtrusionVerticalGradient_FactorDefinedAndFoldedIntoVColor()
+        public void FillExtrusionVerticalGradient_NotRendered_NoWallDarkeningFold()
         {
-            // I4: fill-extrusion-vertical-gradient. The shading term (declared+bound but unused through
-            // I2b/I3) must now (a) exist as a per-vertex factor GATED on _VerticalGradient, and (b) be FOLDED
-            // into vColor by BOTH colour passes, so the fragment's existing `albedo *= vColor.rgb` applies the
-            // wall-base darkening with no extra interpolator. Structural (headless cannot render fragments) —
-            // RED-verify by deleting the vColor fold in a pass, or the helper body.
+            // fill-extrusion-vertical-gradient is deliberately NOT rendered: the maintainer abandoned the
+            // fake-AO wall-base darkening in favour of real ambient + shadows/SSAO (Core still PARSES the
+            // property — this is a shader-side removal only). This is a regression tooth: the darkening must
+            // stay gone and cannot creep back. Structural (headless cannot render fragments) — RED-verify by
+            // re-adding the helper or the vColor fold.
             string vmod = ReadShaderFile(MapExtrusionDir, "FillExtrusion_VertexModify.hlsl");
-            Assert.That(vmod, Does.Contain("half FillExtrusionVerticalGradientFactor(float t)"),
-                "FillExtrusion_VertexModify.hlsl must define the vertical-gradient factor helper.");
-            // Anchor on the executable gate EXPRESSION, not the bare keyword — `_VerticalGradient` also
-            // appears in this file's comments, so a bare Does.Contain would stay green if a regression dropped
-            // the gate but left the comment (both review arms flagged this over-claim).
-            Assert.That(vmod, Does.Contain("lerp(1.0, FILL_EXTRUSION_VGRADIENT_BASE, _VerticalGradient)"),
-                "the vertical-gradient factor must be GATED on _VerticalGradient in the helper BODY " +
-                "(0 ⇒ no darkening), anchored to the executable expression.");
+            Assert.That(vmod, Does.Not.Contain("FillExtrusionVerticalGradientFactor"),
+                "FillExtrusion_VertexModify.hlsl must NOT define the abandoned vertical-gradient factor helper.");
 
             foreach (string pass in new[] { "FillExtrusion_LitForwardPass.hlsl", "FillExtrusion_LitGBufferPass.hlsl" })
             {
                 string text = ReadShaderFile(MapExtrusionDir, pass);
-                int vColorIdx = text.IndexOf("output.vColor = input.color;", StringComparison.Ordinal);
-                int foldIdx   = text.IndexOf("output.vColor.rgb *= FillExtrusionVerticalGradientFactor(", StringComparison.Ordinal);
-                Assert.That(vColorIdx, Is.GreaterThanOrEqualTo(0), $"{pass}: vColor assignment not found.");
-                Assert.That(foldIdx, Is.GreaterThan(vColorIdx),
-                    $"{pass}: the vertical-gradient factor must be folded into vColor AFTER its assignment, so " +
-                    "the fragment's albedo *= vColor.rgb applies wall-base darkening.");
-                Assert.That(text, Does.Contain("FillExtrusionVerticalGradientFactor(input.extrudeUpAndT.w)"),
-                    $"{pass}: the factor must be evaluated at the vertex's t (extrudeUpAndT.w).");
+                // The base per-vertex colour must survive; only the darkening fold on top of it is removed.
+                Assert.That(text, Does.Contain("output.vColor = input.color;"),
+                    $"{pass}: the per-vertex vColor assignment must remain.");
+                Assert.That(text, Does.Not.Contain("FillExtrusionVerticalGradientFactor"),
+                    $"{pass}: the vertical-gradient darkening fold must NOT be applied to vColor.");
             }
         }
 

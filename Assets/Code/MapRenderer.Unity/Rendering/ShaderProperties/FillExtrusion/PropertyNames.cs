@@ -21,10 +21,6 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.FillExtrusion
         /// instead — S23 I2b).</summary>
         public const string ExtrusionBase = "_ExtrusionBase";
 
-        /// <summary>fill-extrusion-vertical-gradient. Declared + bound (I2b); the wall-darkening shading
-        /// term itself is I4 — see <c>FillExtrusion_VertexModify.hlsl</c>'s class doc.</summary>
-        public const string VerticalGradient = "_VerticalGradient";
-
         /// <summary>fill-extrusion-translate: xy = pixel offset (world/viewport per
         /// <see cref="FillExtrusionTranslateAnchor"/>). Deliberately NOT named <c>_FillTranslate</c> —
         /// a fill-extrusion material must never read fill's translate uniform (the two layers are

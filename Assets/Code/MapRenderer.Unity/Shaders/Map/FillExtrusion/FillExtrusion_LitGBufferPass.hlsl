@@ -212,9 +212,6 @@ Varyings LitGBufferPassVertex(Attributes input)
 
     // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
-    // fill-extrusion-vertical-gradient (I4): fold the wall-base darkening into vColor so the fragment's
-    // `albedo *= vColor.rgb` applies it with no extra interpolator (see FillExtrusionVerticalGradientFactor).
-    output.vColor.rgb *= FillExtrusionVerticalGradientFactor(input.extrudeUpAndT.w);
 
     return output;
 }

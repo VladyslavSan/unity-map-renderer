@@ -120,6 +120,12 @@ namespace MapRenderer.Unity.Rendering.Map
             // 3. Ensure a directional light exists in the scene (for URP Lit fill shader).
             EnsureDirectionalLight();
 
+            // 3.5. Ensure the scene has a real ambient probe — a scene whose environment lighting was
+            //      never generated leaves fully-shadowed faces (e.g. fill-extrusion walls facing away
+            //      from the sun) pure black, since URP Lit's indirect term is the only fill they get.
+            //      After EnsureDirectionalLight so a procedural skybox convolves against the real sun.
+            EnsureEnvironmentLighting();
+
             // 4. Resolve the style URI and load it. SetStyle is async (fetches the style doc + any
             //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
             //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
@@ -262,6 +268,29 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Ensures <see cref="RenderSettings.ambientProbe"/> is non-degenerate, so lit map geometry gets
+        /// indirect fill wherever the directional light's <c>N·L</c> is ≤ 0 (otherwise those faces —
+        /// e.g. fill-extrusion walls facing away from the sun — render pure black; URP Lit has no other
+        /// source of light there). Guarded: only recomputes environment lighting when the probe's DC/L0
+        /// term is (near-)zero, i.e. environment lighting was never generated for this scene — a host
+        /// scene that already baked or generated its own probe is left untouched.
+        ///
+        /// <para>Called once, at startup (from <see cref="Start"/>, after the directional light is ensured
+        /// so a procedural skybox convolves against the real sun). Nothing in this project changes the
+        /// skybox or ambient settings after startup, so a single call suffices; a future time-of-day or
+        /// style-driven-sky feature that mutates <see cref="RenderSettings"/> at runtime would own
+        /// re-calling this.</para>
+        /// </summary>
+        internal static void EnsureEnvironmentLighting()
+        {
+            var probe = RenderSettings.ambientProbe;
+            double dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
+            if (dcTerm > 1e-6) return; // already has a real probe — don't clobber a host's baked lighting
+
+            DynamicGI.UpdateEnvironment();
+        }
 
         /// <summary>
         /// Ensures at least one directional light is present in the scene so the URP Lit fill shader

@@ -11,7 +11,6 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.FillExtrusion
     {
         public static readonly int ExtrusionHeight               = Shader.PropertyToID(PropertyNames.ExtrusionHeight);
         public static readonly int ExtrusionBase                 = Shader.PropertyToID(PropertyNames.ExtrusionBase);
-        public static readonly int VerticalGradient               = Shader.PropertyToID(PropertyNames.VerticalGradient);
         public static readonly int FillExtrusionTranslate         = Shader.PropertyToID(PropertyNames.FillExtrusionTranslate);
         public static readonly int FillExtrusionTranslateAnchor   = Shader.PropertyToID(PropertyNames.FillExtrusionTranslateAnchor);
     }

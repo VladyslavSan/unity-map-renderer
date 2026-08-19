@@ -166,10 +166,6 @@ namespace MapRenderer.Unity.Rendering.Materials
             else
                 mat.SetFloat(ShaderProperties.FillExtrusion.PropertyId.ExtrusionBase, 0f);
 
-            // fill-extrusion-vertical-gradient (0/1): gates the wall-base darkening consumed in the shader
-            // (FillExtrusionVerticalGradientFactor). Core collapses any data-driven value to the 1.0 default.
-            applier.BindFloat(paint.VerticalGradient, ShaderProperties.FillExtrusion.PropertyId.VerticalGradient);
-
             // fill-extrusion-translate: a px offset consumed through FillExtrusion_VertexModify's
             // MapPixelsToWorld — same device-px space fill-translate/line-translate live in (S107).
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslate);
