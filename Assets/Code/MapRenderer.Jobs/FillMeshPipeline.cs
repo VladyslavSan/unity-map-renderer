@@ -289,23 +289,79 @@ namespace MapRenderer.Jobs
             }
 
             // ── Stage 3: per-polygon earcut jobs. ──────────────────────────────────────────────────
-            var perPolyVerts         = new NativeArray<double2>[polyCount];
-            var perPolySortedHoleCnt = new NativeArray<int>[polyCount];
-            var perPolyIdxCount      = new NativeArray<int>[polyCount];
-            var perPolyForceClip     = new NativeArray<int>[polyCount];
-            var scratchVx            = new NativeArray<double>[polyCount];
-            var scratchVy            = new NativeArray<double>[polyCount];
-            var scratchPrev          = new NativeArray<int>[polyCount];
-            var scratchNext          = new NativeArray<int>[polyCount];
-            var scratchIsBridge      = new NativeArray<bool>[polyCount];
-            var scratchRemoved       = new NativeArray<bool>[polyCount];
-            var scratchIsEar         = new NativeArray<bool>[polyCount];
-            var perPolyIdxArrays     = new NativeArray<int>[polyCount];
-            var perPolyMergedVertCnt = new NativeArray<int>[polyCount]; // EarcutJob.OutMergedVertexCount (Stage 3)
-            // Plain int scratch → NativeArray (off the GC heap, allocation ladder rung 2). Unlike the 13
-            // NativeArray<T>[] handle-arrays above — managed arrays OF native handles, which can't nest — these
-            // hold plain ints, so the native form is a straight swap. Disposed after the aggregation below.
-            var perPolyMergedVC   = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            // Flattened kill (highest measured build allocator): this used to be 13
+            // `new NativeArray<T>[polyCount]` handle-arrays — managed arrays holding one NativeArray PER
+            // POLYGON (~43k tiny native allocations across a real layer). Every per-polygon stream below is
+            // now ONE flat NativeArray sized by a prefix-sum offset table, with each polygon's slice taken
+            // as a GetSubArray VIEW — no managed array, no per-polygon native allocation, allocation count
+            // independent of polyCount.
+            //
+            // Two passes: (1) sizing — pure arithmetic over the already-computed ring/hole metadata,
+            // building the four offset tables; (2) populate — the real per-polygon work (hole sort + vertex
+            // copy), writing into the flat buffers at those offsets. Each polygon's index stream is a
+            // GetSubArray VIEW of ONE shared flat OutIndices buffer (scoped to that polygon's idxOffsets
+            // slice, EarcutJob writing at OutIndexOffset 0 within it) — so a would-be overrun trips the
+            // slice's bounds check instead of silently corrupting the next polygon's region, the same
+            // backstop every sibling stream keeps.
+            var vertOffsets    = new NativeArray<int>(polyCount + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var holeCntOffsets = new NativeArray<int>(polyCount + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var scratchOffsets = new NativeArray<int>(polyCount + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var idxOffsets     = new NativeArray<int>(polyCount + 1, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            vertOffsets[0] = holeCntOffsets[0] = scratchOffsets[0] = idxOffsets[0] = 0;
+            for (int pi = 0; pi < polyCount; pi++)
+            {
+                int outerRi   = polyOuterIdx[pi];
+                int outerLen  = geometry.RingOffsets[outerRi + 1] - geometry.RingOffsets[outerRi];
+                int holeCount = polyHoleCount[pi];
+                int hStart    = polyHoleStart[pi];
+
+                int holeVertTotal = 0;
+                for (int hi = 0; hi < holeCount; hi++)
+                {
+                    int hri = holeRingIdxs[hStart + hi];
+                    holeVertTotal += geometry.RingOffsets[hri + 1] - geometry.RingOffsets[hri];
+                }
+
+                // EarcutJob scratch capacity (mesh-triangulation-robustness Stage 3): baseCap = polyVC +
+                // 2 per hole (bridge-copy slots) is the deterministic merged-ring size on clean input —
+                // matches managed Earcut's initial `capacity` exactly. The cure → split → clean-drop
+                // cascade's SplitPolygon adds 2 verts per split, bounded by EarcutJob.MaxSplits (512,
+                // mirrored exactly from managed Earcut.MaxSplits) — but splits are a FAILURE-PATH escape
+                // only (0 on the clean corpus; see EarcutJob class doc). Pre-size a bounded, tile-
+                // appropriate SPLIT HEADROOM rather than the worst-case 2*MaxSplits (which would double
+                // every polygon's scratch footprint for a path that never fires on real input); on
+                // exhaustion EarcutJob.TrySplit refuses the split (never writes past these arrays) and the
+                // job drops the locus cleanly instead — see EarcutJob's OutForceClipCount doc.
+                int polyVC        = outerLen + holeVertTotal;
+                int baseCap       = polyVC + holeCount * 2;
+                int splitBudget   = math.min(EarcutJob.MaxSplits, math.max(8, holeCount * 4));
+                int scratchCap    = baseCap + splitBudget * 2;
+                int idxCap        = scratchCap > 2 ? (scratchCap - 2) * 3 : 3;
+                int sortedHoleLen = holeCount > 0 ? holeCount : 1;
+
+                vertOffsets[pi + 1]    = vertOffsets[pi]    + polyVC;
+                holeCntOffsets[pi + 1] = holeCntOffsets[pi] + sortedHoleLen;
+                scratchOffsets[pi + 1] = scratchOffsets[pi] + scratchCap;
+                idxOffsets[pi + 1]     = idxOffsets[pi]     + idxCap;
+            }
+
+            var flatPolyVerts       = new NativeArray<double2>(vertOffsets[polyCount],   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatSortedHoleCnt   = new NativeArray<int>(holeCntOffsets[polyCount],    Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            var flatIdxArrays       = new NativeArray<int>(idxOffsets[polyCount],        Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchVx       = new NativeArray<double>(scratchOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchVy       = new NativeArray<double>(scratchOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchPrev     = new NativeArray<int>(scratchOffsets[polyCount],    Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchNext     = new NativeArray<int>(scratchOffsets[polyCount],    Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchIsBridge = new NativeArray<bool>(scratchOffsets[polyCount],   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchRemoved  = new NativeArray<bool>(scratchOffsets[polyCount],   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            var flatScratchIsEar    = new NativeArray<bool>(scratchOffsets[polyCount],   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+            // Plain per-polygon scalar outputs → flat NativeArrays sized polyCount (stride 1, no offset
+            // table needed): EarcutJob writes each directly through a 1-length GetSubArray view at index pi.
+            var perPolyIdxCount  = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            var perPolyForceClip = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+            var perPolyMergedVC  = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             var perPolyFeatureIdx = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory); // S89 D2: feature index of each polygon (for per-vertex color)
 
             // Per-polygon allocation kill: the hole-ring sort used a `new int[holeCount]` MANAGED array per
@@ -339,13 +395,9 @@ namespace MapRenderer.Jobs
                 if (holeCount > 1)
                     holeRIs.GetSubArray(0, holeCount).Sort(holeComparer);
 
-                // Build flat poly verts: outer + holes in sorted order.
-                int polyVC = outerLen;
-                for (int hi = 0; hi < holeCount; hi++)
-                    polyVC += geometry.RingOffsets[holeRIs[hi] + 1] - geometry.RingOffsets[holeRIs[hi]];
-
-                var polyVerts        = new NativeArray<double2>(polyVC, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var sortedHoleCounts = new NativeArray<int>(holeCount > 0 ? holeCount : 1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+                // This polygon's slice of the flat buffers — sized by the sizing pass above.
+                var polyVerts        = flatPolyVerts.GetSubArray(vertOffsets[pi], vertOffsets[pi + 1] - vertOffsets[pi]);
+                var sortedHoleCounts = flatSortedHoleCnt.GetSubArray(holeCntOffsets[pi], holeCntOffsets[pi + 1] - holeCntOffsets[pi]);
 
                 for (int i = 0; i < outerLen; i++)
                     polyVerts[i] = geometry.Vertices[outerStart + i];
@@ -360,37 +412,6 @@ namespace MapRenderer.Jobs
                     for (int i = 0; i < hLen; i++)
                         polyVerts[vPos++] = geometry.Vertices[hBegin + i];
                 }
-
-                perPolyVerts[pi]         = polyVerts;
-                perPolySortedHoleCnt[pi] = sortedHoleCounts;
-
-                // EarcutJob scratch capacity (mesh-triangulation-robustness Stage 3): baseCap = polyVC +
-                // 2 per hole (bridge-copy slots) is the deterministic merged-ring size on clean input —
-                // matches managed Earcut's initial `capacity` exactly. The cure → split → clean-drop
-                // cascade's SplitPolygon adds 2 verts per split, bounded by EarcutJob.MaxSplits (512,
-                // mirrored exactly from managed Earcut.MaxSplits) — but splits are a FAILURE-PATH escape
-                // only (0 on the clean corpus; see EarcutJob class doc). Pre-size a bounded, tile-
-                // appropriate SPLIT HEADROOM rather than the worst-case 2*MaxSplits (which would double
-                // every polygon's scratch footprint for a path that never fires on real input); on
-                // exhaustion EarcutJob.TrySplit refuses the split (never writes past these arrays) and the
-                // job drops the locus cleanly instead — see EarcutJob's OutForceClipCount doc.
-                int baseCap           = polyVC + holeCount * 2;
-                int splitBudget       = math.min(EarcutJob.MaxSplits, math.max(8, holeCount * 4));
-                int splitHeadroomVerts = splitBudget * 2;
-                int scratchCap        = baseCap + splitHeadroomVerts;
-                int idxCap            = scratchCap > 2 ? (scratchCap - 2) * 3 : 3;
-                perPolyMergedVertCnt[pi] = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-
-                perPolyIdxArrays[pi] = new NativeArray<int>(idxCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                perPolyIdxCount[pi]  = new NativeArray<int>(1,      Allocator.Persistent, NativeArrayOptions.ClearMemory);
-                perPolyForceClip[pi] = new NativeArray<int>(1,      Allocator.Persistent, NativeArrayOptions.ClearMemory);
-                scratchVx[pi]        = new NativeArray<double>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchVy[pi]        = new NativeArray<double>(scratchCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchPrev[pi]      = new NativeArray<int>(scratchCap,    Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchNext[pi]      = new NativeArray<int>(scratchCap,    Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchIsBridge[pi]  = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchRemoved[pi]   = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                scratchIsEar[pi]     = new NativeArray<bool>(scratchCap,   Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             }
 
             holeRIs.Dispose(); // reused only within the collect/sort loop above; the earcut stage never reads it.
@@ -403,33 +424,34 @@ namespace MapRenderer.Jobs
                 {
                     int outerLen  = geometry.RingOffsets[polyOuterIdx[pi] + 1] - geometry.RingOffsets[polyOuterIdx[pi]];
                     int holeCount = polyHoleCount[pi];
+                    int sOff = scratchOffsets[pi], sLen = scratchOffsets[pi + 1] - sOff;
+
                     new EarcutJob
                     {
-                        PolyVertices         = perPolyVerts[pi],
+                        PolyVertices         = flatPolyVerts.GetSubArray(vertOffsets[pi], vertOffsets[pi + 1] - vertOffsets[pi]),
                         OuterCount           = outerLen,
-                        SortedHoleCounts     = perPolySortedHoleCnt[pi],
+                        SortedHoleCounts     = flatSortedHoleCnt.GetSubArray(holeCntOffsets[pi], holeCntOffsets[pi + 1] - holeCntOffsets[pi]),
                         HoleCount            = holeCount,
-                        OutIndices           = perPolyIdxArrays[pi],
+                        OutIndices           = flatIdxArrays.GetSubArray(idxOffsets[pi], idxOffsets[pi + 1] - idxOffsets[pi]),
                         OutIndexOffset       = 0,
-                        OutIndexCount        = perPolyIdxCount[pi],
-                        OutForceClipCount    = perPolyForceClip[pi],
-                        OutMergedVertexCount = perPolyMergedVertCnt[pi],
-                        Vx                   = scratchVx[pi],
-                        Vy                   = scratchVy[pi],
-                        Prev                 = scratchPrev[pi],
-                        Next                 = scratchNext[pi],
-                        IsBridgeCopy         = scratchIsBridge[pi],
-                        Removed              = scratchRemoved[pi],
-                        IsEar                = scratchIsEar[pi],
+                        OutIndexCount        = perPolyIdxCount.GetSubArray(pi, 1),
+                        OutForceClipCount    = perPolyForceClip.GetSubArray(pi, 1),
+                        OutMergedVertexCount = perPolyMergedVC.GetSubArray(pi, 1),
+                        Vx                   = flatScratchVx.GetSubArray(sOff, sLen),
+                        Vy                   = flatScratchVy.GetSubArray(sOff, sLen),
+                        Prev                 = flatScratchPrev.GetSubArray(sOff, sLen),
+                        Next                 = flatScratchNext.GetSubArray(sOff, sLen),
+                        IsBridgeCopy         = flatScratchIsBridge.GetSubArray(sOff, sLen),
+                        Removed              = flatScratchRemoved.GetSubArray(sOff, sLen),
+                        IsEar                = flatScratchIsEar.GetSubArray(sOff, sLen),
                     }.Run();
 
                     // Read the job's ACTUAL final merged vertex count (base bridged count + any
                     // split-added verts) — never assume the pre-sized scratch capacity, since the split
-                    // headroom typically goes unused (scratchVx[pi] tail beyond this is unwritten scratch,
-                    // not part of the triangulation). Never-fired backstop: EarcutJob.TrySplit's own
-                    // capacity guard makes this exceeding scratchVx[pi].Length unreachable.
-                    perPolyMergedVC[pi] = perPolyMergedVertCnt[pi][0];
-                    EnsureCapacity(perPolyMergedVC[pi], scratchVx[pi].Length, "earcut merged vertex (per polygon)");
+                    // headroom typically goes unused (the flat scratch tail beyond this is unwritten
+                    // scratch, not part of the triangulation). Never-fired backstop: EarcutJob.TrySplit's
+                    // own capacity guard makes this exceeding sLen unreachable.
+                    EnsureCapacity(perPolyMergedVC[pi], sLen, "earcut merged vertex (per polygon)");
                 }
             }
 
@@ -441,8 +463,8 @@ namespace MapRenderer.Jobs
             holeRingIdxs.Dispose();
 
             // ── Aggregate: build global merged-vertex and index arrays. ───────────────────────────
-            // The EarcutJob writes vertices into scratchVx/Vy[0..mergedVC-1] and indices into
-            // perPolyIdxArrays[pi][0..idxCount-1]. We concatenate these per-polygon arrays into
+            // EarcutJob wrote vertices into flatScratchVx/Vy[scratchOffsets[pi] .. +mergedVC) and indices
+            // into flatIdxArrays[idxOffsets[pi] .. +idxCount). We concatenate these per-polygon slices into
             // global arrays, offsetting indices by the running global vertex base.
             int totalMergedVerts = 0;
             int totalIdxCount    = 0;
@@ -450,8 +472,8 @@ namespace MapRenderer.Jobs
             for (int pi = 0; pi < polyCount; pi++)
             {
                 totalMergedVerts += perPolyMergedVC[pi];
-                totalIdxCount    += perPolyIdxCount[pi][0];
-                totalForceClips  += perPolyForceClip[pi][0];
+                totalIdxCount    += perPolyIdxCount[pi];
+                totalForceClips  += perPolyForceClip[pi];
             }
 
             var outMergedVerts = new NativeArray<double2>(totalMergedVerts, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -472,38 +494,38 @@ namespace MapRenderer.Jobs
             for (int pi = 0; pi < polyCount; pi++)
             {
                 int mergedVC = perPolyMergedVC[pi];
-                int idxCount = perPolyIdxCount[pi][0];
+                int idxCount = perPolyIdxCount[pi];
                 int featIdx  = perPolyFeatureIdx[pi];
+                int sOff     = scratchOffsets[pi];
+                int iOff     = idxOffsets[pi];
 
                 for (int i = 0; i < mergedVC; i++)
                 {
-                    outMergedVerts[globalVertBase + i] = new double2(scratchVx[pi][i], scratchVy[pi][i]);
+                    outMergedVerts[globalVertBase + i] = new double2(flatScratchVx[sOff + i], flatScratchVy[sOff + i]);
                     outVertexFeat[globalVertBase + i]  = featIdx; // S89 D2: per-vertex feature index for color
                 }
 
                 for (int i = 0; i < idxCount; i++)
-                    outIndices[globalIdxBase + i] = perPolyIdxArrays[pi][i] + globalVertBase;
+                    outIndices[globalIdxBase + i] = flatIdxArrays[iOff + i] + globalVertBase;
 
                 globalVertBase += mergedVC;
                 globalIdxBase  += idxCount;
             }
 
-            // Dispose per-polygon scratch.
-            for (int pi = 0; pi < polyCount; pi++)
-            {
-                perPolyVerts[pi].Dispose();
-                perPolySortedHoleCnt[pi].Dispose();
-                perPolyIdxArrays[pi].Dispose();
-                perPolyIdxCount[pi].Dispose();
-                perPolyForceClip[pi].Dispose();
-                perPolyMergedVertCnt[pi].Dispose();
-                scratchVx[pi].Dispose(); scratchVy[pi].Dispose();
-                scratchPrev[pi].Dispose(); scratchNext[pi].Dispose();
-                scratchIsBridge[pi].Dispose(); scratchRemoved[pi].Dispose(); scratchIsEar[pi].Dispose();
-            }
+            // Dispose per-polygon scratch — now a fixed, small set of flat buffers (was 13 handle-arrays ×
+            // polyCount separate NativeArray disposals).
+            flatPolyVerts.Dispose();
+            flatSortedHoleCnt.Dispose();
+            flatIdxArrays.Dispose();
+            flatScratchVx.Dispose(); flatScratchVy.Dispose();
+            flatScratchPrev.Dispose(); flatScratchNext.Dispose();
+            flatScratchIsBridge.Dispose(); flatScratchRemoved.Dispose(); flatScratchIsEar.Dispose();
+            vertOffsets.Dispose(); holeCntOffsets.Dispose(); scratchOffsets.Dispose(); idxOffsets.Dispose();
 
+            perPolyIdxCount.Dispose();
+            perPolyForceClip.Dispose();
             perPolyMergedVC.Dispose();
-            perPolyFeatureIdx.Dispose(); // both are fully read by the aggregation above; the project stage never touches them.
+            perPolyFeatureIdx.Dispose(); // all four are fully read by the aggregation above; the project stage never touches them.
 
             // ── Stage 4: tile→geodetic, then project to world space (S91). ─────────────────────────
             {
