@@ -12,8 +12,13 @@
 // array exists anywhere in the decode path any more.
 //
 // GATE-MEASURED (this exact tooth — 20-iteration warmed loop, Gen0-guarded — on sample-tile.bytes):
-//   - after the flatten (GREEN):        ~406,000 B/tile (two runs: 405,913 and 408,371 — stable to ~2.5 KB).
+//   - after the flatten (GREEN):        ~406,000 B/tile (two runs: 405,913 and 408,371; a later branch read
+//     418,406 — run-to-run spread ~12 KB, wider than the ~2.5 KB first seen).
 //   - per-feature uint[] reinstated (RED): 696,524 B/tile.
+//   - production DENSE storage path:     105,267 B/tile — pinned by
+//     Decode_SampleTile_DenseStorage_AllocatesFarUnderDictionary (250 KB ceiling; its RED side IS the
+//     ~406–418 KB Dictionary figure above). IMPORTANT: the ~406/697 numbers here are the DICTIONARY A/B
+//     oracle (the no-arg Decode default), NOT what production runs — production defaults to Dense (105 KB).
 // The managed geometry-array elimination therefore saves ~291 KB/tile (~42% of the decode's managed heap) —
 // the single biggest decode allocation site, MEASURED not estimated. (An earlier recon ESTIMATE put the
 // baseline at ~489 KB and the geometry share at ~318 KB / ~65%; that estimate was imprecise — the two
@@ -44,6 +49,12 @@ namespace MapRenderer.Tests.Mvt
         // ~2.5 KB run-to-run variance, so this neither false-reds a healthy run nor false-greens a partial
         // fix that still mints the per-feature uint[] anywhere in Decode. See the file header for both runs.
         private const long Ceiling = 550_000;
+
+        // Ceiling at the MEASURED midpoint of Dense green (105,267 B/tile) and a Dictionary RED-verify on the
+        // SAME tooth (418,406 B/tile on-branch — Dense's RED-verify is "force Dictionary", which is exactly
+        // the Dictionary tooth's own path): ~145 KB above green, ~168 KB below red — both clear the ~100 KB
+        // meter noise floor and the observed run-to-run variance. See the file header's GATE-MEASURED block.
+        private const long DenseCeiling = 250_000;
 
         private static byte[] LoadFixture()
         {
@@ -84,13 +95,17 @@ namespace MapRenderer.Tests.Mvt
         /// <summary>Bytes/decode over a warmed loop, guarded against a Gen0 collection firing inside the
         /// measurement window. The decoded tile is disposed INSIDE the loop: its layers mint
         /// Allocator.Persistent native buffers that GC.GetTotalMemory cannot see, but leaking them across N
-        /// iterations still costs real process memory, so each iteration must clean up after itself.</summary>
-        private static long BytesPerDecode(byte[] bytes, int iterations)
+        /// iterations still costs real process memory, so each iteration must clean up after itself.
+        /// <paramref name="storage"/> selects the <see cref="IMvtPropertyStore"/> under measurement — the
+        /// warm-up loop uses the SAME storage as the measured loop, or the other store's JIT/first-touch
+        /// allocation lands inside the measured window and inflates the reading.</summary>
+        private static long BytesPerDecode(
+            byte[] bytes, int iterations, MvtPropertyStorage storage = MvtPropertyStorage.Dictionary)
         {
             // Warm-up: JIT compilation and any one-shot first-touch allocation must not land in the window.
             for (int w = 0; w < 3; w++)
             {
-                var warm = MvtDecoder.Decode(FixtureTileId, bytes);
+                var warm = MvtDecoder.Decode(FixtureTileId, bytes, storage);
                 warm.Dispose();
             }
 
@@ -103,7 +118,7 @@ namespace MapRenderer.Tests.Mvt
 
             for (int i = 0; i < iterations; i++)
             {
-                var tile = MvtDecoder.Decode(FixtureTileId, bytes);
+                var tile = MvtDecoder.Decode(FixtureTileId, bytes, storage);
                 tile.Dispose();
             }
 
@@ -129,12 +144,38 @@ namespace MapRenderer.Tests.Mvt
         {
             byte[] bytes = LoadFixture();
 
-            long bytesPerDecode = BytesPerDecode(bytes, iterations: 20);
+            long bytesPerDecode = BytesPerDecode(bytes, iterations: 20, storage: MvtPropertyStorage.Dictionary);
+            TestContext.WriteLine($"MEASURE Dictionary bytesPerDecode={bytesPerDecode}");
 
             Assert.LessOrEqual(bytesPerDecode, Ceiling,
                 $"MvtDecoder.Decode allocated {bytesPerDecode} B/tile on sample-tile.bytes — must stay under " +
                 $"the {Ceiling} B ceiling. 2a removes the per-feature geometry uint[] (the largest single " +
                 "site); the residual is tags/Value-table/husks/strings, left to a later retention-pooling stage.");
+        }
+
+        /// <summary>
+        /// Locks in the already-landed Dense storage win (production default since <c>MapViewConfig.cs</c>'s
+        /// <c>PropertyStorage</c> initializer — see <see cref="MapRenderer.Unity.Rendering.Map.MapViewConfig"/>):
+        /// Dense keeps MVT's dense (keyIdx,valIdx) tag pairs instead of expanding each feature into a
+        /// <c>Dictionary&lt;string,Value&gt;</c>, eliminating that per-feature allocation. This tooth measures
+        /// the decode path directly with <see cref="MvtPropertyStorage.Dense"/>; it does NOT exercise the
+        /// production wiring that selects Dense — see <c>ProductionConfig_DefaultsToDensePropertyStorage</c>
+        /// in <c>ProductionPropertyStorageDefaultTests</c> for the tooth that guards the wiring end-to-end.
+        /// </summary>
+        [Test]
+        public void Decode_SampleTile_DenseStorage_AllocatesFarUnderDictionary()
+        {
+            byte[] bytes = LoadFixture();
+
+            long bytesPerDecode = BytesPerDecode(bytes, iterations: 20, storage: MvtPropertyStorage.Dense);
+            TestContext.WriteLine($"MEASURE Dense bytesPerDecode={bytesPerDecode}");
+
+            Assert.LessOrEqual(bytesPerDecode, DenseCeiling,
+                $"MvtDecoder.Decode with Dense property storage allocated {bytesPerDecode} B/tile on " +
+                $"sample-tile.bytes — must stay under the {DenseCeiling} B ceiling. Dense drops the " +
+                "per-feature Dictionary<string,Value> that the Dictionary-path tooth above still measures; " +
+                "regressing back toward that figure means the Dense store started allocating per-feature " +
+                "managed state again.");
         }
     }
 }
