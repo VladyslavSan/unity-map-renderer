@@ -852,6 +852,162 @@ namespace MapRenderer.Tests.Meshing
                 $"triangles + 1 closing triangle each). Found {fanTrianglesChecked}.");
         }
 
+        // ─── line-round-limit: shallow round joins collapse to miter ─────────────────────────
+        //
+        // docs/line-rendering-design.md §3 item — line-round-limit was parsed but had zero production
+        // consumers; the round dispatch emitted the fan unconditionally. f = 1/|cos(θ/2)| is the SAME miter
+        // factor NeedsBevel already gates the miter path with; roundLimit (default 1.05) and miterLimit
+        // (default 2.0) bound disjoint regimes of it from opposite ends — round→miter at f ≤ 1.05, miter→bevel
+        // at f > 2.0, with a round fan only in between. T1/T2 below pin the two ends of that regime; together
+        // they discriminate the correct predicate from both degenerate implementations ("always miter" and
+        // "always fan").
+
+        [Test]
+        public void ShallowRoundJoin_CollapsesToMiter_MatchesMiterPathExactly()
+        {
+            // 20° turn: n1/n2 from tangents (1,0) and (cos20°,sin20°). Half-angle 10° ⇒ f = 1/cos10° ≈
+            // 1.0154 < roundLimit(1.05) ⇒ shallow ⇒ must collapse to the miter path, not emit a fan.
+            var pts = new[]
+            {
+                Pt(0, 0), Pt(10, 0), Pt(19.396926207859085, 3.4202014332566878),
+            };
+
+            var round = LineTessellator.Triangulate(
+                pts, JoinType.Round, CapType.Butt, miterLimit: 10.0, roundSegments: 4, roundLimit: 1.05);
+            var miter = LineTessellator.Triangulate(
+                pts, JoinType.Miter, CapType.Butt, miterLimit: 10.0);
+
+            // OUTER-side topology equals the miter path: no fan intermediates, same vertex/index counts.
+            Assert.AreEqual(miter.Vertices.Length, round.Vertices.Length,
+                $"A shallow round join (f≈1.0154 ≤ roundLimit=1.05) must collapse to the miter path's vertex " +
+                $"count (no fan). miter={miter.Vertices.Length}, round={round.Vertices.Length}.");
+            Assert.AreEqual(miter.Indices.Length, round.Indices.Length,
+                $"A shallow round join must collapse to the miter path's index count (no fan triangles). " +
+                $"miter={miter.Indices.Length}, round={round.Indices.Length}.");
+
+            // Same emission order (start cap, join, last seg) at every join type ⇒ vertex-for-vertex identical
+            // positions/normals when collapsed, including the single outer vertex sitting at the miter factor
+            // along the bisector (ComputeMiterNormals — the same helper the miter path already calls).
+            for (int i = 0; i < miter.Vertices.Length; i++)
+            {
+                AssertNearlyEqual(miter.Vertices[i].Normal.x, round.Vertices[i].Normal.x, 1e-9,
+                    $"vertex[{i}].Normal.x: collapsed round must match the miter path exactly.");
+                AssertNearlyEqual(miter.Vertices[i].Normal.y, round.Vertices[i].Normal.y, 1e-9,
+                    $"vertex[{i}].Normal.y: collapsed round must match the miter path exactly.");
+                Assert.AreEqual(miter.Vertices[i].Side, round.Vertices[i].Side,
+                    $"vertex[{i}].Side: collapsed round must match the miter path exactly.");
+            }
+        }
+
+        [Test]
+        public void SharpRoundJoin_PreservesFan_RimAtHalfWidthRadius()
+        {
+            // 90° turn: f = √2 ≈ 1.414 ≫ roundLimit(1.05) ⇒ fan preserved. Exercised explicitly through the
+            // new roundLimit parameter (not just the pre-existing default) so an "always collapse to miter"
+            // defect fails here too, not only a pre-existing untouched test.
+            var pts    = new[] { Pt(0, 0), Pt(10, 0), Pt(10, 10) };
+            var corner = Pt(10, 0);
+            const double halfWidth = 2.0;
+
+            var r = LineTessellator.Triangulate(
+                pts, JoinType.Round, CapType.Butt, miterLimit: 2.0, roundSegments: 4, roundLimit: 1.05);
+
+            // Convex-side (outer) rim at the corner: arcStart + 4 intermediates + arcEnd = 6 vertices, all
+            // Side==-1 for this left turn (mirrors JoinSide_BevelAndRound_ChamferIsOnTheConvexSide's T1c
+            // count). A collapsed-to-miter join would emit at most 1 vertex at Side==-1 here (the single
+            // right/outer miter vertex), so the count alone discriminates "always miter" from "fan preserved".
+            var rim = CornerVerticesBySide(r.Vertices, corner, -1f);
+            Assert.AreEqual(6, rim.Count,
+                $"Sharp round join must still emit the 6-vertex convex rim (arcStart+4 intermediates+arcEnd). " +
+                $"Found {rim.Count} — if 1, the join collapsed to a miter it should not have.");
+
+            // Region-membership: every rim vertex extrudes to exactly halfWidth from the corner — the arc
+            // radius — not the miter tip's greater reach (1.414·halfWidth at this angle).
+            foreach (int idx in rim)
+            {
+                double2 extruded = Extrude(r.Vertices[idx]);
+                double dist = VecLen(new double2(extruded.x - corner.x, extruded.y - corner.y));
+                AssertNearlyEqual(halfWidth, dist, 1e-6,
+                    $"Rim vertex[{idx}] is {dist:G17} from the corner; must sit at exactly halfWidth=" +
+                    $"{halfWidth} (the arc radius), not the miter tip's reach.");
+            }
+        }
+
+        [Test]
+        public void RoundLimit_ExceedsMiterLimit_CascadesToBevel_NotUnboundedMiter()
+        {
+            // roundLimit(3.0) and miterLimit(2.0) are independently style-settable with NO cross-clamp: a
+            // corner with f=2.5 sits BETWEEN them (shallow enough to collapse the fan per roundLimit, but
+            // still too sharp for the collapsed miter per miterLimit). The round→miter→bevel cascade must
+            // land on bevel here, not fall through to an unbounded ComputeMiterNormals spike (the un-fixed
+            // path reads |normal|≈2.5).
+            //
+            // Constructed so f = 1/cosHalf = 2.5 exactly: cosHalf=0.4, turn = 2·arccos(0.4) ≈ 132.84°.
+            // n1=(0,1) (from tangent0=(1,0)); tangent1=(cos(turn),sin(turn))=(-0.68, 0.7332121111929344)
+            // (cos(turn)=1−2·sinHalf²=1−2·0.84=−0.68 exactly, since cosHalf²=0.16 ⇒ sinHalf²=0.84).
+            var pts    = new[] { Pt(0, 0), Pt(10, 0), Pt(3.2, 7.332121111929344) };
+            var corner = Pt(10, 0);
+
+            var r = LineTessellator.Triangulate(
+                pts, JoinType.Round, CapType.Butt, miterLimit: 2.0, roundSegments: 4, roundLimit: 3.0);
+
+            // Bevel topology at the corner: 3 join vertices (outerA, innerV, outerB), not 2 (miter/collapsed).
+            var cornerVerts = new List<int>();
+            for (int i = 0; i < r.Vertices.Length; i++)
+            {
+                double2 pos = r.Vertices[i].Position;
+                if (Math.Abs(pos.x - corner.x) < 1e-9 && Math.Abs(pos.y - corner.y) < 1e-9)
+                    cornerVerts.Add(i);
+            }
+            Assert.AreEqual(3, cornerVerts.Count,
+                $"A round join whose collapsed miter (f=2.5) exceeds miterLimit=2.0 must bevel (3 join " +
+                $"vertices), not stay an unbounded miter (2). Found {cornerVerts.Count}.");
+
+            // No join-vertex normal may exceed miterLimit — the un-fixed path reads ≈2.5 (unclamped).
+            double maxMag = 0.0;
+            foreach (int idx in cornerVerts)
+                maxMag = Math.Max(maxMag, VecLen(r.Vertices[idx].Normal));
+            Assert.LessOrEqual(maxMag, 2.0 + 1e-6,
+                $"No join-vertex normal may exceed miterLimit=2.0. Got max |normal|={maxMag:G17} — the " +
+                "un-fixed path (unclamped ComputeMiterNormals reached straight from the round dispatch) " +
+                "reads ≈2.5.");
+            AssertNearlyEqual(2.0, maxMag, 1e-6,
+                $"The inner vertex must be clamped to EXACTLY miterLimit=2.0 (the same clamp the plain-miter " +
+                $"path already applies via ComputeInnerNormal), not merely 'somewhere under 2.5'. " +
+                $"Got {maxMag:G17}.");
+        }
+
+        // ─── NeedsMiter static accessor ────────────────────────────────────────────────────
+
+        [Test]
+        public void NeedsMiter_ParallelSegments_ReturnsTrue()
+        {
+            double2 n = new double2(0, 1);
+            Assert.IsTrue(LineTessellator.NeedsMiter(n, n, 1.05),
+                "Parallel segments → miter factor = 1 ≤ any roundLimit ≥ 1 → shallow → collapses to miter.");
+        }
+
+        [Test]
+        public void NeedsMiter_RightAngle_AboveDefaultLimit_ReturnsFalse()
+        {
+            // 90° left turn: n1=(0,1), n2=(−1,0). Miter factor = 1/cos(45°) = √2 ≈ 1.414 > 1.05.
+            double2 n1 = new double2(0, 1);
+            double2 n2 = new double2(-1, 0);
+            Assert.IsFalse(LineTessellator.NeedsMiter(n1, n2, 1.05),
+                "90° turn: miter factor √2 > roundLimit 1.05 → not shallow → NeedsMiter should be false.");
+        }
+
+        [Test]
+        public void NeedsMiter_HairpinWithNegativeHalfAngleCosine_ReturnsFalse()
+        {
+            // Same near-180° hairpin NeedsBevel_HairpinWithNegativeHalfAngleCosine_StillReturnsTrue uses: the
+            // factor's MAGNITUDE is huge, so it is never "shallow" regardless of sign residue.
+            double2 n1 = new double2(0, 1);
+            double2 n2 = new double2(1e-9, -1.0000000001);
+            Assert.IsFalse(LineTessellator.NeedsMiter(n1, n2, 1.05),
+                "Hairpin: miter factor magnitude ≫ roundLimit → NeedsMiter should be false.");
+        }
+
         // ─── NeedsBevel static accessor ────────────────────────────────────────────────────
 
         [Test]

@@ -364,5 +364,105 @@ namespace MapRenderer.Tests.Meshing
                 mda.Dispose();
             }
         }
+
+        // ── Tooth #3: line-miter-limit threaded (latent-bug fix) ────────────────
+
+        /// <summary>
+        /// Before this stage, <see cref="StyledLineTileBuilder.WriteMeshData"/> hardcoded the ribbon job's
+        /// miter limit to <c>2.0</c> regardless of style, so a style-authored <c>line-miter-limit</c> was
+        /// silently ignored. A synthetic 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) stays a sharp miter under
+        /// the default limit (2.0 — <c>LineTessellatorTests.RightAngle_MiterJoin_ExactVertexCount</c>: 6
+        /// verts) but must BEVEL under a tight <c>"line-miter-limit": 1.0</c> (√2 &gt; 1.0 —
+        /// <c>LineTessellatorTests.SharpAngle_ExplicitBevel_VertexCountExactlyOneBevelExtra</c>: 7 verts).
+        /// The vertex-count delta between those two shapes is exactly what pins the threading fix: reading 6
+        /// here means the hardcoded 2.0 is still in effect.
+        /// </summary>
+        [Test]
+        public void BuildMeshData_MiterLimitThreaded_SharpCornerBevelsUnderTightLimit()
+        {
+            // MoveTo(0,0) → LineTo(1024,0) → LineTo(1024,1024): 90° corner, hand-encoded MVT command stream
+            // (zigzag-delta encoded per the MVT spec — see MapRenderer.Tests.FullExtentRingCommandStream for
+            // the same encoding worked out digit-by-digit). Extent 4096.
+            var commands = new uint[] { 9, 0, 0, 18, 2048, 0, 0, 2048 };
+            var feature  = new DictionaryFeature(geometryType: TileGeometryType.LineString, geometry: commands);
+            var features = new List<IFeature> { feature };
+
+            var styleLayer = new StyleLayer
+            {
+                Id          = "test-miter-limit",
+                LayerType   = StyleLayerType.Line,
+                SourceLayer = "test",
+                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}"),
+                LayoutJson  = MapRenderer.Core.Json.JsonParser.Parse("{\"line-miter-limit\":1.0}"),
+            };
+            var paint  = new Line.PaintProperties(styleLayer);
+            var layout = new Line.LayoutProperties(styleLayer);
+
+            Assert.AreEqual(1.0, layout.MiterLimit, 1e-9,
+                "Precondition: layout must parse the tight miter-limit — otherwise this tooth checks nothing.");
+
+            int vertexCount = TestTileMeshBuilder.LineVertexCount(
+                features, paint, layout, zoom: 0.0, extent: 4096.0,
+                id: new TileId { Z = 0, X = 0, Y = 0 }, origin: double2.zero);
+
+            Assert.AreEqual(7, vertexCount,
+                $"line-miter-limit: 1.0 at a 90° corner (f=1.414 > 1.0) must bevel (7 verts), not stay a " +
+                $"sharp miter (6 verts). Got {vertexCount} — StyledLineTileBuilder must thread " +
+                "layout.MiterLimit into LineRibbonJob instead of hardcoding 2.0.");
+        }
+
+        // ── Tooth #4: line-round-limit threaded ──────────────────────────────────
+
+        /// <summary>
+        /// F2 review finding: hardcoding <c>RoundLimit</c> in <see cref="StyledLineTileBuilder"/> (instead of
+        /// reading <c>layout.RoundLimit</c>) passes the entire suite — the same latent-bug class T3 above
+        /// exists to catch for <c>MiterLimit</c>. Reuses T3's 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) with
+        /// <c>line-join: round</c>: under <c>line-round-limit: 1.05</c> the corner is NOT shallow (√2 > 1.05)
+        /// so the fan is preserved (11 verts — <c>LineTessellatorTests.RightAngle_RoundJoin_ExactVertexCount</c>);
+        /// under <c>line-round-limit: 2.0</c> the SAME corner IS shallow (√2 ≤ 2.0) and collapses to the
+        /// (unclamped, since miterLimit stays default 2.0 ⇒ √2 ≤ 2.0 does not bevel) miter path (6 verts —
+        /// <c>LineTessellatorTests.RightAngle_MiterJoin_ExactVertexCount</c>). A build that hardcodes
+        /// <c>RoundLimit</c> reads the SAME count for both styles.
+        /// </summary>
+        [Test]
+        public void BuildMeshData_RoundLimitThreaded_SameCornerFansOrCollapsesByStyle()
+        {
+            // Same 90° corner as BuildMeshData_MiterLimitThreaded_SharpCornerBevelsUnderTightLimit.
+            var commands = new uint[] { 9, 0, 0, 18, 2048, 0, 0, 2048 };
+            var id       = new TileId { Z = 0, X = 0, Y = 0 };
+
+            int VertexCountAtRoundLimit(double roundLimit)
+            {
+                var feature  = new DictionaryFeature(geometryType: TileGeometryType.LineString, geometry: commands);
+                var features = new List<IFeature> { feature };
+                var styleLayer = new StyleLayer
+                {
+                    Id          = $"test-round-limit-{roundLimit}",
+                    LayerType   = StyleLayerType.Line,
+                    SourceLayer = "test",
+                    PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}"),
+                    LayoutJson  = MapRenderer.Core.Json.JsonParser.Parse(
+                        $"{{\"line-join\":\"round\",\"line-round-limit\":{roundLimit}}}"),
+                };
+                var paint  = new Line.PaintProperties(styleLayer);
+                var layout = new Line.LayoutProperties(styleLayer);
+                Assert.AreEqual(roundLimit, layout.RoundLimit, 1e-9,
+                    "Precondition: layout must parse the requested round-limit — otherwise this straddle " +
+                    "checks nothing.");
+
+                return TestTileMeshBuilder.LineVertexCount(
+                    features, paint, layout, zoom: 0.0, extent: 4096.0, id: id, origin: double2.zero);
+            }
+
+            int fanCount       = VertexCountAtRoundLimit(1.05); // √2 > 1.05 ⇒ NOT shallow ⇒ fan preserved
+            int collapsedCount = VertexCountAtRoundLimit(2.0);  // √2 ≤ 2.0  ⇒ shallow ⇒ collapses to miter
+
+            Assert.AreEqual(11, fanCount,
+                $"line-round-limit: 1.05 at a 90° corner must preserve the round fan (11 verts). Got {fanCount}.");
+            Assert.AreEqual(6, collapsedCount,
+                $"line-round-limit: 2.0 at the SAME 90° corner must collapse to the (unclamped) miter path " +
+                $"(6 verts). Got {collapsedCount} — if this reads 11 (same as the fan case), " +
+                "StyledLineTileBuilder is not threading layout.RoundLimit into LineRibbonJob.");
+        }
     }
 }

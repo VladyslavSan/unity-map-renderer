@@ -64,13 +64,25 @@ namespace MapRenderer.Core.Geometry
         /// Maximum miter ratio (1/cos(θ/2)). Must be ≥ 1. Falls back to bevel when exceeded.
         /// </param>
         /// <param name="roundSegments">Number of arc divisions per round join/cap half. Min 1.</param>
+        /// <param name="roundLimit">
+        /// Minimum miter ratio (1/cos(θ/2)) a <see cref="JoinType.Round"/> join needs before it emits a fan.
+        /// Must be ≥ 1. At or below this the corner is shallow enough that the fan would be imperceptible, so
+        /// the join collapses to the miter path instead (see <see cref="NeedsMiter"/>) — and that collapsed
+        /// miter is STILL subject to <paramref name="miterLimit"/>, exactly like <see cref="JoinType.Miter"/>:
+        /// the full Round cascade is fan (f &gt; roundLimit), miter (f ≤ roundLimit AND f ≤ miterLimit), bevel
+        /// (f ≤ roundLimit AND f &gt; miterLimit). <paramref name="roundLimit"/> and <paramref name="miterLimit"/>
+        /// are independently style-settable with no cross-clamp between them, so when roundLimit &gt; miterLimit
+        /// the middle (miter) tier can be empty and a collapsed join goes straight to bevel — see the
+        /// <c>roundCollapsedToMiter</c> dispatch in <see cref="Triangulate"/>.
+        /// </param>
         /// <returns>Ribbon mesh, or empty if the line has fewer than 2 distinct points.</returns>
         public static Result Triangulate(
             IReadOnlyList<double2> line,
             JoinType joinType      = JoinType.Miter,
             CapType  capType       = CapType.Butt,
             double   miterLimit    = 2.0,
-            int      roundSegments = 4)
+            int      roundSegments = 4,
+            double   roundLimit    = 1.05)
         {
             if (line == null || line.Count < 2)
                 return new Result(Array.Empty<LineVertex>(), Array.Empty<int>());
@@ -91,6 +103,7 @@ namespace MapRenderer.Core.Geometry
 
             if (roundSegments < 1) roundSegments = 1;
             if (miterLimit < 1.0)  miterLimit = 1.0;
+            if (roundLimit < 1.0)  roundLimit = 1.0;
 
             int n = pts.Count;
 
@@ -147,10 +160,18 @@ namespace MapRenderer.Core.Geometry
                     double cross = t1.x * t2.y - t1.y * t2.x;
                     bool leftTurn = cross > 0;
 
+                    // A Round join whose corner is shallow enough (f ≤ roundLimit) collapses to the miter
+                    // path instead of a fan — see NeedsMiter. That collapsed miter is STILL subject to
+                    // miterLimit: roundLimit and miterLimit are independently style-settable with no
+                    // cross-clamp, so a corner between the two thresholds (roundLimit < f ≤ miterLimit is
+                    // fine, but f > miterLimit is not) must cascade round→miter→bevel exactly as a plain
+                    // JoinType.Miter would, not jump straight to an unbounded ComputeMiterNormals spike.
+                    bool roundCollapsedToMiter = joinType == JoinType.Round && NeedsMiter(n1, n2, roundLimit);
                     bool bevel = (joinType == JoinType.Bevel) ||
-                                 (joinType == JoinType.Miter && NeedsBevel(n1, n2, miterLimit));
+                                 (joinType == JoinType.Miter && NeedsBevel(n1, n2, miterLimit)) ||
+                                 (roundCollapsedToMiter && NeedsBevel(n1, n2, miterLimit));
 
-                    if (joinType == JoinType.Round)
+                    if (joinType == JoinType.Round && !roundCollapsedToMiter)
                     {
                         EmitRoundJoin(verts, indices, p2, n1, n2, dist2, roundSegments,
                                       leftTurn, leftPrev, rightPrev, miterLimit,
@@ -164,7 +185,10 @@ namespace MapRenderer.Core.Geometry
                     }
                     else
                     {
-                        // Miter join.
+                        // Miter join — also reached by a shallow JoinType.Round join that collapsed here
+                        // (f ≤ roundLimit) and did not ALSO exceed miterLimit (see roundCollapsedToMiter
+                        // above). This branch is the sole destination once the round dispatch declines the
+                        // fan and the bevel cascade declines a chamfer.
                         double2 miterL, miterR;
                         ComputeMiterNormals(n1, n2, out miterL, out miterR);
 
@@ -301,6 +325,22 @@ namespace MapRenderer.Core.Geometry
             // a signed `1/dot > limit` then lets a huge negative factor slip past the bevel gate and the
             // miter normal blows up (the "line across the whole screen" glitch). Compare the magnitude.
             return math.abs(1.0 / cosHalf) > miterLimit;
+        }
+
+        /// <summary>
+        /// Returns true when a <see cref="JoinType.Round"/> join's corner is shallow enough that its fan
+        /// would be imperceptible — the miter ratio between segments with left normals <paramref name="n1"/>
+        /// and <paramref name="n2"/> is at or below <paramref name="roundLimit"/> — and should collapse to
+        /// the miter path instead. Mirrors <see cref="NeedsBevel"/>'s hairpin/near-zero-cosine handling: a
+        /// hairpin or degenerate half-angle is never "shallow", so both return false there (round stays round;
+        /// it is <see cref="EmitRoundJoin"/>'s own <see cref="TryJoinBisector"/> fallback that keeps that case
+        /// well-defined, same as today).
+        /// </summary>
+        public static bool NeedsMiter(double2 n1, double2 n2, double roundLimit)
+        {
+            if (!TryJoinBisector(n1, n2, out double2 mu, out double cosHalf)) return false;
+            if (math.abs(cosHalf) < 1e-12) return false;
+            return math.abs(1.0 / cosHalf) <= roundLimit;
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────

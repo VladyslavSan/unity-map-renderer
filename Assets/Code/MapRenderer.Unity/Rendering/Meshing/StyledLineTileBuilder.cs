@@ -107,9 +107,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // LineTessellator.Triangulate defaults — LineRibbonJob (and its managed oracle) share them for parity.
-        private const double DefaultMiterLimit    = 2.0;
-        private const int    DefaultRoundSegments = 4;
+        // LineTessellator.Triangulate default — LineRibbonJob (and its managed oracle) share it for parity.
+        // MiterLimit/RoundLimit are NOT defaulted here: layout.MiterLimit/layout.RoundLimit thread the
+        // style's own values (or LayoutProperties' own 2.0/1.05 defaults when unset).
+        private const int DefaultRoundSegments = 4;
 
         // S91-B: lines project through the SAME projection surface as fills, not a bespoke hardcoded
         // WebMercator.Forward. Launch-time projection config threads a chosen projection here; until then this
@@ -351,8 +352,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     PointCount     = m,
                     Join           = joinType,
                     Cap            = capType,
-                    MiterLimit     = DefaultMiterLimit,
+                    MiterLimit     = layout.MiterLimit,
                     RoundSegments  = DefaultRoundSegments,
+                    RoundLimit     = layout.RoundLimit,
                     OutVertices    = outV.AsArray(),
                     OutIndices     = outI.AsArray(),
                     OutVertexCount = vcArr,

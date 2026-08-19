@@ -36,7 +36,8 @@ namespace MapRenderer.Tests.Meshing
         // ── Oracle harness ──────────────────────────────────────────────────────────────────────
 
         private static (LineRibbonVertex[] verts, int[] indices) RunJob(
-            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments)
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments,
+            double roundLimit = 1.05)
         {
             int capV = LineRibbonJob.MaxVertexCount(pts.Length, roundSegments);
             int capI = LineRibbonJob.MaxIndexCount(pts.Length, roundSegments);
@@ -64,6 +65,7 @@ namespace MapRenderer.Tests.Meshing
                     Cap            = cap,
                     MiterLimit     = miterLimit,
                     RoundSegments  = roundSegments,
+                    RoundLimit     = roundLimit,
                     OutVertices    = outV,
                     OutIndices     = outI,
                     OutVertexCount = vc,
@@ -87,10 +89,11 @@ namespace MapRenderer.Tests.Meshing
         /// given style. Counts + indices exact; vertex geometry within <see cref="Eps"/>; the extruded plane's
         /// out-of-plane component (Position.y / Across.y) must be zero.</summary>
         private static void AssertParity(
-            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments, string label)
+            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments, string label,
+            double roundLimit = 1.05)
         {
-            var managed  = LineTessellator.Triangulate(pts, join, cap, miterLimit, roundSegments);
-            var (jv, ji) = RunJob(pts, join, cap, miterLimit, roundSegments);
+            var managed  = LineTessellator.Triangulate(pts, join, cap, miterLimit, roundSegments, roundLimit);
+            var (jv, ji) = RunJob(pts, join, cap, miterLimit, roundSegments, roundLimit);
 
             Assert.AreEqual(managed.Vertices.Length, jv.Length, $"{label}: vertex count");
             Assert.AreEqual(managed.Indices.Length,  ji.Length, $"{label}: index count");
@@ -219,6 +222,64 @@ namespace MapRenderer.Tests.Meshing
         public void ShortSegment_FoldRegime_Parity(JoinType join, string label)
             => AssertParity(new[] { new double2(0, 0), new double2(1.8, 0), new double2(1.8, 10) },
                             join, CapType.Butt, 2.0, 4, label);
+
+        // ── line-round-limit: shallow round joins collapse to miter (Burst twin) ────────────────────
+
+        /// <summary>Mixed-regime fixture: a shallow (20°, collapses to miter) join followed by a sharp (90°,
+        /// fan preserved) join in the SAME polyline — the combination the managed-only teeth in
+        /// <c>LineTessellatorTests</c> don't cover, since they exercise one join per fixture.</summary>
+        private static readonly double2[] MixedRoundLimitFixture =
+        {
+            new double2(0, 0),
+            new double2(10, 0),
+            new double2(19.396926207859085, 3.4202014332566878),  // 20° turn — shallow, collapses to miter
+            new double2(15.976724774602397, 12.817127641115771),  // further 90° turn — sharp, fan preserved
+        };
+
+        [Test]
+        public void RoundLimit_MixedShallowAndSharp_Parity()
+            => AssertParity(MixedRoundLimitFixture, JoinType.Round, CapType.Butt, 2.0, 4, "round-limit-mixed",
+                             roundLimit: 1.05);
+
+        /// <summary>
+        /// Direct assertion on the raw Job output (deliberately redundant with the parity tooth above and
+        /// with <c>LineTessellatorTests.ShallowRoundJoin_CollapsesToMiter_MatchesMiterPathExactly</c>): the
+        /// tooth that survives if <see cref="AssertParity"/> is ever loosened. Exact counts worked out by hand
+        /// from <see cref="MixedRoundLimitFixture"/>'s emission shape — see the inline breakdown below.
+        /// </summary>
+        [Test]
+        public void RoundLimit_ShallowCorner_JobEmitsMiterVertexCountDirectly()
+        {
+            var (jv, ji) = RunJob(MixedRoundLimitFixture, JoinType.Round, CapType.Butt, 2.0, 4, roundLimit: 1.05);
+
+            // Verts: start cap(2) + shallow-join-as-miter(2, NOT the 7-vert fan) + sharp round join
+            // (7: 1 inner + 1 arcStart + 4 fan intermediates + 1 arcEnd) + last seg(2) = 13.
+            // Indices: start-cap→join1 connecting quad(6) + join1→join2 connecting quad(6, part of the round
+            // join's own emission) + join2's 4 fan triangles(12) + join2's 1 closing fan triangle(3) +
+            // last-seg quad(6) = 33. (Matches RightAngle_RoundJoin_ExactVertexCount's 11v/27i for a single
+            // round join, plus this fixture's extra shallow-as-miter join: +2v/+6i.)
+            Assert.AreEqual(13, jv.Length,
+                $"Mixed shallow+sharp fixture: shallow join must contribute only 2 verts (miter), not a " +
+                $"7-vert fan. Expected 13 total verts, got {jv.Length}.");
+            Assert.AreEqual(33, ji.Length,
+                $"Mixed shallow+sharp fixture: expected 33 total indices (no fan triangles at the shallow " +
+                $"join). Got {ji.Length}.");
+        }
+
+        /// <summary>
+        /// F1 fix — Burst twin of <c>LineTessellatorTests.RoundLimit_ExceedsMiterLimit_CascadesToBevel_
+        /// NotUnboundedMiter</c>: roundLimit(3.0) and miterLimit(2.0) independently style-settable, corner
+        /// f=2.5 sits between them, must cascade round→miter→bevel (not fall through to an unbounded
+        /// ComputeMiterNormals spike). Parity-only is sufficient here — both producers share the SAME
+        /// roundCollapsedToMiter dispatch shape, and index-count parity alone discriminates bevel (3 join
+        /// verts) from an unbounded miter (2).
+        /// </summary>
+        [Test]
+        public void RoundLimit_ExceedsMiterLimit_CascadesToBevel_Parity()
+            => AssertParity(
+                new[] { new double2(0, 0), new double2(10, 0), new double2(3.2, 7.332121111929344) },
+                join: JoinType.Round, cap: CapType.Butt, miterLimit: 2.0, roundSegments: 4,
+                label: "round-limit-exceeds-miter", roundLimit: 3.0);
 
         /// <summary>
         /// One direct analytic assertion on the Burst side (deliberately redundant with T1 ∧ parity):

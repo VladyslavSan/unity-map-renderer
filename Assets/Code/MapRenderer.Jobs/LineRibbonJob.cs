@@ -53,6 +53,11 @@ namespace MapRenderer.Jobs
         /// <summary>Arc divisions per round join/cap half. Clamped to ≥ 1.</summary>
         public int RoundSegments;
 
+        /// <summary>Minimum miter ratio (1/cos(θ/2)) a <see cref="JoinType.Round"/> join needs before it emits
+        /// a fan; at or below this it collapses to the miter path instead (mirrors
+        /// <c>LineTessellator.Triangulate</c>'s <c>roundLimit</c>). Clamped to ≥ 1.</summary>
+        public double RoundLimit;
+
         // ── Output ────────────────────────────────────────────────────────────────────────────
         /// <summary>Ribbon vertices in emission order (written [0..OutVertexCount[0])).</summary>
         [WriteOnly] public NativeArray<LineRibbonVertex> OutVertices;
@@ -131,6 +136,7 @@ namespace MapRenderer.Jobs
 
             int roundSegments = RoundSegments < 1 ? 1 : RoundSegments;
             double miterLimit = MiterLimit < 1.0 ? 1.0 : MiterLimit;
+            double roundLimit = RoundLimit < 1.0 ? 1.0 : RoundLimit;
 
             // Segment directions + cumulative arc lengths (3D).
             var along   = new NativeArray<double3>(n - 1, Allocator.Temp);
@@ -172,10 +178,17 @@ namespace MapRenderer.Jobs
                     // that a left turn puts the CONCAVE side on the left.)
                     bool leftTurn = math.dot(math.cross(along[seg], along[seg + 1]), upJ) < 0.0;
 
+                    // Mirrors LineTessellator.Triangulate's cascade: a Round join whose corner is shallow
+                    // enough (f ≤ roundLimit) collapses to the miter path instead of a fan, and that
+                    // collapsed miter is STILL subject to miterLimit — roundLimit/miterLimit are
+                    // independently style-settable with no cross-clamp, so the cascade must be
+                    // round→miter→bevel, not round→(unbounded)miter.
+                    bool roundCollapsedToMiter = Join == JoinType.Round && NeedsMiter(n1, n2, roundLimit);
                     bool bevel = (Join == JoinType.Bevel) ||
-                                 (Join == JoinType.Miter && NeedsBevel(n1, n2, miterLimit));
+                                 (Join == JoinType.Miter && NeedsBevel(n1, n2, miterLimit)) ||
+                                 (roundCollapsedToMiter && NeedsBevel(n1, n2, miterLimit));
 
-                    if (Join == JoinType.Round)
+                    if (Join == JoinType.Round && !roundCollapsedToMiter)
                     {
                         EmitRoundJoin(p2, upJ, n1, n2, dist2, roundSegments, leftTurn, leftPrev, rightPrev,
                                       miterLimit, out leftPrev, out rightPrev, ref v, ref idx);
@@ -187,6 +200,8 @@ namespace MapRenderer.Jobs
                     }
                     else
                     {
+                        // Miter join — also reached by a shallow JoinType.Round join that collapsed here
+                        // and did not ALSO exceed miterLimit (see roundCollapsedToMiter above).
                         ComputeMiterNormals(n1, n2, out double3 miterL, out double3 miterR);
                         int lNext = v;
                         int rNext = v + 1;
@@ -298,6 +313,16 @@ namespace MapRenderer.Jobs
             // Magnitude test (mirrors LineTessellator.NeedsBevel): near a 180° hairpin dot can go small-NEGATIVE,
             // and a signed 1/dot > limit lets a huge negative miter factor slip past the bevel gate (the glitch).
             return math.abs(1.0 / cosHalf) > miterLimit;
+        }
+
+        /// <summary>Mirrors <c>LineTessellator.NeedsMiter</c> (3D): true when a Round join's corner is
+        /// shallow enough (miter ratio ≤ <paramref name="roundLimit"/>) to collapse to the miter path instead
+        /// of a fan.</summary>
+        private static bool NeedsMiter(double3 n1, double3 n2, double roundLimit)
+        {
+            if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf)) return false;
+            if (math.abs(cosHalf) < 1e-12) return false;
+            return math.abs(1.0 / cosHalf) <= roundLimit;
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
