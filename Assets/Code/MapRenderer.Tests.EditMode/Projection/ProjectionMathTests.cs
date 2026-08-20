@@ -162,6 +162,36 @@ namespace MapRenderer.Tests.Projection
             }
         }
 
+        /// <summary>
+        /// T6b: <see cref="WebMercator.Forward"/>'s planar output pinned against hard-coded oracle values,
+        /// computed independently (not by re-invoking <c>Forward</c> or <c>FromLonLat</c>) —
+        /// <see cref="WebMercator_ForwardXZ_MatchesFromLonLat"/> only proves the two callers agree with EACH
+        /// OTHER, never that either is numerically correct (both reduce to the same pure function called
+        /// twice). Mirrors the <c>Ecef_*</c> numeric-pin teeth above. RED-verify: flip
+        /// <c>WebMercator.cs</c>'s <c>x = R * longitude</c> to <c>x = -R * longitude</c> and this reds; the
+        /// tautological sibling above does not.
+        /// </summary>
+        [Test]
+        public void WebMercator_Forward_MatchesHardcodedOracle()
+        {
+            // lon=90E, lat=0: x = R*(pi/2), y = 0 (Mercator y is exactly 0 at the equator).
+            double3 eq90E = WebMercator.Forward(new GeoCoordinate3D { Longitude = 90.0, Latitude = 0.0, Altitude = 0.0 });
+            Assert.That(eq90E.x, Is.EqualTo(10018754.171394622).Within(Tol1m), "lon=90E,lat=0 x must be ~R*(pi/2)");
+            Assert.That(eq90E.z, Is.EqualTo(0.0).Within(Tol1m), "lon=90E,lat=0 y must be ~0 (equator)");
+
+            // lon=0, lat=45N: x = 0 (discriminates a longitude/latitude mix-up), y = R*ln(tan(pi/4+lat/2))
+            // (discriminates the Mercator latitude formula itself).
+            double3 lat45 = WebMercator.Forward(new GeoCoordinate3D { Longitude = 0.0, Latitude = 45.0, Altitude = 0.0 });
+            Assert.That(lat45.x, Is.EqualTo(0.0).Within(Tol1m), "lon=0,lat=45 x must be ~0");
+            Assert.That(lat45.z, Is.EqualTo(5621521.486192066).Within(Tol1m), "lon=0,lat=45 y must match oracle");
+
+            // lon=-73.5, lat=-33.4: both x and y nonzero and negative — guards a sign flip on either axis
+            // independently of the two special-cased points above.
+            double3 general = WebMercator.Forward(new GeoCoordinate3D { Longitude = -73.5, Latitude = -33.4, Altitude = 0.0 });
+            Assert.That(general.x, Is.EqualTo(-8181982.573305608).Within(Tol1m), "lon=-73.5,lat=-33.4 x must match oracle");
+            Assert.That(general.z, Is.EqualTo(-3948518.427099392).Within(Tol1m), "lon=-73.5,lat=-33.4 y must match oracle");
+        }
+
         // ── T4-numeric — Batch equals scalar (exact) ────────────────────────────────────────────
 
         /// <summary>

@@ -29,11 +29,27 @@ namespace MapRenderer.Tests.Text.Placement
     {
         // ── (a) Structural: grep guard ───────────────────────────────────────────────────────────
 
+        /// <summary>The ONLY legitimate <c>AddTileLayer(</c> call sites in the assembly: the backend
+        /// interface's declaration, its three backend implementations, and the static per-tile pipeline's
+        /// one caller. Scanning ONLY <c>Text/Placement</c> (the prior scope) misses a violation routed
+        /// through an indirection defined elsewhere in the assembly — a wrapper method the label-placement
+        /// code calls that itself calls <c>AddTileLayer(</c> never contains the literal string inside
+        /// <c>Text/Placement</c> at all. Scanning the whole assembly against this allowlist catches that
+        /// wrapper wherever it lands, while the five known-legitimate files stay silent.</summary>
+        private static readonly string[] AllowedAddTileLayerCallers =
+        {
+            Path.Combine("Rendering", "Backend", "ITileRenderBackend.cs"),
+            Path.Combine("Rendering", "Backend", "BRG", "TileRenderer.cs"),
+            Path.Combine("Rendering", "Backend", "GameObjects", "TileRenderer.cs"),
+            Path.Combine("Rendering", "Backend", "Entities", "TileRenderer.cs"),
+            Path.Combine("Rendering", "Tile", "TileManager.cs"),
+        };
+
         [Test]
         public void SourceTree_NeverReferencesAddTileLayer()
         {
-            string dir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity", "Text", "Placement");
-            Assert.IsTrue(Directory.Exists(dir), $"expected the label-placement source directory to exist at {dir}");
+            string dir = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
+            Assert.IsTrue(Directory.Exists(dir), $"expected the MapRenderer.Unity source directory to exist at {dir}");
 
             // Match the CALL form "AddTileLayer(" (no space before the paren) so a doc comment discussing
             // the constraint in prose ("must never call AddTileLayer (the static ... path)") is not itself
@@ -42,16 +58,20 @@ namespace MapRenderer.Tests.Text.Placement
             foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
             {
                 string text = File.ReadAllText(file);
-                if (text.Contains("AddTileLayer("))
-                {
-                    offenders.Add(file);
-                }
+                if (!text.Contains("AddTileLayer(")) continue;
+
+                bool allowed = false;
+                foreach (string allowedSuffix in AllowedAddTileLayerCallers)
+                    if (file.EndsWith(allowedSuffix, System.StringComparison.Ordinal)) { allowed = true; break; }
+
+                if (!allowed) offenders.Add(file);
             }
 
             Assert.IsEmpty(offenders,
-                "The per-frame label placement path must NEVER call AddTileLayer (the static per-(tile,layer) " +
-                "mesh path) -- it is a structurally separate submission path (T5). Offending files:\n" +
-                string.Join("\n", offenders));
+                "AddTileLayer (the static per-(tile,layer) mesh path) must be called ONLY by the backend " +
+                "implementations and the static pipeline's own TileManager caller -- the per-frame label " +
+                "placement path (T5), and every other file in the assembly, must reach it never, not even " +
+                "through an indirection. Offending files:\n" + string.Join("\n", offenders));
         }
 
         // ── E2: Graphics.RenderMesh is retired — labels draw via persistent per-slot MeshRenderers now

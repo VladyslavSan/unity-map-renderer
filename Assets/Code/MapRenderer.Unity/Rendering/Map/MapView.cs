@@ -290,7 +290,11 @@ namespace MapRenderer.Unity.Rendering.Map
         /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
         /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
         /// </summary>
-        private async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
+        // internal (not private): the D1a resolve-to-Dense integration tooth
+        // (ProductionPropertyStorageDefaultTests.ProductionConfig_ResolvesToDenseThroughBuildSourceSpecs)
+        // drives this method directly, reached via InternalsVisibleTo — test-only visibility widening, no
+        // behaviour change (ARCHITECTURE.md "test code must not bloat the production codebase").
+        internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
         {
             var loader  = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;

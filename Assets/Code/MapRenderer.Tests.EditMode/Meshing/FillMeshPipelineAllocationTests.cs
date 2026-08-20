@@ -198,11 +198,14 @@ namespace MapRenderer.Tests.Meshing
                 Assert.LessOrEqual(mediumBpb, Ceiling);
                 Assert.LessOrEqual(largeBpb,  Ceiling);
 
-                // Bound the small→large spread by an absolute margin far below what linear per-ring scaling
-                // would produce (pre-flatten this fixture's ring-count spread would move bytes/build by
-                // roughly 1.7 MB), but generous enough to absorb GC.GetTotalMemory's own measurement noise.
+                // Bound the small→large spread by an absolute margin close to the observed near-zero spread
+                // (the ceiling checks above already force spread <= Ceiling = 65,536, which never discriminates
+                // — a per-ring managed alloc that stayed under the ceiling would still pass that bound). This
+                // threshold instead targets a small per-ring cost directly: ~16 B/ring reintroduced over this
+                // fixture's small→large ring-count delta (thousands of rings) moves bytes/build by tens of KB,
+                // far past this cap, while the flattened fixed-buffer cost does not scale with ring count at all.
                 long spread = Math.Abs(largeBpb - smallBpb);
-                Assert.Less(spread, 200_000,
+                Assert.Less(spread, 4_096,
                     $"bytes/build spread across ring counts {small.RingCount}/{medium.RingCount}/{large.RingCount} " +
                     $"was {spread} B (small={smallBpb}, medium={mediumBpb}, large={largeBpb} B/build) — " +
                     "allocation is still scaling with ring count; the flatten did not eliminate the per-polygon cost.");

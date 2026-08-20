@@ -140,6 +140,16 @@ namespace MapRenderer.Tests.Tiles
                 PumpUntilSettled(view);
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must be built on first visit.");
 
+                // Captured BEFORE eviction so the revisit can be proven to be the SAME instance, not a
+                // structurally-similar re-build — the counter-based checks below read 0 for a hit AND a miss
+                // whose kick is deferred a tick (see PreparedCacheHits assertion), so identity is the only
+                // discriminator that can't be satisfied by a disguised full re-fetch/re-decode/re-mesh.
+                Mesh[] originalMeshes = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(originalMeshes);
+                Assert.GreaterOrEqual(originalMeshes.Length, 1);
+                Mesh originalMesh = originalMeshes[0];
+                int hitsBefore = view.PreparedCacheHits();
+
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
                 view.LateUpdate();
                 Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must leave the cover.");
@@ -159,6 +169,16 @@ namespace MapRenderer.Tests.Tiles
                 Assert.IsNotNull(meshes);
                 Assert.GreaterOrEqual(meshes.Length, 1);
                 Assert.IsTrue(meshes[0] != null, $"[{backend}] the re-added mesh must be alive.");
+
+                // DECISIVE: the counter above (kicks == 0) reads 0 for a genuine hit AND for a miss whose
+                // kick is structurally deferred to the NEXT tick — it cannot alone distinguish "reused the
+                // prepared mesh" from "quietly re-fetched/re-decoded/re-meshed and only the kick counter
+                // missed it". Mesh IDENTITY across the revisit, plus the cache's own hit counter, can.
+                Assert.AreSame(originalMesh, meshes[0],
+                    $"[{backend}] the revisit mesh must be the SAME instance as before eviction — a genuine " +
+                    "prepared-cache hit reuses the held Mesh, it never rebuilds an equivalent one.");
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore,
+                    $"[{backend}] the revisit must register on the cache's own hit counter.");
             }
             finally
             {

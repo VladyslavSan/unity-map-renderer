@@ -92,11 +92,19 @@ namespace MapRenderer.Tests.Structure
                 "precondition: the extracted body really does READ the buffer it is claimed to borrow — " +
                 "without this, a body that never touched geometry at all would satisfy both zero-counts");
 
-            Assert.AreEqual(0, CountOccurrences(body, ".Materialize()"),
-                "IR C1 P2 INVERTED this from 1 to 0. WriteMeshData must mint NOTHING: the source-layer's " +
-                "buffer is materialized once per worker pass by TileGeometryStore and lent to every style " +
-                "layer naming that source-layer. A mint here is the 61-decodes-per-pass regression B7 " +
-                "retired, re-introduced one layer down.");
+            // Three mint APIs exist on the buffer type: .Materialize(), TileGeometryBuffers.Allocate(...) and
+            // TileGeometryBuffers.AdoptDerivedLists(...). Greping only the first would leave a per-layer
+            // Allocate(...) clone (all-native, so also invisible to the runtime Is.Not.AllocatingGCMemory()
+            // tooth) undetected — matched with the trailing '(' so both no-arg and arg'd call forms count.
+            foreach (string mintToken in new[]
+                     { ".Materialize(", "TileGeometryBuffers.Allocate(", "TileGeometryBuffers.AdoptDerivedLists(" })
+            {
+                Assert.AreEqual(0, CountOccurrences(body, mintToken),
+                    $"IR C1 P2 INVERTED this from 1 to 0. WriteMeshData must mint NOTHING — '{mintToken}' found. " +
+                    "The source-layer's buffer is materialized once per worker pass by TileGeometryStore and " +
+                    "lent to every style layer naming that source-layer. A mint here is the " +
+                    "61-decodes-per-pass regression B7 retired, re-introduced one layer down.");
+            }
             Assert.AreEqual(0, CountOccurrences(body, "geometry.Dispose()"),
                 "…and must free NOTHING. Disposing a BORROWED buffer frees geometry sibling layers are still " +
                 "reading. That double free is LOUD here — the store lends an array-backed buffer, and R6 " +
