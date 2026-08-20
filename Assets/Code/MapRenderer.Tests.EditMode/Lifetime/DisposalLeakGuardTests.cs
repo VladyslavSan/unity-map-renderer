@@ -457,6 +457,209 @@ namespace MapRenderer.Tests.Lifetime
                 $"(baseline={countBefore}, after dispose={countAfterDispose}).");
         }
 
+        // ── perf/gc-elimination Stage A: pooling MeshDataPayload must not make this counter lie ──
+
+        /// <summary>
+        /// Leak-guard regression for meshing follow-ups Stage A (pooling the payload WRAPPER):
+        /// <see cref="MeshDataPayload.DebugLiveAllocCount"/> counts live NATIVE <c>MeshDataArray</c>s, not
+        /// live wrapper instances — pooling the wrapper must not change that. Runs several rent→reset→dispose
+        /// cycles (through <see cref="MeshDataPayloadPool"/> directly, so a reused — not freshly-minted —
+        /// instance is exercised on the later iterations) and asserts the counter returns to baseline after
+        /// every one.
+        /// </summary>
+        [Test]
+        public void PooledCycle_LiveAllocCounter_ReturnsToBaseline_AfterEveryDispose()
+        {
+            long baseline = MeshDataPayload.DebugLiveAllocCount;
+
+            for (int i = 0; i < 5; i++)
+            {
+                Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
+                Assert.Greater(MeshDataPayload.DebugLiveAllocCount, baseline,
+                    $"iteration {i}: AllocateTracked must increment the counter regardless of pooling");
+
+                MeshDataPayload payload = MeshDataPayloadPool.Rent();
+                payload.Reset(mda, 0, default, "pool-leak-guard-probe", 0);
+                payload.Dispose();
+
+                Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
+                    $"iteration {i}: Dispose must free the tracked array and return the counter to baseline — " +
+                    "pooling the wrapper instance must not change what the counter measures (live native " +
+                    "arrays, not live instances).");
+            }
+        }
+
+        /// <summary>
+        /// The positive-control half of the same guard: a POOLED-BUT-UNDISPOSED instance must still be
+        /// counted as a live leak. Guards specifically against a pooling implementation that retired the
+        /// counter early — e.g. at Rent/Reset time — instead of at the point the native array is actually
+        /// freed, which would make a real leak through the pooled path invisible.
+        /// </summary>
+        [Test]
+        public void PooledInstance_UndisposedLeak_StillProducesNonZeroCounter()
+        {
+            long baseline = MeshDataPayload.DebugLiveAllocCount;
+
+            Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
+            MeshDataPayload leaked = MeshDataPayloadPool.Rent();
+            leaked.Reset(mda, 0, default, "pool-leak-positive-control", 0);
+
+            Assert.Greater(MeshDataPayload.DebugLiveAllocCount, baseline,
+                "a pooled-but-undisposed instance must still be counted as a live leak — pooling the wrapper " +
+                "must not retire the counter before the native array is actually freed.");
+
+            // Clean up so this doesn't pollute subsequent tests.
+            leaked.Dispose();
+            Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount);
+        }
+
+        /// <summary>Two unfiltered fill layers over the SAME source-layer — a real, minimal multi-layer
+        /// tile: <c>ConsumeMeshBuild</c>'s dense payload array gets length &gt;= 2, and (with the fixture's
+        /// real geometry) both payloads are non-empty, so a per-mesh consume budget of 1 genuinely stops
+        /// mid-tile rather than free-riding past an empty layer.</summary>
+        private static StyleDocument TwoFillLayerStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""name"": ""LeakGuardTwoLayer"",
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""countries-fill-a"",
+                    ""type"": ""fill"",
+                    ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] }
+                },
+                {
+                    ""id"": ""countries-fill-b"",
+                    ""type"": ""fill"",
+                    ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-color"": [""rgba"", 50, 200, 50, 1] }
+                }
+            ]
+        }");
+
+        /// <summary>
+        /// perf/gc-elimination Stage A — the deterministic, single-threaded regression tooth for the
+        /// <c>TileManager.cs</c> fix discovered while pooling <see cref="MeshDataPayload"/> (outside the
+        /// original plan's file scope; see the Stage A dev report). Pooling means <see cref="MeshDataPayload.Dispose"/>
+        /// hands its instance back to a shared <see cref="MeshDataPayloadPool"/> the moment it runs — so once
+        /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
+        /// safe for anything to touch again: a subsequent <c>Rent()</c> (by this test, standing in for a
+        /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholeResult</c>'s later
+        /// unconditional sweep — over the SAME <c>MeshBuildResult.Payloads</c> array — would otherwise reach
+        /// it a second time. <c>TileManager.ConsumeMeshBuild</c> now nulls each slot the instant it disposes
+        /// it, specifically so that sweep can never touch a recycled instance.
+        ///
+        /// <para>Drive: a single tile, two non-empty fill layers, consume throttled to exactly one mesh per
+        /// tick (<c>MaxConsumesPerTick = 1</c>) so the tile's OWN <c>LateUpdate()</c> stops mid-array —
+        /// after disposing payload 0 but before payload 1, i.e. strictly before <c>DisposeWholeResult</c>
+        /// runs for this tile. At that exact point this test rents from the shared pool (standing in for a
+        /// concurrent build) and marks the rented instance as its own. The cover is then allowed to finish
+        /// settling. Pre-fix, the stale slot reference would let the finishing sweep silently free this
+        /// test's array out from under it; post-fix the slot is null and the sweep skips it — this test's
+        /// array survives until the test itself disposes it.</para>
+        /// </summary>
+        [Test]
+        public void PooledPayload_RentedDuringAPartialConsume_SurvivesUntilThisCallerDisposesIt()
+        {
+            long baseline = MeshDataPayload.DebugLiveAllocCount;
+
+            var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go    = new GameObject("MapView_PoolRaceRegression");
+            var view  = go.AddComponent<MapView>().WithTestMaterials();
+            var style = TwoFillLayerStyle();
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 0; // block consume — build the backlog first
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
+
+                int kicked = 0;
+                for (int f = 0; f < 3000; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                    kicked += view.MeshBuildsKickedLastTick();
+                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+                }
+                Assert.AreEqual(1, view.LoadedTileCount(),
+                    "precondition: a z=0 cover with a single tile keeps the whole scenario to ONE mesh-build " +
+                    "result, so no other tile's payload activity can interleave with the probe below.");
+                Assert.GreaterOrEqual(kicked, 1, "drive precondition: the tile's mesh build must have been kicked");
+                view.AwaitInFlightMeshBuilds(); // the build task must be Succeeded before the budgeted tick below
+
+                // Consume exactly ONE mesh this tick. Two non-empty fill layers ⇒ ConsumeMeshBuild's budgeted
+                // loop must stop after payload 0 — the tile is not yet complete.
+                view.Config.MaxConsumesPerTick = 1;
+                view.LateUpdate();
+
+                var tileId = new TileId { Z = 0, X = 0, Y = 0 };
+                Assert.AreEqual(1, view.MeshesConsumedLastTick(), "precondition: exactly one payload consumed this tick");
+                Assert.AreEqual(0, view.TilesConsumedLastTick(), "precondition: the tile must NOT be complete yet");
+                Assert.IsFalse(view.TryGetBuiltTile(tileId), "precondition: the tile must not be Built yet");
+
+                // The probe: rent from the shared pool right here, standing in for a concurrent build's
+                // Rent()+Reset(). Single-threaded + nothing else touches this pool during the tick above (the
+                // single-tile precondition rules out another tile's payload disposal interleaving), so this
+                // reliably receives the instance ConsumeMeshBuild's per-payload loop just disposed.
+                MeshDataPayload probe = MeshDataPayloadPool.Rent();
+                // Non-vacuity: Dispose()/Upload() never clear VertexCount, so if this Rent() really did
+                // receive the instance ConsumeMeshBuild's per-payload loop just disposed (a real fill layer
+                // over the fixture), it still carries that layer's non-zero vertex count here — BEFORE this
+                // test's own Reset() below overwrites it. A zero here means the probe missed (an unrelated,
+                // freshly-minted or already-Reset stub), which would make the assertion below vacuous.
+                Assert.Greater(probe.VertexCount, 0,
+                    "non-vacuity precondition: the rented instance must be the fill payload ConsumeMeshBuild " +
+                    "just disposed, not an unrelated pooled stub — otherwise this tooth cannot discriminate " +
+                    "the TileManager.cs fix at all");
+                Mesh.MeshDataArray probeMda = MeshDataPayload.AllocateTracked(1);
+                probe.Reset(probeMda, 0, default, "pool-race-probe", -7);
+
+                // The remaining, still-pending layer (payload 1) has its OWN legitimate array, freed by its
+                // OWN Upload/Dispose when the resumed pump below consumes it — that decrement is expected
+                // and is NOT what this tooth is probing for. The discriminating expectation is relative to
+                // baseline, not to the count right after Reset(): once the resumed pump finishes, exactly
+                // TWO arrays should have been freed by production code (payload 0's, already counted above,
+                // and payload 1's, about to happen) and ONE should remain live — this probe's own, which
+                // nothing in production may touch until THIS test calls Dispose() on it.
+                long expectedAfterSettle = baseline + 1; // baseline (0 outstanding) + this probe's own array
+
+                // Resume: finish this tile's remaining payload and let the cover settle — the tick that
+                // completes the tile is exactly when a pre-fix TileManager would sweep the (still-referenced)
+                // first slot a second time via DisposeWholeResult.
+                view.Config.MaxConsumesPerTick = 64;
+                for (int f = 0; f < 500; f++)
+                {
+                    view.LateUpdate();
+                    view.DrainMeshBuilds();
+                    if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                }
+                Assert.IsTrue(view.AllTilesSettled(), "the cover must still settle after the probe's injection");
+
+                Assert.AreEqual(expectedAfterSettle, MeshDataPayload.DebugLiveAllocCount,
+                    "a payload rented DURING a partial consume must not be silently freed by that tile's own " +
+                    "completion — this would mean TileManager still held a stale reference to an " +
+                    "already-recycled payload (what `result.Payloads[slot] = null` after each Dispose() call " +
+                    "in ConsumeMeshBuild exists to prevent). RED-verified by removing either " +
+                    "`result.Payloads[slot] = null;` assignment in TileManager.ConsumeMeshBuild.");
+
+                probe.Dispose();
+                Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount, "no leaks after full cleanup");
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
         // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
 
         /// <summary>

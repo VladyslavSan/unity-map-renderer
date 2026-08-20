@@ -1991,7 +1991,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // S89 C: the payload carries its own material index (draw order); the cursor is just a dense
                 // resume position. A payload whose material index no longer exists (restyle shrank the layer
                 // set mid-flight) is freed without registering — the backend would otherwise throw on it.
-                Style.IRenderLayerPayload payload = result.Payloads[cursor];
+                int slot = cursor;
+                Style.IRenderLayerPayload payload = result.Payloads[slot];
                 cursor++;
 
                 int materialIndex = payload?.MaterialIndex ?? -1;
@@ -2000,6 +2001,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (payload == null || (uint)materialIndex >= (uint)currentLayerCount)
                 {
                     payload?.Dispose();
+                    // perf/gc-elimination Stage A: null the slot the instant Dispose() has run — see the
+                    // note on the main-path Dispose() below for why this is load-bearing, not cosmetic.
+                    result.Payloads[slot] = null;
                     continue;
                 }
 
@@ -2007,6 +2011,17 @@ namespace MapRenderer.Unity.Rendering.Tile
                 using (PmMeshUpload.Auto())
                     mesh = payload.Upload();
                 payload.Dispose(); // consumed — free its NativeArrays now
+
+                // perf/gc-elimination Stage A: MeshDataPayload.Dispose() returns the instance to a shared,
+                // cross-build ConcurrentBag pool — so the moment Dispose() returns, `payload` may already be
+                // some OTHER, concurrently-running build's live instance. result.Payloads[slot] must stop
+                // referencing it right here: DisposeWholeResult's later unconditional sweep (at `complete`,
+                // possibly many frames from now) would otherwise call Dispose() a second time on whatever
+                // this slot still points to — which, if a concurrent build has since Rent()+Reset()'d it, is
+                // NOT a harmless idempotent no-op (that guarantee assumed the reference was never handed to
+                // anyone else) but a live double-free of that OTHER build's native array. Nulling here is
+                // what makes this Dispose() call provably the payload's last touch from this tile's result.
+                result.Payloads[slot] = null;
 
                 if (mesh == null) continue; // empty layer — no AddLayer, no budget charge
 
@@ -2072,9 +2087,15 @@ namespace MapRenderer.Unity.Rendering.Tile
             arr = merged;
         }
 
-        /// <summary>S48/S87: disposes every payload in a result (null-slot- and idempotent-safe — a payload
-        /// already disposed during a partial consume, or a null empty-layer slot, is a no-op). The single
-        /// place a <see cref="MeshBuildResult"/>'s NativeArrays are freed, called from every discard path.</summary>
+        /// <summary>S48/S87: disposes every payload in a result (null-slot-safe — a null empty-layer slot,
+        /// or a slot <see cref="ConsumeMeshBuild"/>'s per-payload loop already disposed AND NULLED, is a
+        /// no-op). The single place a <see cref="MeshBuildResult"/>'s NativeArrays are freed for a result
+        /// that was never partially consumed, called from every discard path.
+        ///
+        /// <para>perf/gc-elimination Stage A: this is NOT idempotent against re-Disposing the SAME live
+        /// reference — <c>ConsumeMeshBuild</c> nulls a slot the instant it disposes that payload precisely so
+        /// this sweep never gets the chance to (see that method's comment on why a pooled payload's identity
+        /// can no longer be assumed stable after its own Dispose() returns).</para></summary>
         private static void DisposeWholeResult(MeshBuildResult result)
         {
             if (result.Payloads == null) return;
@@ -2472,9 +2493,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
 
             // A record with an unconsumed-or-partially-consumed mesh build must have its result's
-            // NativeArrays disposed — stash in the S48 holding pen (idempotent dispose makes a partial
-            // record's already-consumed layers safe no-ops). Genuine mid-flight (task still running) is
-            // counted; an S87 partial (task complete, cursor mid-way) is stashed but not counted.
+            // NativeArrays disposed — stash in the S48 holding pen. A partial record's already-consumed
+            // layers are safe because ConsumeMeshBuild nulled their Payloads[] slots as it disposed them,
+            // so the later DisposeWholeResult sweep skips them — it must NOT re-Dispose a live pooled
+            // reference (a recycled instance a concurrent build now owns). Genuine mid-flight (task still
+            // running) is counted; an S87 partial (task complete, cursor mid-way) is stashed but not counted.
             if (lt.HasMeshBuild && !lt.Built)
             {
                 if (!lt.MeshBuildTask.Status.IsCompleted())

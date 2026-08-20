@@ -16,9 +16,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     internal sealed class TileMeshLayerProcessor : ITileMeshLayerProcessor
     {
-        private readonly ITileMeshRenderLayer _layer;
-        private readonly int                  _materialIndex;
-        private readonly Mesh.MeshDataArray   _mda;
+        private ITileMeshRenderLayer _layer;
+        private int                  _materialIndex;
+        private Mesh.MeshDataArray   _mda;
 
         // Committed by ProcessOnWorker ONLY after WriteInto returns successfully (or left false/default on
         // the no-features / no-source-layer legitimate empty paths, and on any throw — see ProcessOnWorker).
@@ -26,20 +26,33 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private int    _vertexCount;
         private Bounds _bounds;
 
-        private TileMeshLayerProcessor(ITileMeshRenderLayer layer, int materialIndex, Mesh.MeshDataArray mda)
+        // Pool-only: real construction happens via Reset, called from AllocateForKick after
+        // TileMeshLayerProcessorPool.Rent(). Never invoked directly outside the pool's Rent() fallback.
+        internal TileMeshLayerProcessor() { }
+
+        /// <summary>Re-initializes a pooled (or freshly-minted) instance to the same state the retired
+        /// constructor used to establish — every field <see cref="Complete"/> reads, so a reused instance
+        /// never leaks a prior build's state into the next one.</summary>
+        internal void Reset(ITileMeshRenderLayer layer, int materialIndex, Mesh.MeshDataArray mda)
         {
-            _layer         = layer;
-            _materialIndex = materialIndex;
-            _mda           = mda;
+            _layer              = layer;
+            _materialIndex      = materialIndex;
+            _mda                = mda;
+            _completedNormally  = false;
+            _vertexCount        = 0;
+            _bounds             = default;
         }
 
         /// <summary>Main-thread-only allocation factory, called from <c>TileManager.KickMeshBuild</c>'s
         /// <c>PmMeshDataAllocate</c> block. Allocates one writable <see cref="Mesh.MeshDataArray"/>
-        /// (<see cref="MeshDataPayload.AllocateTracked"/>) and retains it for the worker write.</summary>
+        /// (<see cref="MeshDataPayload.AllocateTracked"/>) and rents a pooled processor to retain it for the
+        /// worker write.</summary>
         internal static TileMeshLayerProcessor AllocateForKick(ITileMeshRenderLayer layer, int materialIndex)
         {
             Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
-            return new TileMeshLayerProcessor(layer, materialIndex, mda);
+            TileMeshLayerProcessor processor = TileMeshLayerProcessorPool.Rent();
+            processor.Reset(layer, materialIndex, mda);
+            return processor;
         }
 
         public LayerPhase Phase => LayerPhase.WorkerOnly;
@@ -106,16 +119,24 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         }
 
         /// <summary>Infallible: only wraps the already-allocated <see cref="Mesh.MeshDataArray"/> into a
-        /// <see cref="MeshDataPayload"/> (zero-vertex on the degenerate/fault paths).</summary>
+        /// <see cref="MeshDataPayload"/> (zero-vertex on the degenerate/fault paths). Also returns THIS
+        /// processor to its pool — safe because <c>Complete</c> is <see cref="ITileMeshLayerProcessor"/>'s
+        /// sole "done with this processor" signal, called exactly once per processor
+        /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>'s settle loop), with nothing touching the
+        /// processor afterward.</summary>
         public IRenderLayerPayload Complete()
         {
+            MeshDataPayload payload = MeshDataPayloadPool.Rent();
             if (_completedNormally)
-                return new MeshDataPayload(_mda, _vertexCount, _bounds, _layer.StyleLayer?.Id ?? "TileMesh", _materialIndex);
+                payload.Reset(_mda, _vertexCount, _bounds, _layer.StyleLayer?.Id ?? "TileMesh", _materialIndex);
+            else
+                // Decode fault, a throwing WriteInto, or this processor was never reached because an earlier
+                // processor in the same dense pass threw — either way, the kick-allocated array must still be
+                // wrapped and disposed via consume/discard (no native leak).
+                payload.Reset(_mda, 0, default, "TileMesh", _materialIndex);
 
-            // Decode fault, a throwing WriteInto, or this processor was never reached because an earlier
-            // processor in the same dense pass threw — either way, the kick-allocated array must still be
-            // wrapped and disposed via consume/discard (no native leak).
-            return new MeshDataPayload(_mda, 0, default, "TileMesh", _materialIndex);
+            TileMeshLayerProcessorPool.Return(this);
+            return payload;
         }
     }
 }

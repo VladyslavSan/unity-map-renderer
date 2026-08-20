@@ -456,11 +456,43 @@ namespace MapRenderer.Tests.Tiles
                 "a faulting WriteInto must settle as a zero-vertex payload, not upload partially-written data");
             Assert.AreEqual(7, payloads[0].MaterialIndex, "the material index survives the fault");
 
-            payloads[0].Dispose();
+            var payload = (MeshDataPayload)payloads[0];
+            payload.Dispose();
 
             long afterDispose = MeshDataPayload.DebugLiveAllocCount;
             Assert.AreEqual(baseline, afterDispose,
                 "the tracked MeshDataArray must be released after Dispose — no native leak on a faulting processor");
+
+            // perf/gc-elimination Stage A: a fault must not strand either kick-time wrapper OUTSIDE its
+            // pool — Complete() must still return the processor, and Dispose() must still return the
+            // payload, even on the degenerate/faulting path. Probed rather than asserted as "the very next
+            // Rent()", because both pools are process-global ConcurrentBags shared with every other test in
+            // this run — ordering is not guaranteed, only eventual presence is.
+            Assert.IsTrue(ProbePoolContainsAndRestore(TileMeshLayerProcessorPool.Rent, TileMeshLayerProcessorPool.Return, processor),
+                "a faulting WriteInto's processor must still be returned to TileMeshLayerProcessorPool by Complete()");
+            Assert.IsTrue(ProbePoolContainsAndRestore(MeshDataPayloadPool.Rent, MeshDataPayloadPool.Return, payload),
+                "a faulting WriteInto's payload must still be returned to MeshDataPayloadPool by Dispose()");
+        }
+
+        /// <summary>Rents up to <paramref name="maxProbe"/> times looking for <paramref name="target"/> by
+        /// reference identity, then hands every rented instance back (restoring pool state) before
+        /// returning whether it was found. A bounded, order-agnostic way to observe "was this instance
+        /// returned to its pool" against a process-global <c>ConcurrentBag</c> pool shared with every other
+        /// test in the run — <c>Rent</c>/<c>Return</c> give no ordering guarantee, so asserting identity on
+        /// the very next <c>Rent()</c> alone would be flaky.</summary>
+        private static bool ProbePoolContainsAndRestore<T>(Func<T> rent, Action<T> giveBack, T target, int maxProbe = 32)
+            where T : class
+        {
+            var pulled = new List<T>();
+            bool found = false;
+            for (int i = 0; i < maxProbe; i++)
+            {
+                T candidate = rent();
+                pulled.Add(candidate);
+                if (ReferenceEquals(candidate, target)) { found = true; break; }
+            }
+            foreach (T item in pulled) giveBack(item);
+            return found;
         }
     }
 }
