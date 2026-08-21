@@ -140,6 +140,7 @@ namespace MapRenderer.Tests.Tiles
                 LabelPlacementSystem.ProfilerMarkerNames.Emit,
                 LabelPlacementSystem.ProfilerMarkerNames.EmitLoop,
                 LabelPlacementSystem.ProfilerMarkerNames.EmitDecay,
+                WorldLabelRenderer.ProfilerMarkerNames.EndFrame,
                 MapView.ProfilerMarkerNames.ApplyZoom,
                 FillRenderLayer.ProfilerMarkerNames.ApplyZoomFills,
                 LineRenderLayer.ProfilerMarkerNames.ApplyZoomLines,

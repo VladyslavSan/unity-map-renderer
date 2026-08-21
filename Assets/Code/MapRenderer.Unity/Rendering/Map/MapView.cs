@@ -164,6 +164,8 @@ namespace MapRenderer.Unity.Rendering.Map
             Labels = new LabelPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
+            // Rapid-zoom stutter: run the full label place only every Nth frame (Inspector-tunable; 1 = off).
+            Labels.PlacementThrottleFrames = _config.SymbolPlacementThrottleFrames;
             // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
             // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK

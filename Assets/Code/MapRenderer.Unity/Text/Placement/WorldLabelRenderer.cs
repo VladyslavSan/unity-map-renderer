@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Pool;
 using MapRenderer.Core.Geo;
@@ -199,6 +200,21 @@ namespace MapRenderer.Unity.Text.Placement
         // Reused reclaim-sweep scratch (cleared each EndFrame, never reallocated in steady state — T4).
         private readonly List<WorldLabelKey> _reclaimScratch = new();
 
+        /// <summary>Profiler marker name constants (SSOT) for this type's per-frame work — referenced by the
+        /// <see cref="ProfilerMarker"/> field below and by <c>ProfilerMarkerTests</c>. The label-path markers
+        /// otherwise live on <see cref="LabelPlacementSystem"/>, but <see cref="EndFrame"/> (mesh Build +
+        /// material binds + <c>_tree.Rebuild</c> — main-thread-only Mesh API) runs here and was previously
+        /// UNMARKED, hiding its share of the per-frame LabelTick cost.</summary>
+        internal static class ProfilerMarkerNames
+        {
+            internal const string EndFrame = "MapRenderer.Symbol.EndFrame";
+        }
+
+        // Brackets the whole EndFrame body (mesh rebuild + per-slot SetTexture/SetVector + _tree.Rebuild +
+        // idle reclaim) so its cost is visible in the Profiler rather than folded into LabelTick's self-time.
+        private static readonly ProfilerMarker PmEndFrame =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.EndFrame);
+
         /// <summary>Clears every live slot's accumulators for a fresh emit pass. Dictionary + slots persist
         /// (no alloc in steady state).</summary>
         public void BeginFrame()
@@ -341,6 +357,8 @@ namespace MapRenderer.Unity.Text.Placement
             Material                       fallbackTextMaterial, Material fallbackIconMaterial,
             Texture                        atlasTexture,         Texture spriteTexture, double2 viewportLogicalPx)
         {
+            using (PmEndFrame.Auto())
+            {
             foreach (KeyValuePair<WorldLabelKey, Slot> kv in _slots)
             {
                 WorldLabelKey key  = kv.Key;
@@ -406,7 +424,16 @@ namespace MapRenderer.Unity.Text.Placement
             }
 
             _reclaimScratch.Clear();
+            }
         }
+
+        /// <summary>Held-frame residual for the label-placement throttle: re-rebase every live tile container
+        /// against this frame's floating-origin scene frame WITHOUT re-placing. Because labels are billboarded
+        /// on the GPU from their tile-local anchors (never rebaked on camera motion), this one
+        /// transform-per-container write is ALL a skipped placement frame needs to keep them correctly
+        /// world-anchored — no slot clear (<see cref="BeginFrame"/> would wipe the meshes), no mesh rebuild.</summary>
+        /// <param name="frame">This frame's floating-origin scene frame (same input <see cref="EndFrame"/> rebases against).</param>
+        public void Rebase(in SceneFrame frame) => _tree.Rebuild(in frame);
 
         /// <summary>Lazily creates <paramref name="slot"/>'s text/icon child GameObject (MeshFilter bound to
         /// the slot's persistent, reused <see cref="Mesh"/> — no rebind afterward, only its buffers change)

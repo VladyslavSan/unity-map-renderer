@@ -460,6 +460,18 @@ namespace MapRenderer.Unity.Text.Placement
         // transform: MapView.LateUpdate does SyncToCamera → tile rebase → places labels, in that order.
         private readonly MapCamera _camera;
 
+        // Label-placement throttle (rapid-zoom stutter fix): the full per-frame place (project→collide→emit,
+        // the ~100 ms main-thread LabelTick) runs only every PlacementThrottleFrames-th frame. On the held
+        // frames between, only WorldRenderer.Rebase runs — one transform per tile container — and the GPU
+        // keeps billboarding the existing slot meshes to correct world positions. Held-frame deltaTime is
+        // accumulated so the A-4 fade advances at the true elapsed rate on the recompute frame. Default 1 ==
+        // every frame (throttle OFF), so tests and any single-Tick caller are byte-for-byte unchanged;
+        // MapView sets it > 1 in production. Every-N (not camera-delta) so fades never freeze on a still camera.
+        internal int PlacementThrottleFrames = 1;
+        private int   _framesSinceLastPlacement;
+        private float _heldDeltaTime;
+        private bool  _hasPlacedOnce;
+
         /// <summary>
         /// The default world materials are <see cref="MaterialExtensions.CloneWithParent"/> clones of the
         /// <see cref="MapMaterialSet.SymbolTextWorld"/>/<see cref="MapMaterialSet.SymbolIconWorld"/> bases
@@ -568,11 +580,33 @@ namespace MapRenderer.Unity.Text.Placement
             float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null,
             Texture2D spriteTexture = null)
         {
+            // Throttle: hold this frame (no re-place) unless it's a recompute frame. Skipped only once the
+            // pipeline has placed at least once, so the very first Tick always builds. Held frames just
+            // re-rebase the existing meshes (GPU billboards them) and accumulate their dt for the fade.
+            if (PlacementThrottleFrames > 1 && _hasPlacedOnce)
+            {
+                _framesSinceLastPlacement++;
+                if (!float.IsInfinity(deltaTime)) _heldDeltaTime += deltaTime;
+                if (_framesSinceLastPlacement < PlacementThrottleFrames)
+                {
+                    WorldRenderer.Rebase(in frame);
+                    return;
+                }
+            }
+
+            // On a recompute frame, advance the fade by the WHOLE elapsed time since the last place (this
+            // frame + every held frame), or the fade would slow by the throttle ratio. Infinity (snap) rides through.
+            float effectiveDeltaTime = float.IsInfinity(deltaTime) ? deltaTime : deltaTime + _heldDeltaTime;
+
             using (PmGather.Auto())
                 GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount (Should-Fix 3:
                                         // WinnerCount includes Dropped records; telemetry/gating must not)
-            TickCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
+            TickCore(frame, atlas, effectiveDeltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
             RefreshTelemetry();   // after the pass, so the levels are this Tick's
+
+            _framesSinceLastPlacement = 0;
+            _heldDeltaTime            = 0f;
+            _hasPlacedOnce            = true;
         }
 
 

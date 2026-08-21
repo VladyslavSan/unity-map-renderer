@@ -81,6 +81,13 @@ namespace MapRenderer.Unity.Rendering.Map
                  "prefer Dense unless diagnosing a storage-specific regression.")]
         public PropertyStorageMode PropertyStorage = PropertyStorageMode.Dense;
 
+        [Tooltip("Rapid-zoom stutter: recompute the full symbol-label placement (project/collide/emit — the " +
+            "main-thread LabelTick that spikes to ~100ms) only every Nth frame; on the held frames between, " +
+            "labels stay GPU-billboarded at their world anchors (only reflow / collision / fade update less " +
+            "often). 1 = every frame (throttle OFF, unchanged behaviour). 2-4 trades a few frames of " +
+            "label-reflow latency for a large main-thread saving during zoom.")]
+        public int SymbolPlacementThrottleFrames = 1;
+
         [Header("Meshing")]
         [Tooltip("How much of each tile's MVT buffer the FILL meshes keep, in tile units at extent 4096 " +
                  "(scaled to the layer's own extent). Tiles carry geometry past their edge so neighbours " +
