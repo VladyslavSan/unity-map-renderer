@@ -227,7 +227,7 @@ Shader "Map/Fill"
             // Include order (define-before-use): input first (CBUFFER + DOTS bridge),
             // then vertex-modify body (MapVertexModify definition), then pass body.
             #include "Fill_LitInput.hlsl"
-            #include "Fill_VertexModify.hlsl"
+            #include "../Fill_VertexModify.hlsl"
             #include "Fill_LitForwardPass.hlsl"
             ENDHLSL
         }
@@ -263,7 +263,7 @@ Shader "Map/Fill"
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
             #include "Fill_LitInput.hlsl"
-            #include "Fill_VertexModify.hlsl"
+            #include "../Fill_VertexModify.hlsl"
             #include "Fill_ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -338,7 +338,7 @@ Shader "Map/Fill"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Fill_LitInput.hlsl"
-            #include "Fill_VertexModify.hlsl"
+            #include "../Fill_VertexModify.hlsl"
             #include "Fill_LitGBufferPass.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutputFormat.hlsl"
             ENDHLSL
@@ -373,8 +373,8 @@ Shader "Map/Fill"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Fill_LitInput.hlsl"
-            #include "Fill_VertexModify.hlsl"
-            #include "Fill_DepthOnlyPass.hlsl"
+            #include "../Fill_VertexModify.hlsl"
+            #include "../Fill_DepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -411,8 +411,8 @@ Shader "Map/Fill"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Fill_LitInput.hlsl"
-            #include "Fill_VertexModify.hlsl"
-            #include "Fill_DepthNormalsPass.hlsl"
+            #include "../Fill_VertexModify.hlsl"
+            #include "../Fill_DepthNormalsPass.hlsl"
             ENDHLSL
         }
     }

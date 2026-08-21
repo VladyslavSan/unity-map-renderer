@@ -1,0 +1,20 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e10350998eb54293b8e5a1c56527691, type: 3}
+  m_Name: UnlitMaterialSet
+  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapMaterialSet
+  RenderMode: 1
+  FillMaterial: {fileID: 2100000, guid: 32fadca331c444c77ad74674bece0be9, type: 2}
+  LineMaterial: {fileID: 2100000, guid: ff51389efceca41899c096c05399f037, type: 2}
+  FillExtrusionMaterial: {fileID: 2100000, guid: d61a45d4e5c0549c888132f99f59a0bd, type: 2}
+  SymbolTextWorld: {fileID: 2100000, guid: 000104bafaa9477c953ad2927e0c3409, type: 2}
+  SymbolIconWorld: {fileID: 2100000, guid: 7dea481d6c8246d09606fed74943881e, type: 2}

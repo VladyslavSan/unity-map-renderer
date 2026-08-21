@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Text.Placement
         }";
 
         // A throwaway MapMaterialSet built directly from the real committed shaders (Shader.Find) — never
-        // loads/mutates the production Assets/Settings/Map/MapMaterialSet.asset, mirrors how every other
+        // loads/mutates the committed production MapMaterialSet, mirrors how every other
         // Symbol test builds its material(s) (`new Material(Shader.Find("Map/Symbol/TextWorld"))`).
         private static MapMaterialSet BuildSettings()
         {

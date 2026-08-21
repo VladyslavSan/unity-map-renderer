@@ -204,10 +204,8 @@ namespace MapRenderer.Tests.Visual
                 "Line.shader must NOT #include Fill_LitForwardPass.hlsl (wrong pass for line).");
 
             // 5. Line_LitInput is included by Line.shader; Line_LitForwardPass calls InitializeStandardLitSurfaceData.
-            string passPath = System.IO.Path.Combine(
-                System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
-                "Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_LitForwardPass.hlsl");
-            string passSrc = System.IO.File.ReadAllText(passPath);
+            string passSrc = System.IO.File.ReadAllText(
+                ShaderPropertyParser.MapShaderPath("Line_LitForwardPass.hlsl"));
             Assert.That(passSrc, Does.Not.Contain("#include \"Line_LitInput.hlsl\""),
                 "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl (S66: Line.shader provides it).");
             Assert.That(passSrc, Does.Contain("InitializeStandardLitSurfaceData"),

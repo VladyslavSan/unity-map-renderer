@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
 using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
+using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 
 namespace MapRenderer.Tests.MapViews
 {
@@ -34,7 +35,7 @@ namespace MapRenderer.Tests.MapViews
                 TestContext.WriteLine($"skybox={RenderSettings.skybox} mode={RenderSettings.ambientMode} " +
                     $"dcBefore={math.abs(RenderSettings.ambientProbe[0, 0]) + math.abs(RenderSettings.ambientProbe[1, 0]) + math.abs(RenderSettings.ambientProbe[2, 0])}");
 
-                Bootstrapper.EnsureEnvironmentLighting();
+                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Lit);
 
                 var probe = RenderSettings.ambientProbe;
                 float dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
@@ -42,6 +43,43 @@ namespace MapRenderer.Tests.MapViews
                 Assert.Greater(dcTerm, 0f,
                     "EnsureEnvironmentLighting must populate a non-zero ambient probe when the scene's " +
                     "environment lighting was never generated — otherwise faces the sun misses stay black.");
+            }
+            finally
+            {
+                RenderSettings.ambientMode  = prevMode;
+                RenderSettings.ambientLight = prevLight;
+                RenderSettings.ambientProbe = prevProbe;
+            }
+        }
+
+        [Test]
+        public void EnsureEnvironmentLighting_UnlitMode_LeavesDegenerateProbeUntouched()
+        {
+            // S4 (unlit epic): the mode gate — under Unlit, the SAME degenerate-probe scenario that Lit
+            // populates above must be left untouched (no DynamicGI.UpdateEnvironment call). Unlit map
+            // geometry has no indirect-lighting term to fill, so generating a probe for it is dead work.
+            var prevMode  = RenderSettings.ambientMode;
+            var prevLight = RenderSettings.ambientLight;
+            var prevProbe = RenderSettings.ambientProbe;
+
+            try
+            {
+                RenderSettings.ambientMode  = AmbientMode.Skybox;
+                RenderSettings.ambientProbe = default; // all 27 SH coefficients zero — same as the Lit case
+
+                // Precondition, asserted BEFORE the call under test: if the probe doesn't round-trip to
+                // exactly zero here, a failure below is a harness problem, not a gate failure.
+                var before = RenderSettings.ambientProbe;
+                float dcBefore = math.abs(before[0, 0]) + math.abs(before[1, 0]) + math.abs(before[2, 0]);
+                Assert.AreEqual(0f, dcBefore, "precondition: the probe must round-trip to exactly zero.");
+
+                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Unlit);
+
+                var probe = RenderSettings.ambientProbe;
+                float dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
+                Assert.AreEqual(0f, dcTerm,
+                    "EnsureEnvironmentLighting(RenderMode.Unlit) must NOT populate the ambient probe — " +
+                    "unlit map geometry has no indirect term to fill.");
             }
             finally
             {
@@ -66,7 +104,7 @@ namespace MapRenderer.Tests.MapViews
                 RenderSettings.ambientMode  = AmbientMode.Skybox;
                 RenderSettings.ambientProbe = baked;
 
-                Bootstrapper.EnsureEnvironmentLighting();
+                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Lit);
 
                 var probe = RenderSettings.ambientProbe;
                 for (int channel = 0; channel < 3; channel++)

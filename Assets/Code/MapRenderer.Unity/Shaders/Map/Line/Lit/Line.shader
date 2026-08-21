@@ -262,7 +262,7 @@ Shader "Map/Line"
             // Include order (define-before-use): input (CBUFFER + DOTS bridge), helper
             // (LineAttributes + Line_VertexExtrude + LineCoverage), then pass body.
             #include "Line_LitInput.hlsl"
-            #include "Line_VertexExtrude.hlsl"
+            #include "../Line_VertexExtrude.hlsl"
             #include "Line_LitForwardPass.hlsl"
             ENDHLSL
         }
@@ -298,7 +298,7 @@ Shader "Map/Line"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Line_LitInput.hlsl"
-            #include "Line_VertexExtrude.hlsl"
+            #include "../Line_VertexExtrude.hlsl"
             #include "Line_ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -330,8 +330,8 @@ Shader "Map/Line"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Line_LitInput.hlsl"
-            #include "Line_VertexExtrude.hlsl"
-            #include "Line_DepthOnlyPass.hlsl"
+            #include "../Line_VertexExtrude.hlsl"
+            #include "../Line_DepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -363,8 +363,8 @@ Shader "Map/Line"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Line_LitInput.hlsl"
-            #include "Line_VertexExtrude.hlsl"
-            #include "Line_DepthNormalsPass.hlsl"
+            #include "../Line_VertexExtrude.hlsl"
+            #include "../Line_DepthNormalsPass.hlsl"
             ENDHLSL
         }
 
@@ -430,7 +430,7 @@ Shader "Map/Line"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "Line_LitInput.hlsl"
-            #include "Line_VertexExtrude.hlsl"
+            #include "../Line_VertexExtrude.hlsl"
             #include "Line_LitGBufferPass.hlsl"
             ENDHLSL
         }

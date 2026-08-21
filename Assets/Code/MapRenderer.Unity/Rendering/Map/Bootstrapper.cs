@@ -117,19 +117,31 @@ namespace MapRenderer.Unity.Rendering.Map
             Wire(gameObject, Camera.main, initialView,
                  UseGlobe ? new SphericalProjection() : null);
 
-            // 3. Ensure a directional light exists in the scene (for URP Lit fill shader).
+            // 2.5. Resolve the render mode ahead of the lighting bootstrap — it is a property of the
+            //      referenced MapMaterialSet (an Unlit set puts the whole view in unlit mode). RequireComponent
+            //      guarantees a MapViewComponent, but guard anyway (matches step 4's null check); an absent
+            //      component OR an unset MaterialSet defaults to Lit, the pre-existing unconditional behaviour.
+            var mapView    = GetComponent<MapViewComponent>();
+            var renderMode = mapView != null && mapView.Config.MaterialSet != null
+                ? mapView.Config.MaterialSet.RenderMode
+                : Materials.RenderMode.Lit;
+
+            // 3. Ensure a directional light exists in the scene. Needed in BOTH modes: URP Lit uses it for
+            //    full lighting, and the unlit fill-extrusion twin reads its DIRECTION for a cheap half-Lambert
+            //    so 3D buildings aren't flat solid blocks (fills/lines ignore it). Unconditional — the ambient
+            //    probe below stays Unlit-gated, but the light does not.
             EnsureDirectionalLight();
 
             // 3.5. Ensure the scene has a real ambient probe — a scene whose environment lighting was
             //      never generated leaves fully-shadowed faces (e.g. fill-extrusion walls facing away
             //      from the sun) pure black, since URP Lit's indirect term is the only fill they get.
             //      After EnsureDirectionalLight so a procedural skybox convolves against the real sun.
-            EnsureEnvironmentLighting();
+            //      S4 (unlit epic): skipped under RenderMode.Unlit — no indirect term to fill.
+            EnsureEnvironmentLighting(renderMode);
 
             // 4. Resolve the style URI and load it. SetStyle is async (fetches the style doc + any
             //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
             //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
-            var mapView = GetComponent<MapViewComponent>();
             if (mapView != null)
             {
                 // Device-independent on-screen tile size: derive the device-pixel ratio from the reported
@@ -282,9 +294,18 @@ namespace MapRenderer.Unity.Rendering.Map
         /// skybox or ambient settings after startup, so a single call suffices; a future time-of-day or
         /// style-driven-sky feature that mutates <see cref="RenderSettings"/> at runtime would own
         /// re-calling this.</para>
+        ///
+        /// <para>S4 (unlit epic): a no-op under <see cref="Materials.RenderMode.Unlit"/> — the unlit shader
+        /// twins have no indirect-lighting term to fill, so generating a probe for them would be dead work.
+        /// Threaded as a parameter (not read from a global) so <see cref="Start"/> — this type's one caller —
+        /// stays the single place render mode is resolved.</para>
         /// </summary>
-        internal static void EnsureEnvironmentLighting()
+        /// <param name="mode">The active render mode (<see cref="Materials.MapMaterialSet.RenderMode"/>); only
+        /// <see cref="Materials.RenderMode.Lit"/> runs the probe check.</param>
+        internal static void EnsureEnvironmentLighting(Materials.RenderMode mode)
         {
+            if (mode != Materials.RenderMode.Lit) return;
+
             var probe = RenderSettings.ambientProbe;
             double dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
             if (dcTerm > 1e-6) return; // already has a real probe — don't clobber a host's baked lighting
@@ -293,10 +314,17 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>
-        /// Ensures at least one directional light is present in the scene so the URP Lit fill shader
-        /// produces visible output (not all-black). Creates one if none exists.
+        /// Ensures at least one directional light is present in the scene, creating one if none exists.
+        /// Runs in BOTH render modes — unlike the ambient probe (<see cref="EnsureEnvironmentLighting"/>),
+        /// which stays Unlit-gated, the light itself is unconditional: URP Lit needs it for full lighting,
+        /// and the unlit fill-extrusion twin reads its DIRECTION for a cheap half-Lambert so 3D buildings
+        /// don't render as flat solid blocks. Fills and lines ignore it (no face normal to react to).
         /// </summary>
-        private static void EnsureDirectionalLight()
+        /// <remarks>Test seam: <c>internal</c> (not <c>private</c>) so the bootstrap tooth
+        /// (<c>InternalsVisibleTo</c>) can call it directly without going through the MonoBehaviour
+        /// <see cref="Start"/> lifecycle. See <c>FillExtrusion_UnlitForwardPass.hlsl</c> for the shading
+        /// side that consumes this light.</remarks>
+        internal static void EnsureDirectionalLight()
         {
             var existing = Object.FindAnyObjectByType<Light>();
             if (existing != null && existing.type == LightType.Directional)

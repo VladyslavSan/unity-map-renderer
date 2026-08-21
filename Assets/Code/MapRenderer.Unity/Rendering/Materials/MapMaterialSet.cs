@@ -18,6 +18,13 @@ namespace MapRenderer.Unity.Rendering.Materials
     [CreateAssetMenu(fileName = "MapMaterialSet", menuName = "MapRenderer/Material Set", order = 0)]
     public sealed class MapMaterialSet : ScriptableObject
     {
+        [Tooltip("S4 (unlit epic): whether this set's base materials are lit or unlit. A map view draws in " +
+                 "whichever mode the MapMaterialSet it references declares — reference a Lit set for lit, an " +
+                 "Unlit set (Map/FillUnlit / Map/FillExtrusionUnlit / Map/LineUnlit bases) for unlit. Under " +
+                 "Unlit the Bootstrapper also skips the directional-light + ambient-probe setup the unlit " +
+                 "twins never read. Lit is value 0, so a set authored before this epic stays lit.")]
+        [SerializeField] public RenderMode RenderMode = RenderMode.Lit;
+
         [Tooltip("Base material for all fill (polygon) layers. Cloned per style layer.")]
         [SerializeField] public Material FillMaterial;
 
@@ -72,5 +79,23 @@ namespace MapRenderer.Unity.Rendering.Materials
                     "MapMaterialSet.SymbolTextWorld is unassigned — every map base material (FillMaterial, " +
                     "LineMaterial, SymbolTextWorld) must be set.");
         }
+    }
+
+    /// <summary>
+    /// S4 (unlit epic): the shading family a <see cref="MapMaterialSet"/>'s base materials belong to — a
+    /// property of the SET (the mode is chosen by which set a view references, not a separate view flag).
+    /// <see cref="Lit"/> is value 0 so a set serialized before this epic deserializes to the unchanged
+    /// default.
+    /// </summary>
+    public enum RenderMode
+    {
+        /// <summary>Full URP-lit base materials — the pre-existing default. The <see cref="Bootstrapper"/>
+        /// runs its directional-light + ambient-probe setup.</summary>
+        Lit = 0,
+
+        /// <summary>Unlit base materials (Map/FillUnlit, Map/FillExtrusionUnlit, Map/LineUnlit) — no lighting
+        /// math; the <see cref="Bootstrapper"/> skips the directional-light + ambient-probe setup the unlit
+        /// twins never read.</summary>
+        Unlit = 1,
     }
 }

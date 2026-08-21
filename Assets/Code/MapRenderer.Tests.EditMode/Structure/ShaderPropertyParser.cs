@@ -48,6 +48,23 @@ namespace MapRenderer.Tests
         public static string MapExtrusionDir => Path.Combine(ShadersDir, "Map", "FillExtrusion");
         public static string CommonDir    => Path.Combine(ShadersDir, "Common");
 
+        /// <summary>
+        /// Resolves a shader source file (<c>.hlsl</c>/<c>.shader</c>) to its absolute path by filename,
+        /// searching anywhere under <c>Shaders/Map/</c> — move-proof against the Lit/Unlit folder split (and
+        /// any future reorg). Shader filenames are unique across the Map tree, so exactly one match is
+        /// expected; a count ≠ 1 fails loudly (a duplicate or a missing file, not a silent wrong pick). Use
+        /// this for CONTENT reads (a test that inspects a file's text); the few tests whose subject is the
+        /// folder LAYOUT name their structure directly instead.
+        /// </summary>
+        public static string MapShaderPath(string fileName)
+        {
+            string[] matches = Directory.GetFiles(MapDir, fileName, SearchOption.AllDirectories);
+            Assert.That(matches.Length, Is.EqualTo(1),
+                $"Expected exactly one '{fileName}' under Shaders/Map/; found {matches.Length}" +
+                (matches.Length > 1 ? " [" + string.Join(", ", matches) + "]" : "") + ".");
+            return matches[0];
+        }
+
         private static string ResolveUnityAssemblyRoot()
         {
             foreach (string guid in AssetDatabase.FindAssets("MapRenderer.Unity t:AssemblyDefinitionAsset"))
@@ -260,7 +277,56 @@ namespace MapRenderer.Tests
             return result;
         }
 
+        // ── HLSL struct semantics parser ────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Parses a named <c>struct { … };</c> declaration from an HLSL file and returns the set of
+        /// vertex-semantic tokens (the <c>SEMANTIC</c> in <c>: SEMANTIC;</c>) its fields declare. Used by
+        /// the shared-vertex-layout structural teeth: a shader's <c>Attributes</c> semantics must be a
+        /// subset of what the mesh builder actually emits (<c>VertexAttributeDescriptor</c> streams), so a
+        /// shader cannot silently require an attribute no builder writes.
+        /// </summary>
+        public static HashSet<string> ParseStructSemantics(string hlslPath, string structName)
+        {
+            Assert.That(File.Exists(hlslPath), Is.True, $"HLSL file not found: {hlslPath}");
+            string text = File.ReadAllText(hlslPath);
+
+            var structMatch = Regex.Match(
+                text,
+                $@"struct\s+{Regex.Escape(structName)}\s*\{{(.*?)\}}\s*;",
+                RegexOptions.Singleline);
+
+            Assert.That(structMatch.Success, Is.True,
+                $"No 'struct {structName} {{ … }};' found in: {Path.GetFileName(hlslPath)}");
+
+            string body = structMatch.Groups[1].Value;
+            var semanticRegex = new Regex(@":\s*(\w+)\s*;");
+
+            var result = new HashSet<string>(StringComparer.Ordinal);
+            foreach (Match m in semanticRegex.Matches(body))
+                result.Add(m.Groups[1].Value);
+            return result;
+        }
+
         // ── Shared utility ───────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Strips <c>//</c> line comments and <c>/* … */</c> block comments from HLSL source, so a
+        /// structural grep-tooth scans CODE only and never self-documenting prose. A shader that names a
+        /// forbidden token to explain its ABSENCE ("no <c>UniversalFragmentPBR</c>/<c>SAMPLE_GI</c> —
+        /// UniversalFragmentUnlit composes the colour instead") is good documentation and must not trip a
+        /// "references no lighting call" tooth; a naive <c>text.Contains(token)</c> would false-positive on
+        /// it. Not a full preprocessor — it does not model string literals (these HLSL files carry none),
+        /// which is why it is scoped to token-absence scans, not lexing.
+        /// </summary>
+        /// <param name="text">Raw HLSL source.</param>
+        /// <returns>The source with comment spans replaced by a single space (offsets not preserved).</returns>
+        public static string StripHlslComments(string text)
+        {
+            text = Regex.Replace(text, @"/\*.*?\*/", " ", RegexOptions.Singleline);
+            text = Regex.Replace(text, @"//[^\n]*", " ");
+            return text;
+        }
 
         /// <summary>
         /// Maps an HLSL/GLSL type name to a float count.

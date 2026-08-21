@@ -115,7 +115,8 @@ namespace MapRenderer.Unity.Rendering.Map
         [Tooltip("Optional: base materials per rendering technique (MapMaterialSet asset). When set, each " +
                  "per-layer material is a CLONE of the matching base — a Material Variant in the Editor, so " +
                  "editing the base .mat in Play live-tunes every layer. When unset, legacy shader-built defaults " +
-                 "are used.")]
+                 "are used. S4 (unlit epic): the referenced set's own RenderMode (Lit/Unlit) is what puts the " +
+                 "whole view in lit or unlit mode — assign a Lit set for lit, an Unlit set for unlit.")]
         public Materials.MapMaterialSet MaterialSet;
 
         [Tooltip("S82: PreparedTileCache knobs — Enabled (master toggle) + ByteBudget/MaxCount (LRU bounds). " +

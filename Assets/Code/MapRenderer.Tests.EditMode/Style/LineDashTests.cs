@@ -351,13 +351,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ShaderStructure_LineLitForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
         {
-            string hlslPath = FindRepoFile(
-                "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_LitForwardPass.hlsl");
-
-            Assert.That(hlslPath, Is.Not.Null,
-                $"Line_LitForwardPass.hlsl not found. Tried walking up 16 levels from " +
-                $"cwd={Directory.GetCurrentDirectory()} and AppContext.BaseDirectory={AppContext.BaseDirectory}");
-            string text = File.ReadAllText(hlslPath);
+            // Resolved by name (move-proof) — the lit forward pass now lives under Map/Line/Lit/.
+            string text = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_LitForwardPass.hlsl"));
 
             // S67 + UV-channel cleanup: dashU is computed in the shared Line_VertexExtrude helper; the
             // forward pass calls it and carries the result in the line uv channel (uv.x — the native
@@ -372,11 +367,8 @@ namespace MapRenderer.Tests.Style
 
             // _DashCount: S67 factored the dash logic into Line_VertexExtrude.hlsl (shared by all passes).
             // Assert the guard is present there — still a single-site check, just in the helper.
-            string extrudePath = FindRepoFile(
-                "Assets", "Code", "MapRenderer.Unity", "Shaders", "Map", "Line", "Line_VertexExtrude.hlsl");
-            Assert.That(extrudePath, Is.Not.Null,
-                "Line_VertexExtrude.hlsl not found (S67 shared extrusion helper).");
-            string extrudeText = File.ReadAllText(extrudePath);
+            // Shared helper, resolved by name (move-proof) — stays in the Map/Line/ kind root.
+            string extrudeText = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_VertexExtrude.hlsl"));
             Assert.That(extrudeText, Does.Contain("sideAndDist.y"),
                 "Line_VertexExtrude.hlsl must consume per-vertex distanceAlong (input.sideAndDist.y) to form dashU.");
             Assert.That(extrudeText, Does.Contain("dashU"),

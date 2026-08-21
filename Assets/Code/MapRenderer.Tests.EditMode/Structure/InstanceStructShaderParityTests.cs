@@ -36,10 +36,6 @@ namespace MapRenderer.Tests.Structure
     [TestFixture]
     public class InstanceStructShaderParityTests
     {
-        // Paths are anchored via ShaderPropertyParser (AssetDatabase-based, move-proof).
-        private static string MapFillDir => ShaderPropertyParser.MapFillDir;
-        private static string MapLineDir => ShaderPropertyParser.MapLineDir;
-
         // ── Helpers ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>
@@ -107,7 +103,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void LineDotsPropCount_IsExactly24()
         {
-            var props = ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+            var props = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
             Assert.That(props.Count, Is.EqualTo(24),
                 $"Line_LitInput.hlsl DOTS block must have exactly 24 UNITY_DOTS_INSTANCED_PROP entries " +
                 $"(13 common Lit + _Opacity + 10 line-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
@@ -117,7 +113,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillDotsPropCount_IsExactly21()
         {
-            var props = ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+            var props = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
             Assert.That(props.Count, Is.EqualTo(21),
                 $"Fill_LitInput.hlsl DOTS block must have exactly 21 UNITY_DOTS_INSTANCED_PROP entries " +
                 $"(13 common Lit + _Opacity + 7 fill-specific). Found {props.Count}: {string.Join(", ", props.Keys)}");
@@ -132,7 +128,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void Forward_LineDots_EachPropHasMatchingStructField()
         {
-            var lineProps = ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+            var lineProps = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
             var structFields = ParseStructMaterialFields(out _);
 
             var failures = new List<string>();
@@ -156,7 +152,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void Forward_FillDots_EachPropHasMatchingStructField()
         {
-            var fillProps = ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+            var fillProps = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
             var structFields = ParseStructMaterialFields(out _);
 
             var failures = new List<string>();
@@ -184,8 +180,8 @@ namespace MapRenderer.Tests.Structure
         public void Reverse_EachStructField_AppearsInFillOrLineDots()
         {
             var structFields = ParseStructMaterialFields(out _);
-            var lineProps    = ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
-            var fillProps    = ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+            var lineProps    = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
+            var fillProps    = ParseDotsProps(ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
 
             var failures = new List<string>();
             foreach (string name in structFields.Keys)

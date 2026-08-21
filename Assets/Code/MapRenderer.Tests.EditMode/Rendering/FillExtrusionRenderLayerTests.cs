@@ -8,7 +8,7 @@
 // S23 I2b: the render layer now clones its OWN Map/FillExtrusion base material
 // (MapMaterialSet.FillExtrusionMaterial), not the flat FILL base I1 reused. This suite builds its own
 // synthetic settings via Shader.Find (mirroring MaterialTweakerTests' NewFill()/NewLine() precedent) so it
-// stays independent of the committed asset. As of I3 the production MapMaterialSet.asset DOES carry a
+// stays independent of the committed asset. As of I3 the committed production (Lit) MapMaterialSet DOES carry a
 // FillExtrusionMaterial (the depth-writing render-state wiring it exercises is guarded by
 // MaterialTweakerTests.CreateFillExtrusionMaterial_AppliesElevatedContract_NotFlatPainter).
 

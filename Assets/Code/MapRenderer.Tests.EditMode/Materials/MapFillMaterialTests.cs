@@ -19,9 +19,9 @@ namespace MapRenderer.Tests.Materials
     [TestFixture]
     public class MapFillMaterialTests
     {
-        private const string MatPath     = "Assets/Code/MapRenderer.Unity/Materials/MapFill.mat";
+        private const string MatPath     = "Assets/Code/MapRenderer.Unity/Materials/Map/Fill/Lit/Fill.mat";
         private const string ShaderName  = "Map/Fill";
-        private const string LineMatPath = "Assets/Code/MapRenderer.Unity/Materials/MapLine.mat";
+        private const string LineMatPath = "Assets/Code/MapRenderer.Unity/Materials/Map/Line/Lit/Line.mat";
 
         // Tolerance for the styled RGBA assertions (per channel). Tight enough that a white
         // clobber {1,1,1,1} fails, loose enough for float round-trip through the YAML asset.

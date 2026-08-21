@@ -206,7 +206,7 @@ Shader "Map/FillExtrusion"
             // Include order (define-before-use): input first (CBUFFER + DOTS bridge),
             // then vertex-modify body (MapVertexModify definition), then pass body.
             #include "FillExtrusion_LitInput.hlsl"
-            #include "FillExtrusion_VertexModify.hlsl"
+            #include "../FillExtrusion_VertexModify.hlsl"
             #include "FillExtrusion_LitForwardPass.hlsl"
             ENDHLSL
         }
@@ -242,7 +242,7 @@ Shader "Map/FillExtrusion"
             #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
 
             #include "FillExtrusion_LitInput.hlsl"
-            #include "FillExtrusion_VertexModify.hlsl"
+            #include "../FillExtrusion_VertexModify.hlsl"
             #include "FillExtrusion_ShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -317,7 +317,7 @@ Shader "Map/FillExtrusion"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "FillExtrusion_LitInput.hlsl"
-            #include "FillExtrusion_VertexModify.hlsl"
+            #include "../FillExtrusion_VertexModify.hlsl"
             #include "FillExtrusion_LitGBufferPass.hlsl"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/GBufferOutputFormat.hlsl"
             ENDHLSL
@@ -352,8 +352,8 @@ Shader "Map/FillExtrusion"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "FillExtrusion_LitInput.hlsl"
-            #include "FillExtrusion_VertexModify.hlsl"
-            #include "FillExtrusion_DepthOnlyPass.hlsl"
+            #include "../FillExtrusion_VertexModify.hlsl"
+            #include "../FillExtrusion_DepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -390,8 +390,8 @@ Shader "Map/FillExtrusion"
             #include_with_pragmas "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DOTS.hlsl"
 
             #include "FillExtrusion_LitInput.hlsl"
-            #include "FillExtrusion_VertexModify.hlsl"
-            #include "FillExtrusion_DepthNormalsPass.hlsl"
+            #include "../FillExtrusion_VertexModify.hlsl"
+            #include "../FillExtrusion_DepthNormalsPass.hlsl"
             ENDHLSL
         }
     }

@@ -7,8 +7,8 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: MapLine
-  m_Shader: {fileID: 4800000, guid: 69249b60c48de45a0802593b96196d91, type: 3}
+  m_Name: Fill
+  m_Shader: {fileID: 4800000, guid: ec7c8348581834e319619f37243a76af, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
@@ -17,12 +17,9 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 0
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 3000
-  stringTagMap:
-    RenderType: Transparent
-  disabledShaderPasses:
-  - DepthOnly
-  - SHADOWCASTER
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -67,6 +64,10 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _PatternMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _SpecGlossMap:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -91,52 +92,46 @@ Material:
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BlendOp: 0
-    - _Blur: 0
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _Cull: 2
     - _Cutoff: 0.5
-    - _DashCount: 0
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1
     - _DstBlend: 10
     - _DstBlendAlpha: 10
-    - _EdgeAntialiasing: 1
     - _EnvironmentReflections: 1
-    - _GapWidth: 0
+    - _FillAntialias: 1
+    - _FillPattern: 0
+    - _FillTranslateAnchor: 0
     - _GlossMapScale: 1
     - _Glossiness: 0.5
     - _GlossyReflections: 1
-    - _HairlineStrategy: 0
-    - _LineOffset: 0
-    - _LinePattern: 0
-    - _LineTranslateAnchor: 0
     - _Metallic: 0
-    - _MetersPerPixel: 1
     - _OcclusionStrength: 1
     - _Opacity: 1
     - _Parallax: 0.005
-    - _QueueControl: 0
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _Smoothness: 0
+    - _Smoothness: 0.3
     - _SmoothnessTextureChannel: 0
     - _SpecularHighlights: 1
-    - _SrcBlend: 1
+    - _SrcBlend: 5
     - _SrcBlendAlpha: 1
     - _Surface: 1
-    - _Width: 2
-    - _WidthIsPixels: 0
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1
     - _ZTest: 4
     - _ZWrite: 0
     m_Colors:
-    - _BaseColor: {r: 0.3, g: 0.5, b: 1, a: 1}
-    - _DashArray: {r: 0, g: 0, b: 0, a: 0}
+    - _BaseColor: {r: 0.4, g: 0.7, b: 0.4, a: 1}
+    - _Color: {r: 0.5, g: 0.5, b: 0.5, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _LineTranslate: {r: 0, g: 0, b: 0, a: 0}
+    - _FillOutlineColor: {r: 0, g: 0, b: 0, a: 1}
+    - _FillTranslate: {r: 0, g: 0, b: 0, a: 0}
+    - _PatternRect: {r: 0, g: 0, b: 0, a: 0}
+    - _PatternScale: {r: 1, g: 1, b: 0, a: 0}
     - _SpecColor: {r: 0.2, g: 0.2, b: 0.2, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

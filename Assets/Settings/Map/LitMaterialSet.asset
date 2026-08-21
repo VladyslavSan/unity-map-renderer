@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 4e10350998eb54293b8e5a1c56527691, type: 3}
-  m_Name: MapMaterialSet
+  m_Name: LitMaterialSet
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapMaterialSet
   FillMaterial: {fileID: 2100000, guid: fcbc652aad19f496999d2a827430c2b9, type: 2}
   LineMaterial: {fileID: 2100000, guid: dcd09bd3c233842c39a12f0bd2c29b3b, type: 2}

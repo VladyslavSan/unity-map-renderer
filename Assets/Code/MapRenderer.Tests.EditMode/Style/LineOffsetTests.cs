@@ -360,15 +360,9 @@ namespace MapRenderer.Tests.Style
             // Line_VertexExtrude.hlsl (shared helper). We assert it is there — still one site,
             // consumed by all five line passes. Same assertion strength, correct file.
 
-            string repoRoot     = GetRepoRoot();
-            // S67: extrusion logic (including the S44 offset term) lives in Line_VertexExtrude.hlsl.
-            string hlslPath   = Path.Combine(repoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders",
-                                             "Map", "Line", "Line_VertexExtrude.hlsl");
-
-            Assert.That(File.Exists(hlslPath), Is.True,
-                $"Line_VertexExtrude.hlsl not found at: {hlslPath}");
-
-            string hlsl = File.ReadAllText(hlslPath);
+            // S67: extrusion logic (including the S44 offset term) lives in Line_VertexExtrude.hlsl (shared,
+            // resolved by name — move-proof).
+            string hlsl = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_VertexExtrude.hlsl"));
 
             // The S44 offset term must reference sideAndDist.x (the per-vertex side value).
             // This is the structural guarantee that the offset shifts the band CENTER,
@@ -378,13 +372,8 @@ namespace MapRenderer.Tests.Style
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +
                 "Grep: 'sideAndDist.x * (miter * _LineOffset * pxToWorld)'");
 
-            // Also confirm _LineOffset is declared in Line_LitInput.hlsl.
-            string inputPath = Path.Combine(repoRoot, "Assets", "Code", "MapRenderer.Unity", "Shaders",
-                                            "Map", "Line", "Line_LitInput.hlsl");
-            Assert.That(File.Exists(inputPath), Is.True,
-                $"Line_LitInput.hlsl not found at: {inputPath}");
-
-            string inputHlsl = File.ReadAllText(inputPath);
+            // Also confirm _LineOffset is declared in Line_LitInput.hlsl (resolved by name — move-proof).
+            string inputHlsl = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
             Assert.That(inputHlsl, Does.Contain("float  _LineOffset;"),
                 "Line_LitInput.hlsl CBUFFER must declare 'float  _LineOffset;' (SRP Batcher requirement).");
 
@@ -397,31 +386,5 @@ namespace MapRenderer.Tests.Style
                 "Line_LitInput.hlsl DOTS bridge must include #define _LineOffset redirect.");
         }
 
-        // ── Helper: resolve repo root ────────────────────────────────────────────────────────
-
-        private static string GetRepoRoot()
-        {
-            // When running under dotnet test: binary is at Tools/core-tests/bin/Debug/netX.0/
-            // When running under Unity EditMode: AppDomain base is project root area.
-            // Try the dotnet-test path first (5 levels up from binary directory).
-            string candidate = Path.GetFullPath(
-                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "../../../../.."));
-            if (Directory.Exists(Path.Combine(candidate, "Assets")))
-                return candidate;
-
-            // Fallback: walk up from BaseDirectory looking for Assets/.
-            string dir = AppDomain.CurrentDomain.BaseDirectory;
-            for (int i = 0; i < 10; i++)
-            {
-                if (Directory.Exists(Path.Combine(dir, "Assets")))
-                    return dir;
-                string parent = Path.GetDirectoryName(dir);
-                if (parent == null || parent == dir) break;
-                dir = parent;
-            }
-
-            // Last resort: current working directory.
-            return Directory.GetCurrentDirectory();
-        }
     }
 }

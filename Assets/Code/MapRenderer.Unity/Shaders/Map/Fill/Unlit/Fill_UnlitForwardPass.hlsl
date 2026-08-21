@@ -1,0 +1,141 @@
+// Fill_UnlitForwardPass.hlsl — fill layer unlit forward pass; derived from URP UnlitForwardPass.hlsl
+//
+// Origin:   Packages/com.unity.render-pipelines.universal/Shaders/UnlitForwardPass.hlsl
+//           com.unity.render-pipelines.universal version 17.5.0 (package hash 0c18adc4ff89)
+// Copyright © 2020 Unity Technologies ApS
+// Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
+// Modified from upstream:
+//   • Fill_UnlitInput.hlsl (our mirror) is included by FillUnlit.shader before this file.
+//   • Vertex is IDENTICAL to Fill_LitForwardPass's vertex for the geometry that matters: it calls the
+//     SAME MapVertexModify(...) hook over the SAME Attributes (POSITION/NORMAL/TANGENT/TEXCOORD0/COLOR),
+//     so fill-translate and the mesh silhouette are pixel-identical between the Lit and Unlit twins — only
+//     the FRAGMENT drops lighting. This is the load-bearing invariant the epic plan documents (§1): the
+//     vertex hooks consume NORMAL/TANGENT as GEOMETRY, not lighting, so there is no vertex-layout fork.
+//   • Fragment is flat: albedo = _BaseColor × _BaseMap × vColor; alpha = _BaseColor.a × _BaseMap.a ×
+//     vColor.a × _Opacity (the two texture/color alpha factors default to 1 for every layer — fill-color
+//     never sets a custom _BaseMap or non-opaque _BaseColor — so this is the Lit twin's alpha with the
+//     lighting-only surface-data plumbing removed, not the epic plan's shorthand which drops those two
+//     factors outright; see the unlit S1 dev report for why). No InitializeStandardLitSurfaceData, no
+//     InputData, no UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit
+//     point) composes the final color instead.
+//   • Keeps the fill-pattern branch (SampleFillPattern + clip) verbatim from Fill_LitForwardPass.hlsl.
+
+#ifndef MAP_FORWARD_UNLIT_PASS_INCLUDED
+#define MAP_FORWARD_UNLIT_PASS_INCLUDED
+
+#include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Unlit.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#if defined(LOD_FADE_CROSSFADE)
+    #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/LODCrossFade.hlsl"
+#endif
+
+struct Attributes
+{
+    float4 positionOS   : POSITION;
+    float3 normalOS     : NORMAL;
+    float4 tangentOS    : TANGENT;
+    float2 texcoord     : TEXCOORD0;
+    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    float4 color        : COLOR;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+};
+
+struct Varyings
+{
+    float2 uv          : TEXCOORD0;
+    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension), passed through untouched.
+    half4  vColor      : TEXCOORD1;
+    float  fogCoord    : TEXCOORD2;
+    float4 positionCS  : SV_POSITION;
+    UNITY_VERTEX_INPUT_INSTANCE_ID
+    UNITY_VERTEX_OUTPUT_STEREO
+};
+
+void InitializeInputData(Varyings input, out InputData inputData)
+{
+    inputData = (InputData)0;
+    inputData.positionWS = float3(0, 0, 0);
+    inputData.normalWS = half3(0, 0, 1);
+    inputData.viewDirectionWS = half3(0, 0, 1);
+    inputData.shadowCoord = 0;
+    inputData.fogCoord = 0;
+    inputData.vertexLighting = half3(0, 0, 0);
+    inputData.bakedGI = half3(0, 0, 0);
+    inputData.normalizedScreenSpaceUV = 0;
+    inputData.shadowMask = half4(1, 1, 1, 1);
+}
+
+Varyings UnlitPassVertex(Attributes input)
+{
+    Varyings output = (Varyings)0;
+
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_TRANSFER_INSTANCE_ID(input, output);
+    UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+    // [MAP DELTA] Apply per-layer vertex modification before position transform — IDENTICAL call to the
+    // Lit twin's LitPassVertex. Fill: fill-translate. See Fill_VertexModify.hlsl.
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
+
+    VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
+
+    output.positionCS = vertexInput.positionCS;
+    output.uv = TRANSFORM_TEX(input.texcoord, _BaseMap);
+    output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
+
+    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    output.vColor = input.color;
+
+    return output;
+}
+
+void UnlitPassFragment(
+    Varyings input
+    , out half4 outColor : SV_Target0
+)
+{
+    UNITY_SETUP_INSTANCE_ID(input);
+    UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    half4 texColor = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
+
+    // [MAP DELTA] Flat albedo/alpha — no lighting, no InitializeStandardLitSurfaceData. Composite order
+    // mirrors Fill_LitForwardPass's InitializeStandardLitSurfaceData + its [MAP DELTA S12] modulation:
+    //   texColor / _BaseColor = the URP surface factors (both identity {1,1,1,1} for every real fill —
+    //     the layer color rides vColor, never _BaseColor/_BaseMap; see StyledFillTileBuilder's contract).
+    //   vColor    = per-feature baked color (data-driven dimension, S12).
+    //   _Opacity  = the paint property.
+    half3 albedo = texColor.rgb * _BaseColor.rgb * input.vColor.rgb;
+    half  alpha  = texColor.a   * _BaseColor.a   * input.vColor.a * _Opacity;
+
+    // [MAP DELTA] fill-pattern: the sprite REPLACES the layer colour — verbatim from
+    // Fill_LitForwardPass.hlsl (fill-color is not used at all on a pattern layer; fill-opacity still
+    // applies on top of the sprite's own alpha).
+    bool  patternClipped;
+    half4 patternTexel = SampleFillPattern(input.uv, patternClipped);
+    clip(patternClipped ? -1.0 : 1.0);
+    if (_FillPattern >= 0.5)
+    {
+        albedo = patternTexel.rgb;
+        alpha  = patternTexel.a * _Opacity;
+    }
+
+    alpha = AlphaDiscard(alpha, _Cutoff);
+    albedo = AlphaModulate(albedo, alpha);
+
+#ifdef LOD_FADE_CROSSFADE
+    LODFadeCrossFade(input.positionCS);
+#endif
+
+    InputData inputData;
+    InitializeInputData(input, inputData);
+    SETUP_DEBUG_TEXTURE_DATA(inputData, UNDO_TRANSFORM_TEX(input.uv, _BaseMap));
+
+    half4 color = UniversalFragmentUnlit(inputData, albedo, alpha);
+    color.rgb = MixFog(color.rgb, input.fogCoord);
+    color.a = OutputAlpha(color.a, IsSurfaceTypeTransparent());
+
+    outColor = color;
+}
+
+#endif // MAP_FORWARD_UNLIT_PASS_INCLUDED

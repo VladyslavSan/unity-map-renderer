@@ -61,6 +61,9 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         Map/Fill/Fill_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
         Map/Fill/Fill_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
         Map/Fill/Fill_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Map/Fill/FillUnlit.shader            ← Unlit.shader
+        Map/Fill/Fill_UnlitInput.hlsl        ← UnlitInput.hlsl
+        Map/Fill/Fill_UnlitForwardPass.hlsl  ← UnlitForwardPass.hlsl
         Map/Line/Line.shader                 ← Lit.shader
         Map/Line/Line_LitInput.hlsl          ← LitInput.hlsl
         Map/Line/Line_LitForwardPass.hlsl    ← LitForwardPass.hlsl
@@ -68,6 +71,9 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         Map/Line/Line_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
         Map/Line/Line_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
         Map/Line/Line_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Map/Line/LineUnlit.shader            ← Unlit.shader
+        Map/Line/Line_UnlitInput.hlsl        ← UnlitInput.hlsl
+        Map/Line/Line_UnlitForwardPass.hlsl  ← UnlitForwardPass.hlsl
         Map/FillExtrusion/FillExtrusion.shader                 ← Lit.shader
         Map/FillExtrusion/FillExtrusion_LitInput.hlsl          ← LitInput.hlsl
         Map/FillExtrusion/FillExtrusion_LitForwardPass.hlsl    ← LitForwardPass.hlsl
@@ -75,6 +81,9 @@ Unity Universal Render Pipeline (URP) shader source — verbatim reference templ
         Map/FillExtrusion/FillExtrusion_ShadowCasterPass.hlsl  ← ShadowCasterPass.hlsl
         Map/FillExtrusion/FillExtrusion_DepthOnlyPass.hlsl     ← DepthOnlyPass.hlsl
         Map/FillExtrusion/FillExtrusion_DepthNormalsPass.hlsl  ← LitDepthNormalsPass.hlsl
+        Map/FillExtrusion/FillExtrusionUnlit.shader            ← Unlit.shader
+        Map/FillExtrusion/FillExtrusion_UnlitInput.hlsl        ← UnlitInput.hlsl
+        Map/FillExtrusion/FillExtrusion_UnlitForwardPass.hlsl  ← UnlitForwardPass.hlsl
         Common/LitInput.Template.hlsl        ← LitInput.hlsl (Map-flavoured skeleton template; S66)
 
   (c) Bespoke map helpers — original clean-room work, NOT Unity-derived; listed here only so the

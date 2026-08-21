@@ -33,8 +33,6 @@ namespace MapRenderer.Tests.Structure
         private static string ShaderPropertiesDir => Path.Combine(RenderingDir, "ShaderProperties");
         private static string RenderingLineDir     => Path.Combine(ShaderPropertiesDir, "Line");
         private static string RenderingFillDir     => Path.Combine(ShaderPropertiesDir, "Fill");
-        private static string MapLineDir           => ShaderPropertyParser.MapLineDir;
-        private static string MapFillDir           => ShaderPropertyParser.MapFillDir;
 
         // ── Exact count guards ───────────────────────────────────────────────────────────────────
 
@@ -42,7 +40,7 @@ namespace MapRenderer.Tests.Structure
         public void LineCbufferCount_IsExactly24()
         {
             var set = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
             Assert.That(set.Count, Is.EqualTo(24),
                 $"Line_LitInput.hlsl CBUFFER (after companion strip) must have exactly 24 members. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
@@ -52,7 +50,7 @@ namespace MapRenderer.Tests.Structure
         public void FillCbufferCount_IsExactly21()
         {
             var set = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
             Assert.That(set.Count, Is.EqualTo(21),
                 $"Fill_LitInput.hlsl CBUFFER (after companion strip) must have exactly 21 members. " +
                 $"Found {set.Count}: {string.Join(", ", set.OrderBy(s => s))}");
@@ -121,9 +119,9 @@ namespace MapRenderer.Tests.Structure
             // in one shader (or vice versa).
             var shared = ParseSharedCbufferRegion();
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
             var fillCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
 
             var sharedFromShaders = new HashSet<string>(lineCbuffer);
             sharedFromShaders.IntersectWith(fillCbuffer);
@@ -147,7 +145,7 @@ namespace MapRenderer.Tests.Structure
             var shared = ParseSharedCbufferRegion();
             var lineNames = ParseLineCbufferRegion();
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
 
             var union = new HashSet<string>(shared);
             union.UnionWith(lineNames);
@@ -170,7 +168,7 @@ namespace MapRenderer.Tests.Structure
             var fillNames = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingFillDir, "PropertyNames.cs"));
             var fillCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
 
             var union = new HashSet<string>(shared);
             union.UnionWith(fillNames);
@@ -193,9 +191,9 @@ namespace MapRenderer.Tests.Structure
         {
             // Line DOTS block keys must equal the Line CBUFFER set (both 24, every CBUFFER prop is instanced).
             var lineDotsKeys = new HashSet<string>(
-                ShaderPropertyParser.ParseDotsProps(Path.Combine(MapLineDir, "Line_LitInput.hlsl")).Keys);
+                ShaderPropertyParser.ParseDotsProps(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl")).Keys);
             var lineCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapLineDir, "Line_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
 
             var onlyInDots = new HashSet<string>(lineDotsKeys);
             onlyInDots.ExceptWith(lineCbuffer);
@@ -212,9 +210,9 @@ namespace MapRenderer.Tests.Structure
         public void FillDots_EqualsFillCbuffer()
         {
             var fillDotsKeys = new HashSet<string>(
-                ShaderPropertyParser.ParseDotsProps(Path.Combine(MapFillDir, "Fill_LitInput.hlsl")).Keys);
+                ShaderPropertyParser.ParseDotsProps(ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl")).Keys);
             var fillCbuffer = ShaderPropertyParser.ParseCbufferMembers(
-                Path.Combine(MapFillDir, "Fill_LitInput.hlsl"));
+                ShaderPropertyParser.MapShaderPath("Fill_LitInput.hlsl"));
 
             var onlyInDots = new HashSet<string>(fillDotsKeys);
             onlyInDots.ExceptWith(fillCbuffer);
@@ -237,7 +235,7 @@ namespace MapRenderer.Tests.Structure
             var lineNames = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingLineDir, "PropertyNames.cs"));
             var lineShaderProps = ShaderPropertyParser.ParseShaderPropertiesBlock(
-                Path.Combine(MapLineDir, "Line.shader"));
+                ShaderPropertyParser.MapShaderPath("Line.shader"));
 
             var allRegistry = new HashSet<string>(allShared);
             allRegistry.UnionWith(lineNames);
@@ -260,7 +258,7 @@ namespace MapRenderer.Tests.Structure
             var fillNames = ShaderPropertyParser.ParseAllConstStringValues(
                 Path.Combine(RenderingFillDir, "PropertyNames.cs"));
             var fillShaderProps = ShaderPropertyParser.ParseShaderPropertiesBlock(
-                Path.Combine(MapFillDir, "Fill.shader"));
+                ShaderPropertyParser.MapShaderPath("Fill.shader"));
 
             var allRegistry = new HashSet<string>(allShared);
             allRegistry.UnionWith(fillNames);
