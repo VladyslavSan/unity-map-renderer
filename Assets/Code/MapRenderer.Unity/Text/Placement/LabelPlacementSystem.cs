@@ -9,7 +9,6 @@ using System.Collections.Generic;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
@@ -55,7 +54,10 @@ namespace MapRenderer.Unity.Text.Placement
     /// <see cref="Tick"/>'s effective accessibility domain aligned with its <c>internal</c>
     /// <see cref="Backend.SceneFrame"/> parameter (CS0051 would fire if this class were <c>public</c>).</para>
     /// </summary>
-    internal sealed class LabelPlacementSystem : VerifiedDisposable
+    // `partial`: the opt-in per-layer/per-screen-band breakdown diagnostic lives in
+    // LabelPlacementSystem.Diagnostics.cs (one file to strip). It reads this class's private per-frame buffers
+    // directly and is armed via RequestLabelBreakdown(); TickCore checks the flag after projection.
+    internal sealed partial class LabelPlacementSystem : VerifiedDisposable
     {
         /// <summary>Profiler marker name constants (SSOT) for the per-frame label path — referenced by the
         /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
@@ -71,6 +73,16 @@ namespace MapRenderer.Unity.Text.Placement
             internal const string Gather      = "MapRenderer.Symbol.Gather";
             internal const string Tick        = "MapRenderer.Symbol.LabelTick";
             internal const string Project     = "MapRenderer.Symbol.Project";
+            // The per-record cull SCAN (GatherSymbolPoints): visits every non-dropped mirror record and runs the
+            // horizon/distance/zoom culls, so its cost is O(input) even when it culls everything (the projection
+            // below then does nothing). Split out of ProjectPositions because a capture with 0 records projected
+            // was still charging ~9ms to a marker named "ProjectPositions" — the scan, not projection.
+            internal const string GatherPoints = "MapRenderer.Symbol.GatherPoints";
+            // GatherPoints splits into two passes over the mirror, so the timeline shows which half owns the cost:
+            // Cull = the per-record trigger verdict (departing/coverage/zoom/horizon/distance — the geometric maths);
+            // Compact = the fade-alive probe + the kept-point append + counter tally.
+            internal const string GatherCull    = "MapRenderer.Symbol.Gather.Cull";
+            internal const string GatherCompact = "MapRenderer.Symbol.Gather.Compact";
             internal const string ProjectPositions = "MapRenderer.Symbol.ProjectPositions";
             internal const string Stage       = "MapRenderer.Symbol.Stage";
             // R3: grid sizing + Schedule only — the job's own wait no longer lives here (see CollideHarvest).
@@ -100,11 +112,24 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmProject =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Project);
 
-        // PmProject breakdown: ProjectPositions = gather + projection (the SymbolProjectionJob wait above the threshold,
-        // else the serial main-thread fill); Stage = the managed staging loop that reads the projected screen
-        // positions and builds the collision candidates/boxes/quads. Splitting them answers the architecture
-        // question the timeline can't at a glance: is the Project cost a JOB WAIT (ProjectPositions) or MANAGED main-
-        // thread work (Stage)? The two nest inside PmProject so the umbrella total is preserved.
+        // PmProject breakdown, three siblings nested under PmProject (so the umbrella total is preserved):
+        // GatherPoints = the O(input) per-record cull SCAN (GatherSymbolPoints); ProjectPositions = the projection
+        // itself (the SymbolProjectionJob .Run() wait, over ONLY the records the scan kept — free when the scan culls
+        // everything); Stage = the managed staging loop that reads the projected screen positions and builds the
+        // collision candidates/boxes/quads. Gather and projection were once ONE marker named "ProjectPositions",
+        // which charged the scan's cost to a projection-named row (a 0-record capture still read ~9ms); they are
+        // split so the timeline answers, at a glance, whether the cost is the cull scan, the projection job wait, or
+        // the managed staging work.
+        private static readonly ProfilerMarker PmGatherPoints =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.GatherPoints);
+
+        // GatherPoints' two passes (nested under PmGatherPoints): Cull = the per-record trigger verdict pass,
+        // Compact = the fade-probe + append pass. See ProfilerMarkerNames.GatherCull / GatherCompact.
+        private static readonly ProfilerMarker PmGatherCull =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.GatherCull);
+        private static readonly ProfilerMarker PmGatherCompact =
+            new(ProfilerCategory.Scripts, ProfilerMarkerNames.GatherCompact);
+
         private static readonly ProfilerMarker PmProjectPositions =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.ProjectPositions);
 
@@ -178,11 +203,14 @@ namespace MapRenderer.Unity.Text.Placement
         // release-build reference to this field exists outside the [Conditional] method.)
         private NativeHashSet<long> _debugFadeIdSeen;
 
-        // B-3: the pre-projection horizon/distance cull radius, in viewport-spans of ground around the look-at.
-        // CONSERVATIVE by default — a top-down view's on-screen labels sit within ~one span, so this only trims
-        // the far horizon band a tilted view piles up (where labels are discarded/unstable anyway). Raise to keep
-        // more distant labels, lower to cull the horizon harder — a maintainer tunable (see LabelViewDistance).
-        private const double LabelViewportSpans = 8.0;
+        // The pre-projection label distance cull, as a fraction of the camera's far-clip distance: a label whose
+        // anchor is farther from the CAMERA than LabelMaxDistanceFraction × the far distance is skipped before
+        // projection/collision (fading out first if still alive — the distCulled trigger). 1.0 = cull only at the
+        // far distance (near-inert, since tile selection already frustum-bounds by the same far); lower it to pull
+        // labels CLOSER than the full frustum depth, trimming the far horizon band of tiny/unstable labels.
+        // Runtime-tunable via the Diagnostics slider. See LabelFarPlaneCull. Replaces an earlier fixed
+        // viewport-span radius around the look-at, which at high tilt sat ~4× looser than the frustum reached.
+        internal double LabelMaxDistanceFraction { get; set; } = 1.0;
 
         // ── A-4: fade state machine ──────────────────────────────────────────────────────────────────────
         // A persistent per-FADE-identity opacity (LabelCandidate.FadeId) eased toward 1 (collision-placed) or 0
@@ -198,15 +226,21 @@ namespace MapRenderer.Unity.Text.Placement
         // Sized by VISIBLE labels, not by staged candidates: the two differ by an order of magnitude in a dense
         // view (~2.5k placed quads vs ~31k candidates), and DecayUnseenFadeRecords walks this map in full every
         // frame, so its size is a per-frame COST and not merely memory.
-        private readonly Dictionary<long, float> _fadeOpacity = new Dictionary<long, float>();
+        // Native (not a managed Dictionary) so the gather scan's fade-alive probe can move into Burst — same
+        // long-keyed, per-frame-mutated, Persistent lifetime as _placedLastFrame / _droppedHalvesLastFrame, which
+        // were already migrated for the stage job. This is an INITIAL capacity (the container grows on demand), a
+        // startup hint sized near the steady-state live count (~2.5k placed + churn headroom); growth is a rare
+        // amortized realloc, so there is no reason to oversize — it would only cost memory (buckets = 2×capacity).
+        private const int FadeMapInitialCapacity = 16384;
+        private NativeHashMap<long, float> _fadeOpacity; // NOT readonly — allocated in the ctor
         // The identities EaseFade STORED this frame — i.e. exactly the _fadeOpacity keys it touched, not every
         // candidate it looked at. The direction the decay sweep needs is `stored ⇒ seen`: a key it finds unseen
         // really was untouched, so nothing alive is swept. (The converse can fail harmlessly — two candidates
         // sharing one FadeId, where the second drops what the first stored — but the sweep only ever consults
         // this set for keys it enumerated out of _fadeOpacity, so a stale entry is never read.) Keeping it in
         // lockstep with the store is why both live inside EaseFade rather than in the emit loop.
-        private readonly HashSet<long> _seenFade = new HashSet<long>();
-        private readonly List<long> _fadeScratchKeys = new List<long>(); // reused decay-sweep buffer (no per-frame GC)
+        private NativeHashSet<long> _seenFade; // NOT readonly — allocated in the ctor
+        private NativeList<long> _fadeScratchKeys; // NOT readonly — allocated in the ctor; reused decay-sweep buffer
 
         // FadeIds of records the gather cull (tile-coverage / B-3 distance) hit THIS frame but whose fade is still
         // alive: instead of a hard skip (which would pop the label — a pre-cull produces no geometry, so nothing
@@ -214,7 +248,26 @@ namespace MapRenderer.Unity.Text.Placement
         // toward 0 (a fade-OUT in place at their live position) regardless of collision survival. Once a record's
         // fade settles to <= epsilon the gather cull hard-skips it (the perf win returns in steady state). Cleared
         // + repopulated each frame in gather → zero per-frame GC.
-        private readonly HashSet<long> _forceFadeOut = new HashSet<long>();
+        private NativeHashSet<long> _forceFadeOut; // NOT readonly — allocated in the ctor
+
+        // Per-frame slot → visible-at-live-zoom lookup, filled by GatherSymbolPoints before its record loop so the
+        // pre-projection zoom gate is one array read per record, not a managed StyleLayer.IsVisibleAtZoom call per
+        // record (slots number in the tens; records in the tens of thousands). Reused across frames; only grown
+        // when the slot count rises (never shrinks). Index == material slot == LabelInstance.MaterialIndex.
+        // Native (not a managed bool[]) so the Cull pass's per-record read can move into SymbolCullJob (Burst).
+        private NativeList<bool> _slotVisibleThisFrame; // NOT readonly — allocated in the ctor
+
+        // Per-record cull verdict from GatherSymbolPoints' first pass (Cull), consumed by its second pass (Compact).
+        // Splitting the single gather loop into two marked passes localises the cost (trigger maths vs
+        // fade-probe+append) and is the shape the Burst gather needs (pass 1 → parallel job). Reused across frames
+        // (ResizeUninitialized), zero per-frame GC.
+        private NativeList<GatherTrigger> _gatherTrigger; // NOT readonly — allocated in the ctor
+
+        // Per-trigger culled tally the Compact pass (SymbolCompactJob) writes, indexed by (int)GatherTrigger, then
+        // added back onto the five Last*CulledCount properties after .Run() — a job cannot write those managed
+        // properties, so this native array is the bridge. Persistent (allocated once, like _gatherTrigger) and
+        // zeroed at the top of each dispatch. NOT readonly — allocated in the ctor.
+        private NativeArray<int> _gatherCulledCounts;
 
         // ── A-5: sticky-placement hysteresis ────────────────────────────────────────────────────────────────
         // FadeIds that SURVIVED last frame's collision. Staging looks each candidate up here to set
@@ -395,6 +448,7 @@ namespace MapRenderer.Unity.Text.Placement
                 DistanceCulledLabels    = LastDistanceCulledCount,
                 HorizonCulledLabels     = LastHorizonCulledCount,
                 CoverageFadingLabels    = LastCoverageFadingCulledCount,
+                ZoomCulledLabels        = LastZoomCulledCount,
                 CollisionCandidateCount = LastCandidateCount,
                 CollisionSurvivorCount  = LastSurvivorCount,
                 PlacedQuadCount         = LastQuadCount,
@@ -424,8 +478,9 @@ namespace MapRenderer.Unity.Text.Placement
         /// Telemetry.</summary>
         internal int LastSurvivorCount { get; private set; }
 
-        /// <summary>B-3: labels skipped by the pre-projection horizon/distance cull on the last Tick (never
-        /// projected or collided). Telemetry — a proxy for how much the tilted-view horizon pile-up was trimmed.</summary>
+        /// <summary>Labels skipped by the pre-projection far-distance cull on the last Tick (farther from the
+        /// camera than <see cref="LabelMaxDistanceFraction"/> × the far plane — never projected or collided).
+        /// Telemetry — a proxy for how much the tilted-view horizon pile-up was trimmed.</summary>
         internal int LastDistanceCulledCount { get; private set; }
 
         /// <summary>Retain-as-departing: labels skipped on the last Tick because their tile is leaving cover and the
@@ -437,6 +492,14 @@ namespace MapRenderer.Unity.Text.Placement
         /// bulk (<see cref="HorizonCull"/>) — never projected or collided. Telemetry — always 0 under a planar
         /// projection (Mercator's <c>TryGetHorizonOccluder</c> returns false ⇒ the trigger is inert).</summary>
         internal int LastHorizonCulledCount { get; private set; }
+
+        /// <summary>Labels skipped by the pre-projection ZOOM gate on the last Tick — their style layer is out of
+        /// the live camera zoom's <c>[minzoom, maxzoom)</c> and they have no live fade, so gather hard-skips them
+        /// (never projected/staged/collided) instead of projecting then suppressing them post-stage. Telemetry —
+        /// the direct measure of the overzoom waste this gate removes (e.g. z14 <c>poi_r*</c> points). Records
+        /// still fading out are exempt (kept staged via <c>SymbolCompactJob</c>'s fade-alive probe), so they are
+        /// NOT counted here — <see cref="ApplySuppression"/> still owns their same-frame hide.</summary>
+        internal int LastZoomCulledCount { get; private set; }
 
         /// <summary>A-4 fade records held — the SIZE OF THE MAP <see cref="DecayUnseenFadeRecords"/> walks each
         /// Tick, which is the per-frame cost being measured. An identity that has finished fading OUT is dropped
@@ -536,6 +599,13 @@ namespace MapRenderer.Unity.Text.Placement
             _stageAnchorWasPlaced = new NativeList<byte>(Allocator.Persistent);
             _placedLastFrame = new NativeHashSet<long>(PlacedSetInitialCapacity, Allocator.Persistent);
             _droppedHalvesLastFrame = new NativeHashMap<long, byte>(DroppedHalvesInitialCapacity, Allocator.Persistent);
+            _fadeOpacity = new NativeHashMap<long, float>(FadeMapInitialCapacity, Allocator.Persistent);
+            _seenFade    = new NativeHashSet<long>(FadeMapInitialCapacity, Allocator.Persistent);
+            _forceFadeOut = new NativeHashSet<long>(FadeMapInitialCapacity, Allocator.Persistent);
+            _fadeScratchKeys = new NativeList<long>(FadeMapInitialCapacity, Allocator.Persistent);
+            _gatherTrigger = new NativeList<GatherTrigger>(Allocator.Persistent);
+            _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
+            _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
             // _debugFadeIdSeen is NOT allocated here — see its field doc: AssertFadeIdsUnique allocates it
             // lazily on first use, so a release build (where that [Conditional] method never runs) never pays for it.
             _stageBoxes = new NativeList<LabelBox>(Allocator.Persistent);
@@ -639,6 +709,7 @@ namespace MapRenderer.Unity.Text.Placement
                 LastDepartingCulledCount = 0;
                 LastHorizonCulledCount = 0;
                 LastCoverageFadingCulledCount = 0;
+                LastZoomCulledCount = 0;
 
                 WorldRenderer.BeginFrame(); // Epic A / A1: clear every live world slot's accumulators
 
@@ -663,11 +734,12 @@ namespace MapRenderer.Unity.Text.Placement
                     double3 cameraRelative = frame.CameraRelativePosition;
                     double  globeRadiusSq  = occ ? occRadius * occRadius : -1.0;
 
-                    // B-3: the pre-projection horizon/distance cull radius (render metres around the look-at) —
-                    // one logical pixel of ground = MetersPerPixel(zoom), so LabelViewportSpans screen-widths
-                    // of ground. Labels beyond it are skipped BEFORE projection/collision (the horizon pile-up).
-                    double cullRadius = LabelViewDistance.CullRadiusMeters(
-                        viewportLogicalPx, CameraPoseMath.MetersPerPixel(_camera.CurrentProperties.Zoom), LabelViewportSpans);
+                    // The pre-projection label distance cull threshold (render metres): a fraction of the camera's
+                    // far-clip distance — computed from the camera properties (CurrentFarMetres), NOT read off
+                    // Camera.farClipPlane, so it is correct even before a SyncToCamera has run this frame. Labels
+                    // farther than this from the camera are skipped BEFORE projection/collision (the tilted horizon
+                    // pile-up, where they are discarded/unstable anyway).
+                    double labelCullDistance = LabelMaxDistanceFraction * _camera.CurrentFarMetres;
 
                     // Map bearing (heading) — drives text-translate-anchor:map and text-rotation-alignment:map
                     // (#4). Read once per frame; zero for a north-up map, where map- and viewport-alignment
@@ -681,20 +753,27 @@ namespace MapRenderer.Unity.Text.Placement
                     int candidateCount = 0, boxCount = 0;
                     using (PmProject.Auto())
                     {
-                        // B-2: gather every un-culled symbol's world points (anchor / line path) — cheap, no matrix
-                        // mul, and it is where the B-3 distance cull now runs — then project them all in one pass
-                        // (parallel Burst job above the threshold, else serial). Staging reads the precomputed
-                        // screen positions below rather than projecting each anchor/path inline.
-                        using (PmProjectPositions.Auto())
+                        // B-2: gather every un-culled symbol's world points (anchor / line path) — no matrix mul,
+                        // but O(input): it visits EVERY non-dropped record to run the horizon/distance/zoom culls
+                        // (the B-3 distance cull runs here), so its cost stands even when it culls everything. Its
+                        // own marker (GatherPoints) — it is NOT projection, and lumping it under ProjectPositions
+                        // once charged a 0-record scan ~9ms to a projection-named row.
+                        using (PmGatherPoints.Auto())
                         {
                             // Tile-coverage pre-cull now runs upstream, in SymbolLabelSubsystem.CurrentBatch (via
                             // Core's LabelTileCoverageFilter). D1: a Dropped tile's labels stay RESIDENT in the mirror
                             // (flagged _mirrorRecordDropped) and are hard-skipped below — a mask, not a compaction, but the
                             // same effect as removal. A Fading tile's records also ride (RecordCoverageFading), so gather
                             // eases them out instead of popping (the 4th fade-out trigger below).
-                            GatherSymbolPoints(sceneOriginRender, cullRadius, rebase, cameraRelative, occCentre, globeRadiusSq);
-                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
+                            GatherSymbolPoints(sceneOriginRender, labelCullDistance, rebase, cameraRelative, occCentre, globeRadiusSq,
+                                               symbolLayers, _camera.CurrentProperties.Zoom);
                         }
+
+                        // Project ONLY the records the scan kept (_symbolPoints) in one pass — the parallel Burst
+                        // SymbolProjectionJob via .Run(). Free when the scan culled everything (total == 0 early
+                        // return). Staging below reads these precomputed screen positions rather than projecting inline.
+                        using (PmProjectPositions.Auto())
+                            ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
 
                         using (PmStage.Auto())
                         {
@@ -719,6 +798,12 @@ namespace MapRenderer.Unity.Text.Placement
                             LastBoxCount = boxCount;
                         }
                     }
+
+                    // Diagnostic (opt-in): on an armed capture, dump this frame's input records bucketed by
+                    // style layer and by vertical screen band. Runs here — after projection filled _symbolScreen/
+                    // _symbolValid — so the band split is real. A single branch when un-armed (see Diagnostics partial).
+                    if (_breakdownRequested)
+                        CaptureLabelBreakdown(symbolLayers, viewportLogicalPx);
 
                     // Mark out-of-zoom candidates LabelCandidate.Suppressed BEFORE collision, so a label whose layer
                     // is outside the LIVE camera zoom's minzoom/maxzoom neither wins nor blocks the true winner (it
@@ -834,93 +919,97 @@ namespace MapRenderer.Unity.Text.Placement
         // the mirror (resident, never compacted out) but are hard-skipped here, FIRST and unconditionally: a
         // Dropped tile was never on screen, so — unlike departing/coverage-fading — there is nothing to ease out,
         // never mind its fade state. A FADING tile's records still gather (_mirrorRecordCoverageFading), handled below.
-        private void GatherSymbolPoints(double3 sceneOriginRender, double cullRadius,
-            in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq)
+        private void GatherSymbolPoints(double3 sceneOriginRender, double labelCullDistance,
+            in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq,
+            IReadOnlyList<SymbolRenderLayer> symbolLayers, double zoom)
         {
             _stagePointOffset.ResizeUninitialized(_mirrorCount);
             _symbolPoints.Clear();
             _symbolUps.Clear();
             _forceFadeOut.Clear();
-            for (int r = 0; r < _mirrorCount; r++)
+
+            // Resolve the per-frame ZOOM gate once per slot (not per record): a slot is gated OUT when its layer
+            // is outside the live camera zoom's [minzoom, maxzoom). No layer list (demo/single-material path) or a
+            // null layer ⇒ not gated — matches ApplySuppression's own "no layer → not suppressed" default.
+            int slotCount = symbolLayers?.Count ?? 0;
+            if (_slotVisibleThisFrame.Length < slotCount)
+                _slotVisibleThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
+            for (int s = 0; s < slotCount; s++)
             {
-                if (_mirrorRecordDropped[r] != 0) { _stagePointOffset[r] = -1; continue; } // D1 hard-skip — no fade, never on screen
-
-                // Four fade-out triggers, cheapest first: the record's tile is LEAVING cover (retain-as-departing —
-                // flagged from CollectInto's active/departing split), its tile's on-screen COVERAGE crossed below
-                // threshold (_mirrorRecordCoverageFading — LabelTileCoverageFilter's Fade classification), the B-3
-                // distance cull (this label past the horizon radius), and S3's globe horizon cull (anchor hidden
-                // behind the earth's own bulk — short-circuits to false on a planar projection via globeRadiusSq <
-                // 0). Each trigger short-circuits the cheaper ones before it; its fade-out is unconditional.
-                bool departing  = _mirrorRecordDeparting[r] != 0;
-                bool coverageFading = !departing && _mirrorRecordCoverageFading[r] != 0;
-                bool distCulled = !departing && !coverageFading &&
-                    LabelViewDistance.IsCulled(_mirrorRepAnchor[r], sceneOriginRender, cullRadius);
-                bool horizonCulled = !departing && !coverageFading && !distCulled &&
-                    HorizonCull.IsHiddenBeyondHorizon(_mirrorRepAnchor[r], sceneOriginRender, rebase,
-                                                      cameraRelative, globeCentreRelative, globeRadiusSq);
-
-                if (departing || coverageFading || distCulled || horizonCulled)
-                {
-                    // Don't pop a label that was on screen last frame: if its fade is still alive, KEEP staging it
-                    // (so it eases out in place at its live position) and force its fade-out in emit. Only once it
-                    // has fully faded do we actually skip it — that is where the perf win lands (and, for a departing
-                    // tile or a coverage-fading tile, where the store/filter then purges it: grace > fade, so it is
-                    // already invisible).
-                    if (MarkFadeOutIfAlive(r))
-                    {
-                        // fall through: gather it like a normal record; the emit loop drives its opacity to 0
-                    }
-                    else
-                    {
-                        if (departing) LastDepartingCulledCount++;
-                        else if (coverageFading) LastCoverageFadingCulledCount++;
-                        else if (distCulled) LastDistanceCulledCount++;
-                        else LastHorizonCulledCount++;
-                        _stagePointOffset[r] = -1;
-                        continue;
-                    }
-                }
-
-                _stagePointOffset[r] = _symbolPoints.Length;
-                int ws = _mirrorWorldStart[r], wc = _mirrorWorldCount[r];
-                for (int v = 0; v < wc; v++)
-                {
-                    _symbolPoints.Add(_mirrorWorldPoints[ws + v]);
-                    _symbolUps.Add(_mirrorWorldUps[ws + v]);
-                }
+                var sl = symbolLayers[s]?.StyleLayer;
+                _slotVisibleThisFrame[s] = sl == null || sl.IsVisibleAtZoom(zoom);
             }
-        }
 
-        // If record r's fade is still visible (any of its FadeIds has opacity > epsilon), record those FadeIds in
-        // _forceFadeOut so the emit loop eases them toward 0, and return true (the gather cull then keeps staging
-        // it for the fade-out). Returns false when the record has no live fade — never shown, or already faded —
-        // so the caller hard-skips it (no pop; nothing was on screen to pop). Reads the native mirror (_m*).
-        private bool MarkFadeOutIfAlive(int r)
-        {
-            int detail = _mirrorDetail[r];
-            if (_mirrorKinds[r] == (byte)LabelRecordKind.Point)
-                return TryForceFadeOut(_mirrorPoints[detail].FadeId);
+            _gatherTrigger.ResizeUninitialized(_mirrorCount);
 
-            // Curved: one candidate per anchor plus the centred-fallback slot. Force-fade EVERY anchor — not just
-            // the ones already visible — so a previously-invisible anchor can't fade IN on a tile we are culling;
-            // keep the record staged if ANY anchor is still visible.
-            bool alive = false;
-            int fadeStart = _mirrorCurvedAnchorFadeStart[detail];
-            int fadeCount = _mirrorCurvedAnchorCount[detail] + 1; // + trailing centred-fallback fade id
-            for (int i = 0; i < fadeCount; i++)
+            // Pass 1 — Cull: per-record trigger verdict → _gatherTrigger, in short-circuit priority
+            // dropped → departing → coverage → ZOOM → horizon → distance. An if-else-if chain that early-outs, so a
+            // departing / coverage-fading / zoom-gated record never runs the two expensive rebase-mul culls
+            // (horizon, far-distance) and no guard is re-evaluated. globeRadiusSq < 0 makes the horizon cull a no-op
+            // on a planar projection.
+            //
+            // ZOOM is tested BEFORE horizon/distance on purpose: at overzoom depths the overwhelming majority of
+            // records are zoom-gated — labels riding in the tile for a HIGHER-zoom reveal (e.g. poi_r20, minzoom 17,
+            // present in a z14 tile) — so the cheap array read (IsOutOfLiveZoom) kills ~all of them before the
+            // matrix maths (measured ~57k of ~60k hard-skips at z14/tilt60). Consequence — "zoom wins" attribution:
+            // a record that is BOTH out-of-zoom AND beyond-far/behind-horizon now counts as zoom-gated. KEEP/SKIP is
+            // byte-identical either way; only which counter increments moves. Horizon still precedes distance.
+            //
+            // Ported to Burst (SymbolCullJob): the chain is identical, only the per-element READ moves under
+            // .Run() (Burst-compiled, inline, no worker hand-off — see SymbolProjectionJob's ProjectSymbols for
+            // the same pattern) so the mirror reads skip the AtomicSafetyHandle overhead the Editor pays per
+            // NativeArray access. SlotCount (not SlotVisible.Length) bounds the zoom-slot read.
+            using (PmGatherCull.Auto())
+                new SymbolCullJob
+                {
+                    RecordDropped = _mirrorRecordDropped.AsArray(), RecordDeparting = _mirrorRecordDeparting.AsArray(),
+                    RecordCoverageFading = _mirrorRecordCoverageFading.AsArray(),
+                    RepAnchor = _mirrorRepAnchor.AsArray(), Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(),
+                    Points = _mirrorPoints.AsArray(), Curveds = _mirrorCurveds.AsArray(),
+                    SlotVisible = _slotVisibleThisFrame.AsArray(),
+                    SceneOriginRender = sceneOriginRender, Rebase = rebase, CameraRelative = cameraRelative,
+                    GlobeCentreRelative = globeCentreRelative, GlobeRadiusSq = globeRadiusSq,
+                    LabelCullDistance = labelCullDistance, SlotCount = slotCount,
+                    OutTrigger = _gatherTrigger.AsArray(),
+                }.Run(_mirrorCount);
+
+            // Pass 2 — Compact: consume the verdict in record order (so _stagePointOffset / _symbolPoints match the
+            // old single-loop form byte-for-byte) via the Burst SymbolCompactJob. A triggered record whose fade is
+            // still alive KEEPS staging (its FadeIds recorded into _forceFadeOut; the emit loop eases it to 0 — no
+            // pop); a triggered fade-DEAD record is hard-skipped (offset -1) and tallied into its trigger's counter
+            // (_gatherCulledCounts, enum-indexed — see the job's Execute for why that is equivalent to the old switch); a
+            // kept (None) record is appended. A Dropped record is hard-skipped with no counter (never on screen).
+            // The running offset is load-bearing (record r's destination depends on every kept record before it),
+            // so the job is IJob (not IJobParallelFor) — same inline .Run() pattern as SymbolCullJob above.
+            using (PmGatherCompact.Auto())
             {
-                long fadeId = _mirrorFadeIds[fadeStart + i];
-                _forceFadeOut.Add(fadeId);
-                if (_fadeOpacity.TryGetValue(fadeId, out float opacity) && opacity > FadeEpsilon) alive = true;
-            }
-            return alive;
-        }
+                // _gatherCulledCounts is persistent scratch (allocated once, like _gatherTrigger) — a job cannot
+                // write the managed Last*CulledCount properties, so this native array is the bridge, added back
+                // after .Run(). Zero it each call: the job does Counts[(int)t]++, so a stale array would
+                // accumulate across ticks (a missing reset surfaces as a doubling in the multi-tick gather teeth).
+                for (int i = 0; i < _gatherCulledCounts.Length; i++) _gatherCulledCounts[i] = 0;
+                new SymbolCompactJob
+                {
+                    Trigger = _gatherTrigger.AsArray(),
+                    Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(),
+                    PointDetails = _mirrorPoints.AsArray(),
+                    CurvedAnchorFadeStart = _mirrorCurvedAnchorFadeStart.AsArray(),
+                    CurvedAnchorCount = _mirrorCurvedAnchorCount.AsArray(),
+                    FadeIds = _mirrorFadeIds.AsArray(),
+                    WorldStart = _mirrorWorldStart.AsArray(), WorldCount = _mirrorWorldCount.AsArray(),
+                    WorldPoints = _mirrorWorldPoints.AsArray(), WorldUps = _mirrorWorldUps.AsArray(),
+                    FadeOpacity = _fadeOpacity, FadeEpsilon = FadeEpsilon, Count = _mirrorCount,
+                    StageOffset = _stagePointOffset.AsArray(),
+                    OutPoints = _symbolPoints, OutUps = _symbolUps, ForceFadeOut = _forceFadeOut,
+                    Counts = _gatherCulledCounts,
+                }.Run();
 
-        private bool TryForceFadeOut(long fadeId)
-        {
-            if (!(_fadeOpacity.TryGetValue(fadeId, out float opacity) && opacity > FadeEpsilon)) return false;
-            _forceFadeOut.Add(fadeId);
-            return true;
+                LastDepartingCulledCount      += _gatherCulledCounts[(int)GatherTrigger.Departing];
+                LastCoverageFadingCulledCount += _gatherCulledCounts[(int)GatherTrigger.Coverage];
+                LastZoomCulledCount            += _gatherCulledCounts[(int)GatherTrigger.Zoom];
+                LastHorizonCulledCount         += _gatherCulledCounts[(int)GatherTrigger.Horizon];
+                LastDistanceCulledCount        += _gatherCulledCounts[(int)GatherTrigger.Distance];
+            }
         }
 
         // Project the gathered _symbolPoints to screen/depth/valid via the Burst SymbolProjectionJob, run inline
@@ -1494,7 +1583,7 @@ namespace MapRenderer.Unity.Text.Placement
             // seen this frame, and a staged candidate is always seen — so every candidate that never places (most
             // of them, in a dense view) would park a 0 that nothing collects. Drop instead. This is the same floor
             // rule DecayUnseenFadeRecords already applies to its own decay; it just never reached the hot path.
-            // Both readers outside this loop (MarkFadeOutIfAlive / TryForceFadeOut) test `TryGetValue && > epsilon`,
+            // Both readers outside this loop (SymbolCompactJob's fade-alive probe) test `TryGetValue && > epsilon`,
             // under which an ABSENT entry and ANY sub-epsilon stored value read alike — covering every value this
             // branch can discard, not just exact zeros — so dropping is behaviour-preserving there.
             // `target <= current` confines the drop to a fade-OUT (or an already-invisible identity): without it, a
@@ -1518,9 +1607,11 @@ namespace MapRenderer.Unity.Text.Placement
         {
             float step = deltaTime / FadeDurationSeconds;
             _fadeScratchKeys.Clear();
-            foreach (long id in _fadeOpacity.Keys)
-                if (!_seenFade.Contains(id)) _fadeScratchKeys.Add(id);
-            for (int i = 0; i < _fadeScratchKeys.Count; i++)
+            // NativeHashMap has no .Keys collection; enumerate its key/value pairs (read-only — removals are
+            // deferred into _fadeScratchKeys below, so we never mutate the map mid-enumeration).
+            foreach (var kv in _fadeOpacity)
+                if (!_seenFade.Contains(kv.Key)) _fadeScratchKeys.Add(kv.Key);
+            for (int i = 0; i < _fadeScratchKeys.Length; i++)
             {
                 long id = _fadeScratchKeys[i];
                 float next = math.max(_fadeOpacity[id] - step, 0f);
@@ -1669,9 +1760,13 @@ namespace MapRenderer.Unity.Text.Placement
             _stageCounts.Dispose(); _stagePath.Dispose(); _stageCumulativeLength.Dispose();
             _placedLastFrame.Dispose(); // R2: native set, ctor-allocated alongside the other persistent containers
             _droppedHalvesLastFrame.Dispose(); // Stage C: same lifetime as _placedLastFrame
-            // R3: AssertFadeIdsUnique's persistent scratch set (see its field doc) — lazily allocated, so a
-            // release build (or an Editor instance that never staged a candidate) may never have created it.
-            if (_debugFadeIdSeen.IsCreated) _debugFadeIdSeen.Dispose();
+            _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeScratchKeys.Dispose(); // fade collections, same lifetime
+            _gatherTrigger.Dispose(); // gather Cull→Compact per-record verdict scratch
+            _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, SymbolCullJob input
+            _gatherCulledCounts.Dispose(); // per-trigger culled tally, SymbolCompactJob output bridge
+            // R3: AssertFadeIdsUnique's persistent scratch set (see its field doc) — lazily allocated, so it may
+            // be a default (never-created) value here; Dispose() already no-ops on that, so no IsCreated guard.
+            _debugFadeIdSeen.Dispose();
         }
     }
 }

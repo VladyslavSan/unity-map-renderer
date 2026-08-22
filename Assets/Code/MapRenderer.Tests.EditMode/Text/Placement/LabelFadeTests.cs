@@ -332,8 +332,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── B-3: a label far past the horizon radius is culled BEFORE projection/collision; the near label
-        //    still places. (The Core radius math is pinned in LabelViewDistanceTests; this proves the wiring.) ──
+        // ── A label far past the far-plane cull distance is skipped BEFORE projection/collision; the near label
+        //    (at the look-at, distance 0) still places. (The Core distance math is pinned in LabelFarPlaneCullTests;
+        //    this proves the wiring; the far anchor at 1e8 m dwarfs any plausible far×fraction, so it is robust to
+        //    the harness's exact far value.) ──
         [Test]
         public void Tick_FarLabel_IsDistanceCulled_WhileNearLabelPlaces()
         {

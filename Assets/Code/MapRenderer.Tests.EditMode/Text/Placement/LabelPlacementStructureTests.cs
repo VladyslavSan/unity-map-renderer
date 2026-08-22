@@ -427,6 +427,7 @@ namespace MapRenderer.Tests.Text.Placement
             // migration, e.g. WorldPointEmitRenderTests).
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            system.LabelMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place labels beyond the far plane without them being culled
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
@@ -507,6 +508,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            system.LabelMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place labels beyond the far plane without them being culled
             try
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
@@ -574,6 +576,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            system.LabelMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place labels beyond the far plane without them being culled
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
@@ -698,6 +701,7 @@ namespace MapRenderer.Tests.Text.Placement
             // the world text slot to build+present (mirrors the LineCenter-distribution tooth above).
             var system = new LabelPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            system.LabelMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place labels beyond the far plane without them being culled
             try
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).
@@ -777,6 +781,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            system.LabelMaxDistanceFraction = double.PositiveInfinity; // structural test, not about distance culling: place labels beyond the far plane without them being culled
             try
             {
                 // R3: duplicate each candidate-set's Tick call — the verdict is harvested one Tick late (§2.6).

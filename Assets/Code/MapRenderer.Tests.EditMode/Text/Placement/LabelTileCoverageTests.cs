@@ -11,7 +11,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// The per-tile screen-coverage pre-cull metric. Teeth: a full-screen tile reports ~1.0 coverage (survives), a
     /// tiny tile reports its shoelace fraction (culled below the threshold), a behind-camera corner yields +inf
     /// (never culled — straddles the near plane), and a non-positive threshold DISABLES the cull (a mis-wired
-    /// caller must not cull everything — mirrors <see cref="LabelViewDistance"/>).
+    /// caller must not cull everything — mirrors <see cref="LabelFarPlaneCull"/>).
     /// </summary>
     [TestFixture]
     public class LabelTileCoverageTests

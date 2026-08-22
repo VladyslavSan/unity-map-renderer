@@ -233,10 +233,12 @@ namespace MapRenderer.Tests.Text.Placement
                 };
 
             // A straight line spanning the view (real geo endpoints → wide on-screen segment), 3 glyphs centered.
+            // Endpoints are kept within the camera far distance (±2° ≈ ±222 km at this zoom, well inside the ~775 km
+            // far) so the line is NOT far-distance culled — this tooth asserts only the FAR point "F" is culled.
             public LabelInstance CurvedAcrossView(int feature)
             {
-                double3 a = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 10.0 });
-                double3 b = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 30.0 });
+                double3 a = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 18.0 });
+                double3 b = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 22.0 });
                 var path = new double3[] { a, b };
                 return new LabelInstance
                 {

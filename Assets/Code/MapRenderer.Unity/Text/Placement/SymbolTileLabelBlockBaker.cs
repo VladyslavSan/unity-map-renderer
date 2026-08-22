@@ -53,7 +53,7 @@ namespace MapRenderer.Unity.Text.Placement
             // is unchanged — PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
             // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
             // (LabelStageJob skips staging a Rider record entirely) but is left correctly resolved so
-            // LabelPlacementSystem.MarkFadeOutIfAlive's per-record probe stays well-defined.
+            // the gather Compact pass's per-record fade-alive probe stays well-defined.
             long   fadeId = LabelPlacementSystem.PointFadeId(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage);
 
             // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors

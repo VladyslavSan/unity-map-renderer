@@ -28,6 +28,15 @@ namespace MapRenderer.Core.View
         /// bulk (<c>HorizonCull</c>). Always 0 under a planar projection.</summary>
         public int HorizonCulledLabels { get; init; }
 
+        /// <summary>Labels skipped on the last Tick because their style layer is out of the LIVE camera zoom's
+        /// <c>[minzoom, maxzoom)</c> — the display-time layer gate, evaluated per-frame and moved AHEAD of
+        /// projection so an out-of-zoom label (e.g. a z14 tile's <c>poi_r*</c> points before the camera reaches
+        /// their minzoom) is never projected/staged/collided. A record still fading out is exempt (it stays
+        /// staged, suppressed post-stage), so this counts only the fade-dead out-of-zoom records the pre-gate
+        /// used to project then discard. Watch it against <see cref="InputLabelCount"/> to see the gate's reach
+        /// on an overzoomed view.</summary>
+        public int ZoomCulledLabels { get; init; }
+
         /// <summary>§1.5 companion to <see cref="SymbolStoreTelemetrySnapshot.CoverageDroppedLabels"/>: labels
         /// whose tile just crossed below the coverage threshold and finished easing out this Tick (they FADED
         /// rather than popped) — the transient tail of the store's coverage drop, observed from the placement

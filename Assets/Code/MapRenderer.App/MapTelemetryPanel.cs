@@ -129,6 +129,11 @@ namespace MapRenderer.App
                  "Tick (they faded, not popped) — the transient tail of the coverage drop.")]
         public int SymbolCoverageFadingLabels;
 
+        [Tooltip("Labels skipped last Tick because their layer is out of the live zoom's [minzoom, maxzoom) — " +
+                 "the display-time gate moved ahead of projection, so overzoom points (a z14 tile's poi_r* before " +
+                 "the camera reaches their minzoom) are never projected/staged. Watch against InputLabelCount.")]
+        public int SymbolZoomCulledLabels;
+
         [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
                  "a curved/repeated line label is 1 per along-line anchor).")]
         public int SymbolCollisionCandidates;
@@ -230,6 +235,7 @@ namespace MapRenderer.App
             SymbolInputLabelCount      = placement.InputLabelCount;
             SymbolDistanceCulledLabels = placement.DistanceCulledLabels;
             SymbolCoverageFadingLabels = placement.CoverageFadingLabels;
+            SymbolZoomCulledLabels     = placement.ZoomCulledLabels;
             SymbolCollisionCandidates  = placement.CollisionCandidateCount;
             SymbolCollisionSurvivors   = placement.CollisionSurvivorCount;
             SymbolPlacedQuads          = placement.PlacedQuadCount;

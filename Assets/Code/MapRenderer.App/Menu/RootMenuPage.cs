@@ -12,6 +12,7 @@ namespace MapRenderer.App.Menu
         public void Draw(MenuOverlay menu)
         {
             if (GUILayout.Button("Camera Presets")) menu.Push(new CameraPresetsPage());
+            if (GUILayout.Button("Diagnostics")) menu.Push(new DiagnosticsPage());
             if (GUILayout.Button("Settings")) menu.Push(new SettingsPage());
         }
     }

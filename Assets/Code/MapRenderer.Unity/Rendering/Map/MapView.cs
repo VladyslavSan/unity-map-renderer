@@ -513,7 +513,10 @@ namespace MapRenderer.Unity.Rendering.Map
                 using (PmSymbolBatch.Auto())
                     plan = Symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
                 // Then gather the winning blocks' baked slices → project/collide/build the placement, presenting
-                // each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter).
+                // each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter). Push the
+                // per-label far-distance cull fraction live first (same read-every-Tick contract as the coverage
+                // cull above), so an Inspector tweak takes effect the same frame.
+                Labels.LabelMaxDistanceFraction = _config.LabelMaxDistanceFraction;
                 Labels.Tick(sceneFrame, plan, Symbols.Atlas, Time.deltaTime,
                     _symbolRenderLayers, Symbols.IconTexture);
             }

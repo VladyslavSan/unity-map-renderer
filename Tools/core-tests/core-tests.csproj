@@ -484,8 +484,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTextIntern.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTextInternTests.cs" />
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewDistance.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelViewDistanceTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelFarPlaneCull.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelFarPlaneCullTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverage.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageTests.cs" />
     <!-- Tile-key codec (IR B4): lifted out of SymbolFeatureExtractor so Core consumers keep it -->

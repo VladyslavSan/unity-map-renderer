@@ -182,16 +182,31 @@ namespace MapRenderer.Unity.Rendering.Map
         /// any Unity-camera-matrix consumer (label screen-space placement) must run AFTER it, later in the same
         /// <c>MapView.LateUpdate</c>.
         /// </summary>
+        /// <summary>The camera orbit altitude in render metres for the current properties+viewport — the LOGICAL
+        /// viewport height (S92 D1: ÷DPR brings the camera ~DPR× closer on a high-DPI panel, DPR-independent size),
+        /// the <see cref="AltitudeMultiplier"/>, and a 0.1 m floor. Computed on demand so readers do not depend on
+        /// a <see cref="SyncToCamera"/> having run; <see cref="SyncToCamera"/> reads the same property.</summary>
+        internal double CurrentAltitudeMetres
+        {
+            get
+            {
+                double altitude = CameraPoseMath.AltitudeForZoom(
+                    CurrentProperties.Zoom, ViewportLogicalPx.y, CurrentProperties.VerticalFovDeg) * AltitudeMultiplier;
+                return altitude < 0.1 ? 0.1 : altitude;
+            }
+        }
+
+        /// <summary>The camera far-clip distance in render metres — the injected <see cref="FarPlanePolicy"/> over
+        /// <see cref="CurrentAltitudeMetres"/> and the current tilt/FOV/aspect. This is the SAME value
+        /// <see cref="SyncToCamera"/> writes to <c>Camera.farClipPlane</c>, but computed from the properties on
+        /// demand, so a reader (the label far-distance cull) gets the correct far even when no SyncToCamera has run
+        /// this frame — the raw <c>Camera.farClipPlane</c> would still hold Unity's default until then.</summary>
+        internal double CurrentFarMetres => FarPlanePolicy.FarMetres(
+            CurrentAltitudeMetres, CurrentProperties.Tilt.Value, CurrentProperties.VerticalFovDeg, Camera.aspect);
+
         public void SyncToCamera()
         {
-            // Frame from the LOGICAL viewport height (S92 D1): ÷DPR brings the camera ~DPR× closer on a
-            // high-DPI panel so the map is the right size and DPR-independent. ViewportPx stays physical
-            // (raw from the camera); only this altitude term is normalized — and it reads the shared
-            // ViewportLogicalPx rather than re-deriving it, so the altitude framing and the tile-cover
-            // framing are one quantity (S108) and the unusable-ratio fallback is inherited, not repeated.
-            double altitude = CameraPoseMath.AltitudeForZoom(CurrentProperties.Zoom, ViewportLogicalPx.y, CurrentProperties.VerticalFovDeg)
-                              * AltitudeMultiplier;
-            if (altitude < 0.1) altitude = 0.1;
+            double altitude = CurrentAltitudeMetres;
 
             CameraPoseMath.ComputeRelativePose(altitude,
                                        CurrentProperties.Heading.Value,
@@ -219,9 +234,9 @@ namespace MapRenderer.Unity.Rendering.Map
 
             Camera.nearClipPlane = math.max(0.1f, (float)CameraPoseMath.NearClip(altitude));
             // The injected far policy (shared with the tile selector, per projection) — geometry-aware for the
-            // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far.
-            Camera.farClipPlane  = (float)FarPlanePolicy.FarMetres(
-                altitude, CurrentProperties.Tilt.Value, CurrentProperties.VerticalFovDeg, Camera.aspect);
+            // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far. Via
+            // CurrentFarMetres so the label far-distance cull reads the exact same value off the properties.
+            Camera.farClipPlane  = (float)CurrentFarMetres;
 
             // The frame's ruler, pushed as the LAST act of the commit — after CameraRelativePosition, which
             // MetresPerDevicePixel reads. Here rather than in RenderLayerSet.ApplyZoom because it is a CAMERA

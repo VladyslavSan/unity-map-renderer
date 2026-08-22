@@ -40,9 +40,10 @@
 //                    pose, so ±1 px quantisation there is not just noise but an upward BIAS. Raising SizePx
 //                    does not help (the fixture is scale-invariant in it — see InkRunPose) and raising
 //                    TextSizePx enough drives the receding road's near end behind the camera.
-//   • world metres at the mesh (T3, T10) — 8×, the fixture's constructible ceiling, and the arm that carries
-//                    the RATIO claim to depth. The wall is a PRODUCTION cull (B-3 distance,
-//                    LabelViewportSpans = 8.0), not a fixture limit.
+//   • world metres at the mesh (T3, T10) — 8×, the deep pose, and the arm that carries the RATIO claim to
+//                    depth. The fixture DISABLES the production far-distance cull (LabelMaxDistanceFraction =
+//                    +inf in OffLookAtLabelScene) so the deep pose's far anchors — which sit beyond the camera
+//                    far distance — survive to be measured; the cull is not this fixture's subject.
 //   • pure staging, no camera (T3b, in MapPitchedWorldArcStagingTests) — every magnitude regime to 50×.
 //
 // AND NOTE WHERE THE FAILURE BEGINS: 1.25× the look-at depth, not the horizon (the horizon is merely where
@@ -450,10 +451,11 @@ namespace MapRenderer.Tests.Visual
         /// a real end-to-end reading — production staging, production <c>BuildWorldQuad</c>, a real mesh — at
         /// 8× depth, which no other tooth in the suite reaches.</para>
         ///
-        /// <para><b>Reach, stated so it is not over-read (F-W2-5):</b> 8× is the fixture's ceiling because the
-        /// production B-3 distance cull (<c>LabelViewportSpans = 8.0</c>) removes the far labels at ratio ≥ 9 —
-        /// a production behaviour, not a fixture limit, and not W2's to change. The identity is carried past
-        /// it, on the CPU with no camera, by W2-T3(b) in <c>MapPitchedWorldArcStagingTests</c>.</para>
+        /// <para><b>Reach, stated so it is not over-read (F-W2-5):</b> 8× is the deep pose this fixture measures
+        /// at. The production far-distance cull is DISABLED for this fixture (<c>LabelMaxDistanceFraction = +inf</c>
+        /// in <c>OffLookAtLabelScene</c>) so the deep pose's far anchors — which sit beyond the camera far distance
+        /// — survive to be measured; the cull is not W2's subject. The identity is carried further still, on the
+        /// CPU with no camera, by W2-T3(b) in <c>MapPitchedWorldArcStagingTests</c>.</para>
         ///
         /// <para>RED recipe: multiply <c>cornerMetresPerLogicalPixel</c> by 2 ⇒ this leg stays GREEN (it
         /// cancels) while (a) goes RED. I1/I8 (the corner unit never becomes metres) reds it hard.</para>
@@ -597,11 +599,10 @@ namespace MapRenderer.Tests.Visual
         // Helpers — all fixture-side; no production member exists for these teeth (test-code-bloat rule)
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-        /// <summary>Tilt 72°, ratio 8 — the DEEPEST cell this fixture can construct. Beyond ratio 8.5 the far
-        /// labels are removed by the production B-3 pre-projection distance cull
-        /// (<c>LabelViewportSpans = 8.0</c>), which the horizon measurement proved by observing that
-        /// <c>PointFar</c> — which has no road and no arc walk at all — disappears at the same ratio. Tilt,
-        /// not zoom, is the knob: the fixture is scale-invariant in zoom (every world length in it is a
+        /// <summary>Tilt 72°, ratio 8 — the deep cell this fixture measures at. The production far-distance cull,
+        /// which would otherwise drop the far anchors at this depth, is DISABLED for this fixture
+        /// (<c>LabelMaxDistanceFraction = +inf</c> in <c>OffLookAtLabelScene</c>) so they survive to be measured.
+        /// Tilt, not zoom, is the knob: the fixture is scale-invariant in zoom (every world length in it is a
         /// multiple of <c>MetresPerDevicePixel</c>, which zoom rescales along with the reference depth), while
         /// tilt is what brings the horizon into frame.</summary>
         private static OffLookAtLabelSceneConfig DeepPose()

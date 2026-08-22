@@ -54,6 +54,7 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string InputLabels       = "MapRenderer.Symbols.InputLabels";
             internal const string DistanceCulled    = "MapRenderer.Symbols.DistanceCulled";
             internal const string HorizonCulled     = "MapRenderer.Symbols.HorizonCulled";
+            internal const string ZoomCulled        = "MapRenderer.Symbols.ZoomCulled";
             internal const string CoverageDropped   = "MapRenderer.Symbols.CoverageDropped";
             internal const string CoverageFading    = "MapRenderer.Symbols.CoverageFading";
             internal const string Candidates        = "MapRenderer.Symbols.CollisionCandidates";
@@ -95,6 +96,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private static ProfilerCounterValue<int>    _inputLabels       = Count(CounterNames.InputLabels);
         private static ProfilerCounterValue<int>    _distanceCulled    = Count(CounterNames.DistanceCulled);
         private static ProfilerCounterValue<int>    _horizonCulled     = Count(CounterNames.HorizonCulled);
+        private static ProfilerCounterValue<int>    _zoomCulled        = Count(CounterNames.ZoomCulled);
         private static ProfilerCounterValue<int>    _coverageDropped   = Count(CounterNames.CoverageDropped);
         private static ProfilerCounterValue<int>    _coverageFading    = Count(CounterNames.CoverageFading);
         private static ProfilerCounterValue<int>    _candidates        = Count(CounterNames.Candidates);
@@ -176,6 +178,7 @@ namespace MapRenderer.Unity.Rendering.Map
             _inputLabels.Value     = placement.InputLabelCount;
             _distanceCulled.Value  = placement.DistanceCulledLabels;
             _horizonCulled.Value   = placement.HorizonCulledLabels;
+            _zoomCulled.Value      = placement.ZoomCulledLabels;
             _coverageFading.Value  = placement.CoverageFadingLabels;
             _candidates.Value      = placement.CollisionCandidateCount;
             _survivors.Value       = placement.CollisionSurvivorCount;

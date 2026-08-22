@@ -810,6 +810,11 @@ namespace MapRenderer.Tests
             // ── stage + measure ────────────────────────────────────────────────────────────────────────
             system = new LabelPlacementSystem(scene.MapCam,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // Disable the pre-projection far-distance cull for this fixture. Its measurand is the WORLD-cell
+            // invariant at DEPTH (the "deep" pose's far anchors sit at ~8× the near depth, beyond the camera far
+            // distance); the cull is not this fixture's subject, and leaving it on would drop the far half of the
+            // scene before it can be measured. The cull's own behaviour is pinned by the label-placement teeth.
+            system.LabelMaxDistanceFraction = double.PositiveInfinity;
             plan = new TestSymbolPlan(scene.MapCam.Projection);
             snapshot = new SnapshotRenderer(config.SizePx, config.SizePx);
             var measurements = new Dictionary<OffLookAtLabelId, LabelMeasurement>();

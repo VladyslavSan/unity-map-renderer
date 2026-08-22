@@ -7,11 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The per-TILE screen-coverage pre-cull metric — a coarse companion to the per-label B-3 distance cull
-    /// (<see cref="LabelViewDistance"/>). A tile that covers only a sliver of the screen (the tilt-foreshortened
+    /// The per-TILE screen-coverage pre-cull metric — a coarse companion to the per-label distance cull
+    /// (<see cref="LabelFarPlaneCull"/>). A tile that covers only a sliver of the screen (the tilt-foreshortened
     /// horizon pile-up) has most of its labels collision-discarded anyway, so gathering/projecting/staging them
     /// is wasted work; skipping the whole tile stabilizes per-frame label cost with barely any lost information.
-    /// Where B-3 is a per-label ground <i>radius</i>, this is a per-tile screen <i>area</i>, which catches the
+    /// Where the distance cull is a per-label camera <i>range</i>, this is a per-tile screen <i>area</i>, which catches the
     /// foreshortened slivers a radius keeps.
     ///
     /// <para>The measurement is camera-dependent, so it runs per-frame; only the tile's 4 render-space corners
@@ -47,8 +47,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// True when <paramref name="coverage"/> is below <paramref name="minCoverage"/> and the tile should be
-        /// skipped. A non-positive threshold DISABLES the cull (mirrors <see cref="LabelViewDistance"/>'s
-        /// non-positive-radius fallback), so a mis-wired caller degrades to "cull nothing" rather than culling
+        /// skipped. A non-positive threshold DISABLES the cull (mirrors <see cref="LabelFarPlaneCull"/>'s
+        /// non-positive-distance fallback), so a mis-wired caller degrades to "cull nothing" rather than culling
         /// everything; a <see cref="double.PositiveInfinity"/> coverage (behind-camera / degenerate viewport) is
         /// never below a finite threshold, so it is never culled.
         /// </summary>
