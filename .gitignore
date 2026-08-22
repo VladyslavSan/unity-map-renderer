@@ -77,6 +77,9 @@ mono_crash.*
 *.unitypackage
 *.unitypackage.meta
 *.app
+# `*.app` (macOS build bundle) also matches the MapRenderer.App SOURCE dir on case-insensitive
+# filesystems (macOS/Windows). Re-include it so the app-layer assembly is tracked everywhere.
+!/Assets/Code/MapRenderer.App/
 
 # Crashlytics generated file
 crashlytics-build.properties

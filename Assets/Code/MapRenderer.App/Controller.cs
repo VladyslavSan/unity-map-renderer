@@ -5,7 +5,9 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Map;
+
+namespace MapRenderer.App
 {
     /// <summary>
     /// S45/S73: Thin input → <see cref="CameraPropertiesUpdate"/> patch translator. Supersedes the
@@ -52,11 +54,10 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     public sealed class Controller : MonoBehaviour
     {
-        [Tooltip("The MapView this controller drives (set by Bootstrapper.Wire at runtime).")]
-        public MapViewComponent Map;
-
-        [Tooltip("The camera this controller positions (set by Bootstrapper.Wire at runtime).")]
-        public Camera Camera;
+        // Wired at runtime by MapHost — runtime references, not authoring data, so auto-properties (not
+        // serialized Inspector fields: a serialized slot would just show a dead value MapHost overwrites on Start).
+        public MapViewComponent Map { get; set; }
+        public Camera Camera { get; set; }
 
         // ── Sensitivity (new Input System calibration) ────────────────────────────────────────────
         [Header("Sensitivity (new Input System — see class doc for calibration notes)")]

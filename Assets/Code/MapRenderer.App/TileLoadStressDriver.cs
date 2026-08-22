@@ -2,7 +2,9 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Map;
+
+namespace MapRenderer.App
 {
     /// <summary>
     /// A debug harness that automatically flies the camera to <b>stress the tile-load pipeline</b>: it
@@ -28,7 +30,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <see cref="MapCamera.Apply"/> seam the interactive controller uses.</para>
     ///
     /// <para><b>Play-mode only, self-wiring.</b> <see cref="MapView.Camera"/> is built only on the runtime
-    /// <c>Bootstrapper.Wire</c>/<c>Start</c> path, so <see cref="Tick(float)"/> null-guards
+    /// runtime wiring/startup path, so <see cref="Tick(float)"/> null-guards
     /// <see cref="Map"/>/<see cref="MapViewComponent.Camera"/> and no-ops cleanly when unwired. If
     /// <see cref="Map"/> is left empty it is found via <see cref="Object.FindAnyObjectByType"/> on
     /// <see cref="Start"/>, so the component works on any GameObject in a wired scene with no Inspector

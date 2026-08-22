@@ -11,7 +11,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <see cref="MapView"/> once a camera is wired, and forwards the frame/teardown lifecycle. All map logic
     /// lives in <see cref="MapView"/>; this class holds only the MonoBehaviour glue.
     ///
-    /// <para>The <see cref="MapView"/> is created on the first <see cref="SetCamera"/> (Bootstrapper.Wire
+    /// <para>The <see cref="MapView"/> is created on the first <see cref="SetCamera"/> (called once at runtime wiring
     /// hands it a <see cref="MapCamera"/> over the main tagged camera) — so it is always born with a real
     /// camera and its own config. Before that, and in the pre-wire <see cref="Update"/> window, the forwards
     /// no-op; that "not wired yet" state is the MonoBehaviour's to hold, not <see cref="MapView"/>'s.</para>
@@ -32,11 +32,11 @@ namespace MapRenderer.Unity.Rendering.Map
         partial void ReleaseTelemetryCounters();
         partial void MirrorTelemetryCounters();
 
-        // ── Production API (Bootstrapper / controllers) ──────────────────────────────────────────
+        // ── Production API (host / controllers) ──────────────────────────────────────────
 
         /// <summary>Builds the <see cref="MapView"/> over <see cref="Config"/> + this camera. The camera is
         /// construction-only on <see cref="MapView"/>, so a re-injection tears down the old view and builds a
-        /// fresh one (in practice this is called once, by Bootstrapper.Wire over the main camera).</summary>
+        /// fresh one (in practice this is called once, at runtime wiring over the main camera).</summary>
         public void SetCamera(MapCamera camera)
         {
             ReleaseTelemetryCounters();

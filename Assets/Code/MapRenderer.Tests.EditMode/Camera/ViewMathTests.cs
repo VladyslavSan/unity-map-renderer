@@ -438,7 +438,7 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(1080.0, vp.y, 0.0, $"y falls back to 1 component-wise at {dpr}.");
             }
 
-            // The composition Bootstrapper.Start actually performs — SafeRatio(DevicePixelRatioFromDpi(dpi)) —
+            // The composition MapHost.Start actually performs — SafeRatio(DevicePixelRatioFromDpi(dpi)) —
             // which nothing else pins. An absurd reported panel density cannot escape the band. Only the large
             // end is testable: a dpi of 0 trips DevicePixelRatioFromDpi's own positive-density precondition.
             Assert.AreEqual(1080.0,

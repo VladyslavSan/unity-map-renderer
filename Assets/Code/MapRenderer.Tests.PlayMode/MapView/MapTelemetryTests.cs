@@ -17,6 +17,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.App;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests.PlayMode.MapViews
@@ -202,6 +203,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.WithTestCamera();
                 view.Config.MaxConsumesPerTick        = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
+                // Also lift the concurrent-load cap (default 12) so EVERY cover tile fetches at once — otherwise
+                // a >12-tile cover leaves the overflow queued (not loaded ⇒ not pending) and Pending < Visible.
+                view.Config.MaxConcurrentTileLoads    = 64;
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 view.LateUpdate(); // requests the cover; fetches kick and stay in-flight (SpinUntilReleased never returns)

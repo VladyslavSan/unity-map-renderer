@@ -11,12 +11,19 @@ using Unity.Mathematics;
 
 // S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Materials;
+using MapRenderer.Unity.Rendering.Map;
+// Disambiguate from UnityEngine.RenderMode (Canvas) — the map's render mode is the material-set one.
+using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
+
+namespace MapRenderer.App
 {
     /// <summary>
-    /// S41 map bootstrap and wire-up hub (<c>Map.Bootstrapper</c>). Lives on the <b>MapRoot</b>
-    /// GameObject, which is the scene owner of the map subsystem (<see cref="View"/> +
-    /// <see cref="Controller"/>); this component assembles and starts that subsystem.
+    /// Map composition root — assembles, wires, and starts the map subsystem. Lives on the <b>MapRoot</b>
+    /// GameObject, the scene owner of the map (<see cref="MapViewComponent"/> + <see cref="Controller"/>).
+    /// One component brings the whole thing up: the MapView + camera graph, lighting, input, and the Map
+    /// reference on any dev surface (debug menu, telemetry, camera panel) that is present in the scene — add one
+    /// to use it; MapHost never adds or gates them, and enabling/disabling is the component's own checkbox.
     ///
     /// <para>The Main Camera is a separate plain camera GameObject (tagged <c>MainCamera</c>); this
     /// component finds it at startup via <c>Camera.main</c> and wires it into <see cref="Controller"/>.</para>
@@ -45,7 +52,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
     [RequireComponent(typeof(MapViewComponent))]
-    public sealed class Bootstrapper : MonoBehaviour
+    public sealed class MapHost : MonoBehaviour
     {
         /// <summary>Wires <see cref="VerifiedDisposable.LeakReporter"/> to <see cref="Debug.LogError"/> once
         /// at startup, so a <see cref="VerifiedDisposable"/>-derived instance finalized without Dispose()
@@ -124,7 +131,7 @@ namespace MapRenderer.Unity.Rendering.Map
             var mapView    = GetComponent<MapViewComponent>();
             var renderMode = mapView != null && mapView.Config.MaterialSet != null
                 ? mapView.Config.MaterialSet.RenderMode
-                : Materials.RenderMode.Lit;
+                : RenderMode.Lit;
 
             // 3. Ensure a directional light exists in the scene. Needed in BOTH modes: URP Lit uses it for
             //    full lighting, and the unlit fill-extrusion twin reads its DIRECTION for a cheap half-Lambert
@@ -180,8 +187,37 @@ namespace MapRenderer.Unity.Rendering.Map
             if (mainCam != null && mainCam.backgroundColor == default)
                 mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
 
-            Debug.Log($"[Bootstrapper] Started. styleUri={styleUri}, zoom={InitialZoom}, " +
+            // 6. Dev surfaces — wire Map on whatever dev overlay/panel is PRESENT in the scene. Adding one is
+            //    the user's choice and enabling/disabling it uses Unity's own component checkbox; MapHost never
+            //    adds or gates, it only fills the Map reference so you don't have to drag it.
+            WireDevSurfaces(mapView);
+
+            Debug.Log($"[MapHost] Started. styleUri={styleUri}, zoom={InitialZoom}, " +
                       $"center=({InitialLatitude:F2},{InitialLongitude:F2}).");
+        }
+
+        /// <summary>
+        /// Point each PRESENT dev surface's <c>Map</c> at <paramref name="mapView"/> (only when it hasn't been
+        /// set by hand). MapHost never adds or removes these — a surface is in the scene or it isn't (the user's
+        /// choice), and enabling/disabling it is Unity's own component checkbox; this just spares you dragging
+        /// the reference. Includes inactive components so one enabled at runtime is already wired.
+        /// </summary>
+        /// <param name="mapView">The view the surfaces read (this GameObject's <see cref="MapViewComponent"/>).</param>
+        private void WireDevSurfaces(MapViewComponent mapView)
+        {
+            if (mapView == null) return;
+
+            // Each surface exposes a public `Map` field; with no shared interface, three explicit blocks are
+            // clearer than a reflection/interface hop. FindObjectsInactive.Include so a surface disabled now but
+            // enabled at runtime is already wired; only fill an unassigned Map (respect a hand-set reference).
+            var menu = Object.FindAnyObjectByType<Menu.MenuOverlay>(FindObjectsInactive.Include);
+            if (menu != null && menu.Map == null) menu.Map = mapView;
+
+            var camPanel = Object.FindAnyObjectByType<CameraControlPanel>(FindObjectsInactive.Include);
+            if (camPanel != null && camPanel.Map == null) camPanel.Map = mapView;
+
+            var telemetry = Object.FindAnyObjectByType<MapTelemetryPanel>(FindObjectsInactive.Include);
+            if (telemetry != null && telemetry.Map == null) telemetry.Map = mapView;
         }
 
         /// <summary>
@@ -224,13 +260,13 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             if (root == null)
             {
-                Debug.LogWarning("[Bootstrapper.Wire] root is null — wire-up skipped.");
+                Debug.LogWarning("[MapHost.Wire] root is null — wire-up skipped.");
                 return;
             }
 
             if (camera == null)
             {
-                Debug.LogWarning("[Bootstrapper.Wire] No camera provided (Camera.main is null). " +
+                Debug.LogWarning("[MapHost.Wire] No camera provided (Camera.main is null). " +
                                  "Controller will not drive any camera. Wire-up skipped for camera.");
                 // We still continue to initialise MapView and set Map on the controller.
             }
@@ -238,7 +274,7 @@ namespace MapRenderer.Unity.Rendering.Map
             var mapView = root.GetComponent<MapViewComponent>();
             if (mapView == null)
             {
-                Debug.LogWarning("[Bootstrapper.Wire] No MapViewComponent found on root — wire-up skipped.");
+                Debug.LogWarning("[MapHost.Wire] No MapViewComponent found on root — wire-up skipped.");
                 return;
             }
 
@@ -295,16 +331,16 @@ namespace MapRenderer.Unity.Rendering.Map
         /// style-driven-sky feature that mutates <see cref="RenderSettings"/> at runtime would own
         /// re-calling this.</para>
         ///
-        /// <para>S4 (unlit epic): a no-op under <see cref="Materials.RenderMode.Unlit"/> — the unlit shader
+        /// <para>S4 (unlit epic): a no-op under <see cref="RenderMode.Unlit"/> — the unlit shader
         /// twins have no indirect-lighting term to fill, so generating a probe for them would be dead work.
         /// Threaded as a parameter (not read from a global) so <see cref="Start"/> — this type's one caller —
         /// stays the single place render mode is resolved.</para>
         /// </summary>
-        /// <param name="mode">The active render mode (<see cref="Materials.MapMaterialSet.RenderMode"/>); only
-        /// <see cref="Materials.RenderMode.Lit"/> runs the probe check.</param>
-        internal static void EnsureEnvironmentLighting(Materials.RenderMode mode)
+        /// <param name="mode">The active render mode (<see cref="MapMaterialSet.RenderMode"/>); only
+        /// <see cref="RenderMode.Lit"/> runs the probe check.</param>
+        internal static void EnsureEnvironmentLighting(RenderMode mode)
         {
-            if (mode != Materials.RenderMode.Lit) return;
+            if (mode != RenderMode.Lit) return;
 
             var probe = RenderSettings.ambientProbe;
             double dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
@@ -335,7 +371,7 @@ namespace MapRenderer.Unity.Rendering.Map
             light.type                 = LightType.Directional;
             light.intensity            = 1.0f;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
-            Debug.Log("[Bootstrapper] Created directional light (none found in scene).");
+            Debug.Log("[MapHost] Created directional light (none found in scene).");
         }
     }
 }

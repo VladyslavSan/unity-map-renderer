@@ -86,6 +86,17 @@ LOG="$ROOT/Logs/test-run.log"
 # available at test-results.prev.xml for comparison.
 [ -f "$RESULTS" ] && mv -f "$RESULTS" "$RESULTS_PREV"
 
+# Preserve the interactive Editor's open-scene selection across the batch run. Batch-mode Unity opens
+# with no scene and rewrites Library/LastSceneManagerSetup.txt to `sceneSetups: []`, so the developer's
+# NEXT interactive open lands on an empty scene and has to hunt for MapDemo again. The file is only read
+# at Editor launch, so snapshotting it now and restoring it on exit (any exit — hence the trap) makes the
+# batch run transparent to the open-scene state. No-op when Library is fresh (file absent).
+SCENE_SETUP="$ROOT/Library/LastSceneManagerSetup.txt"
+SCENE_SETUP_BAK="$ROOT/Logs/LastSceneManagerSetup.bak"
+if [ -f "$SCENE_SETUP" ]; then cp -f "$SCENE_SETUP" "$SCENE_SETUP_BAK"; else rm -f "$SCENE_SETUP_BAK"; fi
+restore_scene_setup() { [ -f "$SCENE_SETUP_BAK" ] && cp -f "$SCENE_SETUP_BAK" "$SCENE_SETUP"; }
+trap restore_scene_setup EXIT
+
 run_unity() { # $1 = testResults path, $2 = logFile path
   "$UNITY" -runTests -batchmode -projectPath "$ROOT" \
     -testPlatform "$PLATFORM" \

@@ -15,6 +15,7 @@
 //        from "non-positive" to a plausibility band, so the sweep predicate moved with it.)
 
 using System.Collections.Generic;
+using MapRenderer.App;
 using System.IO;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
@@ -145,7 +146,7 @@ namespace MapRenderer.Tests.Cameras
         /// root and legitimately quotes the guard when explaining it. Note the sweep reads comments too, so
         /// production prose in <b>any</b> swept file must never put the ratio's name next to a comparison
         /// operator — say "outside the plausible band", never the expression itself. That fence binds
-        /// <c>MapViewConfig</c>'s tooltip and <c>Bootstrapper</c>'s comment as much as it binds
+        /// <c>MapViewConfig</c>'s tooltip and <c>MapHost</c>'s comment as much as it binds
         /// <c>DeviceScaling</c>'s own doc.</para>
         ///
         /// <para>S109 STRENGTHENED the predicate rather than merely porting it to the plausibility band. The

@@ -16,7 +16,9 @@ using CoreTouchPhase = MapRenderer.Core.View.TouchPhase;
 // Alias EnhancedTouch.Touch to avoid CS0104 ambiguity with UnityEngine.Touch.
 using Touch = UnityEngine.InputSystem.EnhancedTouch.Touch;
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Map;
+
+namespace MapRenderer.App
 {
     /// <summary>
     /// S74: thin Unity EnhancedTouch adapter — the touch sibling of <see cref="Controller"/>.
@@ -42,12 +44,11 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     public sealed class TouchController : MonoBehaviour
     {
-        // ── References (set by Bootstrapper.Wire) ────────────────────────────────────────────────
-        [Tooltip("The MapView this touch controller drives (set by Bootstrapper.Wire at runtime).")]
-        public MapViewComponent Map;
-
-        [Tooltip("The camera providing the live viewport (set by Bootstrapper.Wire at runtime).")]
-        public Camera camera;
+        // ── References (set at runtime during wiring) ────────────────────────────────────────────────
+        // Wired at runtime by MapHost — runtime references, not authoring data, so auto-properties (not
+        // serialized Inspector fields: MapHost sets them on Start, a serialized slot would just show a dead value).
+        public MapViewComponent Map { get; set; }
+        public Camera camera { get; set; }
 
         // ── Sensitivity ───────────────────────────────────────────────────────────────────────────
         [Header("Sensitivity")]

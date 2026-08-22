@@ -277,7 +277,9 @@ namespace MapRenderer.Tests.Text.Placement
         // outside GoldenTolerancePx (tens of pixels), not a small AA-level difference.
         // MINT MODE — set true to print the actual ink signature (for capturing a fresh golden) instead of
         // asserting against the committed one below. MUST be false when committed (asserting mode).
-        private const bool MintGolden = false;
+        // static readonly (not const): keeps the golden-mint toggle without the compiler proving the mint
+        // block dead and emitting CS0162 "unreachable code" — flip to true to regenerate the goldens.
+        private static readonly bool MintGolden = false;
 
         private static void AssertGolden(byte[] pixels, string label,
             float centroidRow, float centroidCol, int minRow, int maxRow, int minCol, int maxCol)

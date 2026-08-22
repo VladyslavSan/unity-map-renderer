@@ -21,7 +21,7 @@ namespace MapRenderer.Unity.Rendering.Materials
         [Tooltip("S4 (unlit epic): whether this set's base materials are lit or unlit. A map view draws in " +
                  "whichever mode the MapMaterialSet it references declares — reference a Lit set for lit, an " +
                  "Unlit set (Map/FillUnlit / Map/FillExtrusionUnlit / Map/LineUnlit bases) for unlit. Under " +
-                 "Unlit the Bootstrapper also skips the directional-light + ambient-probe setup the unlit " +
+                 "Unlit the host also skips the directional-light + ambient-probe setup the unlit " +
                  "twins never read. Lit is value 0, so a set authored before this epic stays lit.")]
         [SerializeField] public RenderMode RenderMode = RenderMode.Lit;
 
@@ -89,12 +89,12 @@ namespace MapRenderer.Unity.Rendering.Materials
     /// </summary>
     public enum RenderMode
     {
-        /// <summary>Full URP-lit base materials — the pre-existing default. The <see cref="Bootstrapper"/>
+        /// <summary>Full URP-lit base materials — the pre-existing default. The host
         /// runs its directional-light + ambient-probe setup.</summary>
         Lit = 0,
 
         /// <summary>Unlit base materials (Map/FillUnlit, Map/FillExtrusionUnlit, Map/LineUnlit) — no lighting
-        /// math; the <see cref="Bootstrapper"/> skips the directional-light + ambient-probe setup the unlit
+        /// math; the host skips the directional-light + ambient-probe setup the unlit
         /// twins never read.</summary>
         Unlit = 1,
     }

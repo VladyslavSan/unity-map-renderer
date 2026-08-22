@@ -9,6 +9,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
+using MapRenderer.App;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 

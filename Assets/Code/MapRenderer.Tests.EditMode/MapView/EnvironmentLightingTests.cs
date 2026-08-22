@@ -1,4 +1,4 @@
-// Unity EditMode only — tests Bootstrapper.EnsureEnvironmentLighting() (fix for pure-black
+// Unity EditMode only — tests MapHost.EnsureEnvironmentLighting() (fix for pure-black
 // fill-extrusion walls: RenderSettings.ambientProbe was never generated for the demo scenes, so any
 // face the directional light misses got zero indirect fill). Verifies the guard fires exactly when the
 // probe is degenerate and never clobbers an already-populated (e.g. host-baked) probe.
@@ -7,13 +7,13 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
-using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
+using MapHost = MapRenderer.App.MapHost;
 using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
-    /// Guard-behaviour tests for <see cref="Bootstrapper.EnsureEnvironmentLighting"/>.
+    /// Guard-behaviour tests for <see cref="MapHost.EnsureEnvironmentLighting"/>.
     /// </summary>
     [TestFixture]
     public class EnvironmentLightingTests
@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.MapViews
                 TestContext.WriteLine($"skybox={RenderSettings.skybox} mode={RenderSettings.ambientMode} " +
                     $"dcBefore={math.abs(RenderSettings.ambientProbe[0, 0]) + math.abs(RenderSettings.ambientProbe[1, 0]) + math.abs(RenderSettings.ambientProbe[2, 0])}");
 
-                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Lit);
+                MapHost.EnsureEnvironmentLighting(RenderMode.Lit);
 
                 var probe = RenderSettings.ambientProbe;
                 float dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
@@ -73,7 +73,7 @@ namespace MapRenderer.Tests.MapViews
                 float dcBefore = math.abs(before[0, 0]) + math.abs(before[1, 0]) + math.abs(before[2, 0]);
                 Assert.AreEqual(0f, dcBefore, "precondition: the probe must round-trip to exactly zero.");
 
-                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Unlit);
+                MapHost.EnsureEnvironmentLighting(RenderMode.Unlit);
 
                 var probe = RenderSettings.ambientProbe;
                 float dcTerm = math.abs(probe[0, 0]) + math.abs(probe[1, 0]) + math.abs(probe[2, 0]);
@@ -104,7 +104,7 @@ namespace MapRenderer.Tests.MapViews
                 RenderSettings.ambientMode  = AmbientMode.Skybox;
                 RenderSettings.ambientProbe = baked;
 
-                Bootstrapper.EnsureEnvironmentLighting(RenderMode.Lit);
+                MapHost.EnsureEnvironmentLighting(RenderMode.Lit);
 
                 var probe = RenderSettings.ambientProbe;
                 for (int channel = 0; channel < 3; channel++)

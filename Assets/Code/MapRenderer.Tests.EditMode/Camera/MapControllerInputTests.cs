@@ -8,7 +8,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
-using MapController = MapRenderer.Unity.Rendering.Map.Controller;
+using MapController = MapRenderer.App.Controller;
 
 namespace MapRenderer.Tests.Cameras
 {
@@ -21,8 +21,10 @@ namespace MapRenderer.Tests.Cameras
             {
                 // Resolve path relative to the Unity project root (Application.dataPath ends at "Assets").
                 string root   = Path.GetDirectoryName(Application.dataPath);
-                string path   = Path.Combine(root, "Assets", "Code", "MapRenderer.Unity", "Rendering", "Map", "Controller.cs");
-                return File.ReadAllText(path);
+                // Move-proof: find the source by filename anywhere under Assets/Code (survives assembly moves).
+                string[] hits = Directory.GetFiles(Path.Combine(root, "Assets", "Code"), "Controller.cs", SearchOption.AllDirectories);
+                Assert.That(hits, Has.Length.EqualTo(1), "expected exactly one Controller.cs under Assets/Code");
+                return File.ReadAllText(hits[0]);
             }
         }
 

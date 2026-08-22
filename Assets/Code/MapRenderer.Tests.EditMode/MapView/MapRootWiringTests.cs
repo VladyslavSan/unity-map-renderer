@@ -1,4 +1,4 @@
-// Unity EditMode only — tests the Bootstrapper.Wire() static entry point (S41 acceptance tooth 1).
+// Unity EditMode only — tests the MapHost.Wire() static entry point (S41 acceptance tooth 1).
 // Verifies the wiring graph: MapController.Map != null, MapController.Camera == Camera.main,
 // and the MapView is built over the camera after Wire(root, camera, ...).
 
@@ -8,14 +8,14 @@ using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.View.Camera;
-using MapController   = MapRenderer.Unity.Rendering.Map.Controller;
-using TouchController = MapRenderer.Unity.Rendering.Map.TouchController;
-using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
+using MapController   = MapRenderer.App.Controller;
+using TouchController = MapRenderer.App.TouchController;
+using MapHost = MapRenderer.App.MapHost;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
-    /// S41 wiring tests for <see cref="Bootstrapper.Wire"/>.
+    /// S41 wiring tests for <see cref="MapHost.Wire"/>.
     ///
     /// These tests fail on the pre-S41 code-base (where Map was set only in Play via GetComponent
     /// on the same Camera GO — never tested). They are the regression guard for the "unset Map
@@ -50,7 +50,7 @@ namespace MapRenderer.Tests.MapViews
             try
             {
                 // Act.
-                Bootstrapper.Wire(rootGo, cam, initialView);
+                MapHost.Wire(rootGo, cam, initialView);
 
                 // Assert — tooth 1 of S41 acceptance:
                 var ctrl    = rootGo.GetComponent<MapController>();
@@ -89,7 +89,7 @@ namespace MapRenderer.Tests.MapViews
             {
                 // Must not throw.
                 Assert.DoesNotThrow(
-                    () => Bootstrapper.Wire(rootGo, null, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2, 0, 0)),
+                    () => MapHost.Wire(rootGo, null, new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2, 0, 0)),
                     "Wire(root, null) must not throw even when the camera is missing.");
 
                 var ctrl    = rootGo.GetComponent<MapController>();
@@ -118,7 +118,7 @@ namespace MapRenderer.Tests.MapViews
             try
             {
                 Assert.DoesNotThrow(
-                    () => Bootstrapper.Wire(rootGo, null),
+                    () => MapHost.Wire(rootGo, null),
                     "Wire must not throw even when MapView is absent from the root.");
             }
             finally
@@ -150,7 +150,7 @@ namespace MapRenderer.Tests.MapViews
 
             try
             {
-                Bootstrapper.Wire(rootGo, cam, initialView);
+                MapHost.Wire(rootGo, cam, initialView);
 
                 var touch = rootGo.GetComponent<TouchController>();
                 Assert.IsNotNull(touch,    "S74: Wire() must add TouchController to root");

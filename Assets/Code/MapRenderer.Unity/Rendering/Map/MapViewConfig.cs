@@ -21,7 +21,7 @@ namespace MapRenderer.Unity.Rendering.Map
         [Header("Display Scaling")]
         [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
-                 "same PHYSICAL size across panel densities. Bootstrapper.Start OVERWRITES this with " +
+                 "same PHYSICAL size across panel densities. the host overwrites this at startup with " +
                  "Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi) — including in Play mode, " +
                  "where Screen.dpi has been OBSERVED to report the density of whichever monitor the Editor " +
                  "window is on rather than the target device's (its Editor behaviour is undocumented, so " +

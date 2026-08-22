@@ -89,7 +89,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // S91-C bakes the projection's east into this stream for the globe; constant +X is Mercator-correct.
         private static readonly Vector4 FlatTangent = new Vector4(1f, 0f, 0f, 1f);
 
-        // S91-A: the projection the geometry is built with. Launch-time config (Bootstrapper) threads a
+        // S91-A: the projection the geometry is built with. Launch-time config (the host) threads a
         // chosen projection here in S91-C; until then this single seam defaults to WebMercator. The
         // pipeline projects with the chosen Projection struct — WebMercator.Forward is hardcoded nowhere.
         private static readonly IProjection DefaultProjection = new WebMercatorProjection();

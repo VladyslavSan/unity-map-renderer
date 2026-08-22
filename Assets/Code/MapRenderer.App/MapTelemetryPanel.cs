@@ -1,7 +1,9 @@
 using UnityEngine;
 using MapRenderer.Core.View;
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Map;
+
+namespace MapRenderer.App
 {
     /// <summary>
     /// S85: a dev/debug readout surface for the map's telemetry — mirrors <see cref="CameraControlPanel"/>'s
@@ -15,15 +17,15 @@ namespace MapRenderer.Unity.Rendering.Map
     /// the readout; leave it off while profiling.</para>
     ///
     /// <para><b>Play-mode only:</b> <see cref="MapView"/> is constructed only on the runtime
-    /// <c>Bootstrapper.Wire</c>/<c>Start</c> path, so in edit mode there is nothing to read yet.
+    /// runtime wiring/startup path, so in edit mode there is nothing to read yet.
     /// <see cref="Pull"/> runs per frame and no-ops cleanly until the view exists — the same guard
     /// <see cref="CameraControlPanel"/> uses. Nothing has to notice that <c>SetCamera</c> replaced the view,
     /// because a pull reads whatever <c>Map.View</c> is at that moment.</para>
     /// </summary>
     public sealed class MapTelemetryPanel : MonoBehaviour
     {
-        [Tooltip("The MapView whose live telemetry this panel reads (set in the Inspector).")]
-        public MapViewComponent Map;
+        // Wired at runtime by MapHost — a runtime reference, not a serialized Inspector field.
+        public MapViewComponent Map { get; set; }
 
         [Header("Telemetry (live — overwritten each frame)")]
         [Tooltip("Size of the selected cover (the frustum cover, no pad ring). THE headline number.")]

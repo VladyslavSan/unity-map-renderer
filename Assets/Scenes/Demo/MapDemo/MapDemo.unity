@@ -397,8 +397,9 @@ GameObject:
   - component: {fileID: 300000006}
   - component: {fileID: 300000004}
   - component: {fileID: 300000007}
+  - component: {fileID: 300000008}
   m_Layer: 0
-  m_Name: MapBootstrapper
+  m_Name: MapHost
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -444,6 +445,11 @@ MonoBehaviour:
     MaxMeshBuildsPerTick: 2
     MaxVerticesPerTick: 50000
     MaxReleasesPerTick: 4
+    MaxConcurrentTileLoads: 12
+    PriorityStrategy: 0
+    PropertyStorage: 1
+    SymbolPlacementThrottleFrames: 1
+    FillTileBufferClip: 0
     LabelTileCoverageCull: 0.005
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
@@ -552,13 +558,37 @@ MonoBehaviour:
   PreparedCacheEvictions: 0
   SymbolActiveLabelTiles: 0
   SymbolCachedLabelTiles: 0
+  SymbolCoverageDroppedLabels: 0
   SymbolInputLabelCount: 0
   SymbolDistanceCulledLabels: 0
-  SymbolCoverageDroppedLabels: 0
   SymbolCoverageFadingLabels: 0
   SymbolCollisionCandidates: 0
   SymbolCollisionSurvivors: 0
   SymbolPlacedQuads: 0
+  SymbolLiveFadeRecords: 0
+  SymbolMirrorRebuilds: 0
+  SymbolMirrorRebuildsPerSecond: 0
+--- !u!114 &300000008
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 300000001}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1745e14e6250443b1970c07bfd5d99e9, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.DebugMenu.DebugMenuOverlay
+  Map: {fileID: 300000003}
+  ToggleKey: 96
+  TopRightCornerToggle: 1
+  WindowRect:
+    serializedVersion: 2
+    x: 20
+    y: 20
+    width: 360
+    height: 470
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

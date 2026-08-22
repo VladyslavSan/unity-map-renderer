@@ -5,6 +5,7 @@
         "MapRenderer.Core",
         "MapRenderer.Jobs",
         "MapRenderer.Unity",
+        "MapRenderer.App",
         "MapRenderer.Tests.Shared",
         "Unity.Mathematics",
         "Unity.Collections",

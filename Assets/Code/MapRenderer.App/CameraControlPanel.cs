@@ -1,7 +1,9 @@
 using UnityEngine;
 using MapRenderer.Core.View.Camera;
 
-namespace MapRenderer.Unity.Rendering.Map
+using MapRenderer.Unity.Rendering.Map;
+
+namespace MapRenderer.App
 {
     /// <summary>
     /// S72: A dev/authoring surface that two-way binds Zoom / Tilt / Heading sliders to the live
@@ -14,13 +16,13 @@ namespace MapRenderer.Unity.Rendering.Map
     /// a separate component and does not touch the pan/zoom <see cref="Controller"/>.</para>
     ///
     /// <para><b>Play-mode only (decision 6):</b> <see cref="MapView.Camera"/> is constructed only on the
-    /// runtime <c>Bootstrapper.Wire</c>/<c>Start</c> path, so in edit mode it is null. <see cref="Update"/>
+    /// runtime runtime wiring/startup path, so in edit mode it is null. <see cref="Update"/>
     /// null-guards <see cref="Map"/>/<see cref="MapView.Camera"/> and no-ops cleanly when unwired.</para>
     /// </summary>
     public sealed class CameraControlPanel : MonoBehaviour
     {
-        [Tooltip("The MapView whose live camera these sliders drive (set in the Inspector).")]
-        public MapViewComponent Map;
+        // Wired at runtime by MapHost — a runtime reference, not a serialized Inspector field.
+        public MapViewComponent Map { get; set; }
 
         [Header("Camera (two-way bound to the live camera)")]
         [Range(0f, 24f)]

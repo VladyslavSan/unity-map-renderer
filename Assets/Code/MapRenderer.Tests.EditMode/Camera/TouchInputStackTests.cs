@@ -3,6 +3,7 @@
 // the presence/absence of required strings, so structural correctness is a runnable test.
 
 using System.IO;
+using MapRenderer.App;
 using NUnit.Framework;
 using UnityEngine;
 
@@ -16,9 +17,10 @@ namespace MapRenderer.Tests.Cameras
             get
             {
                 string root = Path.GetDirectoryName(Application.dataPath);
-                string path = Path.Combine(root, "Assets", "Code", "MapRenderer.Unity",
-                                           "Rendering", "Map", "TouchController.cs");
-                return File.ReadAllText(path);
+                // Move-proof: find the source by filename anywhere under Assets/Code (survives assembly moves).
+                string[] hits = Directory.GetFiles(Path.Combine(root, "Assets", "Code"), "TouchController.cs", SearchOption.AllDirectories);
+                Assert.That(hits, Has.Length.EqualTo(1), "expected exactly one TouchController.cs under Assets/Code");
+                return File.ReadAllText(hits[0]);
             }
         }
 

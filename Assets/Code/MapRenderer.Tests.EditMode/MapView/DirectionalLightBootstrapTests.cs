@@ -1,4 +1,4 @@
-// Unity EditMode only — tests for Bootstrapper.EnsureDirectionalLight: it creates a directional light when
+// Unity EditMode only — tests for MapHost.EnsureDirectionalLight: it creates a directional light when
 // the scene (visibly) has none, and does NOT add a second when one already exists. The light is now
 // UNCONDITIONAL across render modes — unlike the ambient probe (EnvironmentLightingTests), which stays
 // unlit-gated. The unlit fill-extrusion twin reads the main light's DIRECTION for a half-Lambert so 3D
@@ -8,12 +8,12 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
-using Bootstrapper = MapRenderer.Unity.Rendering.Map.Bootstrapper;
+using MapHost = MapRenderer.App.MapHost;
 
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
-    /// Behaviour tests for <see cref="Bootstrapper.EnsureDirectionalLight"/>: unconditional creation when
+    /// Behaviour tests for <see cref="MapHost.EnsureDirectionalLight"/>: unconditional creation when
     /// the scene lacks a directional light, and idempotency when one is already present. The light exists
     /// in BOTH render modes because the unlit fill-extrusion twin consumes its direction — only the ambient
     /// probe (<c>EnvironmentLightingTests</c>) is unlit-gated.
@@ -26,7 +26,7 @@ namespace MapRenderer.Tests.MapViews
         private static List<Light> ActiveDirectionalLights()
         {
             var found = new List<Light>();
-            foreach (var light in Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+            foreach (var light in Object.FindObjectsByType<Light>())
                 if (light.type == LightType.Directional) found.Add(light);
             return found;
         }
@@ -36,14 +36,14 @@ namespace MapRenderer.Tests.MapViews
         // itself introduced.
         private static List<Light> HideAllActiveLights()
         {
-            var hidden = new List<Light>(Object.FindObjectsByType<Light>(FindObjectsSortMode.None));
+            var hidden = new List<Light>(Object.FindObjectsByType<Light>());
             foreach (var light in hidden) light.gameObject.SetActive(false);
             return hidden;
         }
 
         private static void RestoreLights(List<Light> hidden)
         {
-            foreach (var light in Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
+            foreach (var light in Object.FindObjectsByType<Light>())
                 if (!hidden.Contains(light)) Object.DestroyImmediate(light.gameObject);
             foreach (var light in hidden) if (light != null) light.gameObject.SetActive(true);
         }
@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.MapViews
             var hidden = HideAllActiveLights();
             try
             {
-                Bootstrapper.EnsureDirectionalLight();
+                MapHost.EnsureDirectionalLight();
 
                 Assert.AreEqual(1, ActiveDirectionalLights().Count,
                     "EnsureDirectionalLight must create exactly one directional light when the scene " +
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.MapViews
                 Assert.AreEqual(1, ActiveDirectionalLights().Count,
                     "precondition: exactly one directional light is visible before the call.");
 
-                Bootstrapper.EnsureDirectionalLight();
+                MapHost.EnsureDirectionalLight();
 
                 Assert.AreEqual(1, ActiveDirectionalLights().Count,
                     "EnsureDirectionalLight must NOT create a second directional light when one already " +
