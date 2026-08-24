@@ -1,7 +1,7 @@
 // Unity EditMode — pure managed math (Unity.Mathematics only), no engine dependency, but lives alongside its
 // callers rather than in core-tests.csproj (test-only, not exercised by the fast loop).
 //
-// Epic A / A1 (Risk R1 — world-anchored-labels-design.md §11 A1 D2): AnchorLocal for TileKey=0 (tile 0/0/0)
+// Epic A / A1 (Risk R1 — world-anchored-symbols-design.md §11 A1 D2): AnchorLocal for TileKey=0 (tile 0/0/0)
 // is ~2e7 m from a mid-latitude anchor — float32-unsafe (ULP ~2m — glyphs jitter/vanish on-screen). Every
 // point/icon render test that previously used the "no real tile" placeholder TileKey=0L must instead use a
 // REALISTIC tile containing its anchor. Shared here (mirrors WorldSymbolInkAnalysis's identical "one helper,
@@ -26,9 +26,9 @@ namespace MapRenderer.Tests
             return new TileId { X = (int)math.floor(x), Y = (int)math.floor(y), Z = zoom };
         }
 
-        /// <summary>The packed <see cref="LabelTileKey.Pack"/> of <see cref="Containing"/> —
-        /// the realistic <c>TileKey</c> a point/icon test label should carry (R1).</summary>
+        /// <summary>The packed <see cref="SymbolTileKey.Pack"/> of <see cref="Containing"/> —
+        /// the realistic <c>TileKey</c> a point/icon test symbol should carry (R1).</summary>
         public static long PackedContaining(in GeoCoordinate geo, int zoom)
-            => LabelTileKey.Pack(Containing(geo, zoom));
+            => SymbolTileKey.Pack(Containing(geo, zoom));
     }
 }

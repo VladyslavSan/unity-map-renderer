@@ -1,4 +1,4 @@
-// Unity EditMode only — needs a real Camera/Texture2D + the internal SymbolLabelSubsystem, and drives the
+// Unity EditMode only — needs a real Camera/Texture2D + the internal SymbolSubsystem, and drives the
 // gated sprite fetch through a real UniTask suspend/resume. NOT registered in core-tests.csproj.
 
 using System;
@@ -20,6 +20,8 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Tests;
 using Symbol = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 
@@ -29,7 +31,7 @@ namespace MapRenderer.Tests.Text
     /// D6 (road-shields, docs/road-shields-design.md §3 D6) — the sprite-atlas readiness race. Before D6, a
     /// symbol build kicked while the style's sprite fetch is still pending captures a null
     /// <c>_spriteAtlas</c> and commits icon-starved forever (no invalidation path exists). D6 makes
-    /// <see cref="SymbolLabelSubsystem.TryBeginBuild"/> PARK such a build instead — it commits NOTHING while
+    /// <see cref="SymbolSubsystem.TryBeginBuild"/> PARK such a build instead — it commits NOTHING while
     /// gated, then commits WITH icons once the fetch settles, with no restyle/pan/zoom/re-kick.
     /// </summary>
     [TestFixture]
@@ -41,7 +43,7 @@ namespace MapRenderer.Tests.Text
 
         // Root `sprite` URL + a symbol layer with BOTH icon-image and text-field, over the fixture's
         // "centroids" source-layer (matches Assets/Fixtures/sample-tile.bytes, reused from
-        // SymbolLabelSubsystemPumpTests).
+        // SymbolSubsystemPumpTests).
         private static readonly string StyleJson = @"{
             'version': 8,
             'glyphs': 'https://example.invalid/{fontstack}/{range}.pbf',
@@ -54,7 +56,7 @@ namespace MapRenderer.Tests.Text
 
         private GameObject _camGo;
         private RenderTexture _rt;
-        private SymbolLabelSubsystem _subsystem;
+        private SymbolSubsystem _subsystem;
         private byte[] _tileBytes;
         private byte[] _latinGlyphs;
         private string _spriteJson;
@@ -79,7 +81,7 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            _subsystem = new SymbolLabelSubsystem(mapCamera);
+            _subsystem = new SymbolSubsystem(mapCamera);
             _simulatedNow = 1000.0; // arbitrary non-zero start
             _subsystem.NowSecondsOverride = () => _simulatedNow;
             _tileBytes = ReadBytes("Fixtures", "sample-tile.bytes");
@@ -127,7 +129,7 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        /// <summary>Mirrors SymbolLabelSubsystemPumpTests.DriveTileBytesReady, but counts TryBeginBuild calls.
+        /// <summary>Mirrors SymbolSubsystemPumpTests.DriveTileBytesReady, but counts TryBeginBuild calls.
         /// NOTE (review nit): in THIS harness the `_tryBeginBuildCalls == 1` assertions below cannot actually
         /// fail — the counter only increments inside this method, which each test calls exactly once, and
         /// there is no TileManager here to re-kick. They read as a "no re-kick" tooth but assert nothing
@@ -152,19 +154,15 @@ namespace MapRenderer.Tests.Text
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
 
-        private int LabelCount()
-        {
-            var labels = new List<LabelInstance>();
-            _subsystem.CollectInto(labels);
-            return labels.Count;
-        }
+        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
+        // deduped ACROSS tiles — this suite only ever commits Tile0, so the replacement reads that tile's baked
+        // native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b), giving back the same
+        // per-point AtlasKind discriminator (Points[i].AtlasKind) the retired per-symbol carrier's Kind field did.
+        private static readonly SymbolTileStore.Key Tile0Key = new SymbolTileStore.Key(SourceId, Tile0);
 
-        private List<LabelInstance> Labels()
-        {
-            var labels = new List<LabelInstance>();
-            _subsystem.CollectInto(labels);
-            return labels;
-        }
+        private int SymbolCount() => Block()?.Kinds.Length ?? 0;
+
+        private SymbolTileBlock Block() => _subsystem.Store().DebugBlockFor(Tile0Key);
 
         // ── T10 ────────────────────────────────────────────────────────────────────────────────────────
         [UnityTest]
@@ -183,7 +181,7 @@ namespace MapRenderer.Tests.Text
                 _subsystem.PumpBuilds();
                 yield return null;
             }
-            Assert.AreEqual(0, LabelCount(), "D6: a build kicked before the sprite fetch settles must commit NOTHING while gated");
+            Assert.AreEqual(0, SymbolCount(), "D6: a build kicked before the sprite fetch settles must commit NOTHING while gated");
             Assert.AreEqual(1, _tryBeginBuildCalls, "TryBeginBuild must be called exactly once — no restyle, no re-kick");
 
             // Release the gate with real fixture sprite data — pump frames so the parked build drains.
@@ -194,19 +192,19 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                committed = LabelCount();
+                committed = SymbolCount();
                 if (committed > 0) break;
                 yield return null;
             }
             Assert.AreEqual(1, _tryBeginBuildCalls, "still exactly one TryBeginBuild call — no second kick, no pan/zoom/restyle");
             Assert.Greater(committed, 0, "the SAME tile's labels must eventually commit once the sprite settles");
 
-            List<LabelInstance> labels = Labels();
+            SymbolTileBlock block = Block();
             bool anyIcon = false, anyText = false;
-            foreach (LabelInstance l in labels)
+            foreach (PointStageInput p in block.Points)
             {
-                if (l.Kind == LabelKind.Icon) anyIcon = true;
-                if (l.Kind == LabelKind.Text) anyText = true;
+                if (p.AtlasKind == SymbolKind.Icon) anyIcon = true;
+                if (p.AtlasKind == SymbolKind.Text) anyText = true;
             }
             Assert.IsTrue(anyIcon, "the committed tile must now contain icon labels (the whole point of D6)");
             Assert.IsTrue(anyText, "the committed tile must also contain its text labels");
@@ -228,7 +226,7 @@ namespace MapRenderer.Tests.Text
                 _subsystem.PumpBuilds();
                 yield return null;
             }
-            Assert.AreEqual(0, LabelCount(), "still gated — nothing committed yet");
+            Assert.AreEqual(0, SymbolCount(), "still gated — nothing committed yet");
 
             // Resolve ABSENT (404/204) — the "settled ≠ non-null" guard: waiting on _spriteAtlas != null
             // would hang forever here; SpritesSettled must still flip on an absent sheet.
@@ -239,18 +237,18 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                committed = LabelCount();
+                committed = SymbolCount();
                 if (committed > 0) break;
                 yield return null;
             }
             Assert.Greater(committed, 0, "an absent sprite sheet must NOT stall the parked build forever — its text labels must still commit");
 
-            List<LabelInstance> labels = Labels();
+            SymbolTileBlock block = Block();
             bool anyText = false, anyIcon = false;
-            foreach (LabelInstance l in labels)
+            foreach (PointStageInput p in block.Points)
             {
-                if (l.Kind == LabelKind.Text) anyText = true;
-                if (l.Kind == LabelKind.Icon) anyIcon = true;
+                if (p.AtlasKind == SymbolKind.Text) anyText = true;
+                if (p.AtlasKind == SymbolKind.Icon) anyIcon = true;
             }
             Assert.IsTrue(anyText, "the parked build's text labels must commit despite the absent sheet");
             Assert.IsFalse(anyIcon, "no atlas ever resolved, so no icon can resolve either — text-only is the correct, inert outcome");
@@ -284,18 +282,18 @@ namespace MapRenderer.Tests.Text
                 _subsystem.PumpBuilds();
                 yield return null;
             }
-            Assert.AreEqual(0, LabelCount(), "before the deadline elapses, a hung fetch must still park (no icon-starved commit)");
+            Assert.AreEqual(0, SymbolCount(), "before the deadline elapses, a hung fetch must still park (no icon-starved commit)");
             Assert.AreEqual(1, _subsystem.PendingSpriteCount(), "the build must be sitting in the pending queue while parked");
 
             // Cross the deadline WITHOUT the gate ever resolving — the fetch is still Pending.
-            _simulatedNow += SymbolLabelSubsystem.SpriteFetchDeadlineSeconds + 1.0;
+            _simulatedNow += SymbolSubsystem.SpriteFetchDeadlineSeconds + 1.0;
 
             int committed = 0;
             for (int f = 0; f < 200; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                committed = LabelCount();
+                committed = SymbolCount();
                 if (committed > 0) break;
                 yield return null;
             }
@@ -306,12 +304,12 @@ namespace MapRenderer.Tests.Text
                 "the pending queue must actually DRAIN once the deadline trips, not merely let one build " +
                 "through while the backlog keeps growing");
 
-            List<LabelInstance> labels = Labels();
+            SymbolTileBlock block = Block();
             bool anyText = false, anyIcon = false;
-            foreach (LabelInstance l in labels)
+            foreach (PointStageInput p in block.Points)
             {
-                if (l.Kind == LabelKind.Text) anyText = true;
-                if (l.Kind == LabelKind.Icon) anyIcon = true;
+                if (p.AtlasKind == SymbolKind.Text) anyText = true;
+                if (p.AtlasKind == SymbolKind.Icon) anyIcon = true;
             }
             Assert.IsTrue(anyText, "the deadline fallback must still commit the tile's text labels");
             Assert.IsFalse(anyIcon, "the sprite atlas never resolved (the fetch is still Pending), so no icon can resolve either");

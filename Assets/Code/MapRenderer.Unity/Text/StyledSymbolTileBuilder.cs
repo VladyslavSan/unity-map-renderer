@@ -9,6 +9,7 @@
 using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
@@ -19,17 +20,17 @@ namespace MapRenderer.Unity.Text
 {
     /// <summary>
     /// S105 Slice 3 — turns one decoded MVT tile's symbol layers into rendered-ready
-    /// <see cref="LabelInstance"/>s, the label analogue of <c>StyledLineTileBuilder</c> (but it emits labels,
+    /// <see cref="ShapedSymbol"/>s, the symbol analogue of <c>StyledLineTileBuilder</c> (but it emits symbols,
     /// never a <c>Mesh</c> — symbols are the placed-every-frame class, S20 T5). The Core half
     /// (<see cref="SymbolFeatureExtractor"/>) already did the worker-safe work (select → resolve text →
-    /// project anchor → <see cref="SymbolLabel"/>); this adds the Unity-side shaping the labels need to
+    /// project anchor → <see cref="SymbolFeature"/>); this adds the Unity-side shaping the symbols need to
     /// render.
     ///
     /// <para><b>Deferred two-pass build (the locked threading model).</b> Symbols do NOT have to complete in
-    /// one synchronous pass. <see cref="BuildAsync"/> first REQUESTS every glyph range the tile's labels
+    /// one synchronous pass. <see cref="BuildAsync"/> first REQUESTS every glyph range the tile's symbols
     /// need (<see cref="GlyphManager.EnsureFontStackRangeAsync"/> — the async fetch/decode/atlas-append),
-    /// and only THEN, once the glyphs are in the shared atlas, shapes + lays out each label and emits the
-    /// <see cref="LabelInstance"/>. So a tile whose glyphs are still fetching produces its labels a frame or
+    /// and only THEN, once the glyphs are in the shared atlas, shapes + lays out each symbol and emits the
+    /// <see cref="ShapedSymbol"/>. So a tile whose glyphs are still fetching produces its symbols a frame or
     /// two later rather than stalling the tile-consume critical path.</para>
     /// </summary>
     public sealed class StyledSymbolTileBuilder
@@ -37,10 +38,10 @@ namespace MapRenderer.Unity.Text
         private readonly GlyphManager _glyphManager;
         private readonly CodepointTextShaper _shaper = new CodepointTextShaper();
 
-        /// <summary>Monotonic count of labels skipped because their build threw a non-cancellation exception
-        /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolLabelSubsystem telemetry. Main-thread
+        /// <summary>Monotonic count of symbols skipped because their build threw a non-cancellation exception
+        /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
         /// only (ShapeAsync is the main tail) — no synchronization.</summary>
-        internal int SkippedLabelCount { get; private set; }
+        internal int SkippedSymbolCount { get; private set; }
 
         /// <summary>Type+message of the most recent skip, for the subsystem's throttled diagnostic log
         /// (which cannot see the swallowed exception). Null until the first skip.</summary>
@@ -53,11 +54,11 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>
-        /// Build every symbol label of <paramref name="symbolLayers"/> over <paramref name="tile"/> and
-        /// append them to <paramref name="output"/> (caller-owned — the per-tile label list of F5's
+        /// Build every symbol symbol of <paramref name="symbolLayers"/> over <paramref name="tile"/> and
+        /// append them to <paramref name="buffer"/> (caller-owned — the per-build reused buffer of F5's
         /// lifecycle). Pass 1 requests every glyph (async); pass 2, once they're in the shared atlas,
         /// shapes + lays out + emits. Emission order matches <see cref="SymbolFeatureExtractor"/>'s per-tile
-        /// ordinal, so <see cref="LabelInstance.FeatureIndex"/> stays the stable S20 tiebreak.
+        /// ordinal, so <see cref="ShapedSymbol.FeatureIndex"/> stays the stable S20 tiebreak.
         ///
         /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
         /// production atlas with a fixed dimension): the atlas <c>Size</c> never changes as glyphs append,
@@ -65,29 +66,28 @@ namespace MapRenderer.Unity.Text
         /// invalidate earlier tiles' UVs — see the glyph-atlas-uv-growth-staleness lesson.</para>
         /// </summary>
         /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
-        /// <paramref name="symbolLayers"/>) stamped onto each label's <see cref="LabelInstance.MaterialIndex"/>
+        /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
         /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>
-        /// <summary>One symbol layer's extracted labels + the shaping inputs carried to <see cref="ShapeAsync"/>.
+        /// <summary>One symbol layer's extracted symbols + the shaping inputs carried to <see cref="ShapeAsync"/>.
         /// All fields are engine-free Core types, so the whole list is worker-safe.</summary>
         public readonly struct ExtractedLayer
         {
             public readonly int               MaterialIndex;
             public readonly FontStack         FontStack;
-            public readonly List<SymbolLabel> Labels;
-            public ExtractedLayer(int materialIndex, FontStack fontStack, List<SymbolLabel> labels)
-            { MaterialIndex = materialIndex; FontStack = fontStack; Labels = labels; }
+            public readonly List<SymbolFeature> Symbols;
+            public ExtractedLayer(int materialIndex, FontStack fontStack, List<SymbolFeature> labels)
+            { MaterialIndex = materialIndex; FontStack = fontStack; Symbols = labels; }
         }
 
         /// <summary>
-        /// WORKER-SAFE (Stage B): SELECT + project each symbol layer's <see cref="SymbolLabel"/>s off the main
+        /// WORKER-SAFE (Stage B): SELECT + project each symbol layer's <see cref="SymbolFeature"/>s off the main
         /// thread. Touches only <see cref="SymbolFeatureExtractor"/> + immutable parsed layers + the stateless
         /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
         /// may run it on the thread pool. Returns the shaping inputs <see cref="ShapeAsync"/> consumes on main.
         /// </summary>
-        /// <param name="spriteAtlas">I5a — forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
-        /// <c>null</c> (the default) yields no icon labels, so every pre-I5a caller (which omits this
-        /// argument) is byte-identical to before I5a. The production caller (<c>TileSymbolLayerProcessor</c>)
-        /// still omits it — icon draw isn't wired until I5b, so it stays inert in prod for now.</param>
+        /// <param name="spriteAtlas">Forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
+        /// <c>null</c> (the default) yields no icon symbols, so omitting this argument is behaviour-preserving.
+        /// Production callers still omit it — icon draw is not yet wired, so it stays inert.</param>
         /// <remarks>IR C1 P3: no store parameter and no private fallback store. Every layer's geometry is
         /// read off the decoded tile itself (<c>ITileLayer.Geometry</c>), so N symbol layers naming one
         /// source-layer read ONE buffer with nothing threaded through and nothing to dispose — and they share
@@ -104,7 +104,7 @@ namespace MapRenderer.Unity.Text
             {
                 StyleLayer layer = symbolLayers[l];
                 if (layer == null) continue;
-                var labels = new List<SymbolLabel>();
+                var labels = new List<SymbolFeature>();
                 SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, labels, spriteAtlas);
                 if (labels.Count == 0) continue;
                 int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
@@ -121,53 +121,62 @@ namespace MapRenderer.Unity.Text
             IReadOnlyList<StyleLayer> symbolLayers,
             double zoom,
             IProjection projection,
-            List<LabelInstance> output,
+            SymbolTileBuffer buffer,
             IReadOnlyList<int> materialIndices = null,
             CancellationToken ct = default,
             MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
-            if (output == null) return UniTask.CompletedTask;
-            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas), output, ct);
+            if (buffer == null) return UniTask.CompletedTask;
+            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas), buffer, ct);
         }
 
         /// <summary>
-        /// MAIN-THREAD: pass 1 requests every glyph range the pre-extracted labels need (async fetch/decode/
-        /// atlas-append), then pass 2 shapes + lays out + emits each <see cref="LabelInstance"/>. Reads the
-        /// shared glyph cache/atlas, so it runs on the main thread (Stage C moves shaping to a worker via an
-        /// immutable snapshot). Emission order matches the extractor's per-tile ordinal (stable FeatureIndex).
+        /// MAIN-THREAD: pass 1 requests every glyph range the pre-extracted symbols need (async fetch/decode/
+        /// atlas-append), then pass 2 shapes + lays out + emits each <see cref="ShapedSymbol"/> into
+        /// <paramref name="buffer"/>. Reads the shared glyph cache/atlas, so it runs on the main thread (Stage
+        /// C moves shaping to a worker via an immutable snapshot). Emission order matches the extractor's
+        /// per-tile ordinal (stable FeatureIndex).
         /// </summary>
         public async UniTask ShapeAsync(
-            List<ExtractedLayer> extractedLayers, List<LabelInstance> output, CancellationToken ct = default)
+            List<ExtractedLayer> extractedLayers, SymbolTileBuffer buffer, CancellationToken ct = default)
         {
-            if (extractedLayers == null || output == null) return;
+            if (extractedLayers == null || buffer == null) return;
 
-            // A PER-CALL local (not an instance field): SymbolLabelSubsystem shares one _builder across
+            // PER-CALL locals (not instance fields): SymbolSubsystem shares one _builder across
             // tails whose starts are budgeted per frame but never awaited to completion (RunTailAsync /
             // PumpBuilds), so two ShapeAsync calls can be interleaved on the main thread. A local lives in
-            // this call's own async state machine, so concurrent calls never share it.
+            // this call's own async state machine, so concurrent calls never share it. `buffer` itself is
+            // NOT one of these — it is rented per-build by SymbolSubsystem (the pairing-adjacency rule:
+            // every layer processor of ONE build must write into the SAME buffer instance).
             var glyphScratch = new List<PositionedGlyph>();
+            // 4.4c (3b): reused per-call temp buffers the no-alloc TextQuadLayout/CurvedTextLayout overloads
+            // clear-and-fill per symbol — copied into buffer's own growing pools right after, since those
+            // pools accumulate EVERY symbol of the whole build and the no-alloc overloads always Clear() their
+            // output first (a build-wide pool passed directly would erase every earlier symbol's quads/glyphs).
+            var quadScratch = new List<SymbolQuad>();
+            var curvedScratch = new List<CurvedGlyph>();
 
             for (int el = 0; el < extractedLayers.Count; el++)
             {
                 ExtractedLayer    layerEx       = extractedLayers[el];
-                List<SymbolLabel> extracted     = layerEx.Labels;
+                List<SymbolFeature> extracted     = layerEx.Symbols;
                 int               materialIndex = layerEx.MaterialIndex;
                 FontStack         fontStack     = layerEx.FontStack;
 
-                // Pass 1 — REQUEST every glyph the labels need (async fetch/decode/atlas-append). Each
+                // Pass 1 — REQUEST every glyph the symbols need (async fetch/decode/atlas-append). Each
                 // (fontStack, range) is fetched at most once (GlyphManager caches), so repeated codepoints
-                // and repeated names are cheap. I5a: an icon label carries no Text (null) — skip it here
-                // BEFORE dereferencing .Length, or an icon-only layer NREs on its very first label.
+                // and repeated names are cheap. I5a: an icon symbol carries no Text (null) — skip it here
+                // BEFORE dereferencing .Length, or an icon-only layer NREs on its very first symbol.
                 for (int i = 0; i < extracted.Count; i++)
                 {
-                    if (extracted[i].Kind == LabelKind.Icon) continue;
+                    if (extracted[i].Kind == SymbolKind.Icon) continue;
                     string text = extracted[i].Text;
                     for (int c = 0; c < text.Length; c++)
                         await _glyphManager.EnsureFontStackRangeAsync(fontStack, text[c], ct);
                 }
 
                 // Pass 2 — the glyphs are in the shared atlas: shape + lay out + emit. I5a: the resolver is
-                // only needed by TEXT labels (an icon-only layer may carry no text-font at all), so it is
+                // only needed by TEXT symbols (an icon-only layer may carry no text-font at all), so it is
                 // built lazily on first use rather than unconditionally — an icon-only layer never touches
                 // the font stack / GlyphManager resolver machinery.
                 FontStackResolver resolver = null;
@@ -175,24 +184,30 @@ namespace MapRenderer.Unity.Text
                 {
                     try
                     {
-                        SymbolLabel s = extracted[i];
-                        if (s.Kind == LabelKind.Icon && s.Placement == SymbolPlacement.Point)
+                        SymbolFeature s = extracted[i];
+                        if (s.Kind == SymbolKind.Icon && s.Placement == SymbolPlacement.Point)
                         {
                             // I5a: an icon is a single pre-laid-out quad (SymbolFeatureExtractor already
-                            // resolved sprite + icon-size/-offset/-anchor) — no shaping, just wrap it into the
-                            // same TextLayoutResult shape the point-text path emits, so it rides the SAME
-                            // point-placement path downstream (§5.4: LabelRecordKind.Point + AtlasKind, no parallel path).
-                            // The quad carries the transparent border; the LAYOUT (i.e. the collision box)
-                            // must not — placement runs on the ink, not on the skirt.
-                            TextLayoutResult iconLayout =
-                                IconQuadLayout.ToLayoutResult(s.IconQuad, s.IconSkirtPx);
-                            output.Add(new LabelInstance
+                            // resolved sprite + icon-size/-offset/-anchor) — no shaping, just the SkirtPx-inset
+                            // min/max-corner bounds formula (inlined here, no allocation), so it rides the SAME
+                            // point-placement path downstream (§5.4: SymbolPlacementKind.Point + AtlasKind, no
+                            // parallel path). The quad carries the transparent border; the bounds (i.e. the
+                            // collision box) must not — placement runs on the ink, not on the skirt.
+                            float2 iconSkirt = new float2(s.IconSkirtPx, s.IconSkirtPx);
+                            float2 iconBoundsMin = math.min(s.IconQuad.TopLeft, s.IconQuad.BottomRight) + iconSkirt;
+                            float2 iconBoundsMax = math.max(s.IconQuad.TopLeft, s.IconQuad.BottomRight) - iconSkirt;
+                            int iconQuadStart = buffer.Quads.Count;
+                            buffer.Quads.Add(s.IconQuad);
+                            buffer.AddSymbol(new ShapedSymbol
                             {
                                 AnchorRender = s.AnchorRender,
                                 UpRender = s.UpRender,
                                 Placement = SymbolPlacement.Point,
-                                Kind = LabelKind.Icon,
-                                Layout = iconLayout,
+                                Kind = SymbolKind.Icon,
+                                BoundsMin = iconBoundsMin,
+                                BoundsMax = iconBoundsMax,
+                                QuadStart = iconQuadStart,
+                                QuadCount = 1,
                                 IconImage = s.IconImage, // I6: cross-tile icon identity
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm, // scale 1 — IconQuadLayout already baked icon-size in
@@ -212,36 +227,36 @@ namespace MapRenderer.Unity.Text
                             continue;
                         }
 
-                        if (s.Kind == LabelKind.Icon)
+                        if (s.Kind == SymbolKind.Icon)
                         {
                             // P-B: a map-resolved LINE icon is the same pre-laid-out quad, but shaped as a
-                            // ONE-GLYPH CURVED label — the icon cell is already horizontally centred on 0
+                            // ONE-GLYPH CURVED symbol — the icon cell is already horizontally centred on 0
                             // (icon-anchor: center), which is exactly the CurvedGlyph.Cell contract, so the
                             // whole curved machinery (per-anchor candidates, the arc walk, the rotated
-                            // collision box, the baked world tangent) applies with no new record kind.
+                            // collision box, the baked world tangent) applies with no new symbol kind.
                             // TextSizePx = OneEm ⇒ the curved path's cell scale is 1, matching the point-icon
                             // branch above (IconQuadLayout already baked icon-size in).
-                            output.Add(new LabelInstance
+                            int iconGlyphStart = buffer.Glyphs.Count;
+                            // CellSkirt carries the icon's transparent border into the curved path, which
+                            // insets by it for the collision box and the chord probe while the DRAWN cell
+                            // keeps it. Every text glyph leaves it 0.
+                            buffer.Glyphs.Add(new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad, CellSkirt = s.IconSkirtPx });
+                            int iconAnchorStart = buffer.AppendAnchors(s.LineAnchors, out int iconAnchorCount);
+                            int iconPathStart = buffer.AppendPath(s.PathRender, s.PathUpRender, out int iconPathCount);
+                            buffer.AddSymbol(new ShapedSymbol
                             {
                                 Placement = s.Placement,
-                                Kind = LabelKind.Icon,
-                                PathRender = s.PathRender,
-                                PathUpRender = s.PathUpRender,
-                                LineAnchors = s.LineAnchors,
-                                CurvedGlyphs = new[]
-                                {
-                                    // CellSkirt carries the icon's transparent border into the curved path,
-                                    // which insets by it for the collision box and the chord probe while the
-                                    // DRAWN cell keeps it. Every text glyph leaves it 0.
-                                    new CurvedGlyph { ArcCenter = 0f, Cell = s.IconQuad, CellSkirt = s.IconSkirtPx },
-                                },
+                                Kind = SymbolKind.Icon,
+                                GlyphStart = iconGlyphStart, GlyphCount = 1,
+                                AnchorStart = iconAnchorStart, AnchorCount = iconAnchorCount,
+                                PathStart = iconPathStart, PathCount = iconPathCount,
                                 IconImage = s.IconImage, // I6: cross-tile icon identity
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm,
                                 PaddingPx = s.PaddingPx,
                                 SortKey = s.SortKey,
                                 MaxAngleDeg = s.MaxAngleDeg,
-                                KeepUpright = false, // icon-keep-upright's spec default — see SymbolLabel.KeepUpright
+                                KeepUpright = false, // icon-keep-upright's spec default — see SymbolFeature.KeepUpright
                                 FeatureIndex = s.FeatureIndex,
                                 TileKey = s.TileKey,
                                 AllowOverlap = s.AllowOverlap,
@@ -270,13 +285,22 @@ namespace MapRenderer.Unity.Text
                         {
                             // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
                             // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
-                            TextLayoutResult layout = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions);
-                            output.Add(new LabelInstance
+                            // No-alloc overload writes into the reused quadScratch (Clear()-ed internally); copy
+                            // its contents into buffer's own build-wide Quads pool right after (3b: quadScratch
+                            // itself never allocates once its capacity has stabilized across symbols).
+                            TextLayoutBounds bounds = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions, quadScratch);
+                            int textQuadStart = buffer.Quads.Count;
+                            for (int q = 0; q < quadScratch.Count; q++) buffer.Quads.Add(quadScratch[q]);
+                            buffer.AddSymbol(new ShapedSymbol
                             {
                                 AnchorRender = s.AnchorRender,
                                 UpRender = s.UpRender,
                                 Placement = SymbolPlacement.Point,
-                                Layout = layout,
+                                Kind = SymbolKind.Text,
+                                BoundsMin = bounds.Min,
+                                BoundsMax = bounds.Max,
+                                QuadStart = textQuadStart,
+                                QuadCount = quadScratch.Count,
                                 Text = s.Text, // A-3: cross-tile identity
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
@@ -297,17 +321,22 @@ namespace MapRenderer.Unity.Text
                         }
                         else
                         {
-                            // #5: curved along-line label — per-glyph layout placed on the projected line each
+                            // #5: curved along-line symbol — per-glyph layout placed on the projected line each
                             // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
-                            var curvedGlyphs = CurvedTextLayout.Layout(run, _glyphManager.Atlas);
-                            output.Add(new LabelInstance
+                            // Same reused-then-copied pattern as the point-text branch above.
+                            CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedScratch);
+                            int textGlyphStart = buffer.Glyphs.Count;
+                            for (int g = 0; g < curvedScratch.Count; g++) buffer.Glyphs.Add(curvedScratch[g]);
+                            int textAnchorStart = buffer.AppendAnchors(s.LineAnchors, out int textAnchorCount);
+                            int textPathStart = buffer.AppendPath(s.PathRender, s.PathUpRender, out int textPathCount);
+                            buffer.AddSymbol(new ShapedSymbol
                             {
                                 Placement = s.Placement,
-                                PathRender = s.PathRender,
-                                PathUpRender = s.PathUpRender,
-                                LineAnchors = s.LineAnchors, // A-2: carry the build-time zoom-invariant anchors
-                                CurvedGlyphs = curvedGlyphs,
-                                Text = s.Text, // A-3: carried for parity (line labels are excluded from dedup in v1)
+                                Kind = SymbolKind.Text,
+                                GlyphStart = textGlyphStart, GlyphCount = curvedScratch.Count,
+                                AnchorStart = textAnchorStart, AnchorCount = textAnchorCount, // A-2: build-time zoom-invariant anchors
+                                PathStart = textPathStart, PathCount = textPathCount,
+                                Text = s.Text, // A-3: carried for parity (line symbols are excluded from dedup in v1)
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
                                 PaddingPx = s.PaddingPx,
@@ -328,11 +357,12 @@ namespace MapRenderer.Unity.Text
                     }
                     catch (System.Exception ex) when (!(ex is System.OperationCanceledException) && !ct.IsCancellationRequested)
                     {
-                        // Layer 1 robustness: one label's build failure (e.g. S18's deferred mixed-direction bidi
-                        // NotSupportedException) must never blank the whole tile. Skip THIS label; the rest still
-                        // build and commit. output.Add is the last statement of the guarded body, so no partial
-                        // label was added.
-                        SkippedLabelCount++;
+                        // Layer 1 robustness: one symbol's build failure (e.g. S18's deferred mixed-direction bidi
+                        // NotSupportedException) must never blank the whole tile. Skip THIS symbol; the rest still
+                        // build and commit. buffer.AddSymbol is the last statement of every guarded emit branch,
+                        // so no partial RECORD was added — a throw before it can leave at most an orphaned tail
+                        // range in a pool (Quads/Glyphs/...), never a symbol referencing invalid data.
+                        SkippedSymbolCount++;
                         LastSkipReason = ex.GetType().Name + ": " + ex.Message;
                     }
                 }

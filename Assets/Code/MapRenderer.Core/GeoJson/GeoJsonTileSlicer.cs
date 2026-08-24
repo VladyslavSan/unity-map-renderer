@@ -368,7 +368,7 @@ namespace MapRenderer.Core.GeoJson
             {
                 case TileGeometryType.Point:
                     // A point is in exactly one tile before the margin; with it, up to four. That duplication
-                    // is the point of the margin — it is what lets a label near a seam be placed from either
+                    // is the point of the margin — it is what lets a symbol near a seam be placed from either
                     // tile.
                     foreach (List<double2> path in feature.Paths)
                     {

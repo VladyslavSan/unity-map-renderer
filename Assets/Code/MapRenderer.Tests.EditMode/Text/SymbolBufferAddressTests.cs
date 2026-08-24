@@ -63,12 +63,12 @@ namespace MapRenderer.Tests.Text
             LayoutJson  = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"),
         };
 
-        private static List<SymbolStyle.SymbolLabel> Extract(
+        private static List<SymbolStyle.SymbolFeature> Extract(
             SymbolStyle.StyleLayer layer, IDecodedTile tile, TileId callerSuppliedId)
         {
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, callerSuppliedId, 0.0, new WebMercatorProjection(), labels);
-            return labels;
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, callerSuppliedId, 0.0, new WebMercatorProjection(), symbols);
+            return symbols;
         }
 
         // ── B2 · the ADDRESS, in the production configuration ─────────────────────────────────────────
@@ -85,14 +85,14 @@ namespace MapRenderer.Tests.Text
             MvtTile decodedHere  = TestDecodedTiles.Track(MvtDecoder.Decode(DecodedAt, bytes));
             MvtTile decodedThere = TestDecodedTiles.Track(MvtDecoder.Decode(WrongTile, bytes));
 
-            List<SymbolStyle.SymbolLabel> fromHere  = Extract(CentroidsLayer(), decodedHere,  DecodedAt);
-            List<SymbolStyle.SymbolLabel> fromThere = Extract(CentroidsLayer(), decodedThere, WrongTile);
+            List<SymbolStyle.SymbolFeature> fromHere  = Extract(CentroidsLayer(), decodedHere,  DecodedAt);
+            List<SymbolStyle.SymbolFeature> fromThere = Extract(CentroidsLayer(), decodedThere, WrongTile);
 
             // Anti-vacuity, and it is the whole tooth: if the address did not move the output, corrupting it
             // below would prove nothing. Assert BOTH observable consequences separately — the projected
             // anchor and the packed TileKey — so a change that stops one from depending on the address
             // cannot hide behind the other.
-            Assert.Greater(fromHere.Count, 0, "precondition: the fixture must yield labels at all");
+            Assert.Greater(fromHere.Count, 0, "precondition: the fixture must yield symbols at all");
             Assert.AreEqual(fromHere.Count, fromThere.Count, "precondition: the same features are selected either way");
             Assert.AreNotEqual(fromHere[0].AnchorRender.x, fromThere[0].AnchorRender.x,
                 "precondition: the tile address must genuinely move the projected anchor");
@@ -100,7 +100,7 @@ namespace MapRenderer.Tests.Text
                 "precondition: the tile address must genuinely move the packed TileKey");
 
             // The tooth: same decoded tile (buffer stamped DecodedAt), a CORRUPTED caller-supplied address.
-            List<SymbolStyle.SymbolLabel> corruptedCaller = Extract(CentroidsLayer(), decodedHere, WrongTile);
+            List<SymbolStyle.SymbolFeature> corruptedCaller = Extract(CentroidsLayer(), decodedHere, WrongTile);
 
             Assert.AreEqual(fromHere.Count, corruptedCaller.Count);
             for (int i = 0; i < fromHere.Count; i++)
@@ -157,7 +157,7 @@ namespace MapRenderer.Tests.Text
 
             // One point at (2048, 2048) — dead centre of a 4096 tile, and exactly ON the upper bound of a
             // 2048 one. EmitAtAnchor's single-world clip is `[0, extent)`, so reading the misreported extent
-            // does not merely shift the anchor, it DROPS the label: a discriminator with no tolerance in it.
+            // does not merely shift the anchor, it DROPS the symbol: a discriminator with no tolerance in it.
             var point = new InMemoryTileFeature
             {
                 GeometryType = TileGeometryType.Point,
@@ -178,19 +178,19 @@ namespace MapRenderer.Tests.Text
                 LayoutJson  = JsonParser.Parse("{\"text-field\":\"X\"}"),
             };
 
-            List<SymbolStyle.SymbolLabel> honestLabels = Extract(layer, real, DecodedAt);
-            Assert.AreEqual(1, honestLabels.Count, "precondition: the honest layer yields exactly one label");
+            List<SymbolStyle.SymbolFeature> honestSymbols = Extract(layer, real, DecodedAt);
+            Assert.AreEqual(1, honestSymbols.Count, "precondition: the honest layer yields exactly one label");
 
             var lying = new SingleLayerTile(new ExtentMisreportingLayer(honest, misreportedExtent));
-            List<SymbolStyle.SymbolLabel> labels = Extract(layer, lying, DecodedAt);
+            List<SymbolStyle.SymbolFeature> symbols = Extract(layer, lying, DecodedAt);
 
-            Assert.AreEqual(1, labels.Count,
+            Assert.AreEqual(1, symbols.Count,
                 "the extent must come from the BUFFER (4096), where the point is mid-tile. Read from the " +
                 "layer's declared 2048 instead and the point sits ON the exclusive upper bound of the " +
                 "single-world clip, so the label is silently dropped.");
-            Assert.AreEqual(honestLabels[0].AnchorRender.x, labels[0].AnchorRender.x, "anchor x must not move");
-            Assert.AreEqual(honestLabels[0].AnchorRender.y, labels[0].AnchorRender.y, "anchor y must not move");
-            Assert.AreEqual(honestLabels[0].AnchorRender.z, labels[0].AnchorRender.z, "anchor z must not move");
+            Assert.AreEqual(honestSymbols[0].AnchorRender.x, symbols[0].AnchorRender.x, "anchor x must not move");
+            Assert.AreEqual(honestSymbols[0].AnchorRender.y, symbols[0].AnchorRender.y, "anchor y must not move");
+            Assert.AreEqual(honestSymbols[0].AnchorRender.z, symbols[0].AnchorRender.z, "anchor z must not move");
         }
 
         // ── B3 · the FEATURE COUNT the ring buckets are sized from ────────────────────────────────────
@@ -255,13 +255,13 @@ namespace MapRenderer.Tests.Text
             // Asserted, not merely observed by the runner catching a throw: the defect's manifestation IS an
             // out-of-range index, so wrapping it makes the failing ASSERTION the one that names the property,
             // rather than a bare stack trace that could be read as an unrelated crash.
-            List<SymbolStyle.SymbolLabel> labels = null;
-            Assert.DoesNotThrow(() => labels = Extract(layer, truncated, DecodedAt),
+            List<SymbolStyle.SymbolFeature> symbols = null;
+            Assert.DoesNotThrow(() => symbols = Extract(layer, truncated, DecodedAt),
                 "the counting sort must be sized from geometry.FeatureCount — RingFeatureIdx's values index " +
                 "the buffer's OWN feature column, so sizing from Features.Count indexes ringStart out of " +
                 "range the moment the two disagree (and mis-buckets silently before that).");
 
-            Assert.AreEqual(2, labels.Count, "one label per exposed feature, bucketed correctly");
+            Assert.AreEqual(2, symbols.Count, "one label per exposed feature, bucketed correctly");
         }
     }
 }

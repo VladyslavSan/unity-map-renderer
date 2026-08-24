@@ -102,15 +102,16 @@ namespace MapRenderer.Tests.Text
                 LetterSpacingEm = 0f,
             };
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in options);
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
             Assert.AreEqual(1, result.LineCount, "RTL is forced single-line in S19 (decision 4 / fork 3)");
-            Assert.AreEqual(5, result.Quads.Count, "no whitespace in \"marhaba\" -- one quad per glyph");
+            Assert.AreEqual(5, resultQuads.Count, "no whitespace in \"marhaba\" -- one quad per glyph");
 
             // First visual glyph (ALEF) sits at the line's left edge: penX = 0.
             Assert.IsTrue(atlas.TryGetEntry(run.Glyphs[0].AtlasCodepoint, out GlyphAtlasEntry entryFirst));
             float expectedFirstMinX = 0f + entryFirst.Left - GlyphSdf.Buffer;
-            Assert.AreEqual(expectedFirstMinX, result.Quads[0].TopLeft.x, Tolerance, "the first VISUAL glyph must sit at the line's left edge");
+            Assert.AreEqual(expectedFirstMinX, resultQuads[0].TopLeft.x, Tolerance, "the first VISUAL glyph must sit at the line's left edge");
 
             // Pen accumulates the sum of ALL preceding glyphs' advances (in visual order) -- total
             // advance = sum of atlas entry Advances (letter-spacing = 0).
@@ -123,7 +124,7 @@ namespace MapRenderer.Tests.Text
 
             Assert.IsTrue(atlas.TryGetEntry(run.Glyphs[4].AtlasCodepoint, out GlyphAtlasEntry entryLast));
             float expectedLastMinX = (expectedTotalAdvance - entryLast.Advance) + entryLast.Left - GlyphSdf.Buffer;
-            Assert.AreEqual(expectedLastMinX, result.Quads[4].TopLeft.x, Tolerance, "pen must accumulate every preceding glyph's advance, in visual order");
+            Assert.AreEqual(expectedLastMinX, resultQuads[4].TopLeft.x, Tolerance, "pen must accumulate every preceding glyph's advance, in visual order");
         }
 
         // =========================================================================================
@@ -147,13 +148,14 @@ namespace MapRenderer.Tests.Text
                 LineHeightEm = 1.2f,
                 LetterSpacingEm = 0f,
             };
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in options);
+            var resultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
             Assert.IsTrue(atlas.TryGetEntry(0xFE8Eu, out GlyphAtlasEntry entryAlef)); // visual position 0
             Assert.IsTrue(atlas.TryGetEntry(0xFEE3u, out GlyphAtlasEntry entryMeem)); // visual position 4
             Assert.AreNotEqual(entryAlef.CellSize.x, entryMeem.CellSize.x, "sanity: ALEF and MEEM cell widths must differ for this tooth to be decisive");
 
-            float actualFirstWidth = result.Quads[0].BottomRight.x - result.Quads[0].TopLeft.x;
+            float actualFirstWidth = resultQuads[0].BottomRight.x - resultQuads[0].TopLeft.x;
             Assert.AreEqual(entryAlef.CellSize.x, actualFirstWidth, Tolerance, "the first emitted quad must be ALEF's (visual position 0)");
             Assert.AreNotEqual(entryMeem.CellSize.x, actualFirstWidth, "a re-reversing implementation would put MEEM first instead of ALEF");
         }
@@ -171,8 +173,10 @@ namespace MapRenderer.Tests.Text
             var leftOptions = new TextLayoutOptions { Anchor = TextAnchor.Left, Offset = float2.zero, RadialOffset = 0f, Justify = TextJustify.Auto, MaxWidthEm = 10f, LineHeightEm = 1.2f, LetterSpacingEm = 0f };
             var centerOptions = new TextLayoutOptions { Anchor = TextAnchor.Center, Offset = float2.zero, RadialOffset = 0f, Justify = TextJustify.Auto, MaxWidthEm = 10f, LineHeightEm = 1.2f, LetterSpacingEm = 0f };
 
-            TextLayoutResult left = TextQuadLayout.Layout(run, atlas, in leftOptions);
-            TextLayoutResult center = TextQuadLayout.Layout(run, atlas, in centerOptions);
+            var leftQuads = new List<SymbolQuad>();
+            var centerQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in leftOptions, leftQuads);
+            TextQuadLayout.Layout(run, atlas, in centerOptions, centerQuads);
 
             float lineWidth = 0f;
             foreach (PositionedGlyph g in run.Glyphs)
@@ -181,9 +185,9 @@ namespace MapRenderer.Tests.Text
                 lineWidth += e.Advance;
             }
 
-            for (int i = 0; i < left.Quads.Count; i++)
+            for (int i = 0; i < leftQuads.Count; i++)
             {
-                Assert.AreEqual(-0.5f * lineWidth, center.Quads[i].TopLeft.x - left.Quads[i].TopLeft.x, Tolerance, $"quad {i}: Center-Left anchor delta");
+                Assert.AreEqual(-0.5f * lineWidth, centerQuads[i].TopLeft.x - leftQuads[i].TopLeft.x, Tolerance, $"quad {i}: Center-Left anchor delta");
             }
         }
     }

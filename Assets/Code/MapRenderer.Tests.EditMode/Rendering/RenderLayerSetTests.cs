@@ -174,7 +174,7 @@ namespace MapRenderer.Tests.Rendering
         }
 
         // Commit-2 deletion (§0.1): the world icon material's renderQueue used to be set SOLELY by
-        // WorldLabelRenderer.ResolveMaterial's per-frame sync (deleted this commit) — this style, with two
+        // WorldSymbolRenderer.ResolveMaterial's per-frame sync (deleted this commit) — this style, with two
         // symbol layers at distinct draw indices, pins that BOTH world materials now carry the correct
         // Build-time queue with NO Tick at all.
         private const string TwoSymbolLayersStyleJson = @"{

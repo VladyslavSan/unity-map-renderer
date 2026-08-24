@@ -28,7 +28,7 @@ namespace Unity.Mathematics
                             new float3(m.c0.y, m.c1.y, m.c2.y),
                             new float3(m.c0.z, m.c1.z, m.c2.z));
 
-        // S20 T2: LabelScreenProjection.TryProjectAnchor's view-projection apply. Column-major float4x4,
+        // S20 T2: SymbolScreenProjection.TryProjectAnchor's view-projection apply. Column-major float4x4,
         // same convention as the float3x3 overload above: m·v = c0·x + c1·y + c2·z + c3·w.
         public static float4 mul(float4x4 a, float4 b)
             => new float4(

@@ -10,7 +10,7 @@ using MapRenderer.Core.View.Camera;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// S3: the globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe label
+    /// S3: the globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol
     /// anchors). Teeth: near-side kept / far-side hidden, cross-checked against an INDEPENDENT ray-sphere
     /// oracle (deliberately NOT the horizon half-angle test — that is algebraically identical to
     /// <c>dot &lt; radius²</c> and would be a tautological check); the planar no-op (<c>globeRadiusSq &lt; 0</c>)

@@ -100,7 +100,7 @@ namespace MapRenderer.Tests
         /// directly against an oracle screen pixel with no coordinate conversion at all.</para>
         ///
         /// <para><b>Deferred: a per-layer <c>Ink(layerId)</c>.</b> A shared RGBA frame cannot attribute a
-        /// pixel to a style layer, and this stage renders exactly one inking layer (the label text), so all
+        /// pixel to a style layer, and this stage renders exactly one inking layer (the symbol text), so all
         /// non-background ink already IS that layer's ink — a <c>layerId</c> parameter would be vacuous. A
         /// real per-layer accessor waits for a stage that renders two inking layers together and needs to
         /// tell them apart.</para></summary>

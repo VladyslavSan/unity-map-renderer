@@ -22,8 +22,8 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// The icon skirt's CARRIER CHAIN, driven end to end from a genuinely padded
     /// <see cref="SpriteAtlasView"/>: <c>SymbolFeatureExtractor</c> (computes
-    /// <c>IconQuadLayout.SkirtPx</c>) → <c>SymbolLabel.IconSkirtPx</c> → <see cref="StyledSymbolTileBuilder"/>
-    /// → the point label's <c>Layout.Bounds*</c> and the along-line label's <c>CurvedGlyph.CellSkirt</c>.
+    /// <c>IconQuadLayout.SkirtPx</c>) → <c>SymbolFeature.IconSkirtPx</c> → <see cref="StyledSymbolTileBuilder"/>
+    /// → the point symbol's <c>Layout.Bounds*</c> and the along-line symbol's <c>CurvedGlyph.CellSkirt</c>.
     ///
     /// <para><b>Why this exists as its own tooth.</b> Every other skirt test calls the two ends directly —
     /// <c>ToLayoutResult(quad, SkirtPx(...))</c> or <c>BuildRotatedGlyph(..., skirt: 3f)</c> — so all of them
@@ -80,19 +80,19 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(Padding, padded.Padding,
                 "precondition: the planner must actually have padded this sprite, or the tooth is vacuous");
 
-            var labels = new List<LabelInstance>();
+            var buffer = new SymbolTileBuffer();
             using (GlyphManager manager = IconOnlyGlyphManager())
             {
                 var builder = new StyledSymbolTileBuilder(manager);
                 await builder.BuildAsync(
                     OnePointTile(new double2(100, 200)), TileId0,
-                    new[] { PointIconLayer() }, 0.0, new WebMercatorProjection(), labels,
+                    new[] { PointIconLayer() }, 0.0, new WebMercatorProjection(), buffer,
                     spriteAtlas: atlas);
             }
 
-            Assert.AreEqual(1, labels.Count, "the icon-only feature must emit exactly one label");
-            LabelInstance icon = labels[0];
-            Assert.AreEqual(LabelKind.Icon, icon.Kind);
+            Assert.AreEqual(1, buffer.Symbols.Count, "the icon-only feature must emit exactly one label");
+            ShapedSymbol icon = buffer.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind);
 
             // The reference: the very same layout with NO border at all. That box is what collision saw
             // before the repack and must still see after it.
@@ -100,20 +100,20 @@ namespace MapRenderer.Tests.Text.Placement
                 BareEntry, atlas.Size, IconSize, TextAnchor.Center, float2.zero);
 
             const float eps = 1e-5f;
-            Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.Layout.BoundsMin.x, eps, "BoundsMin.x");
-            Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.Layout.BoundsMin.y, eps, "BoundsMin.y");
-            Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.Layout.BoundsMax.x, eps, "BoundsMax.x");
-            Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.Layout.BoundsMax.y, eps, "BoundsMax.y");
+            Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.BoundsMin.x, eps, "BoundsMin.x");
+            Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.BoundsMin.y, eps, "BoundsMin.y");
+            Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.BoundsMax.x, eps, "BoundsMax.x");
+            Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.BoundsMax.y, eps, "BoundsMax.y");
 
             // Non-vacuity: the DRAWN quad must be strictly bigger than the collision box, by exactly the
             // skirt. Without this, an atlas that silently lost its padding would satisfy everything above.
             float expectedSkirt = IconQuadLayout.SkirtPx(padded, IconSize);
             Assert.AreEqual(Padding * IconSize, expectedSkirt, eps, "precondition: a 1-texel border at icon-size 2 is 2px");
-            SymbolQuad drawn = icon.Layout.Quads[0];
-            Assert.AreEqual(icon.Layout.BoundsMin.x - expectedSkirt, drawn.TopLeft.x, eps,
+            SymbolQuad drawn = buffer.Quads[icon.QuadStart];
+            Assert.AreEqual(icon.BoundsMin.x - expectedSkirt, drawn.TopLeft.x, eps,
                 "the RENDER quad must keep the skirt the collision box removed — the two representations " +
                 "part company here, and only here.");
-            Assert.AreEqual(icon.Layout.BoundsMax.x + expectedSkirt, drawn.BottomRight.x, eps);
+            Assert.AreEqual(icon.BoundsMax.x + expectedSkirt, drawn.BottomRight.x, eps);
         }
 
         // ── The along-line path: CurvedGlyph.CellSkirt must reach the rotated collision box ────────────
@@ -126,21 +126,21 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(atlas.Index.TryGetSprite("arrow", out SpriteEntry padded));
             Assert.AreEqual(Padding, padded.Padding, "precondition: the planner must actually have padded this sprite");
 
-            var labels = new List<LabelInstance>();
+            var buffer = new SymbolTileBuffer();
             using (GlyphManager manager = IconOnlyGlyphManager())
             {
                 var builder = new StyledSymbolTileBuilder(manager);
                 await builder.BuildAsync(
                     OneLineTile(new double2(500, 500), new double2(3500, 3500)), TileId0,
-                    new[] { AlongLineIconLayer() }, 0.0, new WebMercatorProjection(), labels,
+                    new[] { AlongLineIconLayer() }, 0.0, new WebMercatorProjection(), buffer,
                     spriteAtlas: atlas);
             }
 
-            Assert.AreEqual(1, labels.Count, "the map-aligned line icon must emit exactly one curved label");
-            LabelInstance icon = labels[0];
-            Assert.AreEqual(LabelKind.Icon, icon.Kind);
-            Assert.AreEqual(1, icon.CurvedGlyphs.Count, "an along-line icon is a ONE-glyph curved label");
-            CurvedGlyph glyph = icon.CurvedGlyphs[0];
+            Assert.AreEqual(1, buffer.Symbols.Count, "the map-aligned line icon must emit exactly one curved label");
+            ShapedSymbol icon = buffer.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind);
+            Assert.AreEqual(1, icon.GlyphCount, "an along-line icon is a ONE-glyph curved label");
+            CurvedGlyph glyph = buffer.Glyphs[icon.GlyphStart];
 
             float expectedSkirt = IconQuadLayout.SkirtPx(padded, IconSize);
             Assert.Greater(expectedSkirt, 0f, "precondition: a padded sprite has a non-zero skirt");
@@ -155,9 +155,9 @@ namespace MapRenderer.Tests.Text.Placement
             var anchor = new float2(120f, -40f);
             const float rotation = 0.7f;
 
-            LabelBox actual = LabelBox.BuildRotatedGlyph(
+            SymbolBox actual = SymbolBox.BuildRotatedGlyph(
                 anchor, glyph.Cell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: glyph.CellSkirt);
-            LabelBox expected = LabelBox.BuildRotatedGlyph(
+            SymbolBox expected = SymbolBox.BuildRotatedGlyph(
                 anchor, bareCell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: 0f);
 
             const float eps = 1e-4f;
@@ -168,7 +168,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Non-vacuity: the padded cell with skirt 0 must be a DIFFERENT box, or the comparison above
             // could not discriminate a lost skirt.
-            LabelBox unshrunk = LabelBox.BuildRotatedGlyph(
+            SymbolBox unshrunk = SymbolBox.BuildRotatedGlyph(
                 anchor, glyph.Cell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: 0f);
             Assert.Greater(math.abs(unshrunk.Min.x - expected.Min.x), 10f * eps,
                 "precondition: dropping the skirt must visibly change the box, or this tooth is vacuous");
@@ -177,7 +177,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── fixtures ──────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>A glyph manager whose source serves nothing. Legitimate here: an icon-only layer never
-        /// requests a range (pass 1 skips <c>LabelKind.Icon</c>) and never builds a font-stack resolver, so
+        /// requests a range (pass 1 skips <c>SymbolKind.Icon</c>) and never builds a font-stack resolver, so
         /// touching it at all would itself be the defect.</summary>
         private static GlyphManager IconOnlyGlyphManager()
             => new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
@@ -192,7 +192,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
         /// <summary>`symbol-placement: line` with `icon-rotation-alignment` unset ⇒ resolves `auto → map`,
-        /// which is the P-B one-glyph-curved-label emit shape.</summary>
+        /// which is the P-B one-glyph-curved-symbol emit shape.</summary>
         private static SymbolStyle.StyleLayer AlongLineIconLayer()
             => new SymbolStyle.StyleLayer
             {

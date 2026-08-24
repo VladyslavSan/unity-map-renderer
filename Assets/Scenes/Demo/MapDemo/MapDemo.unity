@@ -450,7 +450,7 @@ MonoBehaviour:
     PropertyStorage: 1
     SymbolPlacementThrottleFrames: 1
     FillTileBufferClip: 0
-    LabelTileCoverageCull: 0.005
+    SymbolTileCoverageCull: 0.005
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
     PreparedCache:

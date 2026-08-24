@@ -88,17 +88,17 @@ them as its own pass runs, and hands them out by reference; nothing assembles a 
 counters. That is the whole rule, and it is what decides everything below.
 
 ```csharp
-private LabelPlacementTelemetrySnapshot _telemetry;
+private SymbolPlacementTelemetrySnapshot _telemetry;
 
-internal ref readonly LabelPlacementTelemetrySnapshot Telemetry => ref _telemetry;
+internal ref readonly SymbolPlacementTelemetrySnapshot Telemetry => ref _telemetry;
 ```
 
 `MapView` is **not** a provider — it produces no telemetry of its own, and it does not re-export any either. A
-consumer reaches the owner and reads its `Telemetry`: `view.TileManager.Telemetry`, `view.Labels.Telemetry`,
+consumer reaches the owner and reads its `Telemetry`: `view.TileManager.Telemetry`, `view.SymbolPlacementSystem.Telemetry`,
 `view.Symbols.Telemetry`. All three owners are internal members of the view, so there is nothing to forward.
 
 **Why no forwarding properties on the view.** An earlier revision had one `ref readonly` property per snapshot type
-on `MapView`. Two of the three were pure redundancy — `TileManager` and `Labels` were already internal — and the
+on `MapView`. Two of the three were pure redundancy — `TileManager` and `SymbolPlacementSystem` were already internal — and the
 trio's real cost was that it created the obvious place for someone to eventually compose one view-level snapshot out
 of three providers' counters, which is the exact shape this design exists to remove. Deleting them also deletes that
 temptation.
@@ -106,12 +106,12 @@ temptation.
 | provider | snapshot | refreshes at the end of |
 |---|---|---|
 | `TileManager` | `TileTelemetrySnapshot` | `Tick` — via a `TickCore` shell, so the clean-cover early return still refreshes |
-| `SymbolLabelSubsystem` | `SymbolStoreTelemetrySnapshot` | `CurrentBatch`, where the last of its levels is decided |
-| `LabelPlacementSystem` | `LabelPlacementTelemetrySnapshot` | `Tick` |
+| `SymbolSubsystem` | `SymbolStoreTelemetrySnapshot` | `CurrentBatch`, where the last of its levels is decided |
+| `SymbolPlacementSystem` | `SymbolPlacementTelemetrySnapshot` | `Tick` |
 
 A reader takes a reference whenever it wants one. Nothing registers, nothing unregisters.
 
-**Two of the three refreshes are free.** `LabelPlacementSystem` and `SymbolLabelSubsystem` already store every
+**Two of the three refreshes are free.** `SymbolPlacementSystem` and `SymbolSubsystem` already store every
 level their pass produces (`LastQuadCount`, `ActiveTileCount`, …), so the refresh just repackages fields. Only
 `TileManager` derives anything — `TileCoverStats.Compute` plus a walk of `_loaded` — and it does so once per `Tick`
 unconditionally, because both are bounded by the cover plus its pad ring over reused scratch arrays. That is the
@@ -204,14 +204,14 @@ needed only a field and an accessor. The three snapshot carriers are byte-for-by
 `init`-only. Core now holds *only* those carriers: no channel, no delegate, no logic.
 
 What DID change beyond routing: `SymbolTelemetrySnapshot` split by owner into `SymbolStoreTelemetrySnapshot` +
-`LabelPlacementTelemetrySnapshot` (§3), and `MapView.CaptureTelemetry` / `CaptureSymbolTelemetry` are gone —
+`SymbolPlacementTelemetrySnapshot` (§3), and `MapView.CaptureTelemetry` / `CaptureSymbolTelemetry` are gone —
 the view no longer captures anything. Every field survived the split unchanged; only their owner is now
 explicit.
 
 ## 5. Migration — what landed
 
 1. Each provider owns a snapshot field and exposes `internal ref readonly … Telemetry`, refreshed at the end of
-   its own pass (§3's table). `MapView` exposes the three OWNERS (`TileManager`, `Labels`, `Symbols`) and no
+   its own pass (§3's table). `MapView` exposes the three OWNERS (`TileManager`, `SymbolPlacementSystem`, `SymbolSubsystem`) and no
    per-snapshot forwarders, and produces nothing itself. ✔
 2. `ProfilerCounterTelemetry` — one `ProfilerCounterValue<T>` per varying level, names in a `CounterNames`
    SSOT block mirroring `MapView.ProfilerMarkerNames`. The three configured limits (`PreparedCacheEnabled`,
@@ -221,7 +221,7 @@ explicit.
    rate/ratio computations stay. ✔
 4. Both demo scenes: panel present but **disabled**. ✔
 5. `SymbolTelemetrySnapshot` split by owner into `SymbolStoreTelemetrySnapshot` +
-   `LabelPlacementTelemetrySnapshot`; the panel's Inspector block is split under two headers naming the
+   `SymbolPlacementTelemetrySnapshot`; the panel's Inspector block is split under two headers naming the
    owning provider, so the readout mirrors the ownership. ✔
 6. Tests. `MapTelemetryPanel_NeverPulled_IsNeverWritten_AndPullingFillsIt` is §2's principle as teeth — and it is
    *stronger* than the subscription version it replaces, which could only assert on `HasSubscribers` and admitted
@@ -261,9 +261,9 @@ explicit.
 - **No MapView-level test can reach the label providers.** `MapViewTestExtensions.LoadTestStyle` builds the
   render layers and the tile sources but never applies the style to the symbol subsystem, so
   `Symbols.HasSymbolLayers` is false in EditMode and `MapView.LateUpdate` skips the whole label block —
-  `CurrentBatch` and `Labels.Tick` are unreachable through the view. Found by writing a three-provider test
+  `CurrentBatch` and `SymbolPlacementSystem.Tick` are unreachable through the view. Found by writing a three-provider test
   through `MapView` and watching the store assertion fail against correct code. The label providers are
-  therefore tested where they ARE driven (`SymbolLabelSubsystemPumpTests`, `LabelFadeTests`); anything that
+  therefore tested where they ARE driven (`SymbolSubsystemPumpTests`, `SymbolFadeTests`); anything that
   genuinely needs labels end-to-end through the view has to fix the harness first.
 - **Namespace collisions.** A namespace segment equal to a bare `UnityEngine` type is `CS0118`; pluralize
   (`Telemetry` is safe today — re-check before adding types).

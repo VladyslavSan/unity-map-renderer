@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 —
 // this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a
 // (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
-// LabelScreenProjection header comment for the namespace-collision trap.
+// SymbolScreenProjection header comment for the namespace-collision trap.
 
 using Unity.Mathematics;
 
@@ -53,7 +53,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// A-2: the SCREEN arc distance from the start of a stable <see cref="LineAnchor"/> — the projected
         /// position of a tile-space <c>(segment, t)</c> anchor along THIS frame's polyline. Feed the result to
-        /// <see cref="At(float, out float2, out float)"/> (± glyph offsets) to lay a curved label out around the
+        /// <see cref="At(float, out float2, out float)"/> (± glyph offsets) to lay a curved symbol out around the
         /// anchor. <paramref name="segment"/> is clamped to a valid segment; <paramref name="t"/> to [0,1].
         /// </summary>
         public float ArcDistanceAt(int segment, float t)

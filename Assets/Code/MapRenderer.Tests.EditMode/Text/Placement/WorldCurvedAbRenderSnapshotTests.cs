@@ -4,7 +4,7 @@
 //
 // CONVERTED (old-screen-path deletion, §6a): this tooth used to render the SAME asymmetric glyph through
 // BOTH the OLD screen curved path (a hand-built BillboardMath.BuildQuad mesh through Map/Symbol/Text) and the
-// NEW world curved path (a real LabelPlacementSystem.Tick through Map/Symbol/TextWorld), asserting the two
+// NEW world curved path (a real SymbolPlacementSystem.Tick through Map/Symbol/TextWorld), asserting the two
 // were pixel-equivalent. The OLD arm's oracle (BuildQuad/BillboardVertex) is retired with the dead render
 // path it built for — this tooth now renders ONLY the NEW world path and asserts its ink signature (centroid
 // + bounding box, a real shape/orientation fingerprint, not just a coarse centroid) against committed golden
@@ -19,13 +19,13 @@
 // fails the committed shape), but — unlike the retired A/B — it cannot by itself prove today's rotation SIGN
 // is correct (a golden from a wrong-signed render would enshrine the wrong sign). The sign is backed instead
 // by: (1) the orchestrator's independent D-H RED-verify (injecting a negated sdir.y made this A/B fail 4/5),
-// and (2) a rendered on-screen diagonal-label eyeball — a COMMIT PRECONDITION on this stage (design §14
+// and (2) a rendered on-screen diagonal-symbol eyeball — a COMMIT PRECONDITION on this stage (design §14
 // "SEQUENCING GATE"), which the maintainer confirmed before the conversion landed.
 //
 // GOLDEN RE-MINT (Stage 4, §11 D12): all five goldens moved, by a measured PURE TRANSLATION of ~21.33
 // screen px — a baseline move, not a re-bake over a drift. Why a CURVED tooth is sensitive to a change in
-// POINT-block anchoring at all: production routes curved labels through CurvedTextLayout, which takes no
-// options and no anchor, so no curved label on the map moved; but this fixture borrows the point layout as
+// POINT-block anchoring at all: production routes curved symbols through CurvedTextLayout, which takes no
+// options and no anchor, so no curved symbol on the map moved; but this fixture borrows the point layout as
 // a quad factory (see BuildGlyphF), so its cell inherits TextLayoutOptions.Default's Center anchor —
 // precisely the branch D12 redefined. Shape and orientation were verified preserved (every bbox dimension
 // identical to the pixel, ink within 1.2%) and the delta was attributed to D12 alone by re-running against
@@ -40,6 +40,7 @@
 // tolerance only absorbs legitimate AA-level jitter). Both a 45° diagonal AND a vertical line are swept (a
 // diagonal alone leaves a residual sign ambiguity only the vertical resolves — see the design's D-H note).
 
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -93,8 +94,8 @@ namespace MapRenderer.Tests.Text.Placement
         // 'F' (70) — no mirror symmetry in x or y (unlike 'A'), so a wrong rotation sense cannot alias back
         // to a correct-looking render.
         //
-        // Internal (not private): MapRenderer.Tests.Visual.OffLookAtLabelScene builds its multi-glyph
-        // cross-azimuth labels out of copies of THIS one cell rather than carrying a second copy of the
+        // Internal (not private): MapRenderer.Tests.Visual.OffLookAtSymbolScene builds its multi-glyph
+        // cross-azimuth symbols out of copies of THIS one cell rather than carrying a second copy of the
         // decoder/shaper bootstrap (test-code-bloat convention — widen and reuse, never duplicate-and-drag;
         // the same call WorldPointEmitRenderTests.BuildGlyphA already made for Stage T's T4).
         internal static (GlyphAtlasTexture texture, SymbolQuad quad) BuildGlyphF()
@@ -108,12 +109,13 @@ namespace MapRenderer.Tests.Text.Placement
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "F", Metrics = new AtlasMetrics(atlas) });
             // NB: this fixture uses the POINT layout purely as a quad factory, so the cell it hands back
             // inherits point-block anchoring — TextLayoutOptions.Default.Anchor is Center. Production
-            // curved labels never take this path (CurvedTextLayout has no block anchor at all), so a
-            // change to vertical anchoring moves THIS tooth's goldens while moving no curved label on the
+            // curved symbols never take this path (CurvedTextLayout has no block anchor at all), so a
+            // change to vertical anchoring moves THIS tooth's goldens while moving no curved symbol on the
             // map. Expect a re-mint here, and only here, whenever the centre anchor is redefined (§11 D12).
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
-            Assert.AreEqual(1, layout.Quads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
-            return (texture, layout.Quads[0]);
+            var layoutQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, layoutQuads);
+            Assert.AreEqual(1, layoutQuads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
+            return (texture, layoutQuads[0]);
         }
 
         // Mercator, 3 orientations: 0° (horizontal — not decisive alone, kept for a broad sweep), 45°
@@ -193,7 +195,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                 TileId containing = TestTileKeys.Containing(lookAt, zoom: 14);
                 TileId neighbor = new TileId { X = containing.X + 1, Y = containing.Y, Z = containing.Z };
-                long tileKey = LabelTileKey.Pack(neighbor);
+                long tileKey = SymbolTileKey.Pack(neighbor);
 
                 (double3 pathA, double3 pathB) = ShortLineAt(uCam, frame, 45f);
 
@@ -259,7 +261,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // A short line straddling the frame's look-at, oriented at `lineAngleDeg` in the render-space XZ
         // plane (east=X, north=Z — the flat local approximation is valid at zero tilt/heading). Half-length
-        // mirrors the SAME altitude-relative magnitude WorldSymbolAbRenderSnapshotTests/WorldLabelMotionTests
+        // mirrors the SAME altitude-relative magnitude WorldSymbolAbRenderSnapshotTests/WorldSymbolMotionTests
         // already validate keeps a point comfortably on-screen (altitude*0.02 total span here).
         private static (double3, double3) ShortLineAt(Camera uCam, in SceneFrame frame, float lineAngleDeg)
         {
@@ -305,32 +307,31 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.That(actualMaxCol, Is.EqualTo(maxCol).Within(GoldenBboxTolerancePx), $"ink bbox right edge must match the committed golden ({label}).");
         }
 
-        // ── a REAL curved LabelInstance through a REAL LabelPlacementSystem.Tick (curved routes to the world
+        // ── a REAL curved symbol through a REAL SymbolPlacementSystem.Tick (curved routes to the world
         //    sink since Stage AC) → Map/Symbol/TextWorld. ───────────────────────────────────────────────────
         private static byte[] RenderNewWorldPath(Camera uCam, MapCamera mapCamera, in SceneFrame frame,
             double3 pathA, double3 pathB, in SymbolQuad quad, GlyphAtlasTexture atlasTexture, long tileKey)
         {
-            var label = new LabelInstance
-            {
-                Placement = SymbolPlacement.LineCenter,
-                PathRender = new[] { pathA, pathB },
-                LineAnchors = new[] { new LineAnchor(0, 0.5f) },
-                CurvedGlyphs = new System.Collections.Generic.List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = quad } },
-                Paint = LabelPaint.Default,
-                TextSizePx = TextSizePx,
-                MaxAngleDeg = 180f,
-                KeepUpright = false,
-                FeatureIndex = 0,
-                TileKey = tileKey,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddCurved(buffer,
+                glyphs: new System.Collections.Generic.List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = quad } },
+                anchors: new[] { new LineAnchor(0, 0.5f) },
+                path: new[] { pathA, pathB },
+                placement: SymbolPlacement.LineCenter,
+                paint: SymbolPaint.Default,
+                textSizePx: TextSizePx,
+                maxAngleDeg: 180f,
+                keepUpright: false,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the NEW world path must place the label.");
 
                 using var snap = new SnapshotRenderer(Size, Size);

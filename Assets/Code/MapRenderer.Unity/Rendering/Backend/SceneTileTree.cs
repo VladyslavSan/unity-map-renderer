@@ -14,17 +14,17 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// path that groups its output by tile: one backend-root <see cref="GameObject"/>, one named container
     /// (<c>"Tile z/x/y"</c>) per live <see cref="TileId"/>, positioned + oriented by the floating-origin
     /// rebase and refreshed <b>once per tile per frame</b> — never per child. Callers attach their own
-    /// per-tile children (a layer mesh, a label layer node, …) under <see cref="GetOrCreateTileNode"/>'s
+    /// per-tile children (a layer mesh, a symbol layer node, …) under <see cref="GetOrCreateTileNode"/>'s
     /// returned <see cref="Transform"/> and register/release them via <see cref="AddChild"/> /
     /// <see cref="ReleaseChildFrom"/> so the container is torn down once its last child is gone.
     ///
     /// <para>Extracted from <see cref="GameObjects.TileRenderer"/> (the original "good tree": backend root →
     /// per-tile container → per-layer child, <c>GetOrCreateContainer</c> + the <c>Rebuild</c> transform loop
     /// + the blink-fix cache + the container refcount teardown) so it can be reused verbatim by a second
-    /// caller — the world-anchored label draw path, which owns its OWN instance ("Map Labels" root) so
-    /// labels are organized identically to tile fills regardless of which tile backend is drawing them
+    /// caller — the world-anchored symbol draw path, which owns its OWN instance ("Map Symbols" root) so
+    /// symbols are organized identically to tile fills regardless of which tile backend is drawing them
     /// (Entities/BRG draw tile fills GameObject-free, so there is no tile-backend container to piggyback on;
-    /// see the label-draw-backend-rework design §5).</para>
+    /// see the symbol-draw-backend-rework design §5).</para>
     /// </summary>
     internal sealed class SceneTileTree : VerifiedDisposable
     {
@@ -50,7 +50,7 @@ namespace MapRenderer.Unity.Rendering.Backend
 
         // Tile containers recycle rather than churn: a zoom step replaces the WHOLE cover at once, so the
         // create/destroy burst is per-transition, not per-frame. Bare GameObjects (no components), so the win
-        // here is smaller than the label path's leaves — and the per-rent `$"Tile {tileId}"` name is not saved
+        // here is smaller than the symbol path's leaves — and the per-rent `$"Tile {tileId}"` name is not saved
         // either (a container is named for the tile it holds, so it renames on every rent).
         //
         // A released container parks under _poolRoot, an INACTIVE root of this tree's own. The reparent is

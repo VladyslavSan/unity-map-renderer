@@ -12,7 +12,7 @@ namespace Unity.Mathematics
         public static double sin(double x)  => System.Math.Sin(x);
         public static double cos(double x)  => System.Math.Cos(x);
 
-        // float overloads + sincos (Unity.Mathematics parity — used by BillboardMath / LabelTranslate rotation).
+        // float overloads + sincos (Unity.Mathematics parity — used by BillboardMath / SymbolTranslate rotation).
         public static float sin(float x) => (float)System.Math.Sin(x);
         public static float cos(float x) => (float)System.Math.Cos(x);
         public static void sincos(float x, out float s, out float c) { s = (float)System.Math.Sin(x); c = (float)System.Math.Cos(x); }
@@ -23,7 +23,7 @@ namespace Unity.Mathematics
         public static double atan(double x) => System.Math.Atan(x);
         public static double atan2(double y, double x) => System.Math.Atan2(y, x);
 
-        // Degrees→radians (Unity.Mathematics parity — used by LabelStagingMath's text-max-angle).
+        // Degrees→radians (Unity.Mathematics parity — used by SymbolStagingMath's text-max-angle).
         public static float  radians(float x)  => x * 0.0174532925199432957692f;
         public static double radians(double x) => x * 0.017453292519943295769236907684886;
         public static double sinh(double x) => System.Math.Sinh(x);

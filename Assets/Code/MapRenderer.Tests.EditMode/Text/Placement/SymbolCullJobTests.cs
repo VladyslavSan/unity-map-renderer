@@ -3,7 +3,7 @@
 // an independent managed reference reach the SAME per-record verdict. Dropped/Departing/Coverage/Zoom are pure
 // integer/branch logic ⇒ bit-identical; Horizon/Distance carry double-precision `dot` math where Burst MAY
 // FMA-reorder ⇒ a ULP flip is possible ONLY at the cull boundary, so those fixture records sit CLEARLY on one
-// side of their threshold (never at it) — same hazard LabelStageJobTests documents.
+// side of their threshold (never at it) — same hazard SymbolStageJobTests documents.
 
 using NUnit.Framework;
 using Unity.Collections;
@@ -15,7 +15,7 @@ using MapRenderer.Jobs;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// <see cref="SymbolCullJob"/> — the Burst port of <c>LabelPlacementSystem.GatherSymbolPoints</c>'s Cull pass
+    /// <see cref="SymbolCullJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s Cull pass
     /// — must produce the SAME per-record <see cref="GatherTrigger"/> verdict, in the SAME chain-priority order
     /// (dropped → departing → coverage → zoom → horizon → distance → none), as an independent managed reference.
     /// </summary>
@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Text.Placement
         // Horizon/Distance fixture anchors below sit CLEARLY (not near) the threshold on each side.
         private static readonly double3  GlobeCentreRelative  = new double3(0, 0, -1000);
         private const double GlobeRadiusSq     = 500.0 * 500.0;
-        private const double LabelCullDistance = 500.0;
+        private const double SymbolCullDistance = 500.0;
         private const int    SlotCount = 3;
 
         // Record indices — named so the fixture and the expectation table read as one thing.
@@ -45,7 +45,7 @@ namespace MapRenderer.Tests.Text.Placement
         private const int OrderDropped   = 8; // Dropped AND Departing both set — pins Dropped-first
         private const int OrderCoverage  = 9; // Coverage AND Zoom both true — pins Coverage-before-Zoom
         private const int GrownListTail  = 10; // Slot >= SlotCount, stale `false` only reachable via SlotVisible.Length
-        private const int RecordCount    = 11;
+        private const int SymbolCount    = 11;
 
         private static readonly GatherTrigger[] Expected =
         {
@@ -57,13 +57,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── Fixture construction ─────────────────────────────────────────────────────────────────────────────
 
-        private static byte[] RecordDropped() => Flags(Dropped, OrderDropped);
-        private static byte[] RecordDeparting() => Flags(Departing, OrderDropped);
-        private static byte[] RecordCoverageFading() => Flags(Coverage, OrderCoverage);
+        private static byte[] SymbolDropped() => Flags(Dropped, OrderDropped);
+        private static byte[] SymbolDeparting() => Flags(Departing, OrderDropped);
+        private static byte[] SymbolCoverageFading() => Flags(Coverage, OrderCoverage);
 
         private static byte[] Flags(params int[] set)
         {
-            var a = new byte[RecordCount];
+            var a = new byte[SymbolCount];
             foreach (int i in set) a[i] = 1;
             return a;
         }
@@ -73,25 +73,25 @@ namespace MapRenderer.Tests.Text.Placement
         // the Horizon/Distance thresholds; everyone else gets the safe (0,0,0) anchor for tidiness.
         private static double3[] RepAnchor()
         {
-            var a = new double3[RecordCount];
-            for (int i = 0; i < RecordCount; i++) a[i] = double3.zero;
+            var a = new double3[SymbolCount];
+            for (int i = 0; i < SymbolCount; i++) a[i] = double3.zero;
             a[Horizon]  = new double3(0, 0, -2000); // far side of the horizon plane — clearly hidden
-            a[Distance] = new double3(2000, 0, 0);  // clearly beyond LabelCullDistance, clearly NOT horizon-hidden
+            a[Distance] = new double3(2000, 0, 0);  // clearly beyond SymbolCullDistance, clearly NOT horizon-hidden
             return a;
         }
 
         // Kinds/Detail address one of two per-kind detail arrays (Points/Curveds), mirroring the mirror's own
         // Kinds/Detail split. Unused (short-circuited) records get an arbitrary valid index (Point, detail 0).
-        private static byte[] Kinds()
+        private static SymbolPlacementKind[] Kinds()
         {
-            var a = new byte[RecordCount]; // 0 == LabelRecordKind.Point everywhere by default
-            a[ZoomCurved] = (byte)LabelRecordKind.Curved;
+            var a = new SymbolPlacementKind[SymbolCount]; // 0 == SymbolPlacementKind.Point everywhere by default
+            a[ZoomCurved] = SymbolPlacementKind.Curved;
             return a;
         }
 
         private static int[] Detail()
         {
-            var a = new int[RecordCount];
+            var a = new int[SymbolCount];
             a[ZoomPoint]     = 0; // Points[0].Slot == a slot with SlotVisible == false
             a[ZoomCurved]    = 0; // Curveds[0].Slot == a slot with SlotVisible == false
             a[Horizon]       = 1; // Points[1].Slot == a VISIBLE slot (must clear the zoom gate to reach Horizon)
@@ -121,7 +121,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── The independent managed reference — re-implements the chain, NOT a call into SymbolCullJob ─────────
 
         private static GatherTrigger ManagedVerdict(int r, byte[] dropped, byte[] departing, byte[] coverage,
-            double3[] repAnchor, byte[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
+            double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
             bool[] slotVisible)
         {
             if (dropped[r] != 0) return GatherTrigger.Dropped;
@@ -131,25 +131,25 @@ namespace MapRenderer.Tests.Text.Placement
             if (HorizonCull.IsHiddenBeyondHorizon(repAnchor[r], SceneOriginRender, Rebase, CameraRelative,
                                                    GlobeCentreRelative, GlobeRadiusSq))
                 return GatherTrigger.Horizon;
-            if (LabelFarPlaneCull.IsCulled(repAnchor[r], SceneOriginRender, Rebase, CameraRelative, LabelCullDistance))
+            if (SymbolFarPlaneCull.IsCulled(repAnchor[r], SceneOriginRender, Rebase, CameraRelative, SymbolCullDistance))
                 return GatherTrigger.Distance;
             return GatherTrigger.None;
         }
 
         // Bound by SlotCount, NOT slotVisible.Length — the correctness point GrownListTail pins.
-        private static bool IsOutOfLiveZoom(int r, byte[] kinds, int[] detail, PointStageInput[] points,
+        private static bool IsOutOfLiveZoom(int r, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points,
             CurvedStageInput[] curveds, bool[] slotVisible)
         {
             if (SlotCount == 0) return false;
             int d = detail[r];
-            int slot = kinds[r] == (byte)LabelRecordKind.Point ? points[d].Slot : curveds[d].Slot;
+            int slot = kinds[r] == SymbolPlacementKind.Point ? points[d].Slot : curveds[d].Slot;
             return slot >= 0 && slot < SlotCount && !slotVisible[slot];
         }
 
         // ── The Burst arm — SymbolCullJob.Run() over the same fixture ───────────────────────────────────────
 
         private static GatherTrigger[] NativeVerdicts(byte[] dropped, byte[] departing, byte[] coverage,
-            double3[] repAnchor, byte[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
+            double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
             bool[] slotVisible)
         {
             const Allocator alloc = Allocator.TempJob;
@@ -163,19 +163,19 @@ namespace MapRenderer.Tests.Text.Placement
             var nDropped = From(dropped); var nDeparting = From(departing); var nCoverage = From(coverage);
             var nAnchor = From(repAnchor); var nKinds = From(kinds); var nDetail = From(detail);
             var nPoints = From(points); var nCurveds = From(curveds); var nSlotVisible = From(slotVisible);
-            var outTrigger = new NativeArray<GatherTrigger>(RecordCount, alloc);
+            var outTrigger = new NativeArray<GatherTrigger>(SymbolCount, alloc);
             try
             {
                 new SymbolCullJob
                 {
-                    RecordDropped = nDropped, RecordDeparting = nDeparting, RecordCoverageFading = nCoverage,
+                    SymbolDropped = nDropped, SymbolDeparting = nDeparting, SymbolCoverageFading = nCoverage,
                     RepAnchor = nAnchor, Kinds = nKinds, Detail = nDetail, Points = nPoints, Curveds = nCurveds,
                     SlotVisible = nSlotVisible,
                     SceneOriginRender = SceneOriginRender, Rebase = Rebase, CameraRelative = CameraRelative,
                     GlobeCentreRelative = GlobeCentreRelative, GlobeRadiusSq = GlobeRadiusSq,
-                    LabelCullDistance = LabelCullDistance, SlotCount = SlotCount,
+                    SymbolCullDistance = SymbolCullDistance, SlotCount = SlotCount,
                     OutTrigger = outTrigger,
-                }.Run(RecordCount);
+                }.Run(SymbolCount);
 
                 return outTrigger.ToArray();
             }
@@ -189,16 +189,16 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Cull_MatchesManagedReference_EveryVerdictAndOrder()
         {
-            byte[] dropped = RecordDropped(), departing = RecordDeparting(), coverage = RecordCoverageFading();
+            byte[] dropped = SymbolDropped(), departing = SymbolDeparting(), coverage = SymbolCoverageFading();
             double3[] repAnchor = RepAnchor();
-            byte[] kinds = Kinds();
+            SymbolPlacementKind[] kinds = Kinds();
             int[] detail = Detail();
             PointStageInput[] points = Points();
             CurvedStageInput[] curveds = Curveds();
             bool[] slotVisible = SlotVisible();
 
-            var managed = new GatherTrigger[RecordCount];
-            for (int r = 0; r < RecordCount; r++)
+            var managed = new GatherTrigger[SymbolCount];
+            for (int r = 0; r < SymbolCount; r++)
                 managed[r] = ManagedVerdict(r, dropped, departing, coverage, repAnchor, kinds, detail, points, curveds, slotVisible);
 
             // Sanity: the managed reference itself must match the fixture's stated expectation table — otherwise

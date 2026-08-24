@@ -39,7 +39,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// The camera's position relative to this frame's floating origin — <c>MapCamera.CameraRelativePosition</c>
         /// / <c>CameraPoseMath.ComputeRelativePose</c>'s <c>pos</c>; the horizon occluder and the camera share
         /// this frame. Zero on frames built without a camera pose (the many placement-only call sites, and
-        /// <see cref="Mercator"/>) — they don't feed the label horizon cull, so leaving it unset is correct.
+        /// <see cref="Mercator"/>) — they don't feed the symbol horizon cull, so leaving it unset is correct.
         /// </summary>
         public double3 CameraRelativePosition { get; init; }
 

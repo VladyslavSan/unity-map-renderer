@@ -65,17 +65,17 @@ namespace MapRenderer.Tests.Style
             };
 
         [Test]
-        public void Extract_CentroidsLayer_Yields250LabelsWithRealAnchors()
+        public void Extract_CentroidsLayer_Yields250SymbolsWithRealAnchors()
         {
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, labels);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, symbols);
 
-            // The fixture has 250 centroids features; one label per point feature with a NON-EMPTY NAME.
+            // The fixture has 250 centroids features; one symbol per point feature with a NON-EMPTY NAME.
             // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the A2 skip
-            // rule proven on real data), so 248 labels. Compute the expectation independently, then pin it.
+            // rule proven on real data), so 248 symbols. Compute the expectation independently, then pin it.
             MvtLayer centroids = tile.GetLayer("centroids");
             Assert.AreEqual(250, centroids.Features.Count, "fixture pin: 250 centroids features");
             int pointFeaturesWithName = 0;
@@ -86,12 +86,12 @@ namespace MapRenderer.Tests.Style
                     && !string.IsNullOrWhiteSpace(name.ToDisplayString()))
                     pointFeaturesWithName++;
             }
-            Assert.AreEqual(pointFeaturesWithName, labels.Count,
-                "one label per point feature with a resolvable NAME (empty/absent NAME is skipped, not blank)");
-            Assert.AreEqual(248, labels.Count, "fixture pin: 248 of 250 centroids resolve a non-empty NAME");
+            Assert.AreEqual(pointFeaturesWithName, symbols.Count,
+                "one symbol per point feature with a resolvable NAME (empty/absent NAME is skipped, not blank)");
+            Assert.AreEqual(248, symbols.Count, "fixture pin: 248 of 250 centroids resolve a non-empty NAME");
 
             // First feature resolves to "Aruba".
-            Assert.AreEqual("Aruba", labels[0].Text, "feature[0]'s NAME is Aruba");
+            Assert.AreEqual("Aruba", symbols[0].Text, "feature[0]'s NAME is Aruba");
 
             // Its anchor is the REAL tile→geo→project chain, not a stubbed origin. Recompute independently
             // from the decoded first point and assert equality; also pin the fixture point (1252,1904).
@@ -104,13 +104,13 @@ namespace MapRenderer.Tests.Style
 
             double2 lonLat = FixtureTile.ToLonLat(firstPoint.x, firstPoint.y, centroids.Extent);
             double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-            Assert.AreEqual(expected.x, labels[0].AnchorRender.x, 1e-6, "anchor.x must be the real projection (not a stub)");
-            Assert.AreEqual(expected.y, labels[0].AnchorRender.y, 1e-6);
-            Assert.AreEqual(expected.z, labels[0].AnchorRender.z, 1e-6);
+            Assert.AreEqual(expected.x, symbols[0].AnchorRender.x, 1e-6, "anchor.x must be the real projection (not a stub)");
+            Assert.AreEqual(expected.y, symbols[0].AnchorRender.y, 1e-6);
+            Assert.AreEqual(expected.z, symbols[0].AnchorRender.z, 1e-6);
 
             // Stable per-tile ordinal + spec padding default carried through.
-            Assert.AreEqual(0, labels[0].FeatureIndex);
-            Assert.AreEqual(2f, labels[0].PaddingPx, 1e-6, "text-padding spec default is 2");
+            Assert.AreEqual(0, symbols[0].FeatureIndex);
+            Assert.AreEqual(2f, symbols[0].PaddingPx, 1e-6, "text-padding spec default is 2");
         }
 
         // ── Layer visibility predicate (MapLibre minzoom<=zoom<maxzoom, min inclusive / max EXCLUSIVE, null =
@@ -132,7 +132,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(L(15.0, 17.0).IsVisibleAtZoom(17.0), "at max of a bounded range → hidden");
         }
 
-        // ── Extraction is deliberately zoom-VISIBILITY-agnostic: it emits a layer's labels regardless of the
+        // ── Extraction is deliberately zoom-VISIBILITY-agnostic: it emits a layer's symbols regardless of the
         //    layer's minzoom/maxzoom, because tile DATA tops out at a max source zoom (z14 for OpenFreeMap) and is
         //    OVERZOOMED at higher camera zooms without rebuilding. Gating at build time would freeze visibility and
         //    hide layers MapLibre reveals as you zoom past the data level; the gate lives at display time instead
@@ -148,15 +148,15 @@ namespace MapRenderer.Tests.Style
                 Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "centroids",
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"), MinZoom = 15.0, // MapLibre-hidden at z14
             };
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, labels);
-            Assert.AreEqual(248, labels.Count,
-                "a minzoom-15 layer must still EXTRACT at z14 (its labels live in the store); display-time " +
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, symbols);
+            Assert.AreEqual(248, symbols.Count,
+                "a minzoom-15 layer must still EXTRACT at z14 (its symbols live in the store); display-time " +
                 "IsVisibleAtZoom hides them until the camera reaches z15 — so overzoomed data reveals them correctly");
         }
 
         [Test]
-        public void Extract_TextTransform_CaseFoldsResolvedLabel()
+        public void Extract_TextTransform_CaseFoldsResolvedText()
         {
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
@@ -170,23 +170,23 @@ namespace MapRenderer.Tests.Style
                     "{\"text-field\":\"{NAME}\",\"text-transform\":\"" + transform + "\"}"),
             };
 
-            var upper = new List<SymbolStyle.SymbolLabel>();
+            var upper = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(Layer("uppercase"), tile, FixtureTile, 0.0, projection, upper);
-            Assert.AreEqual("ARUBA", upper[0].Text, "text-transform:uppercase must uppercase the resolved label");
+            Assert.AreEqual("ARUBA", upper[0].Text, "text-transform:uppercase must uppercase the resolved symbol");
 
-            var lower = new List<SymbolStyle.SymbolLabel>();
+            var lower = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(Layer("lowercase"), tile, FixtureTile, 0.0, projection, lower);
-            Assert.AreEqual("aruba", lower[0].Text, "text-transform:lowercase must lowercase the resolved label");
+            Assert.AreEqual("aruba", lower[0].Text, "text-transform:lowercase must lowercase the resolved symbol");
 
             // Teeth: default (no transform) leaves the mixed-case source untouched — so the two above are
             // genuine transforms, not a fixture that happens to be already-cased.
-            var none = new List<SymbolStyle.SymbolLabel>();
+            var none = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, none);
             Assert.AreEqual("Aruba", none[0].Text, "no text-transform leaves the source casing as-is");
         }
 
         [Test]
-        public void Extract_LinePlacement_ProducesLineLabelsWithProjectedPath()
+        public void Extract_LinePlacement_ProducesLineSymbolsWithProjectedPath()
         {
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
@@ -196,21 +196,21 @@ namespace MapRenderer.Tests.Style
                 Id = "lines",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
-                // Literal text-field so every line feature resolves a label regardless of its properties.
+                // Literal text-field so every line feature resolves a symbol regardless of its properties.
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}"),
             };
 
-            var lineLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineLabels);
+            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(LineLayer("line-center"), tile, FixtureTile, 0.0, projection, lineSymbols);
 
-            Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
-            SymbolStyle.SymbolLabel first = lineLabels[0];
+            Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
+            SymbolStyle.SymbolFeature first = lineSymbols[0];
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.LineCenter, first.Placement);
-            Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line label");
-            Assert.IsNotNull(first.PathRender, "a line label carries the projected path");
+            Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line symbol");
+            Assert.IsNotNull(first.PathRender, "a line symbol carries the projected path");
             Assert.GreaterOrEqual(first.PathRender.Length, 2, "a placeable line has >= 2 vertices");
             // A-2: the extractor computes the zoom-invariant along-line anchors (line-center → exactly one).
-            Assert.IsNotNull(first.LineAnchors, "a line label carries its build-time anchors");
+            Assert.IsNotNull(first.LineAnchors, "a line symbol carries its build-time anchors");
             Assert.AreEqual(1, first.LineAnchors.Length, "line-center places a single centred anchor");
             Assert.AreEqual("L", first.Text);
 
@@ -223,15 +223,15 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(expected.x, first.PathRender[0].x, 1e-6, "path vertex is the real projection, not a stub");
 
             // D2 (road-shields): a POINT-placement layer over the SAME line layer now anchors each path at its
-            // mid arc-length (one label per path) instead of skipping it outright — the G2 fix. (Superseded the
+            // mid arc-length (one symbol per path) instead of skipping it outright — the G2 fix. (Superseded the
             // pre-shields "point placement skips LineString features" assertion, which was the very bug D2 fixes.)
-            var pointOverLines = new List<SymbolStyle.SymbolLabel>();
+            var pointOverLines = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
             Assert.Greater(pointOverLines.Count, 0, "D2: point placement now anchors a LineString path at its mid arc-length");
-            foreach (SymbolStyle.SymbolLabel l in pointOverLines)
+            foreach (SymbolStyle.SymbolFeature l in pointOverLines)
             {
                 Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.Point, l.Placement, "a mid-arc anchor is Point-placed");
-                Assert.IsNull(l.PathRender, "a point-placed (mid-arc) label carries no curved path");
+                Assert.IsNull(l.PathRender, "a point-placed (mid-arc) symbol carries no curved path");
             }
         }
 
@@ -251,15 +251,15 @@ namespace MapRenderer.Tests.Style
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
-            var lineLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineLabels);
-            Assert.Greater(lineLabels.Count, 0, "the geolines LineString layer yields line labels");
+            var lineSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(lineLayer, tile, FixtureTile, 0.0, projection, lineSymbols);
+            Assert.Greater(lineSymbols.Count, 0, "the geolines LineString layer yields line symbols");
 
             List<List<double2>> paths = MvtGeometry.Decode(
                 MvtFixtureStreams.ReadLayer(LoadFixture(), "geolines").Commands[0]);
             int originalVertexCount = paths[0].Count;
 
-            Assert.AreEqual(originalVertexCount, lineLabels[0].PathRender.Length,
+            Assert.AreEqual(originalVertexCount, lineSymbols[0].PathRender.Length,
                 "S4: on a flat projection (MaxRefineAngleRad == +infinity) LineCurvatureSubdivision.Subdivide "
                 + "must never fire — PathRender length stays the original decoded vertex count");
         }
@@ -305,26 +305,26 @@ namespace MapRenderer.Tests.Style
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, labels);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(lineLayer, tile, tileId, 0.0, projection, symbols);
 
-            Assert.AreEqual(1, labels.Count, "one line label for the single synthetic feature");
-            SymbolStyle.SymbolLabel label = labels[0];
+            Assert.AreEqual(1, symbols.Count, "one line symbol for the single synthetic feature");
+            SymbolStyle.SymbolFeature symbol = symbols[0];
 
             // (a) tooth #1 — subdivision fired, off the chord.
-            Assert.Greater(label.PathRender.Length, 2, "the globe must subdivide the 2-vertex line");
-            double3 chordStart = label.PathRender[0];
-            double3 chordEnd = label.PathRender[label.PathRender.Length - 1];
+            Assert.Greater(symbol.PathRender.Length, 2, "the globe must subdivide the 2-vertex line");
+            double3 chordStart = symbol.PathRender[0];
+            double3 chordEnd = symbol.PathRender[symbol.PathRender.Length - 1];
             double3 chordMid = (chordStart + chordEnd) * 0.5;
-            double3 midVertex = label.PathRender[label.PathRender.Length / 2];
+            double3 midVertex = symbol.PathRender[symbol.PathRender.Length / 2];
             double distFromChord = math.length(midVertex - chordMid);
             Assert.Greater(distFromChord, 1.0,
                 "an inserted mid vertex must sit OFF the straight render chord (curvature, not a facet)");
 
             // (b) tooth #2 — count/position invariant, index refined.
-            Assert.IsNotNull(label.LineAnchors);
-            Assert.AreEqual(1, label.LineAnchors.Length, "line-center still places a single anchor (arc-length invariant)");
-            Assert.Greater(label.LineAnchors[0].Segment, 0,
+            Assert.IsNotNull(symbol.LineAnchors);
+            Assert.AreEqual(1, symbol.LineAnchors.Length, "line-center still places a single anchor (arc-length invariant)");
+            Assert.Greater(symbol.LineAnchors[0].Segment, 0,
                 "the anchor's segment index must be refined onto the finer path (0 would mean it never resubdivided)");
 
             // (c) tooth #3 — resolves to the correct arc position on the RENDER curve. Independently project the
@@ -335,9 +335,9 @@ namespace MapRenderer.Tests.Style
             double3 expectedRenderMid = projection.Project(
                 new GeoCoordinate { Latitude = midLonLat.y, Longitude = midLonLat.x });
 
-            LineAnchor anchor = label.LineAnchors[0];
-            double3 segStart = label.PathRender[anchor.Segment];
-            double3 segEnd = label.PathRender[anchor.Segment + 1];
+            LineAnchor anchor = symbol.LineAnchors[0];
+            double3 segStart = symbol.PathRender[anchor.Segment];
+            double3 segEnd = symbol.PathRender[anchor.Segment + 1];
             double3 resolved = segStart + (segEnd - segStart) * (double)anchor.T; // math.lerp has no double3 overload in the shim
             double resolveError = math.length(resolved - expectedRenderMid);
             Assert.Less(resolveError, 1.0,
@@ -404,10 +404,10 @@ namespace MapRenderer.Tests.Style
                 LayoutJson = JsonParser.Parse("{\"text-field\":\"L\"}"),
             };
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, labels);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(pointLayer, tile, tileId, 0.0, projection, symbols);
 
-            Assert.AreEqual(4, labels.Count,
+            Assert.AreEqual(4, symbols.Count,
                 "only the 4 in-bounds anchors are emitted; the 5 out-of-bounds/edge points are clipped");
 
             double2[] expectedTilePoints = { inA, inB, inMinEdge, inMaxEdge };
@@ -416,10 +416,10 @@ namespace MapRenderer.Tests.Style
                 double2 lonLat = tileId.ToLonLat(expectedTilePoints[i].x, expectedTilePoints[i].y, extent);
                 double3 expectedAnchor = projection.Project(
                     new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-                Assert.AreEqual(expectedAnchor.x, labels[i].AnchorRender.x, 1e-6, $"label[{i}].anchor.x");
-                Assert.AreEqual(expectedAnchor.y, labels[i].AnchorRender.y, 1e-6, $"label[{i}].anchor.y");
-                Assert.AreEqual(expectedAnchor.z, labels[i].AnchorRender.z, 1e-6, $"label[{i}].anchor.z");
-                Assert.AreEqual(i, labels[i].FeatureIndex,
+                Assert.AreEqual(expectedAnchor.x, symbols[i].AnchorRender.x, 1e-6, $"symbol[{i}].anchor.x");
+                Assert.AreEqual(expectedAnchor.y, symbols[i].AnchorRender.y, 1e-6, $"symbol[{i}].anchor.y");
+                Assert.AreEqual(expectedAnchor.z, symbols[i].AnchorRender.z, 1e-6, $"symbol[{i}].anchor.z");
+                Assert.AreEqual(i, symbols[i].FeatureIndex,
                     "ordinal stays contiguous across skipped out-of-bounds points (no gaps from the clip)");
             }
         }
@@ -430,13 +430,13 @@ namespace MapRenderer.Tests.Style
             MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, LoadFixture()));
             var projection = new WebMercatorProjection();
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 CentroidsLayer(filterJson: "[\"==\",[\"get\",\"ABBREV\"],\"Afg.\"]"),
-                tile, FixtureTile, 0.0, projection, labels);
+                tile, FixtureTile, 0.0, projection, symbols);
 
-            Assert.AreEqual(1, labels.Count, "the ABBREV=='Afg.' filter selects exactly one feature");
-            Assert.AreEqual("Afghanistan", labels[0].Text);
+            Assert.AreEqual(1, symbols.Count, "the ABBREV=='Afg.' filter selects exactly one feature");
+            Assert.AreEqual("Afghanistan", symbols[0].Text);
         }
     }
 }

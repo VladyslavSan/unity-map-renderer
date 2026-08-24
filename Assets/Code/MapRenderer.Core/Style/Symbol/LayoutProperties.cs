@@ -59,7 +59,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
         /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>.
         /// BUILD-ZOOM-evaluated (road-shields D1): the extractor evaluates this ONCE, at the tile's build
-        /// zoom, and the result is frozen into that tile's labels for its lifetime — it is never
+        /// zoom, and the result is frozen into that tile's symbols for its lifetime — it is never
         /// re-evaluated as the camera crosses a step boundary (the accepted, pinned known limit; see
         /// docs/road-shields-design.md §3 D1). An absent property degrades to point at CONSTRUCTION; a
         /// present-but-non-string EXPRESSION RESULT degrades to point at EVALUATION (the extractor's
@@ -71,17 +71,17 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>symbol-sort-key: greedy placement priority (lower placed first). Default 0. Zoom-capable.</summary>
         public StyleProperty<float> SymbolSortKey { get; }
 
-        /// <summary>symbol-spacing: distance in PIXELS between repeated labels along a line
+        /// <summary>symbol-spacing: distance in PIXELS between repeated symbols along a line
         /// (<see cref="Text.SymbolPlacement.Line"/> only — ignored for point/line-center). Default 250 (spec),
         /// minimum 1. Zoom-capable.</summary>
         public StyleProperty<float> SymbolSpacing { get; }
 
-        /// <summary>text-max-angle: maximum DEGREE change between adjacent characters on a curved line label;
-        /// a label whose along-line curvature exceeds this at any glyph pair is dropped at that anchor (line /
+        /// <summary>text-max-angle: maximum DEGREE change between adjacent characters on a curved line symbol;
+        /// a symbol whose along-line curvature exceeds this at any glyph pair is dropped at that anchor (line /
         /// line-center only). Default 45 (spec). Zoom-capable.</summary>
         public StyleProperty<float> TextMaxAngle { get; }
 
-        /// <summary>text-keep-upright: when true (default), a curved line label that would read right-to-left is
+        /// <summary>text-keep-upright: when true (default), a curved line symbol that would read right-to-left is
         /// walked reversed + flipped so it stays upright/left-to-right; when false the glyphs follow the raw
         /// line direction (may render upside-down). line / line-center only.</summary>
         public bool TextKeepUpright { get; }
@@ -95,7 +95,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>text-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
         public StyleProperty<float> TextPadding { get; }
 
-        /// <summary>text-anchor: anchor position for the label block. Default <see cref="Text.TextAnchor.Center"/>.
+        /// <summary>text-anchor: anchor position for the symbol block. Default <see cref="Text.TextAnchor.Center"/>.
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
         public TextAnchor TextAnchor { get; }
 
@@ -109,17 +109,17 @@ namespace MapRenderer.Core.Style.Symbol
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
         public TextJustify TextJustify { get; }
 
-        /// <summary>text-transform: case transform applied to the resolved label before shaping. Default
+        /// <summary>text-transform: case transform applied to the resolved symbol before shaping. Default
         /// <see cref="Text.TextTransform.None"/>. <b>Constant only</b> (parsed once as a plain enum, not
         /// zoom/data-driven). An unrecognized/malformed value degrades to none.</summary>
         public TextTransform TextTransform { get; }
 
-        /// <summary>text-rotation-alignment: whether the label rotates with the map (<c>map</c>) or stays
+        /// <summary>text-rotation-alignment: whether the symbol rotates with the map (<c>map</c>) or stays
         /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/> (→ viewport for the
         /// point placement emitted today). Consumed by the placement billboard rotation (#4).</summary>
         public AlignmentMode TextRotationAlignment { get; }
 
-        /// <summary>text-pitch-alignment: whether the label lies flat on the map (<c>map</c>) or faces the
+        /// <summary>text-pitch-alignment: whether the symbol lies flat on the map (<c>map</c>) or faces the
         /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
         /// <see cref="AlignmentResolution.ResolvePitch"/> against the RESOLVED
         /// <see cref="TextRotationAlignment"/> — so under <see cref="SymbolPlacement.Line"/> /
@@ -129,14 +129,14 @@ namespace MapRenderer.Core.Style.Symbol
         ///
         /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only.</b>
         /// <c>SymbolFeatureExtractor</c> resolves this once per layer and stamps it onto the emitted
-        /// label; under <see cref="AlignmentMode.Map"/> <c>LabelStagingMath.StageCurved</c> lays the label out
+        /// symbol; under <see cref="AlignmentMode.Map"/> <c>SymbolStagingMath.StageCurved</c> lays the symbol out
         /// in WORLD ARC LENGTH rather than screen px, so a glyph advance is a fixed world size and spacing
         /// foreshortens with depth. This is not a dormant key: every shipped line-symbol layer resolves to
         /// <c>map</c> here (an explicit or auto-auto <see cref="TextRotationAlignment"/> under line
         /// placement), so it selects the world-metre layout for all of them.</para>
         ///
         /// <para><b>The POINT arm does NOT consume it yet</b> — do not infer otherwise from the above. A
-        /// map-pitched point label still billboards; the ground-flat point path is a later stage. Glyph SIZE
+        /// map-pitched point symbol still billboards; the ground-flat point path is a later stage. Glyph SIZE
         /// is likewise still screen-constant on both arms (W1 moved the layout, not the render).</para></summary>
         public AlignmentMode TextPitchAlignment { get; }
 
@@ -171,7 +171,7 @@ namespace MapRenderer.Core.Style.Symbol
         ///
         /// <para><b>CONSUMED as of W1, on the CURVED (along-line) arm only</b> — the same wiring and the same
         /// fence as <see cref="TextPitchAlignment"/>, which states both in full. For icons that arm is the
-        /// one-glyph along-line label a MAP-resolved line icon emits (<c>road_one_way_arrow*</c> and
+        /// one-glyph along-line symbol a MAP-resolved line icon emits (<c>road_one_way_arrow*</c> and
         /// friends); a POINT icon still billboards.</para></summary>
         public AlignmentMode IconPitchAlignment { get; }
 
@@ -188,7 +188,7 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>text-optional: when true, the ICON half of an icon+text pair may place even if the text
         /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol;
-        /// ignored on a lone text label.</summary>
+        /// ignored on a lone text symbol.</summary>
         public bool TextOptional { get; }
 
         /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>

@@ -11,8 +11,8 @@ namespace MapRenderer.Tests.Structure
     /// E1 D10 (the render-layer model): <c>RenderLayerFactory</c> is
     /// the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/> subtype to its runtime
     /// render layer. This is a grep guard, modeled on
-    /// <see cref="MapRenderer.Tests.Text.Placement.LabelPlacementStructureTests"/>'s <c>AddTileLayer</c>
-    /// guard: neither <c>MapView</c> nor <c>SymbolLabelSubsystem</c> may re-dispatch on a
+    /// <see cref="MapRenderer.Tests.Text.Placement.SymbolPlacementStructureTests"/>'s <c>AddTileLayer</c>
+    /// guard: neither <c>MapView</c> nor <c>SymbolSubsystem</c> may re-dispatch on a
     /// <c>Fill</c>/<c>Line</c>/<c>Symbol</c> <c>StyleLayer</c> subtype — they derive "which sources to
     /// fetch" / "which layers are mine" from the already-built <c>RenderLayerSet</c> instead (§1.6's three
     /// scattered switches, now killed to one).
@@ -34,10 +34,10 @@ namespace MapRenderer.Tests.Structure
         }
 
         [Test]
-        public void SymbolLabelSubsystem_NeverTypeSwitchesOnAStyleLayerSubtype()
+        public void SymbolSubsystem_NeverTypeSwitchesOnAStyleLayerSubtype()
         {
             AssertNoOffendingPattern(Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs"));
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs"));
         }
 
         private static void AssertNoOffendingPattern(string file)

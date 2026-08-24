@@ -23,15 +23,15 @@ namespace MapRenderer.Jobs
     {
         // ── Input — per-record flags/fields, index-parallel to the mirror ───────────────────────────────────
         /// <summary>Per-record: 1 = the record's tile was coverage-dropped (hard-skip, no fade). Tested first.</summary>
-        [ReadOnly] public NativeArray<byte>   RecordDropped;
+        [ReadOnly] public NativeArray<byte>   SymbolDropped;
         /// <summary>Per-record: 1 = the record is departing (its tile is leaving cover) — the second verdict branch.</summary>
-        [ReadOnly] public NativeArray<byte>   RecordDeparting;
+        [ReadOnly] public NativeArray<byte>   SymbolDeparting;
         /// <summary>Per-record: 1 = the record is coverage-fading — the third verdict branch.</summary>
-        [ReadOnly] public NativeArray<byte>   RecordCoverageFading;
+        [ReadOnly] public NativeArray<byte>   SymbolCoverageFading;
         /// <summary>Per-record representative anchor in render space (pre-RTC) — the point the horizon/distance culls test.</summary>
         [ReadOnly] public NativeArray<double3> RepAnchor;
-        /// <summary>Per-record <see cref="LabelRecordKind"/> — selects which detail array (<see cref="Points"/>/<see cref="Curveds"/>) the slot is read from.</summary>
-        [ReadOnly] public NativeArray<byte>   Kinds;
+        /// <summary>Per-record <see cref="SymbolPlacementKind"/> — selects which detail array (<see cref="Points"/>/<see cref="Curveds"/>) the slot is read from.</summary>
+        [ReadOnly] public NativeArray<SymbolPlacementKind> Kinds;
         /// <summary>Per-record index into <see cref="Points"/> or <see cref="Curveds"/> (per <see cref="Kinds"/>).</summary>
         [ReadOnly] public NativeArray<int>    Detail;
         /// <summary>Point-kind per-record detail; only <c>.Slot</c> (the material slot) is read here.</summary>
@@ -56,7 +56,7 @@ namespace MapRenderer.Jobs
         /// <summary>Globe radius squared; &lt; 0 makes the horizon cull a no-op (planar projection).</summary>
         [ReadOnly] public double   GlobeRadiusSq;
         /// <summary>The far-distance cull threshold (render-space units); a record beyond it is <see cref="GatherTrigger.Distance"/>.</summary>
-        [ReadOnly] public double   LabelCullDistance;
+        [ReadOnly] public double   SymbolCullDistance;
         /// <summary>This frame's live slot count — the exclusive upper bound on the <see cref="SlotVisible"/> read (see its note).</summary>
         [ReadOnly] public int      SlotCount;
 
@@ -67,28 +67,28 @@ namespace MapRenderer.Jobs
         public void Execute(int index)
         {
             GatherTrigger t;
-            if (RecordDropped[index] != 0) t = GatherTrigger.Dropped; // D1 — never on screen, no fade
-            else if (RecordDeparting[index] != 0) t = GatherTrigger.Departing;
-            else if (RecordCoverageFading[index] != 0) t = GatherTrigger.Coverage;
+            if (SymbolDropped[index] != 0) t = GatherTrigger.Dropped; // D1 — never on screen, no fade
+            else if (SymbolDeparting[index] != 0) t = GatherTrigger.Departing;
+            else if (SymbolCoverageFading[index] != 0) t = GatherTrigger.Coverage;
             else if (IsOutOfLiveZoom(index)) t = GatherTrigger.Zoom;
             else if (HorizonCull.IsHiddenBeyondHorizon(RepAnchor[index], SceneOriginRender, Rebase,
                                                         CameraRelative, GlobeCentreRelative, GlobeRadiusSq))
                 t = GatherTrigger.Horizon;
-            else if (LabelFarPlaneCull.IsCulled(RepAnchor[index], SceneOriginRender, Rebase,
-                                                 CameraRelative, LabelCullDistance))
+            else if (SymbolFarPlaneCull.IsCulled(RepAnchor[index], SceneOriginRender, Rebase,
+                                                 CameraRelative, SymbolCullDistance))
                 t = GatherTrigger.Distance;
             else t = GatherTrigger.None;
             OutTrigger[index] = t;
         }
 
         // Record r's owning material slot is out of the live camera zoom's [minzoom, maxzoom) — mirrors
-        // LabelPlacementSystem's (now-removed) managed IsOutOfLiveZoom. SlotCount, NOT SlotVisible.Length,
+        // SymbolPlacementSystem's (now-removed) managed IsOutOfLiveZoom. SlotCount, NOT SlotVisible.Length,
         // bounds the read — the native list is grown-only and may be longer than this frame's slot count.
         private bool IsOutOfLiveZoom(int r)
         {
             if (SlotCount == 0) return false;
             int detail = Detail[r];
-            int slot = Kinds[r] == (byte)LabelRecordKind.Point ? Points[detail].Slot : Curveds[detail].Slot;
+            int slot = Kinds[r] == SymbolPlacementKind.Point ? Points[detail].Slot : Curveds[detail].Slot;
             return slot >= 0 && slot < SlotCount && !SlotVisible[slot];
         }
     }

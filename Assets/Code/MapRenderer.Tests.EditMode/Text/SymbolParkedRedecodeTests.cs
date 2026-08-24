@@ -1,4 +1,4 @@
-// Unity EditMode only — needs a real Camera/Texture2D + the internal SymbolLabelSubsystem, and drives the
+// Unity EditMode only — needs a real Camera/Texture2D + the internal SymbolSubsystem, and drives the
 // gated sprite fetch through a real UniTask suspend/resume. NOT registered in core-tests.csproj.
 
 using System;
@@ -24,6 +24,9 @@ using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Tests;
+using MapRenderer.Tests.Text.Placement; // BlockColumnHash
 using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Text
@@ -38,18 +41,19 @@ namespace MapRenderer.Tests.Text
     /// its own reference while the kick's is still live, so the tile survives the whole
     /// <c>SetStyle</c>→<c>SpritesSettled</c> window and the drain reads the SAME decoded tile. Two
     /// assertions therefore INVERT — the decode count 2 → 1, and the kick's tile disposed-while-parked
-    /// 1 → 0 — and the inversion is the proof the new model works, not a regression. The label differential
+    /// 1 → 0 — and the inversion is the proof the new model works, not a regression. The symbol differential
     /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — the epic docs and the stage
     /// briefs cite it — but "Redecode" is now historical: it names the cost this tooth measured, and then
     /// measured the deletion of.</para>
     ///
     /// <para><b>The differential.</b> Two arms over the same bytes, style, camera and sprite fixture: one
     /// whose sprite fetch is gated open at kick time (parks) and one whose fetch has already settled (never
-    /// parks). Their committed <see cref="LabelInstance"/> lists must be deep-equal. A parked build that
-    /// produced subtly different geometry — a stale extent, a mis-stamped TileId — moves the labels; nothing
+    /// parks). Their committed baked blocks must be column-equal (<c>BlockColumnHash.AssertColumnsEqual</c>,
+    /// 4.4b). A parked build that
+    /// produced subtly different geometry — a stale extent, a mis-stamped TileId — moves the symbols; nothing
     /// else in the suite would see it. (A buffer read after FREE surfaces differently: production catches the
     /// throw in <c>RunSymbolWorkerAndHandoff</c> and logs a warning, so the observable is a commit of ZERO
-    /// labels, caught by the count assertion rather than the differential. Both review arms confirmed that
+    /// symbols, caught by the count assertion rather than the differential. Both review arms confirmed that
     /// empirically.)</para>
     ///
     /// <para><b>Vacuity guards, both directions.</b> The park is reachable only through
@@ -108,8 +112,8 @@ namespace MapRenderer.Tests.Text
         private GameObject _camGo;
         private RenderTexture _rt;
         private MapCamera _mapCamera;
-        private SymbolLabelSubsystem _parkedSubsystem;
-        private SymbolLabelSubsystem _oracleSubsystem;
+        private SymbolSubsystem _parkedSubsystem;
+        private SymbolSubsystem _oracleSubsystem;
         private byte[] _tileBytes;
         private byte[] _latinGlyphs;
         private string _spriteJson;
@@ -161,7 +165,7 @@ namespace MapRenderer.Tests.Text
             if (_camGo != null) UnityEngine.Object.DestroyImmediate(_camGo);
         }
 
-        /// <summary>Collects only <c>SymbolLabelSubsystem</c>'s swallowed build-failure warning — the log line
+        /// <summary>Collects only <c>SymbolSubsystem</c>'s swallowed build-failure warning — the log line
         /// a use-after-free in the parked drain would produce. Fires on the pool thread, hence the gate.</summary>
         private void OnLogMessage(string condition, string stackTrace, LogType type)
         {
@@ -183,9 +187,9 @@ namespace MapRenderer.Tests.Text
 
         // ── Drive helpers ─────────────────────────────────────────────────────────────────────────────
 
-        private SymbolLabelSubsystem NewSubsystem(Func<CancellationToken, UniTask<SpriteResponse>> spriteFetch)
+        private SymbolSubsystem NewSubsystem(Func<CancellationToken, UniTask<SpriteResponse>> spriteFetch)
         {
-            var subsystem = new SymbolLabelSubsystem(_mapCamera) { NowSecondsOverride = () => _simulatedNow };
+            var subsystem = new SymbolSubsystem(_mapCamera) { NowSecondsOverride = () => _simulatedNow };
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             subsystem.GlyphSourceFactoryOverride  = _ => TestGlyphSource.FromRanges(ranges);
             subsystem.SpriteSourceFactoryOverride = _ => new GatedSpriteSource(spriteFetch);
@@ -210,7 +214,7 @@ namespace MapRenderer.Tests.Text
         ///
         /// <para><paramref name="kickTile"/> receives the tile the mesh pass read, so a later assertion can
         /// state that the parked drain read the SAME instance rather than inferring it from a count.</para></summary>
-        private static void DriveKick(SymbolLabelSubsystem subsystem, TileId tile, byte[] bytes,
+        private static void DriveKick(SymbolSubsystem subsystem, TileId tile, byte[] bytes,
             ITileDecoder decoder, IDecodedTile[] kickTile = null, bool[] parked = null)
         {
             ISymbolTileWorkerPass pass = subsystem.TryBeginBuild(SourceId, tile);
@@ -256,41 +260,41 @@ namespace MapRenderer.Tests.Text
         /// <summary>The subsystem's live build-cancellation source, so a test can cancel WITHOUT draining the
         /// parked queue — the one interleaving production never produces in a single call (every canceller
         /// cancels and drains together) and the one the drain's ct-drop mouth exists for.</summary>
-        private static CancellationTokenSource BuildCts(SymbolLabelSubsystem subsystem)
+        private static CancellationTokenSource BuildCts(SymbolSubsystem subsystem)
         {
-            FieldInfo field = typeof(SymbolLabelSubsystem)
+            FieldInfo field = typeof(SymbolSubsystem)
                 .GetField("_buildCts", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(field, "SymbolLabelSubsystem._buildCts must exist — it is this drive's only lever");
+            Assert.IsNotNull(field, "SymbolSubsystem._buildCts must exist — it is this drive's only lever");
             return (CancellationTokenSource)field.GetValue(subsystem);
         }
 
         /// <summary>The source → global-layer-index map. A parked entry carries the very <c>List&lt;int&gt;</c>
         /// instance this dictionary holds, so mutating it after the park is how the drain's
         /// processor-construction step is made to fault without touching production.</summary>
-        private static List<int> LayerIndicesOf(SymbolLabelSubsystem subsystem, string sourceId)
+        private static List<int> LayerIndicesOf(SymbolSubsystem subsystem, string sourceId)
         {
-            FieldInfo field = typeof(SymbolLabelSubsystem)
+            FieldInfo field = typeof(SymbolSubsystem)
                 .GetField("_layersBySource", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(field, "SymbolLabelSubsystem._layersBySource must exist");
+            Assert.IsNotNull(field, "SymbolSubsystem._layersBySource must exist");
             var map = (Dictionary<string, List<int>>)field.GetValue(subsystem);
             Assert.IsTrue(map.TryGetValue(sourceId, out List<int> indices), $"no symbol layers for '{sourceId}'");
             return indices;
         }
 
-        private static List<LabelInstance> Collect(SymbolLabelSubsystem subsystem)
-        {
-            var labels = new List<LabelInstance>();
-            subsystem.CollectInto(labels);
-            return labels;
-        }
+        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
+        // deduped ACROSS tiles — this suite only ever commits Tile0, so its replacement reads that ONE tile's
+        // baked native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b) rather than routing
+        // through the cross-tile winner plan the block-vs-block compare below needs.
+        private static SymbolTileBlock Collect(SymbolSubsystem subsystem)
+            => subsystem.Store().DebugBlockFor(new SymbolTileStore.Key(SourceId, Tile0));
 
-        private static IEnumerator PumpUntilCommitted(SymbolLabelSubsystem subsystem, List<LoadedTileKey> loaded, int frames)
+        private static IEnumerator PumpUntilCommitted(SymbolSubsystem subsystem, List<LoadedTileKey> loaded, int frames)
         {
             for (int f = 0; f < frames; f++)
             {
                 subsystem.ReconcileLoadedTiles(loaded);
                 subsystem.PumpBuilds();
-                if (Collect(subsystem).Count > 0) yield break;
+                if (Collect(subsystem) != null) yield break;
                 yield return null;
             }
         }
@@ -298,7 +302,7 @@ namespace MapRenderer.Tests.Text
         // ── D2 ────────────────────────────────────────────────────────────────────────────────────────
 
         [UnityTest]
-        public IEnumerator AParkedBuild_DecodesOnce_AndCommitsTheSameLabelsAsAnUnparkedOne()
+        public IEnumerator AParkedBuild_DecodesOnce_AndCommitsTheSameSymbolsAsAnUnparkedOne()
         {
             int mainThreadId = Thread.CurrentThread.ManagedThreadId;
             var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0) };
@@ -331,7 +335,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, _parkedSubsystem.PendingSpriteCount(),
                 "PRECONDITION: the build must be sitting in the pending-sprite queue. If it is not, the sprite " +
                 "fetch settled before the kick and this differential compares un-parked against un-parked.");
-            Assert.AreEqual(0, Collect(_parkedSubsystem).Count, "…and a parked build must commit nothing while gated");
+            Assert.IsNull(Collect(_parkedSubsystem), "…and a parked build must commit nothing while gated");
 
             // Vacuity guard 2, INVERTED — the kick's tile is STILL ALIVE while the build sits parked. This
             // is the fact that makes the drain's read a share rather than a use-after-free, and it is the
@@ -356,8 +360,8 @@ namespace MapRenderer.Tests.Text
             gate.TrySetResult(new SpriteResponse { Json = _spriteJson, Png = _spritePng, HasData = true });
             yield return PumpUntilCommitted(_parkedSubsystem, loaded, 200);
 
-            List<LabelInstance> parked = Collect(_parkedSubsystem);
-            Assert.Greater(parked.Count, 0, "the parked build must commit once the sprite fetch settles");
+            SymbolTileBlock parked = Collect(_parkedSubsystem);
+            Assert.IsNotNull(parked, "the parked build must commit once the sprite fetch settles");
             Assert.AreEqual(0, _parkedSubsystem.PendingSpriteCount(), "…and the pending queue must have drained");
 
             Assert.AreEqual(1, parkedProbe.DecodeCount,
@@ -419,7 +423,7 @@ namespace MapRenderer.Tests.Text
 
             yield return PumpUntilCommitted(_oracleSubsystem, loaded, 200);
 
-            List<LabelInstance> unparked = Collect(_oracleSubsystem);
+            SymbolTileBlock unparked = Collect(_oracleSubsystem);
 
             // Vacuity guard 3, REPLACED — not renumbered. It used to be `oracleProbe.DecodeCount == 1`
             // against the parked arm's 2, and under the reference count BOTH arms decode once: the old form
@@ -451,14 +455,13 @@ namespace MapRenderer.Tests.Text
                 "decode once now, so it discriminates nothing.");
 
             // ── The differential.
-            Assert.Greater(unparked.Count, 0, "sanity: the oracle arm committed labels at all");
-            Assert.AreEqual(unparked.Count, parked.Count,
+            Assert.Greater(unparked.Kinds.Length, 0, "sanity: the oracle arm committed labels at all");
+            Assert.AreEqual(unparked.Kinds.Length, parked.Kinds.Length,
                 "a parked build must commit the SAME NUMBER of labels as one that never parked");
-            for (int i = 0; i < unparked.Count; i++)
-                LabelInstanceAssert.AreEqual(unparked[i], parked[i], i);
+            BlockColumnHash.AssertColumnsEqual(unparked, parked);
 
             bool anyIcon = false;
-            foreach (LabelInstance l in parked) if (l.Kind == LabelKind.Icon) { anyIcon = true; break; }
+            foreach (PointStageInput p in parked.Points) if (p.AtlasKind == SymbolKind.Icon) { anyIcon = true; break; }
             Assert.IsTrue(anyIcon,
                 "sanity: the compared labels must include ICONS. Icons are the only part of the output the " +
                 "sprite atlas can change, so a text-only differential would be green under a parked drain " +
@@ -480,7 +483,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, oracleProbe.UnbalancedCount, "…and the un-parked arm leaks nothing either");
 
             // A use-after-free inside the worker is swallowed by production into a Debug.LogWarning, so
-            // without this the failure would surface only as a bare "0 labels" count mismatch. This makes it
+            // without this the failure would surface only as a bare "0 symbols" count mismatch. This makes it
             // name itself.
             //
             // Watching for THAT message rather than calling LogAssert.NoUnexpectedReceived(): the blanket
@@ -508,7 +511,7 @@ namespace MapRenderer.Tests.Text
         /// D0 it was two bare <c>while (TryDequeue(out _)) { }</c> loops, i.e. two places to forget it.</para>
         ///
         /// <para><b>RED injection:</b> delete <c>dropped.Decode.Release()</c> from
-        /// <c>SymbolLabelSubsystem.DrainAndDiscardParkedBuilds</c>.</para>
+        /// <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>.</para>
         /// </summary>
         [UnityTest]
         public IEnumerator AParkedBuildDroppedByARestyle_ReleasesItsDecodeReference()
@@ -573,7 +576,7 @@ namespace MapRenderer.Tests.Text
         /// used where the tooth needs to know the precise moment the entry became visible to the drain.
         /// Production runs this same call on the pool inside <c>TileManager</c>'s kick lambda; nothing in the
         /// ownership protocol under test depends on which thread it is.</summary>
-        private SharedDisposable<IDecodedTile> ParkOneBuild(SymbolLabelSubsystem subsystem, LeaseProbeDecoder probe)
+        private SharedDisposable<IDecodedTile> ParkOneBuild(SymbolSubsystem subsystem, LeaseProbeDecoder probe)
         {
             ISymbolTileWorkerPass pass = subsystem.TryBeginBuild(SourceId, Tile0);
             Assert.IsNotNull(pass, "sanity: the style names this source, so the kick must produce a pass");
@@ -592,13 +595,13 @@ namespace MapRenderer.Tests.Text
             return lease;
         }
 
-        /// <summary>Reflects <c>SymbolLabelSubsystem._parkGate</c> — the same house instrument as
+        /// <summary>Reflects <c>SymbolSubsystem._parkGate</c> — the same house instrument as
         /// <see cref="BuildCts"/> — so a test can rendezvous with it directly.</summary>
-        private static object ParkGateOf(SymbolLabelSubsystem subsystem)
+        private static object ParkGateOf(SymbolSubsystem subsystem)
         {
-            FieldInfo field = typeof(SymbolLabelSubsystem)
+            FieldInfo field = typeof(SymbolSubsystem)
                 .GetField("_parkGate", BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.IsNotNull(field, "SymbolLabelSubsystem._parkGate must exist — the gate this tooth rendezvous locks against");
+            Assert.IsNotNull(field, "SymbolSubsystem._parkGate must exist — the gate this tooth rendezvous locks against");
             return field.GetValue(subsystem);
         }
 

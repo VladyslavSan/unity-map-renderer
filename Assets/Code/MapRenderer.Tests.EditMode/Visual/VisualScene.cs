@@ -130,7 +130,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Injects a fixture glyph source keyed <c>(fontStack, rangeStart)</c> — wired onto the
-        /// MapView-owned <c>SymbolLabelSubsystem</c> in <see cref="Render"/>, between <c>SetCamera</c> and
+        /// MapView-owned <c>SymbolSubsystem</c> in <see cref="Render"/>, between <c>SetCamera</c> and
         /// <c>SetStyle</c> (G-V1 plan §0). A scene that never calls this leaves the glyph factory null, so a
         /// fill-only scene is unaffected — this is additive, not a reordering of the existing path.</summary>
         /// <param name="ranges">Fixture glyph-range bytes, keyed the same way
@@ -150,8 +150,8 @@ namespace MapRenderer.Tests
             => Glyphs(new Dictionary<(string, int), byte[]> { [(fontName, 0)] = range0Bytes });
 
         /// <summary>The placed-quad count <see cref="SpinUntilSymbolsReady"/> pumps <c>LateUpdate</c> toward
-        /// before <see cref="Render"/> snapshots (plan §1 Edit 3.2) — the number of authored labels times the
-        /// glyph count of their text (a single-character label is 1 quad). Required whenever the scene
+        /// before <see cref="Render"/> snapshots (plan §1 Edit 3.2) — the number of authored symbols times the
+        /// glyph count of their text (a single-character symbol is 1 quad). Required whenever the scene
         /// declares a <see cref="SymbolTextVisualLayer"/>; a symbol scene that never calls this has no
         /// readiness target and <see cref="Render"/> throws rather than guessing a frame count
         /// (always-bound-loops).</summary>
@@ -173,8 +173,8 @@ namespace MapRenderer.Tests
             foreach (VisualLayer l in _layers)
                 layerEntries.Add(l.ToLayerJson());
 
-            // Root "glyphs" URL template (Style Spec): SymbolLabelSubsystem.SetStyle bails out (no _builder,
-            // no labels — a WARNING, not a throw) whenever style.Glyphs is null/empty, BEFORE it ever
+            // Root "glyphs" URL template (Style Spec): SymbolSubsystem.SetStyle bails out (no _builder,
+            // no symbols — a WARNING, not a throw) whenever style.Glyphs is null/empty, BEFORE it ever
             // consults GlyphSourceFactoryOverride — so a symbol scene needs a non-empty value here even
             // though GlyphSourceFactoryOverride means the URL itself is never actually fetched. Emitted only
             // when a glyph source was supplied (Glyphs(...)), so a fill-only scene's JSON is unchanged.
@@ -252,7 +252,7 @@ namespace MapRenderer.Tests
             // only wired when a glyph source was supplied, so a fill-only scene leaves this null and takes
             // the unchanged production GlyphSourceFactory.Create path.
             if (_glyphSourceFactory != null)
-                _mapView.View.Symbols.GlyphSourceFactoryOverride = _ => _glyphSourceFactory();
+                _mapView.View.SymbolSubsystem.GlyphSourceFactoryOverride = _ => _glyphSourceFactory();
 
             // ── The real style path: assemble → parse → SetStyle → pump to settled. ─────────────────────────
             string json = BuildStyleJson();
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests
             for (int f = 0; f < WarmupFrames; f++) _mapView.LateUpdate();
 
             // Bounded symbol-readiness settle (plan §1 Edit 3.2), LAST before the snapshot: a style with a
-            // symbol layer needs its labels STAGED, not merely tile-settled — pump until LastQuadCount/
+            // symbol layer needs its symbols STAGED, not merely tile-settled — pump until LastQuadCount/
             // LastSurvivorCount reach the authored count, snapshotting the very next frame (no extra pump
             // after — an inserted frame is a flake source, lessons flaky-tilesymbolkick-settle). Guarded on
             // the scene actually declaring a symbol layer, so a fill-only scene never spins here.
@@ -325,7 +325,7 @@ namespace MapRenderer.Tests
         /// no <c>symbolPass</c>, so the per-consumed-layer symbol harvest never fires). Between ticks,
         /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> only supplies the ThreadPool wall-clock — it
         /// consumes and harvests nothing itself, so it cannot reintroduce the symbol-silent regression
-        /// (RED-verified: three <c>GeoJsonPointLabelFixtureTests</c> failed with LastInputLabelCount=0 when this
+        /// (RED-verified: three <c>GeoJsonPointSymbolFixtureTests</c> failed with LastInputSymbolCount=0 when this
         /// loop was converted to DrainMeshBuilds instead). This helper is shared by every <see cref="VisualScene"/>
         /// consumer, symbol and fill-only alike, so it stays on the real per-frame Tick path.</para></summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
@@ -338,11 +338,11 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Pumps <c>LateUpdate</c> until the MapView-owned <c>LabelPlacementSystem</c> has both
+        /// <summary>Pumps <c>LateUpdate</c> until the MapView-owned <c>SymbolPlacementSystem</c> has both
         /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or fails loud at
-        /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops) — never silently renders a label-less
+        /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops) — never silently renders a symbol-less
         /// frame. Checks <c>LastSurvivorCount</c> alongside <c>LastQuadCount</c>: the collision verdict is
-        /// harvested one tick late (mirrors <c>OffLookAtLabelScene</c>'s "R3: duplicate Tick" note), so a
+        /// harvested one tick late (mirrors <c>OffLookAtSymbolScene</c>'s "R3: duplicate Tick" note), so a
         /// spin that stopped at quad-count-reached alone could snapshot a frame whose survivor count is still
         /// stale.</summary>
         private void SpinUntilSymbolsReady()
@@ -353,7 +353,7 @@ namespace MapRenderer.Tests
                     "bounded readiness spin has no target frame count to pump toward.");
 
             int expected = _expectedSymbolQuads.Value;
-            var labels = _mapView.View.Labels;
+            var labels = _mapView.View.SymbolPlacementSystem;
             for (int f = 0; f < SymbolReadinessCeiling; f++)
             {
                 _mapView.LateUpdate();
@@ -364,7 +364,7 @@ namespace MapRenderer.Tests
                 $"VisualScene symbol readiness spin exhausted its {SymbolReadinessCeiling}-frame ceiling " +
                 $"without reaching {expected} placed+surviving quads — observed " +
                 $"LastQuadCount={labels.LastQuadCount}, LastSurvivorCount={labels.LastSurvivorCount}, " +
-                $"LastInputLabelCount={labels.LastInputLabelCount}. This is a genuine pipeline finding " +
+                $"LastInputSymbolCount={labels.LastInputSymbolCount}. This is a genuine pipeline finding " +
                 "(geojson→symbol produced fewer labels than authored), not a flake to retry around.");
         }
 

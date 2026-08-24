@@ -21,8 +21,8 @@ namespace MapRenderer.Unity.Rendering.Map
     /// camera. The transform is propagated ONCE per frame by <see cref="SyncToCamera"/> (the first step of
     /// <c>MapView.LateUpdate</c>), so many setters in a frame collapse to a single commit from the final merged
     /// state. <see cref="SyncToCamera"/> is the "camera committed for this frame" point: anything reading the
-    /// Unity camera matrix (e.g. label screen-space placement) MUST run AFTER it, sequenced in the same
-    /// <c>MapView.LateUpdate</c> — which is exactly the ordered camera→tiles→labels pipeline there. Smooth,
+    /// Unity camera matrix (e.g. symbol screen-space placement) MUST run AFTER it, sequenced in the same
+    /// <c>MapView.LateUpdate</c> — which is exactly the ordered camera→tiles→symbols pipeline there. Smooth,
     /// animated control is a separate <c>CameraController</c> (future), layered on top.</para>
     ///
     /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at, so the camera
@@ -149,8 +149,8 @@ namespace MapRenderer.Unity.Rendering.Map
         public double2 ViewportPx => new double2(Camera.pixelWidth, Camera.pixelHeight);
 
         /// <summary>Logical (DPR-normalized) viewport size — <see cref="ViewportPx"/> ÷ <see cref="DevicePixelRatio"/>,
-        /// the screen-space unit the label placement + coverage-cull passes measure in. One definition shared by
-        /// its consumers (<c>SymbolLabelSubsystem.CurrentBatch</c>, <c>LabelPlacementSystem.Tick</c>, the altitude
+        /// the screen-space unit the symbol placement + coverage-cull passes measure in. One definition shared by
+        /// its consumers (<c>SymbolSubsystem.CurrentBatch</c>, <c>SymbolPlacementSystem.Tick</c>, the altitude
         /// framing below, and <c>MapView.BuildTileSelectionConfig</c>'s framing viewport).
         /// <para>The division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>, shared with the
         /// paint conversion — so an unconfigured ratio cannot frame the camera and scale the paint differently
@@ -179,7 +179,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// Propagate <see cref="CurrentProperties"/> to the wrapped Unity camera (transform + FOV + clip) —
         /// the single per-frame commit, the first step of <c>MapView.LateUpdate</c>. Idempotent: pushing the same
         /// state twice is harmless (no dirty tracking). This is the "camera committed for this frame" point —
-        /// any Unity-camera-matrix consumer (label screen-space placement) must run AFTER it, later in the same
+        /// any Unity-camera-matrix consumer (symbol screen-space placement) must run AFTER it, later in the same
         /// <c>MapView.LateUpdate</c>.
         /// </summary>
         /// <summary>The camera orbit altitude in render metres for the current properties+viewport — the LOGICAL
@@ -199,7 +199,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>The camera far-clip distance in render metres — the injected <see cref="FarPlanePolicy"/> over
         /// <see cref="CurrentAltitudeMetres"/> and the current tilt/FOV/aspect. This is the SAME value
         /// <see cref="SyncToCamera"/> writes to <c>Camera.farClipPlane</c>, but computed from the properties on
-        /// demand, so a reader (the label far-distance cull) gets the correct far even when no SyncToCamera has run
+        /// demand, so a reader (the symbol far-distance cull) gets the correct far even when no SyncToCamera has run
         /// this frame — the raw <c>Camera.farClipPlane</c> would still hold Unity's default until then.</summary>
         internal double CurrentFarMetres => FarPlanePolicy.FarMetres(
             CurrentAltitudeMetres, CurrentProperties.Tilt.Value, CurrentProperties.VerticalFovDeg, Camera.aspect);
@@ -235,7 +235,7 @@ namespace MapRenderer.Unity.Rendering.Map
             Camera.nearClipPlane = math.max(0.1f, (float)CameraPoseMath.NearClip(altitude));
             // The injected far policy (shared with the tile selector, per projection) — geometry-aware for the
             // flat atlas, ray-sphere for the globe. Both use identical inputs, so render far == selection far. Via
-            // CurrentFarMetres so the label far-distance cull reads the exact same value off the properties.
+            // CurrentFarMetres so the symbol far-distance cull reads the exact same value off the properties.
             Camera.farClipPlane  = (float)CurrentFarMetres;
 
             // The frame's ruler, pushed as the LAST act of the commit — after CameraRelativePosition, which

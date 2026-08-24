@@ -1,7 +1,7 @@
 // Epic A / A5a-A5b acceptance teeth — the PlayMode half of the pump-split (pre-existing EditMode flake: a
 // [UnityTest] yielded frame is instantaneous in EditMode, starving the off-main worker/tail hop; real
 // PlayMode frames give the ThreadPool wall-clock, making the wait deterministic). These 3 [UnityTest] drive
-// SymbolLabelSubsystem directly (no MapView, no enabled=false / WithTestMaterials — this fixture never used
+// SymbolSubsystem directly (no MapView, no enabled=false / WithTestMaterials — this fixture never used
 // them) and assert the budgeted tail-start loop + restyle-drop/cancel behaviour over the pool→main handoff.
 // The 2 synchronous [Test] (structural source-grep teeth, no async wait) stay in the EditMode half.
 
@@ -31,9 +31,9 @@ namespace MapRenderer.Tests.PlayMode.Text
     /// <summary>
     /// Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail split (PlayMode half — see the
     /// EditMode <c>SymbolTailPumpTests</c> for the 2 synchronous structural teeth that stayed). Reuses
-    /// <see cref="MapRenderer.Tests.Text.SymbolLabelSubsystemPumpTests"/>' fixture/glyph-source harness (a
+    /// <see cref="MapRenderer.Tests.Text.SymbolSubsystemPumpTests"/>' fixture/glyph-source harness (a
     /// single symbol layer over the fixture's "centroids", <see cref="TestGlyphSource"/> injected via
-    /// <see cref="SymbolLabelSubsystem.GlyphSourceFactoryOverride"/>).
+    /// <see cref="SymbolSubsystem.GlyphSourceFactoryOverride"/>).
     /// </summary>
     [TestFixture]
     public class SymbolTailPumpTests
@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.PlayMode.Text
 
         private GameObject _camGo;
         private RenderTexture _rt;
-        private SymbolLabelSubsystem _subsystem;
+        private SymbolSubsystem _subsystem;
         private byte[] _tileBytes;
         private byte[] _latinGlyphs;
 
@@ -67,7 +67,7 @@ namespace MapRenderer.Tests.PlayMode.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            _subsystem = new SymbolLabelSubsystem(mapCamera);
+            _subsystem = new SymbolSubsystem(mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
             _latinGlyphs = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
         }
@@ -194,7 +194,7 @@ namespace MapRenderer.Tests.PlayMode.Text
         }
 
         // ── F-3(b): the finer variant — cancel DURING the tail loop (after the tail has STARTED and parked
-        //    on a gated glyph fetch), not just between phases. Partial labels must never reach CompleteBuild:
+        //    on a gated glyph fetch), not just between phases. Partial symbols must never reach CompleteBuild:
         //    the whole-loop-then-ct-check-then-commit order (moved verbatim from pre-A5a BuildTileAsync)
         //    still gates the commit. ───────────────────────────────────────────────────────────────────────
         [UnityTest]

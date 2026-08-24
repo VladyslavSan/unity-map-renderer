@@ -5,8 +5,8 @@
 // Stage T — the SHARED tilt-measurement harness. Extracted from LineProbeSymmetrySnapshotTests.BuildScene /
 // SetupLitAmbient / RestoreAmbient / AssertGpuContext (S111), which already built exactly this camera-and-
 // chrome recipe. CONTENT-AGNOSTIC on purpose: this class knows nothing about lines, styles, materials or
-// labels — the consumer attaches its own GameObject(s) — which is what lets it serve both the line/join
-// consumer (T2/T3) and the label consumer (T4) from one harness.
+// symbols — the consumer attaches its own GameObject(s) — which is what lets it serve both the line/join
+// consumer (T2/T3) and the symbol consumer (T4) from one harness.
 
 #if UNITY_EDITOR
 using System;
@@ -52,11 +52,11 @@ namespace MapRenderer.Tests
 
         public double DevicePixelRatio { get; set; } = 1.0;
 
-        /// <summary>The line arms render on the shared dark-slate background; the label arm (T4) overrides
+        /// <summary>The line arms render on the shared dark-slate background; the symbol arm (T4) overrides
         /// this to white, because <c>WorldSymbolInkAnalysis.InkThreshold</c> reads dark ink on white.</summary>
         public Color BackgroundColor { get; set; } = new Color(0.05f, 0.05f, 0.08f, 1f);
 
-        /// <summary>The line arms need the lit recipe (real PBR, a live viewDirectionWS); the label arm does
+        /// <summary>The line arms need the lit recipe (real PBR, a live viewDirectionWS); the symbol arm does
         /// not and turns this off.</summary>
         public bool LitAmbient { get; set; } = true;
 

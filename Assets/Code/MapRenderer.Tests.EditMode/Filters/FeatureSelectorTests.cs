@@ -200,7 +200,7 @@ namespace MapRenderer.Tests.Filters
         /// The ordinal is the feature's position in the <b>source layer's</b> feature list — never its
         /// position in the selection. Every per-feature side array a consumer joins to the shared geometry
         /// buffer is keyed on it, and <c>RingFeatureIdx</c> indexes the layer, so a slot-based ordinal
-        /// mis-attributes colours, widths and labels the moment a filter rejects anything.
+        /// mis-attributes colours, widths and symbols the moment a filter rejects anything.
         ///
         /// <para>The fixture makes the two differ: the only matching feature sits at layer position 2 and
         /// selection position 0, so a slot-indexed implementation reports 0 and fails here.</para>

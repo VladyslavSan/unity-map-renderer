@@ -1,10 +1,10 @@
 // Unity EditMode only — Mesh.AcquireReadOnlyMeshData needs the engine. NOT registered in core-tests.csproj.
 //
-// Epic A / A1: after A1, point/icon draws land on a WorldLabelRenderer-built mesh (WorldBillboardVertex
+// Epic A / A1: after A1, point/icon draws land on a WorldSymbolRenderer-built mesh (WorldBillboardVertex
 // stream 0 + a separate stream-1 Opacity float), not the screen slot mesh's BillboardVertex (Position=px,
 // Color=RGBA, ...) the pre-A1 tests read via mesh.vertices/mesh.colors. This is the single shared readback
-// several point/icon test files need (LabelFadeTests, HorizonCullGatherTests, LabelPlacementStructureTests,
-// LabelPlacementDemoProductionFlipTests) — kept in its own file (mirrors WorldSymbolInkAnalysis's identical
+// several point/icon test files need (SymbolFadeTests, HorizonCullGatherTests, SymbolPlacementStructureTests,
+// SymbolPlacementDemoProductionFlipTests) — kept in its own file (mirrors WorldSymbolInkAnalysis's identical
 // "one shared helper, not duplicated per test" reasoning) so none of them re-derive the MeshData readback.
 // Internal, not public (test-code-bloat convention: a test helper's footprint stays inside the test assembly).
 
@@ -18,7 +18,7 @@ namespace MapRenderer.Tests
     internal static class WorldMeshReadback
     {
         /// <summary>
-        /// Reads back a <c>WorldLabelRenderer</c>-built mesh's stream-0 <see cref="WorldBillboardVertex"/>s and
+        /// Reads back a <c>WorldSymbolRenderer</c>-built mesh's stream-0 <see cref="WorldBillboardVertex"/>s and
         /// stream-1 Opacity floats — the SAME struct/descriptor layout <c>WorldBillboardMeshBuilder.Build</c>
         /// wrote, so this is a faithful round-trip regardless of the mesh's actual vertex-attribute wiring.
         /// Empty arrays (not null) for a null/vertex-less mesh.

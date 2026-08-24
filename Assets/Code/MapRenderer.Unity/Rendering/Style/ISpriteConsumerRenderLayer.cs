@@ -8,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// later <c>line-pattern</c> and <c>background-pattern</c>, which resolve a sprite name the same way.
     ///
     /// <para><b>Why this exists as a seam rather than a constructor argument:</b> the sheet is fetched
-    /// asynchronously (it is one keyless request per style, owned by <c>SymbolLabelSubsystem</c>), while
+    /// asynchronously (it is one keyless request per style, owned by <c>SymbolSubsystem</c>), while
     /// layer materials are built eagerly and synchronously inside <c>MapView.SetStyle</c>. So at
     /// <c>TryCreate</c> time the sheet provably does not exist yet, and a pattern-bearing layer must be able
     /// to start unresolved and be told later. <see cref="RenderLayerSet.SetSprites"/> is the push.</para>

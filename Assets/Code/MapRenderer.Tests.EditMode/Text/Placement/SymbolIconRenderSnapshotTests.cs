@@ -3,7 +3,7 @@
 //
 // This is the machine-checkable form of the I5b/I6 "on-screen eyeball": it renders four DISTINCT, deliberately
 // ASYMMETRIC demo sprites (a committed fixture — an up-triangle, an "F", a down-arrow, a ring) through the REAL
-// LabelPlacementSystem.Tick → Map/Symbol/IconWorld shader → row-flipped SpriteSheet texture, reads the framebuffer
+// SymbolPlacementSystem.Tick → Map/Symbol/IconWorld shader → row-flipped SpriteSheet texture, reads the framebuffer
 // back, and writes Logs/snapshots/symbol-icons.png. Asymmetric shapes make any vertical flip / horizontal
 // mirror visible (a symmetric square could not). The test asserts the frame is non-blank and that the four
 // icons' saturated colors are all present (each distinct sprite actually sampled); the human-facing check is
@@ -82,8 +82,8 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             // Icons are drawn with vertex color = white so SAMPLE(_MainTex) * color shows the sprite's true
-            // RGBA (LabelPaint.Default is BLACK text ink — it would render every icon black).
-            var whitePaint = new LabelPaint
+            // RGBA (SymbolPaint.Default is BLACK text ink — it would render every icon black).
+            var whitePaint = new SymbolPaint
             {
                 TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
                 HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
@@ -105,7 +105,7 @@ namespace MapRenderer.Tests.Text.Placement
             // (TileKey=0 is ~2e7m away — see SymbolAtlasOrientationSnapshotTests' identical note).
             long tileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
 
-            var labels = new List<LabelInstance>();
+            var buffer = new SymbolTileBuffer();
             for (int i = 0; i < placements.Length; i++)
             {
                 (string name, double east, double north) = placements[i];
@@ -115,19 +115,23 @@ namespace MapRenderer.Tests.Text.Placement
                     $"fixture must define sprite '{name}'");
                 SymbolQuad quad = IconQuadLayout.Layout(
                     entry, sheetSize, iconSize: 2.0f, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
-                labels.Add(new LabelInstance
-                {
-                    AnchorRender = frame.SceneOriginRender + new double3(east, 0.0, north),
-                    Layout = IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(entry, 2.0f)),
-                    Kind = LabelKind.Icon,
-                    Paint = whitePaint,
-                    TextSizePx = TextQuadLayout.OneEm, // scale 1 — matches the real StyledSymbolTileBuilder icon path
-                    IconImage = name,                  // the I6 cross-tile identity discriminant
-                    AllowOverlap = true,               // render diagnostic — never collision-cull
-                    SortKey = 0f,
-                    FeatureIndex = i,
-                    TileKey = tileKey,
-                });
+
+                // Inlined IconQuadLayout.ToLayoutResult's own bounds maths (min/max corner ± the skirt).
+                float skirtPx = IconQuadLayout.SkirtPx(entry, 2.0f);
+                var skirt = new float2(skirtPx, skirtPx);
+                float2 boundsMin = math.min(quad.TopLeft, quad.BottomRight) + skirt;
+                float2 boundsMax = math.max(quad.TopLeft, quad.BottomRight) - skirt;
+                var quads = new List<SymbolQuad> { quad };
+                TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender + new double3(east, 0.0, north),
+                    quads, boundsMin, boundsMax,
+                    kind: SymbolKind.Icon,
+                    paint: whitePaint,
+                    textSizePx: TextQuadLayout.OneEm, // scale 1 — matches the real StyledSymbolTileBuilder icon path
+                    iconImage: name,                  // the I6 cross-tile identity discriminant
+                    allowOverlap: true,               // render diagnostic — never collision-cull
+                    sortKey: 0f,
+                    featureIndex: i,
+                    tileKey: tileKey);
             }
 
             // Reference: a REAL text glyph 'A' (known upright on-screen — pinned by SymbolAtlasOrientation-
@@ -141,36 +145,33 @@ namespace MapRenderer.Tests.Text.Placement
             atlasTexture.Upload(glyphAtlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(glyphAtlas) });
-            TextLayoutResult glyphLayout = TextQuadLayout.Layout(run, glyphAtlas, TextLayoutOptions.Default);
-            labels.Add(new LabelInstance
-            {
-                AnchorRender = frame.SceneOriginRender,
-                Layout = glyphLayout,
-                Paint = LabelPaint.Default, // black 'A' on white — the upright reference
-                TextSizePx = 90f,
-                AllowOverlap = true,
-                SortKey = 0f,
-                FeatureIndex = 99,
-                TileKey = tileKey,
-            });
+            var glyphQuads = new List<SymbolQuad>();
+            TextLayoutBounds glyphBounds = TextQuadLayout.Layout(run, glyphAtlas, TextLayoutOptions.Default, glyphQuads);
+            TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, glyphQuads, glyphBounds.Min, glyphBounds.Max,
+                paint: SymbolPaint.Default, // black 'A' on white — the upright reference
+                textSizePx: 90f,
+                allowOverlap: true,
+                sortKey: 0f,
+                featureIndex: 99,
+                tileKey: tileKey);
 
             // Epic A / A1: point text + icons draw through the world path (D7) — the ONLY draw path since
             // commit 1 retired the screen materials/path.
-            var system = new LabelPlacementSystem(
+            var system = new SymbolPlacementSystem(
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             var snap = new SnapshotRenderer(Size, Size);
-            // Every label here is Point placement (icons carry Kind = Icon, not Placement = Line), so the
+            // Every symbol here is Point placement (icons carry Kind = Icon, not Placement = Line), so the
             // production collect's curved-then-points split cannot reorder them — see
-            // SymbolPlanMirrorParityTests for the mixed-kind case where it does.
+            // SymbolGatherParityTests for the mixed-kind (curved + point) case where the split reorders.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                Assert.AreEqual(labels.Count, plan.CollectedCount,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
+                Assert.AreEqual(buffer.Symbols.Count, plan.CollectedCount,
                     "precondition: the cross-tile dedup (fixed 4 m grid) must not merge any of these — a short " +
                     "count here would show up below as missing ink rather than as a placement bug.");
                 Assert.AreEqual(5, system.LastQuadCount,
@@ -419,11 +420,11 @@ namespace MapRenderer.Tests.Text.Placement
                 AssertRotatedBy(road45.CentroidFromViewportCentrePx, road45Rotated90.CentroidFromViewportCentrePx,
                     expectedDeg: -90f,
                     "icon-rotate turns the icon the WRONG WAY: MapLibre defines icon-rotate as clockwise, " +
-                    "and so does every doc comment on the value's way in (SymbolLabel.IconRotateRadians, " +
-                    "LabelStageInputs, CandidateEmit.ExtraRotationRadians) — but a positive icon-rotate is " +
+                    "and so does every doc comment on the value's way in (SymbolFeature.IconRotateRadians, " +
+                    "SymbolStageInputs, CandidateEmit.ExtraRotationRadians) — but a positive icon-rotate is " +
                     "rendering counter-clockwise. Note 180°, the only value the other icon-rotate tests use " +
                     "and the value road_one_way_arrow_opposite asks for, is its own inverse and cannot show " +
-                    "this. The sense conversion is LabelBearing.IconRotationRadians, the ONE flip point, " +
+                    "this. The sense conversion is SymbolBearing.IconRotationRadians, the ONE flip point, " +
                     "shared with the point path — a regression there breaks both paths at once");
             }
             finally
@@ -438,10 +439,10 @@ namespace MapRenderer.Tests.Text.Placement
         //
         // WHY THIS EXISTS. W2 gave `Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` a map-pitch branch, and
         // that branch is LIVE IN PRODUCTION TODAY: `AlignmentResolution.ResolvePitch(Auto, Auto, LineCenter)`
-        // resolves to Map, `SymbolFeatureExtractor` stamps it onto the along-line ICON SymbolLabel, and
+        // resolves to Map, `SymbolFeatureExtractor` stamps it onto the along-line ICON SymbolFeature, and
         // `StageCurved` is shared across AtlasKind — so `road_one_way_arrow` / `road_one_way_arrow_opposite`
         // ship with AlignFlags bit2 and METRE corner offsets. Every other W2 rendered tooth binds
-        // Map/Symbol/TextWorld and LabelKind.Text, so without this pair the icon copy of the branch was
+        // Map/Symbol/TextWorld and SymbolKind.Text, so without this pair the icon copy of the branch was
         // compiled and shipped but never rendered by any test. `round-caps-never-rendered` is this repo's
         // recorded cost of shipping exactly that shape.
         //
@@ -472,7 +473,7 @@ namespace MapRenderer.Tests.Text.Placement
         //
         // THE REFERENCE IS THE VIEWPORT ARM, which shares no code with the map branch: SymbolWorldIsMapPitched
         // sends the two down mutually exclusive paths. The twins differ in EXACTLY ONE FIELD,
-        // LabelInstance.PitchAlignment. (P3a's rebuilt-T2 lesson: a reference drawn from the arm under test
+        // ShapedSymbol.PitchAlignment. (P3a's rebuilt-T2 lesson: a reference drawn from the arm under test
         // cancels the defect it is meant to expose.)
         //
         // Two [Test] methods, never one with two clauses — NUnit throws on the first failure, so a second
@@ -568,7 +569,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // LabelBearing.MapAlignedSign — the map-BEARING sign, the last of this file's three rotation signs.
+        // SymbolBearing.MapAlignedSign — the map-BEARING sign, the last of this file's three rotation signs.
         // It was documented as "not headlessly testable … chosen, not derived … deferred to an eyeball
         // pass", on the grounds that every headless test runs at bearing 0 where map- and viewport-alignment
         // coincide. That premise is wrong: a headless camera takes a heading like any other, and the sibling
@@ -576,9 +577,9 @@ namespace MapRenderer.Tests.Text.Placement
         // rendered at a discriminating angle — turned out to be inverted by exactly 180°. So this renders it.
         //
         // ── THE DERIVATION (written from the contract BEFORE the render, per the icon-sign method) ────
-        // LabelBearing's stated contract: "+1 = a map heading of θ (CW from north) turns map-aligned labels
+        // SymbolBearing's stated contract: "+1 = a map heading of θ (CW from north) turns map-aligned symbols
         // by +θ in the screen's (y-up) frame." What SHOULD happen is fixed independently by what
-        // rotation-alignment:map MEANS — the label is glued to the map plane, so it turns exactly as the map
+        // rotation-alignment:map MEANS — the symbol is glued to the map plane, so it turns exactly as the map
         // turns on screen, no more and no less. Following that through:
         //   · CameraProperties.Heading is degrees CW from north, and CameraPoseMath derives the camera's
         //     up-vector from the heading direction in the horizontal plane (at heading 0 the camera sits
@@ -587,7 +588,7 @@ namespace MapRenderer.Tests.Text.Placement
         //   · A map direction of bearing β therefore lands at screen angle 90° − β + θ, measured CCW from
         //     screen-right in a y-up frame (check: β = θ+90 → 0°, β = θ → 90°). Map-EAST, β = 90°, lands at
         //     θ — so raising the heading to θ turns everything drawn on the map by +θ COUNTER-CLOCKWISE on
-        //     screen, and a map-aligned label must turn +θ with it.
+        //     screen, and a map-aligned symbol must turn +θ with it.
         //   · The staging frame the sign feeds is positive-CCW-on-screen. That is MEASURED, not assumed —
         //     it is what AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen above pins.
         //   · BillboardRotationRadians hands the quad MapAlignedSign · θ. Matching +θ ⇒ MapAlignedSign = +1.
@@ -601,14 +602,14 @@ namespace MapRenderer.Tests.Text.Placement
         // rotation-equivariant.
         //
         // ── THE MAP'S OWN TURN, MEASURED RATHER THAN ASSUMED ─────────────────────────────────────────
-        // "The label turns +45°" is only half the contract; the other half is "…the same way the map does",
+        // "The symbol turns +45°" is only half the contract; the other half is "…the same way the map does",
         // and asserting that against a NUMBER would smuggle the camera derivation in as an assumption. So
         // two extra arms render a VIEWPORT-aligned probe icon at a deliberately off-centre anchor, placed
         // due map-EAST of the look-at. Its quad never rotates, so its ink box centre tracks its anchor, and
         // where that anchor lands on screen IS the camera's rendering of map-east — pure projection, with no
-        // label-rotation math in it at all. The tooth then asserts BOTH that the probe swings +45° (the
-        // camera derivation, so a camera-side sign error reports as itself rather than as a label bug) and
-        // that the label's turn MATCHES the probe's within a few degrees (the contract proper).
+        // symbol-rotation math in it at all. The tooth then asserts BOTH that the probe swings +45° (the
+        // camera derivation, so a camera-side sign error reports as itself rather than as a symbol bug) and
+        // that the symbol's turn MATCHES the probe's within a few degrees (the contract proper).
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         private const float MapBearingToothHeadingDeg = 45f;
@@ -662,17 +663,17 @@ namespace MapRenderer.Tests.Text.Placement
 
                 float2 mapEastUnderBearingPx = InkBoxCentreFromViewportCentrePx(mapEastUnderBearing);
                 AssertRotatedBy(mapEastAtNorthUpPx, mapEastUnderBearingPx, expectedDeg: MapBearingToothHeadingDeg,
-                    "CAMERA, not LabelBearing: raising the heading to 45° (CW from north) must swing the map " +
+                    "CAMERA, not SymbolBearing: raising the heading to 45° (CW from north) must swing the map " +
                     "45° COUNTER-CLOCKWISE on screen, because heading θ puts map bearing θ at screen-up. This " +
                     "arm contains no label-rotation math — only where the camera projects an off-centre " +
                     "anchor — so a failure HERE is a camera-pose finding and says nothing about MapAlignedSign");
 
-                float labelTurnDeg = SignedRotationDeg(unrotated, underBearing.CentroidFromViewportCentrePx);
+                float symbolTurnDeg = SignedRotationDeg(unrotated, underBearing.CentroidFromViewportCentrePx);
                 float mapTurnDeg = SignedRotationDeg(mapEastAtNorthUpPx, mapEastUnderBearingPx);
 
                 AssertRotatedBy(unrotated, underBearing.CentroidFromViewportCentrePx,
                     expectedDeg: MapBearingToothHeadingDeg,
-                    "LabelBearing.MapAlignedSign turns map-aligned labels the WRONG WAY: a heading of 45° " +
+                    "SymbolBearing.MapAlignedSign turns map-aligned labels the WRONG WAY: a heading of 45° " +
                     "(CW from north) must turn a rotation-alignment:map label +45° counter-clockwise on " +
                     "screen, with the map. A -1 sign turns it 45° the other way — 90° of error, invisible at " +
                     "bearing 0 (where map and viewport alignment coincide) and invisible at 180° (its own " +
@@ -680,9 +681,9 @@ namespace MapRenderer.Tests.Text.Placement
 
                 // The contract proper — "glued to the map" is a RELATION, and this is the only assertion
                 // that states it without routing through a derived number.
-                Assert.Less(math.abs(labelTurnDeg - mapTurnDeg), 8f,
+                Assert.Less(math.abs(symbolTurnDeg - mapTurnDeg), 8f,
                     $"rotation-alignment:map means the label is glued to the map plane, so its on-screen " +
-                    $"turn must equal the map's: the label turned {labelTurnDeg:F1}° while the map turned " +
+                    $"turn must equal the map's: the label turned {symbolTurnDeg:F1}° while the map turned " +
                     $"{mapTurnDeg:F1}° under the same 45° heading.");
             }
             finally
@@ -741,8 +742,8 @@ namespace MapRenderer.Tests.Text.Placement
             };
         }
 
-        /// <summary>Both sign teeth measure about the label's anchor, which this fixture puts at the viewport
-        /// centre: the camera looks straight down at <c>lookAt</c>, and the label's single cell sits at the
+        /// <summary>Both sign teeth measure about the symbol's anchor, which this fixture puts at the viewport
+        /// centre: the camera looks straight down at <c>lookAt</c>, and the symbol's single cell sits at the
         /// path's arc midpoint, which IS <c>lookAt</c> (the path is lookAt ± dir·halfLen and the anchor is
         /// segment 0 at t = 0.5). Confirmed rather than assumed — the cell is symmetric about the anchor and
         /// the "F"'s ink box is centred in its cell to within 0.5 px of 32, so on the UN-ROTATED arm the ink
@@ -758,7 +759,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>Where the ink BOX's centre sits relative to the viewport centre, in the same y-up screen
         /// frame — the difference of the carrier's two offsets, since both are taken from the same centroid.
-        /// For an UN-ROTATED symbol this locates the label's anchor on screen (the box is centred on it),
+        /// For an UN-ROTATED symbol this locates the symbol's anchor on screen (the box is centred on it),
         /// which is what lets a render at an off-centre anchor report where the camera put that anchor.</summary>
         private static float2 InkBoxCentreFromViewportCentrePx(SymbolInk ink)
             => ink.CentroidFromViewportCentrePx - ink.CentroidFromInkBoxPx;
@@ -804,7 +805,7 @@ namespace MapRenderer.Tests.Text.Placement
             /// and both centroids are scale-free about their own reference).</summary>
             public int InkCount { get; set; }
 
-            /// <summary>Ink centroid minus the VIEWPORT CENTRE — which is the label's anchor on every arm
+            /// <summary>Ink centroid minus the VIEWPORT CENTRE — which is the symbol's anchor on every arm
             /// that anchors at the look-at, making this the direction-BEARING measure a rotation about the
             /// anchor acts on exactly. Named for the fixed reference rather than for the anchor because the
             /// map-bearing tooth also renders a DELIBERATELY off-centre anchor, where the two differ.</summary>
@@ -819,7 +820,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // Renders ONE along-line icon of sprite `iconImage`, carrying icon-rotate `iconRotateDeg`, on a road
         // at `lineAngleDeg` (0 = east/screen-horizontal, 90 = north/screen-vertical at heading 0) through the
-        // real LabelPlacementSystem → Map/Symbol/IconWorld, and measures its on-screen ink.
+        // real SymbolPlacementSystem → Map/Symbol/IconWorld, and measures its on-screen ink.
         private static SymbolInk MeasureAlongLineIconInk(SpriteSheet sheet, in SymbolQuad cell,
             string iconImage, float lineAngleDeg, float iconRotateDeg,
             AlignmentMode pitchAlignment = AlignmentMode.Viewport)
@@ -854,40 +855,39 @@ namespace MapRenderer.Tests.Text.Placement
             // the branch the tooth exists for.
             var worldUp = new double3(0.0, 1.0, 0.0);
 
-            var label = new LabelInstance
-            {
-                Placement = SymbolPlacement.LineCenter,
-                Kind = LabelKind.Icon,
+            var buffer = new SymbolTileBuffer();
+            var path = new[] { frame.SceneOriginRender - dir * halfLen, frame.SceneOriginRender + dir * halfLen };
+            var pathUp = new[] { worldUp, worldUp };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            var glyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } };
+            TestSymbolTileBuffer.AddCurved(buffer, glyphs, anchors, path, pathUp,
+                placement: SymbolPlacement.LineCenter,
+                up: worldUp,
+                iconImage: iconImage,
+                kind: SymbolKind.Icon,
                 // W2: the ONLY field the map/viewport twins below differ in.
-                PitchAlignment = pitchAlignment,
-                PathRender = new[] { frame.SceneOriginRender - dir * halfLen, frame.SceneOriginRender + dir * halfLen },
-                PathUpRender = new[] { worldUp, worldUp },
-                UpRender = worldUp,
-                LineAnchors = new[] { new LineAnchor(0, 0.5f) },
-                CurvedGlyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } },
-                IconImage = iconImage,
-                IconRotateRadians = math.radians(iconRotateDeg),
-                // White vertex color so SAMPLE(_MainTex) * color shows the sprite's own hue (LabelPaint.Default
+                pitchAlignment: pitchAlignment,
+                iconRotateRadians: math.radians(iconRotateDeg),
+                // White vertex color so SAMPLE(_MainTex) * color shows the sprite's own hue (SymbolPaint.Default
                 // is black text ink — see the four-icon test above).
-                Paint = new LabelPaint
+                paint: new SymbolPaint
                 {
                     TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
                     HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
                 },
-                TextSizePx = TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
-                MaxAngleDeg = 180f,
-                KeepUpright = false,
-                AllowOverlap = true, // render diagnostic — never collision-cull
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = tileKey,
-            };
+                textSizePx: TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
+                maxAngleDeg: 180f,
+                keepUpright: false,
+                allowOverlap: true, // render diagnostic — never collision-cull
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(
+            var system = new SymbolPlacementSystem(
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
-            // A real (if tiny) glyph atlas is REQUIRED even for an icon-only scene: LabelPlacementSystem
+            // A real (if tiny) glyph atlas is REQUIRED even for an icon-only scene: SymbolPlacementSystem
             // gates its whole staging pass on `atlas?.Texture != null`, so a null one stages nothing at all.
             GlyphAtlasTexture atlasTexture = BuildTinyGlyphAtlasTexture();
             var snap = new SnapshotRenderer(Size, Size);
@@ -895,9 +895,9 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"DIAGNOSTIC precondition ({lineAngleDeg} deg): the along-line icon must place exactly one quad.");
@@ -914,7 +914,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.Greater(ink, 200, $"({lineAngleDeg} deg) the icon must render meaningful ink, not a blank frame.");
 
                 // Row/col (top-left origin, rows growing DOWN) → a y-up screen frame about the viewport
-                // centre, which is where this fixture's camera puts the label anchor (see the sign tooth's
+                // centre, which is where this fixture's camera puts the symbol anchor (see the sign tooth's
                 // reference-point precondition, which is what proves it rather than assuming it). Pixel
                 // centres are index+0.5, so the centre of a Size-wide viewport is index (Size−1)/2.
                 float viewportCentre = (Size - 1) * 0.5f;
@@ -946,8 +946,8 @@ namespace MapRenderer.Tests.Text.Placement
         // Renders ONE POINT icon of sprite `SignToothSprite` in a square cell of `halfExtentPx`, with the
         // given `rotationAlignment`, under a camera at `headingDeg`, anchored `anchorEastFractionOfAltitude`
         // of the camera's altitude due map-EAST of the look-at (0 = at the look-at, i.e. the viewport
-        // centre) — through the real LabelPlacementSystem → Map/Symbol/IconWorld — and measures its
-        // on-screen ink. The along-line sibling above shares everything but the label: this one carries a
+        // centre) — through the real SymbolPlacementSystem → Map/Symbol/IconWorld — and measures its
+        // on-screen ink. The along-line sibling above shares everything but the symbol: this one carries a
         // Layout + AnchorRender (the point path) instead of a PathRender + CurvedGlyphs, and a heading
         // instead of a road bearing.
         private static SymbolInk MeasurePointIconInk(SpriteSheet sheet, float halfExtentPx,
@@ -975,30 +975,33 @@ namespace MapRenderer.Tests.Text.Placement
             double altitude = uCam.transform.position.y;
             SymbolQuad cell = SignToothCell(sheet.View, halfExtentPx);
 
-            var label = new LabelInstance
-            {
-                AnchorRender = frame.SceneOriginRender + new double3(altitude * anchorEastFractionOfAltitude, 0.0, 0.0),
-                // The cell's footprint is a deliberately fixed square, not the sprite's own rect, so it
-                // carries no skirt to remove.
-                Layout = IconQuadLayout.ToLayoutResult(cell, skirtPx: 0f),
-                Kind = LabelKind.Icon,
-                IconImage = SignToothSprite,
-                RotationAlignment = rotationAlignment,
-                // White vertex color so SAMPLE(_MainTex) * color shows the sprite's own hue (LabelPaint.Default
+            // The cell's footprint is a deliberately fixed square, not the sprite's own rect, so it carries no
+            // skirt to remove — skirtPx 0 reduces IconQuadLayout.ToLayoutResult's own bounds maths to the
+            // quad's raw min/max corner.
+            var cellQuads = new List<SymbolQuad> { cell };
+            float2 cellBoundsMin = math.min(cell.TopLeft, cell.BottomRight);
+            float2 cellBoundsMax = math.max(cell.TopLeft, cell.BottomRight);
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer,
+                frame.SceneOriginRender + new double3(altitude * anchorEastFractionOfAltitude, 0.0, 0.0),
+                cellQuads, cellBoundsMin, cellBoundsMax,
+                kind: SymbolKind.Icon,
+                iconImage: SignToothSprite,
+                rotationAlignment: rotationAlignment,
+                // White vertex color so SAMPLE(_MainTex) * color shows the sprite's own hue (SymbolPaint.Default
                 // is black text ink — see the four-icon test above).
-                Paint = new LabelPaint
+                paint: new SymbolPaint
                 {
                     TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
                     HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
                 },
-                TextSizePx = TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
-                AllowOverlap = true, // render diagnostic — never collision-cull
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = tileKey,
-            };
+                textSizePx: TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
+                allowOverlap: true, // render diagnostic — never collision-cull
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(
+            var system = new SymbolPlacementSystem(
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -1010,9 +1013,9 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"DIAGNOSTIC precondition (heading {headingDeg} deg, {rotationAlignment}): the point icon " +

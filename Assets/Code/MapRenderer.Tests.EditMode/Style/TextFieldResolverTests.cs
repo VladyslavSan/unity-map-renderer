@@ -12,8 +12,8 @@ namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S105 Slice 1 (A2): <see cref="SymbolStyle.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
-    /// expression form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact label string; a missing
-    /// property SKIPS the feature (returns null), never a blank label. Engine-free; runs in both runners.
+    /// expression form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact symbol string; a missing
+    /// property SKIPS the feature (returns null), never a blank symbol. Engine-free; runs in both runners.
     /// </summary>
     [TestFixture]
     public class TextFieldResolverTests

@@ -13,14 +13,14 @@
 //        HalfCrossingDistancePx) resolves the three join types' silhouette reach under tilt — the
 //        measurement `docs/line-rendering-design.md` §3 item 4 (grazing incidence) will need, though THIS
 //        tooth measures at the look-at, not grazing.
-//   T4 — a REAL production-path label (LabelPlacementSystem.Tick) does not foreshorten under tilt today
+//   T4 — a REAL production-path symbol (SymbolPlacementSystem.Tick) does not foreshorten under tilt today
 //        (viewport-pitch-aligned), and — the point of building this at all — the fixture can tell that
-//        apart from what a MAP-aligned label would read. Wired before P3 (`pitch-alignment: map`) exists.
+//        apart from what a MAP-aligned symbol would read. Wired before P3 (`pitch-alignment: map`) exists.
 //
 // ONE FILE, BOTH CONSUMERS ON PURPOSE: splitting it would hide the very thing this stage exists to
-// demonstrate — TiltedGroundScene is CONTENT-AGNOSTIC and serves a line/join consumer and a label consumer
-// from the SAME harness. T4's glyph/LabelPlacementSystem arm lives here, under Visual/, rather than under
-// Text/Placement/, for exactly that reason: it is a TILT-FIXTURE tooth first, a label tooth second.
+// demonstrate — TiltedGroundScene is CONTENT-AGNOSTIC and serves a line/join consumer and a symbol consumer
+// from the SAME harness. T4's glyph/SymbolPlacementSystem arm lives here, under Visual/, rather than under
+// Text/Placement/, for exactly that reason: it is a TILT-FIXTURE tooth first, a symbol tooth second.
 //
 // COMMON TO ALL FOUR: the scene renders at 55°, the value two green fixtures (LineProbeSymmetrySnapshotTests,
 // LineDashSnapshotTests) already use. NO tooth here asserts an absolute pixel count — every assertion is
@@ -600,14 +600,14 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════
-        // T4 — a REAL production-path label does not foreshorten under tilt, and the fixture can see that a
+        // T4 — a REAL production-path symbol does not foreshorten under tilt, and the fixture can see that a
         // map-aligned one would. Wired before P3 (pitch-alignment: map) exists.
         // ═══════════════════════════════════════════════════════════════════════════════════════════
         //
         // The one-glyph bootstrap is WorldPointEmitRenderTests.BuildGlyphA, widened private → internal there
         // (test-code-bloat convention: widen and reuse, never duplicate-and-drag) rather than copied here.
 
-        private readonly struct LabelArmResult
+        private readonly struct SymbolArmResult
         {
             public readonly double  InkHeightPx;
             public readonly int     QuadCount;
@@ -615,7 +615,7 @@ namespace MapRenderer.Tests.Visual
             public readonly double  MetresPerDevicePixel;
             public readonly double  MapAlignedExpectationPx;
 
-            public LabelArmResult(double inkHeightPx, int quadCount, double2 anchorScreenPx,
+            public SymbolArmResult(double inkHeightPx, int quadCount, double2 anchorScreenPx,
                 double metresPerDevicePixel, double mapAlignedExpectationPx)
             {
                 InkHeightPx              = inkHeightPx;
@@ -626,7 +626,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        /// <summary>Renders the glyph 'A' through the REAL <c>LabelPlacementSystem.Tick</c> — exactly
+        /// <summary>Renders the glyph 'A' through the REAL <c>SymbolPlacementSystem.Tick</c> — exactly
         /// <c>WorldPointEmitRenderTests.cs:104–116</c>'s recipe (double Tick: the collision verdict is
         /// harvested one Tick late) — anchored at <c>frame.SceneOriginRender</c> (the look-at itself, so it
         /// projects to screen centre at BOTH tilts and the two ink heights are comparable).
@@ -634,15 +634,15 @@ namespace MapRenderer.Tests.Visual
         /// <para>When <paramref name="inkHeight0PxForMapExpectation"/> is supplied (the 55° call), also
         /// computes the MAP-aligned expectation for a quad of that height: <c>GroundSegmentSpanPx</c> of a
         /// world-plane segment <c>inkHeight(0°) · mpp</c> metres tall, on THIS scene's own camera.</para></summary>
-        private static LabelArmResult RenderLabelArm(
-            double tiltDeg, GlyphAtlasTexture atlasTexture, TextLayoutResult layout,
+        private static SymbolArmResult RenderSymbolArm(
+            double tiltDeg, GlyphAtlasTexture atlasTexture, List<SymbolQuad> quads, TextLayoutBounds bounds,
             double? inkHeight0PxForMapExpectation)
         {
             var config = new TiltedGroundSceneConfig
             {
                 TiltDegrees     = tiltDeg,
                 BackgroundColor = Color.white, // WorldSymbolInkAnalysis.InkThreshold reads dark ink on white.
-                LitAmbient      = false,       // the label arm needs no lit recipe.
+                LitAmbient      = false,       // the symbol arm needs no lit recipe.
             };
             using var scene = TiltedGroundScene.Create(config);
             using var snap  = new SnapshotRenderer(config.SizePx, config.SizePx);
@@ -651,20 +651,18 @@ namespace MapRenderer.Tests.Visual
             double3 anchorRender = frame.SceneOriginRender; // the look-at, per T4's screen-centre requirement.
 
             long tileKey = TestTileKeys.PackedContaining(config.LookAt.Surface, zoom: 14);
-            var label = new LabelInstance
-            {
-                AnchorRender = anchorRender, Layout = layout, Paint = LabelPaint.Default,
-                TextSizePx = 220f, SortKey = 0f, FeatureIndex = 0, TileKey = tileKey,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
+                paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(scene.MapCam,
+            var system = new SymbolPlacementSystem(scene.MapCam,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(scene.MapCam.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 int quadCount = system.LastQuadCount;
 
                 scene.Render(snap);
@@ -681,7 +679,7 @@ namespace MapRenderer.Tests.Visual
                 // origin — the look-at, under camera-relative rendering), NOT `anchorRender` itself, which is
                 // the PRE-RTC absolute render-space coordinate the shader never sees directly (SceneFrame's
                 // Rebase/RTC cancels it out — see WorldPointEmitRenderTests' NEW-F1 tooth for the proof that
-                // this cancellation is exact regardless of which real tile the label nominally belongs to).
+                // this cancellation is exact regardless of which real tile the symbol nominally belongs to).
                 double2 anchorScreenPx = GroundRuler.ProjectPx(scene.UnityCamera, double3.zero);
                 double  mpp            = scene.MetresPerDevicePixel;
 
@@ -693,7 +691,7 @@ namespace MapRenderer.Tests.Visual
                         scene.UnityCamera, double3.zero, new double2(0.0, 1.0), quadHeightWorld);
                 }
 
-                return new LabelArmResult(inkHeightPx, quadCount, anchorScreenPx, mpp, mapAlignedExpectationPx);
+                return new SymbolArmResult(inkHeightPx, quadCount, anchorScreenPx, mpp, mapAlignedExpectationPx);
             }
             finally
             {
@@ -703,10 +701,10 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>Half of <see cref="TiltedGroundSceneConfig.SizePx"/>'s default (512) — the frame centre
         /// in device px, for T4 (a)'s screen-centre precondition.</summary>
-        private const double LabelFrameCentrePx = 256.0;
+        private const double SymbolFrameCentrePx = 256.0;
 
         /// <summary>
-        /// <b>T4.</b> Proves: the harness renders a PRODUCTION-PATH label at tilt, and resolves screen extent
+        /// <b>T4.</b> Proves: the harness renders a PRODUCTION-PATH symbol at tilt, and resolves screen extent
         /// finely enough to separate a map-aligned expectation from a viewport-aligned measurement by ~74% —
         /// i.e. P3 will have a real acceptance criterion.
         ///
@@ -718,20 +716,20 @@ namespace MapRenderer.Tests.Visual
         /// collision or fade.</para>
         /// </summary>
         [Test]
-        public void ViewportPitchAlignedLabel_DoesNotForeshorten_AndTheFixtureCanSeeThatItWould()
+        public void ViewportPitchAlignedSymbol_DoesNotForeshorten_AndTheFixtureCanSeeThatItWould()
         {
-            (GlyphAtlasTexture atlasTexture, TextLayoutResult layout) = WorldPointEmitRenderTests.BuildGlyphA();
+            (GlyphAtlasTexture atlasTexture, List<SymbolQuad> quads, TextLayoutBounds bounds) = WorldPointEmitRenderTests.BuildGlyphA();
             try
             {
-                LabelArmResult r0  = RenderLabelArm(0.0,     atlasTexture, layout, null);
-                LabelArmResult r55 = RenderLabelArm(TiltDeg, atlasTexture, layout, r0.InkHeightPx);
+                SymbolArmResult r0  = RenderSymbolArm(0.0,     atlasTexture, quads, bounds, null);
+                SymbolArmResult r55 = RenderSymbolArm(TiltDeg, atlasTexture, quads, bounds, r0.InkHeightPx);
 
-                // (a) precondition. 0 ⇒ the label is culled under tilt → escalate, §9 fork 1.
+                // (a) precondition. 0 ⇒ the symbol is culled under tilt → escalate, §9 fork 1.
                 Assert.That(r55.QuadCount, Is.EqualTo(1),
                     "T4 (a): the label must not be culled at 55° — LastQuadCount == 0 here means §9 fork 1 " +
                     "applies (STOP and report; do not lower the tilt or hand-build the mesh unreported).");
                 double centreDistPx = math.length(
-                    r55.AnchorScreenPx - new double2(LabelFrameCentrePx, LabelFrameCentrePx));
+                    r55.AnchorScreenPx - new double2(SymbolFrameCentrePx, SymbolFrameCentrePx));
                 Assert.That(centreDistPx, Is.LessThan(8.0),
                     $"T4 (a): the anchor must project within 8px of frame centre at 55° (measured " +
                     $"{centreDistPx:F2}px) — AnchorRender is the look-at exactly so the two tilts are " +

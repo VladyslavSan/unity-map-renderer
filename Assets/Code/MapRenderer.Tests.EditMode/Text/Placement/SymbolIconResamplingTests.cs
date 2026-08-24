@@ -237,7 +237,7 @@ namespace MapRenderer.Tests.Text.Placement
                 SymbolQuad quad = IconQuadLayout.Layout(
                     left, sheet.View.Size, Magnification, MapRenderer.Core.Text.TextAnchor.Center, float2.zero);
 
-                byte[] px = RenderIcon(sheet, glyphAtlas, quad, "left", LabelPaintWhite(), Color.black, out _);
+                byte[] px = RenderIcon(sheet, glyphAtlas, quad, "left", SymbolPaintWhite(), Color.black, out _);
 
                 // The left sprite is pure RED. Any pixel where blue leads red carries ink from the RIGHT
                 // sprite — impossible unless the sampler reached across the rect boundary.
@@ -466,7 +466,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>
         /// A minimal one-glyph atlas. Required even though nothing here renders TEXT:
-        /// <c>LabelPlacementSystem.TickCore</c> gates its whole placement pass on
+        /// <c>SymbolPlacementSystem.TickCore</c> gates its whole placement pass on
         /// <c>atlas?.Texture != null</c>, so a null glyph atlas silently places ZERO icons. An empty
         /// <see cref="GlyphAtlas"/> will not do either — <see cref="GlyphAtlasTexture.Upload"/> no-ops at
         /// <c>Size.y == 0</c> and leaves the texture null, which trips the same gate.
@@ -613,7 +613,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── render + measure ──────────────────────────────────────────────────────────────────────────
 
-        private static LabelPaint LabelPaintWhite() => new LabelPaint
+        private static SymbolPaint SymbolPaintWhite() => new SymbolPaint
         {
             TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
             HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
@@ -629,7 +629,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static float RenderAndMeasureInkCentroidX(
             SpriteSheet sheet, GlyphAtlasTexture glyphAtlas, in SymbolQuad quad, string iconName)
         {
-            byte[] px = RenderIcon(sheet, glyphAtlas, quad, iconName, LabelPaint.Default, Color.white, out int width);
+            byte[] px = RenderIcon(sheet, glyphAtlas, quad, iconName, SymbolPaint.Default, Color.white, out int width);
 
             double weighted = 0.0, total = 0.0;
             for (int i = 0, p = 0; i + 3 < px.Length; i += 4, p++)
@@ -655,7 +655,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static float RenderAndMeasureBarSeparationPx(
             SpriteSheet sheet, GlyphAtlasTexture glyphAtlas, in SymbolQuad quad, string iconName)
         {
-            byte[] px = RenderIcon(sheet, glyphAtlas, quad, iconName, LabelPaint.Default, Color.white, out int width);
+            byte[] px = RenderIcon(sheet, glyphAtlas, quad, iconName, SymbolPaint.Default, Color.white, out int width);
 
             var column = new double[width];
             for (int i = 0, p = 0; i + 3 < px.Length; i += 4, p++)
@@ -693,13 +693,13 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
-        /// Drives ONE icon through the real LabelPlacementSystem → Map/Symbol/IconWorld path and returns the
+        /// Drives ONE icon through the real SymbolPlacementSystem → Map/Symbol/IconWorld path and returns the
         /// raw RGBA32 readback. The readback is the vertical mirror of on-screen (Unity's render-to-texture
         /// Y-flip), which is irrelevant to every measurement here — all of them are horizontal.
         /// </summary>
         private static byte[] RenderIcon(
             SpriteSheet sheet, GlyphAtlasTexture glyphAtlas, in SymbolQuad quad, string iconName,
-            LabelPaint paint, Color background, out int width)
+            SymbolPaint paint, Color background, out int width)
         {
             var camGo = new GameObject("IconResampling_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -729,26 +729,25 @@ namespace MapRenderer.Tests.Text.Placement
             long tileKey = TestTileKeys.PackedContaining(
                 new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
 
-            var labels = new List<LabelInstance>
-            {
-                new LabelInstance
-                {
-                    AnchorRender = frame.SceneOriginRender,
-                    // 0: the collision box is inert here (one label, AllowOverlap) — only Quads[0], the
-                    // padded quad, reaches the framebuffer, and that is what every measurement reads.
-                    Layout = IconQuadLayout.ToLayoutResult(quad, skirtPx: 0f),
-                    Kind = LabelKind.Icon,
-                    Paint = paint,
-                    TextSizePx = TextQuadLayout.OneEm, // scale 1 — the real StyledSymbolTileBuilder icon path
-                    IconImage = iconName,
-                    AllowOverlap = true,
-                    SortKey = 0f,
-                    FeatureIndex = 0,
-                    TileKey = tileKey,
-                },
-            };
+            // Skirt 0 here, so the inline bounds formula (IconQuadLayout.ToLayoutResult's own maths) reduces
+            // to the quad's raw min/max corner.
+            var quads = new List<SymbolQuad> { quad };
+            float2 boundsMin = math.min(quad.TopLeft, quad.BottomRight);
+            float2 boundsMax = math.max(quad.TopLeft, quad.BottomRight);
+            var buffer = new SymbolTileBuffer();
+            // 0: the collision box is inert here (one symbol, AllowOverlap) — only quads[0], the padded quad,
+            // reaches the framebuffer, and that is what every measurement reads.
+            TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, quads, boundsMin, boundsMax,
+                kind: SymbolKind.Icon,
+                paint: paint,
+                textSizePx: TextQuadLayout.OneEm, // scale 1 — the real StyledSymbolTileBuilder icon path
+                iconImage: iconName,
+                allowOverlap: true,
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(
+            var system = new SymbolPlacementSystem(
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -757,9 +756,9 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // The collision verdict is harvested one Tick late (§2.6) — hence the duplicate tick.
-                system.Tick(in frame, plan.Build(labels), glyphAtlas, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
                     spriteTexture: sheet.Texture);
-                system.Tick(in frame, plan.Build(labels), glyphAtlas, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
                     spriteTexture: sheet.Texture);
                 Assert.AreEqual(1, system.LastQuadCount, "the single icon quad must place (not culled).");
 

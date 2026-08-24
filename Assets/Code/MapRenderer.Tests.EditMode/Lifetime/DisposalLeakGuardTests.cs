@@ -169,7 +169,7 @@ namespace MapRenderer.Tests.Lifetime
         // MapEntitiesWorld) BEFORE MapViewComponent.OnDestroy runs. The record-teardown loop then called into
         // the backend's RemoveItems, which touched the deallocated EntityManager and threw straight out of
         // DoDispose — stranding _prepared, the backend, the pipelines, and (via MapView.Teardown)
-        // Layers/Labels/Symbols: the whole-graph "finalized without Dispose()" flood, independent of whether
+        // Layers/SymbolPlacementSystem/Symbols: the whole-graph "finalized without Dispose()" flood, independent of whether
         // any tile was still loading (which is why an idle Stop leaked too). This drives the exact ordering by
         // disposing the World out from under the live map, then asserts Teardown runs to completion.
         //
@@ -180,7 +180,7 @@ namespace MapRenderer.Tests.Lifetime
         // pipelines; the catch swallows the throw so DoesNotThrow still passes, but the Mesh-baseline and the
         // VerifiedDisposable-leak assertions go RED (tile meshes stranded; PreparedTileCache, the backend, the
         // scheduler and pipelines never disposed). (2) additionally delete MapView.Teardown's catch → Teardown
-        // itself throws and DoesNotThrow goes RED (Layers/Labels/Symbols strand too — the original flood).
+        // itself throws and DoesNotThrow goes RED (Layers/SymbolPlacementSystem/Symbols strand too — the original flood).
 
         /// <summary>
         /// Teardown must complete — no throw, tile Meshes released to baseline, zero VerifiedDisposable

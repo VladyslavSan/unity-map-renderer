@@ -13,14 +13,14 @@ namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// W4 — a curved (along-line) text cell is centred VERTICALLY on the path, by the same optical
-    /// (cap-band) metric a centred point label uses (<c>docs/road-shields-design.md</c> §11 D12). Before
-    /// W4 the curved producer left every cell baseline-relative, so a road label rendered a fixed offset
+    /// (cap-band) metric a centred point symbol uses (<c>docs/road-shields-design.md</c> §11 D12). Before
+    /// W4 the curved producer left every cell baseline-relative, so a road symbol rendered a fixed offset
     /// above/below the road it was drawn along — at every tilt, tilt 0 included.
     ///
     /// <para><b>Oracle hygiene.</b> No tooth here takes <c>TextQuadLayout.OpticalCentreBelowReferencePx</c>
     /// as its expected value — that is the code under test, and an oracle derived from it is vacuous.
     /// T1 measures the ink band the committed fixture's own glyph metrics predict, T2 measures a
-    /// per-glyph-vs-per-label distinction that needs no magnitude at all, and T3 uses the POINT path
+    /// per-glyph-vs-per-symbol distinction that needs no magnitude at all, and T3 uses the POINT path
     /// (fixed by a different stage, pinned by <c>TextVerticalCentringTests</c>, untouched by W4) as an
     /// independent reference.</para>
     /// </summary>
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Text
         // =========================================================================================
         // W4-T1 — the headline invariant, in cell coordinates: a baseline-resting CAP glyph's ink band
         // straddles the anchor. Cell y=0 is the point on the path (both consumers map the cell linearly
-        // and homogeneously about the anchor — BillboardMath.BuildWorldQuad, LabelBox.BuildRotatedGlyph),
+        // and homogeneously about the anchor — BillboardMath.BuildWorldQuad, SymbolBox.BuildRotatedGlyph),
         // so "on the road" is exactly "ink band symmetric about y=0".
         //
         // The preconditions come FIRST and from the fixture's own entry, the V9 pattern: this tooth's
@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.Text
         // looking perfectly correct. T1 and T2 are a pair; neither alone is the tooth.
         // =========================================================================================
         [Test]
-        public void CurvedCells_ShiftIsOnePerLabelConstant_NotPerGlyph()
+        public void CurvedCells_ShiftIsOnePerSymbolConstant_NotPerGlyph()
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
@@ -122,7 +122,7 @@ namespace MapRenderer.Tests.Text
             for (int i = 0; i < codepoints.Length; i++) entries[i] = atlas.Append(latin.Glyphs[codepoints[i]]);
 
             // Vacuity guard: a run whose glyphs share their metrics could not distinguish per-glyph from
-            // per-label centring at all.
+            // per-symbol centring at all.
             Assert.AreNotEqual(BareHeight(entries[0]), BareHeight(entries[1]),
                 $"vacuity guard: 'A' and 'g' must differ in bare height on this fixture " +
                 $"({BareHeight(entries[0])} vs {BareHeight(entries[1])})");
@@ -153,7 +153,7 @@ namespace MapRenderer.Tests.Text
         // path centres the whole block, the curved path centres each glyph on its own arc centre.
         //
         // The equality holds because the point path's centre shift carries a (lineCount - 1) line-spacing
-        // term that vanishes for the single line a curved label always is; LineCount is asserted as a
+        // term that vanishes for the single line a curved symbol always is; LineCount is asserted as a
         // precondition so a future multi-line change cannot silently make this compare two different things.
         // =========================================================================================
         [Test]
@@ -175,15 +175,16 @@ namespace MapRenderer.Tests.Text
                 LetterSpacingEm = 0f,
             };
 
-            TextLayoutResult point = TextQuadLayout.Layout(run, atlas, in options);
+            var pointQuads = new List<SymbolQuad>();
+            TextLayoutBounds point = TextQuadLayout.Layout(run, atlas, in options, pointQuads);
             Assert.AreEqual(1, point.LineCount, "precondition: the point twin must be single-line, or the " +
                 "block's (lineCount - 1) line-spacing term stops vanishing and the two paths are no longer comparable");
-            Assert.AreEqual(1, point.Quads.Count, "the point path emits one quad for '5'");
+            Assert.AreEqual(1, pointQuads.Count, "the point path emits one quad for '5'");
 
             IReadOnlyList<CurvedGlyph> curved = CurvedTextLayout.Layout(run, atlas);
             Assert.AreEqual(1, curved.Count, "the curved path emits one cell for '5'");
 
-            SymbolQuad pointQuad = point.Quads[0];
+            SymbolQuad pointQuad = pointQuads[0];
             SymbolQuad curvedCell = curved[0].Cell;
 
             Assert.AreEqual(pointQuad.TopLeft.y, curvedCell.TopLeft.y, 1e-3f,

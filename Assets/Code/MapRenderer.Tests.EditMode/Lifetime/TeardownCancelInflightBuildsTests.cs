@@ -9,7 +9,7 @@
 // observe it.
 //
 // Coverage gap (recorded, not closed here): the EditMode drain is symbol-silent, so the symbol-side leak
-// vector (SymbolTileLabelBlock) is not exercised by this file — the maintainer's in-Editor Stop check
+// vector (SymbolTileBlock) is not exercised by this file — the maintainer's in-Editor Stop check
 // covers it.
 
 using System.Collections.Generic;

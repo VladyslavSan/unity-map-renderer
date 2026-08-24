@@ -92,25 +92,26 @@ namespace MapRenderer.Tests.Text
                 LetterSpacingEm = 0f,
             };
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in options);
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
             Assert.AreEqual(2, result.LineCount, "word1+space+word2 fits; adding space+word3 must overflow to a new line");
-            Assert.AreEqual(6, result.Quads.Count, "8 glyphs minus the 2 whitespace glyphs (never quaded) = 6");
+            Assert.AreEqual(6, resultQuads.Count, "8 glyphs minus the 2 whitespace glyphs (never quaded) = 6");
 
             // Golden line map: word1+word2 (4 quads) on line 0, word3 (2 quads) on line 1.
             int[] expectedLineIndices = { 0, 0, 0, 0, 1, 1 };
             for (int i = 0; i < expectedLineIndices.Length; i++)
             {
-                Assert.AreEqual(expectedLineIndices[i], result.Quads[i].LineIndex, $"quad {i} LineIndex");
+                Assert.AreEqual(expectedLineIndices[i], resultQuads[i].LineIndex, $"quad {i} LineIndex");
             }
 
             // Teeth: a no-wrap impl would put everything on line 0.
-            Assert.IsTrue(result.Quads[4].LineIndex != result.Quads[0].LineIndex, "a no-wrap impl fails: word3 must be on a different line than word1");
+            Assert.IsTrue(resultQuads[4].LineIndex != resultQuads[0].LineIndex, "a no-wrap impl fails: word3 must be on a different line than word1");
 
             // Teeth: a break-mid-word impl would split word2's 'A'/'a' across two different LineIndex
             // values (they must both be on line 0, adjacent to word1's glyphs, not word3's line).
-            Assert.AreEqual(result.Quads[2].LineIndex, result.Quads[3].LineIndex, "word2's two glyphs must share the same line (no mid-word break)");
-            Assert.AreNotEqual(result.Quads[3].LineIndex, result.Quads[4].LineIndex, "word2 and word3 must be on different lines");
+            Assert.AreEqual(resultQuads[2].LineIndex, resultQuads[3].LineIndex, "word2's two glyphs must share the same line (no mid-word break)");
+            Assert.AreNotEqual(resultQuads[3].LineIndex, resultQuads[4].LineIndex, "word2 and word3 must be on different lines");
         }
 
         [Test]
@@ -135,12 +136,13 @@ namespace MapRenderer.Tests.Text
                 LetterSpacingEm = 0f,
             };
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in options);
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
             Assert.AreEqual(1, result.LineCount, "a single word (no interior whitespace) can never be split -- one line regardless of max-width");
-            Assert.AreEqual(2, result.Quads.Count);
-            Assert.AreEqual(0, result.Quads[0].LineIndex);
-            Assert.AreEqual(0, result.Quads[1].LineIndex);
+            Assert.AreEqual(2, resultQuads.Count);
+            Assert.AreEqual(0, resultQuads[0].LineIndex);
+            Assert.AreEqual(0, resultQuads[1].LineIndex);
         }
 
         // =========================================================================================
@@ -171,19 +173,20 @@ namespace MapRenderer.Tests.Text
                 LetterSpacingEm = 0f,
             };
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in options);
+            var resultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
-            Assert.AreEqual(2, result.Quads.Count, "3 glyphs minus the 1 whitespace glyph (never quaded) = 2 (N-1)");
+            Assert.AreEqual(2, resultQuads.Count, "3 glyphs minus the 1 whitespace glyph (never quaded) = 2 (N-1)");
 
             float penAfterSpace = entryA.Advance + entrySpace.Advance; // pen consumes the space's FULL advance
             float expectedLowerAMinX = penAfterSpace + entryLowerA.Left - GlyphSdf.Buffer;
 
-            Assert.AreEqual(expectedLowerAMinX, result.Quads[1].TopLeft.x, Tolerance,
+            Assert.AreEqual(expectedLowerAMinX, resultQuads[1].TopLeft.x, Tolerance,
                 "the glyph after the space must be positioned as if the space consumed its full advance");
 
             // Teeth: an impl that drops the space's advance would place 'a' as if right after 'A' alone.
             float wrongMinXIfSpaceDropped = entryA.Advance + entryLowerA.Left - GlyphSdf.Buffer;
-            Assert.AreNotEqual(wrongMinXIfSpaceDropped, result.Quads[1].TopLeft.x, "dropping the space's advance would mis-position the following glyph");
+            Assert.AreNotEqual(wrongMinXIfSpaceDropped, resultQuads[1].TopLeft.x, "dropping the space's advance would mis-position the following glyph");
         }
     }
 }

@@ -13,19 +13,20 @@ works today (the milestone), and the known problems with an analysis of how to f
 ## The pipeline (data flow across assemblies)
 
 ```
-TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, prologue)
+TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prologue)
                  │  + RunWorkerAndHandoff (pool, inside the SAME kick task as the mesh pass)  (Unity/Text)
                  │  decode + extract features — off the main thread (thread pool), sharing the mesh
                  │  pass's decode (A4/A5b: one decode-once entry, no parallel push feed)
                  │  shape glyphs (HarfBuzz-free CodepointTextShaper, bidi, Arabic joining)  (Core/Text)
+                 │  ShapeAsync writes each raw label into a reused SymbolTileBuffer (no per-label alloc)
                  ▼
-              List<LabelInstance>  ──▶  SymbolTileLabelStore                 (Unity/Text)
-                 │  per-(source,tile) label sets, collected-set Version, static-frame skip
+     SymbolTileBuffer ─▶ Bake ─▶ SymbolTileBlock ──▶ SymbolTileStore   (Unity/Text)
+                 │  native per-tile SoA block; per-(source,tile) sets, collected-set Version, static-frame skip
                  ▼
-      ┌── LabelPlacementSystem.Tick(frame, labels, atlas)  (Unity/Text/Placement)  [PER FRAME, MAIN]
+      ┌── SymbolPlacementSystem.Tick(frame, labels, atlas)  (Unity/Text/Placement)  [PER FRAME, MAIN]
       │      1. ProjectPositions  — gather world points + project to screen  (SymbolProjectionJob, Jobs — .Run())
       │      2. Stage             — lay each glyph onto the projected curve, build collision boxes + quads
-      │      3. Collide           — greedy all-or-nothing placement          (LabelCollisionJob, Jobs)
+      │      3. Collide           — greedy all-or-nothing placement          (SymbolCollisionJob, Jobs)
       │      4. Emit              — A-4 fade + assemble per-slot quad buckets
       │      5. BuildSubmit       — write the billboard Mesh + upload        (SymbolBillboardJob, Jobs)
       └──────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -36,18 +37,18 @@ TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, 
 | Concern | Assembly / path | Key files |
 |---|---|---|
 | Shaping, bidi, glyph atlas/SDF, font stacks | `Core/Text/` | `CodepointTextShaper`, `BidiReorder`, `ArabicJoining`, `GlyphAtlas*`, `FontStack*`, `TextQuadLayout`, `CurvedTextLayout` |
-| Placement math (engine-free) | `Core/Text/Placement/` | `LabelBox`, `LabelCollision(Grid)`, `LabelScreenProjection`, `PolylineArcWalker`, `LabelInstance`, `PlacedQuad`, `LabelBearing` |
-| Tile build orchestration (off-thread) | `Unity/Text/` | `SymbolLabelSubsystem`, `StyledSymbolTileBuilder`, `SymbolTileLabelStore` |
+| Placement math (engine-free) | `Core/Text/Placement/` | `SymbolBox`, `SymbolCollision(Grid)`, `SymbolScreenProjection`, `PolylineArcWalker`, `SymbolTileBuffer`/`ShapedSymbol` (the reused per-build shape buffer), `PlacedQuad`, `SymbolBearing` |
+| Tile build orchestration (off-thread) | `Unity/Text/` | `SymbolSubsystem`, `StyledSymbolTileBuilder`, `SymbolTileStore` |
 | Glyph atlas texture (GPU) | `Unity/Text/` | `GlyphAtlasTexture`, `GlyphManager` |
-| Per-frame placement | `Unity/Text/Placement/` | `LabelPlacementSystem` (the god-method: project → stage → collide → emit) |
-| Burst hot loops | `Jobs/` | `SymbolProjectionJob`, `LabelCollisionJob`, `SymbolBillboardJob` |
+| Per-frame placement | `Unity/Text/Placement/` | `SymbolPlacementSystem` (the god-method: project → stage → collide → emit) |
+| Burst hot loops | `Jobs/` | `SymbolProjectionJob`, `SymbolCollisionJob`, `SymbolBillboardJob` |
 
 ## What works today (the milestone)
 
 - **Point labels** (`symbol-placement: point`) and **curved along-line labels** (`line` / `line-center`)
   — per-glyph text that follows the line tangent.
 - **Collision** — one global greedy all-or-nothing pass over a uniform grid; point and line labels
-  compete for the same space. Runs as the Burst `LabelCollisionJob`.
+  compete for the same space. Runs as the Burst `SymbolCollisionJob`.
 - **Fade** (A-4) — labels ease in/out instead of popping; **cross-tile identity** (A-3) keeps a label's
   opacity across a parent/child tile swap; **sticky-placement hysteresis** (A-5) resists flicker.
 - **Static-frame skip** (B-1) — an idle camera with an unchanged label set re-submits the cached mesh
@@ -55,7 +56,7 @@ TileManager's per-tile KICK ──▶ SymbolLabelSubsystem.TryBeginBuild (main, 
 - **Shaping** — a clean-room codepoint shaper with bidi reordering + Arabic joining, SDF glyphs from
   glyph-PBF ranges, multi-font stacks.
 - **Off-main tile build** — decode + feature-extract run on the thread pool; only glyph shaping and the
-  atlas upload touch the main thread (see `SymbolLabelSubsystem.TryBeginBuild`/`RunWorkerAndHandoff`,
+  atlas upload touch the main thread (see `SymbolSubsystem.TryBeginBuild`/`RunWorkerAndHandoff`,
   driven by `TileManager`'s per-tile kick, A5b).
 
 For the exact MapLibre `text-*` property coverage (wired vs. parsed-but-dead vs. missing), see the
@@ -67,8 +68,8 @@ Profiled in-Editor on a pan frame, 2026-07-11 (markers below). One `LateUpdate` 
 labels are **~21.8 ms** — labels *are* the frame cost right now.
 
 1. **Staging dominates the frame — `Symbol.Stage` ≈ 12.77 ms (76% of the label Tick), managed, on the
-   main thread.** For every visible label, every frame, `StagePointLabel` / `StageCurvedLabel`
-   (`LabelPlacementSystem.cs`) re-lay-out each glyph onto the freshly-projected screen curve and build a
+   main thread.** For every visible label, every frame, `StagePoint` / `StageCurved`
+   (`SymbolPlacementSystem.cs`) re-lay-out each glyph onto the freshly-projected screen curve and build a
    collision box + render quad per glyph. Curved (road) labels dominate: per label × per anchor × per
    glyph it walks the arc for a screen point + tangent and runs ~6 transcendental ops (keep-upright
    `cos`, max-angle `atan2`/`sin`/`cos`, rotated-box `sin`/`cos`). It is all `math.*` in **managed C#**
@@ -84,7 +85,7 @@ labels are **~21.8 ms** — labels *are* the frame cost right now.
    with no cross-frame memory. The static-skip (B-1) hides this for a truly idle camera, but any motion
    pays full price.
 
-4. **`LabelCollisionJob` is `Schedule().Complete()` with no interleaved work.** A single `IJob` scheduled
+4. **`SymbolCollisionJob` is `Schedule().Complete()` with no interleaved work.** A single `IJob` scheduled
    onto a worker and immediately blocked on — worker hand-off + fence for zero parallelism. `.Run()`
    (inline Burst) is strictly cheaper today; deferring the `Complete()` a frame (B-4b) is the real win.
    Note `SymbolProjectionJob` was already switched to inline `.Run()` (no schedule round-trip, no count
@@ -101,7 +102,7 @@ are, cheapest first:
 | Lever | What | Reduces | Effort |
 |---|---|---|---|
 | **A. De-quadratic the arc walk** | single forward cursor in `PolylineArcWalker.At()` / place all a label's glyphs in one polyline pass | CPU (algorithmic), independent of thread/Burst | small, Core-only, test-covered |
-| **B. Move `Stage` off the main thread** | run the managed staging loop on a worker — it builds plain data (`PlacedQuad`/`LabelBox`/`LabelCandidate`) and touches **no Unity API**, so it needs no Burst/nativization to relocate | main-thread occupancy (the 12.77 ms) | medium |
+| **B. Move `Stage` off the main thread** | run the managed staging loop on a worker — it builds plain data (`PlacedQuad`/`SymbolBox`/`SymbolCandidate`) and touches **no Unity API**, so it needs no Burst/nativization to relocate | main-thread occupancy (the 12.77 ms) | medium |
 | **C. Nativize + Burst `Stage`** | blittable inputs/outputs → the trig-heavy loop becomes a Burst job (SIMD + inlined trig) that also runs off-main | CPU **and** occupancy — the endgame | large |
 
 Whether A or C matters more depends on road vertex counts vs. glyph volume (grab `LastCandidateCount`
@@ -123,11 +124,11 @@ All under `ProfilerCategory.Scripts`, so a re-profile is self-serve:
 
 | Marker | Covers |
 |---|---|
-| `MapRenderer.Symbol.LabelTick` | the whole per-frame placement Tick |
+| `MapRenderer.Symbol.SymbolTick` | the whole per-frame placement Tick |
 | `MapRenderer.Symbol.Project` | umbrella: gather + projection + staging |
 | ` ├ MapRenderer.Symbol.ProjectPositions` | gather world points + project (job-wait / inline `.Run()`) |
 | ` └ MapRenderer.Symbol.Stage` | the managed staging loop (**the hot spot**) |
-| `MapRenderer.Symbol.Collide` | `LabelCollisionJob` schedule + complete |
+| `MapRenderer.Symbol.Collide` | `SymbolCollisionJob` schedule + complete |
 | `MapRenderer.Symbol.Emit` | A-4 fade + per-slot quad-bucket assembly |
 | `MapRenderer.Symbol.BuildSubmit` | billboard Mesh write + upload |
 | `MapRenderer.Symbol.Collect` | (upstream, MapView) label aggregation |

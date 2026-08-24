@@ -1,10 +1,10 @@
 // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-// LabelPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+// SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
 // Tools/core-tests/core-tests.csproj (it renders).
 //
-// Stage W4 — THE HEADLINE ARM: a curved road label's ink sits ON the road, at tilt 0.
+// Stage W4 — THE HEADLINE ARM: a curved road symbol's ink sits ON the road, at tilt 0.
 //
-// WHY THIS FILE EXISTS. The maintainer's very first reported defect was that road labels render "not on the
+// WHY THIS FILE EXISTS. The maintainer's very first reported defect was that road symbols render "not on the
 // road geometry itself but with some offset, below or above the road" — and it reproduces at tilt 0, so it is
 // not a pitch defect at all. The cause is a producer one: CurvedTextLayout baked every cell BASELINE-relative
 // while the point path applied TextQuadLayout's optical-centre shift. The gate at W2 was structurally blind
@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Visual
         private const float TextSizePx = 160f;
 
         /// <summary>Half-length of the road, as a multiple of the frame ruler. Only has to exceed the chord
-        /// probe's half-width (the label is ONE glyph, so its arc span is exactly 0 and the spill gate is
+        /// probe's half-width (the symbol is ONE glyph, so its arc span is exactly 0 and the spill gate is
         /// trivially satisfied); 200 leaves a wide margin at both ends.</summary>
         private const double RoadHalfLengthRulerUnits = 200.0;
 
@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W4-T4 — a curved label's ink is centred on the road it is drawn along, at tilt 0.</b> Proves the
+        /// <b>W4-T4 — a curved symbol's ink is centred on the road it is drawn along, at tilt 0.</b> Proves the
         /// maintainer's reported defect is gone, in the pose they reported it in, measured from a REAL
         /// <see cref="CurvedTextLayout"/> cell rendered through the real placement system and the real shader.
         ///
@@ -96,7 +96,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>Why the mid-row of the ink bbox is the right measurement.</b> Cell y = 0 IS the point on
         /// the path: both consumers map the cell linearly and homogeneously about the anchor
-        /// (<c>BillboardMath.BuildWorldQuad</c>, <c>LabelBox.BuildRotatedGlyph</c>), so zero maps to zero
+        /// (<c>BillboardMath.BuildWorldQuad</c>, <c>SymbolBox.BuildRotatedGlyph</c>), so zero maps to zero
         /// under every branch. '5' being exactly cap-height and baseline-resting, its ink band is symmetric
         /// about that zero, and the rendered band's midpoint must therefore land on the anchor's row.</para>
         ///
@@ -127,7 +127,7 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W4-T5 — a curved label and a centre-anchored POINT label of the same glyph sit the same way on
+        /// <b>W4-T5 — a curved symbol and a centre-anchored POINT symbol of the same glyph sit the same way on
         /// the same anchor, rendered.</b> The render-level statement of the requirement that the two producers
         /// have the same optical relationship to their anchor.
         ///
@@ -190,9 +190,9 @@ namespace MapRenderer.Tests.Visual
             => File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", fileName));
 
         /// <summary>
-        /// Renders the same glyph twice through ONE scene and ONE camera — once as a CURVED along-line label
+        /// Renders the same glyph twice through ONE scene and ONE camera — once as a CURVED along-line symbol
         /// whose cell comes from the real <see cref="CurvedTextLayout"/>, once as a centre-anchored POINT
-        /// label whose quads come from <see cref="TextQuadLayout"/> — and also returns the road anchor's own
+        /// symbol whose quads come from <see cref="TextQuadLayout"/> — and also returns the road anchor's own
         /// projected screen row.
         ///
         /// <para>'5' is built here rather than reusing <c>WorldCurvedAbRenderSnapshotTests.BuildGlyphF</c>:
@@ -209,12 +209,12 @@ namespace MapRenderer.Tests.Visual
                 SizePx           = SizePx,
                 DevicePixelRatio = 1.0,
                 BackgroundColor  = Color.white, // WorldSymbolInkAnalysis.InkThreshold reads dark ink on white.
-                LitAmbient       = false,       // the label arm needs no lit recipe.
+                LitAmbient       = false,       // the symbol arm needs no lit recipe.
             };
 
             TiltedGroundScene    scene    = null;
             GlyphAtlasTexture    texture  = null;
-            LabelPlacementSystem system   = null;
+            SymbolPlacementSystem system   = null;
             TestSymbolPlan       plan     = null;
             SnapshotRenderer     snapshot = null;
             try
@@ -236,10 +236,12 @@ namespace MapRenderer.Tests.Visual
                     Direction = TextDirection.LeftToRight,
                 };
 
-                IReadOnlyList<CurvedGlyph> curvedCells = CurvedTextLayout.Layout(run, atlas);
+                var curvedCells = new List<CurvedGlyph>();
+                CurvedTextLayout.Layout(run, atlas, curvedCells);
                 Assert.AreEqual(1, curvedCells.Count, "precondition: '5' lays out to exactly one curved cell.");
 
-                TextLayoutResult pointLayout = TextQuadLayout.Layout(run, atlas, new TextLayoutOptions
+                var pointQuads = new List<SymbolQuad>();
+                TextLayoutOptions pointOptions = new TextLayoutOptions
                 {
                     Anchor          = TextAnchor.Center,
                     Offset          = float2.zero,
@@ -248,9 +250,10 @@ namespace MapRenderer.Tests.Visual
                     MaxWidthEm      = 10f,
                     LineHeightEm    = 1.2f,
                     LetterSpacingEm = 0f,
-                });
-                Assert.AreEqual(1, pointLayout.Quads.Count, "precondition: '5' lays out to exactly one point quad.");
-                Assert.AreEqual(1, pointLayout.LineCount, "precondition: the point twin must be single-line.");
+                };
+                TextLayoutBounds pointBounds = TextQuadLayout.Layout(run, atlas, in pointOptions, pointQuads);
+                Assert.AreEqual(1, pointQuads.Count, "precondition: '5' lays out to exactly one point quad.");
+                Assert.AreEqual(1, pointBounds.LineCount, "precondition: the point twin must be single-line.");
 
                 SceneFrame frame = scene.BuildIdentityRebaseSceneFrame();
                 double3 origin = frame.SceneOriginRender;
@@ -268,49 +271,42 @@ namespace MapRenderer.Tests.Visual
 
                 long tileKey = TestTileKeys.PackedContaining(sceneConfig.LookAt.Surface, zoom: 14);
 
-                system = new LabelPlacementSystem(scene.MapCam,
+                system = new SymbolPlacementSystem(scene.MapCam,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
                 snapshot = new SnapshotRenderer(SizePx, SizePx);
 
-                var curvedLabel = new LabelInstance
-                {
-                    Placement    = SymbolPlacement.LineCenter,
-                    PathRender   = new[] { pathA, pathB },
-                    PathUpRender = new[] { up, up },
-                    UpRender     = up,
-                    LineAnchors  = new[] { new LineAnchor(0, 0.5f) },
-                    CurvedGlyphs = curvedCells,
-                    Paint        = LabelPaint.Default,
-                    Text         = "curved",
-                    TextSizePx   = TextSizePx,
-                    MaxAngleDeg  = 180f,
-                    KeepUpright  = false,
+                var curvedBuffer = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddCurved(curvedBuffer, curvedCells, new[] { new LineAnchor(0, 0.5f) },
+                    new[] { pathA, pathB }, new[] { up, up },
+                    placement: SymbolPlacement.LineCenter,
+                    up: up,
+                    paint: SymbolPaint.Default,
+                    text: "curved",
+                    textSizePx: TextSizePx,
+                    maxAngleDeg: 180f,
+                    keepUpright: false,
                     // P3a's recorded lesson: at coarse zoom the dedup/collision machinery decides who emits
-                    // and a fixture silently loses its label.
-                    AllowOverlap = true,
-                    FeatureIndex = 0,
-                    TileKey      = tileKey,
-                };
+                    // and a fixture silently loses its symbol.
+                    allowOverlap: true,
+                    featureIndex: 0,
+                    tileKey: tileKey);
 
-                var pointLabel = new LabelInstance
-                {
-                    // Placement left at its default (Point) — this is the point emit path, deliberately.
-                    AnchorRender = origin,
-                    UpRender     = up,
-                    Layout       = pointLayout,
-                    Paint        = LabelPaint.Default,
+                var pointBuffer = new SymbolTileBuffer();
+                // Placement left at its default (Point) — this is the point emit path, deliberately.
+                TestSymbolTileBuffer.AddPoint(pointBuffer, origin, pointQuads, pointBounds.Min, pointBounds.Max,
+                    up: up,
+                    paint: SymbolPaint.Default,
                     // Distinct from the curved arm's: PointFadeId hashes (AnchorRender, MaterialIndex, Text,
                     // IconImage), and the two arms share an anchor.
-                    Text         = "point",
-                    TextSizePx   = TextSizePx,
-                    AllowOverlap = true,
-                    FeatureIndex = 1,
-                    TileKey      = tileKey,
-                };
+                    text: "point",
+                    textSizePx: TextSizePx,
+                    allowOverlap: true,
+                    featureIndex: 1,
+                    tileKey: tileKey);
 
-                curved = RenderArm(scene, system, plan, snapshot, texture, in frame, curvedLabel, "curved");
-                point  = RenderArm(scene, system, plan, snapshot, texture, in frame, pointLabel,  "point");
+                curved = RenderArm(scene, system, plan, snapshot, texture, in frame, curvedBuffer, "curved");
+                point  = RenderArm(scene, system, plan, snapshot, texture, in frame, pointBuffer,  "point");
 
                 // The oracle. The anchor is the road's midpoint, which is the scene origin, which is Unity
                 // world Vector3.zero after RTC.
@@ -337,14 +333,13 @@ namespace MapRenderer.Tests.Visual
         }
 
         private static RowReading RenderArm(
-            TiltedGroundScene scene, LabelPlacementSystem system, TestSymbolPlan plan,
+            TiltedGroundScene scene, SymbolPlacementSystem system, TestSymbolPlan plan,
             SnapshotRenderer snapshot, GlyphAtlasTexture atlas, in SceneFrame frame,
-            LabelInstance label, string armName)
+            SymbolTileBuffer buffer, string armName)
         {
-            var one = new[] { label };
             // R3: duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(one), atlas);
-            system.Tick(in frame, plan.Build(one), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"W4-T4/T5 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road (StageCurved's centerArc ± halfSpan " +

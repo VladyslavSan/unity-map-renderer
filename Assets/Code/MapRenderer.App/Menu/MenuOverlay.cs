@@ -20,7 +20,7 @@ namespace MapRenderer.App.Menu
     /// </summary>
     public sealed class MenuOverlay : MonoBehaviour
     {
-        /// <summary>The MapView this menu operates on (camera presets, label diagnostics). Wired at runtime by
+        /// <summary>The MapView this menu operates on (camera presets, symbol diagnostics). Wired at runtime by
         /// MapHost — a runtime reference, not a serialized Inspector field.</summary>
         public MapViewComponent Map { get; set; }
 
@@ -56,7 +56,7 @@ namespace MapRenderer.App.Menu
         // Arbitrary, stable window id — only needs to be unique among concurrent GUI.Window calls in the scene.
         private const int WindowId = 0x0DEB6;
 
-        /// <summary>The map component pages act on (camera / labels). Null until wired / before Play.</summary>
+        /// <summary>The map component pages act on (camera / symbols). Null until wired / before Play.</summary>
         internal MapViewComponent MapComponent => Map;
 
         /// <summary>Open a sub-page (pushes it onto the navigation stack; a null page is ignored).</summary>

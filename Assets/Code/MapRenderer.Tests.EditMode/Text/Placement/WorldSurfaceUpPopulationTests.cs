@@ -3,7 +3,7 @@
 // P2 T-3: the byte-identical invariant (§1 of the P2 plan) means the RENDER cannot tell you whether `Up` is
 // populated correctly — a zeroed, a hardcoded +Y, and a correct per-projection `Up` would all render
 // IDENTICALLY (the vertex attribute is written and unread by every shader). So this file inspects DATA: it
-// drives a real LabelPlacementSystem.Tick to a real world mesh (WorldMeshReadback.Read) and asserts the
+// drives a real SymbolPlacementSystem.Tick to a real world mesh (WorldMeshReadback.Read) and asserts the
 // vertex `Up` against a CLOSED FORM written out independently in each test — never by calling the production
 // sampler (IProjection.ProjectPoint / PolylineArcMath.SampleUp) to produce the expectation.
 
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Text.Placement
             return texture;
         }
 
-        private static LabelInstance MakePointLabel(double3 anchorRender, double3 upRender)
+        private static SymbolTileBuffer MakePointSymbol(double3 anchorRender, double3 upRender)
         {
             var quads = new List<SymbolQuad>
             {
@@ -53,16 +53,14 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
                 },
             };
-            var layout = new TextLayoutResult { Quads = quads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
-            return new LabelInstance
-            {
-                AnchorRender = anchorRender, UpRender = upRender, Layout = layout, Paint = LabelPaint.Default,
-                TextSizePx = 24f, SortKey = 0f, FeatureIndex = 0, TileKey = 0L,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, float2.zero, new float2(18f, 18f),
+                up: upRender, paint: SymbolPaint.Default, textSizePx: 24f, sortKey: 0f, featureIndex: 0, tileKey: 0L);
+            return buffer;
         }
 
-        // Runs one real Tick of `label` under `projection` and returns the world mesh's stream-0 vertices.
-        private static WorldBillboardVertex[] RunPointTick(IProjection projection, LabelInstance label)
+        // Runs one real Tick of `buffer` under `projection` and returns the world mesh's stream-0 vertices.
+        private static WorldBillboardVertex[] RunPointTick(IProjection projection, SymbolTileBuffer buffer)
         {
             var camGo = new GameObject("SurfaceUpPopulation_TestCamera");
             try
@@ -78,16 +76,15 @@ namespace MapRenderer.Tests.Text.Placement
                     Rebase = float3x3.identity,
                 };
                 var atlasTexture = BuildTinyAtlasTexture();
-                var system = new LabelPlacementSystem(mapCamera,
+                var system = new SymbolPlacementSystem(mapCamera,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 try
                 {
-                    var labels = new List<LabelInstance> { label };
                     // R3: collision verdicts apply one Tick late — duplicate before reading placement.
-                    system.TickLabels(in frame, labels, atlasTexture, projection);
-                    system.TickLabels(in frame, labels, atlasTexture, projection);
+                    system.TickSymbols(in frame, buffer, atlasTexture, projection);
+                    system.TickSymbols(in frame, buffer, atlasTexture, projection);
                     Assert.AreEqual(1, system.LastQuadCount, "precondition: the label must place (not cull).");
-                    Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh), "the world slot mesh must exist.");
+                    Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh mesh), "the world slot mesh must exist.");
                     WorldMeshReadback.Read(mesh, out WorldBillboardVertex[] v, out _);
                     return v;
                 }
@@ -103,10 +100,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── (a) Spherical, point label ──────────────────────────────────────────────────────────────────
+        // ── (a) Spherical, point symbol ──────────────────────────────────────────────────────────────────
 
         [Test]
-        public void SphericalPointLabel_Up_MatchesClosedFormGeodeticNormal_OnEveryCorner()
+        public void SphericalPointSymbol_Up_MatchesClosedFormGeodeticNormal_OnEveryCorner()
         {
             var projection = new SphericalProjection();
             double lambda = Anchor.Longitude * math.PI_DBL / 180.0;
@@ -120,7 +117,7 @@ namespace MapRenderer.Tests.Text.Placement
             double3 anchorRender = projection.Project(Anchor);
             double3 upRender = projection.ProjectPoint(Anchor).Up; // the value the extractor threads through P2's chain
 
-            WorldBillboardVertex[] v = RunPointTick(projection, MakePointLabel(anchorRender, upRender));
+            WorldBillboardVertex[] v = RunPointTick(projection, MakePointSymbol(anchorRender, upRender));
             Assert.AreEqual(4, v.Length, "one point quad, 4 corners");
 
             foreach (WorldBillboardVertex vv in v)
@@ -139,23 +136,23 @@ namespace MapRenderer.Tests.Text.Placement
         // ── (b) Web Mercator, same fixture ──────────────────────────────────────────────────────────────
 
         [Test]
-        public void WebMercatorPointLabel_Up_IsExactlyPlusY()
+        public void WebMercatorPointSymbol_Up_IsExactlyPlusY()
         {
             var projection = new WebMercatorProjection();
             double3 anchorRender = projection.Project(Anchor);
             double3 upRender = projection.ProjectPoint(Anchor).Up;
 
-            WorldBillboardVertex[] v = RunPointTick(projection, MakePointLabel(anchorRender, upRender));
+            WorldBillboardVertex[] v = RunPointTick(projection, MakePointSymbol(anchorRender, upRender));
             Assert.AreEqual(4, v.Length);
 
             foreach (WorldBillboardVertex vv in v)
                 Assert.AreEqual(new float3(0f, 1f, 0f), vv.Up, "Web Mercator's Up is the CONSTANT +Y — no per-vertex math to narrow wrong");
         }
 
-        // ── (c) Spherical, curved/along-line label ──────────────────────────────────────────────────────
+        // ── (c) Spherical, curved/along-line symbol ──────────────────────────────────────────────────────
 
         [Test]
-        public void SphericalCurvedLabel_Up_MatchesClosedFormAtEachGlyphsOwnSampledPosition()
+        public void SphericalCurvedSymbol_Up_MatchesClosedFormAtEachGlyphsOwnSampledPosition()
         {
             var projection = new SphericalProjection();
             // A short (2 deg) span centred on the camera look-at, on the same non-equator/non-meridian
@@ -174,20 +171,10 @@ namespace MapRenderer.Tests.Text.Placement
             };
             LineAnchor centerAnchor = AnchorAtMidpoint(path);
 
-            var lineLabel = new LabelInstance
-            {
-                Placement = SymbolPlacement.LineCenter,
-                PathRender = path,
-                PathUpRender = pathUps,
-                LineAnchors = new[] { centerAnchor },
-                CurvedGlyphs = glyphs,
-                Paint = LabelPaint.Default,
-                TextSizePx = 24f,
-                MaxAngleDeg = 45f,
-                KeepUpright = true,
-                FeatureIndex = 0,
-                TileKey = 0L,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddCurved(buffer, glyphs, new[] { centerAnchor }, path, pathUps,
+                placement: SymbolPlacement.LineCenter, paint: SymbolPaint.Default, textSizePx: 24f,
+                maxAngleDeg: 45f, keepUpright: true, featureIndex: 0, tileKey: 0L);
 
             var camGo = new GameObject("SurfaceUpPopulationCurved_TestCamera");
             WorldBillboardVertex[] v;
@@ -200,15 +187,14 @@ namespace MapRenderer.Tests.Text.Placement
                     zoom: 6.0, heading: 0.0, tilt: 0.0), projection: projection);
                 var frame = new SceneFrame { SceneOriginRender = mapCamera.Projection.Project(Anchor), Rebase = float3x3.identity };
                 var atlasTexture = BuildTinyAtlasTexture();
-                var system = new LabelPlacementSystem(mapCamera,
+                var system = new SymbolPlacementSystem(mapCamera,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 try
                 {
-                    var labels = new List<LabelInstance> { lineLabel };
-                    system.TickLabels(in frame, labels, atlasTexture, projection);
-                    system.TickLabels(in frame, labels, atlasTexture, projection);
+                    system.TickSymbols(in frame, buffer, atlasTexture, projection);
+                    system.TickSymbols(in frame, buffer, atlasTexture, projection);
                     Assert.AreEqual(3, system.LastQuadCount, "precondition: 3 glyphs, all placed");
-                    Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh mesh), "the world text slot must exist.");
+                    Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh mesh), "the world text slot must exist.");
                     WorldMeshReadback.Read(mesh, out v, out _);
                 }
                 finally
@@ -224,7 +210,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(12, v.Length, "3 glyphs x 4 verts");
 
-            // TileKey 0 unpacks to TileId{0,0,0} (LabelTileKey.Pack's default) — recover
+            // TileKey 0 unpacks to TileId{0,0,0} (SymbolTileKey.Pack's default) — recover
             // the SAME render-space tile origin TestSymbolPlan baked AnchorLocal against, so worldPt below
             // is the glyph's REAL sampled world position, not an approximation.
             double3 tileOriginRender = TileRenderOrigin.Project(new TileId { Z = 0, X = 0, Y = 0 }, projection);
@@ -258,10 +244,10 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.AreEqual(vv.Up, v[g * 4 + c].Up, $"glyph {g}: every corner shares the glyph's own Up");
             }
 
-            // Not a vacuous per-label constant: the three glyphs sample genuinely different, MONOTONIC
-            // fractions — never out of order, never a duplicate. NOT hardcoded ascending: LabelStagingMath.
+            // Not a vacuous per-symbol constant: the three glyphs sample genuinely different, MONOTONIC
+            // fractions — never out of order, never a duplicate. NOT hardcoded ascending: SymbolStagingMath.
             // StageCurvedAnchor's text-keep-upright reversal ("a centre tangent pointing leftward reads
-            // right-to-left; walk the arc reversed...") flips the WHOLE label's walk direction when the
+            // right-to-left; walk the arc reversed...") flips the WHOLE symbol's walk direction when the
             // anchor's on-screen tangent points leftward — a real, pre-existing (P1, untouched by P2) branch
             // this fixture's camera/anchor geometry happens to trigger, producing DESCENDING t here. Either
             // direction is a correct render; only a MIXED order (a glyph out of step with its neighbours) or
@@ -289,7 +275,7 @@ namespace MapRenderer.Tests.Text.Placement
             },
         };
 
-        // The single-segment (2-point path) case of LabelPlacementStructureTests' AnchorAt(path, 0.5) —
+        // The single-segment (2-point path) case of SymbolPlacementStructureTests' AnchorAt(path, 0.5) —
         // duplicated rather than shared (that helper is `private` on a sibling test class; the "broaden to
         // internal" footprint is for production seams, not a 6-line test-local formula).
         private static LineAnchor AnchorAtMidpoint(double3[] path)

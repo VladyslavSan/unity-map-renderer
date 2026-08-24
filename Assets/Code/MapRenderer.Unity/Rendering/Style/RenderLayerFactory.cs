@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Style
             {
                 Fill.StyleLayer f                          => FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex),
                 Line.StyleLayer l                           => LineRenderLayer.TryCreate(l, settings, initialZoom, drawIndex),
-                // The Source != null guard mirrors SymbolLabelSubsystem.SetStyle's skip so the slot-taking
+                // The Source != null guard mirrors SymbolSubsystem.SetStyle's skip so the slot-taking
                 // symbol layers stay exactly the set the subsystem manages — the 1:1 slot↔subsystem-ordinal
                 // mapping E2 relies on. Create never returns null (unlike TryCreate) — see its own doc.
                 // Only the GameObject-bearing symbol presenter receives the Hierarchy parent; fill/line/

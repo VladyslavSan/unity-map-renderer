@@ -16,6 +16,7 @@
 // (blank, since the filler has no bitmap) instead of 'A' — inkPage1 would collapse to ~0, failing the
 // "meaningful ink" assertion below.
 
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -103,7 +104,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
 
             var camGo = new GameObject("SymbolMultiPage_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -122,28 +124,25 @@ namespace MapRenderer.Tests.Text.Placement
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
 
-            var label = new LabelInstance
-            {
-                AnchorRender = anchorRender,
-                Layout = layout,
-                Paint = LabelPaint.Default,
-                TextSizePx = 220f,
-                SortKey = 0f,
-                FeatureIndex = 0,
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
+                paint: SymbolPaint.Default,
+                textSizePx: 220f,
+                sortKey: 0f,
+                featureIndex: 0,
                 // Epic A / A1 Risk R1: a realistic containing tile keeps the world-anchored bake float32-safe
                 // (TileKey=0 is ~2e7m away — see SymbolAtlasOrientationSnapshotTests' identical note).
-                TileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
-            };
+                tileKey: TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14));
 
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
-            var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label's anchor must not be culled");
 
                 snap.Render(uCam);

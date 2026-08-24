@@ -2,10 +2,10 @@ using UnityEngine;
 
 namespace MapRenderer.App.Menu
 {
-    /// <summary>Diagnostics page: on-demand analyses of the live map. Arms the label breakdown
-    /// (<c>LabelPlacementSystem.RequestLabelBreakdown</c>), which logs a per-style-layer + per-vertical-screen-band
-    /// tally of the next frame's input labels to the Console (the "what/where are all these labels" reproducer).
-    /// Supersedes the standalone <c>LabelBreakdownOverlay</c>.</summary>
+    /// <summary>Diagnostics page: on-demand analyses of the live map. Arms the symbol breakdown
+    /// (<c>SymbolPlacementSystem.RequestSymbolBreakdown</c>), which logs a per-style-layer + per-vertical-screen-band
+    /// tally of the next frame's input symbols to the Console (the "what/where are all these symbols" reproducer).
+    /// Supersedes the standalone <c>SymbolBreakdownOverlay</c>.</summary>
     internal sealed class DiagnosticsPage : IMenuPage
     {
         // Last action feedback. Always drawn (even when empty) so the control count is constant across the
@@ -18,17 +18,17 @@ namespace MapRenderer.App.Menu
         /// <inheritdoc/>
         public void Draw(MenuOverlay menu)
         {
-            var labels = menu.MapComponent != null ? menu.MapComponent.View?.Labels : null;
+            var symbols = menu.MapComponent != null ? menu.MapComponent.View?.SymbolPlacementSystem : null;
 
             GUILayout.Label("Label placement analysis (logs to the Console).");
 
-            if (GUILayout.Button("Analyze labels (per-layer + screen band)"))
+            if (GUILayout.Button("Analyze symbols (per-layer + screen band)"))
             {
-                if (labels == null)
+                if (symbols == null)
                     _status = "No live MapView.";
                 else
                 {
-                    labels.RequestLabelBreakdown();
+                    symbols.RequestSymbolBreakdown();
                     _status = "Capture armed — see Console next frame.";
                 }
             }

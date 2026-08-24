@@ -42,7 +42,7 @@ namespace MapRenderer.Core.Geometry
     ///
     /// <para><i>Note on scope of the claim:</i> <c>GeoJsonTileSlicer</c> quantizes to integers AFTER
     /// clipping, which currently masks a sub-ulp disagreement of this size. The guarantee is the clipper's
-    /// own, and it is what a consumer working at unquantized precision — seam-matched stroke and label
+    /// own, and it is what a consumer working at unquantized precision — seam-matched stroke and symbol
     /// geometry, S2/S3 — gets to rely on.</para>
     /// </summary>
     public static class PolylineWindowClipper

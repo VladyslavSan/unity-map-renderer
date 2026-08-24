@@ -1,5 +1,5 @@
 // Test-only image-analysis helpers shared by WorldSymbolAbRenderSnapshotTests (T2) and
-// WorldLabelMotionTests (T3) — kept in its own file (rather than duplicated per test, or bolted onto
+// WorldSymbolMotionTests (T3) — kept in its own file (rather than duplicated per test, or bolted onto
 // SymbolAtlasOrientationSnapshotTests) so both A0 GPU teeth share ONE ink-analysis implementation without
 // touching that existing, frozen test file. Internal, not public (test-code-bloat convention: a test
 // helper's footprint stays inside the test assembly).
@@ -41,7 +41,7 @@ namespace MapRenderer.Tests
 
         /// <summary>Same scan, restricted to the INCLUSIVE row band
         /// <paramref name="rowFrom"/>..<paramref name="rowTo"/> (clamped to the buffer; an inverted band
-        /// reports no ink) — for a frame carrying more than one label, where a whole-frame scan reports one
+        /// reports no ink) — for a frame carrying more than one symbol, where a whole-frame scan reports one
         /// merged bounding box that belongs to neither.
         ///
         /// <para>The whole-frame overload above forwards to this one, so there is exactly ONE scanner: a

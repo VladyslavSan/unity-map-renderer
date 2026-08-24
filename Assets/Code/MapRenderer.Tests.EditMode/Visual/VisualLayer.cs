@@ -3,7 +3,7 @@
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
 // The LAYER half of the kit. G-V0 shipped fill-only (plan §1 decision 5, §10 scope fence); G-V1 adds
-// SymbolTextVisualLayer (point labels only) as a sibling VisualLayer subclass — no VisualScene JSON-assembly
+// SymbolTextVisualLayer (point symbols only) as a sibling VisualLayer subclass — no VisualScene JSON-assembly
 // change (VisualScene's glyph wiring + readiness spin ARE new, but the "layers" array assembly itself did
 // not change shape). A line layer kind is still a future VisualLayer subclass.
 
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests
         }
     }
 
-    /// <summary>A <c>type: "symbol"</c> text <see cref="VisualLayer"/> — point labels only (G-V1 scope
+    /// <summary>A <c>type: "symbol"</c> text <see cref="VisualLayer"/> — point symbols only (G-V1 scope
     /// fence; no icons, no line/curved placement). No <c>"source-layer"</c> is emitted: an inline-geojson
     /// source resolves its implicit layer the same way the fill layer does
     /// (<c>SourceLayerResolver.ResolveTileLayer</c>), so binding is <see cref="Source"/> alone.</summary>
@@ -161,7 +161,7 @@ namespace MapRenderer.Tests
                 $"\"text-size\":{_textSizePx.ToString(CultureInfo.InvariantCulture)}",
                 $"\"text-font\":{_textFontJson}",
                 // Always on (plan Risk/lessons `flaky-tilesymbolkick-settle`): the dedup/collision machinery
-                // at coarse zoom silently drops labels a fixture needs both of to render.
+                // at coarse zoom silently drops symbols a fixture needs both of to render.
                 "\"text-allow-overlap\":true",
             };
             string paintColorJson = _textColorJson ?? DefaultTextColorJson;

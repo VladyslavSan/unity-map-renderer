@@ -260,9 +260,9 @@ namespace MapRenderer.Jobs.Mvt
             }
             finally
             {
-                if (commands.IsCreated) commands.Dispose();
-                if (featOffsets.IsCreated) featOffsets.Dispose();
-                if (featLengths.IsCreated) featLengths.Dispose();
+                commands.Dispose();
+                featOffsets.Dispose();
+                featLengths.Dispose();
             }
 
             return layer;

@@ -1,9 +1,9 @@
-// Unity EditMode only — real OffLookAtLabelScene (MapCamera + Camera/RenderTexture + a real
-// LabelPlacementSystem.Tick), mesh readback through the live camera.
+// Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real
+// SymbolPlacementSystem.Tick), mesh readback through the live camera.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
 // Stage W1 — the FIXTURE arm (W1-T1…T5): the assertions Stage P-M built the apparatus for and deliberately
-// deferred. Read `OffLookAtLabelScene`'s header first; `OffLookAtLabelFixtureTests` (M1–M13) is the
+// deferred. Read `OffLookAtSymbolScene`'s header first; `OffLookAtSymbolFixtureTests` (M1–M13) is the
 // apparatus' own acceptance suite and every tooth there still passes unchanged.
 //
 // THE MODEL, SETTLED, NOT RE-DERIVED HERE: `text-size` under `*-pitch-alignment: map` means X px TOP-DOWN.
@@ -11,7 +11,7 @@
 // letter spacing foreshorten together — the same principle as `line-width`.
 //
 // THE TRAP THESE TEETH EXIST TO AVOID. `CrossNear`/`CrossFar` are ISO-DEPTH by construction, and for an
-// iso-depth label a true per-glyph WORLD walk and a screen walk scaled by ONE per-label constant produce
+// iso-depth symbol a true per-glyph WORLD walk and a screen walk scaled by ONE per-symbol constant produce
 // IDENTICAL output — and that second thing is a model this epic already built and reverted. A stage can be
 // green on all 14 P-M teeth while re-implementing the bug. W1-T2/T3/T4 live on the RECEDING
 // (depth-spanning) arm and are the falsifiability of this stage; T1 is the inherited regression tooth and T5
@@ -35,19 +35,19 @@ namespace MapRenderer.Tests.Visual
     [TestFixture]
     public class MapPitchedWorldArcLayoutTests
     {
-        private static readonly OffLookAtLabelId[] CurvedIds =
+        private static readonly OffLookAtSymbolId[] CurvedIds =
         {
-            OffLookAtLabelId.CrossNear, OffLookAtLabelId.CrossFar,
-            OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar,
+            OffLookAtSymbolId.CrossNear, OffLookAtSymbolId.CrossFar,
+            OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar,
         };
 
-        private static readonly OffLookAtLabelId[] RecedingIds =
+        private static readonly OffLookAtSymbolId[] RecedingIds =
         {
-            OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar,
+            OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar,
         };
 
-        private static OffLookAtLabelScene CreateFixture(double devicePixelRatio = 1.0)
-            => OffLookAtLabelScene.Create(new OffLookAtLabelSceneConfig
+        private static OffLookAtSymbolScene CreateFixture(double devicePixelRatio = 1.0)
+            => OffLookAtSymbolScene.Create(new OffLookAtSymbolSceneConfig
             {
                 DevicePixelRatio = devicePixelRatio,
             });
@@ -61,12 +61,12 @@ namespace MapRenderer.Tests.Visual
         /// mean screen spacing halves when the view depth doubles — far/near reads 0.500, where the pre-W1
         /// screen-constant layout read 1.0000.
         ///
-        /// <para>It is a RATIO of two readings from ONE frame and ONE label pair, so any uniform scale error
+        /// <para>It is a RATIO of two readings from ONE frame and ONE symbol pair, so any uniform scale error
         /// (OneEm, TextSizePx, mpp, DPR, atlas scale, a wrong P11) multiplies both and CANCELS. Only the depth
         /// dependence survives, which is exactly the question.</para>
         ///
-        /// <para><b>Does NOT prove that spacing foreshortens per-GLYPH rather than per-LABEL.</b> Both labels
-        /// are iso-depth, so a screen walk scaled by one per-label constant passes this tooth. That is what
+        /// <para><b>Does NOT prove that spacing foreshortens per-GLYPH rather than per-LABEL.</b> Both symbols
+        /// are iso-depth, so a screen walk scaled by one per-symbol constant passes this tooth. That is what
         /// W1-T2 is for, and why T1 alone would not be an acceptable stage.</para>
         ///
         /// <para>RED-verify: injection I1 (force <c>worldArc = false</c>) — reads 1.0000.</para>
@@ -75,8 +75,8 @@ namespace MapRenderer.Tests.Visual
         public void CrossAzimuthPair_ScreenSpacing_HalvesWithDepth()
         {
             using var f = CreateFixture();
-            double nearMean = OffLookAtLabelScene.Mean(f.Measure(OffLookAtLabelId.CrossNear).ScreenSpacingPx);
-            double farMean  = OffLookAtLabelScene.Mean(f.Measure(OffLookAtLabelId.CrossFar).ScreenSpacingPx);
+            double nearMean = OffLookAtSymbolScene.Mean(f.Measure(OffLookAtSymbolId.CrossNear).ScreenSpacingPx);
+            double farMean  = OffLookAtSymbolScene.Mean(f.Measure(OffLookAtSymbolId.CrossFar).ScreenSpacingPx);
             double ratio = farMean / nearMean;
             // Printed as well as asserted: the depth-derived expectation is what the 0.500 constant stands
             // for, and seeing both makes a pose change legible instead of mysterious.
@@ -91,11 +91,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W1-T2 — THE HEADLINE. Per gap, all four curved labels, both directions, both depths.
+        // W1-T2 — THE HEADLINE. Per gap, all four curved symbols, both directions, both depths.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W1-T2 — THE HEADLINE TOOTH.</b> Proves: EVERY gap of ALL FOUR curved labels — 16 gaps across two
+        /// <b>W1-T2 — THE HEADLINE TOOTH.</b> Proves: EVERY gap of ALL FOUR curved symbols — 16 gaps across two
         /// directions and two depths — measures <c>AdvanceWorldMetres</c> in the world, within 1 %. That is
         /// the model stated directly: one glyph advance is one fixed world length, everywhere in the frame.
         ///
@@ -103,9 +103,9 @@ namespace MapRenderer.Tests.Visual
         /// definition and the frame ruler. Nothing measured. The MEASURAND is the staged world anchors read
         /// back off the built meshes.</para>
         ///
-        /// <para><b>Why a per-label constant cannot pass it — the iso-depth trap closed.</b> On the RECEDING
-        /// arms a screen-uniform walk (or a world walk scaled by one per-label constant, which is the same
-        /// thing) produces world gaps that GROW along the label as depth increases, reading well over the
+        /// <para><b>Why a per-symbol constant cannot pass it — the iso-depth trap closed.</b> On the RECEDING
+        /// arms a screen-uniform walk (or a world walk scaled by one per-symbol constant, which is the same
+        /// thing) produces world gaps that GROW along the symbol as depth increases, reading well over the
         /// oracle at the far end. Against a 1 % bound that is enormous. The cross arms cannot see this; the
         /// receding arms are where the tooth has teeth.</para>
         ///
@@ -128,7 +128,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W1-T3 — the world claim carried into SCREEN space through the live camera.</b> For each gap of
-        /// each receding label, the expectation is
+        /// each receding symbol, the expectation is
         /// <c>|ProjectPx(A_i + d̂·AdvanceWorldMetres) − ProjectPx(A_i)|</c>, where <c>A_i</c> is glyph
         /// <c>i</c>'s MEASURED world position and <c>d̂</c> is the fixture's own road direction. The measured
         /// screen gap must match it within 3 %.
@@ -156,14 +156,14 @@ namespace MapRenderer.Tests.Visual
             table.AppendLine();
             table.AppendLine("   label          gap  measuredPx   projectedPx   err%    closedFormPx (reported)");
 
-            foreach (OffLookAtLabelId id in RecedingIds)
+            foreach (OffLookAtSymbolId id in RecedingIds)
             {
-                LabelMeasurement m = f.Measure(id);
+                SymbolMeasurement m = f.Measure(id);
                 for (int g = 0; g + 1 < m.Glyphs.Length; g++)
                 {
                     double3 a = m.Glyphs[g].WorldUnity;
                     // A DIRECTION taken from the measurement, never a length: the road runs along ±ĝ and
-                    // which sign is a fact about how the label was laid out, not about how far apart the
+                    // which sign is a fact about how the symbol was laid out, not about how far apart the
                     // glyphs are.
                     double sign = math.sign(math.dot(m.Glyphs[g + 1].WorldUnity - a, f.RecedingDir));
                     double3 b = a + f.RecedingDir * (sign * f.AdvanceWorldMetres);
@@ -193,7 +193,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W1-T4 — the cheapest discriminating reading in the stage.</b> Proves: along each receding
-        /// label, screen gaps decrease STRICTLY with view depth, and on <c>RecedingNear</c> the nearest gap is
+        /// symbol, screen gaps decrease STRICTLY with view depth, and on <c>RecedingNear</c> the nearest gap is
         /// more than 1.10× the farthest.
         ///
         /// <para>Model-discriminating on its own and with no oracle at all: a screen-constant walk gives
@@ -210,9 +210,9 @@ namespace MapRenderer.Tests.Visual
         public void RecedingGaps_ShrinkStrictlyWithDepth()
         {
             using var f = CreateFixture();
-            foreach (OffLookAtLabelId id in RecedingIds)
+            foreach (OffLookAtSymbolId id in RecedingIds)
             {
-                LabelMeasurement m = f.Measure(id);
+                SymbolMeasurement m = f.Measure(id);
                 int gaps = m.ScreenSpacingPx.Length;
                 Assert.That(gaps, Is.GreaterThan(1),
                     $"W1-T4 precondition ({id}): need at least two gaps to speak of monotonicity, got {gaps}.");
@@ -245,7 +245,7 @@ namespace MapRenderer.Tests.Visual
                     $"W1-T4 ({id}): screen gaps must shrink STRICTLY as view depth grows — smallest step " +
                     $"{worstStep:F6} px. Gaps:{report} A flat sequence is the pre-W1 screen-constant walk.");
 
-                if (id == OffLookAtLabelId.RecedingNear)
+                if (id == OffLookAtSymbolId.RecedingNear)
                     Assert.That(nearest / farthest, Is.GreaterThan(1.10),
                         $"W1-T4 ({id}): the nearest gap must exceed the farthest by more than 10 % — reads " +
                         $"{nearest / farthest:F4} ({nearest:F3} px vs {farthest:F3} px). RecedingFar is " +
@@ -260,7 +260,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W1-T5 — the DPR tooth (R2).</b> W1-T2 re-run on a fixture built at
-        /// <c>DevicePixelRatio = 2</c>: every gap of every curved label must still measure
+        /// <c>DevicePixelRatio = 2</c>: every gap of every curved symbol must still measure
         /// <c>AdvanceWorldMetres</c>, the SAME number of metres as at DPR 1.
         ///
         /// <para><b>The expectation is deliberately NOT "twice the DPR-1 value".</b> The altitude framing uses
@@ -276,7 +276,7 @@ namespace MapRenderer.Tests.Visual
         /// self-referential oracle could see it either.</para>
         ///
         /// <para>RED-verify: injection I2 (drop <c>* _camera.DevicePixelRatio</c> in
-        /// <c>LabelPlacementSystem</c>) — DPR 1 stays green, this reads 0.5×.</para>
+        /// <c>SymbolPlacementSystem</c>) — DPR 1 stays green, this reads 0.5×.</para>
         /// </summary>
         [Test]
         public void EveryCurvedGap_MeasuresTheSameWorldAdvance_AtDevicePixelRatioTwo()
@@ -289,11 +289,11 @@ namespace MapRenderer.Tests.Visual
 
         // ── shared ───────────────────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Computes the world residual for every gap of all four curved labels, asserts the WORST,
-        /// and puts the full per-label/per-gap table in the failure message (NUnit throws on the first
+        /// <summary>Computes the world residual for every gap of all four curved symbols, asserts the WORST,
+        /// and puts the full per-symbol/per-gap table in the failure message (NUnit throws on the first
         /// failure, so asserting per gap would let the first one shadow the rest).</summary>
         private static void AssertEveryGapMatchesTheWorldAdvance(
-            OffLookAtLabelScene f, string what, double boundPercent)
+            OffLookAtSymbolScene f, string what, double boundPercent)
         {
             double expectedM = f.AdvanceWorldMetres;
             Assert.That(expectedM, Is.GreaterThan(0.0),
@@ -312,9 +312,9 @@ namespace MapRenderer.Tests.Visual
                 f.Config.DevicePixelRatio));
             table.AppendLine("   label          gap      worldM        err%     viewDepthM");
 
-            foreach (OffLookAtLabelId id in CurvedIds)
+            foreach (OffLookAtSymbolId id in CurvedIds)
             {
-                LabelMeasurement m = f.Measure(id);
+                SymbolMeasurement m = f.Measure(id);
                 Assert.That(m.WorldSpacingM.Length, Is.EqualTo(f.Config.GlyphCount - 1),
                     $"{what} precondition ({id}): expected {f.Config.GlyphCount - 1} gaps, got " +
                     $"{m.WorldSpacingM.Length} — the label did not stage every glyph.");

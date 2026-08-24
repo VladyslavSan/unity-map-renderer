@@ -16,14 +16,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// (matching the mesh side's per-layer granularity). This is parity-safe because
     /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.ShapeAsync"/>
     /// are ALREADY per-layer loops, so N single-layer processors invoked in declared order reproduce the
-    /// identical call sequence and label order as one N-layer call.
+    /// identical call sequence and symbol order as one N-layer call.
     ///
-    /// <para>Worker step = <see cref="StyledSymbolTileBuilder.ExtractLayers"/> for this one layer (the
-    /// moved form of the pre-A3 <c>SymbolLabelSubsystem.BuildTileAsync</c> decode+extract). Main tail =
+    /// <para>Worker step = <see cref="StyledSymbolTileBuilder.ExtractLayers"/> for this one layer. Main tail =
     /// <see cref="StyledSymbolTileBuilder.ShapeAsync"/> for this layer's extraction, appending into the
-    /// build's SHARED <see cref="LabelInstance"/> output list — every processor of one build writes into
-    /// the SAME list object, so the committed list is the same shape <c>SymbolTileLabelStore.CompleteBuild</c>
-    /// receives today (no concat step, no order ambiguity).</para>
+    /// build's SHARED <see cref="SymbolTileBuffer"/> — every processor of one build writes into
+    /// the SAME instance (the pairing-adjacency rule), so the committed scratch is the same shape
+    /// <c>SymbolTileStore.CompleteBuild</c> receives today (no concat step, no order ambiguity).</para>
     /// </summary>
     internal sealed class TileSymbolLayerProcessor : ITileWorkerThenMainLayerProcessor
     {
@@ -33,9 +32,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         // already allocates.
         private readonly SymbolStyle.StyleLayer[] _layerWrapper;
         private readonly int[]                    _materialIndexWrapper;
-        private readonly List<LabelInstance>      _sharedOutput;
+        private readonly SymbolTileBuffer       _sharedBuffer;
         // I5b/D6: forwarded verbatim to ExtractLayers' spriteAtlas param. D6 (docs/road-shields-design.md §3
-        // D6): a build's worker step (this class) only ever runs once SymbolLabelSubsystem.SpritesSettled is
+        // D6): a build's worker step (this class) only ever runs once SymbolSubsystem.SpritesSettled is
         // true — TryBeginBuild PARKS a build kicked before the sprite fetch settles instead of constructing
         // this processor at all. `_spriteAtlas` is non-null here whenever the style actually resolved a
         // sheet; it is null (and stays inert — every icon draw/extract path downstream already guards on it)
@@ -49,24 +48,22 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         // early on a null extraction list.
         private List<StyledSymbolTileBuilder.ExtractedLayer> _extracted;
 
-        /// <param name="spriteAtlas">I5b: forwarded verbatim to <see cref="StyledSymbolTileBuilder.ExtractLayers"/>;
-        /// null (the default) yields no icon labels — every pre-I5b caller (which omits this argument) stays
-        /// byte-identical.</param>
+        /// <param name="spriteAtlas">Forwarded verbatim to <see cref="StyledSymbolTileBuilder.ExtractLayers"/>;
+        /// null (the default) yields no icon symbols, so omitting this argument is behaviour-preserving.</param>
         public TileSymbolLayerProcessor(
             StyledSymbolTileBuilder builder, SymbolStyle.StyleLayer layer, int materialIndex,
-            List<LabelInstance> sharedOutput, SpriteAtlasView spriteAtlas = null)
+            SymbolTileBuffer sharedBuffer, SpriteAtlasView spriteAtlas = null)
         {
             _builder              = builder;
             _layerWrapper         = new[] { layer };
             _materialIndexWrapper = new[] { materialIndex };
-            _sharedOutput         = sharedOutput;
+            _sharedBuffer        = sharedBuffer;
             _spriteAtlas          = spriteAtlas;
         }
 
         public LayerPhase Phase => LayerPhase.WorkerThenMain;
 
-        /// <summary>WORKER-SAFE (moved form of the pre-A3 <c>SymbolLabelSubsystem.BuildTileAsync</c>'s
-        /// <c>ExtractLayers</c> call, one layer wide): SELECT + project this layer's <see cref="SymbolStyle.StyleLayer"/>
+        /// <summary>WORKER-SAFE: SELECT + project this layer's <see cref="SymbolStyle.StyleLayer"/>
         /// off the main thread.</summary>
         /// <remarks>IR C1 P3: no store parameter. The extractor reads each symbol layer's source-layer buffer
         /// off the decoded tile itself, so every symbol layer of this build — and every mesh layer of the
@@ -78,11 +75,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                 _spriteAtlas);
         }
 
-        /// <summary>MAIN-THREAD tail (moved form of the pre-A3 <c>ShapeAsync</c> call, one layer wide): shape
+        /// <summary>MAIN-THREAD tail: shape
         /// + lay out this layer's extraction and append into the build's shared output list. A null
         /// <see cref="_extracted"/> (worker never ran) is the no-op path — <c>ShapeAsync</c> already returns
         /// early on a null input.</summary>
         public UniTask CompleteOnMainAsync(CancellationToken ct)
-            => _builder.ShapeAsync(_extracted, _sharedOutput, ct);
+            => _builder.ShapeAsync(_extracted, _sharedBuffer, ct);
     }
 }

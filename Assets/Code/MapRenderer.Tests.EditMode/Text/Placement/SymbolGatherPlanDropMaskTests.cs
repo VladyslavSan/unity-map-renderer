@@ -1,4 +1,4 @@
-// Unity EditMode only — needs LabelPlacementSystem/SymbolGatherPlan/SymbolTileLabelBlock (Unity.Collections) +
+// Unity EditMode only — needs SymbolPlacementSystem/SymbolGatherPlan/SymbolTileBlock (Unity.Collections) +
 // a real Camera/Mesh (world-slot vertex/opacity readback). NOT registered in core-tests.csproj.
 
 using System.Collections.Generic;
@@ -18,16 +18,16 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// D1-#2 (symbol-label native bake, Phase 2): the tile-coverage cull's Drop decision is now a per-record
-    /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mirrorRecordDropped</c>)
+    /// D1-#2 (symbol-symbol native bake, Phase 2): the tile-coverage cull's Drop decision is now a per-record
+    /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mirrorSymbolDropped</c>)
     /// instead of a physical compaction — a Dropped winner stays RESIDENT in the plan/mirror and is hard-skipped
-    /// by <c>LabelPlacementSystem.GatherSymbolPoints</c>'s FIRST, unconditional check. This is the falsifiable
+    /// by <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s FIRST, unconditional check. This is the falsifiable
     /// proof that masking a Dropped record is bit-for-bit equivalent to it never having been collected — proven
     /// three ways, each independently RED-verifiable so a single defect can't hide behind another:
     ///
     /// <list type="bullet">
     ///   <item><see cref="MaskedDrop_PointOnly_MatchesReference_SurvivorContentIdentical"/> — a POINT-only
-    ///     fixture (no curved label anywhere), so a point-path regression can't hide behind curved candidates.</item>
+    ///     fixture (no curved symbol anywhere), so a point-path regression can't hide behind curved candidates.</item>
     ///   <item><see cref="MaskedDrop_CurvedOnly_MatchesReference_SurvivorContentIdentical"/> — a CURVED-only
     ///     fixture, with an explicit pre-Drop assertion that the curved record actually SURVIVED with positive
     ///     opacity (a genuinely live fade, not just "no assertion it ever placed") — this is what makes the
@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Text.Placement
     ///   <item><see cref="AllDropped_FadeStaysFrozen_ReappearOpacityMatchesReference"/> — the Blocker-1 regression:
     ///     a frame where EVERY resident record is Dropped must behave EXACTLY like the pre-D1 empty-after-
     ///     compaction mirror (placement/fade-decay block skipped entirely), so a live fade FREEZES instead of
-    ///     decaying — <see cref="LabelPlacementSystem"/>'s <c>_mirrorNonDroppedCount</c> gate, not raw <c>_mirrorCount</c>.</item>
+    ///     decaying — <see cref="SymbolPlacementSystem"/>'s <c>_mirrorNonDroppedCount</c> gate, not raw <c>_mirrorCount</c>.</item>
     /// </list>
     ///
     /// Each test compares the RESIDENT-MASKED production path (a plan carrying every winner, some flagged
@@ -45,9 +45,9 @@ namespace MapRenderer.Tests.Text.Placement
     /// (<see cref="WorldMeshReadback"/>), so a wrong-candidate-survived defect (same count, different content)
     /// is caught too.
     ///
-    /// <para><b>SF8 (vacuous-pass guard).</b> <c>LabelStagingMath.StagePoint</c> returns 0 candidates on a
+    /// <para><b>SF8 (vacuous-pass guard).</b> <c>SymbolStagingMath.StagePoint</c> returns 0 candidates on a
     /// projection/viewport-margin failure — the KEEP anchor is the dead-centre point the test camera looks
-    /// straight at (mirrors <c>LabelFadeTests</c>' pattern) and the DROP anchor is offset by <c>DropOffset</c>
+    /// straight at (mirrors <c>SymbolFadeTests</c>' pattern) and the DROP anchor is offset by <c>DropOffset</c>
     /// but stays well inside the 256px viewport, both guaranteed projectable and inside margin, so a removed
     /// hard-skip is never saved from detection by an unrelated off-viewport reject.</para>
     /// </summary>
@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Text.Placement
     {
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
 
-        // Render-space offset separating the DROP label from the centre-anchored KEEP label so the two do NOT
+        // Render-space offset separating the DROP symbol from the centre-anchored KEEP symbol so the two do NOT
         // collide (a same-point pair suppresses one to opacity 0). ~1600 render metres — large enough to clear the
         // 18px glyph box across the plausible metres-per-pixel range, small enough to stay inside the 256px viewport.
         private static readonly double3 DropOffset = new double3(0, 0, 1600);
@@ -72,9 +72,8 @@ namespace MapRenderer.Tests.Text.Placement
             return texture;
         }
 
-        private static TextLayoutResult OneQuad(float u) => new TextLayoutResult
-        {
-            Quads = new List<SymbolQuad>
+        private static (List<SymbolQuad> Quads, float2 BoundsMin, float2 BoundsMax) OneQuad(float u) => (
+            new List<SymbolQuad>
             {
                 new SymbolQuad
                 {
@@ -82,45 +81,44 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(u, u), UvBottomRight = new float2(u + 0.2f, u + 0.2f), LineIndex = 0,
                 },
             },
-            BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1,
-        };
+            float2.zero, new float2(18f, 18f));
 
-        private static LabelInstance PointLabel(double3 anchor, string text, int feature, long tileKey)
-            => new LabelInstance
-            {
-                AnchorRender = anchor, Placement = SymbolPlacement.Point, Layout = OneQuad(0.1f), Paint = LabelPaint.Default,
-                TextSizePx = 20f, PaddingPx = 2f, SortKey = 0f, Text = text, FeatureIndex = feature, TileKey = tileKey,
-            };
+        private static SymbolTileBuffer PointSymbol(double3 anchor, string text, int feature, long tileKey)
+        {
+            var layout = OneQuad(0.1f);
+            return TestSymbolTileBuffer.Point(anchor, layout.Quads, layout.BoundsMin, layout.BoundsMax,
+                text: text, textSizePx: 20f, paddingPx: 2f, featureIndex: feature, tileKey: tileKey, paint: SymbolPaint.Default);
+        }
 
-        private static LabelInstance CurvedLabel(double3 anchor, string text, int feature, long tileKey)
-            => new LabelInstance
-            {
-                AnchorRender = anchor, Placement = SymbolPlacement.LineCenter, Text = text, Paint = LabelPaint.Default,
-                TextSizePx = 20f, PaddingPx = 2f, SortKey = 1f, FeatureIndex = feature, TileKey = tileKey,
-                MaxAngleDeg = 180f, KeepUpright = false,
+        private static SymbolTileBuffer CurvedSymbol(double3 anchor, string text, int feature, long tileKey) =>
+            TestSymbolTileBuffer.Curved(
+                glyphs: new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = OneQuad(0.3f).Quads[0] } },
+                anchors: new[] { new LineAnchor(0, 0.5f) },
                 // A fixed ~8m path is sub-pixel at z12 and never stages — mirror WorldCurvedAbRenderSnapshotTests'
                 // altitude-relative sizing: a ~1600 render-metre span (anchor at path mid via LineAnchor 0.5, glyph
                 // at ArcCenter 0 ⇒ at the anchor) places comfortably on-screen at this zoom.
-                PathRender = new[] { anchor - new double3(800, 0, 0), anchor + new double3(800, 0, 0) },
-                LineAnchors = new[] { new LineAnchor(0, 0.5f) },
-                CurvedGlyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = OneQuad(0.3f).Quads[0] } },
-            };
+                path: new[] { anchor - new double3(800, 0, 0), anchor + new double3(800, 0, 0) },
+                anchorRender: anchor, placement: SymbolPlacement.LineCenter,
+                text: text, textSizePx: 20f, paddingPx: 2f, sortKey: 1f,
+                maxAngleDeg: 180f, keepUpright: false,
+                featureIndex: feature, tileKey: tileKey, paint: SymbolPaint.Default);
 
-        private static SymbolTileLabelStore.Key Key(TileId t) => new SymbolTileLabelStore.Key("s", t);
-        private static long Tk(TileId t) => LabelTileKey.Pack(t);
+        private static SymbolTileStore.Key Key(TileId t) => new SymbolTileStore.Key("s", t);
+        private static long Tk(TileId t) => SymbolTileKey.Pack(t);
 
-        private static void SeedTile(SymbolTileLabelStore store, TileId tile, List<LabelInstance> labels)
+        private static void SeedTile(SymbolTileStore store, TileId tile, SymbolTileBuffer buffer)
         {
             int gen = store.BeginBuild(Key(tile));
-            SymbolTileLabelBlock block = SymbolTileLabelBlockBaker.Bake(labels, slotCount: 1, TileRenderOrigin.Project(tile, P));
-            Assert.IsTrue(store.CompleteBuild(Key(tile), gen, labels, block), "sanity: block committed");
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(
+                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+            Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
         }
 
         // Owns the LPS + the throwaway Unity resources the fixture creates — mirrors SymbolGatherParityTests'
         // LpsHarness, plus a real look-at so StagePoint's projection/viewport-margin check genuinely passes (SF8).
         private sealed class Harness : System.IDisposable
         {
-            public readonly LabelPlacementSystem System;
+            public readonly SymbolPlacementSystem System;
             public readonly SceneFrame Frame;
             public readonly double3 Origin;
             public readonly GlyphAtlasTexture Atlas;
@@ -141,7 +139,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 Atlas = BuildTinyAtlasTexture();
                 _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
-                System = new LabelPlacementSystem(mapCamera, _baseMaterial);
+                System = new SymbolPlacementSystem(mapCamera, _baseMaterial);
             }
 
             public void Dispose()
@@ -160,48 +158,45 @@ namespace MapRenderer.Tests.Text.Placement
         // R1: `version` is threaded through to SymbolGatherPlan.Build — every test below rebuilds the SAME plan
         // object across frames, so each call passes a freshly incremented per-test counter (audited by READING
         // this call site, not by which tests happen to go RED — SHOULD-FIX 3).
-        private static void BuildMaskedPlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long dropTileKey, int version)
+        private static void BuildMaskedPlan(SymbolTileStore store, SymbolGatherPlan plan, long dropTileKey, int version)
         {
-            var collected = new List<LabelInstance>();
             var blockId = new List<int>();
             var localIndex = new List<int>();
             var isDeparting = new List<byte>();
-            store.CollectInto(collected, blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
+            store.CollectInto(blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
 
-            var decisions = new List<byte>(collected.Count);
-            for (int i = 0; i < collected.Count; i++)
-                decisions.Add(collected[i].TileKey == dropTileKey ? LabelTileCoverageFilter.Drop : LabelTileCoverageFilter.Keep);
+            var decisions = new List<byte>(blockId.Count);
+            for (int i = 0; i < blockId.Count; i++)
+                decisions.Add(store.OrderedBlocks[blockId[i]].TileKey == dropTileKey ? SymbolTileCoverageFilter.Drop : SymbolTileCoverageFilter.Keep);
 
-            plan.Build(blockId, localIndex, collected, isDeparting, decisions, store.OrderedBlocks, version);
+            plan.Build(blockId, localIndex, isDeparting, decisions, store.OrderedBlocks, version);
         }
 
         // Fills `plan` with ONLY the winners whose TileKey != excludedTileKey — the REFERENCE path (physical
         // absence, as if the excluded tile's build never happened / was never collected). excludedTileKey == -1
         // (no tile ever packs to -1) ⇒ everything included (a plain "Build the whole store" call).
-        private static void BuildReferencePlan(SymbolTileLabelStore store, SymbolGatherPlan plan, long excludedTileKey, int version)
+        private static void BuildReferencePlan(SymbolTileStore store, SymbolGatherPlan plan, long excludedTileKey, int version)
         {
-            var collected = new List<LabelInstance>();
             var blockId = new List<int>();
             var localIndex = new List<int>();
             var isDeparting = new List<byte>();
-            store.CollectInto(collected, blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
+            store.CollectInto(blockId, localIndex, isDeparting, quantizeMeters: 1.0, out _);
 
-            var refCollected = new List<LabelInstance>();
             var refBlockId = new List<int>();
             var refLocalIndex = new List<int>();
             var refIsDeparting = new List<byte>();
             var refDecisions = new List<byte>();
-            for (int i = 0; i < collected.Count; i++)
+            for (int i = 0; i < blockId.Count; i++)
             {
-                if (collected[i].TileKey == excludedTileKey) continue;
-                refCollected.Add(collected[i]); refBlockId.Add(blockId[i]); refLocalIndex.Add(localIndex[i]);
-                refIsDeparting.Add(isDeparting[i]); refDecisions.Add(LabelTileCoverageFilter.Keep);
+                if (store.OrderedBlocks[blockId[i]].TileKey == excludedTileKey) continue;
+                refBlockId.Add(blockId[i]); refLocalIndex.Add(localIndex[i]);
+                refIsDeparting.Add(isDeparting[i]); refDecisions.Add(SymbolTileCoverageFilter.Keep);
             }
-            plan.Build(refBlockId, refLocalIndex, refCollected, refIsDeparting, refDecisions, store.OrderedBlocks, version);
+            plan.Build(refBlockId, refLocalIndex, refIsDeparting, refDecisions, store.OrderedBlocks, version);
         }
 
-        private static float MaxAlpha(LabelPlacementSystem system, long tileKey)
-            => system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
+        private static float MaxAlpha(SymbolPlacementSystem system, long tileKey)
+            => system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
         // Full vertex + opacity byte comparison of two world-slot meshes — identity+content, not just a count or
         // a single max-opacity scalar. Returns the first difference, or null if byte-identical.
@@ -227,16 +222,16 @@ namespace MapRenderer.Tests.Text.Placement
 
             using var hMasked = new Harness();
             using var hRef = new Harness();
-            var storeMasked = new SymbolTileLabelStore(cacheCap: 16);
-            var storeRef = new SymbolTileLabelStore(cacheCap: 16);
+            var storeMasked = new SymbolTileStore(cacheCap: 16);
+            var storeRef = new SymbolTileStore(cacheCap: 16);
             try
             {
-                foreach (SymbolTileLabelStore store in new[] { storeMasked, storeRef })
+                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
                 {
-                    SeedTile(store, keepTile, new List<LabelInstance> { PointLabel(hMasked.Origin, "keep", 1, keepKey) });
+                    SeedTile(store, keepTile, PointSymbol(hMasked.Origin, "keep", 1, keepKey));
                     // DROP anchor offset so it does NOT collide with KEEP (same-point ⇒ one is suppressed to 0 and the
                     // "genuinely live before Drop" sanity can't hold); still well inside the 256px viewport (SF8).
-                    SeedTile(store, dropTile, new List<LabelInstance> { PointLabel(hMasked.Origin + DropOffset, "dropPoint", 2, dropKey) });
+                    SeedTile(store, dropTile, PointSymbol(hMasked.Origin + DropOffset, "dropPoint", 2, dropKey));
                 }
 
                 var planMasked = new SymbolGatherPlan();
@@ -276,19 +271,19 @@ namespace MapRenderer.Tests.Text.Placement
                         "masked-Drop's emitted quad count must equal the reference's");
                     Assert.AreEqual(1, hRef.System.LastQuadCount, "sanity: only the KEEP point ever draws");
 
-                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshMasked);
-                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshRef);
+                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshMasked);
+                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshRef);
                     Assert.IsTrue(maskedHasKeep && refHasKeep, "the surviving KEEP point's world slot must exist on both sides");
                     Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
                         "the surviving KEEP point's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
 
                     // The Dropped point is hard-skipped BEFORE emit (masked) / absent (reference); either way its slot
-                    // is not emitted this frame, so WorldLabelRenderer disables the Renderer but RETAINS the stale
+                    // is not emitted this frame, so WorldSymbolRenderer disables the Renderer but RETAINS the stale
                     // frame-1 mesh until idle-reclaim. Equivalence is therefore masked-drop-slot == reference-drop-slot
                     // (both hidden, both stale-identical), NOT "absolutely invisible" (the retained mesh reads its old
                     // opacity on both sides). This differential still fails loudly if residency changed the slot at all.
-                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, LabelKind.Text, out Mesh dropMeshMasked);
-                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, LabelKind.Text, out Mesh dropMeshRef);
+                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
+                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
                     Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped point's world slot must be present/absent identically masked vs reference");
                     if (maskedHasDrop && refHasDrop)
                         Assert.IsNull(FirstMeshDifference(dropMeshRef, dropMeshMasked),
@@ -297,10 +292,10 @@ namespace MapRenderer.Tests.Text.Placement
                     // Content equality alone can't catch a KEEP↔DROP swap (both slots hold identical stale/rebuilt
                     // meshes); visibility is carried separately by the presenter's MeshRenderer.enabled. Assert the
                     // RENDERED set — KEEP visible, DROP hidden, on BOTH paths — a swap flips these and fails here.
-                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, LabelKind.Text), "masked: the surviving KEEP slot must be VISIBLE");
-                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, LabelKind.Text), "reference: the surviving KEEP slot must be VISIBLE");
-                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, LabelKind.Text), "masked: the Dropped slot must be HIDDEN (Renderer disabled), not merely stale-mesh-identical");
-                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, LabelKind.Text), "reference: the absent Drop slot must be HIDDEN");
+                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: the surviving KEEP slot must be VISIBLE");
+                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "reference: the surviving KEEP slot must be VISIBLE");
+                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "masked: the Dropped slot must be HIDDEN (Renderer disabled), not merely stale-mesh-identical");
+                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "reference: the absent Drop slot must be HIDDEN");
                 }
                 finally { planMasked.Dispose(); planRef.Dispose(); }
             }
@@ -316,15 +311,15 @@ namespace MapRenderer.Tests.Text.Placement
 
             using var hMasked = new Harness();
             using var hRef = new Harness();
-            var storeMasked = new SymbolTileLabelStore(cacheCap: 16);
-            var storeRef = new SymbolTileLabelStore(cacheCap: 16);
+            var storeMasked = new SymbolTileStore(cacheCap: 16);
+            var storeRef = new SymbolTileStore(cacheCap: 16);
             try
             {
-                foreach (SymbolTileLabelStore store in new[] { storeMasked, storeRef })
+                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
                 {
-                    SeedTile(store, keepTile, new List<LabelInstance> { CurvedLabel(hMasked.Origin, "keepCurved", 1, keepKey) });
+                    SeedTile(store, keepTile, CurvedSymbol(hMasked.Origin, "keepCurved", 1, keepKey));
                     // DROP anchor offset so it does NOT collide with KEEP (see the point-only test); in-viewport (SF8).
-                    SeedTile(store, dropTile, new List<LabelInstance> { CurvedLabel(hMasked.Origin + DropOffset, "dropCurved", 2, dropKey) });
+                    SeedTile(store, dropTile, CurvedSymbol(hMasked.Origin + DropOffset, "dropCurved", 2, dropKey));
                 }
 
                 var planMasked = new SymbolGatherPlan();
@@ -366,8 +361,8 @@ namespace MapRenderer.Tests.Text.Placement
                     Assert.AreEqual(hRef.System.LastQuadCount, hMasked.System.LastQuadCount,
                         "masked-Drop's emitted quad count must equal the reference's");
 
-                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshMasked);
-                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, LabelKind.Text, out Mesh keepMeshRef);
+                    bool maskedHasKeep = hMasked.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshMasked);
+                    bool refHasKeep = hRef.System.TryGetWorldSlotMesh(keepKey, 0, SymbolKind.Text, out Mesh keepMeshRef);
                     Assert.IsTrue(maskedHasKeep && refHasKeep, "the surviving KEEP curved label's world slot must exist on both sides");
                     Assert.IsNull(FirstMeshDifference(keepMeshRef, keepMeshMasked),
                         "the surviving KEEP curved label's full vertex+opacity content must be byte-identical whether the Drop tile is masked or absent");
@@ -375,8 +370,8 @@ namespace MapRenderer.Tests.Text.Placement
                     // Same equivalence as the point test, but the drop record had a genuinely LIVE curved fade before
                     // the Drop — so this proves masking a live curved record is bit-identical to its absence (it is NOT
                     // soft-faded via MarkFadeOutIfAlive, because the hard-skip precedes that chain).
-                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, LabelKind.Text, out Mesh dropMeshMasked);
-                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, LabelKind.Text, out Mesh dropMeshRef);
+                    bool maskedHasDrop = hMasked.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshMasked);
+                    bool refHasDrop = hRef.System.TryGetWorldSlotMesh(dropKey, 0, SymbolKind.Text, out Mesh dropMeshRef);
                     Assert.AreEqual(refHasDrop, maskedHasDrop, "the Dropped curved record's world slot must be present/absent identically masked vs reference");
                     if (maskedHasDrop && refHasDrop)
                         Assert.IsNull(FirstMeshDifference(dropMeshRef, dropMeshMasked),
@@ -384,10 +379,10 @@ namespace MapRenderer.Tests.Text.Placement
 
                     // As in the point test: prove the RENDERED set, not just buffer content — KEEP visible, DROP
                     // hidden on BOTH paths (MeshRenderer.enabled), so a KEEP↔DROP swap can't pass on stale meshes.
-                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, LabelKind.Text), "masked: the surviving KEEP curved slot must be VISIBLE");
-                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, LabelKind.Text), "reference: the surviving KEEP curved slot must be VISIBLE");
-                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, LabelKind.Text), "masked: the Dropped curved slot must be HIDDEN (Renderer disabled)");
-                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, LabelKind.Text), "reference: the absent Drop curved slot must be HIDDEN");
+                    Assert.IsTrue(hMasked.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "masked: the surviving KEEP curved slot must be VISIBLE");
+                    Assert.IsTrue(hRef.System.IsWorldSlotVisible(keepKey, 0, SymbolKind.Text), "reference: the surviving KEEP curved slot must be VISIBLE");
+                    Assert.IsFalse(hMasked.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "masked: the Dropped curved slot must be HIDDEN (Renderer disabled)");
+                    Assert.IsFalse(hRef.System.IsWorldSlotVisible(dropKey, 0, SymbolKind.Text), "reference: the absent Drop curved slot must be HIDDEN");
                 }
                 finally { planMasked.Dispose(); planRef.Dispose(); }
             }
@@ -403,12 +398,12 @@ namespace MapRenderer.Tests.Text.Placement
 
             using var hMasked = new Harness();
             using var hRef = new Harness();
-            var storeMasked = new SymbolTileLabelStore(cacheCap: 16);
-            var storeRef = new SymbolTileLabelStore(cacheCap: 16);
+            var storeMasked = new SymbolTileStore(cacheCap: 16);
+            var storeRef = new SymbolTileStore(cacheCap: 16);
             try
             {
-                foreach (SymbolTileLabelStore store in new[] { storeMasked, storeRef })
-                    SeedTile(store, soloTile, new List<LabelInstance> { PointLabel(hMasked.Origin, "solo", 1, soloKey) });
+                foreach (SymbolTileStore store in new[] { storeMasked, storeRef })
+                    SeedTile(store, soloTile, PointSymbol(hMasked.Origin, "solo", 1, soloKey));
 
                 var planMasked = new SymbolGatherPlan();
                 var planRef = new SymbolGatherPlan();
@@ -447,7 +442,7 @@ namespace MapRenderer.Tests.Text.Placement
                     // "no pending" branch), easing solo DOWN one smallDeltaTime step before its own newly-scheduled
                     // collision (solo alone, trivial winner) can be harvested. Duplicate F3 so that harvest lands
                     // (SAME args — still fade-neutral: solo is a live candidate throughout, never decays via
-                    // DecayUnseenFadeRecords) — both sides dip identically then recover, so the comparison and the
+                    // DecayUnseenFadeSymbols) — both sides dip identically then recover, so the comparison and the
                     // "reference never decayed" sanity both still hold once the second F3 Tick's harvest lands.
                     const float smallDeltaTime = 0.05f;
                     BuildMaskedPlan(storeMasked, planMasked, dropTileKey: -1, maskedVersion++);

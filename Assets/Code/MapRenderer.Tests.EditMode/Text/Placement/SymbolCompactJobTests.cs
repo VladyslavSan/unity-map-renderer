@@ -16,7 +16,7 @@ using MapRenderer.Jobs;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// <see cref="SymbolCompactJob"/> — the Burst port of <c>LabelPlacementSystem.GatherSymbolPoints</c>'s
+    /// <see cref="SymbolCompactJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s
     /// Compact pass — must produce the SAME <c>_stagePointOffset</c> / kept-point pools / <c>_forceFadeOut</c>
     /// membership / per-trigger counters, in the SAME record order, as an independent managed reference.
     /// </summary>
@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Text.Placement
         private const int CoverageCurvedAlive = 8;
         private const int ZoomCurvedDead      = 9;
         private const int KeptNoneB           = 10;
-        private const int RecordCount         = 11;
+        private const int SymbolCount         = 11;
 
         // Detail == record index everywhere (Detail[r] = r) — a deliberate simplification: it still exercises
         // every read path (PointDetails / CurvedAnchorFadeStart / CurvedAnchorCount are all indexed by Detail,
@@ -49,18 +49,18 @@ namespace MapRenderer.Tests.Text.Placement
             GatherTrigger.Coverage, GatherTrigger.Zoom, GatherTrigger.None,
         };
 
-        private static byte[] Kinds()
+        private static SymbolPlacementKind[] Kinds()
         {
-            var a = new byte[RecordCount]; // Point (0) everywhere by default
-            a[CoverageCurvedAlive] = (byte)LabelRecordKind.Curved;
-            a[ZoomCurvedDead]      = (byte)LabelRecordKind.Curved;
+            var a = new SymbolPlacementKind[SymbolCount]; // Point (0) everywhere by default
+            a[CoverageCurvedAlive] = SymbolPlacementKind.Curved;
+            a[ZoomCurvedDead]      = SymbolPlacementKind.Curved;
             return a;
         }
 
         private static int[] Detail()
         {
-            var a = new int[RecordCount];
-            for (int r = 0; r < RecordCount; r++) a[r] = r;
+            var a = new int[SymbolCount];
+            for (int r = 0; r < SymbolCount; r++) a[r] = r;
             return a;
         }
 
@@ -68,7 +68,7 @@ namespace MapRenderer.Tests.Text.Placement
         // (2-7) are ever read — 0/1/10 short-circuit before MarkFadeOutIfAlive; 8/9 are Curved.
         private static long[] PointFadeIds()
         {
-            var a = new long[RecordCount];
+            var a = new long[SymbolCount];
             a[DepartingDead]  = 2001;
             a[CoverageDead]   = 3001;
             a[ZoomDeadA]      = 4001;
@@ -80,8 +80,8 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static PointStageInput[] PointDetails(long[] pointFadeIds)
         {
-            var a = new PointStageInput[RecordCount];
-            for (int r = 0; r < RecordCount; r++) a[r] = new PointStageInput { FadeId = pointFadeIds[r] };
+            var a = new PointStageInput[SymbolCount];
+            for (int r = 0; r < SymbolCount; r++) a[r] = new PointStageInput { FadeId = pointFadeIds[r] };
             return a;
         }
 
@@ -89,7 +89,7 @@ namespace MapRenderer.Tests.Text.Placement
         // centred-fallback id = 3 ids read); ZoomCurvedDead has 1 anchor (+ fallback = 2 ids read).
         private static int[] CurvedAnchorFadeStart()
         {
-            var a = new int[RecordCount];
+            var a = new int[SymbolCount];
             a[CoverageCurvedAlive] = 100;
             a[ZoomCurvedDead]      = 200;
             return a;
@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static int[] CurvedAnchorCount()
         {
-            var a = new int[RecordCount];
+            var a = new int[SymbolCount];
             a[CoverageCurvedAlive] = 2;
             a[ZoomCurvedDead]      = 1;
             return a;
@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Text.Placement
         // skipped records' spans are never touched, so they are left at the zeroed default.
         private static int[] WorldStart()
         {
-            var a = new int[RecordCount];
+            var a = new int[SymbolCount];
             a[KeptNoneA]           = 6;
             a[DepartingAlive]      = 0;
             a[CoverageCurvedAlive] = 10;
@@ -136,7 +136,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         private static int[] WorldCount()
         {
-            var a = new int[RecordCount];
+            var a = new int[SymbolCount];
             a[KeptNoneA]           = 2;
             a[DepartingAlive]      = 1;
             a[CoverageCurvedAlive] = 3;
@@ -210,12 +210,12 @@ namespace MapRenderer.Tests.Text.Placement
             return true;
         }
 
-        private static bool ManagedMarkFadeOutIfAlive(int r, byte[] kinds, int[] detail, long[] pointFadeIds,
+        private static bool ManagedMarkFadeOutIfAlive(int r, SymbolPlacementKind[] kinds, int[] detail, long[] pointFadeIds,
             int[] curvedAnchorFadeStart, int[] curvedAnchorCount, long[] fadeIds, Dictionary<long, float> fadeOpacity,
             HashSet<long> forceFadeOut, float fadeEpsilon)
         {
             int d = detail[r];
-            if (kinds[r] == (byte)LabelRecordKind.Point)
+            if (kinds[r] == SymbolPlacementKind.Point)
                 return ManagedTryForceFadeOut(pointFadeIds[d], fadeOpacity, forceFadeOut, fadeEpsilon);
 
             bool alive = false;
@@ -230,12 +230,12 @@ namespace MapRenderer.Tests.Text.Placement
             return alive;
         }
 
-        private static void ManagedCompact(byte[] kinds, int[] detail, long[] pointFadeIds,
+        private static void ManagedCompact(SymbolPlacementKind[] kinds, int[] detail, long[] pointFadeIds,
             int[] curvedAnchorFadeStart, int[] curvedAnchorCount, long[] fadeIds, int[] worldStart, int[] worldCount,
             double3[] worldPoints, float3[] worldUps, Dictionary<long, float> fadeOpacity, float fadeEpsilon,
             int[] outOffset, List<double3> outPoints, List<float3> outUps, HashSet<long> outForceFadeOut, int[] outCounts)
         {
-            for (int r = 0; r < RecordCount; r++)
+            for (int r = 0; r < SymbolCount; r++)
             {
                 GatherTrigger t = Trigger[r];
                 if (t == GatherTrigger.Dropped) { outOffset[r] = -1; continue; }
@@ -261,7 +261,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── The Burst arm — SymbolCompactJob.Run() over the same fixture ────────────────────────────────────
 
         private static (int[] offset, double3[] points, float3[] ups, HashSet<long> forceFadeOut, int[] counts)
-            NativeCompact(byte[] kinds, int[] detail, PointStageInput[] pointDetails, int[] curvedAnchorFadeStart,
+            NativeCompact(SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] pointDetails, int[] curvedAnchorFadeStart,
                 int[] curvedAnchorCount, long[] fadeIds, int[] worldStart, int[] worldCount, double3[] worldPoints,
                 float3[] worldUps, Dictionary<long, float> fadeOpacity)
         {
@@ -288,8 +288,8 @@ namespace MapRenderer.Tests.Text.Placement
             var nFadeOpacity = new NativeHashMap<long, float>(fadeOpacity.Count, alloc);
             foreach (var kv in fadeOpacity) nFadeOpacity.Add(kv.Key, kv.Value);
 
-            var nStageOffset = new NativeArray<int>(RecordCount, alloc);
-            for (int i = 0; i < RecordCount; i++) nStageOffset[i] = int.MinValue; // poison, NOT zero — see field doc
+            var nStageOffset = new NativeArray<int>(SymbolCount, alloc);
+            for (int i = 0; i < SymbolCount; i++) nStageOffset[i] = int.MinValue; // poison, NOT zero — see field doc
 
             var nOutPoints = new NativeList<double3>(alloc);
             var nOutUps = new NativeList<float3>(alloc);
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests.Text.Placement
                     CurvedAnchorFadeStart = nCurvedAnchorFadeStart, CurvedAnchorCount = nCurvedAnchorCount,
                     FadeIds = nFadeIds, WorldStart = nWorldStart, WorldCount = nWorldCount,
                     WorldPoints = nWorldPoints, WorldUps = nWorldUps, FadeOpacity = nFadeOpacity,
-                    FadeEpsilon = FadeEpsilon, Count = RecordCount,
+                    FadeEpsilon = FadeEpsilon, Count = SymbolCount,
                     StageOffset = nStageOffset, OutPoints = nOutPoints, OutUps = nOutUps,
                     ForceFadeOut = nForceFadeOut, Counts = nCounts,
                 }.Run();
@@ -328,7 +328,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Compact_MatchesManagedReference_EveryOutputAndRunningOffset()
         {
-            byte[] kinds = Kinds();
+            SymbolPlacementKind[] kinds = Kinds();
             int[] detail = Detail();
             long[] pointFadeIds = PointFadeIds();
             PointStageInput[] pointDetails = PointDetails(pointFadeIds);
@@ -341,8 +341,8 @@ namespace MapRenderer.Tests.Text.Placement
             float3[] worldUps = WorldUps();
             Dictionary<long, float> fadeOpacity = FadeOpacity();
 
-            var managedOffset = new int[RecordCount];
-            for (int i = 0; i < RecordCount; i++) managedOffset[i] = int.MinValue; // poison — see NativeCompact
+            var managedOffset = new int[SymbolCount];
+            for (int i = 0; i < SymbolCount; i++) managedOffset[i] = int.MinValue; // poison — see NativeCompact
             var managedPoints = new List<double3>();
             var managedUps = new List<float3>();
             var managedForceFadeOut = new HashSet<long>();

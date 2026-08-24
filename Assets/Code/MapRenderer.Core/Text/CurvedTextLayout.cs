@@ -13,12 +13,12 @@ namespace MapRenderer.Core.Text
     /// <see cref="TextQuadLayout.OpticalCentreBelowReferencePx"/>). Unlike <see cref="TextQuadLayout"/>
     /// (which lays glyphs into an anchored, justified, possibly-wrapped block for point placement), this is
     /// a single un-wrapped forward pass with NO block anchor / justify / offset — those are point concepts;
-    /// a line label's position + orientation come from the projected line at placement time.
+    /// a line symbol's position + orientation come from the projected line at placement time.
     /// </summary>
     public static class CurvedTextLayout
     {
         /// <summary>Allocating overload — returns a fresh list. For the per-frame path prefer the caller-buffer
-        /// overload; this layout is build-time (cached on the label), so the allocation is once per label.</summary>
+        /// overload; this layout is build-time (cached on the symbol), so the allocation is once per symbol.</summary>
         public static List<CurvedGlyph> Layout(ShapedRun run, IGlyphAtlasView atlas)
         {
             var output = new List<CurvedGlyph>(run?.Glyphs?.Count ?? 0);
@@ -56,8 +56,8 @@ namespace MapRenderer.Core.Text
 
                     // Same TOP-referenced cell as TextQuadLayout.PlaceGlyph, but placed relative to THIS
                     // glyph's own pen origin and centered HORIZONTALLY on arcCenter — and VERTICALLY on the
-                    // path, by the same OpticalCentreBelowReferencePx a point label's Centre vertical anchor
-                    // applies (§11 D12), so a curved and a point label of the same string have the same
+                    // path, by the same OpticalCentreBelowReferencePx a point symbol's Centre vertical anchor
+                    // applies (§11 D12), so a curved and a point symbol of the same string have the same
                     // optical relationship to their anchor. That shift is one constant per LABEL (no `entry`
                     // term), so the run's own typography is untouched: ascenders and descenders keep their
                     // relative offsets instead of each glyph bobbing onto its own ink centre.

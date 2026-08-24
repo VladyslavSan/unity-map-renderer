@@ -3,10 +3,10 @@
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// A-2: a stable along-line label anchor expressed as polyline TOPOLOGY — a segment index plus an
+    /// A-2: a stable along-line symbol anchor expressed as polyline TOPOLOGY — a segment index plus an
     /// interpolation parameter <see cref="T"/> in [0,1] within that segment — NOT a screen or world
     /// coordinate. Computed ONCE at build time in TILE space (projection-agnostic, zoom-invariant) so a
-    /// <c>symbol-placement: line</c> label's repeats stay pinned to the same world positions as the camera
+    /// <c>symbol-placement: line</c> symbol's repeats stay pinned to the same world positions as the camera
     /// zooms — fixing the slide where fixed screen-px-from-start anchors drifted to different world points as
     /// the projected line length changed.
     ///

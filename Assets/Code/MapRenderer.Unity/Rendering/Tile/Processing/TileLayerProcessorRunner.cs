@@ -108,7 +108,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                         // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
                         // fault never reaches here either: the decode happens in the source's GetTile task and faults
                         // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
-                        // logs (SymbolLabelSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
+                        // logs (SymbolSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
                         // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
                         // exactly as before.
                         UnityEngine.Debug.LogWarning(
@@ -235,7 +235,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// holds only managed state), and the main-thread tail is by definition the caller's step, run after
         /// this method returns. A processor exception PROPAGATES to the caller (design §B "fault policy:
         /// propagate, don't settle") — swallowing it here would let a subsequent tail run over an
-        /// empty/partial extraction and commit an empty label list, an observable behaviour change from the
+        /// empty/partial extraction and commit an empty symbol list, an observable behaviour change from the
         /// fault → no-store-commit path. Does NOT release <paramref name="decode"/> — the caller owns the
         /// reference.</para>
         /// </summary>

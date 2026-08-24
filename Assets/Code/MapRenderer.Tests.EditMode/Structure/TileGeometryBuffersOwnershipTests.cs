@@ -279,16 +279,16 @@ namespace MapRenderer.Tests.Structure
             string normalised = NormaliseWhitespace(body);
 
             // Shape, not just count: the three frees must sit in a finally wrapping the materializer
-            // construct+Materialize call, EACH guarded by IsCreated — a throw from the FIRST allocation (or
-            // from the count loop, which runs between the first two allocations) leaves the others
-            // un-allocated, and disposing a default NativeArray would itself throw without the guard.
+            // construct+Materialize call. No IsCreated guard — a throw from the FIRST allocation (or from
+            // the count loop, which runs between the first two allocations) leaves the others un-allocated,
+            // and NativeArray.Dispose() early-returns on a default value (docs/lessons-learned.md), so the
+            // finally frees whatever was allocated and no-ops on the rest.
             StringAssert.Contains(
-                "finally { if (commands.IsCreated) commands.Dispose(); " +
-                "if (featOffsets.IsCreated) featOffsets.Dispose(); " +
-                "if (featLengths.IsCreated) featLengths.Dispose(); }",
+                "finally { commands.Dispose(); " +
+                "featOffsets.Dispose(); " +
+                "featLengths.Dispose(); }",
                 normalised,
-                "the three frees must sit in a finally around the materializer construct+Materialize call, " +
-                "each guarded by IsCreated.");
+                "the three frees must sit in a finally around the materializer construct+Materialize call.");
 
             // The regression this whole tooth exists to catch: an allocation made BEFORE the try leaks if a
             // later loop throws. Both the count loop and the fill loop re-read raw wire bytes via

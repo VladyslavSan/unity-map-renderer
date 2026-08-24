@@ -9,7 +9,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// One label-local glyph (or, later, sprite icon) quad: an axis-aligned, anchor-relative rectangle
+    /// One symbol-local glyph (or, later, sprite icon) quad: an axis-aligned, anchor-relative rectangle
     /// in baked-pixel space (<see cref="TextQuadLayout.OneEm"/> = 24px) plus its normalized atlas UV
     /// rect. Deliberately glyph/sprite-AGNOSTIC — nothing text-specific (no codepoint/cluster field) —
     /// so a later icon-layout stage reuses this exact struct with sprite UVs instead of glyph UVs (the
@@ -30,7 +30,7 @@ namespace MapRenderer.Core.Text
         /// <summary>Normalized atlas UV at <see cref="BottomRight"/>'s texel (<c>(AtlasOrigin + CellSize) / atlasSize</c>).</summary>
         public float2 UvBottomRight { get; init; }
 
-        /// <summary>0-based wrapped line index this quad belongs to (see <see cref="TextLayoutResult.LineCount"/>).</summary>
+        /// <summary>0-based wrapped line index this quad belongs to.</summary>
         public int LineIndex { get; init; }
 
         /// <summary>

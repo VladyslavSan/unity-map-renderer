@@ -65,7 +65,7 @@ namespace MapRenderer.Unity.Rendering.Map
             View?.Teardown();
         }
 
-        // The whole per-frame pipeline (camera commit -> tiles -> labels) lives in MapView.LateUpdate; this is
+        // The whole per-frame pipeline (camera commit -> tiles -> symbols) lives in MapView.LateUpdate; this is
         // just the Unity trigger. LateUpdate (not Update) so it runs AFTER the input Controller's Update, which
         // is where the camera props are mutated — so the frame always sees this frame's input. See
         // MapView.LateUpdate for the ordered sequence and why it's one snapshot.

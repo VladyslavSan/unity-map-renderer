@@ -106,8 +106,9 @@ namespace MapRenderer.Tests.Text
 
             // Top anchor => globalY = 0, so quad y is baselineY-relative with no anchor shift --
             // isolates the ink-band computation from the anchor math this stage changes.
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top));
-            (float min, float max) = InkBandY(result.Quads);
+            var resultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top), resultQuads);
+            (float min, float max) = InkBandY(resultQuads);
 
             int bareHeight = entryFive.CellSize.y - 2 * GlyphSdf.Buffer;
             Assert.AreEqual(entryFive.Top, max, Tolerance, "ink top must equal the atlas entry's own Top metric");
@@ -129,8 +130,9 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default);
-            (float min, float max) = InkBandY(result.Quads);
+            var resultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
+            (float min, float max) = InkBandY(resultQuads);
             float centre = 0.5f * (min + max);
 
             Assert.LessOrEqual(math.abs(centre), 0.5f, $"centred ink must sit within 0.5 baked px of the anchor, was {centre}");
@@ -147,8 +149,9 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
-            TextLayoutResult textResult = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default);
-            (float textMin, float textMax) = InkBandY(textResult.Quads);
+            var textResultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, textResultQuads);
+            (float textMin, float textMax) = InkBandY(textResultQuads);
             float textCentre = 0.5f * (textMin + textMax);
 
             // A synthetic even-sized sprite: IconQuadLayout centres box == ink exactly (design doc §11).
@@ -186,10 +189,12 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
-            TextLayoutResult tight = TextQuadLayout.Layout(run, atlas, MakeOptions(lineHeightEm: 1.2f));
-            TextLayoutResult loose = TextQuadLayout.Layout(run, atlas, MakeOptions(lineHeightEm: 2.0f));
+            var tightQuads = new List<SymbolQuad>();
+            var looseQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(lineHeightEm: 1.2f), tightQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(lineHeightEm: 2.0f), looseQuads);
 
-            AssertAllQuadsEqual(tight.Quads, loose.Quads, "a single-line Center block must not move when line-height changes");
+            AssertAllQuadsEqual(tightQuads, looseQuads, "a single-line Center block must not move when line-height changes");
         }
 
         // =========================================================================================
@@ -215,14 +220,15 @@ namespace MapRenderer.Tests.Text
             float maxWidthEm = maxWidthPx / TextQuadLayout.OneEm;
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, MakeOptions(maxWidthEm: maxWidthEm));
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, MakeOptions(maxWidthEm: maxWidthEm), resultQuads);
             Assert.AreEqual(2, result.LineCount, "the chosen max-width must force exactly a 2-line wrap");
-            Assert.AreEqual(2, result.Quads.Count, "one glyph per line -- '5' on line 0, '5' on line 1");
-            Assert.AreEqual(0, result.Quads[0].LineIndex);
-            Assert.AreEqual(1, result.Quads[1].LineIndex);
+            Assert.AreEqual(2, resultQuads.Count, "one glyph per line -- '5' on line 0, '5' on line 1");
+            Assert.AreEqual(0, resultQuads[0].LineIndex);
+            Assert.AreEqual(1, resultQuads[1].LineIndex);
 
-            (float min0, float max0) = InkBandY(new[] { result.Quads[0] });
-            (float min1, float max1) = InkBandY(new[] { result.Quads[1] });
+            (float min0, float max0) = InkBandY(new[] { resultQuads[0] });
+            (float min1, float max1) = InkBandY(new[] { resultQuads[1] });
             float centre0 = 0.5f * (min0 + max0);
             float centre1 = 0.5f * (min1 + max1);
             float mean = 0.5f * (centre0 + centre1);
@@ -245,26 +251,32 @@ namespace MapRenderer.Tests.Text
 
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
 
-            TextLayoutResult top = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top));
-            TextLayoutResult bottom = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Bottom));
-            TextLayoutResult topLeft = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft));
-            TextLayoutResult topRight = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopRight));
-            TextLayoutResult bottomLeft = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.BottomLeft));
-            TextLayoutResult bottomRight = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.BottomRight));
+            var topQuads = new List<SymbolQuad>();
+            var bottomQuads = new List<SymbolQuad>();
+            var topLeftQuads = new List<SymbolQuad>();
+            var topRightQuads = new List<SymbolQuad>();
+            var bottomLeftQuads = new List<SymbolQuad>();
+            var bottomRightQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top), topQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Bottom), bottomQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft), topLeftQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopRight), topRightQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.BottomLeft), bottomLeftQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.BottomRight), bottomRightQuads);
 
             // Top anchor => globalY = 0, so the cell's top edge sits at entry.Top + Buffer.
             float expectedTopCellTopY = entryA.Top + GlyphSdf.Buffer;
-            Assert.AreEqual(expectedTopCellTopY, top.Quads[0].TopLeft.y, Tolerance, "Top anchor: block top edge at y=0");
+            Assert.AreEqual(expectedTopCellTopY, topQuads[0].TopLeft.y, Tolerance, "Top anchor: block top edge at y=0");
 
             // Bottom anchor => globalY = lineCount*lineHeightPx = lineHeightPx (lineCount==1), added to the
             // pre-shift cell edge (entry.Top + Buffer - CellSize.y).
             float expectedBottomCellBottomY = lineHeightPx + (entryA.Top + GlyphSdf.Buffer - entryA.CellSize.y);
-            Assert.AreEqual(expectedBottomCellBottomY, bottom.Quads[0].BottomRight.y, Tolerance, "Bottom anchor: block bottom edge at y = lineHeightPx");
+            Assert.AreEqual(expectedBottomCellBottomY, bottomQuads[0].BottomRight.y, Tolerance, "Bottom anchor: block bottom edge at y = lineHeightPx");
 
-            Assert.AreEqual(top.Quads[0].TopLeft.y, topLeft.Quads[0].TopLeft.y, Tolerance, "TopLeft shares Top's y");
-            Assert.AreEqual(top.Quads[0].TopLeft.y, topRight.Quads[0].TopLeft.y, Tolerance, "TopRight shares Top's y");
-            Assert.AreEqual(bottom.Quads[0].TopLeft.y, bottomLeft.Quads[0].TopLeft.y, Tolerance, "BottomLeft shares Bottom's y");
-            Assert.AreEqual(bottom.Quads[0].TopLeft.y, bottomRight.Quads[0].TopLeft.y, Tolerance, "BottomRight shares Bottom's y");
+            Assert.AreEqual(topQuads[0].TopLeft.y, topLeftQuads[0].TopLeft.y, Tolerance, "TopLeft shares Top's y");
+            Assert.AreEqual(topQuads[0].TopLeft.y, topRightQuads[0].TopLeft.y, Tolerance, "TopRight shares Top's y");
+            Assert.AreEqual(bottomQuads[0].TopLeft.y, bottomLeftQuads[0].TopLeft.y, Tolerance, "BottomLeft shares Bottom's y");
+            Assert.AreEqual(bottomQuads[0].TopLeft.y, bottomRightQuads[0].TopLeft.y, Tolerance, "BottomRight shares Bottom's y");
         }
 
         // =========================================================================================
@@ -286,10 +298,18 @@ namespace MapRenderer.Tests.Text
             ShapedRun runFiveG = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'g', entryG.Advance));
             ShapedRun runFiveX = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'x', entryX.Advance));
 
-            float yFive = TextQuadLayout.Layout(runFive, atlas, in TextLayoutOptions.Default).Quads[0].TopLeft.y;
-            float yFiveZero = TextQuadLayout.Layout(runFiveZero, atlas, in TextLayoutOptions.Default).Quads[0].TopLeft.y;
-            float yFiveG = TextQuadLayout.Layout(runFiveG, atlas, in TextLayoutOptions.Default).Quads[0].TopLeft.y;
-            float yFiveX = TextQuadLayout.Layout(runFiveX, atlas, in TextLayoutOptions.Default).Quads[0].TopLeft.y;
+            var fiveQuads = new List<SymbolQuad>();
+            var fiveZeroQuads = new List<SymbolQuad>();
+            var fiveGQuads = new List<SymbolQuad>();
+            var fiveXQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(runFive, atlas, in TextLayoutOptions.Default, fiveQuads);
+            TextQuadLayout.Layout(runFiveZero, atlas, in TextLayoutOptions.Default, fiveZeroQuads);
+            TextQuadLayout.Layout(runFiveG, atlas, in TextLayoutOptions.Default, fiveGQuads);
+            TextQuadLayout.Layout(runFiveX, atlas, in TextLayoutOptions.Default, fiveXQuads);
+            float yFive = fiveQuads[0].TopLeft.y;
+            float yFiveZero = fiveZeroQuads[0].TopLeft.y;
+            float yFiveG = fiveGQuads[0].TopLeft.y;
+            float yFiveX = fiveXQuads[0].TopLeft.y;
 
             Assert.AreEqual(yFive, yFiveZero, Tolerance, "'5' must be at the same y in \"5\" and \"50\"");
             Assert.AreEqual(yFive, yFiveG, Tolerance, "'5' must be at the same y in \"5\" and \"5g\" (descender)");
@@ -308,15 +328,18 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
-            TextLayoutResult left = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left));
-            TextLayoutResult right = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right));
-            TextLayoutResult center = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Center));
+            var leftQuads = new List<SymbolQuad>();
+            var rightQuads = new List<SymbolQuad>();
+            var centerQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left), leftQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right), rightQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Center), centerQuads);
 
-            Assert.AreEqual(center.Quads[0].TopLeft.y, left.Quads[0].TopLeft.y, Tolerance, "Left must shift vertically exactly like Center");
-            Assert.AreEqual(center.Quads[0].TopLeft.y, right.Quads[0].TopLeft.y, Tolerance, "Right must shift vertically exactly like Center");
-            Assert.AreNotEqual(left.Quads[0].TopLeft.x, center.Quads[0].TopLeft.x, "sanity: x must actually differ between Left and Center");
+            Assert.AreEqual(centerQuads[0].TopLeft.y, leftQuads[0].TopLeft.y, Tolerance, "Left must shift vertically exactly like Center");
+            Assert.AreEqual(centerQuads[0].TopLeft.y, rightQuads[0].TopLeft.y, Tolerance, "Right must shift vertically exactly like Center");
+            Assert.AreNotEqual(leftQuads[0].TopLeft.x, centerQuads[0].TopLeft.x, "sanity: x must actually differ between Left and Center");
 
-            (float min, float max) = InkBandY(left.Quads);
+            (float min, float max) = InkBandY(leftQuads);
             float centre = 0.5f * (min + max);
             Assert.LessOrEqual(math.abs(centre), 0.5f, $"Left-anchored ink must also be centred on the anchor, was {centre}");
         }
@@ -327,7 +350,7 @@ namespace MapRenderer.Tests.Text
         // nothing in the layout math can detect it going wrong: every other tooth here measures positions
         // that are all derived from the same constant, and would stay green if the fixture were regenerated
         // from a font baked against a different ascent. The other shipped ranges modally measure 27 (§11),
-        // so this is a live hazard, and its symptom is silent — every centred label would sit one baked px
+        // so this is a live hazard, and its symptom is silent — every centred symbol would sit one baked px
         // low with a fully green suite. This re-derives the constant from a baseline-resting reference
         // glyph's OWN metrics: for such a glyph the ink bottom IS the baseline, so its distance below the
         // line's reference origin is (bare height - Top). A digit is used deliberately — a descender ('g')

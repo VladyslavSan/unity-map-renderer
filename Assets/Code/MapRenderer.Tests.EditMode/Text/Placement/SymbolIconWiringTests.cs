@@ -1,14 +1,14 @@
-// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (LabelSlotPresenter creates one,
+// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (SymbolSlotPresenter creates one,
 // SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
 //
 // I5b — the icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
 // draw-side bind; the actual on-screen sprite pixels are eyeball-owed, see the I5b plan). Three ticks:
-//   1. An icon-bearing batch through LabelPlacementSystem.Tick with a fixture sprite Texture2D + a
+//   1. An icon-bearing batch through SymbolPlacementSystem.Tick with a fixture sprite Texture2D + a
 //      SymbolRenderLayer whose WorldIconMaterial is a real "Map/Symbol/IconWorld" clone — the icon slot mesh
 //      must build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
 //      material's _MainTex must be the sprite texture (GetTexture — no framebuffer readback, no GPU
 //      snapshot needed for this tooth).
-//   2. A TEXT-ONLY batch (no icon labels, no spriteTexture) must leave the icon presenter HIDDEN and the
+//   2. A TEXT-ONLY batch (no icon symbols, no spriteTexture) must leave the icon presenter HIDDEN and the
 //      text mesh/material path unaffected — the #1-rule parity check.
 //   3. Shader.Find("Map/Symbol/IconWorld") must resolve (the shader actually compiled/imported).
 
@@ -75,7 +75,7 @@ namespace MapRenderer.Tests.Text.Placement
             return texture;
         }
 
-        private static LabelInstance MakeIconLabel(double3 sceneOriginRender)
+        private static SymbolTileBuffer MakeIcon(double3 sceneOriginRender)
         {
             var quads = new List<SymbolQuad>
             {
@@ -85,24 +85,18 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
                 },
             };
-            var layout = new TextLayoutResult
-            {
-                Quads = quads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1,
-            };
-            return new LabelInstance
-            {
-                AnchorRender = sceneOriginRender,
-                Layout = layout,
-                Kind = LabelKind.Icon, // I3: routes this label onto the icon draw path (AtlasKind, I5b)
-                Paint = LabelPaint.Default,
-                TextSizePx = TextQuadLayout.OneEm, // scale 1 — mirrors StyledSymbolTileBuilder's real icon path
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = 0L,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, quads, new float2(-8f, -8f), new float2(8f, 8f),
+                kind: SymbolKind.Icon, // I3: routes this symbol onto the icon draw path (AtlasKind, I5b)
+                paint: SymbolPaint.Default,
+                textSizePx: TextQuadLayout.OneEm, // scale 1 — mirrors StyledSymbolTileBuilder's real icon path
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: 0L);
+            return buffer;
         }
 
-        private static LabelInstance MakeTextLabel(double3 sceneOriginRender)
+        private static SymbolTileBuffer MakeText(double3 sceneOriginRender)
         {
             var quads = new List<SymbolQuad>
             {
@@ -112,17 +106,14 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
                 },
             };
-            var layout = new TextLayoutResult { Quads = quads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
-            return new LabelInstance
-            {
-                AnchorRender = sceneOriginRender,
-                Layout = layout,
-                Paint = LabelPaint.Default,
-                TextSizePx = 24f,
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = 0L,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, quads, float2.zero, new float2(18f, 18f),
+                paint: SymbolPaint.Default,
+                textSizePx: 24f,
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: 0L);
+            return buffer;
         }
 
         // ── P-B: a MAP-aligned LINE icon — the one-glyph curved instance StyledSymbolTileBuilder now emits. ──
@@ -132,32 +123,30 @@ namespace MapRenderer.Tests.Text.Placement
             UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
         };
 
-        private static LabelInstance MakeAlongLineIconLabel(
+        private static void AddAlongLineIcon(SymbolTileBuffer buffer,
             double3 sceneOriginRender, int materialIndex, float iconRotateRadians, params LineAnchor[] anchors)
-            => new LabelInstance
+        {
+            // A short east-west road straddling the look-at, in render space (east = +X).
+            var path = new[]
             {
-                Placement = SymbolPlacement.Line,
-                Kind = LabelKind.Icon,
-                // A short east-west road straddling the look-at, in render space (east = +X).
-                PathRender = new[]
-                {
-                    sceneOriginRender + new double3(-400.0, 0.0, 0.0),
-                    sceneOriginRender + new double3(400.0, 0.0, 0.0),
-                },
-                LineAnchors = anchors,
-                CurvedGlyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = AlongLineIconCell } },
-                IconImage = "arrow",
-                Paint = LabelPaint.Default,
-                TextSizePx = TextQuadLayout.OneEm, // scale 1 — mirrors the real builder's along-line icon path
-                MaxAngleDeg = 180f,
-                KeepUpright = false,
-                AllowOverlap = true, // wiring tooth — never let collision decide whether there is ink to read
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = 0L,
-                MaterialIndex = materialIndex,
-                IconRotateRadians = iconRotateRadians,
+                sceneOriginRender + new double3(-400.0, 0.0, 0.0),
+                sceneOriginRender + new double3(400.0, 0.0, 0.0),
             };
+            var glyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = AlongLineIconCell } };
+            TestSymbolTileBuffer.AddCurved(buffer, glyphs, anchors, path,
+                placement: SymbolPlacement.Line,
+                iconImage: "arrow",
+                kind: SymbolKind.Icon,
+                materialIndex: materialIndex,
+                textSizePx: TextQuadLayout.OneEm, // scale 1 — mirrors the real builder's along-line icon path
+                maxAngleDeg: 180f,
+                keepUpright: false,
+                featureIndex: 0,
+                tileKey: 0L,
+                allowOverlap: true, // wiring tooth — never let collision decide whether there is ink to read
+                iconRotateRadians: iconRotateRadians,
+                paint: SymbolPaint.Default);
+        }
 
         // ── A5 (P-B): end-to-end — a map-aligned line icon lands in the (tile, slot) ICON world mesh and
         //    NOTHING in the text mesh, with one candidate staged per along-line anchor. ──
@@ -170,22 +159,20 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
             using var plan = new TestSymbolPlan(mapCamera.Projection);
 
             try
             {
                 var anchors = new[] { new LineAnchor(0, 0.35f), new LineAnchor(0, 0.65f) };
-                var labels = new List<LabelInstance>
-                {
-                    MakeAlongLineIconLabel(frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchors),
-                };
+                var buffer = new SymbolTileBuffer();
+                AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchors);
 
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(labels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(anchors.Length, system.LastCandidateCount,
@@ -193,16 +180,16 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(anchors.Length, system.LastQuadCount,
                     "one quad per anchor — a one-glyph curved label emits exactly its single cell each time.");
 
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh iconMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh iconMesh),
                     "the along-line icon must create the ICON world slot (AtlasKind must reach the emit).");
                 Assert.AreEqual(anchors.Length * 4, iconMesh.vertexCount, "4 corners per placed anchor");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon), "the icon slot must be showing");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon), "the icon slot must be showing");
 
                 // The decisive half: an AtlasKind-forgetting impl routes these quads to the GLYPH texture.
-                bool textSlotExists = system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh textMesh);
+                bool textSlotExists = system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh textMesh);
                 Assert.IsTrue(!textSlotExists || textMesh.vertexCount == 0,
                     "no along-line icon quad may land in the TEXT world mesh.");
-                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, LabelKind.Text),
+                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text),
                     "the text slot must stay hidden — this scene has no text label at all.");
 
                 // The tangent branch is what the shader reads: every emitted corner must carry a non-zero
@@ -242,28 +229,26 @@ namespace MapRenderer.Tests.Text.Placement
             var spriteTexture = BuildSpriteTexture();
             var settings = BuildSettings();
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
 
             try
             {
                 var anchor = new[] { new LineAnchor(0, 0.5f) };
-                var labels = new List<LabelInstance>
-                {
-                    MakeAlongLineIconLabel(frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchor),
-                    MakeAlongLineIconLabel(frame.SceneOriginRender, materialIndex: 1, iconRotateRadians: math.PI, anchor),
-                };
+                var buffer = new SymbolTileBuffer();
+                AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchor);
+                AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 1, iconRotateRadians: math.PI, anchor);
 
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(labels, slotCount: 2), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(labels, slotCount: 2), atlasTexture,
+                system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh plainMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh plainMesh),
                     "precondition: the UNROTATED layer must have emitted an icon mesh.");
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 1, LabelKind.Icon, out Mesh rotatedMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 1, SymbolKind.Icon, out Mesh rotatedMesh),
                     "precondition: the icon-rotate: 180 layer must have emitted its own icon mesh.");
 
                 WorldMeshReadback.Read(plainMesh, out WorldBillboardVertex[] plain, out _);
@@ -332,7 +317,7 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
             // One plan across both halves: rebuilding it advances WinnerSetVersion, which is what makes the
             // second (text-only) tick refill the mirror instead of hitting the gather memo.
@@ -344,18 +329,18 @@ namespace MapRenderer.Tests.Text.Placement
                 // Epic A / A1: icons draw through the WORLD path now — the icon quad no longer lands on
                 // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
                 // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
-                var iconLabels = new List<LabelInstance> { MakeIconLabel(frame.SceneOriginRender) };
+                var iconBuffer = MakeIcon(frame.SceneOriginRender);
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(iconLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(iconLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(1, system.LastQuadCount, "LastQuadCount must include the icon quad (no text labels this Tick).");
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh worldIconMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh worldIconMesh),
                     "the world icon slot mesh must exist (created lazily on the icon's first Emit).");
                 Assert.Greater(worldIconMesh.vertexCount, 0, "the world icon slot mesh must have built non-zero vertices.");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon), "the world icon presenter must be showing after an icon Tick.");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon), "the world icon presenter must be showing after an icon Tick.");
 
                 Assert.IsNotNull(renderLayer.WorldIconMaterial, "settings.SymbolIconWorld was assigned — WorldIconMaterial must be a clone, not null.");
                 Texture boundTexture = renderLayer.WorldIconMaterial.GetTexture("_MainTex");
@@ -363,13 +348,13 @@ namespace MapRenderer.Tests.Text.Placement
                     "the world icon presenter's bound material's _MainTex must be the SAME sprite texture instance passed to Tick.");
 
                 // ── 2. Text-only batch (parity: the #1 rule) — world icon slot must go back to HIDDEN, text unaffected ──
-                var textLabels = new List<LabelInstance> { MakeTextLabel(frame.SceneOriginRender) };
-                system.Tick(in frame, plan.Build(textLabels), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(textLabels), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                var textBuffer = MakeText(frame.SceneOriginRender);
+                system.Tick(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(textBuffer), atlasTexture, deltaTime: float.PositiveInfinity, symbolLayers: layers);
 
                 Assert.AreEqual(1, system.LastQuadCount, "the text-only Tick must place its one glyph quad (precondition).");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text), "the world text presenter must still show on a text-only Tick.");
-                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon),
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text), "the world text presenter must still show on a text-only Tick.");
+                Assert.IsFalse(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon),
                     "the world icon presenter must be HIDDEN on a text-only Tick (spriteTexture omitted, no icon quads) — " +
                     "the #1 rule: no sprite loaded ⇒ nothing icon-related builds/binds/presents.");
             }

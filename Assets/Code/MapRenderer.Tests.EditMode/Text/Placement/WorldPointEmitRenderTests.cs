@@ -1,11 +1,11 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj.
 //
-// Epic A / A1 (world-anchored-labels-design.md §11 A1) — the two A0-review findings that must run through
+// Epic A / A1 (world-anchored-symbols-design.md §11 A1) — the two A0-review findings that must run through
 // the REAL production path (not A0's hand-built test scaffold), plus the no-leak tooth:
 //
 //   A0-F2 (real-emit upright): A0's Y-negation fix lived only in test scaffold (BuildOneGlyphWorldMesh).
-//     This renders a point label through the REAL LabelPlacementSystem.Tick (which now produces the world
+//     This renders a point symbol through the REAL SymbolPlacementSystem.Tick (which now produces the world
 //     mesh via BillboardMath.BuildWorldQuad) and asserts the SAME upright check WorldSymbolAbRenderSnapshotTests
 //     already pins for the scaffold — now against production.
 //
@@ -18,6 +18,7 @@
 // Both reuse WorldSymbolAbRenderSnapshotTests' fixture-glyph + camera setup and WorldSymbolInkAnalysis's ink
 // helpers (shared, not duplicated — see that file's header).
 
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -57,10 +58,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        /// <summary>Internal (not private): Stage T's <c>TiltFixtureSelfTests.ViewportPitchAlignedLabel_…</c>
+        /// <summary>Internal (not private): Stage T's <c>TiltFixtureSelfTests.ViewportPitchAlignedSymbol_…</c>
         /// reuses this one-glyph bootstrap under tilt rather than carrying a second copy
         /// (test-code-bloat convention — widen, don't duplicate-and-drag).</summary>
-        internal static (GlyphAtlasTexture texture, TextLayoutResult layout) BuildGlyphA()
+        internal static (GlyphAtlasTexture texture, List<SymbolQuad> quads, TextLayoutBounds bounds) BuildGlyphA()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();
@@ -69,16 +70,17 @@ namespace MapRenderer.Tests.Text.Placement
             texture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
-            return (texture, layout);
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
+            return (texture, quads, bounds);
         }
 
         // ── A0-F2: real-emit upright ────────────────────────────────────────────────────────────────────
 
         [Test]
-        public void RealTick_PointLabel_RendersUpright_ThroughProductionBuildWorldQuad()
+        public void RealTick_PointSymbol_RendersUpright_ThroughProductionBuildWorldQuad()
         {
-            var (atlasTexture, layout) = BuildGlyphA();
+            var (atlasTexture, quads, bounds) = BuildGlyphA();
 
             var camGo = new GameObject("WorldPointEmit_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -98,24 +100,22 @@ namespace MapRenderer.Tests.Text.Placement
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
             long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // Risk R1: a realistic tile, not TileKey=0
 
-            var label = new LabelInstance
-            {
-                AnchorRender = anchorRender, Layout = layout, Paint = LabelPaint.Default,
-                TextSizePx = 220f, SortKey = 0f, FeatureIndex = 0, TileKey = tileKey,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
+                paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: tileKey);
 
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, plan.CollectedCount, "precondition: the collect must yield the label.");
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label must not be culled.");
-                Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, LabelKind.Text), "the world presenter must be showing.");
+                Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world presenter must be showing.");
 
                 snap.Render(uCam);
                 byte[] px = (byte[])snap.RawPixels.Clone();
@@ -145,18 +145,18 @@ namespace MapRenderer.Tests.Text.Placement
             var lookAt = new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 };
             var projection = new WebMercatorProjection();
 
-            // The label's anchor is chosen to be EXACTLY a tile's render-space origin (SW corner) — so a
-            // label whose TileKey names THAT tile bakes AnchorLocal == 0 (the scaffold's degenerate case).
-            // A DIFFERENT (neighbour) tile's origin differs from the anchor, so the SAME label's AnchorLocal
+            // The symbol's anchor is chosen to be EXACTLY a tile's render-space origin (SW corner) — so a
+            // symbol whose TileKey names THAT tile bakes AnchorLocal == 0 (the scaffold's degenerate case).
+            // A DIFFERENT (neighbour) tile's origin differs from the anchor, so the SAME symbol's AnchorLocal
             // is genuinely nonzero there — the two must still land on the SAME real-world point (§3.4's RTC
             // cancellation), hence pixel-equivalent renders.
             TileId zeroTile = TestTileKeys.Containing(lookAt, zoom: 14);
             TileId nonzeroTile = new TileId { X = zeroTile.X + 1, Y = zeroTile.Y, Z = zeroTile.Z };
             double3 anchorRender = TileRenderOrigin.Project(zeroTile, projection);
-            long zeroTileKey = LabelTileKey.Pack(zeroTile);
-            long nonzeroTileKey = LabelTileKey.Pack(nonzeroTile);
+            long zeroTileKey = SymbolTileKey.Pack(zeroTile);
+            long nonzeroTileKey = SymbolTileKey.Pack(nonzeroTile);
 
-            var (atlasTexture, layout) = BuildGlyphA();
+            var (atlasTexture, quads, bounds) = BuildGlyphA();
 
             var camGo = new GameObject("WorldPointEmitAnchor_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -173,36 +173,32 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             byte[] zeroPixels, nonzeroPixels;
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(projection);
             try
             {
-                var zeroLabel = new LabelInstance
-                {
-                    AnchorRender = anchorRender, Layout = layout, Paint = LabelPaint.Default,
-                    TextSizePx = 220f, SortKey = 0f, FeatureIndex = 0, TileKey = zeroTileKey,
-                };
+                var zeroScratch = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(zeroScratch, anchorRender, quads, bounds.Min, bounds.Max,
+                    paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: zeroTileKey);
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, plan.Build(new[] { zeroLabel }), atlasTexture);
-                    system.Tick(in frame, plan.Build(new[] { zeroLabel }), atlasTexture);
+                    system.Tick(in frame, plan.Build(zeroScratch), atlasTexture);
+                    system.Tick(in frame, plan.Build(zeroScratch), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
                     snapZero.Render(uCam);
                     zeroPixels = (byte[])snapZero.RawPixels.Clone();
                 }
 
-                var nonzeroLabel = new LabelInstance
-                {
-                    AnchorRender = anchorRender, Layout = layout, Paint = LabelPaint.Default,
-                    TextSizePx = 220f, SortKey = 0f, FeatureIndex = 0, TileKey = nonzeroTileKey,
-                };
+                var nonzeroScratch = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(nonzeroScratch, anchorRender, quads, bounds.Min, bounds.Max,
+                    paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: nonzeroTileKey);
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, plan.Build(new[] { nonzeroLabel }), atlasTexture);
-                    system.Tick(in frame, plan.Build(new[] { nonzeroLabel }), atlasTexture);
+                    system.Tick(in frame, plan.Build(nonzeroScratch), atlasTexture);
+                    system.Tick(in frame, plan.Build(nonzeroScratch), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
                     snapNonzero.Render(uCam);
                     nonzeroPixels = (byte[])snapNonzero.RawPixels.Clone();
@@ -235,12 +231,12 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Less(changedFraction, 0.03f, $"changed-pixel fraction ({changedFraction:P1}) must stay tiny — same real-world point, different tile bake.");
         }
 
-        // ── No-leak: WorldLabelRenderer destroys every mesh + presenter GameObject on Dispose ──────────
+        // ── No-leak: WorldSymbolRenderer destroys every mesh + presenter GameObject on Dispose ──────────
 
         [Test]
         public void Dispose_DestroysEveryWorldSlotMeshAndPresenter_NoLeak()
         {
-            var (atlasTexture, layout) = BuildGlyphA();
+            var (atlasTexture, quads, bounds) = BuildGlyphA();
 
             var camGo = new GameObject("WorldPointEmitLeak_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -255,7 +251,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             int meshesBefore = Resources.FindObjectsOfTypeAll<Mesh>().Length;
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             // Native buffers only — TestSymbolPlan creates no Mesh, so it cannot perturb the count either side.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
@@ -265,26 +261,23 @@ namespace MapRenderer.Tests.Text.Placement
                 // presenter each) — exercises the dictionary growing, not just one static slot.
                 for (int i = 0; i < 3; i++)
                 {
-                    long tileKey = LabelTileKey.Pack(new TileId { Z = 12, X = 100 + i, Y = 200 });
-                    var label = new LabelInstance
-                    {
-                        AnchorRender = frame.SceneOriginRender, Layout = layout, Paint = LabelPaint.Default,
-                        TextSizePx = 40f, SortKey = 0f, FeatureIndex = i, TileKey = tileKey,
-                        // R3 (Edit 8b): all three labels share AnchorRender, and PointFadeId hashes
-                        // (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so leaving
-                        // Text at its default would give all three the SAME FadeId. Only one candidate is ever
-                        // live per Tick, so that's not an Edit 7 (same-frame) violation, but under R3 iterations
-                        // 1 and 2 would then be satisfied by the id the PREVIOUS iteration's harvested collision
-                        // already put in _placedLastFrame, instead of validating their own tile's placement —
-                        // green for the wrong reason. Distinct text per iteration keeps each id unique.
-                        Text = "T" + i,
-                    };
+                    long tileKey = SymbolTileKey.Pack(new TileId { Z = 12, X = 100 + i, Y = 200 });
+                    var buffer = new SymbolTileBuffer();
+                    // R3 (Edit 8b): all three symbols share AnchorRender, and PointFadeId hashes
+                    // (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so leaving
+                    // Text at its default would give all three the SAME FadeId. Only one candidate is ever
+                    // live per Tick, so that's not an Edit 7 (same-frame) violation, but under R3 iterations
+                    // 1 and 2 would then be satisfied by the id the PREVIOUS iteration's harvested collision
+                    // already put in _placedLastFrame, instead of validating their own tile's placement —
+                    // green for the wrong reason. Distinct text per iteration keeps each id unique.
+                    TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, quads, bounds.Min, bounds.Max,
+                        text: "T" + i, paint: SymbolPaint.Default, textSizePx: 40f, sortKey: 0f, featureIndex: i, tileKey: tileKey);
                     // R3: collision verdicts apply one Tick late (HarvestCollision consumes the PREVIOUS Tick's
                     // scheduled job) — a fresh candidate's own Tick shows nothing, so a second, identical Tick is
                     // needed before its placement can be asserted. The duplicate is fade-neutral (deltaTime
                     // defaults to +inf, snapping to target either way) and does not move any expectation.
-                    system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                    system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                    system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                    system.Tick(in frame, plan.Build(buffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, $"tick {i} must place its label.");
                 }
 
@@ -300,7 +293,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int meshesAfterDispose = Resources.FindObjectsOfTypeAll<Mesh>().Length;
             Assert.AreEqual(meshesBefore, meshesAfterDispose,
-                "every world slot's mesh must be destroyed by LabelPlacementSystem.Dispose (via WorldLabelRenderer.Dispose) — no leak.");
+                "every world slot's mesh must be destroyed by SymbolPlacementSystem.Dispose (via WorldSymbolRenderer.Dispose) — no leak.");
         }
     }
 }

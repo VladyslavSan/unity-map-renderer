@@ -6,8 +6,8 @@
 // Graphics.RenderMesh submit (0 px headless — SymbolAtlasOrientationSnapshotTests' header), a scene
 // MeshRenderer Unity redraws on its own renders normally under a manually-invoked Camera.Render().
 //
-// Setup fuses two proven harnesses: the real-glyph label pipeline from SymbolAtlasOrientationSnapshotTests
-// (fixture atlas, CodepointTextShaper, real LabelPlacementSystem) and the queue/composite scene from
+// Setup fuses two proven harnesses: the real-glyph symbol pipeline from SymbolAtlasOrientationSnapshotTests
+// (fixture atlas, CodepointTextShaper, real SymbolPlacementSystem) and the queue/composite scene from
 // LayerOrderSnapshotTests (QualitySettings/ambient/light setup, the GPU-context Inconclusive guard).
 // SymbolRenderLayers are built directly via SymbolRenderLayer.Create, bypassing RenderLayerSet.Build — so
 // each test writes the renderQueue itself (`TransparentQueue + drawIndex`, one sub-slot's worth — these
@@ -27,7 +27,7 @@
 // SyntheticLineMesh builds the real production vertex layout, proven to render headless (it backs
 // LayerOrderSnapshotTests.BuildWideLine). renderQueue-vs-symbol compositing doesn't care which layer KIND
 // produced the geometry, so a line still proves tooth 1's claim (higher-queue geometry composites over a
-// symbol layer's labels) — see BuildOccludingLineRibbon.
+// symbol layer's symbols) — see BuildOccludingLineRibbon.
 //
 // Sample-point discovery: rather than predicting exactly which pixels a real glyph's ink lands on (an 'A'
 // has a hollow counter — its centroid is not reliably inked), every ink-sensitive test first renders the
@@ -83,7 +83,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        private static (GlyphAtlasTexture texture, TextLayoutResult layout) BuildGlyphA()
+        private static (GlyphAtlasTexture texture, List<SymbolQuad> quads, TextLayoutBounds bounds) BuildGlyphA()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();
@@ -92,28 +92,25 @@ namespace MapRenderer.Tests.Visual
             texture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
-            return (texture, layout);
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
+            return (texture, quads, bounds);
         }
 
-        private static LabelInstance MakeCenteredLabel(TextLayoutResult layout, double3 sceneOriginRender,
-            float4 textColor, int materialIndex, bool allowOverlap = false)
-            => new LabelInstance
-            {
-                AnchorRender = sceneOriginRender, // exactly at look-at → renders centred on screen
-                Layout = layout,
-                Paint = new LabelPaint { TextColor = textColor, Opacity = 1f },
-                TextSizePx = 200f,
-                SortKey = 0f,
-                FeatureIndex = 0,
+        private static void AddCenteredSymbol(SymbolTileBuffer buffer, List<SymbolQuad> quads, TextLayoutBounds bounds,
+            double3 sceneOriginRender, float4 textColor, int materialIndex, bool allowOverlap = false)
+            => TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, quads, bounds.Min, bounds.Max, // exactly at look-at → renders centred on screen
+                paint: new SymbolPaint { TextColor = textColor, Opacity = 1f },
+                textSizePx: 200f,
+                sortKey: 0f,
+                featureIndex: 0,
                 // Epic A / A1 Risk R1: a realistic containing tile (BuildOverheadScene's look-at) keeps the
                 // world-anchored bake float32-safe — TileKey=0 is ~2e7m away (see
                 // SymbolAtlasOrientationSnapshotTests' identical note).
-                TileKey = TestTileKeys.PackedContaining(
+                tileKey: TestTileKeys.PackedContaining(
                     new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
-                MaterialIndex = materialIndex,
-                AllowOverlap = allowOverlap,
-            };
+                materialIndex: materialIndex,
+                allowOverlap: allowOverlap);
 
         // ── shared harness: overhead camera + queue/fill-quad scene (LayerOrderSnapshotTests) ────────────
 
@@ -236,15 +233,15 @@ namespace MapRenderer.Tests.Visual
             finally { Object.DestroyImmediate(blankGo); }
         }
 
-        // ── Tooth 1 (§6.1): a fill at a HIGHER queue occludes labels; a fill BELOW them does not ──────────
+        // ── Tooth 1 (§6.1): a fill at a HIGHER queue occludes symbols; a fill BELOW them does not ──────────
 
         [Test]
-        public void FillAboveSymbolLayer_OccludesLabels_FillBelow_LabelWins()
+        public void FillAboveSymbolLayer_OccludesSymbols_FillBelow_SymbolWins()
         {
             var saved = SetupLitAmbient();
             var (camGo, cam, mapCamera, frame) = BuildOverheadScene();
             var lightGo = BuildDirectionalLight();
-            var (glyphAtlas, layout) = BuildGlyphA();
+            var (glyphAtlas, quads, bounds) = BuildGlyphA();
 
             const string StyleJson = @"{
                 ""version"": 8,
@@ -257,7 +254,7 @@ namespace MapRenderer.Tests.Visual
             var symbolLayer = (Symbol.StyleLayer)style.Layers[0];
             var settings = MapMaterialSetTestUtil.Load();
 
-            var greenLabelColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
+            var greenSymbolColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
             // G7/D7 note: Create(drawIndex: 1) now also writes WorldIconMaterial.renderQueue itself, at
@@ -271,11 +268,11 @@ namespace MapRenderer.Tests.Visual
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.85f, 0.1f, 1f), materialIndex: 0);
+            var buffer = new SymbolTileBuffer();
+            AddCenteredSymbol(buffer, quads, bounds, frame.SceneOriginRender, new float4(0.1f, 0.85f, 0.1f, 1f), materialIndex: 0);
             var layers = new List<SymbolRenderLayer> { renderLayer };
-            var labelSet = new List<LabelInstance> { label };
 
             Mesh occluderMesh = null; Material occluderMat = null; GameObject occluderGo = null;
             using var snap = new SnapshotRenderer(Size, Size);
@@ -283,18 +280,18 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the single 'A' glyph must place (precondition, not the tooth itself).");
 
                 // 1. Solo render (no occluder yet) — find the sample point deep inside the glyph's ink.
                 snap.Render(cam);
                 AssertNotGpuContextFailure(snap);
-                bool found = TryFindClosestPixel(snap.RawPixels, Size, Size, greenLabelColor, out int ix, out int iy);
+                bool found = TryFindClosestPixel(snap.RawPixels, Size, Size, greenSymbolColor, out int ix, out int iy);
                 Assert.IsTrue(found, "solo label render must contain a pixel close to the label's ink colour — " +
                                       "precondition for the occlusion sample point.");
 
-                // 2. Add the occluder ABOVE the symbol layer's queue (+2 > +1) — it must occlude the label.
+                // 2. Add the occluder ABOVE the symbol layer's queue (+2 > +1) — it must occlude the symbol.
                 (occluderMesh, occluderMat) = BuildOccludingLineRibbon(redOccluderColor, LayerDrawOrder.TransparentQueue + 2);
                 occluderGo = AttachMesh(occluderMesh, occluderMat, "Occluder_Above");
                 snap.Render(cam);
@@ -303,7 +300,7 @@ namespace MapRenderer.Tests.Visual
                     $"a layer declared ABOVE a symbol layer must occlude its labels — sampled (R,G,B)=({above[0]:F3},{above[1]:F3},{above[2]:F3}) " +
                     "should read occluder-red (R dominant), not label-green. Under the retired Overlay-4000 pin this fails by construction.");
 
-                // 3. Control: occluder BELOW the symbol layer's queue (+0 < +1) — the label must win instead.
+                // 3. Control: occluder BELOW the symbol layer's queue (+0 < +1) — the symbol must win instead.
                 occluderMat.renderQueue = LayerDrawOrder.TransparentQueue + 0;
                 snap.Render(cam);
                 double[] below = SampleAround(snap.RawPixels, ix, iy);
@@ -333,7 +330,7 @@ namespace MapRenderer.Tests.Visual
             var saved = SetupLitAmbient();
             var (camGo, cam, mapCamera, frame) = BuildOverheadScene();
             var lightGo = BuildDirectionalLight();
-            var (glyphAtlas, layout) = BuildGlyphA();
+            var (glyphAtlas, quads, bounds) = BuildGlyphA();
 
             const string StyleJson = @"{
                 ""version"": 8,
@@ -351,40 +348,43 @@ namespace MapRenderer.Tests.Visual
 
             var redColor  = new Color32(230, 38, 26, 255);  // (0.9, 0.15, 0.1)
             var blueColor = new Color32(26, 51, 230, 255);  // (0.1, 0.2, 0.9)
-            var labelA = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
-            var labelB = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.1f, 0.2f, 0.9f, 1f), materialIndex: 1, allowOverlap: true);
 
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
 
             using var snap = new SnapshotRenderer(Size, Size);
-            // Solo render of label A alone (layerA only) to find the ink sample point — labelA/labelB share
+            // Solo render of symbol A alone (layerA only) to find the ink sample point — labelA/labelB share
             // the identical glyph/anchor/size, so the same footprint applies to both. ONE TestSymbolPlan
-            // instance serves every tick in this test: LabelPlacementSystem skips the native-mirror refresh
+            // instance serves every tick in this test: SymbolPlacementSystem skips the native-mirror refresh
             // unless the source's IDENTITY or version changed, and TestSymbolPlan reuses one SymbolGatherPlan
             // whose WinnerSetVersion it advances per Build — two independently-constructed plans would each
             // start at version 1 and could collide on that skip guard.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                var soloSet = new List<LabelInstance> { labelA };
-                var bothSet = new List<LabelInstance> { labelA, labelB };
+                var soloBuffer = new SymbolTileBuffer();
+                AddCenteredSymbol(soloBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
+
+                var bothBuffer = new SymbolTileBuffer();
+                AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
+                AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.1f, 0.2f, 0.9f, 1f), materialIndex: 1, allowOverlap: true);
+
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
                 var layerAOnly = new List<SymbolRenderLayer> { layerA };
-                system.Tick(in frame, plan.Build(soloSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
-                system.Tick(in frame, plan.Build(soloSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
+                system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
                 Assert.AreEqual(1, system.LastQuadCount, "label A alone must place (precondition).");
                 snap.Render(cam);
                 AssertNotGpuContextFailure(snap);
                 bool found = TryFindClosestPixel(snap.RawPixels, Size, Size, redColor, out int ix, out int iy);
                 Assert.IsTrue(found, "solo label-A render must contain a pixel close to its ink colour — precondition for the sample point.");
 
-                // Both labels, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
+                // Both symbols, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(2, system.LastQuadCount, "both overlapping labels place (AllowOverlap — the tooth is draw order, not collision).");
 
                 snap.Render(cam);
@@ -401,8 +401,8 @@ namespace MapRenderer.Tests.Visual
                 // live queue mutation took effect on the very next Render with no re-Tick). A re-Tick here
                 // matches real usage (production always Ticks before every Render); rebuilding through the
                 // SAME TestSymbolPlan keeps the mirror-refresh guard satisfied (see its note above).
-                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(bothSet, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 snap.Render(cam);
                 double[] aFirst = SampleAround(snap.RawPixels, ix, iy);
                 Assert.Greater(aFirst[0], aFirst[2],
@@ -429,7 +429,7 @@ namespace MapRenderer.Tests.Visual
             var saved = SetupLitAmbient();
             var (camGo, cam, mapCamera, frame) = BuildOverheadScene();
             var lightGo = BuildDirectionalLight();
-            var (glyphAtlas, layout) = BuildGlyphA();
+            var (glyphAtlas, quads, bounds) = BuildGlyphA();
 
             const string StyleJson = @"{
                 ""version"": 8,
@@ -444,24 +444,24 @@ namespace MapRenderer.Tests.Visual
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
 
             var inkColor = new Color32(230, 230, 230, 255); // near-white ink, distinct from the near-black background
-            var label = MakeCenteredLabel(layout, frame.SceneOriginRender, new float4(0.9f, 0.9f, 0.9f, 1f), materialIndex: 0);
+            var buffer = new SymbolTileBuffer();
+            AddCenteredSymbol(buffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.9f, 0.9f, 1f), materialIndex: 0);
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
-            var system = new LabelPlacementSystem(mapCamera,
+            var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
-            var labelSet = new List<LabelInstance> { label };
-            var emptySet = new List<LabelInstance>();
+            var emptyBuffer = new SymbolTileBuffer();
 
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // SHOW half: one Tick with a label, render TWICE with no Tick between — no manual
+                // SHOW half: one Tick with a symbol, render TWICE with no Tick between — no manual
                 // MeshFilter/MeshRenderer attach anywhere in this test (E2's whole point: the presenter IS
                 // a persistent scene renderer, created/bound entirely inside Tick).
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
-                system.Tick(in frame, plan.Build(labelSet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
 
                 snap.Render(cam);
@@ -476,8 +476,8 @@ namespace MapRenderer.Tests.Visual
                     "Under the retired immediate-mode Graphics.RenderMesh path this would be the Editor blink (0 ink, nothing re-submitted).");
 
                 // HIDE half (risk #1's mirror-image guard): Tick with an EMPTY set → the presenter must hide,
-                // not keep drawing last frame's label frozen on screen.
-                system.Tick(in frame, plan.Build(emptySet), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
+                // not keep drawing last frame's symbol frozen on screen.
+                system.Tick(in frame, plan.Build(emptyBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(0, system.LastQuadCount, "the empty Tick must place nothing (precondition).");
 
                 snap.Render(cam);
@@ -499,7 +499,7 @@ namespace MapRenderer.Tests.Visual
 
         // ── Collision parity (tooth §6.3): the demo (no layers) and production (real SymbolRenderLayer)
         //    paths must produce IDENTICAL candidate/survivor/quad counts — E2 touches only the DRAW, never
-        //    anything upstream of the emit loop. Two fresh LabelPlacementSystem instances (not one instance
+        //    anything upstream of the emit loop. Two fresh SymbolPlacementSystem instances (not one instance
         //    ticked twice) so A-5 sticky-placement incumbency from the first call can't bias the second. ──
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
@@ -512,7 +512,7 @@ namespace MapRenderer.Tests.Visual
             return texture;
         }
 
-        private static LabelInstance MakeOverlappingLabel(int featureIndex, double3 sceneOriginRender, float sortKey)
+        private static void AddOverlappingSymbol(SymbolTileBuffer buffer, int featureIndex, double3 sceneOriginRender, float sortKey)
         {
             var quads = new List<SymbolQuad>
             {
@@ -522,24 +522,19 @@ namespace MapRenderer.Tests.Visual
                     UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
                 },
             };
-            var layout = new TextLayoutResult { Quads = quads, BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1 };
-            return new LabelInstance
-            {
-                AnchorRender = sceneOriginRender, // SAME anchor for both labels → guaranteed real collision
-                Layout = layout,
-                Paint = LabelPaint.Default,
-                TextSizePx = 24f,
-                SortKey = sortKey,
-                FeatureIndex = featureIndex,
-                TileKey = 0L,
+            TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, quads, float2.zero, new float2(18f, 18f), // SAME anchor for both symbols → guaranteed real collision
+                paint: SymbolPaint.Default,
+                textSizePx: 24f,
+                sortKey: sortKey,
+                featureIndex: featureIndex,
+                tileKey: 0L,
                 // R3: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey —
-                // so two labels sharing an anchor with the (both-default) Text/MaterialIndex this method used to
-                // leave unset would collide on FadeId. Under R3, FadeId is the display key (LabelCandidate.FadeId's
+                // so two symbols sharing an anchor with the (both-default) Text/MaterialIndex this method used to
+                // leave unset would collide on FadeId. Under R3, FadeId is the display key (SymbolCandidate.FadeId's
                 // uniqueness contract), so a collision would make the loser show alongside the winner. Distinct Text
-                // per label keeps the anchors identical (the real collision this test needs) while giving each a
-                // unique identity; it does not perturb the staged geometry (Layout is supplied explicitly here).
-                Text = "L" + featureIndex,
-            };
+                // per symbol keeps the anchors identical (the real collision this test needs) while giving each a
+                // unique identity; it does not perturb the staged geometry (its quads are supplied explicitly here).
+                text: "L" + featureIndex);
         }
 
         [Test]
@@ -569,24 +564,22 @@ namespace MapRenderer.Tests.Visual
                 (Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 0;
 
-            var labels = new List<LabelInstance>
-            {
-                MakeOverlappingLabel(0, frame.SceneOriginRender, sortKey: 20f),
-                MakeOverlappingLabel(1, frame.SceneOriginRender, sortKey: 10f), // lower key wins the collision
-            };
+            var buffer = new SymbolTileBuffer();
+            AddOverlappingSymbol(buffer, 0, frame.SceneOriginRender, sortKey: 20f);
+            AddOverlappingSymbol(buffer, 1, frame.SceneOriginRender, sortKey: 10f); // lower key wins the collision
 
-            // Step 5b: this compared the labels-list overload against the SymbolLabelBatch overload — both demo
+            // Step 5b: this compared the symbols-list overload against the SymbolBatch overload — both demo
             // seams, so it compared demo against demo while calling one side "prod". Both are gone. The invariant
             // it actually asserts survives and is now stated directly: supplying per-layer render layers (E2 —
             // each with its own material + persistent presenter) partitions only the DRAW, and must not perturb
-            // anything upstream of the emit loop. Same plan, same labels, layers vs no layers.
-            var noLayersSystem = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
-            var layeredSystem  = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            // anything upstream of the emit loop. Same plan, same symbols, layers vs no layers.
+            var noLayersSystem = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var layeredSystem  = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                SymbolGatherPlan built = plan.Build(labels);
-                Assert.AreEqual(labels.Count, plan.CollectedCount,
+                SymbolGatherPlan built = plan.Build(buffer);
+                Assert.AreEqual(buffer.Symbols.Count, plan.CollectedCount,
                     "precondition: both labels reach the placement path — they share an anchor, so a dedup " +
                     "merge here would silently turn the comparison into 1-vs-2 and read as a real divergence.");
 

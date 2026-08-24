@@ -12,11 +12,11 @@ namespace MapRenderer.Jobs
     /// vertices) to logical screen pixels + NDC depth, culling only behind-camera. It is deliberately GENERIC
     /// over what a symbol renders — text today, an icon later, both together — because a symbol is projected as
     /// its anchor/path world points regardless; the glyph/icon layout is a separate, serial staging step that
-    /// reads this job's output. Uses the SAME <see cref="LabelScreenProjection.TryProjectPoint"/> the serial
+    /// reads this job's output. Uses the SAME <see cref="SymbolScreenProjection.TryProjectPoint"/> the serial
     /// path uses (one copy of the projection math), so the job and inline results are bit-identical.
     ///
     /// <para><b>Pure projection, cull downstream.</b> The point-anchor viewport-margin cull
-    /// (<see cref="LabelScreenProjection.IsWithinViewportMargin"/>) and the line near-plane blow-up guard are
+    /// (<see cref="SymbolScreenProjection.IsWithinViewportMargin"/>) and the line near-plane blow-up guard are
     /// applied by the serial staging pass, NOT here — they are cheap screen-space tests, and keeping them out
     /// makes this job a single uniform matrix-mul over both symbol kinds.</para>
     ///
@@ -51,7 +51,7 @@ namespace MapRenderer.Jobs
 
         public void Execute(int index)
         {
-            bool ok = LabelScreenProjection.TryProjectPoint(
+            bool ok = SymbolScreenProjection.TryProjectPoint(
                 Points[index], SceneOriginRender, ViewProj, ViewportLogicalPx, Rebase, out float2 screen, out float depth);
             OutScreen[index] = screen;
             OutDepth[index]  = depth;

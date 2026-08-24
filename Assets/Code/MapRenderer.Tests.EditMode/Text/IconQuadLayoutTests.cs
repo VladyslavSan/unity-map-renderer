@@ -1,6 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
@@ -158,23 +159,26 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(expectedBottomRightY, quad.BottomRight.y, Eps, $"anchor {anchor}: BottomRight.y");
         }
 
-        // I5a: ToLayoutResult wraps a single laid-out icon quad into the same TextLayoutResult shape the
-        // point-text path produces, so StyledSymbolTileBuilder's Pass 2 can emit an icon down the SAME
-        // point-placement path.
+        // I5a: the inline bounds formula (min/max corner ± skirt) wraps a single laid-out icon quad into
+        // the same caller-owned quad list + TextLayoutBounds shape the point-text path produces, so
+        // StyledSymbolTileBuilder's Pass 2 can emit an icon down the SAME point-placement path.
         [Test]
-        public void ToLayoutResult_WrapsSingleQuad_BoundsAreItsOwnMinMaxCorners()
+        public void IconBounds_WrapsSingleQuad_BoundsAreItsOwnMinMaxCorners()
         {
             SymbolQuad quad = IconQuadLayout.Layout(Star, SheetSize, 1f, TextAnchor.TopLeft, new float2(3f, -1f));
 
-            TextLayoutResult result = IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(Star, 1f));
+            float skirtPx = IconQuadLayout.SkirtPx(Star, 1f);
+            var quads = new List<SymbolQuad> { quad };
+            float2 skirtV = new float2(skirtPx, skirtPx);
+            float2 boundsMin = math.min(quad.TopLeft, quad.BottomRight) + skirtV;
+            float2 boundsMax = math.max(quad.TopLeft, quad.BottomRight) - skirtV;
 
-            Assert.AreEqual(1, result.Quads.Count, "a sprite is exactly one quad");
-            AssertQuadEqual(quad, result.Quads[0]);
-            Assert.AreEqual(1, result.LineCount, "an icon has no line concept — pinned at 1");
-            Assert.AreEqual(math.min(quad.TopLeft.x, quad.BottomRight.x), result.BoundsMin.x, Eps);
-            Assert.AreEqual(math.min(quad.TopLeft.y, quad.BottomRight.y), result.BoundsMin.y, Eps);
-            Assert.AreEqual(math.max(quad.TopLeft.x, quad.BottomRight.x), result.BoundsMax.x, Eps);
-            Assert.AreEqual(math.max(quad.TopLeft.y, quad.BottomRight.y), result.BoundsMax.y, Eps);
+            Assert.AreEqual(1, quads.Count, "a sprite is exactly one quad");
+            AssertQuadEqual(quad, quads[0]);
+            Assert.AreEqual(math.min(quad.TopLeft.x, quad.BottomRight.x), boundsMin.x, Eps);
+            Assert.AreEqual(math.min(quad.TopLeft.y, quad.BottomRight.y), boundsMin.y, Eps);
+            Assert.AreEqual(math.max(quad.TopLeft.x, quad.BottomRight.x), boundsMax.x, Eps);
+            Assert.AreEqual(math.max(quad.TopLeft.y, quad.BottomRight.y), boundsMax.y, Eps);
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -210,13 +214,15 @@ namespace MapRenderer.Tests.Text
             float expectedBottomRightX, float expectedBottomRightY)
         {
             SymbolQuad quad = IconQuadLayout.Layout(PaddedMarker, SheetSize, 1f, anchor, float2.zero);
-            TextLayoutResult content =
-                IconQuadLayout.ToLayoutResult(quad, IconQuadLayout.SkirtPx(PaddedMarker, 1f));
+            float skirtPx = IconQuadLayout.SkirtPx(PaddedMarker, 1f);
+            float2 skirtV = new float2(skirtPx, skirtPx);
+            float2 boundsMin = math.min(quad.TopLeft, quad.BottomRight) + skirtV;
+            float2 boundsMax = math.max(quad.TopLeft, quad.BottomRight) - skirtV;
 
-            Assert.AreEqual(math.min(expectedTopLeftX, expectedBottomRightX), content.BoundsMin.x, Eps, $"anchor {anchor}: BoundsMin.x");
-            Assert.AreEqual(math.min(expectedTopLeftY, expectedBottomRightY), content.BoundsMin.y, Eps, $"anchor {anchor}: BoundsMin.y");
-            Assert.AreEqual(math.max(expectedTopLeftX, expectedBottomRightX), content.BoundsMax.x, Eps, $"anchor {anchor}: BoundsMax.x");
-            Assert.AreEqual(math.max(expectedTopLeftY, expectedBottomRightY), content.BoundsMax.y, Eps, $"anchor {anchor}: BoundsMax.y");
+            Assert.AreEqual(math.min(expectedTopLeftX, expectedBottomRightX), boundsMin.x, Eps, $"anchor {anchor}: BoundsMin.x");
+            Assert.AreEqual(math.min(expectedTopLeftY, expectedBottomRightY), boundsMin.y, Eps, $"anchor {anchor}: BoundsMin.y");
+            Assert.AreEqual(math.max(expectedTopLeftX, expectedBottomRightX), boundsMax.x, Eps, $"anchor {anchor}: BoundsMax.x");
+            Assert.AreEqual(math.max(expectedTopLeftY, expectedBottomRightY), boundsMax.y, Eps, $"anchor {anchor}: BoundsMax.y");
         }
 
         /// <summary>C1, the general case: for every fixture sprite × icon-size × anchor × offset, the padded
@@ -241,14 +247,16 @@ namespace MapRenderer.Tests.Text
                 {
                     SymbolQuad bareQuad = IconQuadLayout.Layout(bare, SheetSize, iconSize, anchor, offset);
                     SymbolQuad paddedQuad = IconQuadLayout.Layout(padded, SheetSize, iconSize, anchor, offset);
-                    TextLayoutResult content =
-                        IconQuadLayout.ToLayoutResult(paddedQuad, IconQuadLayout.SkirtPx(padded, iconSize));
+                    float skirtPx = IconQuadLayout.SkirtPx(padded, iconSize);
+                    float2 skirtV = new float2(skirtPx, skirtPx);
+                    float2 boundsMin = math.min(paddedQuad.TopLeft, paddedQuad.BottomRight) + skirtV;
+                    float2 boundsMax = math.max(paddedQuad.TopLeft, paddedQuad.BottomRight) - skirtV;
 
                     string what = $"{bare.Width}x{bare.Height}@{bare.PixelRatio} {anchor} size {iconSize}";
-                    Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), content.BoundsMin.x, Eps, $"{what}: min.x");
-                    Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), content.BoundsMin.y, Eps, $"{what}: min.y");
-                    Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), content.BoundsMax.x, Eps, $"{what}: max.x");
-                    Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), content.BoundsMax.y, Eps, $"{what}: max.y");
+                    Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), boundsMin.x, Eps, $"{what}: min.x");
+                    Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), boundsMin.y, Eps, $"{what}: min.y");
+                    Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), boundsMax.x, Eps, $"{what}: max.x");
+                    Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), boundsMax.y, Eps, $"{what}: max.y");
                 }
             }
         }

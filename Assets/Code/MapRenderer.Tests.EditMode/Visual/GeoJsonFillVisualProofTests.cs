@@ -4,7 +4,7 @@
 // The single fill-only proof fixture carrying the kit's three acceptance teeth (plan §6): T-Fill (the fill
 // actually renders where authored, background where empty), T-Parse (the kit routes through the REAL
 // StyleParser.Parse — two arms), T-Binding (layers bind by source id; a dangling id yields no geometry AND
-// wires no source). Fill only — no labels, no lines, no seam-dedup (plan §10 scope fence).
+// wires no source). Fill only — no symbols, no lines, no seam-dedup (plan §10 scope fence).
 
 #if UNITY_EDITOR
 using System;

@@ -124,23 +124,23 @@ namespace MapRenderer.Tests.Style
                 "transportation_name", SyntheticTileId, new List<IFeature> { interstate, usHighway }, Extent);
         }
 
-        private static int CountIcons(List<SymbolStyle.SymbolLabel> labels)
+        private static int CountIcons(List<SymbolStyle.SymbolFeature> symbols)
         {
             int n = 0;
-            foreach (SymbolStyle.SymbolLabel l in labels) if (l.Kind == LabelKind.Icon) n++;
+            foreach (SymbolStyle.SymbolFeature l in symbols) if (l.Kind == SymbolKind.Icon) n++;
             return n;
         }
 
-        private static int CountTexts(List<SymbolStyle.SymbolLabel> labels)
+        private static int CountTexts(List<SymbolStyle.SymbolFeature> symbols)
         {
             int n = 0;
-            foreach (SymbolStyle.SymbolLabel l in labels) if (l.Kind == LabelKind.Text) n++;
+            foreach (SymbolStyle.SymbolFeature l in symbols) if (l.Kind == SymbolKind.Text) n++;
             return n;
         }
 
         // ── T2 ─────────────────────────────────────────────────────────────────────────────────────────
         [Test]
-        public void PointPlacement_OnLineString_EmitsLabels()
+        public void PointPlacement_OnLineString_EmitsSymbols()
         {
             SymbolStyle.StyleLayer nonUs = FindShieldLayer("highway-shield-non-us");
             Assert.IsNotNull(nonUs, "precondition: highway-shield-non-us must parse as a Symbol.StyleLayer");
@@ -149,15 +149,15 @@ namespace MapRenderer.Tests.Style
 
             Assert.Greater(FeatureSelectorCount(nonUs), 0, "precondition: the layer must select > 0 features");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             // z10 — below the layer's z11 step boundary — must evaluate to Point placement.
-            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 10.0, projection, labels, atlas);
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 10.0, projection, symbols, atlas);
 
-            Assert.Greater(labels.Count, 0, "point placement on LineString features must emit labels");
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            Assert.Greater(symbols.Count, 0, "point placement on LineString features must emit symbols");
+            foreach (SymbolStyle.SymbolFeature l in symbols)
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "every label must be Point-placed below the step");
 
-            int icons = CountIcons(labels), texts = CountTexts(labels);
+            int icons = CountIcons(symbols), texts = CountTexts(symbols);
             Assert.Greater(icons, 0, "icon count must be > 0");
             Assert.Greater(texts, 0, "text count must be > 0");
             Assert.AreEqual(texts, icons, "icon count must equal text count (one pair per feature)");
@@ -175,12 +175,12 @@ namespace MapRenderer.Tests.Style
 
             // non-us — real fixture, at z13 (above its z11 step ⇒ line/upright placement, the demo's actual view).
             SymbolStyle.StyleLayer nonUs = FindShieldLayer("highway-shield-non-us");
-            var nonUsLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, nonUsLabels, atlas);
-            int nonUsIcons = CountIcons(nonUsLabels);
+            var nonUsSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, nonUsSymbols, atlas);
+            int nonUsIcons = CountIcons(nonUsSymbols);
             Assert.Greater(nonUsIcons, 0, "highway-shield-non-us must resolve > 0 icons at z13");
-            foreach (SymbolStyle.SymbolLabel l in nonUsLabels)
-                if (l.Kind == LabelKind.Icon)
+            foreach (SymbolStyle.SymbolFeature l in nonUsSymbols)
+                if (l.Kind == SymbolKind.Icon)
                 {
                     StringAssert.StartsWith("road_", l.IconImage, "non-us icon name must be road_<ref_length>");
                 }
@@ -189,44 +189,44 @@ namespace MapRenderer.Tests.Style
             IDecodedTile synthTile = SyntheticUsShieldTile();
 
             SymbolStyle.StyleLayer interstate = FindShieldLayer("highway-shield-us-interstate");
-            var interstateLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(interstate, synthTile, SyntheticTileId, 13.0, projection, interstateLabels, atlas);
-            int interstateIcons = CountIcons(interstateLabels);
+            var interstateSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(interstate, synthTile, SyntheticTileId, 13.0, projection, interstateSymbols, atlas);
+            int interstateIcons = CountIcons(interstateSymbols);
             Assert.Greater(interstateIcons, 0, "highway-shield-us-interstate must resolve > 0 icons at z13");
-            foreach (SymbolStyle.SymbolLabel l in interstateLabels)
-                if (l.Kind == LabelKind.Icon)
+            foreach (SymbolStyle.SymbolFeature l in interstateSymbols)
+                if (l.Kind == SymbolKind.Icon)
                     StringAssert.StartsWith("us-interstate_", l.IconImage, "interstate icon name must be us-interstate_<ref_length>");
 
             SymbolStyle.StyleLayer usShield = FindShieldLayer("road_shield_us");
-            var usShieldLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(usShield, synthTile, SyntheticTileId, 13.0, projection, usShieldLabels, atlas);
-            int usShieldIcons = CountIcons(usShieldLabels);
+            var usShieldSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(usShield, synthTile, SyntheticTileId, 13.0, projection, usShieldSymbols, atlas);
+            int usShieldIcons = CountIcons(usShieldSymbols);
             Assert.Greater(usShieldIcons, 0, "road_shield_us must resolve > 0 icons at z13");
-            foreach (SymbolStyle.SymbolLabel l in usShieldLabels)
-                if (l.Kind == LabelKind.Icon)
+            foreach (SymbolStyle.SymbolFeature l in usShieldSymbols)
+                if (l.Kind == SymbolKind.Icon)
                     Assert.IsTrue(l.IconImage.StartsWith("us-highway_") || l.IconImage.StartsWith("us-state_"),
                         $"road_shield_us icon name must be us-highway_<n>|us-state_<n>, was '{l.IconImage}'");
         }
 
         // ── T4 ─────────────────────────────────────────────────────────────────────────────────────────
         [Test]
-        public void LinePlacement_ViewportAligned_EmitsUprightAnchorLabels()
+        public void LinePlacement_ViewportAligned_EmitsUprightAnchorSymbols()
         {
             SymbolStyle.StyleLayer nonUs = FindShieldLayer("highway-shield-non-us");
             var projection = new WebMercatorProjection();
             var atlas = SyntheticShieldAtlas();
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, symbols, atlas);
 
-            Assert.Greater(labels.Count, 0, "z13 (above the step) must still emit labels");
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            Assert.Greater(symbols.Count, 0, "z13 (above the step) must still emit symbols");
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
-                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor labels are Point-placed, not curved");
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor symbols are Point-placed, not curved");
                 Assert.IsNull(l.PathRender, "an upright-at-anchor label carries no curved path");
             }
 
-            int icons = CountIcons(labels), texts = CountTexts(labels);
+            int icons = CountIcons(symbols), texts = CountTexts(symbols);
             Assert.Greater(icons, 0, "icon count must be > 0 at z13");
             Assert.Greater(texts, 0, "text count must be > 0 at z13");
             Assert.AreEqual(texts, icons, "icon count must equal text count at z13");
@@ -240,22 +240,22 @@ namespace MapRenderer.Tests.Style
             var projection = new WebMercatorProjection();
             var atlas = SyntheticShieldAtlas();
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(nonUs, BerlinFixtureTile(), BerlinTile, 13.0, projection, symbols, atlas);
 
-            Assert.Greater(labels.Count, 0, "precondition: some labels must be emitted");
-            Assert.AreEqual(0, labels.Count % 2, "labels must form consecutive (icon,text) pairs — even count");
+            Assert.Greater(symbols.Count, 0, "precondition: some symbols must be emitted");
+            Assert.AreEqual(0, symbols.Count % 2, "symbols must form consecutive (icon,text) pairs — even count");
 
-            for (int i = 0; i < labels.Count; i += 2)
+            for (int i = 0; i < symbols.Count; i += 2)
             {
-                SymbolStyle.SymbolLabel icon = labels[i];
-                SymbolStyle.SymbolLabel text = labels[i + 1];
-                Assert.AreEqual(LabelKind.Icon, icon.Kind, $"labels[{i}] must be the icon (icon emitted first)");
-                Assert.AreEqual(LabelKind.Text, text.Kind, $"labels[{i + 1}] must be the text");
+                SymbolStyle.SymbolFeature icon = symbols[i];
+                SymbolStyle.SymbolFeature text = symbols[i + 1];
+                Assert.AreEqual(SymbolKind.Icon, icon.Kind, $"symbols[{i}] must be the icon (icon emitted first)");
+                Assert.AreEqual(SymbolKind.Text, text.Kind, $"symbols[{i + 1}] must be the text");
                 Assert.AreEqual(icon.FeatureIndex + 1, text.FeatureIndex, "text's ordinal must immediately follow its icon's");
                 Assert.AreEqual(icon.AnchorRender, text.AnchorRender, "icon and text of a pair share the same anchor");
                 // §10 D8/D9: the D5 forcing is retired — the icon+text pair is ONE placement instance
-                // downstream (LabelPairing / StagePointPair), so both halves carry their AUTHORED
+                // downstream (SymbolPairing / StagePointPair), so both halves carry their AUTHORED
                 // text-allow-overlap/text-ignore-placement (liberty's shield layers declare neither — default
                 // false), not a forced-true passenger flag.
                 Assert.IsFalse(text.AllowOverlap, "the rider text carries its AUTHORED AllowOverlap (unset -> false)");
@@ -264,8 +264,8 @@ namespace MapRenderer.Tests.Style
                 Assert.IsFalse(icon.IgnorePlacement, "the icon (pair owner) must NOT set IgnorePlacement");
 
                 // §10 D10: the pair is stamped Owner/Rider sharing a PairId.
-                Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, "the icon must be stamped Owner");
-                Assert.AreEqual(LabelPairRole.Rider, text.PairRole, "the text must be stamped Rider");
+                Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, "the icon must be stamped Owner");
+                Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, "the text must be stamped Rider");
                 Assert.AreEqual(icon.FeatureIndex, icon.PairId, "PairId is the owner's own FeatureIndex");
                 Assert.AreEqual(icon.PairId, text.PairId, "both halves of a pair share one PairId");
             }
@@ -292,19 +292,19 @@ namespace MapRenderer.Tests.Style
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
                     "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"text-offset\":[0,0.6]}"),
             };
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
-                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+                new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
 
-            Assert.AreEqual(2, labels.Count, "precondition: text + icon must both be emitted");
-            Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "a pair emits its OWNER (the icon) first");
-            Assert.AreEqual(LabelKind.Text, labels[1].Kind, "the rider text follows immediately");
-            Assert.AreEqual(LabelPairRole.Owner, labels[0].PairRole, "the icon is the pair owner");
-            Assert.AreEqual(LabelPairRole.Rider, labels[1].PairRole, "the offset text still rides its icon");
-            Assert.AreEqual(labels[0].FeatureIndex, labels[0].PairId, "PairId is the owner's own FeatureIndex");
-            Assert.AreEqual(labels[0].PairId, labels[1].PairId, "both halves share one PairId");
-            Assert.AreEqual(labels[0].FeatureIndex + 1, labels[1].FeatureIndex,
-                "the rider's ordinal must immediately follow its owner's (LabelPairing's adjacency contract)");
+            Assert.AreEqual(2, symbols.Count, "precondition: text + icon must both be emitted");
+            Assert.AreEqual(SymbolKind.Icon, symbols[0].Kind, "a pair emits its OWNER (the icon) first");
+            Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text follows immediately");
+            Assert.AreEqual(SymbolPairRole.Owner, symbols[0].PairRole, "the icon is the pair owner");
+            Assert.AreEqual(SymbolPairRole.Rider, symbols[1].PairRole, "the offset text still rides its icon");
+            Assert.AreEqual(symbols[0].FeatureIndex, symbols[0].PairId, "PairId is the owner's own FeatureIndex");
+            Assert.AreEqual(symbols[0].PairId, symbols[1].PairId, "both halves share one PairId");
+            Assert.AreEqual(symbols[0].FeatureIndex + 1, symbols[1].FeatureIndex,
+                "the rider's ordinal must immediately follow its owner's (SymbolPairing's adjacency contract)");
         }
 
         // ── T7 ─────────────────────────────────────────────────────────────────────────────────────────
@@ -340,26 +340,26 @@ namespace MapRenderer.Tests.Style
                     if (path.Count >= 2) eligiblePaths++;
             Assert.Greater(eligiblePaths, 0, "precondition: > 0 eligible (>=2 point) decoded paths");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(handBuilt, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(handBuilt, BerlinFixtureTile(), BerlinTile, 13.0, projection, symbols, atlas);
 
-            Assert.Greater(labels.Count, 0, "map-aligned line layer must still emit curved labels");
-            Assert.AreEqual(eligiblePaths, labels.Count, "one curved label per eligible decoded path — no drops, no dupes");
+            Assert.Greater(symbols.Count, 0, "map-aligned line layer must still emit curved symbols");
+            Assert.AreEqual(eligiblePaths, symbols.Count, "one curved label per eligible decoded path — no drops, no dupes");
 
-            for (int i = 0; i < labels.Count; i++)
+            for (int i = 0; i < symbols.Count; i++)
             {
-                SymbolStyle.SymbolLabel l = labels[i];
-                Assert.AreEqual(SymbolPlacement.Line, l.Placement, $"labels[{i}] must stay curved (Line), not upright");
-                Assert.IsNotNull(l.PathRender, $"labels[{i}] must carry a projected path");
-                Assert.IsNotNull(l.LineAnchors, $"labels[{i}] must carry its build-time anchors");
-                Assert.Greater(l.LineAnchors.Length, 0, $"labels[{i}] must carry >= 1 anchor");
+                SymbolStyle.SymbolFeature l = symbols[i];
+                Assert.AreEqual(SymbolPlacement.Line, l.Placement, $"symbols[{i}] must stay curved (Line), not upright");
+                Assert.IsNotNull(l.PathRender, $"symbols[{i}] must carry a projected path");
+                Assert.IsNotNull(l.LineAnchors, $"symbols[{i}] must carry its build-time anchors");
+                Assert.Greater(l.LineAnchors.Length, 0, $"symbols[{i}] must carry >= 1 anchor");
                 Assert.AreEqual(i, l.FeatureIndex, "FeatureIndex ordinals must be contiguous from 0");
-                Assert.AreEqual(LabelKind.Text, l.Kind, "a map-aligned curved label is a text label");
+                Assert.AreEqual(SymbolKind.Text, l.Kind, "a map-aligned curved label is a text label");
             }
 
             // Field-for-field, against values derived independently from the layer definition (spec defaults),
             // not a baked baseline.
-            SymbolStyle.SymbolLabel first = labels[0];
+            SymbolStyle.SymbolFeature first = symbols[0];
             Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default is 250");
             Assert.AreEqual(45f, first.MaxAngleDeg, 1e-6, "text-max-angle default is 45");
             Assert.IsTrue(first.KeepUpright, "text-keep-upright default is true");
@@ -371,7 +371,7 @@ namespace MapRenderer.Tests.Style
             Assert.Greater(first.PathRender.Length, 0, "PathRender must be non-empty");
 
             // No icons at all — this layer declares no icon-image.
-            Assert.AreEqual(0, CountIcons(labels), "a text-only layer must emit zero icon labels");
+            Assert.AreEqual(0, CountIcons(symbols), "a text-only layer must emit zero icon symbols");
 
             // The real shipped Liberty layer (guarded skip if this fixture selects nothing for it).
             SymbolStyle.StyleLayer highwayNameMajor = FindShieldLayer("highway-name-major");
@@ -382,16 +382,16 @@ namespace MapRenderer.Tests.Style
             {
                 Assert.Pass("known coverage gap: highway-name-major selects nothing from the Berlin fixture at z13");
             }
-            var majorLabels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(highwayNameMajor, BerlinFixtureTile(), BerlinTile, 13.0, projection, majorLabels, atlas);
-            Assert.Greater(majorLabels.Count, 0, "highway-name-major (literal line, unset alignment -> map) must still emit curved labels");
-            foreach (SymbolStyle.SymbolLabel l in majorLabels)
+            var majorSymbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(highwayNameMajor, BerlinFixtureTile(), BerlinTile, 13.0, projection, majorSymbols, atlas);
+            Assert.Greater(majorSymbols.Count, 0, "highway-name-major (literal line, unset alignment -> map) must still emit curved symbols");
+            foreach (SymbolStyle.SymbolFeature l in majorSymbols)
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "highway-name-major must stay curved");
         }
 
         // ── A2 (P-B; REVERSES T8) ──────────────────────────────────────────────────────────────────────
         // T8 pinned the D4 fence — "a map-aligned line icon never emits, even with an atlas supplied".
-        // P-B LIFTS that fence: a map-resolved line icon is now emitted as a ONE-GLYPH CURVED label (the
+        // P-B LIFTS that fence: a map-resolved line icon is now emitted as a ONE-GLYPH CURVED symbol (the
         // road_one_way_arrow* shape). The assertion below is T8's inverse, not a re-bake: the old zero-icon
         // expectation described a deliberate gap, and this stage closes it.
         private static SymbolStyle.StyleLayer MapAlignedIconProbeLayer(string extraLayoutJson = "")
@@ -407,8 +407,8 @@ namespace MapRenderer.Tests.Style
                     "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\"" + extraLayoutJson + "}"),
             };
 
-        /// <summary>Decoded paths of <paramref name="layer"/>'s selected features that can carry a label
-        /// (>= 2 points) — the along-line emit shape produces exactly one curved label per one of these.
+        /// <summary>Decoded paths of <paramref name="layer"/>'s selected features that can carry a symbol
+        /// (>= 2 points) — the along-line emit shape produces exactly one curved symbol per one of these.
         /// Same count the curved-text tooth above derives inline, over the same fixture.</summary>
         private static int EligiblePathCount(SymbolStyle.StyleLayer layer)
         {
@@ -426,7 +426,7 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void MapAlignedLineIconLayer_EmitsAlongLineIconLabels()
+        public void MapAlignedLineIconLayer_EmitsAlongLineIcons()
         {
             var atlas = SyntheticShieldAtlas();
             var projection = new WebMercatorProjection();
@@ -440,27 +440,27 @@ namespace MapRenderer.Tests.Style
             // Precondition that the fixture is genuinely ICON-BEARING: the SAME layer with an explicit
             // viewport alignment takes the shipped D4 at-anchors path and emits POINT-shaped icons. Without
             // this, a zero-icon map arm could pass for the wrong reason (an unresolvable sprite).
-            var viewportLabels = new List<SymbolStyle.SymbolLabel>();
+            var viewportSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
-                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
-            Assert.Greater(CountIcons(viewportLabels), 0,
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportSymbols, atlas);
+            Assert.Greater(CountIcons(viewportSymbols), 0,
                 "precondition: the viewport-resolved arm must emit icons (the sprite resolves)");
-            foreach (SymbolStyle.SymbolLabel l in viewportLabels)
+            foreach (SymbolStyle.SymbolFeature l in viewportSymbols)
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement,
                     "precondition: a viewport-resolved line icon stays point-shaped (the unchanged D4 path)");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(mapAligned, BerlinFixtureTile(), BerlinTile, 13.0, projection, labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(mapAligned, BerlinFixtureTile(), BerlinTile, 13.0, projection, symbols, atlas);
 
-            int icons = CountIcons(labels);
+            int icons = CountIcons(symbols);
             Assert.Greater(icons, 0, "a map-aligned line icon must now emit (the D4 fence is lifted by P-B)");
 
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
-                if (l.Kind != LabelKind.Icon) continue;
+                if (l.Kind != SymbolKind.Icon) continue;
                 // A point-shaped icon here would mean the shallow "emit it at the anchors" impl, not the
-                // one-glyph curved label this stage specifies.
+                // one-glyph curved symbol this stage specifies.
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "an along-line icon carries LINE placement");
                 Assert.IsNotNull(l.PathRender, "an along-line icon carries the projected path it rides");
                 Assert.Greater(l.PathRender.Length, 1, "the projected path must have >= 1 segment");
@@ -469,7 +469,7 @@ namespace MapRenderer.Tests.Style
                 Assert.IsFalse(l.KeepUpright,
                     "icon-keep-upright's spec default is false — an arrow must never flip to stay upright");
                 Assert.IsNotNull(l.IconImage, "the resolved sprite name is the icon's cross-tile identity");
-                Assert.AreEqual(LabelPairRole.None, l.PairRole, "a curved label is never half of a centred pair");
+                Assert.AreEqual(SymbolPairRole.None, l.PairRole, "a curved label is never half of a centred pair");
             }
         }
 
@@ -487,44 +487,44 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(AlignmentMode.Viewport, AlignmentResolution.Resolve(AlignmentMode.Auto, SymbolPlacement.Point),
                 "auto resolves to viewport under point placement (D3)");
 
-            // (a) line + map-resolved -> ALONG-LINE icon (one curved label per path).
-            var mapLabels = new List<SymbolStyle.SymbolLabel>();
+            // (a) line + map-resolved -> ALONG-LINE icon (one curved symbol per path).
+            var mapSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(),
-                BerlinFixtureTile(), BerlinTile, 13.0, projection, mapLabels, atlas);
-            Assert.Greater(CountIcons(mapLabels), 0, "line + map must emit icons");
-            foreach (SymbolStyle.SymbolLabel l in mapLabels)
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, mapSymbols, atlas);
+            Assert.Greater(CountIcons(mapSymbols), 0, "line + map must emit icons");
+            foreach (SymbolStyle.SymbolFeature l in mapSymbols)
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "line + map -> along-line (curved) icon");
 
             // (b) line + viewport -> the shipped D4 at-anchors icon (point-shaped), UNCHANGED by this stage.
-            var viewportLabels = new List<SymbolStyle.SymbolLabel>();
+            var viewportSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"icon-rotation-alignment\":\"viewport\""),
-                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportLabels, atlas);
-            Assert.Greater(CountIcons(viewportLabels), 0, "line + viewport must emit icons");
-            foreach (SymbolStyle.SymbolLabel l in viewportLabels)
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, viewportSymbols, atlas);
+            Assert.Greater(CountIcons(viewportSymbols), 0, "line + viewport must emit icons");
+            foreach (SymbolStyle.SymbolFeature l in viewportSymbols)
             {
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "line + viewport -> point-shaped icon at each anchor");
                 Assert.IsNull(l.PathRender, "an at-anchors icon carries no path");
             }
             // The two shapes are genuinely different, not the same emit relabelled: the viewport arm produces
-            // one label PER ANCHOR, the map arm one per PATH. The map arm's count is pinned EXACTLY — that is
+            // one symbol PER ANCHOR, the map arm one per PATH. The map arm's count is pinned EXACTLY — that is
             // the claim, and it needs no premise. The strict inequality does need one the exact count does
             // not: that at least one decoded path is longer than a symbol-spacing (250 px default) and so
             // carries >= 2 anchors. True of this committed fixture, and asserted rather than assumed.
             int eligiblePaths = EligiblePathCount(MapAlignedIconProbeLayer());
-            Assert.AreEqual(eligiblePaths, CountIcons(mapLabels),
+            Assert.AreEqual(eligiblePaths, CountIcons(mapSymbols),
                 "the along-line arm emits exactly one curved icon per eligible decoded path");
-            Assert.Greater(CountIcons(viewportLabels), eligiblePaths,
+            Assert.Greater(CountIcons(viewportSymbols), eligiblePaths,
                 "the at-anchors arm emits per ANCHOR, so with at least one multi-anchor path it must emit " +
                 "strictly more icons than there are paths");
 
             // (c) point placement -> the point icon path, regardless of alignment.
-            var pointLabels = new List<SymbolStyle.SymbolLabel>();
+            var pointSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(",\"symbol-placement\":\"point\""),
-                BerlinFixtureTile(), BerlinTile, 13.0, projection, pointLabels, atlas);
-            Assert.Greater(CountIcons(pointLabels), 0, "point placement must emit icons");
-            foreach (SymbolStyle.SymbolLabel l in pointLabels)
+                BerlinFixtureTile(), BerlinTile, 13.0, projection, pointSymbols, atlas);
+            Assert.Greater(CountIcons(pointSymbols), 0, "point placement must emit icons");
+            foreach (SymbolStyle.SymbolFeature l in pointSymbols)
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "point placement -> point icon");
         }
 
@@ -532,7 +532,7 @@ namespace MapRenderer.Tests.Style
         //    the line branch it must be re-gated on the fence that decides whether an icon reaches the
         //    at-anchors emit at all. P-B widened that gap: before it, `hasIcon` on a line layer implied
         //    `iconAtAnchors`; now the icon can leave for the along-line shape instead, and a centred text
-        //    would be stamped Rider against a PairId no emitted label owns. LabelPairing dissolves such an
+        //    would be stamped Rider against a PairId no emitted symbol owns. SymbolPairing dissolves such an
         //    orphan, so this is about the pairing site telling the truth, not about a visible defect. ──
         [Test]
         public void ViewportTextWithAlongLineIcon_StampsNoPairRole()
@@ -540,18 +540,18 @@ namespace MapRenderer.Tests.Style
             // Text resolves VIEWPORT (explicit) -> at-anchors; the icon's alignment is unset -> auto -> MAP
             // under line placement -> the along-line shape. Anchors/offsets are left at their defaults, which
             // is exactly what makes the centred-pair predicate fire.
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 MapAlignedIconProbeLayer(
                     ",\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"viewport\""),
-                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
 
             int atAnchorTexts = 0, alongLineIcons = 0;
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
-                if (l.Kind == LabelKind.Text && l.Placement == SymbolPlacement.Point) atAnchorTexts++;
-                if (l.Kind == LabelKind.Icon && l.Placement == SymbolPlacement.Line) alongLineIcons++;
-                Assert.AreEqual(LabelPairRole.None, l.PairRole,
+                if (l.Kind == SymbolKind.Text && l.Placement == SymbolPlacement.Point) atAnchorTexts++;
+                if (l.Kind == SymbolKind.Icon && l.Placement == SymbolPlacement.Line) alongLineIcons++;
+                Assert.AreEqual(SymbolPairRole.None, l.PairRole,
                     "no half of this feature may claim a pair role: the icon left for the along-line shape, " +
                     "so the at-anchors emit has no owner for a rider to point at");
                 Assert.AreEqual(0, l.PairId, "PairId must stay at its unpaired default");
@@ -566,7 +566,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── B2 (P-B): icon-rotate is converted ONCE (degrees -> radians) and stamped on the ICON half only. ──
-        private static List<SymbolStyle.SymbolLabel> ExtractPointPairWithLayout(string layoutJson)
+        private static List<SymbolStyle.SymbolFeature> ExtractPointPairWithLayout(string layoutJson)
         {
             var feature = new DictionaryFeature(
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
@@ -581,19 +581,19 @@ namespace MapRenderer.Tests.Style
                 SourceLayer = "points",
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(layoutJson),
             };
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
-                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
-            return labels;
+                new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
+            return symbols;
         }
 
         [Test]
         public void IconRotate_IsConvertedToRadiansOnce_AndStampedOnTheIconHalfOnly()
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractPointPairWithLayout(
+            List<SymbolStyle.SymbolFeature> symbols = ExtractPointPairWithLayout(
                 "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"icon-rotate\":90}");
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: an icon label must be present");
             Assert.IsNotNull(text, "precondition: a text label must be present");
 
@@ -602,9 +602,9 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0f, text.IconRotateRadians, 1e-6f, "icon-rotate never rotates text");
 
             // Absent -> 0 (the spec default), so every un-rotated icon composes an exact `x + 0f`.
-            List<SymbolStyle.SymbolLabel> bare = ExtractPointPairWithLayout(
+            List<SymbolStyle.SymbolFeature> bare = ExtractPointPairWithLayout(
                 "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"}");
-            Assert.AreEqual(0f, FindByKind(bare, LabelKind.Icon).IconRotateRadians, 1e-6f,
+            Assert.AreEqual(0f, FindByKind(bare, SymbolKind.Icon).IconRotateRadians, 1e-6f,
                 "absent icon-rotate -> 0 radians");
         }
 
@@ -612,14 +612,14 @@ namespace MapRenderer.Tests.Style
         public void IconRotate_180_IsStampedOnAnAlongLineIcon()
         {
             // The road_one_way_arrow_opposite shape: a map-resolved line icon layer with icon-rotate: 180.
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(MapAlignedIconProbeLayer(",\"icon-rotate\":180"),
-                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), labels, SyntheticShieldAtlas());
+                BerlinFixtureTile(), BerlinTile, 13.0, new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
 
             int icons = 0;
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
-                if (l.Kind != LabelKind.Icon) continue;
+                if (l.Kind != SymbolKind.Icon) continue;
                 icons++;
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "precondition: the along-line emit shape");
                 Assert.AreEqual(math.PI, l.IconRotateRadians, 1e-5f, "icon-rotate: 180 -> pi radians");
@@ -630,7 +630,7 @@ namespace MapRenderer.Tests.Style
         // ── Shared centred-pair synthetic fixture for T9/T12 (isolates G5/D5 from G1-G4: literal "point"
         //    placement, default centred anchors — unaffected by the step-expression/anchor-emit machinery).
         //    <paramref name="extraLayout"/> appends further layout members (stage C's optional flags). ──
-        private static List<SymbolStyle.SymbolLabel> ExtractCentredPairLabels(string extraLayout = null)
+        private static List<SymbolStyle.SymbolFeature> ExtractCentredPairSymbols(string extraLayout = null)
         {
             var feature = new DictionaryFeature(
                 properties: new Dictionary<string, Value> { ["ref"] = Value.String("5") },
@@ -647,27 +647,27 @@ namespace MapRenderer.Tests.Style
                     "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"" // symbol-placement default = point
                     + (extraLayout == null ? "" : "," + extraLayout) + "}"),
             };
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
-                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
-            return labels;
+                new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
+            return symbols;
         }
 
         private static uint[] SinglePointGeometry(double2 p)
             => new uint[] { 1u | (1u << 3), ZigZagEncode((long)p.x), ZigZagEncode((long)p.y) };
 
-        private static SymbolStyle.SymbolLabel FindByKind(List<SymbolStyle.SymbolLabel> labels, LabelKind kind)
+        private static SymbolStyle.SymbolFeature FindByKind(List<SymbolStyle.SymbolFeature> symbols, SymbolKind kind)
         {
-            foreach (SymbolStyle.SymbolLabel l in labels) if (l.Kind == kind) return l;
+            foreach (SymbolStyle.SymbolFeature l in symbols) if (l.Kind == kind) return l;
             return null;
         }
 
         // §10 D8 test helper (shared with SymbolPairPredicateTests — see SymbolTestFixtures.StageInputFor).
-        private static PointStageInput StageInputFor(SymbolStyle.SymbolLabel label, LabelKind atlasKind,
+        private static PointStageInput StageInputFor(SymbolStyle.SymbolFeature label, SymbolKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
             => SymbolTestFixtures.StageInputFor(label, atlasKind, boundsMin, boundsMax, screenPx, textSizePx);
 
-        // A single synthetic quad standing in for a shaped text run (SymbolLabel carries no Layout — shaping is
+        // A single synthetic quad standing in for a shaped text run (SymbolFeature carries no Layout — shaping is
         // Unity-side) — its exact footprint is irrelevant to these teeth, only that quads.Length > 0.
         private static SymbolQuad SyntheticTextQuad() => new SymbolQuad
         {
@@ -679,58 +679,58 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void CentredPair_AtomicPlacement_OneCandidateBothBoxes_PairDropsTogether_NoBareNumber()
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels();
-            Assert.AreEqual(2, labels.Count, "precondition: the centred-pair feature must emit exactly 2 labels");
+            List<SymbolStyle.SymbolFeature> symbols = ExtractCentredPairSymbols();
+            Assert.AreEqual(2, symbols.Count, "precondition: the centred-pair feature must emit exactly 2 symbols");
 
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: an icon label must be present");
             Assert.IsNotNull(text, "precondition: a text label must be present");
-            Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, "precondition: the icon must be the resolved Owner");
-            Assert.AreEqual(LabelPairRole.Rider, text.PairRole, "precondition: the text must be the resolved Rider");
-            Assert.IsTrue(LabelPairing.TryGetRider(labels, labels.IndexOf(icon), out int riderIdx));
-            Assert.AreEqual(labels.IndexOf(text), riderIdx, "precondition: LabelPairing resolves the SAME pair the extractor proposed");
+            Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, "precondition: the icon must be the resolved Owner");
+            Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, "precondition: the text must be the resolved Rider");
+            Assert.IsTrue(SymbolPairing.TryGetRider(symbols, symbols.IndexOf(icon), out int riderIdx));
+            Assert.AreEqual(symbols.IndexOf(text), riderIdx, "precondition: SymbolPairing resolves the SAME pair the extractor proposed");
 
-            var ownerInput = StageInputFor(icon, LabelKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
-            var riderInput = StageInputFor(text, LabelKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
+            var ownerInput = StageInputFor(icon, SymbolKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
+            var riderInput = StageInputFor(text, SymbolKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
             // Candidate 0: a higher-priority blocker sitting where the icon box will land — big enough to
             // cover it regardless of icon-padding's exact magnitude.
-            boxes[boxCount++] = new LabelBox { Min = new float2(900, 900), Max = new float2(1100, 1100) };
-            candidates[0] = new LabelCandidate
+            boxes[boxCount++] = new SymbolBox { Min = new float2(900, 900), Max = new float2(1100, 1100) };
+            candidates[0] = new SymbolCandidate
             {
                 BoxStart = 0, BoxCount = 1, EmitStart = 0, EmitCount = 0,
-                SortKey = -1f, FeatureIndex = -1, TileKey = 999, LabelIndex = 0,
+                SortKey = -1f, FeatureIndex = -1, TileKey = 999, SymbolIndex = 0,
             };
 
             // Candidate 1: the pair, staged for REAL via StagePointPair (the §10 D8 production code path).
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 1,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
             Assert.AreEqual(1, staged, "the pair stages as exactly one candidate");
 
-            LabelCandidate pairCand = candidates[1];
+            SymbolCandidate pairCand = candidates[1];
             Assert.AreEqual(2, pairCand.BoxCount, "the candidate spans BOTH halves' boxes");
             Assert.AreEqual(2, pairCand.EmitCount, "the candidate spans BOTH halves' emits");
-            Assert.AreEqual(LabelKind.Icon, emit[pairCand.EmitStart].AtlasKind, "emits (Icon, Text) in order");
-            Assert.AreEqual(LabelKind.Text, emit[pairCand.EmitStart + 1].AtlasKind);
+            Assert.AreEqual(SymbolKind.Icon, emit[pairCand.EmitStart].AtlasKind, "emits (Icon, Text) in order");
+            Assert.AreEqual(SymbolKind.Text, emit[pairCand.EmitStart + 1].AtlasKind);
 
             var survivor = new bool[2];
-            var grid = new LabelCollisionGrid();
-            LabelCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
+            var grid = new SymbolCollisionGrid();
+            SymbolCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
 
             bool blockerPlaced = false, pairPlaced = false;
             for (int k = 0; k < 2; k++)
             {
-                if (candidates[k].LabelIndex == 0) blockerPlaced = survivor[k];
-                else if (candidates[k].LabelIndex == 1) pairPlaced = survivor[k];
+                if (candidates[k].SymbolIndex == 0) blockerPlaced = survivor[k];
+                else if (candidates[k].SymbolIndex == 1) pairPlaced = survivor[k];
             }
             Assert.IsTrue(blockerPlaced, "the higher-priority blocker must place");
             Assert.IsFalse(pairPlaced,
@@ -739,56 +739,56 @@ namespace MapRenderer.Tests.Style
 
         // ── P4 (§10) — a PLACED pair blocks through BOTH boxes ───────────────────────────────────────────
         [Test]
-        public void CentredPair_Placed_BlocksThroughBothBoxes_LaterLabelOverlappingOnlyTextIsDropped()
+        public void CentredPair_Placed_BlocksThroughBothBoxes_LaterSymbolOverlappingOnlyTextIsDropped()
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels();
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            List<SymbolStyle.SymbolFeature> symbols = ExtractCentredPairSymbols();
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon); Assert.IsNotNull(text);
 
-            var ownerInput = StageInputFor(icon, LabelKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
-            var riderInput = StageInputFor(text, LabelKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
-            // Move the text box away from the icon box (viewport-anchored translate) so a later label can
+            var ownerInput = StageInputFor(icon, SymbolKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
+            var riderInput = StageInputFor(text, SymbolKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
+            // Move the text box away from the icon box (viewport-anchored translate) so a later symbol can
             // overlap ONLY the text half — isolating "the pair blocks through BOTH boxes" from "the icon alone".
             riderInput.TranslatePx = new float2(60f, 0f);
             riderInput.TranslateAnchor = TextTranslateAnchor.Viewport;
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
             Assert.AreEqual(1, staged);
 
-            LabelCandidate pairCand = candidates[0];
-            LabelBox iconBox = boxes[pairCand.BoxStart];
-            LabelBox textBox = boxes[pairCand.BoxStart + 1];
-            Assert.IsFalse(LabelCollision.Overlaps(in iconBox, in textBox),
+            SymbolCandidate pairCand = candidates[0];
+            SymbolBox iconBox = boxes[pairCand.BoxStart];
+            SymbolBox textBox = boxes[pairCand.BoxStart + 1];
+            Assert.IsFalse(SymbolCollision.Overlaps(in iconBox, in textBox),
                 "precondition: icon/text boxes must be disjoint, or this tooth cannot isolate the text-only overlap");
 
-            var laterBox = new LabelBox { Min = textBox.Min - new float2(1, 1), Max = textBox.Max + new float2(1, 1) };
+            var laterBox = new SymbolBox { Min = textBox.Min - new float2(1, 1), Max = textBox.Max + new float2(1, 1) };
             boxes[boxCount] = laterBox;
-            candidates[1] = new LabelCandidate
+            candidates[1] = new SymbolCandidate
             {
                 BoxStart = boxCount, BoxCount = 1, EmitStart = emitCount, EmitCount = 0,
-                SortKey = pairCand.SortKey + 1f, FeatureIndex = 999, TileKey = 999, LabelIndex = 1,
+                SortKey = pairCand.SortKey + 1f, FeatureIndex = 999, TileKey = 999, SymbolIndex = 1,
             };
             boxCount++;
 
             var survivor = new bool[2];
-            var grid = new LabelCollisionGrid();
-            LabelCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
+            var grid = new SymbolCollisionGrid();
+            SymbolCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
 
             bool pairPlaced = false, laterPlaced = false;
             for (int k = 0; k < 2; k++)
             {
-                if (candidates[k].LabelIndex == 0) pairPlaced = survivor[k];
-                else if (candidates[k].LabelIndex == 1) laterPlaced = survivor[k];
+                if (candidates[k].SymbolIndex == 0) pairPlaced = survivor[k];
+                else if (candidates[k].SymbolIndex == 1) laterPlaced = survivor[k];
             }
             Assert.IsTrue(pairPlaced, "the pair must place (nothing blocks it)");
             Assert.IsFalse(laterPlaced,
@@ -800,22 +800,22 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void CentredPair_OneFadeId_FromTheOwner_NotTheRider()
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels();
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            List<SymbolStyle.SymbolFeature> symbols = ExtractCentredPairSymbols();
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
 
-            var ownerInput = StageInputFor(icon, LabelKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
+            var ownerInput = StageInputFor(icon, SymbolKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
             ownerInput.FadeId = 42L;
-            var riderInput = StageInputFor(text, LabelKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
+            var riderInput = StageInputFor(text, SymbolKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
             riderInput.FadeId = 999L; // deliberately DIFFERENT — must never leak into the pair's one FadeId
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
@@ -830,17 +830,17 @@ namespace MapRenderer.Tests.Style
         {
             void AssertPair(string extraLayout, bool expectIconOptional, bool expectTextOptional, string what)
             {
-                List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels(extraLayout);
-                Assert.AreEqual(2, labels.Count, $"{what}: the centred-pair feature must still emit exactly 2 labels");
-                SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-                SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+                List<SymbolStyle.SymbolFeature> symbols = ExtractCentredPairSymbols(extraLayout);
+                Assert.AreEqual(2, symbols.Count, $"{what}: the centred-pair feature must still emit exactly 2 symbols");
+                SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+                SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
                 Assert.IsNotNull(icon, what); Assert.IsNotNull(text, what);
 
                 // The ANTI-D11 assertion: optionality must NOT un-pair the halves. D11's recorded "pair only
                 // when both flags are false" would leave these None — and, because a centred pair's boxes
                 // overlap by construction, make the two halves mutually exclusive (the bare-number defect).
-                Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, $"{what}: the icon must STILL be the pair Owner");
-                Assert.AreEqual(LabelPairRole.Rider, text.PairRole, $"{what}: the text must STILL be the pair Rider");
+                Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, $"{what}: the icon must STILL be the pair Owner");
+                Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, $"{what}: the text must STILL be the pair Rider");
                 Assert.AreEqual(icon.PairId, text.PairId, $"{what}: both halves must still share one PairId");
 
                 // icon-optional makes the ICON droppable; text-optional makes the TEXT droppable.
@@ -870,73 +870,73 @@ namespace MapRenderer.Tests.Style
             public bool ProbeOverTextPlaced;
         }
 
-        private static OptionalPairOutcome RunOptionalPairScene(string extraLayout, LabelKind blockedHalf)
+        private static OptionalPairOutcome RunOptionalPairScene(string extraLayout, SymbolKind blockedHalf)
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractCentredPairLabels(extraLayout);
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            List<SymbolStyle.SymbolFeature> symbols = ExtractCentredPairSymbols(extraLayout);
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: an icon label must be present");
             Assert.IsNotNull(text, "precondition: a text label must be present");
-            Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, "precondition: the pair must form regardless of the flags");
-            Assert.AreEqual(LabelPairRole.Rider, text.PairRole, "precondition: the pair must form regardless of the flags");
+            Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, "precondition: the pair must form regardless of the flags");
+            Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, "precondition: the pair must form regardless of the flags");
 
-            var ownerInput = StageInputFor(icon, LabelKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
-            var riderInput = StageInputFor(text, LabelKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
+            var ownerInput = StageInputFor(icon, SymbolKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
+            var riderInput = StageInputFor(text, SymbolKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
             riderInput.TranslatePx = new float2(200f, 0f);
             riderInput.TranslateAnchor = TextTranslateAnchor.Viewport;
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
             Assert.AreEqual(1, staged, "precondition: the pair stages as exactly one candidate");
             Assert.AreEqual(2, candidates[0].BoxCount, "precondition: the candidate must span BOTH halves' boxes");
 
-            LabelBox iconBox = boxes[0];
-            LabelBox textBox = boxes[1];
-            Assert.IsFalse(LabelCollision.Overlaps(in iconBox, in textBox),
+            SymbolBox iconBox = boxes[0];
+            SymbolBox textBox = boxes[1];
+            Assert.IsFalse(SymbolCollision.Overlaps(in iconBox, in textBox),
                 "precondition: the halves' boxes must be disjoint here, or a blocker cannot address one alone");
 
-            LabelBox target = blockedHalf == LabelKind.Icon ? iconBox : textBox;
-            LabelBox spared = blockedHalf == LabelKind.Icon ? textBox : iconBox;
-            var blockerBox = new LabelBox
+            SymbolBox target = blockedHalf == SymbolKind.Icon ? iconBox : textBox;
+            SymbolBox spared = blockedHalf == SymbolKind.Icon ? textBox : iconBox;
+            var blockerBox = new SymbolBox
             {
                 Min = new float2(target.Min.x - 5f, target.Min.y), Max = new float2(target.Min.x + 2f, target.Max.y),
             };
-            Assert.IsTrue(LabelCollision.Overlaps(in blockerBox, in target),
+            Assert.IsTrue(SymbolCollision.Overlaps(in blockerBox, in target),
                 "precondition: the blocker must overlap the targeted half's box");
-            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in spared),
+            Assert.IsFalse(SymbolCollision.Overlaps(in blockerBox, in spared),
                 "precondition: the blocker must NOT overlap the other half's box");
 
-            var iconProbeBox = new LabelBox
+            var iconProbeBox = new SymbolBox
             {
                 Min = new float2(iconBox.Max.x - 2f, iconBox.Min.y), Max = new float2(iconBox.Max.x + 5f, iconBox.Max.y),
             };
-            var textProbeBox = new LabelBox
+            var textProbeBox = new SymbolBox
             {
                 Min = new float2(textBox.Max.x - 2f, textBox.Min.y), Max = new float2(textBox.Max.x + 5f, textBox.Max.y),
             };
-            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in iconProbeBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in blockerBox, in iconProbeBox),
                 "precondition: the icon probe must be clear of the blocker, so only the PAIR can block it");
-            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in textProbeBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in blockerBox, in textProbeBox),
                 "precondition: the text probe must be clear of the blocker");
-            Assert.IsFalse(LabelCollision.Overlaps(in iconProbeBox, in textProbeBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in iconProbeBox, in textProbeBox),
                 "precondition: the two probes must not block one another");
-            Assert.IsFalse(LabelCollision.Overlaps(in iconProbeBox, in textBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in iconProbeBox, in textBox),
                 "precondition: the icon probe must address the ICON box only");
-            Assert.IsFalse(LabelCollision.Overlaps(in textProbeBox, in iconBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in textProbeBox, in iconBox),
                 "precondition: the text probe must address the TEXT box only");
 
-            LabelCandidate Probe(int boxIndex, float sortKey, int labelIndex) => new LabelCandidate
+            SymbolCandidate Probe(int boxIndex, float sortKey, int symbolIndex) => new SymbolCandidate
             {
                 BoxStart = boxIndex, BoxCount = 1, EmitStart = emitCount, EmitCount = 0,
-                SortKey = sortKey, FeatureIndex = 900 + labelIndex, TileKey = 900 + labelIndex, LabelIndex = labelIndex,
+                SortKey = sortKey, FeatureIndex = 900 + symbolIndex, TileKey = 900 + symbolIndex, SymbolIndex = symbolIndex,
             };
 
             boxes[boxCount] = blockerBox;   candidates[1] = Probe(boxCount, -1f, 1); boxCount++;
@@ -944,14 +944,14 @@ namespace MapRenderer.Tests.Style
             boxes[boxCount] = textProbeBox; candidates[3] = Probe(boxCount, 2f, 3);  boxCount++;
 
             var survivor = new bool[4];
-            var grid = new LabelCollisionGrid();
-            LabelCollision.SelectSurvivors(candidates, 4, boxes, boxCount, survivor, grid);
+            var grid = new SymbolCollisionGrid();
+            SymbolCollision.SelectSurvivors(candidates, 4, boxes, boxCount, survivor, grid);
 
             var outcome = new OptionalPairOutcome();
             bool blockerPlaced = false;
             for (int k = 0; k < 4; k++)
             {
-                switch (candidates[k].LabelIndex)
+                switch (candidates[k].SymbolIndex)
                 {
                     case 0:
                         outcome.PairPlaced = survivor[k];
@@ -971,7 +971,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void TextOptional_TextBoxBlocked_IconStillPlaces_AndTheTextBoxReservesNothing()
         {
-            OptionalPairOutcome o = RunOptionalPairScene("\"text-optional\":true", LabelKind.Text);
+            OptionalPairOutcome o = RunOptionalPairScene("\"text-optional\":true", SymbolKind.Text);
 
             Assert.AreEqual(0b10, o.OptionalBoxMask, "text-optional marks the RIDER (bit 1) droppable, not the owner");
             Assert.IsTrue(o.PairPlaced,
@@ -987,7 +987,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void IconOptional_IconBoxBlocked_TextStillPlaces_AndTheIconBoxReservesNothing()
         {
-            OptionalPairOutcome o = RunOptionalPairScene("\"icon-optional\":true", LabelKind.Icon);
+            OptionalPairOutcome o = RunOptionalPairScene("\"icon-optional\":true", SymbolKind.Icon);
 
             Assert.AreEqual(0b01, o.OptionalBoxMask, "icon-optional marks the OWNER (bit 0) droppable, not the rider");
             Assert.IsTrue(o.PairPlaced, "the pair must SURVIVE on its text alone");
@@ -1001,7 +1001,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void NeitherOptional_TextBoxBlocked_TheWholePairDrops_AndReservesNothing()
         {
-            OptionalPairOutcome o = RunOptionalPairScene(null, LabelKind.Text);
+            OptionalPairOutcome o = RunOptionalPairScene(null, SymbolKind.Text);
 
             Assert.AreEqual(0, o.OptionalBoxMask, "the spec default leaves NEITHER half optional");
             Assert.IsFalse(o.PairPlaced,
@@ -1045,12 +1045,12 @@ namespace MapRenderer.Tests.Style
                     Id = "clip-a", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
                     LayoutJson = MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
-                var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
-                Assert.AreEqual(0, labels.Count, "a buffer-dominated path (mid-arc outside [0,extent)) must emit ZERO labels");
+                var symbols = new List<SymbolStyle.SymbolFeature>();
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
+                Assert.AreEqual(0, symbols.Count, "a buffer-dominated path (mid-arc outside [0,extent)) must emit ZERO symbols");
             }
 
-            // (b) mid-arc lands INSIDE [0, extent) — exactly one label, at the true mid-arc point.
+            // (b) mid-arc lands INSIDE [0, extent) — exactly one symbol, at the true mid-arc point.
             {
                 double2 p0 = new double2(500, 500), p1 = new double2(3500, 3500);
                 var feature = new InMemoryTileFeature
@@ -1064,16 +1064,16 @@ namespace MapRenderer.Tests.Style
                     Id = "clip-b", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
                     LayoutJson = MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
-                var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
-                Assert.AreEqual(1, labels.Count, "an in-tile mid-arc must emit exactly one label");
+                var symbols = new List<SymbolStyle.SymbolFeature>();
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
+                Assert.AreEqual(1, symbols.Count, "an in-tile mid-arc must emit exactly one label");
 
                 double2 midTile = (p0 + p1) * 0.5;
                 double2 lonLat = SyntheticTileId.ToLonLat(midTile.x, midTile.y, Extent);
                 double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-                Assert.AreEqual(expected.x, labels[0].AnchorRender.x, 1e-6, "anchor must be the true mid-arc point");
-                Assert.AreEqual(expected.y, labels[0].AnchorRender.y, 1e-6);
-                Assert.AreEqual(expected.z, labels[0].AnchorRender.z, 1e-6);
+                Assert.AreEqual(expected.x, symbols[0].AnchorRender.x, 1e-6, "anchor must be the true mid-arc point");
+                Assert.AreEqual(expected.y, symbols[0].AnchorRender.y, 1e-6);
+                Assert.AreEqual(expected.z, symbols[0].AnchorRender.z, 1e-6);
             }
 
             // (c) under LINE placement (viewport-aligned -> upright-at-anchor), only in-tile anchors emit.
@@ -1091,12 +1091,12 @@ namespace MapRenderer.Tests.Style
                     LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
                         "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\",\"symbol-spacing\":100}"),
                 };
-                var labels = new List<SymbolStyle.SymbolLabel>();
-                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, labels);
+                var symbols = new List<SymbolStyle.SymbolFeature>();
+                SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
 
-                Assert.Greater(labels.Count, 0, "an edge-crossing viewport-aligned line must still emit some upright labels");
-                foreach (SymbolStyle.SymbolLabel l in labels)
-                    Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor labels are Point-placed");
+                Assert.Greater(symbols.Count, 0, "an edge-crossing viewport-aligned line must still emit some upright symbols");
+                foreach (SymbolStyle.SymbolFeature l in symbols)
+                    Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor symbols are Point-placed");
 
                 // Independently compute the FULL anchor set (unclipped) and confirm some fall outside [0,extent) —
                 // i.e. this scenario genuinely exercises the clip, not a vacuous all-in-tile case.
@@ -1112,7 +1112,7 @@ namespace MapRenderer.Tests.Style
                     if (pos.x < 0.0 || pos.x >= Extent) outOfTile++;
                 }
                 Assert.Greater(outOfTile, 0, "precondition: this scenario must genuinely have out-of-tile anchors");
-                Assert.Less(labels.Count, allAnchors.Length, "some anchors must have been clipped away");
+                Assert.Less(symbols.Count, allAnchors.Length, "some anchors must have been clipped away");
             }
         }
 
@@ -1134,17 +1134,17 @@ namespace MapRenderer.Tests.Style
             };
             var projection = new WebMercatorProjection();
 
-            var below = new List<SymbolStyle.SymbolLabel>();
+            var below = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 10.9, projection, below);
-            var above = new List<SymbolStyle.SymbolLabel>();
+            var above = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 11.0, projection, above);
 
             Assert.Greater(below.Count, 0, "z10.9 (below the z11 step) must emit the point shape");
-            foreach (SymbolStyle.SymbolLabel l in below)
+            foreach (SymbolStyle.SymbolFeature l in below)
                 Assert.AreEqual(SymbolPlacement.Point, l.Placement, "z10.9 must yield Point placement");
 
             Assert.Greater(above.Count, 0, "z11.0 (at/above the z11 step) must emit the line shape");
-            foreach (SymbolStyle.SymbolLabel l in above)
+            foreach (SymbolStyle.SymbolFeature l in above)
                 Assert.AreEqual(SymbolPlacement.Line, l.Placement, "z11.0 must yield Line placement");
         }
 
@@ -1253,13 +1253,13 @@ namespace MapRenderer.Tests.Style
             return TestDecodedTiles.Of("lines", SyntheticTileId, features, Extent);
         }
 
-        private static List<SymbolStyle.SymbolLabel> ExtractLines(
+        private static List<SymbolStyle.SymbolFeature> ExtractLines(
             SymbolStyle.StyleLayer layer, TileId tileId, params double2[][] paths)
         {
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, LineTile(paths), tileId, 1.0,
-                new WebMercatorProjection(), labels, SyntheticShieldAtlas());
-            return labels;
+                new WebMercatorProjection(), symbols, SyntheticShieldAtlas());
+            return symbols;
         }
 
         /// <summary>The tile-space x an anchor resolves to on <paramref name="path"/> — the same
@@ -1268,13 +1268,13 @@ namespace MapRenderer.Tests.Style
         private static double AnchorLocalX(LineAnchor anchor, double2[] path)
             => math.lerp(path[anchor.Segment], path[anchor.Segment + 1], anchor.T).x;
 
-        /// <summary>Every emitted along-line anchor of <paramref name="labels"/>, as a world x in tile units
+        /// <summary>Every emitted along-line anchor of <paramref name="symbols"/>, as a world x in tile units
         /// (<c>tileId.X · extent + localX</c>) — one flat list, in emit order.</summary>
         private static List<double> EmittedWorldXs(
-            List<SymbolStyle.SymbolLabel> labels, TileId tileId, double2[] path)
+            List<SymbolStyle.SymbolFeature> symbols, TileId tileId, double2[] path)
         {
             var world = new List<double>();
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
                 if (l.LineAnchors == null) continue;
                 foreach (LineAnchor a in l.LineAnchors)
@@ -1288,8 +1288,8 @@ namespace MapRenderer.Tests.Style
         /// extract, so counting it would compare against tiles that are not in the picture.</summary>
         private static List<double> SeamRoadWorldXs(SeamArm arm)
         {
-            List<SymbolStyle.SymbolLabel> a = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
-            List<SymbolStyle.SymbolLabel> b = ExtractLines(SeamLayer(arm), SeamTileB, SeamRoadVertices);
+            List<SymbolStyle.SymbolFeature> a = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
+            List<SymbolStyle.SymbolFeature> b = ExtractLines(SeamLayer(arm), SeamTileB, SeamRoadVertices);
             Assert.Greater(a.Count, 0, $"{arm}: precondition: tile A must emit a label at all");
             Assert.Greater(b.Count, 0, $"{arm}: precondition: tile B must emit a label at all");
             if (arm == SeamArm.AlongLineIcon)
@@ -1426,12 +1426,12 @@ namespace MapRenderer.Tests.Style
             TileId tileBottom = new TileId { Z = 1, X = 0, Y = 1 };
 
             List<double> world = new List<double>();
-            foreach ((TileId tile, List<SymbolStyle.SymbolLabel> labels) in new[]
+            foreach ((TileId tile, List<SymbolStyle.SymbolFeature> symbols) in new[]
                      { (tileTop,    ExtractLines(SeamLayer(arm), tileTop,    road)),
                        (tileBottom, ExtractLines(SeamLayer(arm), tileBottom, road)) })
             {
-                Assert.Greater(labels.Count, 0, $"{arm}: precondition: tile {tile.Y} must emit a label");
-                foreach (SymbolStyle.SymbolLabel l in labels)
+                Assert.Greater(symbols.Count, 0, $"{arm}: precondition: tile {tile.Y} must emit a label");
+                foreach (SymbolStyle.SymbolFeature l in symbols)
                 {
                     if (l.LineAnchors == null) continue;
                     foreach (LineAnchor a in l.LineAnchors)
@@ -1462,10 +1462,10 @@ namespace MapRenderer.Tests.Style
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
         {
             var projection = new WebMercatorProjection();
-            List<SymbolStyle.SymbolLabel> labels = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
-            Assert.Greater(labels.Count, 0, $"{arm}: precondition: the seam road must emit a curved label");
+            List<SymbolStyle.SymbolFeature> symbols = ExtractLines(SeamLayer(arm), SeamTileA, SeamRoadVertices);
+            Assert.Greater(symbols.Count, 0, $"{arm}: precondition: the seam road must emit a curved label");
 
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
                 Assert.IsNotNull(l.PathRender, $"{arm}: a curved label carries its projected path");
                 Assert.AreEqual(SeamRoadVertices.Length, l.PathRender.Length,
@@ -1485,9 +1485,9 @@ namespace MapRenderer.Tests.Style
         }
 
         // T5 — a path whose every anchor belongs to a neighbour emits NOTHING here, rather than an anchor-less
-        // label that can never place.
+        // symbol that can never place.
         [Test]
-        public void SeamAnchorClip_PathWithNoSurvivingAnchor_EmitsNoLabel(
+        public void SeamAnchorClip_PathWithNoSurvivingAnchor_EmitsNoSymbol(
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)
         {
             // Precondition: the geometry really does produce one anchor, and it really is out of tile.
@@ -1499,10 +1499,10 @@ namespace MapRenderer.Tests.Style
             Assert.Less(AnchorLocalX(unclipped[0], BufferOnlyRoadVertices), 0.0,
                 "precondition: that anchor must lie in the buffer strip, outside [0, extent)");
 
-            List<SymbolStyle.SymbolLabel> labels =
+            List<SymbolStyle.SymbolFeature> symbols =
                 ExtractLines(SeamLayer(arm), SeamTileA, BufferOnlyRoadVertices);
-            Assert.AreEqual(0, labels.Count,
-                $"{arm}: a buffer-only path must emit ZERO labels here — not one carrying an empty LineAnchors");
+            Assert.AreEqual(0, symbols.Count,
+                $"{arm}: a buffer-only path must emit ZERO symbols here — not one carrying an empty LineAnchors");
         }
 
         // T6 — the at-anchors arm (the shipped D4 shield shape) did not move: it already applied the same
@@ -1520,22 +1520,22 @@ namespace MapRenderer.Tests.Style
                     "\"symbol-spacing\":32}"),
             };
 
-            List<SymbolStyle.SymbolLabel> labels = ExtractLines(layer, SeamTileA, SeamRoadVertices);
+            List<SymbolStyle.SymbolFeature> symbols = ExtractLines(layer, SeamTileA, SeamRoadVertices);
 
             // 17 pre-clip anchors at local x = 0 .. 4096; EmitAtAnchor already dropped local 4096 (>= extent).
-            Assert.AreEqual(SeamPreClipAnchors - 1, labels.Count,
+            Assert.AreEqual(SeamPreClipAnchors - 1, symbols.Count,
                 "the at-anchors arm must emit one upright label per IN-TILE anchor — 16, exactly as before");
-            foreach (SymbolStyle.SymbolLabel l in labels)
-                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor labels are Point-placed");
+            foreach (SymbolStyle.SymbolFeature l in symbols)
+                Assert.AreEqual(SymbolPlacement.Point, l.Placement, "upright-at-anchor symbols are Point-placed");
 
             foreach (int k in new[] { 0, SeamPreClipAnchors - 2 })
             {
                 double2 lonLat = SeamTileA.ToLonLat(SeamAnchorStride * k, SeamRoadVertices[0].y, Extent);
                 double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-                Assert.AreEqual(expected.x, labels[k].AnchorRender.x, 1e-6,
+                Assert.AreEqual(expected.x, symbols[k].AnchorRender.x, 1e-6,
                     $"label {k} must sit at local x == {SeamAnchorStride * k}");
-                Assert.AreEqual(expected.y, labels[k].AnchorRender.y, 1e-6);
-                Assert.AreEqual(expected.z, labels[k].AnchorRender.z, 1e-6);
+                Assert.AreEqual(expected.y, symbols[k].AnchorRender.y, 1e-6);
+                Assert.AreEqual(expected.z, symbols[k].AnchorRender.z, 1e-6);
             }
         }
     }

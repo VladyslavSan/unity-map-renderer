@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Cameras
         /// <para>Reachable without any platform claim: <c>MapViewConfig.DevicePixelRatio</c> is a plain
         /// serialized field whose tooltip says "must be positive" with nothing enforcing it, so any Inspector
         /// edit or scene asset carrying 0 lands here. The altitude was already guarded, so the camera framed
-        /// normally while the logical viewport went infinite — which then feeds the label collision viewport
+        /// normally while the logical viewport went infinite — which then feeds the symbol collision viewport
         /// (rejecting nothing) and the tile selector's framing (NaN-poisoned frustum planes: every tile
         /// intersects, the LOD stop never fires, and the planar cover enumerates the whole quadtree).</para>
         ///

@@ -1,6 +1,6 @@
 // Engine-free: no UnityEngine dependency.
-// BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored label
-// mesh (Epic A, world-anchored-labels-design.md §3.1/§11 A0) — fed straight to Mesh.SetVertexBufferData
+// BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored symbol
+// mesh (Epic A, world-anchored-symbols-design.md §3.1/§11 A0) — fed straight to Mesh.SetVertexBufferData
 // by WorldBillboardMeshBuilder — field DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
 // TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
@@ -9,9 +9,9 @@
 // BillboardVertex/StyledLineTileBuilder's identical rule). Declaring these out of order triggers Unity's
 // "non-standard order" auto-adjustment, which silently reinterprets the byte layout against a DIFFERENT
 // stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
-// label renders nothing). Keep to blittable fields only.
+// symbol renders nothing). Keep to blittable fields only.
 //
-// FROZEN at A0 (world-anchored-labels-design.md §11 A0): A1/A2/A3 are purely additive on top of this
+// FROZEN at A0 (world-anchored-symbols-design.md §11 A0): A1/A2/A3 are purely additive on top of this
 // layout — never a reshuffle of stream 0. Stage AC (curved-world) appended Tangent as the LAST field at
 // the time (TEXCOORD5) — AlignFlags was no longer last, Tangent was; P2 now appends Up (TEXCOORD6) as the
 // new LAST field (see its own doc below) — Tangent is no longer last, Up is. Both still honor "append,
@@ -37,7 +37,7 @@ namespace MapRenderer.Core.Text.Placement
         /// Never rebaked on camera motion; the object-to-world transform supplies Level 2 every frame.</summary>
         public float3 AnchorLocal;
 
-        /// <summary>Per-vertex color (COLOR): carries the OLD path's <see cref="LabelPaint.TextColor"/>.rgb
+        /// <summary>Per-vertex color (COLOR): carries the OLD path's <see cref="SymbolPaint.TextColor"/>.rgb
         /// VERBATIM — no sRGB→linear conversion (A0 equivalence requires the identical color value; see
         /// this file's header and the A0 plan's color-space note). Opacity is stream 1, not this field.</summary>
         public float3 ColorRGB;
@@ -56,7 +56,7 @@ namespace MapRenderer.Core.Text.Placement
         /// map-aligned bearing rotation is applied in the vertex shader once <c>AlignFlags</c> is wired,
         /// A1/A3 — see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
         /// <para><b>W2 — TWO UNITS, selected by <see cref="AlignFlags"/> bit2.</b> Bit2 CLEAR (every point/icon
-        /// label, every viewport-pitched curved label — the pre-W2 behaviour): LOGICAL SCREEN PIXELS, added to
+        /// symbol, every viewport-pitched curved symbol — the pre-W2 behaviour): LOGICAL SCREEN PIXELS, added to
         /// <c>clip.xy</c> after projection, so the glyph is a fixed screen size at any depth. Bit2 SET
         /// (map-pitched curved): WORLD METRES, displaced in the ground plane at the anchor before projection,
         /// so the glyph is a fixed WORLD size and foreshortens with depth. <b>The field is deliberately NOT named
@@ -72,7 +72,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Stage AC (curved-world) — TEXCOORD5, the new LAST field (see this file's header):
         /// tile-local WORLD direction along the line at this glyph (unit-normalized, the keep-upright
-        /// negation already baked in by <see cref="MapRenderer.Core.Text.Placement.LabelStagingMath"/>).
+        /// negation already baked in by <see cref="MapRenderer.Core.Text.Placement.SymbolStagingMath"/>).
         /// Read by the shader ONLY when <see cref="AlignFlags"/> bit1 is set (curved); <see cref="float3.zero"/>
         /// for point/icon (an unread attribute — their render stays byte-identical).</summary>
         public float3 Tangent;

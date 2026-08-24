@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency. Pure 2D (float2 only, no float4x4/camera) — every screen-space
-// position here is already resolved (LabelScreenProjection did the 3D→screen work); this is just the
+// position here is already resolved (SymbolScreenProjection did the 3D→screen work); this is just the
 // baked-px quad → screen-px quad scale, per S19 T8a / S20 decision 6.
 
 using Unity.Mathematics;
@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Epic A / A1 (world-anchored-labels-design.md §11 A1): builds one quad's 4
+    /// Epic A / A1 (world-anchored-symbols-design.md §11 A1): builds one quad's 4
     /// <see cref="WorldBillboardVertex"/>s for the world-anchored point/icon/curved-text draw path.
     /// zoom-independent (the anchor moves with zoom; the quad's screen-pixel SIZE does not, because
     /// <c>emScale</c> is built from the resolved `text-size`, not from zoom/distance). F7 (S20 stage doc §6):
@@ -22,7 +22,7 @@ namespace MapRenderer.Core.Text.Placement
     /// glyph is a fixed world size and the perspective divide foreshortens it (a map-pitched `text-size` is
     /// X px TOP-DOWN — the same principle as `line-width`). This method does not know which: it just scales
     /// baked em coordinates by whatever <paramref name="emScale"/> is, and the caller
-    /// (<c>WorldLabelRenderer.Emit</c>) picks the unit. The corners and
+    /// (<c>WorldSymbolRenderer.Emit</c>) picks the unit. The corners and
     /// <paramref name="translateDeltaPx"/> ALWAYS share whichever unit is in force — there is one displacement
     /// path in the shader, so a mixed <c>off</c> is not expressible.</para>
     ///
@@ -34,7 +34,7 @@ namespace MapRenderer.Core.Text.Placement
     /// rotated in the quad's y-up LOCAL frame and then Y is negated (A0-F2, below), which lands
     /// <see cref="WorldBillboardVertex.Offset"/> in a y-DOWN screen frame, and a rotation read through a
     /// mirrored axis reverses sense. MEASURED through the real GPU path, not derived — see
-    /// <see cref="LabelBearing.IconRotationRadians"/>, which is where a style value whose own convention is
+    /// <see cref="SymbolBearing.IconRotationRadians"/>, which is where a style value whose own convention is
     /// clockwise-positive (<c>icon-rotate</c>) is flipped into this frame. Do not re-derive this on paper:
     /// the previous paper reading had the negation supplying a clockwise sense while also treating
     /// <c>Offset</c> as y-up, which cannot both hold.</para>
@@ -49,7 +49,7 @@ namespace MapRenderer.Core.Text.Placement
         /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored point/icon draw
         /// path. Winding: topLeft, topRight, bottomRight, bottomLeft — 2 triangles
         /// (topLeft,topRight,bottomRight) + (topLeft,bottomRight,bottomLeft) — so
-        /// <see cref="MapRenderer.Unity.Text.Placement.WorldLabelRenderer"/>'s index emit follows the same
+        /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>'s index emit follows the same
         /// TL/TR/BR/BL pattern throughout.
         ///
         /// <para><b>A0-F2 negation (carried from the A0 test scaffold into production, per the design's
@@ -60,9 +60,9 @@ namespace MapRenderer.Core.Text.Placement
         /// attached to its ORIGINAL corner (no flip) — only the screen-space offset sign changes.</para>
         ///
         /// <para><b>NEW-F2 — no gamma conversion:</b> <paramref name="colorRgb"/> is carried onto
-        /// <see cref="WorldBillboardVertex.ColorRGB"/> VERBATIM — the caller (<c>WorldLabelRenderer</c>) is
+        /// <see cref="WorldBillboardVertex.ColorRGB"/> VERBATIM — the caller (<c>WorldSymbolRenderer</c>) is
         /// responsible for handing in the already-linear colour (<c>PlacedQuad.Color</c>, sRGB→linear
-        /// baked once at batch build — see <c>LabelPlacementSystem.LinearColor</c>); this method performs no
+        /// baked once at batch build — see <c>SymbolPlacementSystem.LinearColor</c>); this method performs no
         /// second conversion (a double-convert would break A/B colour equivalence).</para>
         ///
         /// <para><see cref="WorldBillboardVertex.AnchorLocal"/> is <paramref name="anchorLocal"/> on all four
@@ -124,7 +124,7 @@ namespace MapRenderer.Core.Text.Placement
         /// Y-negation and before any translate: <c>Rotate(corner · emScale / OneEm, rotationRadians)</c>.
         /// Extracted VERBATIM out of <see cref="BuildWorldQuad"/>, which now calls it — so the drawn quad and
         /// the collision box are built from ONE expression rather than from two hand-maintained copies (which
-        /// is what <see cref="LabelBox.BuildRotatedGlyph"/>'s "mirrors BuildQuad exactly" claim rested on).
+        /// is what <see cref="SymbolBox.BuildRotatedGlyph"/>'s "mirrors BuildQuad exactly" claim rested on).
         ///
         /// <para><b>Deliberately does NOT take the translate delta.</b> That add stays in
         /// <see cref="BuildWorldQuad"/>, next to the Y-negation it shares a convention with, so the caller's

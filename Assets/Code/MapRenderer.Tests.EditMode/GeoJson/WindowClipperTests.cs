@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// T13. One world-space line, clipped from the frames of two horizontally adjacent tiles, must place
         /// the shared seam vertex EXACTLY on the seam in each frame — <c>x = Extent</c> for the western tile,
         /// <c>x = 0</c> for its eastern neighbour. That is what makes the two tiles agree about where their
-        /// common edge is, and it is the property seam-matched stroke and label geometry will rest on.
+        /// common edge is, and it is the property seam-matched stroke and symbol geometry will rest on.
         ///
         /// <para><b>Discriminating by construction:</b> the test computes the interpolation the clipper
         /// would otherwise emit and asserts it MISSES the boundary — here by one ulp, leaving the vertex just

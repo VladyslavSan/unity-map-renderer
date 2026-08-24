@@ -468,7 +468,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "eight frames of live providers must leave an unpulled panel untouched — wiring the Inspector " +
                     "reference is not what makes it cost anything; Update is.");
                 Assert.AreEqual(0, panel.LoadedTileCount);
-                Assert.AreEqual(0, panel.SymbolActiveLabelTiles);
+                Assert.AreEqual(0, panel.SymbolActiveTiles);
 
                 panel.Pull();
 
@@ -499,9 +499,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
         // ── Each owner publishes its own telemetry (docs/telemetry-design.md §3) ──────────────────
         //
-        // The two LABEL providers are tested where they are actually driven — SymbolLabelSubsystemPumpTests
-        // and LabelFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
-        // test can reach CurrentBatch / Labels.Tick at all (see the design doc's §6 note).
+        // The two LABEL providers are tested where they are actually driven — SymbolSubsystemPumpTests
+        // and SymbolFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
+        // test can reach CurrentBatch / SymbolPlacementSystem.Tick at all (see the design doc's §6 note).
 
         /// <summary>
         /// A CLEAN tick must not blank the readout. <c>TileManager.Tick</c> returns early when the cover is

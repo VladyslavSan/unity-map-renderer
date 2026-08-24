@@ -1,7 +1,7 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/harness
-// modeled on WorldLabelMotionTests (T3) but does NOT touch that file — this is Stage AC's T-MOT regression
+// modeled on WorldSymbolMotionTests (T3) but does NOT touch that file — this is Stage AC's T-MOT regression
 // tooth (curved-world-plan.md §4 T-MOT): build the NEW world-anchored CURVED mesh ONCE (frozen — AnchorLocal/
-// Tangent never rebaked, exactly like WorldLabelMotionTests' point case), then PAN AND ROTATE (heading) the
+// Tangent never rebaked, exactly like WorldSymbolMotionTests' point case), then PAN AND ROTATE (heading) the
 // camera and re-render the SAME frozen mesh with only the per-frame object transform updated — the glyph
 // must (a) track its WORLD anchor (position) and (b) RE-ORIENT to the live screen tangent (the whole point
 // of Stage AC's shader-side projection — a shallow impl that baked a screen rotation would pass (a) and fail
@@ -15,10 +15,11 @@
 //       makes this test FAIL after the pan+rotate (Failed(Child) on a filtered run). So the re-orient check
 //       genuinely discriminates — a shallow impl that baked a static screen rotation does NOT slip past.
 //   (a) POSITION tracking: rides the SHARED anchor line `clip = TransformObjectToHClip(input.anchorOS)`
-//       (line ~61) that point/icon use too, which the point motion precedent WorldLabelMotionTests already
+//       (line ~61) that point/icon use too, which the point motion precedent WorldSymbolMotionTests already
 //       RED-verifies against a frozen screen-baked mesh; this test additionally exercises it with a nonzero
 //       tile-corner AnchorLocal, so the shared reprojection is covered by that precedent (same code path).
 
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Collections;
@@ -71,9 +72,10 @@ namespace MapRenderer.Tests.Text.Placement
             atlasTexture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "F", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
-            Assert.AreEqual(1, layout.Quads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
-            SymbolQuad quad = layout.Quads[0];
+            var layoutQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, layoutQuads);
+            Assert.AreEqual(1, layoutQuads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
+            SymbolQuad quad = layoutQuads[0];
             const float textSizePx = 140f;
 
             var camGo = new GameObject("WorldCurvedMotion_TestCamera");
@@ -113,7 +115,7 @@ namespace MapRenderer.Tests.Text.Placement
                 float diagRad = math.radians(45f);
                 var tangentLocal = math.normalize(new float3(math.cos(diagRad), 0f, math.sin(diagRad)));
 
-                float4 textColor = LabelPaint.Default.TextColor;
+                float4 textColor = SymbolPaint.Default.TextColor;
                 worldMesh = BuildOneGlyphWorldMeshCurved(quad, textSizePx, new float3(textColor.x, textColor.y, textColor.z),
                     anchorLocal, tangentLocal);
                 worldMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
@@ -138,18 +140,18 @@ namespace MapRenderer.Tests.Text.Placement
                 float aspect0 = (float)(maxCol0 - minCol0 + 1) / (maxRow0 - minRow0 + 1);
 
                 float4x4 viewProj0 = math.mul(
-                    LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
-                    LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
-                Assert.IsTrue(LabelScreenProjection.TryProjectPoint(
+                    SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
+                    SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
+                Assert.IsTrue(SymbolScreenProjection.TryProjectPoint(
                         anchorRender, frame0.SceneOriginRender, viewProj0, viewportLogicalPx, float3x3.identity,
                         out float2 anchorScreen0, out _),
                     "anchor must project in front of the camera at pose 0.");
 
                 // ── Pan (new look-at longitude) AND rotate (a new heading) — the SAME frozen mesh (its baked
                 //    AnchorLocal/Tangent never rebaked) is reused; only the per-frame object transform is
-                //    recomputed against the new SceneFrame, mirroring exactly how a real tile/label renderer
+                //    recomputed against the new SceneFrame, mirroring exactly how a real tile/symbol renderer
                 //    re-places a frozen mesh every frame. ────────────────────────────────────────────────
-                // WorldLabelMotionTests' point precedent uses 0.5deg at zoom 8 (~182px shift) — this test runs
+                // WorldSymbolMotionTests' point precedent uses 0.5deg at zoom 8 (~182px shift) — this test runs
                 // at zoom 12 (16x finer: each zoom level doubles screen-px-per-degree), so the SAME 0.5deg pan
                 // would blow ~2900px past the 512px frame (0 ink). Scaled down by 2^(12-8) to land the SAME
                 // ballpark on-screen shift.
@@ -171,15 +173,15 @@ namespace MapRenderer.Tests.Text.Placement
                 float aspect1 = (float)(maxCol1 - minCol1 + 1) / (maxRow1 - minRow1 + 1);
 
                 float4x4 viewProj1 = math.mul(
-                    LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
-                    LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
-                Assert.IsTrue(LabelScreenProjection.TryProjectPoint(
+                    SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
+                    SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
+                Assert.IsTrue(SymbolScreenProjection.TryProjectPoint(
                         anchorRender, frame1.SceneOriginRender, viewProj1, viewportLogicalPx, float3x3.identity,
                         out float2 anchorScreen1, out _),
                     "anchor must project in front of the camera at pose 1.");
 
                 // (a) POSITION: the glyph must shift by the anchor's own projected screen delta — the SAME
-                //     analytic reasoning as WorldLabelMotionTests (Offset is a fixed additive clip-space
+                //     analytic reasoning as WorldSymbolMotionTests (Offset is a fixed additive clip-space
                 //     term that cancels exactly in a delta).
                 float2 expectedDeltaScreen = anchorScreen1 - anchorScreen0;
                 Assert.Greater(math.abs(expectedDeltaScreen.x) + math.abs(expectedDeltaScreen.y), 50f,
@@ -226,7 +228,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// <summary>Places the presenter GameObject at Level-2 (§3.4): the mesh's baked AnchorLocal is
         /// relative to <paramref name="tileOriginRender"/> — recomputed against <paramref name="frame"/> —
         /// so the object's position alone carries the tile placement to its per-frame place. Mirrors exactly
-        /// how a real world label renderer re-places a FROZEN mesh every frame; the mesh itself is never
+        /// how a real world symbol renderer re-places a FROZEN mesh every frame; the mesh itself is never
         /// touched here.</summary>
         private static void PlacePresenter(GameObject presenterGo, in double3 tileOriginRender, in SceneFrame frame)
         {
@@ -237,7 +239,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>Builds a one-glyph world-anchored CURVED <see cref="Mesh"/> via the REAL production
         /// <see cref="BillboardMath.BuildWorldQuad"/> (unlike WorldSymbolAbRenderSnapshotTests'/
-        /// WorldLabelMotionTests' point scaffolds, which hand-roll the corner math independently — curved's
+        /// WorldSymbolMotionTests' point scaffolds, which hand-roll the corner math independently — curved's
         /// rotation-by-tangent has no simpler independent form worth re-deriving here; BuildWorldQuad's own
         /// corner/rotation math is separately pinned by BillboardMathTests). Unrotated corners
         /// (rotationRadians: 0f) + AlignFlags bit1 set — the shader rotates <c>Offset</c> live from

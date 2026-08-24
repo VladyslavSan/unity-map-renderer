@@ -1,5 +1,5 @@
 // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-// LabelPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+// SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
 // Tools/core-tests/core-tests.csproj (it renders).
 //
 // Stage W3 — THE RENDERED ARM of the projected-world-corner collision box (W3-T1, T2, T3).
@@ -7,15 +7,15 @@
 // THE DEFECT. Since W2 a map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at its
 // anchor, so its screen size foreshortens with depth. Its collision box was still a SCREEN box sized from
 // `TextSizePx` with no depth term anywhere, so it OVER-reserved — always, and only. At the shipped
-// OffLookAtLabelScene pose the receding glyph advance is 29.07 px at the look-at and 0.19 px at 8× that
+// OffLookAtSymbolScene pose the receding glyph advance is 29.07 px at the look-at and 0.19 px at 8× that
 // depth, so the box reserved roughly 150× the screen area the ink covers. Over-reservation can only ever
-// SUPPRESS a label; it can never make letters overlap and it can never misplace one. An eyeball symptom of
+// SUPPRESS a symbol; it can never make letters overlap and it can never misplace one. An eyeball symptom of
 // overlap or misplacement is therefore NOT this stage.
 //
 // THE THREE TEETH HERE, AND WHAT EACH CAN AND CANNOT SEE:
 //   • W3-T1 (headline) — the box IS the drawn quad's screen AABB, at ten view depths spanning >2×. Its
-//     oracle is built from the EMITTED VERTEX STREAM and the LIVE Unity camera, calling no LabelStagingMath,
-//     no LabelBox and no LabelScreenProjection. Its PROJECTION leg is genuinely independent; its ŷ-SENSE leg
+//     oracle is built from the EMITTED VERTEX STREAM and the LIVE Unity camera, calling no SymbolStagingMath,
+//     no SymbolBox and no SymbolScreenProjection. Its PROJECTION leg is genuinely independent; its ŷ-SENSE leg
 //     is NOT — it re-derives the same sense production uses, so T1 alone cannot catch a shared sign error.
 //   • W3-T2 — the box CONTAINS the rendered ink. Containment also holds under the (strictly larger) pre-W3
 //     box, so T2 is NOT the depth discriminator; its job is the other direction — that W3 did not make the
@@ -29,7 +29,7 @@
 //     observer. F-W3-6.
 //
 // NO METRE LITERALS in the tilt-0 harness: every world length is a multiple of `scene.MetresPerDevicePixel`,
-// the same rule TiltFixtureSelfTests, OffLookAtLabelScene and MapPitchedGlyphSizeTiltZeroTests enforce.
+// the same rule TiltFixtureSelfTests, OffLookAtSymbolScene and MapPitchedGlyphSizeTiltZeroTests enforce.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;
@@ -68,8 +68,8 @@ namespace MapRenderer.Tests.Visual
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T1 — the stage's headline tooth.</b> For every glyph of both receding labels, the staged
-        /// <see cref="LabelBox"/> equals the axis-aligned screen bound of the FOUR WORLD CORNERS the renderer
+        /// <b>W3-T1 — the stage's headline tooth.</b> For every glyph of both receding symbols, the staged
+        /// <see cref="SymbolBox"/> equals the axis-aligned screen bound of the FOUR WORLD CORNERS the renderer
         /// actually emitted, to <see cref="BoxAgreementPx"/>.
         ///
         /// <para><b>The oracle calls no production placement code.</b> It reads each glyph's four
@@ -77,7 +77,7 @@ namespace MapRenderer.Tests.Visual
         /// <c>Up</c>/<c>Tangent</c> through the slot transform, displaces by <c>Offset</c> (y-DOWN, per the
         /// A0-F2 negation, so the y-UP amount is <c>−Offset.y</c>), and projects through the LIVE Unity
         /// camera with <c>GroundRuler.ProjectPx</c> — a different code path and a different matrix from
-        /// <c>LabelScreenProjection</c>'s.</para>
+        /// <c>SymbolScreenProjection</c>'s.</para>
         ///
         /// <para><b>Honest reach.</b> The oracle's PROJECTION leg is genuinely independent. Its <b>ŷ-sense leg
         /// is not</b>: it re-derives <c>ŷ = cross(x̂, up)</c>, the same sense production uses, so a shared sign
@@ -87,16 +87,16 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>The anti-P3c precondition.</b> Within <c>RecedingNear</c> alone the reconstructed quad's
         /// screen height must vary by ≥ 4 px between its first and last glyph. A box scaled by ONE constant
-        /// per label — the model that got P3c reverted, and the one <c>CrossNear</c>/<c>CrossFar</c> cannot
+        /// per symbol — the model that got P3c reverted, and the one <c>CrossNear</c>/<c>CrossFar</c> cannot
         /// refute because they are iso-depth by construction — is then provably unable to clear the 0.5 px
         /// bound.</para>
         /// </summary>
         [Test]
         public void MapPitchedBox_IsTheDrawnQuadsScreenAabb_AtEveryDepth()
         {
-            using var f = OffLookAtLabelScene.Create(new OffLookAtLabelSceneConfig());
+            using var f = OffLookAtSymbolScene.Create(new OffLookAtSymbolSceneConfig());
             Assert.That(f.Config.DevicePixelRatio, Is.EqualTo(1.0),
-                "W3-T1 precondition: LabelBox is in LOGICAL px and GroundRuler.ProjectPx reports DEVICE px — " +
+                "W3-T1 precondition: SymbolBox is in LOGICAL px and GroundRuler.ProjectPx reports DEVICE px — " +
                 "they coincide only at DPR 1. The DPR-2 arm belongs to W3-T3, where the identity is exact by " +
                 "construction.");
             UnityEngine.Camera cam = f.UnityCamera;
@@ -105,9 +105,9 @@ namespace MapRenderer.Tests.Visual
             var nearHeights = new List<double>();
             double worstResidualPx = 0.0;
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
-                f.RenderIsolated(id, out LabelBox[] boxes, out WorldBillboardVertex[] vertices,
+                f.RenderIsolated(id, out SymbolBox[] boxes, out WorldBillboardVertex[] vertices,
                     out Transform slot);
                 Assert.That(boxes.Length, Is.EqualTo(f.Config.GlyphCount),
                     $"W3-T1 precondition ({id}): the isolated Tick must stage exactly {f.Config.GlyphCount} " +
@@ -125,7 +125,7 @@ namespace MapRenderer.Tests.Visual
                 for (int g = 0; g < boxes.Length; g++)
                 {
                     QuadScreenAabb(cam, slot, vertices, g, out double2 quadMin, out double2 quadMax);
-                    LabelBox b = boxes[g];
+                    SymbolBox b = boxes[g];
 
                     double dMinX = b.Min.x - quadMin.x, dMinY = b.Min.y - quadMin.y;
                     double dMaxX = b.Max.x - quadMax.x, dMaxY = b.Max.y - quadMax.y;
@@ -140,7 +140,7 @@ namespace MapRenderer.Tests.Visual
                         quadMin.x, quadMin.y, quadMax.x, quadMax.y, dMinX, dMinY, dMaxX, dMaxY));
 
                     depths.Add(measured[g].ViewDepthMetres);
-                    if (id == OffLookAtLabelId.RecedingNear) nearHeights.Add(quadMax.y - quadMin.y);
+                    if (id == OffLookAtSymbolId.RecedingNear) nearHeights.Add(quadMax.y - quadMin.y);
 
                     Assert.That(math.abs(dMinX), Is.LessThanOrEqualTo(BoxAgreementPx),
                         $"W3-T1 ({id}, glyph {g}): box Min.x is {dMinX:F4} px from the drawn quad's own " +
@@ -180,7 +180,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// THE ORACLE: one glyph's four drawn corners, projected, as a screen AABB. Reads only the emitted
         /// vertex stream, the slot transform the renderer itself built, and the LIVE camera — no
-        /// <c>LabelStagingMath</c>, no <c>LabelBox</c>, no <c>LabelScreenProjection</c>.
+        /// <c>SymbolStagingMath</c>, no <c>SymbolBox</c>, no <c>SymbolScreenProjection</c>.
         /// </summary>
         private static void QuadScreenAabb(UnityEngine.Camera cam, Transform slot, WorldBillboardVertex[] vertices,
             int glyphIndex, out double2 min, out double2 max)
@@ -220,7 +220,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W3-T2 — corroboration, in the other direction.</b> Every per-glyph ink run of both receding
-        /// labels lies INSIDE that glyph's staged box (mapped into ink-buffer coordinates,
+        /// symbols lies INSIDE that glyph's staged box (mapped into ink-buffer coordinates,
         /// <c>row = SizePx − 1 − y</c>), with <see cref="InkSlackPx"/> of rasterisation slack per edge.
         ///
         /// <para><b>What this does and does not prove.</b> Containment ALSO holds under the pre-W3 box, which
@@ -233,16 +233,16 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void MapPitchedBox_ContainsTheRenderedInk_AtBothRecedingDepths()
         {
-            using var f = OffLookAtLabelScene.Create(new OffLookAtLabelSceneConfig());
+            using var f = OffLookAtSymbolScene.Create(new OffLookAtSymbolSceneConfig());
             Assert.That(f.Config.DevicePixelRatio, Is.EqualTo(1.0),
                 "W3-T2 precondition: the box is LOGICAL px and the ink buffer is DEVICE px — they coincide " +
                 "only at DPR 1.");
             int size = f.Config.SizePx;
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 OffLookAtInkRuns.AssertRunsVertically(f, id, f.Measure(id).Glyphs);
-                byte[] pixels = f.RenderIsolated(id, out LabelBox[] boxes, out _, out _);
+                byte[] pixels = f.RenderIsolated(id, out SymbolBox[] boxes, out _, out _);
                 f.ColumnBandFor(id, out int colFrom, out int colTo);
                 colFrom = math.max(0, colFrom);
                 colTo   = math.min(size - 1, colTo);
@@ -253,14 +253,14 @@ namespace MapRenderer.Tests.Visual
                     $"band, got {runs.Length}. Merged or missing runs make the run↔glyph pairing below wrong.");
 
                 // The runs come out ordered by increasing ink-buffer ROW; the boxes are in glyph order along
-                // the road, which for an up-screen label is the reverse. Pair them by sorting the BOXES by
+                // the road, which for an up-screen symbol is the reverse. Pair them by sorting the BOXES by
                 // their own centre row — the box-side analogue of MapPitchedGlyphSizeTests' OrderedByScreenRow,
                 // and deliberately NOT a search for "whichever box contains this run" (which could not fail).
                 int[] order = BoxesByCentreRow(boxes, size);
 
                 for (int i = 0; i < runs.Length; i++)
                 {
-                    LabelBox b = boxes[order[i]];
+                    SymbolBox b = boxes[order[i]];
                     double boxRowMin = size - 1 - b.Max.y, boxRowMax = size - 1 - b.Min.y;
                     InkColumnExtent(pixels, size, runs[i], colFrom, colTo, out int inkColMin, out int inkColMax);
 
@@ -295,7 +295,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>Box indices ordered by increasing ink-buffer centre row.</summary>
-        private static int[] BoxesByCentreRow(LabelBox[] boxes, int size)
+        private static int[] BoxesByCentreRow(SymbolBox[] boxes, int size)
         {
             var order = new int[boxes.Length];
             for (int i = 0; i < order.Length; i++) order[i] = i;
@@ -330,7 +330,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// <b>W3-T3 — the absolute scale and the DPR factor, calibrated against an arm that shares no code
         /// with the one under test.</b> At tilt 0 a map-pitched curved
-        /// label's collision box must equal its viewport-pitched twin's, edge for edge, at both device-pixel
+        /// symbol's collision box must equal its viewport-pitched twin's, edge for edge, at both device-pixel
         /// ratios and three road angles.
         ///
         /// <para><b>Why this is exact and not a tolerance argument.</b> At tilt 0 the ground plane is
@@ -342,9 +342,9 @@ namespace MapRenderer.Tests.Visual
         /// length are proportional and both walks place a glyph at the same point. The two boxes must be
         /// EQUAL.</para>
         ///
-        /// <para><b>The reference shares no code with the arm under test.</b> The two labels differ in exactly
-        /// one field, <c>LabelInstance.PitchAlignment</c>; that one predicate selects
-        /// <c>LabelStagingMath</c>'s world-arc walk, the metre corner unit, and W3's projected box. P3a's
+        /// <para><b>The reference shares no code with the arm under test.</b> The two symbols differ in exactly
+        /// one field, <c>ShapedSymbol.PitchAlignment</c>; that one predicate selects
+        /// <c>SymbolStagingMath</c>'s world-arc walk, the metre corner unit, and W3's projected box. P3a's
         /// rebuilt-T2 is the recorded lesson about references drawn from the arm under test.</para>
         ///
         /// <para><b>What each failure mode looks like.</b> A wrong
@@ -371,7 +371,7 @@ namespace MapRenderer.Tests.Visual
             [Values(0f, 45f, 90f)] float roadAngleDeg)
         {
             StageTiltZeroTwin(devicePixelRatio, roadAngleDeg,
-                out LabelBox[] map, out LabelBox[] viewport, out bool rulerIsLive);
+                out SymbolBox[] map, out SymbolBox[] viewport, out bool rulerIsLive);
 
             Assert.That(map.Length, Is.EqualTo(viewport.Length),
                 $"W3-T3 precondition (DPR {devicePixelRatio}, road {roadAngleDeg}°): the twin arms staged " +
@@ -415,7 +415,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Stages the SAME one-glyph curved label twice through ONE scene and ONE camera at tilt 0 — once with
+        /// Stages the SAME one-glyph curved symbol twice through ONE scene and ONE camera at tilt 0 — once with
         /// <c>PitchAlignment = Map</c>, once with <c>Viewport</c> — and returns both arms' staged collision
         /// boxes. No render: the measurand is the staged box, not ink, so this needs no
         /// <c>SnapshotRenderer</c> (which is what keeps it from being a second copy of
@@ -423,7 +423,7 @@ namespace MapRenderer.Tests.Visual
         /// its ink machinery).
         /// </summary>
         private static void StageTiltZeroTwin(double devicePixelRatio, float roadAngleDeg,
-            out LabelBox[] map, out LabelBox[] viewport, out bool rulerIsLive)
+            out SymbolBox[] map, out SymbolBox[] viewport, out bool rulerIsLive)
         {
             const int   sizePx     = 512;
             const float textSizePx = 160f;
@@ -440,7 +440,7 @@ namespace MapRenderer.Tests.Visual
 
             TiltedGroundScene    scene  = null;
             GlyphAtlasTexture    atlas  = null;
-            LabelPlacementSystem system = null;
+            SymbolPlacementSystem system = null;
             TestSymbolPlan       plan   = null;
             try
             {
@@ -464,7 +464,7 @@ namespace MapRenderer.Tests.Visual
 
                 long tileKey = TestTileKeys.PackedContaining(sceneConfig.LookAt.Surface, zoom: 14);
 
-                system = new LabelPlacementSystem(scene.MapCam,
+                system = new SymbolPlacementSystem(scene.MapCam,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
 
@@ -482,41 +482,37 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        private static LabelBox[] StageArm(LabelPlacementSystem system, TestSymbolPlan plan,
+        private static SymbolBox[] StageArm(SymbolPlacementSystem system, TestSymbolPlan plan,
             GlyphAtlasTexture atlas, in SceneFrame frame, double3 pathA, double3 pathB, double3 up,
             in SymbolQuad cell, long tileKey, float textSizePx, AlignmentMode pitch, string armName)
         {
-            var label = new LabelInstance
-            {
-                Placement      = SymbolPlacement.LineCenter,
-                PitchAlignment = pitch,          // THE one field the two arms differ in.
-                PathRender     = new[] { pathA, pathB },
-                PathUpRender   = new[] { up, up },
-                UpRender       = up,
-                LineAnchors    = new[] { new LineAnchor(0, 0.5f) },
-                CurvedGlyphs   = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } },
-                Paint          = LabelPaint.Default,
-                Text           = armName,
-                TextSizePx     = textSizePx,
-                MaxAngleDeg    = 180f,
-                KeepUpright    = false,
+            var buffer = new SymbolTileBuffer();
+            var glyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } };
+            TestSymbolTileBuffer.AddCurved(buffer, glyphs, new[] { new LineAnchor(0, 0.5f) },
+                new[] { pathA, pathB }, new[] { up, up },
+                placement: SymbolPlacement.LineCenter,
+                up: up,
+                pitchAlignment: pitch,            // THE one field the two arms differ in.
+                paint: SymbolPaint.Default,
+                text: armName,
+                textSizePx: textSizePx,
+                maxAngleDeg: 180f,
+                keepUpright: false,
                 // P3a's recorded lesson: at coarse zoom the dedup/collision machinery decides who emits and a
-                // fixture silently loses its label.
-                AllowOverlap   = true,
-                FeatureIndex   = 0,
-                TileKey        = tileKey,
-            };
+                // fixture silently loses its symbol.
+                allowOverlap: true,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var one = new[] { label };
             // R3: duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(one), atlas);
-            system.Tick(in frame, plan.Build(one), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"W3-T3 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road or was culled.");
 
-            NativeArray<LabelBox> staged = system.LastStagedBoxes();
-            var boxes = new LabelBox[system.LastBoxCount];
+            NativeArray<SymbolBox> staged = system.LastStagedBoxes();
+            var boxes = new SymbolBox[system.LastBoxCount];
             for (int b = 0; b < boxes.Length; b++) boxes[b] = staged[b];
             return boxes;
         }

@@ -13,7 +13,7 @@ namespace MapRenderer.Tests.Text
     /// S105 Slice 4 (A5b) → E2 (D11): each symbol style layer gets its OWN material — a distinct
     /// <see cref="MapMaterialSet.SymbolTextWorld"/> clone (NOT one shared material) — with its
     /// <c>text-halo-*</c> bound by name. This is what makes per-layer halo variation possible (F1).
-    /// Ownership migrated from <c>SymbolLabelSubsystem</c> into <see cref="SymbolRenderLayer"/> in E2
+    /// Ownership migrated from <c>SymbolSubsystem</c> into <see cref="SymbolRenderLayer"/> in E2
     /// (D11: "per-layer materials live on the layer object, one owner") — the tooth is unchanged
     /// (per-layer halo), only the owner under test is: this now builds the render layers directly via
     /// <see cref="RenderLayerSet.Build"/> (the same production path <c>MapView.SetStyle</c> drives) instead

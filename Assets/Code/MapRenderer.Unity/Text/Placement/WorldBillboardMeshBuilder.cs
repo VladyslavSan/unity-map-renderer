@@ -11,8 +11,8 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Epic A / A0 (world-anchored-labels-design.md §3.1, §11 A0): the type-explicit builder (naming
-    /// convention) that assembles a two-stream world-anchored label <see cref="Mesh"/> from CPU corner
+    /// Epic A / A0 (world-anchored-symbols-design.md §3.1, §11 A0): the type-explicit builder (naming
+    /// convention) that assembles a two-stream world-anchored symbol <see cref="Mesh"/> from CPU corner
     /// data. Reused by A1's real per-(tile,DrawIndex,kind) emit and A0's test scaffold.
     ///
     /// <para><b>Two streams</b> (so a per-frame fade update never touches topology, §3.1): stream 0 is
@@ -29,7 +29,7 @@ namespace MapRenderer.Unity.Text.Placement
     public static class WorldBillboardMeshBuilder
     {
         // Combined stream-0 + stream-1 descriptor set. ORDER IS LOAD-BEARING for stream 0 (mirrors
-        // WorldBillboardVertex's header / LabelPlacementSystem.VertexDescriptors' identical rule): the array
+        // WorldBillboardVertex's header / SymbolPlacementSystem.VertexDescriptors' identical rule): the array
         // MUST stay in globally-ASCENDING VertexAttribute enum order ACROSS THE WHOLE ARRAY regardless of
         // stream — Position=0, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord4=8
         // (stream 1!), TexCoord5=9, TexCoord6=10 — declaring them out of order triggers a silent
@@ -53,14 +53,14 @@ namespace MapRenderer.Unity.Text.Placement
             new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up (P2) — truly LAST
         };
 
-        // Skip main-thread index validation + redundant bounds recompute (mirrors LabelPlacementSystem's
+        // Skip main-thread index validation + redundant bounds recompute (mirrors SymbolPlacementSystem's
         // NoValidate / StyledLineTileBuilder's NoValidate) — Build sets Mesh.bounds explicitly below anyway.
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
         // A MeshRenderer's CPU frustum cull is evaluated against Mesh.bounds — an anchor can sit off-object
         // while a glyph/halo extends on-screen (§3.3 "never-cull"), so "never cull" is the only correct
-        // choice, mirroring LabelPlacementSystem.HugeBounds (the screen-space path's identical reasoning).
+        // choice, mirroring SymbolPlacementSystem.HugeBounds (the screen-space path's identical reasoning).
         public static readonly Bounds HugeBounds = new Bounds(Vector3.zero, new Vector3(1e9f, 1e9f, 1e9f));
 
         /// <summary>

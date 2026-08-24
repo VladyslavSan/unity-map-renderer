@@ -14,7 +14,7 @@ namespace MapRenderer.Tests.Text.Sprites
     /// <summary>
     /// P2 regression — the sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
     ///
-    /// <para>The sheet used to be an icons-only resource, so <c>SymbolLabelSubsystem.SetStyle</c> returned
+    /// <para>The sheet used to be an icons-only resource, so <c>SymbolSubsystem.SetStyle</c> returned
     /// early ("no symbol layers — stay idle") <i>before</i> kicking off the fetch. Once <c>fill-pattern</c>
     /// began resolving against the same sheet that early return became a silent feature-killer: a style with
     /// pattern fills and no symbol layers would never fetch a sheet, so every pattern layer would stay
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Text.Sprites
             var mapCamera = new MapCamera(cam, new CameraProperties(
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
-            var subsystem = new SymbolLabelSubsystem(mapCamera);
+            var subsystem = new SymbolSubsystem(mapCamera);
             try
             {
                 int fetches = 0;

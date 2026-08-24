@@ -36,10 +36,10 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>text-halo-blur: halo blur radius in pixels. Default 0.</summary>
         public StyleProperty<float> HaloBlur { get; }
 
-        /// <summary>text-translate: [x, y] pixel offset applied to the label's placed screen anchor (y-down,
+        /// <summary>text-translate: [x, y] pixel offset applied to the symbol's placed screen anchor (y-down,
         /// as authored). Default [0, 0]. A plain constant <see cref="float2"/> (px offsets are small — no
         /// need for double precision or the zoom/expression machinery; mirrors <c>LayoutProperties.TextOffset</c>).
-        /// Consumed per-frame by <c>LabelPlacementSystem</c> via <see cref="Text.Placement.LabelTranslate"/>.</summary>
+        /// Consumed per-frame by <c>SymbolPlacementSystem</c> via <see cref="Text.Placement.SymbolTranslate"/>.</summary>
         public float2 Translate { get; }
 
         /// <summary>text-translate-anchor: the frame of reference for <see cref="Translate"/>. Default

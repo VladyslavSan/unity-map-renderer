@@ -84,17 +84,17 @@ namespace MapRenderer.Tests.Style
                 LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(layoutJson),
             };
 
-        private static List<SymbolStyle.SymbolLabel> ExtractPoint(string layoutJson, SpriteAtlasView atlas)
+        private static List<SymbolStyle.SymbolFeature> ExtractPoint(string layoutJson, SpriteAtlasView atlas)
         {
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(PointProbeLayer(layoutJson), OnePointTile(), SyntheticTileId,
-                0.0, new WebMercatorProjection(), labels, atlas);
-            return labels;
+                0.0, new WebMercatorProjection(), symbols, atlas);
+            return symbols;
         }
 
-        private static SymbolStyle.SymbolLabel FindByKind(List<SymbolStyle.SymbolLabel> labels, LabelKind kind)
+        private static SymbolStyle.SymbolFeature FindByKind(List<SymbolStyle.SymbolFeature> symbols, SymbolKind kind)
         {
-            foreach (SymbolStyle.SymbolLabel l in labels) if (l.Kind == kind) return l;
+            foreach (SymbolStyle.SymbolFeature l in symbols) if (l.Kind == kind) return l;
             return null;
         }
 
@@ -108,19 +108,19 @@ namespace MapRenderer.Tests.Style
         [TestCase("\"icon-offset\":[2,0]", TestName = "RetiredConjunct_IconOffset_StillPairs")]
         public void NonCentredHalf_StillFormsOnePairedInstance(string nonCentringProperty)
         {
-            List<SymbolStyle.SymbolLabel> labels = ExtractPoint(
+            List<SymbolStyle.SymbolFeature> symbols = ExtractPoint(
                 "{\"text-field\":\"{ref}\",\"icon-image\":\"road_3\"," + nonCentringProperty + "}",
                 SyntheticAtlas("road_3"));
 
-            Assert.AreEqual(2, labels.Count, "precondition: both halves must be emitted");
-            Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "the OWNER (icon) is emitted first");
-            Assert.AreEqual(LabelKind.Text, labels[1].Kind, "the rider text follows");
-            Assert.AreEqual(LabelPairRole.Owner, labels[0].PairRole, nonCentringProperty + " must still pair");
-            Assert.AreEqual(LabelPairRole.Rider, labels[1].PairRole, nonCentringProperty + " must still pair");
-            Assert.AreEqual(labels[0].FeatureIndex, labels[0].PairId, "PairId is the owner's own FeatureIndex");
-            Assert.AreEqual(labels[0].PairId, labels[1].PairId, "both halves share one PairId");
-            Assert.AreEqual(labels[0].FeatureIndex + 1, labels[1].FeatureIndex,
-                "owner-immediately-then-rider — LabelPairing's adjacency contract");
+            Assert.AreEqual(2, symbols.Count, "precondition: both halves must be emitted");
+            Assert.AreEqual(SymbolKind.Icon, symbols[0].Kind, "the OWNER (icon) is emitted first");
+            Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text follows");
+            Assert.AreEqual(SymbolPairRole.Owner, symbols[0].PairRole, nonCentringProperty + " must still pair");
+            Assert.AreEqual(SymbolPairRole.Rider, symbols[1].PairRole, nonCentringProperty + " must still pair");
+            Assert.AreEqual(symbols[0].FeatureIndex, symbols[0].PairId, "PairId is the owner's own FeatureIndex");
+            Assert.AreEqual(symbols[0].PairId, symbols[1].PairId, "both halves share one PairId");
+            Assert.AreEqual(symbols[0].FeatureIndex + 1, symbols[1].FeatureIndex,
+                "owner-immediately-then-rider — SymbolPairing's adjacency contract");
         }
 
         // ══ T3 — the F1 tooth: a non-centred pair's two boxes land where each half's OWN baked bounds say ══
@@ -139,12 +139,12 @@ namespace MapRenderer.Tests.Style
             // zero offset the boxes coincide whatever the staging does, and the tooth would prove nothing.
             const string layoutJson =
                 "{\"text-field\":\"{ref}\",\"icon-image\":\"road_3\",\"text-anchor\":\"bottom\",\"text-offset\":[0,-2]}";
-            List<SymbolStyle.SymbolLabel> labels = ExtractPoint(layoutJson, SyntheticAtlas("road_3"));
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            List<SymbolStyle.SymbolFeature> symbols = ExtractPoint(layoutJson, SyntheticAtlas("road_3"));
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: an icon half must be present");
             Assert.IsNotNull(text, "precondition: a text half must be present");
-            Assert.AreEqual(LabelPairRole.Owner, icon.PairRole, "precondition: the halves must have paired");
+            Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole, "precondition: the halves must have paired");
 
             // The REAL text layout, through the REAL options builder over the SAME style layer.
             var glyphAtlas = new GlyphAtlas();
@@ -162,44 +162,48 @@ namespace MapRenderer.Tests.Style
             var run = new ShapedRun { Glyphs = glyphs, Direction = TextDirection.LeftToRight };
             TextLayoutOptions options = SymbolStyle.TextLayoutOptionsBuilder.Build(
                 PointProbeLayer(layoutJson).Layout, 0.0, null);
-            TextLayoutResult textLayout = TextQuadLayout.Layout(run, glyphAtlas, in options);
-            TextLayoutResult iconLayout = IconQuadLayout.ToLayoutResult(icon.IconQuad, icon.IconSkirtPx);
+            var textLayoutQuads = new List<SymbolQuad>();
+            TextLayoutBounds textLayout = TextQuadLayout.Layout(run, glyphAtlas, in options, textLayoutQuads);
+            float iconSkirtPx = icon.IconSkirtPx;
+            float2 iconSkirtV = new float2(iconSkirtPx, iconSkirtPx);
+            float2 iconBoundsMin = math.min(icon.IconQuad.TopLeft, icon.IconQuad.BottomRight) + iconSkirtV;
+            float2 iconBoundsMax = math.max(icon.IconQuad.TopLeft, icon.IconQuad.BottomRight) - iconSkirtV;
 
             var sharedScreenPx = new float2(1000f, 1000f);
-            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, LabelKind.Icon,
-                iconLayout.BoundsMin, iconLayout.BoundsMax, sharedScreenPx, TextQuadLayout.OneEm);
-            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, LabelKind.Text,
-                textLayout.BoundsMin, textLayout.BoundsMax, sharedScreenPx, text.TextSizePx);
+            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, SymbolKind.Icon,
+                iconBoundsMin, iconBoundsMax, sharedScreenPx, TextQuadLayout.OneEm);
+            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, SymbolKind.Text,
+                textLayout.Min, textLayout.Max, sharedScreenPx, text.TextSizePx);
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[64];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
-            var textQuads = new SymbolQuad[textLayout.Quads.Count];
-            for (int q = 0; q < textQuads.Length; q++) textQuads[q] = textLayout.Quads[q];
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            var textQuads = new SymbolQuad[textLayoutQuads.Count];
+            for (int q = 0; q < textQuads.Length; q++) textQuads[q] = textLayoutQuads[q];
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, textQuads,
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
 
             Assert.AreEqual(1, staged, "the pair stages as exactly one candidate");
             Assert.AreEqual(2, candidates[0].BoxCount, "the candidate spans BOTH halves' boxes");
-            LabelBox iconBox = boxes[candidates[0].BoxStart];
-            LabelBox textBox = boxes[candidates[0].BoxStart + 1];
+            SymbolBox iconBox = boxes[candidates[0].BoxStart];
+            SymbolBox textBox = boxes[candidates[0].BoxStart + 1];
 
             // Each half's box must be `sharedAnchor + ITS OWN bounds at ITS OWN size`. Collapsing the rider
             // onto the owner's box, or scaling the rider's bounds by the owner's text size, fails here.
-            LabelBox expectedIcon = LabelBox.Build(sharedScreenPx, iconLayout.BoundsMin, iconLayout.BoundsMax,
+            SymbolBox expectedIcon = SymbolBox.Build(sharedScreenPx, iconBoundsMin, iconBoundsMax,
                 TextQuadLayout.OneEm, icon.PaddingPx, 0f, 0, 0, 0, false, false);
-            LabelBox expectedText = LabelBox.Build(sharedScreenPx, textLayout.BoundsMin, textLayout.BoundsMax,
+            SymbolBox expectedText = SymbolBox.Build(sharedScreenPx, textLayout.Min, textLayout.Max,
                 text.TextSizePx, text.PaddingPx, 0f, 0, 0, 0, false, false);
             AssertBoxEqual(expectedIcon, iconBox, "the owner's box");
             AssertBoxEqual(expectedText, textBox, "the rider's box");
 
             // The geometric consequence, stated in its own right: a non-centred pair's boxes are DISJOINT —
             // the halves are one instance without sharing a footprint.
-            Assert.IsFalse(LabelCollision.Overlaps(in iconBox, in textBox),
+            Assert.IsFalse(SymbolCollision.Overlaps(in iconBox, in textBox),
                 "a 2 em offset must separate the halves' boxes — coincident boxes would mean the rider was " +
                 "placed at the owner's bounds rather than its own");
             Assert.Greater(textBox.Min.y, iconBox.Max.y,
@@ -219,14 +223,14 @@ namespace MapRenderer.Tests.Style
             SymbolStyle.StyleLayer labelCity = SymbolTestFixtures.FindSymbolLayer("label_city");
             Assert.IsNotNull(labelCity, "precondition: label_city must parse as a symbol layer");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             // z6 — BELOW label_city's `["step",["zoom"],"circle_11_black",9,""]`, so the dot exists at all.
             // At z >= 9 the icon-image resolves to "" and there is no icon to pair with, let alone orphan.
             SymbolFeatureExtractor.Extract(labelCity, PlaceFixtureTile(), PlaceTileId, 6.0,
-                new WebMercatorProjection(), labels, SyntheticAtlas("circle_11_black"));
+                new WebMercatorProjection(), symbols, SyntheticAtlas("circle_11_black"));
 
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: the fixture must carry a class=city place feature with a dot");
             Assert.IsNotNull(text, "precondition: that feature must also resolve a name");
             Assert.IsTrue(icon.AllowOverlap,
@@ -236,18 +240,18 @@ namespace MapRenderer.Tests.Style
             // Stage the instance the way the placement system does: ONE pair candidate when the extractor
             // proposed a pair, two independent candidates when it did not. Reverting the predicate therefore
             // reads RED as the ARTEFACT (an orphan dot survives), not as a broken precondition.
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[8];
             int boxCount = 0, quadCount = 0, emitCount = 0;
 
             // Synthetic half-bounds + a viewport translate on the rider: label_city's real text-offset is
             // -0.1 em, far too small to separate the boxes, and a blocker that overlaps BOTH halves would not
             // isolate "the text half was blocked". T3 is where the real baked bounds are pinned.
-            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, LabelKind.Icon,
+            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, SymbolKind.Icon,
                 new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
-            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, LabelKind.Text,
+            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, SymbolKind.Text,
                 new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx);
             riderInput.TranslatePx = new float2(200f, 0f);
             riderInput.TranslateAnchor = TextTranslateAnchor.Viewport;
@@ -256,28 +260,28 @@ namespace MapRenderer.Tests.Style
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
             Assert.Greater(instanceCount, 0, "precondition: the instance must stage");
 
-            LabelBox textBox = boxes[boxCount - 1]; // the text half is always the LAST box appended above
-            var blockerBox = new LabelBox
+            SymbolBox textBox = boxes[boxCount - 1]; // the text half is always the LAST box appended above
+            var blockerBox = new SymbolBox
             {
                 Min = textBox.Min - new float2(1f, 1f), Max = textBox.Max + new float2(1f, 1f),
-                SortKey = -1f, FeatureIndex = -1, TileKey = 999, LabelIndex = 99,
+                SortKey = -1f, FeatureIndex = -1, TileKey = 999, SymbolIndex = 99,
             };
-            Assert.IsFalse(LabelCollision.Overlaps(in blockerBox, in boxes[0]),
+            Assert.IsFalse(SymbolCollision.Overlaps(in blockerBox, in boxes[0]),
                 "precondition: the blocker must address the TEXT half alone, never the dot's box");
-            candidates[instanceCount] = new LabelCandidate
+            candidates[instanceCount] = new SymbolCandidate
             {
                 BoxStart = boxCount, BoxCount = 1, EmitStart = emitCount, EmitCount = 0,
-                SortKey = -1f, FeatureIndex = -1, TileKey = 999, LabelIndex = 99,
+                SortKey = -1f, FeatureIndex = -1, TileKey = 999, SymbolIndex = 99,
             };
             boxes[boxCount++] = blockerBox;
 
             var survivor = new bool[instanceCount + 1];
-            LabelCollision.SelectSurvivors(candidates, instanceCount + 1, boxes, boxCount, survivor,
-                new LabelCollisionGrid());
+            SymbolCollision.SelectSurvivors(candidates, instanceCount + 1, boxes, boxCount, survivor,
+                new SymbolCollisionGrid());
 
-            Assert.AreEqual(0, SurvivingEmitCount(candidates, survivor, instanceCount + 1, emit, LabelKind.Icon),
+            Assert.AreEqual(0, SurvivingEmitCount(candidates, survivor, instanceCount + 1, emit, SymbolKind.Icon),
                 "the dot must go down with its name — an icon surviving a blocked text IS the orphan-dot artefact");
-            Assert.AreEqual(0, SurvivingEmitCount(candidates, survivor, instanceCount + 1, emit, LabelKind.Text),
+            Assert.AreEqual(0, SurvivingEmitCount(candidates, survivor, instanceCount + 1, emit, SymbolKind.Text),
                 "the blocked name is culled too (this half was never in doubt)");
         }
 
@@ -306,35 +310,35 @@ namespace MapRenderer.Tests.Style
             var tile = TestDecodedTiles.Of(
                 "aerodrome_label", BerlinTileId, new List<IFeature> { feature }, Extent);
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(airport, tile, BerlinTileId, 9.0,
-                new WebMercatorProjection(), labels, SyntheticAtlas("airport_11"));
+                new WebMercatorProjection(), symbols, SyntheticAtlas("airport_11"));
 
-            SymbolStyle.SymbolLabel icon = FindByKind(labels, LabelKind.Icon);
-            SymbolStyle.SymbolLabel text = FindByKind(labels, LabelKind.Text);
+            SymbolStyle.SymbolFeature icon = FindByKind(symbols, SymbolKind.Icon);
+            SymbolStyle.SymbolFeature text = FindByKind(symbols, SymbolKind.Text);
             Assert.IsNotNull(icon, "precondition: the airport layer must resolve its icon");
             Assert.IsNotNull(text, "precondition: it must also resolve a name");
 
             // The pair FORMS despite the flag — D11 ("pair only when both optional flags are false") would
             // leave these None, and then a text could place with its own required icon culled.
-            Assert.AreEqual(LabelPairRole.Owner, icon.PairRole,
+            Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole,
                 "text-optional must not un-pair: the flag says this INSTANCE may render icon-only");
-            Assert.AreEqual(LabelPairRole.Rider, text.PairRole, "text-optional must not un-pair the text half");
+            Assert.AreEqual(SymbolPairRole.Rider, text.PairRole, "text-optional must not un-pair the text half");
             Assert.AreEqual(icon.PairId, text.PairId, "both halves share one PairId");
             Assert.IsFalse(icon.PairOptional, "icon-optional is unset — the icon half is REQUIRED");
             Assert.IsTrue(text.PairOptional, "text-optional: true lands on the TEXT half");
 
-            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, LabelKind.Icon,
+            PointStageInput ownerInput = SymbolTestFixtures.StageInputFor(icon, SymbolKind.Icon,
                 new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
-            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, LabelKind.Text,
+            PointStageInput riderInput = SymbolTestFixtures.StageInputFor(text, SymbolKind.Text,
                 new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx);
 
-            var boxes = new LabelBox[8];
+            var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
-            var candidates = new LabelCandidate[4];
+            var candidates = new SymbolCandidate[4];
             var emit = new CandidateEmit[4];
             int boxCount = 0, quadCount = 0, emitCount = 0;
-            int staged = LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            int staged = SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                 new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
@@ -350,24 +354,24 @@ namespace MapRenderer.Tests.Style
         {
             SpriteAtlasView atlas = SyntheticAtlas("road_3");
 
-            List<SymbolStyle.SymbolLabel> textOnly = ExtractPoint("{\"text-field\":\"{ref}\"}", atlas);
+            List<SymbolStyle.SymbolFeature> textOnly = ExtractPoint("{\"text-field\":\"{ref}\"}", atlas);
             Assert.AreEqual(1, textOnly.Count, "a text-only feature emits one label");
-            Assert.AreEqual(LabelKind.Text, textOnly[0].Kind);
-            Assert.AreEqual(LabelPairRole.None, textOnly[0].PairRole, "there is no icon to pair with");
+            Assert.AreEqual(SymbolKind.Text, textOnly[0].Kind);
+            Assert.AreEqual(SymbolPairRole.None, textOnly[0].PairRole, "there is no icon to pair with");
 
-            List<SymbolStyle.SymbolLabel> iconOnly = ExtractPoint("{\"icon-image\":\"road_3\"}", atlas);
+            List<SymbolStyle.SymbolFeature> iconOnly = ExtractPoint("{\"icon-image\":\"road_3\"}", atlas);
             Assert.AreEqual(1, iconOnly.Count, "an icon-only feature emits one label");
-            Assert.AreEqual(LabelKind.Icon, iconOnly[0].Kind);
-            Assert.AreEqual(LabelPairRole.None, iconOnly[0].PairRole, "there is no text to pair with");
+            Assert.AreEqual(SymbolKind.Icon, iconOnly[0].Kind);
+            Assert.AreEqual(SymbolPairRole.None, iconOnly[0].PairRole, "there is no text to pair with");
 
             // A null atlas resolves no icon at all, however loudly the layer asks for one.
-            var nullAtlasLabels = new List<SymbolStyle.SymbolLabel>();
+            var nullAtlasSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 PointProbeLayer("{\"text-field\":\"{ref}\",\"icon-image\":\"road_3\",\"text-offset\":[0,0.6]}"),
-                OnePointTile(), SyntheticTileId, 0.0, new WebMercatorProjection(), nullAtlasLabels, null);
-            Assert.AreEqual(1, nullAtlasLabels.Count, "a null atlas yields the text half alone");
-            Assert.AreEqual(LabelKind.Text, nullAtlasLabels[0].Kind);
-            Assert.AreEqual(LabelPairRole.None, nullAtlasLabels[0].PairRole, "no icon resolved ⇒ no pair");
+                OnePointTile(), SyntheticTileId, 0.0, new WebMercatorProjection(), nullAtlasSymbols, null);
+            Assert.AreEqual(1, nullAtlasSymbols.Count, "a null atlas yields the text half alone");
+            Assert.AreEqual(SymbolKind.Text, nullAtlasSymbols[0].Kind);
+            Assert.AreEqual(SymbolPairRole.None, nullAtlasSymbols[0].PairRole, "no icon resolved ⇒ no pair");
         }
 
         // ══ T8 — D-PA-4: the line branch re-gates on BOTH suppressions, not just the icon's ═══════════════
@@ -392,16 +396,16 @@ namespace MapRenderer.Tests.Style
                     "\"icon-rotation-alignment\":\"viewport\"}"),
             };
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, BerlinFixtureTile(), BerlinTileId, 13.0,
-                new WebMercatorProjection(), labels, SyntheticAtlas("road_3"));
+                new WebMercatorProjection(), symbols, SyntheticAtlas("road_3"));
 
             int atAnchorIcons = 0, curvedTexts = 0;
-            foreach (SymbolStyle.SymbolLabel l in labels)
+            foreach (SymbolStyle.SymbolFeature l in symbols)
             {
-                if (l.Kind == LabelKind.Icon && l.Placement == SymbolPlacement.Point) atAnchorIcons++;
-                if (l.Kind == LabelKind.Text && l.Placement == SymbolPlacement.Line) curvedTexts++;
-                Assert.AreEqual(LabelPairRole.None, l.PairRole,
+                if (l.Kind == SymbolKind.Icon && l.Placement == SymbolPlacement.Point) atAnchorIcons++;
+                if (l.Kind == SymbolKind.Text && l.Placement == SymbolPlacement.Line) curvedTexts++;
+                Assert.AreEqual(SymbolPairRole.None, l.PairRole,
                     "the text left for the curved shape, so no at-anchor icon may claim to own a rider");
                 Assert.AreEqual(0, l.PairId, "PairId must stay at its unpaired default");
             }
@@ -445,41 +449,41 @@ namespace MapRenderer.Tests.Style
             UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1),
         };
 
-        /// <summary>Stages an icon+text feature the way <c>LabelPlacementSystem</c> does — ONE pair candidate
+        /// <summary>Stages an icon+text feature the way <c>SymbolPlacementSystem</c> does — ONE pair candidate
         /// when the extractor proposed a pair, two INDEPENDENT candidates when it did not. Returns the number
         /// of candidates written from index 0. Modelling both arms is what lets a tooth assert the placement
         /// OUTCOME (an orphan dot) rather than merely the roles.</summary>
         private static int StageInstance(
-            SymbolStyle.SymbolLabel icon, SymbolStyle.SymbolLabel text,
+            SymbolStyle.SymbolFeature icon, SymbolStyle.SymbolFeature text,
             in PointStageInput ownerInput, in PointStageInput riderInput,
-            LabelBox[] boxes, ref int boxCount, PlacedQuad[] quads, ref int quadCount,
-            LabelCandidate[] candidates, CandidateEmit[] emit, ref int emitCount)
+            SymbolBox[] boxes, ref int boxCount, PlacedQuad[] quads, ref int quadCount,
+            SymbolCandidate[] candidates, CandidateEmit[] emit, ref int emitCount)
         {
-            if (icon.PairRole == LabelPairRole.Owner && text.PairRole == LabelPairRole.Rider)
-                return LabelStagingMath.StagePointPair(in ownerInput, in riderInput,
+            if (icon.PairRole == SymbolPairRole.Owner && text.PairRole == SymbolPairRole.Rider)
+                return SymbolStagingMath.StagePointPair(in ownerInput, in riderInput,
                     new[] { icon.IconQuad }, new[] { SyntheticTextQuad() },
                     bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                     boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
 
-            int staged = LabelStagingMath.StagePoint(in ownerInput, new[] { icon.IconQuad },
+            int staged = SymbolStagingMath.StagePoint(in ownerInput, new[] { icon.IconQuad },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: 0,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
-            staged += LabelStagingMath.StagePoint(in riderInput, new[] { SyntheticTextQuad() },
+            staged += SymbolStagingMath.StagePoint(in riderInput, new[] { SyntheticTextQuad() },
                 bearingRadians: 0f, viewportLogicalPx: new double2(1920, 1080), ordinal: staged,
                 boxes, ref boxCount, quads, ref quadCount, candidates, emit, ref emitCount);
             return staged;
         }
 
         /// <summary>Emits of <paramref name="kind"/> belonging to a SURVIVING candidate, skipping any half
-        /// the collision loop dropped (<see cref="LabelCandidate.DroppedBoxMask"/>).</summary>
-        private static int SurvivingEmitCount(LabelCandidate[] candidates, bool[] survivor, int count,
-            CandidateEmit[] emit, LabelKind kind)
+        /// the collision loop dropped (<see cref="SymbolCandidate.DroppedBoxMask"/>).</summary>
+        private static int SurvivingEmitCount(SymbolCandidate[] candidates, bool[] survivor, int count,
+            CandidateEmit[] emit, SymbolKind kind)
         {
             int n = 0;
             for (int c = 0; c < count; c++)
             {
                 if (!survivor[c]) continue;
-                LabelCandidate cand = candidates[c];
+                SymbolCandidate cand = candidates[c];
                 for (int e = 0; e < cand.EmitCount; e++)
                 {
                     if (emit[cand.EmitStart + e].AtlasKind != kind) continue;
@@ -490,7 +494,7 @@ namespace MapRenderer.Tests.Style
             return n;
         }
 
-        private static void AssertBoxEqual(in LabelBox expected, in LabelBox actual, string what)
+        private static void AssertBoxEqual(in SymbolBox expected, in SymbolBox actual, string what)
         {
             const float eps = 1e-4f;
             Assert.AreEqual(expected.Min.x, actual.Min.x, eps, what + " Min.x");

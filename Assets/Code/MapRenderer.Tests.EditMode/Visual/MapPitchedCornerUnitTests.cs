@@ -1,18 +1,18 @@
-// Unity EditMode only — real TiltedGroundScene + a REAL LabelPlacementSystem.Tick, read back off the built
+// Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Tick, read back off the built
 // slot mesh. NOT registered in Tools/core-tests/core-tests.csproj.
 //
 // Stage W2 — the CORNER-UNIT teeth that need the RENDERER (W2-T7, W2-T8).
 //
 // PLACEMENT NOTE, deliberate and worth stating. The W2 plan filed T7 under `BillboardMathTests` and T8 under
 // `MapPitchedWorldArcStagingTests`. Both of those are engine-free files that reach only `MapRenderer.Core`,
-// and both of these teeth are claims about `WorldLabelRenderer.Emit` — "the four WorldBillboardVertexs
+// and both of these teeth are claims about `WorldSymbolRenderer.Emit` — "the four WorldBillboardVertexs
 // produced by the RENDERER", and "the renderer scales the translate delta by the corner unit". Asserting
 // either one without the renderer in the loop would be asserting the test's own arithmetic, which is the
 // self-referential-oracle failure this epic already made once. So they live here, on the real emit path, and
 // the deviation from the plan's filing is recorded rather than silently taken.
 //
 // WHY tilt 0. Neither tooth reads a projected quantity — both read the emitted VERTEX STREAM off the built
-// mesh — so the pose only has to be one where the labels stage reliably. Tilt 0 is the simplest such pose and
+// mesh — so the pose only has to be one where the symbols stage reliably. Tilt 0 is the simplest such pose and
 // it is the one MapPitchedGlyphSizeTiltZeroTests already uses, so the two files share a shape.
 
 #if UNITY_EDITOR
@@ -39,8 +39,8 @@ namespace MapRenderer.Tests.Visual
         private const float TextSizePx = 160f;
 
         /// <summary>`AlignFlags` bit1 — Stage AC's along-line rotation. Spelled out here rather than read from
-        /// <c>WorldLabelRenderer</c>'s own private constant: a tooth that compares a value to itself pins
-        /// nothing (the same reason <c>WorldLabelGroupingTests</c> asserts its hierarchy names literally).</summary>
+        /// <c>WorldSymbolRenderer</c>'s own private constant: a tooth that compares a value to itself pins
+        /// nothing (the same reason <c>WorldSymbolGroupingTests</c> asserts its hierarchy names literally).</summary>
         private const float AlongLineBit = 2f;
 
         /// <summary>`AlignFlags` bit2 — W2's map-pitch bit, same rationale.</summary>
@@ -52,8 +52,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T7, clause 1 — the STRUCTURAL statement of R3: the non-map path is BITWISE unchanged.</b>
-        /// Proves: for a curved label whose <c>CornerMetresPerLogicalPixel</c> is 0 (every viewport- and
-        /// auto-pitched label, and every point label), the four <see cref="WorldBillboardVertex"/>s the
+        /// Proves: for a curved symbol whose <c>CornerMetresPerLogicalPixel</c> is 0 (every viewport- and
+        /// auto-pitched symbol, and every point symbol), the four <see cref="WorldBillboardVertex"/>s the
         /// renderer emitted are bit-for-bit equal to a <see cref="BillboardMath.BuildWorldQuad"/> call made
         /// with the PRE-W2 arguments — <c>q.TextSizePx</c> unscaled, <c>emit.TranslateDeltaPx</c> unscaled,
         /// <c>alignFlags = AlongLineAlignFlag</c>.
@@ -65,7 +65,7 @@ namespace MapRenderer.Tests.Visual
         /// let a real unit slip through as rounding.</para>
         ///
         /// <para><b>The reference does not come from the arm under test.</b> The expected quad is built from
-        /// the label's own baked cell plus the mesh's own <c>AnchorLocal</c>/<c>Tangent</c>/<c>Up</c> — i.e.
+        /// the symbol's own baked cell plus the mesh's own <c>AnchorLocal</c>/<c>Tangent</c>/<c>Up</c> — i.e.
         /// from the geometry, not from the corner offsets being checked.</para>
         /// </summary>
         [Test]
@@ -153,12 +153,12 @@ namespace MapRenderer.Tests.Visual
         /// (<c>recorded-limitation-needs-an-observing-tooth</c>). Without it the scaling is an unobserved
         /// path, and this epic has already shipped one of those.</para>
         ///
-        /// <para><b>Method: a DIFFERENCE, so the corner geometry cancels.</b> The same map-pitched label is
+        /// <para><b>Method: a DIFFERENCE, so the corner geometry cancels.</b> The same map-pitched symbol is
         /// emitted twice, once with a translate and once without, and the per-corner offset difference must
         /// have the MAGNITUDE of the delta times the corner unit, component by component.</para>
         ///
         /// <para><b>Component MAGNITUDES, not signed values — and that is a scope statement, not a
-        /// weakening.</b> The Y sense of a translate is set by <c>LabelTranslate.ApplyTranslate</c>'s own
+        /// weakening.</b> The Y sense of a translate is set by <c>SymbolTranslate.ApplyTranslate</c>'s own
         /// convention composed with <c>BuildWorldQuad</c>'s A0-F2 negation, both of which predate W2 and
         /// neither of which this stage touches; measured, the two compose to a POSITIVE Y here. W2's claim is
         /// exclusively about the UNIT, and the unit is what the magnitude states. Re-pinning the sign would
@@ -208,9 +208,9 @@ namespace MapRenderer.Tests.Visual
         // Harness
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-        /// <summary>Stages ONE curved label through the real <see cref="LabelPlacementSystem"/> and reads its
+        /// <summary>Stages ONE curved symbol through the real <see cref="SymbolPlacementSystem"/> and reads its
         /// first glyph's four vertices back off the built slot mesh — the same production path
-        /// <c>OffLookAtLabelScene</c> measures through.</summary>
+        /// <c>OffLookAtSymbolScene</c> measures through.</summary>
         private static WorldBillboardVertex[] EmitAndRead(
             AlignmentMode pitch, float2 translatePx, out SymbolQuad cell, out double metresPerLogicalPixel)
         {
@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Visual
 
             TiltedGroundScene    scene  = null;
             GlyphAtlasTexture    atlas  = null;
-            LabelPlacementSystem system = null;
+            SymbolPlacementSystem system = null;
             TestSymbolPlan       plan   = null;
             try
             {
@@ -237,39 +237,35 @@ namespace MapRenderer.Tests.Visual
                 var up  = new double3(0.0, 1.0, 0.0);
                 long tileKey = TestTileKeys.PackedContaining(sceneConfig.LookAt.Surface, zoom: 14);
 
-                var label = new LabelInstance
-                {
-                    Placement      = SymbolPlacement.LineCenter,
-                    PitchAlignment = pitch,
-                    PathRender     = new[] { origin - dir * halfLen, origin + dir * halfLen },
-                    PathUpRender   = new[] { up, up },
-                    UpRender       = up,
-                    LineAnchors    = new[] { new LineAnchor(0, 0.5f) },
-                    CurvedGlyphs   = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } },
-                    Paint          = LabelPaint.Default,
-                    TranslatePx    = translatePx,
-                    Text           = "T",
-                    TextSizePx     = TextSizePx,
-                    MaxAngleDeg    = 180f,
-                    KeepUpright    = false,
-                    AllowOverlap   = true,
-                    FeatureIndex   = 0,
-                    TileKey        = tileKey,
-                };
+                var buffer = new SymbolTileBuffer();
+                var glyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } };
+                TestSymbolTileBuffer.AddCurved(buffer, glyphs, new[] { new LineAnchor(0, 0.5f) },
+                    new[] { origin - dir * halfLen, origin + dir * halfLen }, new[] { up, up },
+                    placement: SymbolPlacement.LineCenter,
+                    up: up,
+                    pitchAlignment: pitch,
+                    paint: SymbolPaint.Default,
+                    translatePx: translatePx,
+                    text: "T",
+                    textSizePx: TextSizePx,
+                    maxAngleDeg: 180f,
+                    keepUpright: false,
+                    allowOverlap: true,
+                    featureIndex: 0,
+                    tileKey: tileKey);
 
-                system = new LabelPlacementSystem(scene.MapCam,
+                system = new SymbolPlacementSystem(scene.MapCam,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
 
-                var one = new[] { label };
                 // R3: duplicate Tick — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(one), atlas);
-                system.Tick(in frame, plan.Build(one), atlas);
+                system.Tick(in frame, plan.Build(buffer), atlas);
+                system.Tick(in frame, plan.Build(buffer), atlas);
                 Assert.That(system.LastQuadCount, Is.EqualTo(1),
                     $"W2-T7/T8 precondition ({pitch}): the label must stage exactly one quad, got " +
                     $"{system.LastQuadCount}.");
 
-                Assert.That(system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh), Is.True,
+                Assert.That(system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh), Is.True,
                     "W2-T7/T8 precondition: the label emitted no world slot mesh.");
                 WorldMeshReadback.Read(mesh, out WorldBillboardVertex[] vertices, out _);
                 Assert.That(vertices.Length, Is.EqualTo(4),

@@ -7,7 +7,7 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// I3 — turns one resolved <see cref="SpriteEntry"/> + <c>icon-*</c> layout properties into a single
-    /// label-local, anchor-relative <see cref="SymbolQuad"/> in the sprite sheet's own pixel space. The
+    /// symbol-local, anchor-relative <see cref="SymbolQuad"/> in the sprite sheet's own pixel space. The
     /// icon analogue of <see cref="TextQuadLayout"/> — reuses the SAME horizontal hAlign factor and the
     /// SAME y-down→y-up single-negation offset convention, but a sprite is exactly one quad (no glyph run,
     /// no wrap, no baseline) so this is a single pure function rather than a stateful forward pass.
@@ -56,8 +56,8 @@ namespace MapRenderer.Core.Text
             // The SKIRT: the quad grows by the drawn size of the sprite's transparent border, symmetrically,
             // AFTER the align/offset block above has placed the CONTENT box. Adding it symmetrically is what
             // keeps every icon-anchor exact — `icon-anchor: left` still puts the CONTENT's left edge on the
-            // anchor — and what keeps the collision box (IconQuadLayout.ToLayoutResult, which insets by the
-            // same skirt) on the ink rather than on the border.
+            // anchor — and what keeps the collision box (the caller-side bounds formula, which insets by the
+            // same skirt — see SkirtPx) on the ink rather than on the border.
             minX -= skirtPx; maxX += skirtPx;
             minY -= skirtPx; maxY += skirtPx;
 
@@ -101,56 +101,25 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// The drawn width, in label-local (baked) px, of the transparent border around
+        /// The drawn width, in symbol-local (baked) px, of the transparent border around
         /// <paramref name="entry"/>'s content — per side. Divides out the sheet's device pixel ratio and
         /// applies <c>icon-size</c>, exactly as the content's own logical size does, so the border and the
         /// content are drawn at the same texels-per-pixel.
         ///
         /// <para>ONE formula with TWO entry points that must never drift: <see cref="Layout"/> calls it to
-        /// grow the quad, and every consumer that needs the CONTENT box back out of a laid-out quad
-        /// (<see cref="ToLayoutResult"/>, <c>CurvedGlyph.CellSkirt</c>) calls it to inset by the same amount.
+        /// grow the quad, and every consumer that needs the CONTENT box back out of a laid-out quad (the
+        /// caller-side bounds formula, <c>CurvedGlyph.CellSkirt</c>) calls it to inset by the same amount.
         /// <c>0</c> whenever the sprite reports no border.</para>
         ///
         /// <para>The <c>pixelRatio</c> divisor is guarded exactly as <c>FillPattern.TryResolve</c> guards its
         /// own: <see cref="SpriteIndex"/> defaults the field to 1, but a malformed sheet declaring an explicit
         /// <c>"pixelRatio": 0</c> parses straight through. At <c>Padding == 0</c> that would make the skirt
         /// <c>0/0f</c> — <b>NaN</b>, not the infinity the surrounding size maths produces — and a NaN carried
-        /// into <c>SymbolLabel.IconSkirtPx</c> and out into a collision box compares false against everything,
+        /// into <c>SymbolFeature.IconSkirtPx</c> and out into a collision box compares false against everything,
         /// which is a different (and quieter) failure than an infinite box.</para>
         /// </summary>
         public static float SkirtPx(in SpriteEntry entry, float iconSize)
             => entry.Padding / (entry.PixelRatio > 0f ? entry.PixelRatio : 1f) * iconSize;
-
-        /// <summary>
-        /// I5a — wraps a single laid-out icon <see cref="SymbolQuad"/> into the same
-        /// <see cref="TextLayoutResult"/> shape the point-text path produces, so <c>StyledSymbolTileBuilder</c>'s
-        /// Pass 2 can emit an icon <see cref="Placement.LabelInstance"/> down the SAME point-placement path
-        /// (§5.4: ride <see cref="Placement.LabelRecordKind.Point"/> + the <c>AtlasKind</c> discriminator, no parallel icon path). Bounds are
-        /// the quad's own min/max corner per component — a sprite is exactly one quad, so its bbox IS the block
-        /// bbox. <see cref="TextLayoutResult.LineCount"/> is 1 (an icon has no line concept, but every consumer
-        /// of <c>LineCount</c> treats "&gt;= 1" as the normal case).
-        ///
-        /// <para><paramref name="skirtPx"/> — <see cref="SkirtPx"/> for the same entry and <c>icon-size</c> —
-        /// is REMOVED from the bounds again, so the reported box is the icon's CONTENT, not its padded quad.
-        /// Placement and collision must run on the ink: a padded box would grow every icon's collision
-        /// footprint by ~1 logical px per side (up to ~9 % of a 22 px icon's area), silently changing which
-        /// labels win and which fade — a behaviour change the transparent border has no business causing.
-        /// The render half keeps the padded quad; the two representations part company here, and only here.
-        /// No default value on purpose: every call site must state which of the two it wants.</para>
-        /// </summary>
-        public static TextLayoutResult ToLayoutResult(in SymbolQuad iconQuad, float skirtPx)
-        {
-            float2 skirt = new float2(skirtPx, skirtPx);
-            float2 min = math.min(iconQuad.TopLeft, iconQuad.BottomRight) + skirt;
-            float2 max = math.max(iconQuad.TopLeft, iconQuad.BottomRight) - skirt;
-            return new TextLayoutResult
-            {
-                Quads = new[] { iconQuad },
-                BoundsMin = min,
-                BoundsMax = max,
-                LineCount = 1,
-            };
-        }
 
         /// <summary>hAlign: Left*=0, Right*=1, else .5. vAlign: Top*=0, Bottom*=1, else .5 — a bare float,
         /// unlike <c>TextQuadLayout.ResolveAlignFactors</c>'s three-valued vertical, for the reason in this

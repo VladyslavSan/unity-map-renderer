@@ -105,34 +105,34 @@ namespace MapRenderer.App
         [Tooltip("Cumulative LRU evictions (an entry destroyed because the byte budget or count cap was exceeded).")]
         public int PreparedCacheEvictions;
 
-        [Header("S105: Symbol labels — STORE (published by SymbolLabelSubsystem)")]
+        [Header("S105: Symbol labels — STORE (published by SymbolSubsystem)")]
         [Tooltip("Active (in-cover) label-tile count — tiles whose labels feed this frame's placement pass.")]
-        public int SymbolActiveLabelTiles;
+        public int SymbolActiveTiles;
 
         [Tooltip("Cached (out-of-cover) label-tile count — labels kept warm so a prepared-cache hit re-shows " +
                  "the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.")]
-        public int SymbolCachedLabelTiles;
+        public int SymbolCachedTiles;
 
         [Tooltip("§1.5 tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
-                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune LabelTileCoverageCull.")]
-        public int SymbolCoverageDroppedLabels;
+                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune SymbolTileCoverageCull.")]
+        public int SymbolCoverageDropped;
 
-        [Header("S105: Symbol labels — PLACEMENT (published by LabelPlacementSystem)")]
-        [Tooltip("Labels fed into the last placement Tick (before projection cull) — sum over active tiles.")]
-        public int SymbolInputLabelCount;
+        [Header("S105: Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
+        [Tooltip("Symbols fed into the last placement Tick (before projection cull) — sum over active tiles.")]
+        public int SymbolInputCount;
 
         [Tooltip("B-3: labels skipped by the pre-projection horizon/distance cull last Tick (never projected/" +
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
-        public int SymbolDistanceCulledLabels;
+        public int SymbolDistanceCulled;
 
         [Tooltip("§1.5 companion: labels whose tile just crossed below coverage and finished fading out this " +
                  "Tick (they faded, not popped) — the transient tail of the coverage drop.")]
-        public int SymbolCoverageFadingLabels;
+        public int SymbolCoverageFading;
 
-        [Tooltip("Labels skipped last Tick because their layer is out of the live zoom's [minzoom, maxzoom) — " +
+        [Tooltip("Symbols skipped last Tick because their layer is out of the live zoom's [minzoom, maxzoom) — " +
                  "the display-time gate moved ahead of projection, so overzoom points (a z14 tile's poi_r* before " +
-                 "the camera reaches their minzoom) are never projected/staged. Watch against InputLabelCount.")]
-        public int SymbolZoomCulledLabels;
+                 "the camera reaches their minzoom) are never projected/staged. Watch against InputSymbolCount.")]
+        public int SymbolZoomCulled;
 
         [Tooltip("Collision candidates on the last Tick (labels that survived projection; a point label is 1, " +
                  "a curved/repeated line label is 1 per along-line anchor).")]
@@ -148,7 +148,7 @@ namespace MapRenderer.App
                  "just memory. A faded-out identity is dropped rather than parked at 0, so this should track " +
                  "SymbolPlacedQuads and settle when the camera does; tracking SymbolCollisionCandidates instead " +
                  "means invisible identities are being retained again.")]
-        public int SymbolLiveFadeRecords;
+        public int SymbolLiveFade;
 
         [Tooltip("R1: cumulative heavy rebuilds of the native label mirror (never bumped on a memo hit).")]
         public int SymbolMirrorRebuilds;
@@ -185,8 +185,8 @@ namespace MapRenderer.App
 
             // Straight off each provider — `in` is what keeps the ref-return copy-free all the way to the writes.
             OnTileTelemetry(in live.TileManager.Telemetry);
-            OnSymbolStoreTelemetry(in live.Symbols.Telemetry);
-            OnLabelPlacementTelemetry(in live.Labels.Telemetry);
+            OnSymbolStoreTelemetry(in live.SymbolSubsystem.Telemetry);
+            OnSymbolPlacementTelemetry(in live.SymbolPlacementSystem.Telemetry);
         }
 
         private void OnTileTelemetry(in TileTelemetrySnapshot snap)
@@ -225,21 +225,21 @@ namespace MapRenderer.App
 
         private void OnSymbolStoreTelemetry(in SymbolStoreTelemetrySnapshot store)
         {
-            SymbolActiveLabelTiles      = store.ActiveLabelTiles;
-            SymbolCachedLabelTiles      = store.CachedLabelTiles;
-            SymbolCoverageDroppedLabels = store.CoverageDroppedLabels;
+            SymbolActiveTiles      = store.ActiveSymbolTiles;
+            SymbolCachedTiles      = store.CachedSymbolTiles;
+            SymbolCoverageDropped = store.CoverageDroppedSymbols;
         }
 
-        private void OnLabelPlacementTelemetry(in LabelPlacementTelemetrySnapshot placement)
+        private void OnSymbolPlacementTelemetry(in SymbolPlacementTelemetrySnapshot placement)
         {
-            SymbolInputLabelCount      = placement.InputLabelCount;
-            SymbolDistanceCulledLabels = placement.DistanceCulledLabels;
-            SymbolCoverageFadingLabels = placement.CoverageFadingLabels;
-            SymbolZoomCulledLabels     = placement.ZoomCulledLabels;
+            SymbolInputCount      = placement.InputSymbolCount;
+            SymbolDistanceCulled = placement.DistanceCulledSymbols;
+            SymbolCoverageFading = placement.CoverageFadingSymbols;
+            SymbolZoomCulled     = placement.ZoomCulledSymbols;
             SymbolCollisionCandidates  = placement.CollisionCandidateCount;
             SymbolCollisionSurvivors   = placement.CollisionSurvivorCount;
             SymbolPlacedQuads          = placement.PlacedQuadCount;
-            SymbolLiveFadeRecords      = placement.LiveFadeRecordCount;
+            SymbolLiveFade      = placement.LiveFadeSymbolCount;
             SymbolMirrorRebuilds       = placement.MirrorRebuildCount;
             SampleMirrorRebuildRate(placement.MirrorRebuildCount);
         }

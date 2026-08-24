@@ -146,7 +146,10 @@ namespace MapRenderer.Tests.Meshing
             using var glyphManager = new GlyphManager(
                 TestGlyphSource.FromRanges(new Dictionary<(string fontStack, int rangeStart), byte[]>()), new GlyphAtlas(256, 256));
             var builder = new StyledSymbolTileBuilder(glyphManager);
-            var labels  = new List<MapRenderer.Core.Text.Placement.LabelInstance>();
+            // 4.4c: the symbol processors now write their raw symbol slots into a reused SymbolTileBuffer (not a
+            // per-symbol managed carrier list). This test only exercises the WORKER pass (ExtractLayers) + buffer-sharing —
+            // the scratch is never read here, just handed to the processor ctors.
+            var tileBuffer  = new MapRenderer.Core.Text.Placement.SymbolTileBuffer();
 
             // ONE reference around BOTH passes, released in a finally — TileManager.KickMeshBuild's shape
             // exactly.
@@ -168,8 +171,8 @@ namespace MapRenderer.Tests.Meshing
                     new BufferProbeSymbolProcessor(symbolB, symbolLog),
                     // The REAL symbol processors run in the same pass, so the arrangement under test is one
                     // production actually creates — two symbol layers naming one source-layer, extracting.
-                    new TileSymbolLayerProcessor(builder, symbolA, 0, labels),
-                    new TileSymbolLayerProcessor(builder, symbolB, 1, labels),
+                    new TileSymbolLayerProcessor(builder, symbolA, 0, tileBuffer),
+                    new TileSymbolLayerProcessor(builder, symbolB, 1, tileBuffer),
                 };
                 TileLayerProcessorRunner.RunSymbolWorkerPass(handle, in context, symbolProcessors);
             }

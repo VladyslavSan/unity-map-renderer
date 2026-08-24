@@ -28,7 +28,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// out here — never obtained from <see cref="IProjection.ProjectPoint"/> or any production sampler.
     ///
     /// <para><b>Why this exists as its own tooth.</b> T-3 (<c>WorldSurfaceUpPopulationTests</c>) hand-builds
-    /// a <see cref="LabelInstance"/> directly, so it starts DOWNSTREAM of every Block-A edit (the extractor's
+    /// a <see cref="ShapedSymbol"/> directly, so it starts DOWNSTREAM of every Block-A edit (the extractor's
     /// four <c>UpRender</c>/<c>PathUpRender</c> assignments and <see cref="StyledSymbolTileBuilder"/>'s four
     /// carry-through sites). Deleting any one of those eight lines leaves T-3 — and the rest of the gate —
     /// green, because nothing else reads <c>Up</c> yet (the byte-identical invariant). Only a tooth that
@@ -136,7 +136,7 @@ namespace MapRenderer.Tests.Text.Placement
             return TestDecodedTiles.Of("roads", TileId0, new List<IFeature> { feature }, Extent);
         }
 
-        // ── (1) point TEXT, unpaired — SymbolFeatureExtractor.EmitTextLabel + StyledSymbolTileBuilder :257 ──
+        // ── (1) point TEXT, unpaired — SymbolFeatureExtractor.EmitText + StyledSymbolTileBuilder :257 ──
 
         [Test]
         public async Task PointText_ThroughRealExtractionAndBuild_UpRenderMatchesClosedForm()
@@ -150,15 +150,15 @@ namespace MapRenderer.Tests.Text.Placement
 
             using GlyphManager manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
-            var labels = new List<LabelInstance>();
-            await builder.BuildAsync(OnePointTile(point), TileId0, new[] { layer }, 0.0, Projection, labels);
+            var symbols = new SymbolTileBuffer();
+            await builder.BuildAsync(OnePointTile(point), TileId0, new[] { layer }, 0.0, Projection, symbols);
 
-            Assert.AreEqual(1, labels.Count, "one point-text label");
-            Assert.AreEqual(LabelKind.Text, labels[0].Kind);
-            AssertUp(ExpectedUpAtTilePoint(point), labels[0].UpRender, "point-text UpRender");
+            Assert.AreEqual(1, symbols.Symbols.Count, "one point-text label");
+            Assert.AreEqual(SymbolKind.Text, symbols.Symbols[0].Kind);
+            AssertUp(ExpectedUpAtTilePoint(point), symbols.Symbols[0].UpRender, "point-text UpRender");
         }
 
-        // ── (2) point ICON+TEXT PAIR — both EmitIconLabel(Owner)/EmitTextLabel(Rider) + builder :179/:257 ──
+        // ── (2) point ICON+TEXT PAIR — both EmitIcon(Owner)/EmitText(Rider) + builder :179/:257 ──
 
         [Test]
         public async Task PointIconTextPair_ThroughRealExtractionAndBuild_BothHalvesUpRenderMatchClosedForm()
@@ -173,14 +173,14 @@ namespace MapRenderer.Tests.Text.Placement
 
             using GlyphManager manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
-            var labels = new List<LabelInstance>();
-            await builder.BuildAsync(OnePointTile(point), TileId0, new[] { layer }, 0.0, Projection, labels,
+            var symbols = new SymbolTileBuffer();
+            await builder.BuildAsync(OnePointTile(point), TileId0, new[] { layer }, 0.0, Projection, symbols,
                 spriteAtlas: OneSpriteAtlas("marker"));
 
-            Assert.AreEqual(2, labels.Count, "a feature resolving both icon and text emits a paired instance (icon then text)");
-            LabelInstance icon = labels[0], text = labels[1];
-            Assert.AreEqual(LabelKind.Icon, icon.Kind); Assert.AreEqual(LabelPairRole.Owner, icon.PairRole);
-            Assert.AreEqual(LabelKind.Text, text.Kind); Assert.AreEqual(LabelPairRole.Rider, text.PairRole);
+            Assert.AreEqual(2, symbols.Symbols.Count, "a feature resolving both icon and text emits a paired instance (icon then text)");
+            ShapedSymbol icon = symbols.Symbols[0], text = symbols.Symbols[1];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind); Assert.AreEqual(SymbolPairRole.Owner, icon.PairRole);
+            Assert.AreEqual(SymbolKind.Text, text.Kind); Assert.AreEqual(SymbolPairRole.Rider, text.PairRole);
 
             float3 expected = ExpectedUpAtTilePoint(point);
             AssertUp(expected, icon.UpRender, "paired icon (owner) UpRender");
@@ -201,23 +201,23 @@ namespace MapRenderer.Tests.Text.Placement
 
             using GlyphManager manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
-            var labels = new List<LabelInstance>();
-            await builder.BuildAsync(OneLineTile(), TileId0, new[] { layer }, 0.0, Projection, labels);
+            var symbols = new SymbolTileBuffer();
+            await builder.BuildAsync(OneLineTile(), TileId0, new[] { layer }, 0.0, Projection, symbols);
 
-            Assert.AreEqual(1, labels.Count, "one curved text label");
-            LabelInstance curved = labels[0];
+            Assert.AreEqual(1, symbols.Symbols.Count, "one curved text label");
+            ShapedSymbol curved = symbols.Symbols[0];
             Assert.AreEqual(SymbolPlacement.LineCenter, curved.Placement);
-            Assert.IsNotNull(curved.PathRender);
-            Assert.IsNotNull(curved.PathUpRender, "PathUpRender must not be null on a curved label");
-            Assert.AreEqual(curved.PathRender.Length, curved.PathUpRender.Length,
-                "PathUpRender must be index-parallel to PathRender (same length)");
+            Assert.Greater(curved.PathCount, 0, "a curved label must carry a non-empty path");
+            // PathUp is always index-parallel to Path by construction (SymbolTileBuffer.AppendPath pads any
+            // short/missing up-array with zero) — a genuinely dropped/short extractor assignment is instead
+            // caught below by AssertUp's explicit "must not be the dropped-assignment zero" check.
 
             // Subdivision (LineCurvatureSubdivision.Subdivide) always preserves the ORIGINAL endpoints
             // exactly (dense[0] = input[0], dense[last] = input[last]) regardless of how many points it
             // inserts between them — so element 0 / element[last] are safe to check independent of whether
             // the globe subdivided this span.
-            AssertUp(ExpectedUpAtTilePoint(LineFrom), curved.PathUpRender[0], "curved text PathUpRender[0] (start)");
-            AssertUp(ExpectedUpAtTilePoint(LineTo), curved.PathUpRender[curved.PathUpRender.Length - 1], "curved text PathUpRender[last] (end)");
+            AssertUp(ExpectedUpAtTilePoint(LineFrom), symbols.PathUp[curved.PathStart], "curved text PathUpRender[0] (start)");
+            AssertUp(ExpectedUpAtTilePoint(LineTo), symbols.PathUp[curved.PathStart + curved.PathCount - 1], "curved text PathUpRender[last] (end)");
         }
 
         // ── (4) along-line ICON — SymbolFeatureExtractor.EmitAlongLineIcon's PathUpRender (:605) + builder :216 ──
@@ -237,21 +237,19 @@ namespace MapRenderer.Tests.Text.Placement
             // IconSkirtCarrierChainTests.IconOnlyGlyphManager).
             using var manager = new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
             var builder = new StyledSymbolTileBuilder(manager);
-            var labels = new List<LabelInstance>();
-            await builder.BuildAsync(OneLineTile(), TileId0, new[] { layer }, 0.0, Projection, labels,
+            var symbols = new SymbolTileBuffer();
+            await builder.BuildAsync(OneLineTile(), TileId0, new[] { layer }, 0.0, Projection, symbols,
                 spriteAtlas: OneSpriteAtlas("arrow"));
 
-            Assert.AreEqual(1, labels.Count, "one along-line icon label");
-            LabelInstance icon = labels[0];
-            Assert.AreEqual(LabelKind.Icon, icon.Kind);
-            Assert.AreEqual(1, icon.CurvedGlyphs.Count, "an along-line icon is a ONE-glyph curved label");
-            Assert.IsNotNull(icon.PathRender);
-            Assert.IsNotNull(icon.PathUpRender, "PathUpRender must not be null on an along-line icon");
-            Assert.AreEqual(icon.PathRender.Length, icon.PathUpRender.Length,
-                "PathUpRender must be index-parallel to PathRender (same length)");
+            Assert.AreEqual(1, symbols.Symbols.Count, "one along-line icon label");
+            ShapedSymbol icon = symbols.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind);
+            Assert.AreEqual(1, icon.GlyphCount, "an along-line icon is a ONE-glyph curved label");
+            Assert.Greater(icon.PathCount, 0, "an along-line icon must carry a non-empty path");
+            // PathUp is always index-parallel to Path by construction (see the curved-text test's identical note).
 
-            AssertUp(ExpectedUpAtTilePoint(LineFrom), icon.PathUpRender[0], "along-line icon PathUpRender[0] (start)");
-            AssertUp(ExpectedUpAtTilePoint(LineTo), icon.PathUpRender[icon.PathUpRender.Length - 1], "along-line icon PathUpRender[last] (end)");
+            AssertUp(ExpectedUpAtTilePoint(LineFrom), symbols.PathUp[icon.PathStart], "along-line icon PathUpRender[0] (start)");
+            AssertUp(ExpectedUpAtTilePoint(LineTo), symbols.PathUp[icon.PathStart + icon.PathCount - 1], "along-line icon PathUpRender[last] (end)");
         }
     }
 }

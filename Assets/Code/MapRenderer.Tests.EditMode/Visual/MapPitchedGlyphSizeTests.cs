@@ -1,5 +1,5 @@
-// Unity EditMode only — real OffLookAtLabelScene (MapCamera + Camera/RenderTexture + a real
-// LabelPlacementSystem.Tick), off-screen GPU render + CPU readback. NOT registered in
+// Unity EditMode only — real OffLookAtSymbolScene (MapCamera + Camera/RenderTexture + a real
+// SymbolPlacementSystem.Tick), off-screen GPU render + CPU readback. NOT registered in
 // Tools/core-tests/core-tests.csproj.
 //
 // Stage W2 — THE SIZE TEETH (W2-T1, T2, T3, T10), on the off-look-at multi-depth fixture.
@@ -8,7 +8,7 @@
 // carried by the SAME `arcScale` that already spaces the glyph anchors (W1), so size and spacing foreshorten
 // together and their RATIO is depth-independent.
 //
-// THE ALGEBRA THESE TEETH READ. `LabelStagingMath.StageCurved` spaces glyph g at world arc
+// THE ALGEBRA THESE TEETH READ. `SymbolStagingMath.StageCurved` spaces glyph g at world arc
 // `centerArc + (ArcCenter[g] − centre) · arcScale`, so the world gap between consecutive anchors is
 // `ΔArcCenter · arcScale`. W2 makes the drawn corner offset `cornerBaked · arcScale` as well. Therefore
 //
@@ -28,7 +28,7 @@
 // which shares no code with the map branch.
 //
 // R2 — WHY THE RECEDING ARM CARRIES THE STAGE. `CrossNear`/`CrossFar` are ISO-DEPTH by construction, and for
-// an iso-depth label a true per-glyph world size and a size scaled by ONE constant per label are IDENTICAL —
+// an iso-depth symbol a true per-glyph world size and a size scaled by ONE constant per symbol are IDENTICAL —
 // that second thing is the reverted P3c model, which passed two review arms. So a cross-arm reading cannot
 // discriminate the model, and every reading here that claims to is on, or spans, the RECEDING arm. Cross-arm
 // readings appear only as controls and are labelled as such.
@@ -41,8 +41,8 @@
 //                    does not help (the fixture is scale-invariant in it — see InkRunPose) and raising
 //                    TextSizePx enough drives the receding road's near end behind the camera.
 //   • world metres at the mesh (T3, T10) — 8×, the deep pose, and the arm that carries the RATIO claim to
-//                    depth. The fixture DISABLES the production far-distance cull (LabelMaxDistanceFraction =
-//                    +inf in OffLookAtLabelScene) so the deep pose's far anchors — which sit beyond the camera
+//                    depth. The fixture DISABLES the production far-distance cull (SymbolMaxDistanceFraction =
+//                    +inf in OffLookAtSymbolScene) so the deep pose's far anchors — which sit beyond the camera
 //                    far distance — survive to be measured; the cull is not this fixture's subject.
 //   • pure staging, no camera (T3b, in MapPitchedWorldArcStagingTests) — every magnitude regime to 50×.
 //
@@ -64,23 +64,23 @@ namespace MapRenderer.Tests.Visual
     public class MapPitchedGlyphSizeTests
     {
         /// <summary>The shipped pose — tilt 55, depth ratio 2, DPR 1, 512 px.</summary>
-        private static OffLookAtLabelSceneConfig ShippedPose() => new OffLookAtLabelSceneConfig();
+        private static OffLookAtSymbolSceneConfig ShippedPose() => new OffLookAtSymbolSceneConfig();
 
         /// <summary>
         /// W2-T1/T2's pose — the SHIPPED one.
         ///
-        /// <para><b>MEASURED FINDING: raising <see cref="OffLookAtLabelSceneConfig.SizePx"/> does NOT magnify
+        /// <para><b>MEASURED FINDING: raising <see cref="OffLookAtSymbolSceneConfig.SizePx"/> does NOT magnify
         /// this fixture, so it is not a remedy for a sub-pixel ink reading.</b> It was tried at 1024 and the
         /// projected geometry did not change: the altitude framing uses the LOGICAL viewport, so doubling
         /// SizePx doubles the orbit radius <c>d</c> AND the viewport height <c>H</c>, leaving
         /// <c>MetresPerDevicePixel = 2·d·tan(fov/2)/H</c> — and therefore every world length in the fixture,
-        /// which is a multiple of it — unchanged, while every label sits at twice the view depth. The two
+        /// which is a multiple of it — unchanged, while every symbol sits at twice the view depth. The two
         /// cancel exactly. Measured at 1024: <c>RecedingNear</c>'s per-glyph ink advance read 21–25 px, the
         /// same band it reads at 512. This is the same scale-invariance the horizon measurement found for
         /// ZOOM (its §2.2), for the same reason, and it rules out the plan's escalation option (b). Recorded
         /// as followUp F-W2-7; do not spend a gate round rediscovering it.</para>
         /// </summary>
-        private static OffLookAtLabelSceneConfig InkRunPose() => new OffLookAtLabelSceneConfig();
+        private static OffLookAtSymbolSceneConfig InkRunPose() => new OffLookAtSymbolSceneConfig();
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
         // W2-T1 — THE HEADLINE (R1)
@@ -88,7 +88,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T1a — THE RENDERED HEADLINE, on the DEPTH-SPANNING arm.</b> Proves, from rendered ink alone:
-        /// both receding labels segment into exactly <c>GlyphCount</c> separable ink runs, at two depths a
+        /// both receding symbols segment into exactly <c>GlyphCount</c> separable ink runs, at two depths a
         /// factor of ≈ 2 apart — <b>where the shipped code merges them already AT the look-at.</b>
         ///
         /// <para><b>Why this is a real discriminator and not a formality.</b> On a receding road the world
@@ -101,7 +101,7 @@ namespace MapRenderer.Tests.Visual
         /// but it won't make the letters move closer to each other" — read off the arm where moving away
         /// actually happens.</para>
         ///
-        /// <para><b>It pins the PLANE, not just the unit.</b> <c>r</c> can only stay above 1 as the label
+        /// <para><b>It pins the PLANE, not just the unit.</b> <c>r</c> can only stay above 1 as the symbol
         /// recedes if the glyph CELL foreshortens by the same factor the advance does, which requires x̂ to be
         /// the road tangent lying IN the ground plane. A camera-facing or screen-aligned cell would keep its
         /// width while the advance shrank, and the letters would merge exactly as they do today.</para>
@@ -113,16 +113,16 @@ namespace MapRenderer.Tests.Visual
         /// user-visible claim. No tension.</para>
         ///
         /// <para>RED recipe: I1 (mechanism off) — the receding runs merge and the count drops below
-        /// <c>GlyphCount</c>. I4 (a per-LABEL depth ruler, the reverted P3c shape) leaves the near label
+        /// <c>GlyphCount</c>. I4 (a per-LABEL depth ruler, the reverted P3c shape) leaves the near symbol
         /// separable and merges the far one.</para>
         /// </summary>
         [Test]
-        public void RecedingLabels_StaySeparable_AtBothDepths()
+        public void RecedingSymbols_StaySeparable_AtBothDepths()
         {
-            using var f = OffLookAtLabelScene.Create(InkRunPose());
+            using var f = OffLookAtSymbolScene.Create(InkRunPose());
 
             double nearDepth = 0.0, farDepth = 0.0;
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 GlyphMeasurement[] glyphs = f.Measure(id).Glyphs;
                 OffLookAtInkRuns.AssertRunsVertically(f, id, glyphs);
@@ -144,11 +144,11 @@ namespace MapRenderer.Tests.Visual
                     "cell), so a merged reading here is the defect this stage removes, not a tolerance " +
                     "question.");
 
-                if (id == OffLookAtLabelId.RecedingNear) nearDepth = f.Measure(id).AnchorViewDepthMetres;
+                if (id == OffLookAtSymbolId.RecedingNear) nearDepth = f.Measure(id).AnchorViewDepthMetres;
                 else                                     farDepth  = f.Measure(id).AnchorViewDepthMetres;
             }
 
-            // The claim is worth nothing unless the two labels really are at different depths.
+            // The claim is worth nothing unless the two symbols really are at different depths.
             Assert.That(farDepth / nearDepth, Is.GreaterThanOrEqualTo(1.8),
                 $"W2-T1a precondition: the two receding labels must sit at genuinely different depths — " +
                 $"{nearDepth:F0} m and {farDepth:F0} m, ratio {farDepth / nearDepth:F3}. Separability at one " +
@@ -161,7 +161,7 @@ namespace MapRenderer.Tests.Visual
         /// run is large enough to measure — i.e. it does not drift with depth.
         ///
         /// <para><b>HONEST REACH, and the measurement that fixes it (followUp F-W2-7).</b> The plan designed
-        /// this tooth to POOL both receding labels for a 2.37× depth span. That is not constructible: at the
+        /// this tooth to POOL both receding symbols for a 2.37× depth span. That is not constructible: at the
         /// shipped pose <c>RecedingFar</c>'s per-glyph ink runs measure <b>1–2 px</b>, so ±1 px of edge
         /// quantisation is a ±50–100 % error AND a systematic upward bias on <c>r</c> (a 1.4 px extent reads
         /// as 1 or 2, never as 1.4). Measured, pooled: <c>RecedingNear</c> gave r = 2.333 / 2.333 / 2.400 /
@@ -187,7 +187,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void GapToInkExtentRatio_DoesNotDriftWithDepth_WhereInkIsResolvable()
         {
-            using var f = OffLookAtLabelScene.Create(InkRunPose());
+            using var f = OffLookAtSymbolScene.Create(InkRunPose());
 
             const double resolvableExtentPx = 4.0; // below this, ±1 px per edge dominates AND biases upward
             var ratios = new List<double>();
@@ -199,7 +199,7 @@ namespace MapRenderer.Tests.Visual
                 "W2-T1b  SizePx={0}  resolvable extent floor={1:F1} px", f.Config.SizePx, resolvableExtentPx));
             table.AppendLine("label          i  runStart  runEnd  extent  advance     r_i   viewDepth(m)  used");
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 GlyphMeasurement[] glyphs = f.Measure(id).Glyphs;
                 OffLookAtInkRuns.AssertRunsVertically(f, id, glyphs);
@@ -280,7 +280,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T2 — "the letters must never overlap", at and past the depth where today's code first
-        /// fails.</b> Proves: a map-pitched curved label segments into exactly <c>GlyphCount</c> ink runs,
+        /// fails.</b> Proves: a map-pitched curved symbol segments into exactly <c>GlyphCount</c> ink runs,
         /// with a real gap between consecutive runs, at depth ratios <b>1.25</b> and <b>1.5</b> as well as at
         /// the shipped 2.0.
         ///
@@ -292,13 +292,13 @@ namespace MapRenderer.Tests.Visual
         /// frame is past 1.25×, which is why the maintainer sees the blob everywhere. A tooth that only
         /// asserted at extreme depth would leave that whole band unobserved.</para>
         ///
-        /// <para><b>Why T2 does NOT go deep.</b> At ratio 8 the far label's entire 5-glyph screen extent is
+        /// <para><b>Why T2 does NOT go deep.</b> At ratio 8 the far symbol's entire 5-glyph screen extent is
         /// 0.773 px — under W2 the glyphs shrink with it, so there is no ink to count under EITHER model.
         /// Chasing depth here would make the tooth vacuous, which is the opposite of what R1 asks.</para>
         ///
         /// <para><b>SCOPE CAVEAT — read this before citing T2 as evidence for the model.</b> These cells read
         /// the CROSS-AZIMUTH arm, which is ISO-DEPTH by construction and therefore CANNOT distinguish a
-        /// per-glyph world size from a per-label constant. That is fine here, because T2's claim is "letters
+        /// per-glyph world size from a per-symbol constant. That is fine here, because T2's claim is "letters
         /// do not merge", not "the size is per-glyph" — and the 32.0 px threshold was measured on the cross
         /// arm and is exact only there. <b>W2-T1 on the receding arm is the R1/R2 discriminator; T2 is the
         /// threshold observer.</b></para>
@@ -315,17 +315,17 @@ namespace MapRenderer.Tests.Visual
         public void Letters_StaySeparable_PastTheMergeThreshold(
             [Values(1.25, 1.5)] double targetDepthRatio)
         {
-            using var f = OffLookAtLabelScene.Create(new OffLookAtLabelSceneConfig
+            using var f = OffLookAtSymbolScene.Create(new OffLookAtSymbolSceneConfig
             {
                 SizePx = 1024, TargetDepthRatio = targetDepthRatio,
             });
 
-            LabelMeasurement far = f.Measure(OffLookAtLabelId.CrossFar);
+            SymbolMeasurement far = f.Measure(OffLookAtSymbolId.CrossFar);
             double minAdvancePx = double.MaxValue;
             for (int i = 0; i < far.ScreenSpacingPx.Length; i++)
                 minAdvancePx = math.min(minAdvancePx, far.ScreenSpacingPx[i]);
 
-            f.RowBandFor(OffLookAtLabelId.CrossFar, out int rowFrom, out int rowTo);
+            f.RowBandFor(OffLookAtSymbolId.CrossFar, out int rowFrom, out int rowTo);
             (int start, int end)[] runs = OffLookAtInkRuns.AlongColumns(f.InkPixels, f.Config.SizePx, rowFrom, rowTo);
 
             int minGap = int.MaxValue;
@@ -357,7 +357,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>W2-T2, the control BELOW the threshold.</b> The near (look-at) cross-azimuth label must
+        /// <b>W2-T2, the control BELOW the threshold.</b> The near (look-at) cross-azimuth symbol must
         /// segment into <c>GlyphCount</c> runs. Deliberately NOT a discriminator: at the look-at the two
         /// competing rulers coincide exactly, so this cell is separable under BOTH models. It is what says
         /// the segmentation machinery works at all before the cells above are believed.
@@ -365,8 +365,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void Letters_AreSeparable_AtTheLookAt_Control()
         {
-            using var f = OffLookAtLabelScene.Create(InkRunPose());
-            f.RowBandFor(OffLookAtLabelId.CrossNear, out int rowFrom, out int rowTo);
+            using var f = OffLookAtSymbolScene.Create(InkRunPose());
+            f.RowBandFor(OffLookAtSymbolId.CrossNear, out int rowFrom, out int rowTo);
             (int start, int end)[] runs = OffLookAtInkRuns.AlongColumns(f.InkPixels, f.Config.SizePx, rowFrom, rowTo);
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
@@ -406,7 +406,7 @@ namespace MapRenderer.Tests.Visual
         public void WorldCellSize_IsTheBakedCellOnTheWorldRuler(
             [Values("shipped", "deep", "dpr2")] string poseName)
         {
-            using var f = OffLookAtLabelScene.Create(PoseByName(poseName));
+            using var f = OffLookAtSymbolScene.Create(PoseByName(poseName));
 
             double emScale = f.Config.TextSizePx / TextQuadLayout.OneEm;
             double expected = f.GlyphCellWidthBakedPx * emScale * f.MetresPerLogicalPixel;
@@ -414,7 +414,7 @@ namespace MapRenderer.Tests.Visual
             // EVERY glyph, not just glyph 0: the corner scale is a per-VERTEX quantity, so reading one glyph
             // would leave a per-glyph divergence on glyphs 1..N-1 invisible to this leg — and leg (b) could
             // not see it either, since it divides the scale away. Reading them all costs nothing.
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 int glyphs = GlyphQuadCount(f, id);
                 Assert.That(glyphs, Is.EqualTo(f.Config.GlyphCount),
@@ -452,8 +452,8 @@ namespace MapRenderer.Tests.Visual
         /// 8× depth, which no other tooth in the suite reaches.</para>
         ///
         /// <para><b>Reach, stated so it is not over-read (F-W2-5):</b> 8× is the deep pose this fixture measures
-        /// at. The production far-distance cull is DISABLED for this fixture (<c>LabelMaxDistanceFraction = +inf</c>
-        /// in <c>OffLookAtLabelScene</c>) so the deep pose's far anchors — which sit beyond the camera far distance
+        /// at. The production far-distance cull is DISABLED for this fixture (<c>SymbolMaxDistanceFraction = +inf</c>
+        /// in <c>OffLookAtSymbolScene</c>) so the deep pose's far anchors — which sit beyond the camera far distance
         /// — survive to be measured; the cull is not W2's subject. The identity is carried further still, on the
         /// CPU with no camera, by W2-T3(b) in <c>MapPitchedWorldArcStagingTests</c>.</para>
         ///
@@ -464,11 +464,11 @@ namespace MapRenderer.Tests.Visual
         public void WorldCellSize_AndWorldAdvance_ShareOneArcScale(
             [Values("shipped", "deep", "dpr2")] string poseName)
         {
-            using var f = OffLookAtLabelScene.Create(PoseByName(poseName));
+            using var f = OffLookAtSymbolScene.Create(PoseByName(poseName));
 
             double expected = f.Config.AdvanceBakedPx / f.GlyphCellWidthBakedPx; // eq. (5), both sides baked
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 double[] worldSpacing = f.Measure(id).WorldSpacingM;
                 for (int i = 0; i < worldSpacing.Length; i++)
@@ -498,7 +498,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T10 (a) — SPAN/ROAD is depth-invariant at 8× the look-at depth.</b> Proves: each receding
-        /// label's staged world span, as a fraction of its own road length, is the SAME at the deep
+        /// symbol's staged world span, as a fraction of its own road length, is the SAME at the deep
         /// tilt-72/ratio-8 pose as at the shipped tilt-55/ratio-2 one.
         ///
         /// <para><b>This is W1's guarantee, and that is exactly why it belongs in W2.</b> It is the regression
@@ -509,25 +509,25 @@ namespace MapRenderer.Tests.Visual
         /// that construction once.</para>
         ///
         /// <para><b>A ratio of two WORLD lengths, so the drawn glyph size cannot touch it</b> — which is what
-        /// makes it survivable at a depth where nothing is legible (at ratio 8 the far label's whole 5-glyph
+        /// makes it survivable at a depth where nothing is legible (at ratio 8 the far symbol's whole 5-glyph
         /// screen extent is 0.773 px). The reference is the ratio-2 cell measured IN THE SAME TEST RUN, never
         /// a hard-coded 0.3333333: the designed value is <c>1/(2·SpillMargin)</c>, so a literal would track a
         /// fixture constant instead of the invariant and would go RED for the wrong reason if
         /// <c>SpillMargin</c> ever moved.</para>
         ///
-        /// <para><b>RED recipe — and note what it is NOT.</b> Injection I4 (a per-label depth ruler, the
+        /// <para><b>RED recipe — and note what it is NOT.</b> Injection I4 (a per-symbol depth ruler, the
         /// reverted P3c shape) leaves this GREEN, because SPAN/ROAD is a spacing reading and I4 is a SIZE
         /// defect. That is the point: T10 fences the spacing half so a W2 regression cannot be misread as a
         /// W1 one. Its own RED comes from re-injecting the pre-W1 screen walk (<c>worldArc = false</c>),
         /// which reds it hard.</para>
         /// </summary>
         [Test]
-        public void LabelSpanPerRoad_IsDepthInvariant_AtEightTimesDepth()
+        public void SymbolSpanPerRoad_IsDepthInvariant_AtEightTimesDepth()
         {
-            using var shipped = OffLookAtLabelScene.Create(ShippedPose());
-            using var deep    = OffLookAtLabelScene.Create(DeepPose());
+            using var shipped = OffLookAtSymbolScene.Create(ShippedPose());
+            using var deep    = OffLookAtSymbolScene.Create(DeepPose());
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 double shippedRatio = SpanOverRoad(shipped, id);
                 double deepRatio    = SpanOverRoad(deep, id);
@@ -554,10 +554,10 @@ namespace MapRenderer.Tests.Visual
         /// RTC artifact at this pose and below the real precision floor, and BOTH are named here so a future
         /// RED is diagnosed as a bookkeeping question before it is diagnosed as a size defect:
         /// <list type="bullet">
-        /// <item><b>The artifact (not a defect).</b> <c>OffLookAtLabelScene</c> derives all six labels' tile
-        /// keys from the LOOK-AT's z14 tile, so its far labels sit ≈ 1e6 m from their nominal
+        /// <item><b>The artifact (not a defect).</b> <c>OffLookAtSymbolScene</c> derives all six symbols' tile
+        /// keys from the LOOK-AT's z14 tile, so its far symbols sit ≈ 1e6 m from their nominal
         /// <c>TileOriginRender</c>, and the <c>float3 AnchorLocal</c> RTC bake at that distance is the ENTIRE
-        /// source of the drift: 4.2e-5 % at ratio 2, 4.05e-4 % at ratio 5. In production a label's tile origin
+        /// source of the drift: 4.2e-5 % at ratio 2, 4.05e-4 % at ratio 5. In production a symbol's tile origin
         /// is its OWN tile's, a few km away, so this never bites. 0.01 % is ≈ 25× the ratio-5 artifact.</item>
         /// <item><b>The floor.</b> <c>PolylineArcMath.BuildCumulativeWorld</c> accumulates in <c>double</c> and
         /// narrows per entry, so the real floor is the <c>float</c> storage of the cumulative — it needs a
@@ -569,10 +569,10 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void WorldGapResidual_StaysBounded_AtEightTimesDepth()
         {
-            using var f = OffLookAtLabelScene.Create(DeepPose());
+            using var f = OffLookAtSymbolScene.Create(DeepPose());
             double expected = f.AdvanceWorldMetres;
 
-            foreach (OffLookAtLabelId id in new[] { OffLookAtLabelId.RecedingNear, OffLookAtLabelId.RecedingFar })
+            foreach (OffLookAtSymbolId id in new[] { OffLookAtSymbolId.RecedingNear, OffLookAtSymbolId.RecedingFar })
             {
                 double[] gaps = f.Measure(id).WorldSpacingM;
                 for (int i = 0; i < gaps.Length; i++)
@@ -601,30 +601,30 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>Tilt 72°, ratio 8 — the deep cell this fixture measures at. The production far-distance cull,
         /// which would otherwise drop the far anchors at this depth, is DISABLED for this fixture
-        /// (<c>LabelMaxDistanceFraction = +inf</c> in <c>OffLookAtLabelScene</c>) so they survive to be measured.
+        /// (<c>SymbolMaxDistanceFraction = +inf</c> in <c>OffLookAtSymbolScene</c>) so they survive to be measured.
         /// Tilt, not zoom, is the knob: the fixture is scale-invariant in zoom (every world length in it is a
         /// multiple of <c>MetresPerDevicePixel</c>, which zoom rescales along with the reference depth), while
         /// tilt is what brings the horizon into frame.</summary>
-        private static OffLookAtLabelSceneConfig DeepPose()
-            => new OffLookAtLabelSceneConfig { TiltDegrees = 72.0, TargetDepthRatio = 8.0 };
+        private static OffLookAtSymbolSceneConfig DeepPose()
+            => new OffLookAtSymbolSceneConfig { TiltDegrees = 72.0, TargetDepthRatio = 8.0 };
 
-        private static OffLookAtLabelSceneConfig PoseByName(string poseName)
+        private static OffLookAtSymbolSceneConfig PoseByName(string poseName)
         {
             switch (poseName)
             {
                 case "shipped": return ShippedPose();
                 case "deep":    return DeepPose();
-                case "dpr2":    return new OffLookAtLabelSceneConfig { DevicePixelRatio = 2.0 };
+                case "dpr2":    return new OffLookAtSymbolSceneConfig { DevicePixelRatio = 2.0 };
                 default:        throw new System.ArgumentOutOfRangeException(nameof(poseName), poseName, null);
             }
         }
 
         /// <summary>One glyph's drawn cell WIDTH, in the unit its <c>Offset</c> carries — world metres for a
-        /// map-pitched label. Read as <c>topRight.x − topLeft.x</c> off the emitted quad, which is exactly
-        /// <c>(Cell.BottomRight.x − Cell.TopLeft.x) · emScale</c> because a curved label's per-quad rotation
+        /// map-pitched symbol. Read as <c>topRight.x − topLeft.x</c> off the emitted quad, which is exactly
+        /// <c>(Cell.BottomRight.x − Cell.TopLeft.x) · emScale</c> because a curved symbol's per-quad rotation
         /// is forced to 0 (the shader supplies the tangent instead) and its <c>ExtraRotationRadians</c> is 0
-        /// for text. Uses the label's FIRST glyph and reports which.</summary>
-        private static double WorldCellWidth(OffLookAtLabelScene f, OffLookAtLabelId id, int glyphIndex)
+        /// for text. Uses the symbol's FIRST glyph and reports which.</summary>
+        private static double WorldCellWidth(OffLookAtSymbolScene f, OffLookAtSymbolId id, int glyphIndex)
         {
             WorldBillboardVertex[] v = f.Vertices(id);
             Assert.That(v.Length, Is.GreaterThanOrEqualTo(4 * (glyphIndex + 1)),
@@ -634,14 +634,14 @@ namespace MapRenderer.Tests.Visual
             return v[4 * glyphIndex + 1].Offset.x - v[4 * glyphIndex + 0].Offset.x;
         }
 
-        /// <summary>The number of glyphs on this label's slot mesh (4 vertices each).</summary>
-        private static int GlyphQuadCount(OffLookAtLabelScene f, OffLookAtLabelId id)
+        /// <summary>The number of glyphs on this symbol's slot mesh (4 vertices each).</summary>
+        private static int GlyphQuadCount(OffLookAtSymbolScene f, OffLookAtSymbolId id)
             => f.Vertices(id).Length / 4;
 
-        /// <summary>A label's staged WORLD span (first glyph anchor to last) as a fraction of its own road's
+        /// <summary>A symbol's staged WORLD span (first glyph anchor to last) as a fraction of its own road's
         /// total world length. Both sides are world lengths measured off the built mesh and the fixture's own
         /// road construction, so the drawn glyph size cannot enter.</summary>
-        private static double SpanOverRoad(OffLookAtLabelScene f, OffLookAtLabelId id)
+        private static double SpanOverRoad(OffLookAtSymbolScene f, OffLookAtSymbolId id)
         {
             GlyphMeasurement[] g = f.Measure(id).Glyphs;
             double span = math.length(g[g.Length - 1].WorldUnity - g[0].WorldUnity);
@@ -649,12 +649,12 @@ namespace MapRenderer.Tests.Visual
             return span / (half.x + half.y);
         }
 
-        /// <summary>The label's glyphs ordered by increasing ink-buffer ROW, so element <c>i</c> corresponds
+        /// <summary>The symbol's glyphs ordered by increasing ink-buffer ROW, so element <c>i</c> corresponds
         /// to ink run <c>i</c>. <c>InkPixels</c> is row-flipped (row 0 = top scanline), so the row of a glyph
-        /// is <c>SizePx − 1 − ScreenPx.y</c> and a label running "up-screen" has its glyph ARRAY order
+        /// is <c>SizePx − 1 − ScreenPx.y</c> and a symbol running "up-screen" has its glyph ARRAY order
         /// reversed relative to its run order. Getting this wrong would invert every depth in the printed
         /// table while leaving the ratios untouched — a silent mis-attribution rather than a failure.</summary>
-        private static GlyphMeasurement[] OrderedByScreenRow(OffLookAtLabelScene f, GlyphMeasurement[] glyphs)
+        private static GlyphMeasurement[] OrderedByScreenRow(OffLookAtSymbolScene f, GlyphMeasurement[] glyphs)
         {
             double firstRow = f.Config.SizePx - 1 - glyphs[0].ScreenPx.y;
             double lastRow  = f.Config.SizePx - 1 - glyphs[glyphs.Length - 1].ScreenPx.y;

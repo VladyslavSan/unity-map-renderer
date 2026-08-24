@@ -550,7 +550,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         protected override void DoDispose()
         {
-            if (_destroyScratch.IsCreated) _destroyScratch.Dispose();
+            _destroyScratch.Dispose();
             _items.Clear();
             _tileRoots.Clear();
             if (_world != null && _world.IsCreated)

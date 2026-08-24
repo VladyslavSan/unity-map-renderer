@@ -2,12 +2,12 @@
 // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: Texture2D encode/decode).
 //
 // A CHANGE DETECTOR layered ALONGSIDE the visual kit's existing analytic teeth (SnapshotCoverage / InkStatsIn
-// / the oracle in GeoJsonPointLabelFixtureTests) — it does not replace them. A golden can only say "different
+// / the oracle in GeoJsonPointSymbolFixtureTests) — it does not replace them. A golden can only say "different
 // from the last bake" and will happily lock in a WRONG image; the analytic assertions stay the correctness
 // oracle. Two traps guarded here (both from the plan, both load-bearing — see docs/lessons-learned.md):
 //   1. Vacuous all-black golden: NoGpuContext refuses to bake and never compares to a pass; a nonzero-ink
 //      precondition (frame-wide, via VisualFrame.InkStatsIn — NOT SnapshotCoverage.IsBlank, which reads TRUE
-//      on a sparse label frame too, see GeoJsonPointLabelFixtureTests.Neg_) runs before every compare.
+//      on a sparse symbol frame too, see GeoJsonPointSymbolFixtureTests.Neg_) runs before every compare.
 //   2. Orientation-blind compare: RawPixels is bottom-left; a Texture2D.LoadImage'd PNG must be read back the
 //      SAME way. RED-verified empirically (T-RED-flip) rather than assumed — see the dev report.
 
@@ -59,8 +59,8 @@ namespace MapRenderer.Tests
 
             // Nonzero-ink precondition — frame-wide, the SAME background predicate SnapshotCoverage uses
             // (InkStatsIn delegates to SnapshotCoverage.Tolerance). Deliberately NOT frame.Coverage().IsBlank:
-            // IsBlank fires at >=97% background, which reads TRUE on a legitimate sparse label frame (measured
-            // 0.27% filled in GeoJsonPointLabelFixtureTests) and would resolve Inconclusive forever.
+            // IsBlank fires at >=97% background, which reads TRUE on a legitimate sparse symbol frame (measured
+            // 0.27% filled in GeoJsonPointSymbolFixtureTests) and would resolve Inconclusive forever.
             frame.InkStatsIn(0, 0, frame.Width, frame.Height, out _, out int totalInk);
             if (totalInk == 0)
             {

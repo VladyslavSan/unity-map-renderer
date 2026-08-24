@@ -507,7 +507,7 @@ namespace MapRenderer.Tests.GeoJsons
         // ── Points, the buffer, and empty tiles ─────────────────────────────────────────────────────
 
         /// <summary>A point near a seam appears in BOTH neighbouring tiles once the buffer is on — the
-        /// duplication is the point of the margin, and it is what lets a label be placed from either tile.
+        /// duplication is the point of the margin, and it is what lets a symbol be placed from either tile.
         /// With the buffer off it belongs to exactly one.</summary>
         [Test]
         public void PointNearASeam_AppearsInBothTilesOnlyWhenBuffered()

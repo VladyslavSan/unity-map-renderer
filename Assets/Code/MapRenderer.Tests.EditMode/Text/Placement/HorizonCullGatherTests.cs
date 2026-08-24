@@ -34,7 +34,7 @@ namespace MapRenderer.Tests.Text.Placement
     ///     — <see cref="OffAxisAnchor_HorizonCullFiresPerHeading_PinsEastNorthAxes"/>;</item>
     ///   <item>Mercator is byte-identical: <see cref="IProjection.TryGetHorizonOccluder"/> returns false, so
     ///     <c>globeRadiusSq &lt; 0</c> makes the trigger an unconditional no-op (proven by every unmoved
-    ///     Mercator label snapshot elsewhere — nothing to re-prove here).</item>
+    ///     Mercator symbol snapshot elsewhere — nothing to re-prove here).</item>
     /// </list>
     ///
     /// <para><b>Footgun avoided (Stage-U carry-over both reviewers flagged):</b> the harness builds its
@@ -57,31 +57,25 @@ namespace MapRenderer.Tests.Text.Placement
             return texture;
         }
 
-        private static TextLayoutResult OneQuad() => new TextLayoutResult
+        private static List<SymbolQuad> OneQuad() => new List<SymbolQuad>
         {
-            Quads = new List<SymbolQuad>
+            new SymbolQuad
             {
-                new SymbolQuad
-                {
-                    TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
-                    UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
-                },
+                TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
             },
-            BoundsMin = float2.zero, BoundsMax = new float2(18f, 18f), LineCount = 1,
         };
 
-        private static LabelInstance Point(double3 anchor, string text, int feature)
-            => new LabelInstance
-            {
-                AnchorRender = anchor, Placement = SymbolPlacement.Point, Layout = OneQuad(), Paint = LabelPaint.Default,
-                TextSizePx = 24f, PaddingPx = 2f, SortKey = 0f, Text = text, FeatureIndex = feature, TileKey = 0L,
-            };
+        private static void AddPoint(SymbolTileBuffer buffer, double3 anchor, string text, int feature)
+            => TestSymbolTileBuffer.AddPoint(buffer, anchor, OneQuad(), float2.zero, new float2(18f, 18f),
+                paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: 0f, text: text,
+                featureIndex: feature, tileKey: 0L);
 
-        // Epic A / A1: point labels draw through the WORLD path now — see LabelFadeTests.MaxAlpha's identical
+        // Epic A / A1: point symbols draw through the WORLD path now — see SymbolFadeTests.MaxAlpha's identical
         // header for the full rationale (fade opacity rides the world slot's stream-1 Opacity, not
         // system.Mesh's vertex-colour alpha).
-        private static float MaxAlpha(LabelPlacementSystem system, long tileKey = 0L)
-            => system.TryGetWorldSlotMesh(tileKey, 0, LabelKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
+        private static float MaxAlpha(SymbolPlacementSystem system, long tileKey = 0L)
+            => system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
 
         /// <summary>Great-circle destination point from the equator/prime-meridian (0,0) — the fixed look-at
         /// every test in this fixture uses — at compass <paramref name="bearingDeg"/> (CW from north) and
@@ -98,7 +92,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         private sealed class Harness : System.IDisposable
         {
-            public readonly LabelPlacementSystem System;
+            public readonly SymbolPlacementSystem System;
             public readonly MapCamera Camera;
             public readonly MapView View;
             public readonly GlyphAtlasTexture Atlas;
@@ -118,9 +112,9 @@ namespace MapRenderer.Tests.Text.Placement
                 View = component.View;
 
                 Atlas = BuildTinyAtlasTexture();
-                // Epic A / A1: point labels now draw through the world path — the demo tick needs its own
+                // Epic A / A1: point symbols now draw through the world path — the demo tick needs its own
                 // world base material for a live opacity read (see MaxAlpha's header).
-                System = new LabelPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+                System = new SymbolPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
 
             /// <summary>The REAL 3-arg <see cref="MapView.BuildSceneFrame"/> path — see the class header's
@@ -161,9 +155,10 @@ namespace MapRenderer.Tests.Text.Placement
             IProjection proj = h.Camera.Projection;
             double3 farAnchor = proj.Project(new GeoCoordinate { Latitude = 0.0, Longitude = 180.0 }); // antipode
 
-            var labels = new List<LabelInstance> { Point(farAnchor, "F", 0) };
+            var buffer = new SymbolTileBuffer();
+            AddPoint(buffer, farAnchor, "F", 0);
             SceneFrame frame = h.Frame();
-            h.System.TickLabels(in frame, labels, h.Atlas, h.Camera.Projection); // fresh — never seen, no live fade to ease out
+            h.System.TickSymbols(in frame, buffer, h.Atlas, h.Camera.Projection); // fresh — never seen, no live fade to ease out
 
             Assert.AreEqual(0, h.System.LastQuadCount, "a fresh far-side anchor produces no geometry (hard-skip)");
             Assert.AreEqual(0, h.System.LastCandidateCount, "…and never enters the collision pass");
@@ -219,9 +214,10 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 using var h = new Harness(new CameraProperties(lookAt, zoom: 2.0, heading: headingDeg, tilt: 45.0));
                 double3 anchor = h.Camera.Projection.Project(anchorGeo);
-                var labels = new List<LabelInstance> { Point(anchor, "A", 0) };
+                var buffer = new SymbolTileBuffer();
+                AddPoint(buffer, anchor, "A", 0);
                 SceneFrame frame = h.Frame();
-                h.System.TickLabels(in frame, labels, h.Atlas, h.Camera.Projection);
+                h.System.TickSymbols(in frame, buffer, h.Atlas, h.Camera.Projection);
 
                 Assert.AreEqual(expected, h.System.LastHorizonCulledCount,
                     $"heading {headingDeg}°: horizon-cull fire must match the normal {{1,1,0}} pattern — a swap or " +
@@ -240,13 +236,14 @@ namespace MapRenderer.Tests.Text.Placement
             // The SAME geo anchor throughout — only the CAMERA orbits (LookAt moves to the antipode), so the
             // fade id (hashed off this fixed render-space anchor) stays stable across the transition.
             double3 anchor = proj.Project(new GeoCoordinate { Latitude = 0.0, Longitude = 0.0 });
-            var labels = new List<LabelInstance> { Point(anchor, "A", 0) };
+            var buffer = new SymbolTileBuffer();
+            AddPoint(buffer, anchor, "A", 0);
 
             // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
             // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
             SceneFrame frame1 = h.Frame();
-            h.System.TickLabels(in frame1, labels, h.Atlas, h.Camera.Projection);
-            h.System.TickLabels(in frame1, labels, h.Atlas, h.Camera.Projection);
+            h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
+            h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
             Assert.AreEqual(1, h.System.LastQuadCount, "the anchor places while the camera looks at it");
             Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
 
@@ -255,7 +252,7 @@ namespace MapRenderer.Tests.Text.Placement
             var rotated = new GeoCoordinate3D { Latitude = 0.0, Longitude = 180.0, Altitude = 0.0 };
             h.SetProperties(new CameraProperties(rotated, zoom: 2.0, heading: 0.0, tilt: 0.0));
             SceneFrame frame2 = h.Frame();
-            h.System.TickLabels(in frame2, labels, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
+            h.System.TickSymbols(in frame2, buffer, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
             Assert.AreEqual(1, h.System.LastQuadCount, "a horizon-occluded-but-visible anchor keeps drawing (fading, not popping)");
             float dim = MaxAlpha(h.System);
             Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
@@ -265,7 +262,7 @@ namespace MapRenderer.Tests.Text.Placement
             for (int i = 0; i < 10; i++)
             {
                 SceneFrame frame3 = h.Frame();
-                h.System.TickLabels(in frame3, labels, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
+                h.System.TickSymbols(in frame3, buffer, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
             }
             Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the horizon-occluded anchor is fully skipped");
             Assert.Greater(h.System.LastHorizonCulledCount, 0, "…and its skip is attributed to horizon telemetry");

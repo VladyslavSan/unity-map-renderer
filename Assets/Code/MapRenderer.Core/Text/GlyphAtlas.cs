@@ -41,7 +41,7 @@ namespace MapRenderer.Core.Text
         /// (Stage M robustness — no unbounded page growth → OOM / exceeding the platform's Texture2DArray
         /// layer limit).
         ///
-        /// <para><b>16, justified.</b> At the production 4096² R8 atlas (16 MB/page — <c>SymbolLabelSubsystem
+        /// <para><b>16, justified.</b> At the production 4096² R8 atlas (16 MB/page — <c>SymbolSubsystem
         /// .AtlasDimension</c>), one page holds ~17k typical ~30px SDF glyph cells, so 16 pages ≈ 270k glyph
         /// cells — comfortably more than the largest realistic multi-script set (a full Noto CJK ≈ 65k glyphs
         /// plus every other Unicode script's common set is well under ~100k, ~6 pages), leaving ≥2.5×

@@ -4,18 +4,14 @@ using Cysharp.Threading.Tasks;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A3: the <see cref="LayerPhase.WorkerThenMain"/> capability — the sibling of
+    /// The <see cref="LayerPhase.WorkerThenMain"/> capability — the sibling of
     /// <see cref="ITileMeshLayerProcessor"/>'s mesh-settlement capability — for a processor whose worker
     /// step (<see cref="ITileLayerProcessor.ProcessOnWorker"/>) is followed by exactly one main-thread
-    /// completion step. Modelled first by <see cref="TileSymbolLayerProcessor"/>, choreographed by
-    /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> (worker half, driven by A5b's
-    /// <c>MapRenderer.Unity.Text.SymbolLabelSubsystem.RunWorkerAndHandoff</c>) and the symbol
-    /// coordinator's main-thread tail loop (<c>MapRenderer.Unity.Text.SymbolLabelSubsystem.RunTailAsync</c>).
+    /// completion step. Modelled first by <see cref="TileSymbolLayerProcessor"/>.
     ///
     /// <para>Deliberately ARTIFACT-FREE — unlike <see cref="ITileMeshLayerProcessor.Complete"/>, this
-    /// contract returns nothing. The tail's output (e.g. a symbol layer's shaped <c>LabelInstance</c>s) is
-    /// exposed and sunk by the implementor itself: sinks stay separate, only decode + dispatch unify (the
-    /// design's rule). No <c>LayerArtifact</c> type is invented for A3.</para>
+    /// contract returns nothing. The tail's output (e.g. a symbol layer's shaped symbol records) is
+    /// exposed and sunk by the implementor itself: sinks stay separate, only decode + dispatch unify.</para>
     /// </summary>
     internal interface ITileWorkerThenMainLayerProcessor : ITileLayerProcessor
     {

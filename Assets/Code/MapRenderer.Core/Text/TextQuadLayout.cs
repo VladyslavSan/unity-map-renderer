@@ -8,7 +8,7 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// S19: turns a <see cref="ShapedRun"/> + atlas metrics + <see cref="TextLayoutOptions"/> into
-    /// label-local, anchor-relative <see cref="SymbolQuad"/>s in baked-pixel space (<see cref="OneEm"/>
+    /// symbol-local, anchor-relative <see cref="SymbolQuad"/>s in baked-pixel space (<see cref="OneEm"/>
     /// = 24px — the fixed size MapLibre bakes glyph-PBFs at). Deliberately takes NO text-size parameter
     /// (T8a): layout is size-independent, S20 applies the zoom-dependent <c>text-size/24</c> screen
     /// scale and builds the actual <c>Mesh</c>/vertices per frame. Point placement only
@@ -63,7 +63,7 @@ namespace MapRenderer.Core.Text
         /// </para>
         /// <para>
         /// It has a SECOND reader outside this type: <see cref="CurvedTextLayout"/> applies the same constant
-        /// to every along-line cell, so a curved label and a centred point label of the same string have the
+        /// to every along-line cell, so a curved symbol and a centred point symbol of the same string have the
         /// same optical relationship to their anchor. One derivation site, two producers.
         /// </para>
         /// </summary>
@@ -83,23 +83,9 @@ namespace MapRenderer.Core.Text
             Bottom,
         }
 
-        /// <summary>Allocating overload: lays out <paramref name="run"/> and returns a new <see cref="TextLayoutResult"/> (quads + block bbox + line count).</summary>
-        public static TextLayoutResult Layout(ShapedRun run, IGlyphAtlasView atlas, in TextLayoutOptions options)
-        {
-            var quads = new List<SymbolQuad>(run?.Glyphs?.Count ?? 0);
-            TextLayoutBounds bounds = Layout(run, atlas, in options, quads);
-            return new TextLayoutResult
-            {
-                Quads = quads,
-                BoundsMin = bounds.Min,
-                BoundsMax = bounds.Max,
-                LineCount = bounds.LineCount,
-            };
-        }
-
         /// <summary>
         /// No-alloc caller-buffer overload (mirrors <see cref="CodepointTextShaper.Shape(in ShapingRequest, List{PositionedGlyph})"/>):
-        /// clears and writes into <paramref name="output"/> instead of allocating a <see cref="TextLayoutResult"/>/<c>List</c>.
+        /// clears and writes into <paramref name="output"/> instead of allocating a <c>List</c>.
         /// Guaranteed zero managed allocation on the steady no-wrap path once <paramref name="output"/>'s
         /// backing capacity has stabilized from a prior call (see <c>TextQuadLayoutAllocTests</c>, Unity-only).
         /// </summary>

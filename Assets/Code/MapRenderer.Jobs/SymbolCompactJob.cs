@@ -31,9 +31,9 @@ namespace MapRenderer.Jobs
         // ── Input — per-record verdict + fields, index-parallel to the mirror ───────────────────────────────
         /// <summary>Per-record cull verdict from <see cref="SymbolCullJob"/>, consumed in record order.</summary>
         [ReadOnly] public NativeArray<GatherTrigger> Trigger;
-        /// <summary>Per-record <see cref="LabelRecordKind"/> — selects which detail path (<see cref="PointDetails"/>
+        /// <summary>Per-record <see cref="SymbolPlacementKind"/> — selects which detail path (<see cref="PointDetails"/>
         /// / the curved anchor arrays) the fade-alive probe reads.</summary>
-        [ReadOnly] public NativeArray<byte> Kinds;
+        [ReadOnly] public NativeArray<SymbolPlacementKind> Kinds;
         /// <summary>Per-record index into <see cref="PointDetails"/> or the curved anchor arrays (per <see cref="Kinds"/>).</summary>
         [ReadOnly] public NativeArray<int> Detail;
         /// <summary>Point-kind per-record detail; only <c>.FadeId</c> is read here.</summary>
@@ -61,7 +61,7 @@ namespace MapRenderer.Jobs
         /// keeps staging instead of hard-skipping.</summary>
         [ReadOnly] public NativeHashMap<long, float> FadeOpacity;
         /// <summary>Below this opacity a fade identity reads as invisible (matches
-        /// <c>LabelPlacementSystem.FadeEpsilon</c>).</summary>
+        /// <c>SymbolPlacementSystem.FadeEpsilon</c>).</summary>
         public float FadeEpsilon;
         /// <summary>Record count — the loop bound (index-parallel across every input array above).</summary>
         public int Count;
@@ -117,7 +117,7 @@ namespace MapRenderer.Jobs
         private bool MarkFadeOutIfAlive(int r)
         {
             int detail = Detail[r];
-            if (Kinds[r] == (byte)LabelRecordKind.Point)
+            if (Kinds[r] == SymbolPlacementKind.Point)
                 return TryForceFadeOut(PointDetails[detail].FadeId);
 
             // Curved: one candidate per anchor plus the centred-fallback slot. Force-fade EVERY anchor — not just

@@ -47,7 +47,7 @@ namespace MapRenderer.Core.Text
         /// S18 Slice 5 (T4) no-GC caller-buffer overload: writes positioned glyphs directly into
         /// <paramref name="output"/> (cleared first; reused across calls by the caller) instead of
         /// allocating a <see cref="ShapedRun"/>. Guaranteed zero managed allocation on the steady LTR
-        /// path (the common map-label case: Latin/Cyrillic/Greek/digits/punctuation) once
+        /// path (the common map-symbol case: Latin/Cyrillic/Greek/digits/punctuation) once
         /// <paramref name="output"/>'s backing capacity has stabilized from a prior call — no
         /// intermediate codepoint/cluster lists, no <see cref="ShapedRun"/> class instance.
         ///

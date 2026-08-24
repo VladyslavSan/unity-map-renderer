@@ -68,10 +68,10 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // its floating-origin transform, and its refcount teardown are the tree's job.
         internal SceneTileTree _tree;
 
-        // Layer children recycle, for the same reason the label leaves do (see WorldLabelRenderer): each one
+        // Layer children recycle, for the same reason the symbol leaves do (see WorldSymbolRenderer): each one
         // costs new GameObject + AddComponent<MeshFilter> + AddComponent<MeshRenderer>, the AddComponents
         // dominating, and a zoom step replaces the WHOLE cover at once. This backend churns HARDER than the
-        // label path — one child per tile LAYER, not per (layer, kind) label slot.
+        // symbol path — one child per tile LAYER, not per (layer, kind) symbol slot.
         //
         // A released child parks under _poolRoot, which is INACTIVE. ObjectPool is scene-unaware, so without
         // a reparent the child stays under its tile container; and SetParent(null) is not the answer either —

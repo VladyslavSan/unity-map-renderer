@@ -42,8 +42,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>The original per-tile-layer GameObject path (<see cref="Backend.GameObjects.TileRenderer"/>):
         /// one MeshFilter+MeshRenderer child per layer under a <c>"Tile z/x/y"</c> container, drawn by the
-        /// SRP Batcher. The simplest, most Inspector-debuggable backend — retired in S53c (the Entities
-        /// Hierarchy covered the debug need) and restored as an explicit opt-in.</summary>
+        /// SRP Batcher. The simplest, most Inspector-debuggable backend, an explicit opt-in.</summary>
         GameObject = 2,
     }
 
@@ -109,14 +108,14 @@ namespace MapRenderer.Unity.Rendering.Map
         private static readonly ProfilerMarker PmSceneFrame =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SceneFrame);
 
-        // The symbol reconcile that runs before the label aggregation (A-1 pull/reconcile + PumpBuilds).
+        // The symbol reconcile that runs before the symbol aggregation (A-1 pull/reconcile + PumpBuilds).
         private static readonly ProfilerMarker PmSymbolCollect =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolCollect);
 
-        // The label AGGREGATION (A-3 cross-tile dedup CollectInto + LabelInstance → SoA batch build). Its own
+        // The symbol AGGREGATION (A-3 cross-tile dedup CollectInto + record → SoA batch build). Its own
         // marker so the dedup/build cost is not misattributed to the unmarked LateUpdate self-time — it runs
-        // between Symbol.Collect and Labels.Tick and is a managed main-thread hot spot in its own right
-        // (it grows with the on-screen label count at high zoom).
+        // between Symbol.Collect and SymbolPlacementSystem.Tick and is a managed main-thread hot spot in its own right
+        // (it grows with the on-screen symbol count at high zoom).
         private static readonly ProfilerMarker PmSymbolBatch =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolBatch);
 
@@ -137,11 +136,11 @@ namespace MapRenderer.Unity.Rendering.Map
         // The tile lifecycle — owned by MapView, ticked once per frame. Built in the ctor (needs only Layers).
         internal readonly Tile.TileManager TileManager;
 
-        // ── S20 Slice 1: the per-frame label placement path (F1) — a SEPARATE path from the tile lifecycle
+        // ── S20 Slice 1: the per-frame symbol placement path (F1) — a SEPARATE path from the tile lifecycle
         // above, never a static per-(tile,layer) mesh (T5). Needs no ctor dependency (unlike TileManager).
-        /// <summary>The dedicated per-frame label renderer. <c>internal</c>: test surface (job-parity /
+        /// <summary>The dedicated per-frame symbol renderer. <c>internal</c>: test surface (job-parity /
         /// alloc / structural teeth read it via <c>MapViewTestExtensions</c>-style InternalsVisibleTo).</summary>
-        internal LabelPlacementSystem Labels { get; }
+        internal SymbolPlacementSystem SymbolPlacementSystem { get; }
 
         /// <summary>
         /// Builds the view over its <paramref name="config"/> (the Inspector knobs, shared by reference with
@@ -156,36 +155,36 @@ namespace MapRenderer.Unity.Rendering.Map
             // S82: the PreparedTileCache's Enabled toggle + byte/count budget — maintainer-tunable Inspector
             // fields (placeholder budget defaults pending in-editor VRAM profiling, stage Risk 3).
             TileManager = new Tile.TileManager(Layers, _config.PreparedCache);
-            // S20: one label system per view, owning this view's camera (constructed here, after Camera is
+            // S20: one symbol system per view, owning this view's camera (constructed here, after Camera is
             // set — a field initializer would see a null Camera). Epic A / A1 (design §11 A1 D7): the
             // world-anchored point/icon draw path's base materials — GUID assets, no Shader.Find (S58
             // architecture); the icon base rides alongside the text one, both optional (null → that draw
             // path stays inert, see MapMaterialSet.SymbolIconWorld's doc).
-            Labels = new LabelPlacementSystem(Camera,
+            SymbolPlacementSystem = new SymbolPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
-            // Rapid-zoom stutter: run the full label place only every Nth frame (Inspector-tunable; 1 = off).
-            Labels.PlacementThrottleFrames = _config.SymbolPlacementThrottleFrames;
-            // S105: the decoupled symbol-label subsystem produces the real map labels Labels.Tick renders.
+            // Rapid-zoom stutter: run the full symbol place only every Nth frame (Inspector-tunable; 1 = off).
+            SymbolPlacementSystem.PlacementThrottleFrames = _config.SymbolPlacementThrottleFrames;
+            // S105: the decoupled symbol-symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
             // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
-            // (Symbols implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
+            // (SymbolSubsystem implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
             // hand it TileManager's loaded set and it reconciles (no release/restore callbacks). cacheEnabled
             // drives keep-warm-on-release so it matches the prepared mesh cache.
-            Symbols = new SymbolLabelSubsystem(Camera,
+            SymbolSubsystem = new SymbolSubsystem(Camera,
                 _config.PreparedCache.MaxCount, _config.PreparedCache.Enabled);
-            TileManager.SymbolWorkerFactory = Symbols;
+            TileManager.SymbolWorkerFactory = SymbolSubsystem;
         }
 
-        // S105: production symbol labels (real map data), fed to Labels.Tick each frame.
-        internal readonly SymbolLabelSubsystem Symbols;
+        // S105: production symbol symbols (real map data), fed to SymbolPlacementSystem.Tick each frame.
+        internal readonly SymbolSubsystem SymbolSubsystem;
 
         // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
         // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
         private readonly List<Symbol.StyleLayer> _symbolLayerScratch = new List<Symbol.StyleLayer>();
 
         // D11/E2: the SymbolRenderLayer objects themselves (same walk as _symbolLayerScratch, same order) —
-        // handed to Labels.Tick each frame so each layer's survivors draw with its own material/presenter.
+        // handed to SymbolPlacementSystem.Tick each frame so each layer's survivors draw with its own material/presenter.
         private readonly List<Style.SymbolRenderLayer> _symbolRenderLayers = new List<Style.SymbolRenderLayer>();
 
         // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
@@ -197,7 +196,7 @@ namespace MapRenderer.Unity.Rendering.Map
         // (fetch style + TileJSON) that fits the MonoBehaviour host's async Start naturally.
 
 
-        /// <summary>S83b: the id of the active style (forward contract for S82's prepared-tile cache).
+        /// <summary>The id of the active style.
         /// For <see cref="SetStyle(string,CancellationToken)"/> it is the style URI; for the
         /// <see cref="StyleDocument"/> overload it is the caller-supplied id.</summary>
         internal string StyleId { get; private set; }
@@ -261,7 +260,7 @@ namespace MapRenderer.Unity.Rendering.Map
             // D10: derive the symbol layers from the just-built set (RenderLayerFactory is the sole
             // registry) instead of re-walking style.Layers with an is-check (kills §1.6). One walk, two
             // lists (D11/E2): the typed StyleLayer for the subsystem, the owning SymbolRenderLayer (its
-            // material + presenter) for Labels.Tick — same order, so the ordinal mapping stays 1:1.
+            // material + presenter) for SymbolPlacementSystem.Tick — same order, so the ordinal mapping stays 1:1.
             // A2: the Mercator-only background gate is gone — background is now a per-covered-tile TileMesh
             // layer projected through the same IProjection fill/line use, so the globe renders it correctly.
             _symbolLayerScratch.Clear();
@@ -273,7 +272,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     _symbolRenderLayers.Add(s);
                 }
 
-            Symbols.SetStyle(_style,
+            SymbolSubsystem.SetStyle(_style,
                 _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             TileManager.SetSources(specs, _config.Backend);
@@ -285,9 +284,8 @@ namespace MapRenderer.Unity.Rendering.Map
         /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via S83a. Failure
         /// isolation: an offline/404/malformed TileJSON logs a warning and skips THAT source.
         ///
-        /// Epic A / A2 (HIGH b/c): runs BEFORE <see cref="Style.RenderLayerSet.Build"/> now (the transactional
-        /// restyle reorder — see <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>), so it can no
-        /// longer walk the built <see cref="Layers"/> set. Walks <paramref name="style"/>'s raw layers through
+        /// Runs BEFORE <see cref="Style.RenderLayerSet.Build"/>, so it cannot walk the built
+        /// <see cref="Layers"/> set. Walks <paramref name="style"/>'s raw layers through
         /// <see cref="Style.RenderLayerFactory.TryGetFetchSource"/> instead — the ONE registry of which style
         /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
         /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
@@ -420,14 +418,13 @@ namespace MapRenderer.Unity.Rendering.Map
         /// LateUpdate on purpose: the input <c>Controller</c> mutates the camera props in its <c>Update</c>, and
         /// Unity runs every LateUpdate after every Update, so this pipeline is GUARANTEED to see this frame's
         /// input — no execution-order attributes needed. The whole per-frame pipeline lives HERE, in one ordered
-        /// pass off a SINGLE camera snapshot, so tiles and labels are frame-coherent by construction (the pan-lag
-        /// fix — they used to sample the look-at in two different phases):
+        /// pass off a SINGLE camera snapshot, so tiles and symbols are frame-coherent by construction:
         /// <list type="number">
         ///   <item>commit the camera (DPI refresh + <see cref="MapCamera.SyncToCamera"/>) — the merged input
         ///         state from every controller this frame;</item>
         ///   <item>move the tiles — push zoom uniforms, then rebase every loaded tile onto the look-at's
         ///         floating origin;</item>
-        ///   <item>place the labels — project their anchors against the SAME snapshot + just-committed camera.</item>
+        ///   <item>place the symbols — project their anchors against the SAME snapshot + just-committed camera.</item>
         /// </list>
         /// Telemetry is not a step here: each provider publishes at the end of its OWN pass (see the facade
         /// below), so its levels are that pass's rather than a shared end-of-frame instant's.
@@ -438,7 +435,7 @@ namespace MapRenderer.Unity.Rendering.Map
             using var _lateUpdate = PmLateUpdate.Auto(); // umbrella: self-time = residual unmarked per-frame cost
 
             // 1. Update the camera FIRST — commit this frame's merged input to the Unity camera, so the tile
-            //    rebase and the label projection below both read the just-committed pose. DPI is refreshed from
+            //    rebase and the symbol projection below both read the just-committed pose. DPI is refreshed from
             //    the live config before the commit, and it now feeds TWO consumers, not one: the altitude
             //    framing here, and the selector's framing viewport built at BuildTileSelectionConfig() below
             //    (both are Camera.ViewportLogicalPx since S108). This ordering is also what keeps
@@ -447,7 +444,7 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmCameraAdvance.Auto())
                 Camera.SyncToCamera();
 
-            // ONE snapshot for the rest of the frame — tiles and labels share it, so they can't diverge.
+            // ONE snapshot for the rest of the frame — tiles and symbols share it, so they can't diverge.
             CameraProperties   cameraProperties = Camera.CurrentProperties;
             Backend.SceneFrame sceneFrame;
             using (PmSceneFrame.Auto())
@@ -478,47 +475,47 @@ namespace MapRenderer.Unity.Rendering.Map
 
             // Hand the style's sprite sheet to the layers that paint from it (fill-pattern today). Pulled per
             // frame rather than pushed from the fetch because the sheet is owned and fetched by the symbol
-            // subsystem — the same per-frame pull Labels.Tick already does for Symbols.IconTexture below.
+            // subsystem — the same per-frame pull SymbolPlacementSystem.Tick already does for SymbolSubsystem.IconTexture below.
             // RenderLayerSet.SetSprites early-outs on an unchanged pair, so the steady state is one reference
             // compare; the interesting frames are the one where the sheet lands and the one after a restyle.
-            Layers.SetSprites(Symbols.SpriteAtlas, Symbols.IconTexture);
+            Layers.SetSprites(SymbolSubsystem.SpriteAtlas, SymbolSubsystem.IconTexture);
 
-            // 3. Place the labels against the SAME snapshot the tiles used (never a second BuildSceneFrame).
+            // 3. Place the symbols against the SAME snapshot the tiles used (never a second BuildSceneFrame).
             //    A style with no symbol layers simply has nothing to place.
-            if (Symbols.HasSymbolLayers)
+            if (SymbolSubsystem.HasSymbolLayers)
             {
                 // ONE wall-clock read shared by ReconcileLoadedTiles' departing-tile grace window and CurrentBatch's
                 // coverage-fade grace window (REVISION 2) — same frame, same clock, no double Time.timeAsDouble read.
                 double now = Time.timeAsDouble;
 
                 // A-1: PULL the current loaded-tile set (post-Tick, so cache-hit adds and releases are already
-                // reflected) and reconcile the label store before collecting — restores kept-warm labels for
-                // cache-hit re-entries, releases tiles that left cover. Then aggregate the active labels.
+                // reflected) and reconcile the symbol store before collecting — restores kept-warm symbols for
+                // cache-hit re-entries, releases tiles that left cover. Then aggregate the active symbols.
                 using (PmSymbolCollect.Auto())
                 {
                     TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                    Symbols.ReconcileLoadedTiles(_symbolLoadedScratch, now);
+                    SymbolSubsystem.ReconcileLoadedTiles(_symbolLoadedScratch, now);
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
-                    Symbols.PumpBuilds();
+                    SymbolSubsystem.PumpBuilds();
                 }
 
-                // Stage-2 (symbol-label native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
+                // Stage-2 (symbol-symbol native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
                 // the pre-build tile-coverage cull, recording each winner's (blockId, localIndex) against the
-                // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the Labels.Tick
+                // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the SymbolPlacementSystem.Tick
                 // argument so its managed dedup/collect cost is MARKED (Symbol.BatchBuild), not folded into the
                 // umbrella self-time. Pass this frame's SAME sceneFrame snapshot the tiles used, so the coverage
                 // cull's projection matches the placement below exactly.
                 SymbolGatherPlan plan;
                 using (PmSymbolBatch.Auto())
-                    plan = Symbols.CurrentBatch(sceneFrame, _config.LabelTileCoverageCull, now);
+                    plan = SymbolSubsystem.CurrentBatch(sceneFrame, _config.SymbolTileCoverageCull, now);
                 // Then gather the winning blocks' baked slices → project/collide/build the placement, presenting
                 // each slot through its own SymbolRenderLayer (D11/E2 — material + persistent presenter). Push the
-                // per-label far-distance cull fraction live first (same read-every-Tick contract as the coverage
+                // per-symbol far-distance cull fraction live first (same read-every-Tick contract as the coverage
                 // cull above), so an Inspector tweak takes effect the same frame.
-                Labels.LabelMaxDistanceFraction = _config.LabelMaxDistanceFraction;
-                Labels.Tick(sceneFrame, plan, Symbols.Atlas, Time.deltaTime,
-                    _symbolRenderLayers, Symbols.IconTexture);
+                SymbolPlacementSystem.SymbolMaxDistanceFraction = _config.SymbolMaxDistanceFraction;
+                SymbolPlacementSystem.Tick(sceneFrame, plan, SymbolSubsystem.Atlas, Time.deltaTime,
+                    _symbolRenderLayers, SymbolSubsystem.IconTexture);
             }
         }
 
@@ -610,12 +607,12 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Releases all tile resources (via the <see cref="Tile.TileManager"/>), then disposes the
-        /// RenderLayerSet's materials, then the label placement system's mesh/material/native buffers.
+        /// RenderLayerSet's materials, then the symbol placement system's mesh/material/native buffers.
         /// Order matters TWICE: tiles first — their renderers reference layer materials — and (E2)
-        /// <see cref="Layers"/> before <see cref="Labels"/> — a <see cref="Style.SymbolRenderLayer"/>'s
+        /// <see cref="Layers"/> before <see cref="SymbolPlacementSystem"/> — a <see cref="Style.SymbolRenderLayer"/>'s
         /// presenter (destroyed by <c>Layers.Dispose()</c>) references a slot <see cref="Mesh"/> owned by
-        /// <see cref="Labels"/>; a MeshRenderer must not outlive the mesh it points at. The glyph atlas
-        /// texture is owned by <see cref="SymbolLabelSubsystem"/> and disposed there, never here.
+        /// <see cref="SymbolPlacementSystem"/>; a MeshRenderer must not outlive the mesh it points at. The glyph atlas
+        /// texture is owned by <see cref="SymbolSubsystem"/> and disposed there, never here.
         /// Idempotent (every dispose here is). The MonoBehaviour host calls this from OnDestroy.
         /// </summary>
         public void Teardown()
@@ -623,14 +620,14 @@ namespace MapRenderer.Unity.Rendering.Map
             // Defense-in-depth: dispose each subsystem independently so a fault in ONE cannot strand the
             // others. Learned the hard way — on Play-mode Stop Unity tears down the Entities World before this
             // runs, and an unguarded entity touch inside TileManager.Dispose() threw straight out of here,
-            // leaving Layers/Labels/Symbols (and everything TileManager disposes after the throw) undisposed:
+            // leaving Layers/SymbolPlacementSystem/SymbolSubsystem (and everything TileManager disposes after the throw) undisposed:
             // the whole-graph "finalized without Dispose()" flood. The exception is LOGGED, never swallowed
             // silently, so a genuine teardown bug is still loud. Order is preserved (see the summary): tiles
-            // before Layers (renderers reference layer materials), Layers before Labels (E2 presenter/slot-mesh).
+            // before Layers (renderers reference layer materials), Layers before SymbolPlacementSystem (E2 presenter/slot-mesh).
             DisposeStep(TileManager, nameof(TileManager)); // tiles first — their renderers reference Layers' materials
             DisposeStep(Layers,      nameof(Layers));
-            DisposeStep(Labels,      nameof(Labels));
-            DisposeStep(Symbols,     nameof(Symbols));     // S105: destroy the shared glyph atlas texture + manager
+            DisposeStep(SymbolPlacementSystem,      nameof(SymbolPlacementSystem));
+            DisposeStep(SymbolSubsystem,     nameof(SymbolSubsystem));     // S105: destroy the shared glyph atlas texture + manager
 
             static void DisposeStep(System.IDisposable subsystem, string name)
             {

@@ -326,7 +326,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <b>T4 (logical rows).</b> <c>text-padding</c> and <c>icon-padding</c> are collided in
-        /// <c>LabelStagingMath</c> against anchors that <c>SymbolProjectionJob</c> projects with
+        /// <c>SymbolStagingMath</c> against anchors that <c>SymbolProjectionJob</c> projects with
         /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.ViewportLogicalPx"/> — the SAME space
         /// <c>text-size</c> and the glyph bounds live in. One space, logical, factor 1: the value reaching the
         /// collision grid must be the styled number, and the staging path must contain no device conversion
@@ -344,7 +344,7 @@ namespace MapRenderer.Tests.Style
             foreach (string relativePath in new[]
                      {
                          "Assets/Code/MapRenderer.Unity/Text/SymbolFeatureExtractor.cs",
-                         "Assets/Code/MapRenderer.Core/Text/Placement/LabelStagingMath.cs",
+                         "Assets/Code/MapRenderer.Core/Text/Placement/SymbolStagingMath.cs",
                          "Assets/Code/MapRenderer.Jobs/SymbolProjectionJob.cs",
                      })
             {

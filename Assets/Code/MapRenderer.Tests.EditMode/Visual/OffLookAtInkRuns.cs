@@ -1,4 +1,4 @@
-// Unity EditMode only — reads a rendered frame produced by OffLookAtLabelScene. NOT registered in
+// Unity EditMode only — reads a rendered frame produced by OffLookAtSymbolScene. NOT registered in
 // Tools/core-tests/core-tests.csproj.
 //
 // The ink-run segmenter shared by the map-pitch epic's ink teeth. W2 wrote these bodies inside
@@ -24,12 +24,12 @@ using MapRenderer.Tests.Text.Placement; // WorldSymbolInkAnalysis
 
 namespace MapRenderer.Tests
 {
-    /// <summary>Ink-run segmentation over an <see cref="OffLookAtLabelScene"/> frame (row 0 = TOP scanline,
-    /// the convention <c>OffLookAtLabelScene.InkPixels</c> and <c>RenderIsolated</c> both return).</summary>
+    /// <summary>Ink-run segmentation over an <see cref="OffLookAtSymbolScene"/> frame (row 0 = TOP scanline,
+    /// the convention <c>OffLookAtSymbolScene.InkPixels</c> and <c>RenderIsolated</c> both return).</summary>
     internal static class OffLookAtInkRuns
     {
         /// <summary>
-        /// Contiguous inked spans along COLUMNS (a screen-HORIZONTAL label), where a column counts as inked if
+        /// Contiguous inked spans along COLUMNS (a screen-HORIZONTAL symbol), where a column counts as inked if
         /// any pixel of it inside the inclusive row band is below
         /// <c>WorldSymbolInkAnalysis.InkThreshold</c>. Returned as inclusive <c>(start, end)</c> column pairs.
         /// </summary>
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests
             return RunsOf(inked);
         }
 
-        /// <summary>The ROW analogue, for a screen-VERTICAL (receding) label: contiguous inked spans along
+        /// <summary>The ROW analogue, for a screen-VERTICAL (receding) symbol: contiguous inked spans along
         /// rows, where a row counts as inked if any pixel of it inside the inclusive COLUMN band is ink.</summary>
         public static (int start, int end)[] AlongRows(byte[] rgba, int size, int colFrom, int colTo)
         {
@@ -55,21 +55,21 @@ namespace MapRenderer.Tests
             return RunsOf(inked);
         }
 
-        /// <summary>A receding label's ink runs: render it ISOLATED (the construction-time ink pass draws only
-        /// the cross-azimuth pair — see <c>OffLookAtLabelScene.RenderIsolated</c> for why) and segment along
+        /// <summary>A receding symbol's ink runs: render it ISOLATED (the construction-time ink pass draws only
+        /// the cross-azimuth pair — see <c>OffLookAtSymbolScene.RenderIsolated</c> for why) and segment along
         /// ROWS inside its own column band.</summary>
-        public static (int start, int end)[] Receding(OffLookAtLabelScene f, OffLookAtLabelId id)
+        public static (int start, int end)[] Receding(OffLookAtSymbolScene f, OffLookAtSymbolId id)
         {
             byte[] pixels = f.RenderIsolated(id);
             f.ColumnBandFor(id, out int colFrom, out int colTo);
             return AlongRows(pixels, f.Config.SizePx, colFrom, colTo);
         }
 
-        /// <summary>Asserts — never assumes — that this label really runs screen-VERTICALLY, which is what
+        /// <summary>Asserts — never assumes — that this symbol really runs screen-VERTICALLY, which is what
         /// makes a row segmentation inside a column band measure the thing the tooth thinks it does. If the
         /// pose ever stops making the receding roads axis-aligned, this fails loudly instead of quietly
         /// measuring the wrong axis.</summary>
-        public static void AssertRunsVertically(OffLookAtLabelScene f, OffLookAtLabelId id,
+        public static void AssertRunsVertically(OffLookAtSymbolScene f, OffLookAtSymbolId id,
             GlyphMeasurement[] glyphs)
         {
             double2 spread = glyphs[glyphs.Length - 1].ScreenPx - glyphs[0].ScreenPx;

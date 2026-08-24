@@ -549,13 +549,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         // in steady state (the cover size that drives both lists' capacity stabilizes quickly).
         private double[] _priorityKeysScratch = new double[64];
 
-        // S105/A5b: the symbol-agnostic seam through which the DECOUPLED symbol-label subsystem is driven —
-        // TileManager holds only this interface (never a label/store/glyph type). The per-tile mesh KICK
+        // S105/A5b: the symbol-agnostic seam through which the DECOUPLED symbol-symbol subsystem is driven —
+        // TileManager holds only this interface (never a symbol/store/glyph type). The per-tile mesh KICK
         // (PumpPending) calls TryBeginBuild on the MAIN THREAD, isolated (a throwing factory must never fault
         // the tile pipeline, mirroring TakeDecodeFromFetch's per-tile fault isolation), then threads the
         // returned pass into the SAME kick task so the symbol worker runs alongside the mesh pass, sharing
         // the A4 shared-decode entry (no re-fetch, no second decode, no touching the mesh/disposal path). The
-        // tile LIFECYCLE (which tiles are loaded → which labels render) is NOT pushed — the subsystem PULLS
+        // tile LIFECYCLE (which tiles are loaded → which symbols render) is NOT pushed — the subsystem PULLS
         // it via CollectLoadedTileKeys and reconciles (A-1: fragile release/restore callbacks retired).
         internal Processing.ISymbolTileWorkerFactory SymbolWorkerFactory { get; set; }
 
@@ -646,7 +646,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// precedent, which parks once), so a test can hold builds genuinely in-flight and observe that
         /// teardown-cancel releases every parked worker promptly. The test releases them by setting the gate
         /// or by tearing down (which cancels the token both parked workers also wait on). Mirrors
-        /// <see cref="MapRenderer.Unity.Text.SymbolLabelReconciler.GateForTest"/>. Internal test-only.</summary>
+        /// <see cref="MapRenderer.Unity.Text.SymbolReconciler.GateForTest"/>. Internal test-only.</summary>
         internal ManualResetEventSlim MeshBuildGateForTest;
 
         // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
@@ -914,10 +914,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// A-1 pull surface: fill <paramref name="into"/> with the current loaded <c>(source, tile)</c>
         /// membership — every record in <see cref="_loaded"/> mapped from its pipeline slot to its source-id.
-        /// The symbol-label subsystem calls this each frame and reconciles its active/cached label sets against
+        /// The symbol-symbol subsystem calls this each frame and reconciles its active/cached symbol sets against
         /// it (retiring the release/restore push-callbacks). Clears <paramref name="into"/> first; reuses the
         /// caller's list, so it is allocation-free in steady state (no per-frame GC — the S95 zero-alloc
-        /// contract). Includes tiles still fetching (not yet built): those simply have no label entry yet, so
+        /// contract). Includes tiles still fetching (not yet built): those simply have no symbol entry yet, so
         /// reconcile leaves them for the bytes-ready build push.
         /// </summary>
         internal void CollectLoadedTileKeys(List<LoadedTileKey> into)
@@ -1004,7 +1004,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <see cref="TileTelemetrySnapshot"/>, so it produces them itself rather than exposing counters for
         /// someone else to assemble.
         ///
-        /// <para>Unlike the two label providers — whose levels their pass already stores, making the refresh a
+        /// <para>Unlike the two symbol providers — whose levels their pass already stores, making the refresh a
         /// repackage — this one derives two of its numbers: the cover-stats pass and the walk of <c>_loaded</c> in
         /// <see cref="CaptureTelemetry"/>. It does them once per <see cref="Tick"/> regardless of whether anyone
         /// reads. Both are bounded by the cover plus its pad ring (tens of records) over reused scratch arrays, so
@@ -1761,7 +1761,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// AFTER the mesh pass, over the SAME shared <paramref name="decode"/> — the feed swap that retires
         /// the parallel symbol push. Computed only at the <c>PumpPending</c> kick site (§Q-Drain); the two
         /// <see cref="DrainMeshBuilds"/> call sites pass nothing, so drain stays symbol-silent (unchanged —
-        /// labels never appeared in snapshots and no test drove symbols via drain).</para>
+        /// symbols never appeared in snapshots and no test drove symbols via drain).</para>
         /// </summary>
         private UniTask<MeshBuildResult> KickMeshBuild(
             LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
@@ -1855,10 +1855,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // Complete() guard precedent (RunWorkerPass above).
                         //
                         // teardown-cancel: skip the handoff once the lifetime token is cancelled.
-                        // RunWorkerAndHandoff may TryParkBuild -> enqueue into SymbolLabelSubsystem, which
+                        // RunWorkerAndHandoff may TryParkBuild -> enqueue into SymbolSubsystem, which
                         // MapView.Teardown disposes AFTER TileManager.DoDispose returns (TileManager -> Layers
-                        // -> Labels -> Symbols) — enqueuing into a subsystem about to be torn down is exactly
-                        // the SymbolTileLabelBlock leak vector this stage exists to close.
+                        // -> SymbolPlacementSystem -> Symbols) — enqueuing into a subsystem about to be torn down is exactly
+                        // the SymbolTileBlock leak vector this stage exists to close.
                         try
                         {
                             if (!token.IsCancellationRequested)
@@ -2180,7 +2180,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Epic A / A2: the source-less pipeline has no FeatureSource — no-op for a background record.
             _pipelines[key.Slot].FeatureSource?.Release(key.Tile);
             // S105/A-1: no symbol-release callback — this tile just left _loaded, so the subsystem's next
-            // CollectLoadedTileKeys pull no longer reports it and its reconcile fades/drops the labels.
+            // CollectLoadedTileKeys pull no longer reports it and its reconcile fades/drops the symbols.
         }
 
         /// <summary>
@@ -2283,7 +2283,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // layers (a symbol-only source) has nothing in the prepared cache to hit, and the loop below
                 // never runs to falsify it — so an unconditional `true` made `allCached` vacuously true on
                 // every cover entry, sending the tile down BuildTileFromCache forever (no fetch, no kick),
-                // so its labels never built with the cache on (the default). A zero-dense source is never
+                // so its symbols never built with the cache on (the default). A zero-dense source is never
                 // "all cached" — it must fetch.
                 allCached = _denseLayerIdsScratch.Count > 0;
                 for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
@@ -2302,7 +2302,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
                 // S105/A-1: a cache HIT re-shows the tile with NO fetch (so no bytes-ready). The symbol
                 // subsystem now PULLS this tile back into its loaded set and reconciles — restoring its
-                // kept-warm labels — instead of us pushing a restore callback here.
+                // kept-warm symbols — instead of us pushing a restore callback here.
             }
             else
             {
@@ -2570,7 +2570,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 // BEFORE the general arm, deliberately. Under the eager decode a malformed tile faults the
                 // same task a 5xx does, and routing both into one counter would let a genuinely broken tile
-                // hide behind 64 unrelated network errors — and would label it "tile fetch failed", which is
+                // hide behind 64 unrelated network errors — and would symbol it "tile fetch failed", which is
                 // a lie. The fetch succeeded; the bytes are bad. Its own counter, its own message.
                 LogDecodeErrorThrottled(ex);
                 return null;

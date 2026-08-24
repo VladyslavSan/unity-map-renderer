@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Text
     /// <para><b>Landmine #2 — symbol is the consumer that finally OBSERVES the unfiltered buffer.</b> B1
     /// measured that a short-ring filter in the shared decode stage reds NOTHING for fill (ring assembly
     /// re-filters); B3 measured the same for line (<c>LineRibbonJob</c> returns early below 2 points). Symbol's
-    /// point branch has <b>no length filter at all</b>, so a 1-point path is a real, rendered label — T2 is the
+    /// point branch has <b>no length filter at all</b>, so a 1-point path is a real, rendered symbol — T2 is the
     /// instrument those two stages could not build.</para>
     /// </summary>
     [TestFixture]
@@ -65,7 +65,7 @@ namespace MapRenderer.Tests.Text
         /// running live in the same process. Everything downstream of that path list is literally unchanged
         /// code (<c>LineCurvatureSubdivision.Subdivide</c>, <c>LineAnchorPlacement.Compute</c>,
         /// <c>KeepAnchorsInsideTile</c>, <c>ProjectPath</c>, every emit and every style evaluation), so
-        /// path-level equality is label-level equality; the ~75 symbol extraction suites running unedited are
+        /// path-level equality is symbol-level equality; the ~75 symbol extraction suites running unedited are
         /// the end-to-end confirmation of that implication.
         /// <para>Run over BOTH fixture layers: <c>centroids</c> is the only one carrying 1-point paths (the
         /// case line's oracle could not have) and <c>geolines</c> the only one carrying a feature with more
@@ -81,7 +81,7 @@ namespace MapRenderer.Tests.Text
         /// The claim here is therefore about the DECODERS — that the Burst job and the managed decoder agree
         /// bit-for-bit, in order, unfiltered — which is the substance of the swap, and for which this tooth IS
         /// armed (a short-ring filter in the shared stage reds it). Production's own path ordering is observed
-        /// by <see cref="SymbolLabelOrder_WithinAFeature_FollowsDecodeOrder"/> below.</para>
+        /// by <see cref="SymbolOrder_WithinAFeature_FollowsDecodeOrder"/> below.</para>
         /// </summary>
         [Test]
         public void SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle()
@@ -212,14 +212,14 @@ namespace MapRenderer.Tests.Text
         // ── T8: production's OWN path ordering, through Extract ─────────────────────────────────────
 
         /// <summary>
-        /// T8 — the labels <c>Extract</c> emits for one feature follow that feature's paths in DECODE ORDER,
+        /// T8 — the symbols <c>Extract</c> emits for one feature follow that feature's paths in DECODE ORDER,
         /// and there is one per path. This observes <c>Extract</c>'s own <c>ringStart</c>/<c>ringOrder</c>
         /// bucketing and <c>CopyRing</c>, which T1 cannot: T1 transcribes both into the test, so an injection
         /// into production leaves it green. Added after the RED sweep measured that blind spot rather than
         /// predicted it.
         /// <para>Path order is observable OUTPUT, not an implementation detail: the extractor's per-tile
-        /// <c>ordinal</c> becomes <c>SymbolLabel.FeatureIndex</c>, the stable S20 tiebreak, so a reordering
-        /// silently changes which label wins a collision.</para>
+        /// <c>ordinal</c> becomes <c>SymbolFeature.FeatureIndex</c>, the stable S20 tiebreak, so a reordering
+        /// silently changes which symbol wins a collision.</para>
         /// <para>Also pins <c>RingCapacity == RingCount</c> for an MVT-materialized buffer. That identity is
         /// why substituting one for the other in the bucketing is currently an arithmetic no-op
         /// (<c>MvtGeometryMaterializer</c> sizes exactly from <c>PrecountRingsAndVertices</c>) — and it is the
@@ -227,7 +227,7 @@ namespace MapRenderer.Tests.Text
         /// capacity-vs-count trap becomes real. Without it, that trap has no observer at all.</para>
         /// </summary>
         [Test]
-        public void SymbolLabelOrder_WithinAFeature_FollowsDecodeOrder()
+        public void SymbolOrder_WithinAFeature_FollowsDecodeOrder()
         {
             // Three DISTINCT points in one MultiPoint feature ⇒ three 1-point paths in one feature, so the
             // ordering under test is WITHIN a feature, not across features.
@@ -254,11 +254,11 @@ namespace MapRenderer.Tests.Text
                 geometry.Dispose();
             }
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                PointLabelLayer(), TileOf(feature), SyntheticTileId, 0.0, new WebMercatorProjection(), labels);
+                PointSymbolLayer(), TileOf(feature), SyntheticTileId, 0.0, new WebMercatorProjection(), symbols);
 
-            Assert.AreEqual(authored.Length, labels.Count,
+            Assert.AreEqual(authored.Length, symbols.Count,
                 "one label per path — a dropped or duplicated path is a counting defect in the bucketing");
 
             var projection = new WebMercatorProjection();
@@ -268,15 +268,15 @@ namespace MapRenderer.Tests.Text
                 double3 expected = projection.Project(
                     new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
 
-                Assert.AreEqual(expected.x, labels[i].AnchorRender.x, 1e-6,
+                Assert.AreEqual(expected.x, symbols[i].AnchorRender.x, 1e-6,
                     $"label {i} must be the {i}th AUTHORED path, in decode order — the bucketing is a stable " +
                     "counting sort precisely so a feature's paths keep the order the decoder produced them in, " +
                     "and FeatureIndex (the S20 collision tiebreak) is stamped from that order");
-                Assert.AreEqual(expected.y, labels[i].AnchorRender.y, 1e-6, $"label {i} anchor.y");
-                // NOT a second pin on path order: `ordinal++` is stamped at each emit site and labels are
+                Assert.AreEqual(expected.y, symbols[i].AnchorRender.y, 1e-6, $"label {i} anchor.y");
+                // NOT a second pin on path order: `ordinal++` is stamped at each emit site and symbols are
                 // appended in emission order, so this holds for ANY path ordering. It pins emission order
                 // only; the anchor comparison above is the clause that discriminates.
-                Assert.AreEqual(i, labels[i].FeatureIndex,
+                Assert.AreEqual(i, symbols[i].FeatureIndex,
                     $"label {i}'s per-tile ordinal must follow EMISSION order (not path order)");
             }
         }
@@ -285,16 +285,16 @@ namespace MapRenderer.Tests.Text
 
         /// <summary>
         /// T2 — a Point feature whose command stream is a single <c>MoveTo</c> of ONE point still emits
-        /// exactly one label, at that point's projection. This is the instrument B1 and B3 both recorded as
+        /// exactly one symbol, at that point's projection. This is the instrument B1 and B3 both recorded as
         /// missing: fill re-filters short rings downstream and line returns early below 2 points, so a
         /// <c>&lt; 2</c>-point filter fused into the shared decode stage was invisible in both. Here it deletes
-        /// a rendered label.
-        /// <para>The control — a <c>MoveTo</c> of THREE points expecting THREE labels — is what makes "one
-        /// label" a statement about the boundary value rather than an artefact of the emitter collapsing
+        /// a rendered symbol.
+        /// <para>The control — a <c>MoveTo</c> of THREE points expecting THREE symbols — is what makes "one
+        /// symbol" a statement about the boundary value rather than an artefact of the emitter collapsing
         /// anything.</para>
         /// </summary>
         [Test]
-        public void SymbolPointFeature_OnePointPath_StillEmitsOneLabel()
+        public void SymbolPointFeature_OnePointPath_StillEmitsOneSymbol()
         {
             var onePoint    = new double2(1000, 1500);
             var threePoints = new[] { new double2(600, 700), new double2(1200, 1400), new double2(2400, 2800) };
@@ -318,10 +318,10 @@ namespace MapRenderer.Tests.Text
                 geometry.Dispose();
             }
 
-            var oneLabel = new List<SymbolStyle.SymbolLabel>();
+            var oneSymbol = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                PointLabelLayer(), TileOf(single), SyntheticTileId, 0.0, new WebMercatorProjection(), oneLabel);
-            Assert.AreEqual(1, oneLabel.Count,
+                PointSymbolLayer(), TileOf(single), SyntheticTileId, 0.0, new WebMercatorProjection(), oneSymbol);
+            Assert.AreEqual(1, oneSymbol.Count,
                 "a 1-point path is a REAL label: symbol's point branch has no length filter at all, so any " +
                 "short-ring filter in MvtGeometryMaterializer, MvtDecodeJob or any shared stage deletes it");
 
@@ -329,17 +329,17 @@ namespace MapRenderer.Tests.Text
             double2 lonLat = SyntheticTileId.ToLonLat(onePoint.x, onePoint.y, SyntheticExtent);
             double3 expected = new WebMercatorProjection().Project(
                 new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
-            Assert.AreEqual(expected.x, oneLabel[0].AnchorRender.x, 1e-6);
-            Assert.AreEqual(expected.y, oneLabel[0].AnchorRender.y, 1e-6);
-            Assert.AreEqual(expected.z, oneLabel[0].AnchorRender.z, 1e-6);
+            Assert.AreEqual(expected.x, oneSymbol[0].AnchorRender.x, 1e-6);
+            Assert.AreEqual(expected.y, oneSymbol[0].AnchorRender.y, 1e-6);
+            Assert.AreEqual(expected.z, oneSymbol[0].AnchorRender.z, 1e-6);
 
-            // Control: a MultiPoint MoveTo of 3 emits 3 — "one label" above is the boundary value, not a
+            // Control: a MultiPoint MoveTo of 3 emits 3 — "one symbol" above is the boundary value, not a
             // collapse.
-            var threeLabels = new List<SymbolStyle.SymbolLabel>();
+            var threeSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                PointLabelLayer(), TileOf(triple), SyntheticTileId, 0.0, new WebMercatorProjection(), threeLabels);
-            Assert.AreEqual(3, threeLabels.Count,
-                "control: a MoveTo of three points is three 1-point paths and therefore three labels");
+                PointSymbolLayer(), TileOf(triple), SyntheticTileId, 0.0, new WebMercatorProjection(), threeSymbols);
+            Assert.AreEqual(3, threeSymbols.Count,
+                "control: a MoveTo of three points is three 1-point paths and therefore three symbols");
         }
 
         // ── T3: symbol's OWN length threshold, < 2 and not < 3 ──────────────────────────────────────
@@ -360,19 +360,19 @@ namespace MapRenderer.Tests.Text
             AssertSingleRingSpan(twoPoint, 2);
             AssertSingleRingSpan(onePoint, 1);
 
-            var twoPointLabels = new List<SymbolStyle.SymbolLabel>();
+            var twoPointSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                LineLabelLayer(), TileOf(twoPoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
-                twoPointLabels);
-            Assert.Greater(twoPointLabels.Count, 0,
+                LineSymbolLayer(), TileOf(twoPoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
+                twoPointSymbols);
+            Assert.Greater(twoPointSymbols.Count, 0,
                 "a 2-point polyline has exactly one segment to place along — symbol's line filter is < 2, " +
-                "not fill's < 3, and moving it to < 3 would silently delete these labels");
+                "not fill's < 3, and moving it to < 3 would silently delete these symbols");
 
-            var onePointLabels = new List<SymbolStyle.SymbolLabel>();
+            var onePointSymbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                LineLabelLayer(), TileOf(onePoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
-                onePointLabels);
-            Assert.AreEqual(0, onePointLabels.Count,
+                LineSymbolLayer(), TileOf(onePoint), SyntheticTileId, 0.0, new WebMercatorProjection(),
+                onePointSymbols);
+            Assert.AreEqual(0, onePointSymbols.Count,
                 "control: a 1-point path has no segment, so the LINE branch's < 2 filter drops it — this is " +
                 "what makes the assertion above about the boundary rather than about geometry existing");
         }
@@ -381,13 +381,13 @@ namespace MapRenderer.Tests.Text
 
         /// <summary>
         /// T5 — the three selections that exercise <c>Extract</c>'s non-obvious buffer states: none throws and
-        /// none emits, and each asserts WHY it emitted nothing, so "zero labels" can never be mistaken for
+        /// none emits, and each asserts WHY it emitted nothing, so "zero symbols" can never be mistaken for
         /// "the buffer was empty".
         /// <list type="number">
         /// <item>zero selected features ⇒ <c>Materialize</c> returns <c>default</c>, so <c>Dispose()</c> is a
         /// no-op, not a throw;</item>
         /// <item>one Polygon feature with a genuine multi-point ring ⇒ the buffer IS created with
-        /// <c>RingCount &gt; 0</c>, so the zero labels provably came from <b>symbol's kind gate</b>;</item>
+        /// <c>RingCount &gt; 0</c>, so the zero symbols provably came from <b>symbol's kind gate</b>;</item>
         /// <item>one feature whose <c>Geometry</c> is <c>null</c> ⇒ the buffer IS created (feature count ≥ 1)
         /// with <c>RingCount == 0</c>. B3's dev report recorded its plan claiming <c>IsCreated == false</c>
         /// here and being wrong; this asserts what actually holds.</item>
@@ -403,9 +403,9 @@ namespace MapRenderer.Tests.Text
                 "a zero-feature selection must return default(TileGeometryBuffers) — Dispose on it is a no-op");
             Assert.DoesNotThrow(() => empty.Dispose(), "Dispose on a default buffer early-returns");
 
-            var noneSelected = new List<SymbolStyle.SymbolLabel>();
+            var noneSelected = new List<SymbolStyle.SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
-                PointLabelLayer("[\"==\",\"nope\",\"nope\"]"), TileOf(anyPoint), SyntheticTileId, 0.0,
+                PointSymbolLayer("[\"==\",\"nope\",\"nope\"]"), TileOf(anyPoint), SyntheticTileId, 0.0,
                 new WebMercatorProjection(), noneSelected));
             Assert.AreEqual(0, noneSelected.Count, "a selection matching nothing emits nothing");
 
@@ -422,7 +422,7 @@ namespace MapRenderer.Tests.Text
             {
                 Assert.IsTrue(polyBuffer.IsCreated, "the Polygon selection DOES materialize a buffer");
                 Assert.Greater(polyBuffer.RingCount, 0,
-                    "…with real rings — so the zero labels below come from symbol's kind gate, not from an " +
+                    "…with real rings — so the zero symbols below come from symbol's kind gate, not from an " +
                     "empty buffer. Without this the case would be vacuous.");
             }
             finally
@@ -430,11 +430,11 @@ namespace MapRenderer.Tests.Text
                 polyBuffer.Dispose();
             }
 
-            var polygonLabels = new List<SymbolStyle.SymbolLabel>();
+            var polygonSymbols = new List<SymbolStyle.SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
-                PointLabelLayer(), TileOf(polygon), SyntheticTileId, 0.0, new WebMercatorProjection(),
-                polygonLabels));
-            Assert.AreEqual(0, polygonLabels.Count, "Polygon is never accepted at any placement (the D2 fence)");
+                PointSymbolLayer(), TileOf(polygon), SyntheticTileId, 0.0, new WebMercatorProjection(),
+                polygonSymbols));
+            Assert.AreEqual(0, polygonSymbols.Count, "Polygon is never accepted at any placement (the D2 fence)");
 
             // (3) a feature whose Geometry is null.
             IFeature nullGeometry = new DictionaryFeature(
@@ -455,11 +455,11 @@ namespace MapRenderer.Tests.Text
                 nullBuffer.Dispose();
             }
 
-            var nullLabels = new List<SymbolStyle.SymbolLabel>();
+            var nullSymbols = new List<SymbolStyle.SymbolFeature>();
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
-                PointLabelLayer(), TileOf(nullGeometry), SyntheticTileId, 0.0, new WebMercatorProjection(),
-                nullLabels));
-            Assert.AreEqual(0, nullLabels.Count, "no geometry, no anchors, no labels");
+                PointSymbolLayer(), TileOf(nullGeometry), SyntheticTileId, 0.0, new WebMercatorProjection(),
+                nullSymbols));
+            Assert.AreEqual(0, nullSymbols.Count, "no geometry, no anchors, no symbols");
         }
 
         // ── Fixture + synthetic plumbing ────────────────────────────────────────────────────────────
@@ -491,7 +491,7 @@ namespace MapRenderer.Tests.Text
 
         private static IReadOnlyList<IFeature> SelectedFeatures(string sourceLayer)
             => FeatureSelector.SelectFeatures(
-                PointLabelLayer(sourceLayer: sourceLayer), DecodedFixture(), 0.0);
+                PointSymbolLayer(sourceLayer: sourceLayer), DecodedFixture(), 0.0);
 
         /// <summary>Arm B's buffer, minted through the REAL producer from synthetic features' command
         /// streams — the same thing the decoder does for a real layer (IR C1 P3).</summary>
@@ -516,7 +516,7 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        private static SymbolStyle.StyleLayer PointLabelLayer(
+        private static SymbolStyle.StyleLayer PointSymbolLayer(
             string filterJson = null, string sourceLayer = "probe")
             => new SymbolStyle.StyleLayer
             {
@@ -527,7 +527,7 @@ namespace MapRenderer.Tests.Text
                 Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
             };
 
-        private static SymbolStyle.StyleLayer LineLabelLayer()
+        private static SymbolStyle.StyleLayer LineSymbolLayer()
             => new SymbolStyle.StyleLayer
             {
                 Id          = "b4-line",

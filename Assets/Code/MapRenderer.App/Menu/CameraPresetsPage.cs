@@ -7,7 +7,7 @@ namespace MapRenderer.App.Menu
 {
     /// <summary>
     /// Camera-preset page (UMR-78): ~10 slots to Save the live camera pose and Load it back later — the
-    /// reproducer for "where did I see that state?" (e.g. the 80k-label spike). Select a slot, then Save (store
+    /// reproducer for "where did I see that state?" (e.g. the 80k-symbol spike). Select a slot, then Save (store
     /// the current view) / Load (jump the camera to the slot) / Clear. Slots persist via
     /// <see cref="CameraPresetStore"/> (PlayerPrefs), so a saved spot survives a Play-session restart.
     /// </summary>

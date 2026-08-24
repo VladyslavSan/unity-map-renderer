@@ -11,7 +11,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// Stage AC (curved-world) T-CPU: <see cref="PolylineArcMath.SegmentAt"/> (the resumable segment search
     /// factored out of <see cref="PolylineArcMath.At"/>) and <see cref="PolylineArcMath.SampleWorld"/> (the
     /// <c>double3</c> world-polyline sampler at an already-resolved <c>(seg,t)</c>) — the seam
-    /// <c>LabelStagingMath.StageCurvedAnchor</c> uses to bake a per-glyph world anchor/tangent at the SAME
+    /// <c>SymbolStagingMath.StageCurvedAnchor</c> uses to bake a per-glyph world anchor/tangent at the SAME
     /// index the screen arc walk resolves. Pins the off-by-one seam at segment boundaries and the
     /// zero-length-segment skip <see cref="PolylineArcMath.SegmentTangent"/> already has for the screen path.
     /// </summary>
@@ -65,7 +65,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void SegmentAt_ReverseMonotonicSweep_MatchesForwardSweep()
         {
-            // A reversed (keep-upright) label queries arcs in DECREASING order — the backward-walking cursor
+            // A reversed (keep-upright) symbol queries arcs in DECREASING order — the backward-walking cursor
             // must resolve the same (seg,t) as a query starting fresh at that arc.
             float[] cum = Cumulative();
             float[] arcs = { 2f, 8f, 12f, 18f };

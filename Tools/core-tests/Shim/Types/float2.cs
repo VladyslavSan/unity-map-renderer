@@ -1,7 +1,7 @@
 namespace Unity.Mathematics
 {
     // S19: float2 is needed by MapRenderer.Core.Text.SymbolQuad / TextLayoutOptions / TextQuadLayout
-    // (label-local glyph-quad corners + UV rects in baked-pixel space). API surface mirrored from the
+    // (symbol-local glyph-quad corners + UV rects in baked-pixel space). API surface mirrored from the
     // real Unity.Mathematics.float2 (reflected off UnityEngine.MathematicsModule.dll) so this one shim
     // type keeps the real Core source compiling identically under both runners: fields, the `zero`
     // static, the implicit int2->float2 conversion, and the arithmetic operators actually used by S19.

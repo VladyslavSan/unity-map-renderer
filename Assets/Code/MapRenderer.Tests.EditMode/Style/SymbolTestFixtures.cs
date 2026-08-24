@@ -16,7 +16,7 @@ namespace MapRenderer.Tests
     /// Shared, engine-free fixture plumbing for the symbol-extraction test files: the walk-up loaders (which
     /// have to work under Unity batch mode AND <c>dotnet test</c>, whose working directories differ), the
     /// parsed-once Liberty style, and the <see cref="PointStageInput"/> adapter that turns a real extractor
-    /// <see cref="SymbolStyle.SymbolLabel"/> into a staging input. Lifted out of
+    /// <see cref="SymbolStyle.SymbolFeature"/> into a staging input. Lifted out of
     /// <c>SymbolShieldExtractionTests</c> when P-A's predicate teeth needed the same loaders — one copy, so a
     /// fixture path or a staging field cannot drift between the two files.
     /// </summary>
@@ -81,11 +81,11 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Hand-builds the <see cref="PointStageInput"/> for one half of a pair from the REAL
-        /// extractor's own <see cref="SymbolStyle.SymbolLabel"/> — mirrors
-        /// <c>SymbolTileLabelBlockBaker.BuildPointInput</c>'s field math (the Unity-only bake step itself
+        /// extractor's own <see cref="SymbolStyle.SymbolFeature"/> — mirrors
+        /// <c>SymbolTileBlockBaker.BuildPointInput</c>'s field math (the Unity-only bake step itself
         /// can't run headlessly — no Unity.Collections in Tools/core-tests — so this is the engine-free
         /// subset: Color/FadeId are placeholders the callers set or ignore).</summary>
-        public static PointStageInput StageInputFor(SymbolStyle.SymbolLabel label, LabelKind atlasKind,
+        public static PointStageInput StageInputFor(SymbolStyle.SymbolFeature label, SymbolKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
             => new PointStageInput
             {

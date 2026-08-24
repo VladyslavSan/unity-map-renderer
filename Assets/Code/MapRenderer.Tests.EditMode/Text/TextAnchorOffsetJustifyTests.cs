@@ -112,15 +112,18 @@ namespace MapRenderer.Tests.Text
             float lineWidth = entryA.Advance + entryLowerA.Advance;
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
 
-            TextLayoutResult topLeft = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.TopLeft));
-            TextLayoutResult center = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center));
-            TextLayoutResult bottomRight = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight));
+            var topLeftQuads = new List<SymbolQuad>();
+            var centerQuads = new List<SymbolQuad>();
+            var bottomRightQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.TopLeft), topLeftQuads);
+            TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center), centerQuads);
+            TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight), bottomRightQuads);
 
             // Optical-centre shift (§11 D12): GlyphSdf.BaselineBelowReferencePx (26) minus half a
             // cap height (0.5 * (17/24)em * 24 = 8.5) = 17.5 -- a hand-derived literal, not read
             // back from the production constants it exists to check.
-            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * lineWidth, 17.5f), "Center - TopLeft");
-            AssertConstantDelta(topLeft.Quads, bottomRight.Quads, new float2(-lineWidth, lineHeightPx), "BottomRight - TopLeft");
+            AssertConstantDelta(topLeftQuads, centerQuads, new float2(-0.5f * lineWidth, 17.5f), "Center - TopLeft");
+            AssertConstantDelta(topLeftQuads, bottomRightQuads, new float2(-lineWidth, lineHeightPx), "BottomRight - TopLeft");
 
             TextLayoutOptions Opt(TextAnchor a) => MakeOptions(anchor: a);
         }
@@ -157,14 +160,17 @@ namespace MapRenderer.Tests.Text
             // centre sits one line's span (0.5*lineHeightPx) above it.
             float deltaYCenterExpected = 17.5f + 0.5f * lineHeightPx;
 
-            TextLayoutResult topLeft = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.TopLeft));
-            TextLayoutResult center = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center));
-            TextLayoutResult bottomRight = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight));
+            var topLeftQuads = new List<SymbolQuad>();
+            var centerQuads = new List<SymbolQuad>();
+            var bottomRightQuads = new List<SymbolQuad>();
+            TextLayoutBounds topLeft = TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.TopLeft), topLeftQuads);
+            TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.Center), centerQuads);
+            TextQuadLayout.Layout(run, atlas, Opt(TextAnchor.BottomRight), bottomRightQuads);
 
             Assert.AreEqual(2, topLeft.LineCount, "the chosen max-width must force exactly a 2-line wrap");
 
-            float deltaYCenter = center.Quads[0].TopLeft.y - topLeft.Quads[0].TopLeft.y;
-            float deltaYBottomRight = bottomRight.Quads[0].TopLeft.y - topLeft.Quads[0].TopLeft.y;
+            float deltaYCenter = centerQuads[0].TopLeft.y - topLeftQuads[0].TopLeft.y;
+            float deltaYBottomRight = bottomRightQuads[0].TopLeft.y - topLeftQuads[0].TopLeft.y;
 
             Assert.AreEqual(deltaYCenterExpected, deltaYCenter, Tolerance, "Center's vertical delta must be the line-span midpoint, not half of lineCount*lineHeight");
             Assert.AreEqual(blockHeight, deltaYBottomRight, Tolerance, "BottomRight's vertical delta must use lineCount*lineHeight");
@@ -176,8 +182,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreNotEqual(0.5f * blockHeight, deltaYCenter, "the old box-midpoint formula (0.5*blockHeight) must not match the optical-centre formula");
             Assert.AreNotEqual(lineHeightPx, deltaYBottomRight, "a per-line vertical anchor would use a single line's height, not the block's");
 
-            AssertConstantDelta(topLeft.Quads, center.Quads, new float2(-0.5f * blockWidth, deltaYCenterExpected), "Center - TopLeft (2-line)");
-            AssertConstantDelta(topLeft.Quads, bottomRight.Quads, new float2(-blockWidth, blockHeight), "BottomRight - TopLeft (2-line)");
+            AssertConstantDelta(topLeftQuads, centerQuads, new float2(-0.5f * blockWidth, deltaYCenterExpected), "Center - TopLeft (2-line)");
+            AssertConstantDelta(topLeftQuads, bottomRightQuads, new float2(-blockWidth, blockHeight), "BottomRight - TopLeft (2-line)");
 
             TextLayoutOptions Opt(TextAnchor a) => MakeOptions(anchor: a, justify: TextJustify.Center, maxWidthEm: maxWidthEm);
         }
@@ -194,12 +200,15 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
             ShapedRun run = MakeRun(((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
-            TextLayoutResult baseline = TextQuadLayout.Layout(run, atlas, MakeOptions(offset: float2.zero));
-            TextLayoutResult offsetX = TextQuadLayout.Layout(run, atlas, MakeOptions(offset: new float2(1f, 0f)));
-            TextLayoutResult offsetY = TextQuadLayout.Layout(run, atlas, MakeOptions(offset: new float2(0f, 0.5f)));
+            var baselineQuads = new List<SymbolQuad>();
+            var offsetXQuads = new List<SymbolQuad>();
+            var offsetYQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(offset: float2.zero), baselineQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(offset: new float2(1f, 0f)), offsetXQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(offset: new float2(0f, 0.5f)), offsetYQuads);
 
-            AssertConstantDelta(baseline.Quads, offsetX.Quads, new float2(24f, 0f), "text-offset [1,0]");
-            AssertConstantDelta(baseline.Quads, offsetY.Quads, new float2(0f, 12f), "text-offset [0,0.5]");
+            AssertConstantDelta(baselineQuads, offsetXQuads, new float2(24f, 0f), "text-offset [1,0]");
+            AssertConstantDelta(baselineQuads, offsetYQuads, new float2(0f, 12f), "text-offset [0,0.5]");
         }
 
         [Test]
@@ -210,19 +219,22 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
             ShapedRun run = MakeRun(((uint)'A', entryA.Advance));
 
-            TextLayoutResult baseline = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft));
-            TextLayoutResult radial = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, radialOffset: 1f));
+            var baselineQuads = new List<SymbolQuad>();
+            var radialQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft), baselineQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, radialOffset: 1f), radialQuads);
 
             // TopLeft is a corner anchor (hAlign=0, vAlign=0): pushes away from the anchored edges,
             // i.e. further +x (away from the left edge) and further -y (away from the top edge),
             // split into a diagonal of magnitude RadialOffset/sqrt2 on each axis.
             float diagPx = 24f / math.SQRT2;
-            AssertConstantDelta(baseline.Quads, radial.Quads, new float2(diagPx, -diagPx), "RadialOffset=1 @ TopLeft (corner)");
+            AssertConstantDelta(baselineQuads, radialQuads, new float2(diagPx, -diagPx), "RadialOffset=1 @ TopLeft (corner)");
 
             // Radial overrides a nonzero Offset entirely (decision: "Radial overrides Offset if !=0").
-            TextLayoutResult radialWithIgnoredOffset = TextQuadLayout.Layout(run, atlas,
-                MakeOptions(anchor: TextAnchor.TopLeft, offset: new float2(5f, 5f), radialOffset: 1f));
-            AssertAllQuadsEqual(radial.Quads, radialWithIgnoredOffset.Quads, "RadialOffset must override a nonzero Offset");
+            var radialWithIgnoredOffsetQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas,
+                MakeOptions(anchor: TextAnchor.TopLeft, offset: new float2(5f, 5f), radialOffset: 1f), radialWithIgnoredOffsetQuads);
+            AssertAllQuadsEqual(radialQuads, radialWithIgnoredOffsetQuads, "RadialOffset must override a nonzero Offset");
         }
 
         [Test]
@@ -233,13 +245,17 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
             ShapedRun run = MakeRun(((uint)'A', entryA.Advance));
 
-            TextLayoutResult baselineLeft = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left));
-            TextLayoutResult radialLeft = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, radialOffset: 1f));
-            AssertConstantDelta(baselineLeft.Quads, radialLeft.Quads, new float2(24f, 0f), "RadialOffset=1 @ Left (pure x axis)");
+            var baselineLeftQuads = new List<SymbolQuad>();
+            var radialLeftQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left), baselineLeftQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, radialOffset: 1f), radialLeftQuads);
+            AssertConstantDelta(baselineLeftQuads, radialLeftQuads, new float2(24f, 0f), "RadialOffset=1 @ Left (pure x axis)");
 
-            TextLayoutResult baselineTop = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top));
-            TextLayoutResult radialTop = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, radialOffset: 1f));
-            AssertConstantDelta(baselineTop.Quads, radialTop.Quads, new float2(0f, -24f), "RadialOffset=1 @ Top (pure y axis)");
+            var baselineTopQuads = new List<SymbolQuad>();
+            var radialTopQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top), baselineTopQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, radialOffset: 1f), radialTopQuads);
+            AssertConstantDelta(baselineTopQuads, radialTopQuads, new float2(0f, -24f), "RadialOffset=1 @ Top (pure y axis)");
         }
 
         // =========================================================================================
@@ -251,14 +267,17 @@ namespace MapRenderer.Tests.Text
         {
             (GlyphAtlas atlas, ShapedRun run, GlyphAtlasEntry entryA, GlyphAtlasEntry entrySpace, GlyphAtlasEntry entryLowerA, float maxWidthEm) = MakeTwoLineFixture();
 
-            TextLayoutResult left = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Left, maxWidthEm: maxWidthEm));
-            TextLayoutResult center = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Center, maxWidthEm: maxWidthEm));
-            TextLayoutResult right = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Right, maxWidthEm: maxWidthEm));
+            var leftQuads = new List<SymbolQuad>();
+            var centerQuads = new List<SymbolQuad>();
+            var rightQuads = new List<SymbolQuad>();
+            TextLayoutBounds left = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Left, maxWidthEm: maxWidthEm), leftQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Center, maxWidthEm: maxWidthEm), centerQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.TopLeft, justify: TextJustify.Right, maxWidthEm: maxWidthEm), rightQuads);
 
             Assert.AreEqual(2, left.LineCount);
-            Assert.AreEqual(2, left.Quads.Count);
-            Assert.AreEqual(0, left.Quads[0].LineIndex);
-            Assert.AreEqual(1, left.Quads[1].LineIndex);
+            Assert.AreEqual(2, leftQuads.Count);
+            Assert.AreEqual(0, leftQuads[0].LineIndex);
+            Assert.AreEqual(1, leftQuads[1].LineIndex);
             // (quads[0] is line 0's only glyph 'A'; quads[1] is line 1's only glyph 'a' -- the space never gets a quad.)
 
             float lineWidth0 = entryA.Advance;
@@ -269,9 +288,9 @@ namespace MapRenderer.Tests.Text
             float raw0 = entryA.Left - GlyphSdf.Buffer;
             float raw1 = entryLowerA.Left - GlyphSdf.Buffer;
 
-            float diffLeft = left.Quads[0].TopLeft.x - left.Quads[1].TopLeft.x;
-            float diffCenter = center.Quads[0].TopLeft.x - center.Quads[1].TopLeft.x;
-            float diffRight = right.Quads[0].TopLeft.x - right.Quads[1].TopLeft.x;
+            float diffLeft = leftQuads[0].TopLeft.x - leftQuads[1].TopLeft.x;
+            float diffCenter = centerQuads[0].TopLeft.x - centerQuads[1].TopLeft.x;
+            float diffRight = rightQuads[0].TopLeft.x - rightQuads[1].TopLeft.x;
 
             // Left (factor 0): no per-line correction at all -- each line's own local start (raw0/raw1) is untouched.
             float expectedDiffLeft = raw0 - raw1;
@@ -294,20 +313,26 @@ namespace MapRenderer.Tests.Text
         {
             (GlyphAtlas atlas, ShapedRun run, GlyphAtlasEntry entryA, GlyphAtlasEntry entrySpace, GlyphAtlasEntry entryLowerA, float maxWidthEm) = MakeTwoLineFixture();
 
-            TextLayoutResult autoLeftAnchor = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, justify: TextJustify.Auto, maxWidthEm: maxWidthEm));
-            TextLayoutResult explicitLeft = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, justify: TextJustify.Left, maxWidthEm: maxWidthEm));
-            AssertAllQuadsEqual(autoLeftAnchor.Quads, explicitLeft.Quads, "auto with a Left-ish anchor must resolve to Left");
+            var autoLeftAnchorQuads = new List<SymbolQuad>();
+            var explicitLeftQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, justify: TextJustify.Auto, maxWidthEm: maxWidthEm), autoLeftAnchorQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Left, justify: TextJustify.Left, maxWidthEm: maxWidthEm), explicitLeftQuads);
+            AssertAllQuadsEqual(autoLeftAnchorQuads, explicitLeftQuads, "auto with a Left-ish anchor must resolve to Left");
 
-            TextLayoutResult autoRightAnchor = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right, justify: TextJustify.Auto, maxWidthEm: maxWidthEm));
-            TextLayoutResult explicitRight = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right, justify: TextJustify.Right, maxWidthEm: maxWidthEm));
-            AssertAllQuadsEqual(autoRightAnchor.Quads, explicitRight.Quads, "auto with a Right-ish anchor must resolve to Right");
+            var autoRightAnchorQuads = new List<SymbolQuad>();
+            var explicitRightQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right, justify: TextJustify.Auto, maxWidthEm: maxWidthEm), autoRightAnchorQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Right, justify: TextJustify.Right, maxWidthEm: maxWidthEm), explicitRightQuads);
+            AssertAllQuadsEqual(autoRightAnchorQuads, explicitRightQuads, "auto with a Right-ish anchor must resolve to Right");
 
-            TextLayoutResult autoTopAnchor = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, justify: TextJustify.Auto, maxWidthEm: maxWidthEm));
-            TextLayoutResult explicitCenter = TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, justify: TextJustify.Center, maxWidthEm: maxWidthEm));
-            AssertAllQuadsEqual(autoTopAnchor.Quads, explicitCenter.Quads, "auto with a non-Left/Right anchor must resolve to Center");
+            var autoTopAnchorQuads = new List<SymbolQuad>();
+            var explicitCenterQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, justify: TextJustify.Auto, maxWidthEm: maxWidthEm), autoTopAnchorQuads);
+            TextQuadLayout.Layout(run, atlas, MakeOptions(anchor: TextAnchor.Top, justify: TextJustify.Center, maxWidthEm: maxWidthEm), explicitCenterQuads);
+            AssertAllQuadsEqual(autoTopAnchorQuads, explicitCenterQuads, "auto with a non-Left/Right anchor must resolve to Center");
 
             // Teeth: an impl that ignores the anchor for auto (always Center) fails the Left/Right cases above.
-            Assert.AreNotEqual(explicitLeft.Quads[0].TopLeft.x, explicitRight.Quads[0].TopLeft.x,
+            Assert.AreNotEqual(explicitLeftQuads[0].TopLeft.x, explicitRightQuads[0].TopLeft.x,
                 "sanity: Left vs Right justify must actually differ for the auto-resolution assertions above to be decisive");
         }
 

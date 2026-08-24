@@ -1,4 +1,4 @@
-// Unity EditMode only — needs a real Camera/Material/Shader + the internal SymbolLabelSubsystem, and reads
+// Unity EditMode only — needs a real Camera/Material/Shader + the internal SymbolSubsystem, and reads
 // source files under Application.dataPath. NOT registered in core-tests.csproj.
 //
 // EditMode half of the pump-split: the 2 synchronous [Test] below are structural source-grep teeth with no
@@ -17,13 +17,13 @@ namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail
-    /// split — the worker phase (<see cref="SymbolLabelSubsystem.TryBeginBuild"/>'s returned pass) stops
+    /// split — the worker phase (<see cref="SymbolSubsystem.TryBeginBuild"/>'s returned pass) stops
     /// after the pool-side extract and hands a ready tail (via the A5b pool→main handoff) to
-    /// <see cref="SymbolLabelSubsystem.PumpBuilds"/>' budgeted tail-start loop (<c>RunTailAsync</c>), rather
+    /// <see cref="SymbolSubsystem.PumpBuilds"/>' budgeted tail-start loop (<c>RunTailAsync</c>), rather
     /// than shaping + committing inline. These teeth fail a shallow split — a rename that leaves the tail
     /// running inline, an unbudgeted tail loop, or a split that breaks the partial-commit guard. Both teeth
     /// here are structural (source-grep) and need no fixture/camera/subsystem harness — the behavioural
-    /// [UnityTest] teeth that DO (and drive <see cref="SymbolLabelSubsystemPumpTests"/>' fixture/glyph-source
+    /// [UnityTest] teeth that DO (and drive <see cref="SymbolSubsystemPumpTests"/>' fixture/glyph-source
     /// harness) live in the PlayMode half.
     /// </summary>
     [TestFixture]
@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Text
         public void RunWorkerAndHandoff_NeverShapesOrCommits_RunTailAsync_DoesBothExactlyOnce()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
@@ -64,14 +64,14 @@ namespace MapRenderer.Tests.Text
         // ── A3 merge-step follow-up: the commit-gating ORDER in RunTailAsync — the sole CompleteBuild commit
         //    is reached only AFTER the whole per-layer CompleteOnMainAsync loop AND a trailing ct check, so a
         //    cancel landing mid-loop (between processor tails k and k+1, or after the last one) never commits
-        //    partial labels. F-1 pins the call COUNTS (each exactly once); this pins their ORDER — the actual
+        //    partial symbols. F-1 pins the call COUNTS (each exactly once); this pins their ORDER — the actual
         //    partial-commit guard the A3 review flagged as covered only indirectly. Complements the behavioural
         //    F-3(b) (cancel OBSERVED inside a shape await); this pins the guard structurally + deterministically.
         [Test]
         public void RunTailAsync_CommitIsGatedBehindTheWholeLoopAndACtCheck()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
             string tailBody = ExtractMethodBody(source, "UniTaskVoid RunTailAsync(", path);

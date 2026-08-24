@@ -1,8 +1,8 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj. Modeled on SymbolAtlasOrientationSnapshotTests (same fixture glyph,
 // same headless-readback caveats) but does NOT touch that file — this is the A0 GPU A/B equivalence tooth
-// (world-anchored-labels-design.md §10 T2, §11 A0), rendering the SAME real glyph through BOTH the OLD
-// screen-space path (a real LabelPlacementSystem.Tick, exactly like the orientation test) and the NEW
+// (world-anchored-symbols-design.md §10 T2, §11 A0), rendering the SAME real glyph through BOTH the OLD
+// screen-space path (a real SymbolPlacementSystem.Tick, exactly like the orientation test) and the NEW
 // world-anchored path (a one-off WorldBillboardMeshBuilder mesh presented through Map/Symbol/TextWorld).
 //
 // Y RECONCILIATION (advisor #1 / A0's make-or-break — resolved EMPIRICALLY, see WorldSymbolInkAnalysis):
@@ -17,6 +17,7 @@
 // see the RESOLVED CONVENTION note on <see cref="BuildOneGlyphWorldMesh"/>.
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Collections;
@@ -71,9 +72,10 @@ namespace MapRenderer.Tests.Text.Placement
 
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
-            Assert.AreEqual(1, layout.Quads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
-            SymbolQuad quad = layout.Quads[0];
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
+            Assert.AreEqual(1, quads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
+            SymbolQuad quad = quads[0];
 
             var camGo = new GameObject("WorldSymbolAb_TestCamera");
             var uCam = camGo.AddComponent<Camera>();
@@ -99,32 +101,25 @@ namespace MapRenderer.Tests.Text.Placement
             // the AnchorLocal bake float32-safe (Risk R1; TileKey=0 is ~2e7m away, see
             // SymbolAtlasOrientationSnapshotTests' identical note).
             long tileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
-            var label = new LabelInstance
-            {
-                AnchorRender = anchorRender,
-                Layout = layout,
-                Paint = LabelPaint.Default,
-                TextSizePx = textSizePx,
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = tileKey,
-            };
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
+                paint: SymbolPaint.Default, textSizePx: textSizePx, sortKey: 0f, featureIndex: 0, tileKey: tileKey);
 
             byte[] oldPixels;
             byte[] newPixels;
 
-            // ── OLD path: a real LabelPlacementSystem.Tick — since A1, this Tick produces the WORLD path's
-            // output for a point label (the design's "Open items" note: this arm is repointed to
+            // ── OLD path: a real SymbolPlacementSystem.Tick — since A1, this Tick produces the WORLD path's
+            // output for a point symbol (the design's "Open items" note: this arm is repointed to
             // real-Tick-vs-scaffold, no longer a literal screen-space "old"). Needs its own world base
             // material (D7). ──────────────────────────────────────────────────────────────────────────
-            using (var system = new LabelPlacementSystem(mapCamera,
+            using (var system = new SymbolPlacementSystem(mapCamera,
                        worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld"))))
             using (var snapOld = new SnapshotRenderer(Size, Size))
             using (var plan = new TestSymbolPlan(mapCamera.Projection))
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the OLD path's label must not be culled.");
 
                 snapOld.Render(uCam);
@@ -138,7 +133,7 @@ namespace MapRenderer.Tests.Text.Placement
             Material worldMaterial = null;
             try
             {
-                float4 textColor = LabelPaint.Default.TextColor;
+                float4 textColor = SymbolPaint.Default.TextColor;
                 worldMesh = BuildOneGlyphWorldMesh(quad, textSizePx, new float3(textColor.x, textColor.y, textColor.z));
 
                 worldMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));
@@ -154,7 +149,7 @@ namespace MapRenderer.Tests.Text.Placement
                 meshRenderer.sharedMaterial = worldMaterial;
 
                 // Level-2 placement (§3.4): AnchorLocal is baked relative to the anchor itself (tileOrigin
-                // == anchorRender, so AnchorLocal == 0) — a one-label test mesh has no real tile to bake
+                // == anchorRender, so AnchorLocal == 0) — a one-symbol test mesh has no real tile to bake
                 // against, so the anchor doubles as its own bake origin. The object's position/rotation
                 // carry the rest, identically to how a real tile mesh is placed.
                 float3 objectPos = FloatingOrigin.TileToSceneRebased(anchorRender, frame.SceneOriginRender, frame.Rebase);

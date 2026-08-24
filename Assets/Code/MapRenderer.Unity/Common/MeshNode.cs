@@ -7,8 +7,8 @@ namespace MapRenderer.Unity.Common
     /// A <see cref="GameObject"/> that draws one mesh: it and its <see cref="MeshFilter"/> /
     /// <see cref="MeshRenderer"/>, resolved once at construction and held as properties.
     ///
-    /// <para><b>What this is for.</b> Both GameObject-based draw paths — the world-label leaves
-    /// (<c>WorldLabelRenderer</c>) and the tile backend's per-layer children
+    /// <para><b>What this is for.</b> Both GameObject-based draw paths — the world-symbol leaves
+    /// (<c>WorldSymbolRenderer</c>) and the tile backend's per-layer children
     /// (<c>Backend.GameObjects.TileRenderer</c>) — pool exactly this shape, and both used to express it as an
     /// unenforced handshake: a <c>createFunc</c> that happened to <c>AddComponent</c> both, and rent/release
     /// sites that <c>GetComponent</c> them back and null-checked the result. Making it a type turns that
@@ -17,7 +17,7 @@ namespace MapRenderer.Unity.Common
     ///
     /// <para><b>State, not policy.</b> This deliberately owns nothing about how a node is USED — no
     /// parenting, no naming, no shadow mode, no <c>hideFlags</c>, no initial visibility. A shared type that
-    /// guessed those would be wrong for someone: a label leaf sits at local identity under a layer node,
+    /// guessed those would be wrong for someone: a symbol leaf sits at local identity under a layer node,
     /// while a tile layer child is named per style layer and placed under a tile container. A pool wrapping
     /// this type's *behaviour* was tried and removed for exactly that reason, and the constructor then
     /// briefly repeated the mistake with three renderer settings, which is why this paragraph enumerates
@@ -60,7 +60,7 @@ namespace MapRenderer.Unity.Common
         /// Drops every reference to the tenancy that just ended, leaving the node safe to park.
         ///
         /// <para>Clearing <see cref="MeshFilter.sharedMesh"/> is not hygiene, it is required: neither draw
-        /// path owns its Mesh (TileManager owns tile meshes; a label slot destroys its own), and both may
+        /// path owns its Mesh (TileManager owns tile meshes; a symbol slot destroys its own), and both may
         /// destroy it immediately after releasing the node — so a node that kept the binding would carry a
         /// DESTROYED Mesh into its next tenancy.</para>
         ///

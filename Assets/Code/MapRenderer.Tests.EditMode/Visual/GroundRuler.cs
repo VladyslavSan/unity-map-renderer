@@ -16,7 +16,7 @@ namespace MapRenderer.Tests
     ///
     /// <para>WHY THIS IS AN INDEPENDENT ORACLE AND NOT THE MECHANISM UNDER TEST. The mechanism under test is
     /// how a styled or offset quantity becomes a WORLD displacement (the shader's extrusion, a future
-    /// tangent-plane label offset) — the projection itself is shared machinery, correct by the fact that the
+    /// tangent-plane symbol offset) — the projection itself is shared machinery, correct by the fact that the
     /// whole renderer works. This class computes the intended world displacement on the CPU and projects it;
     /// the render computes the displacement in the shader and projects it with the same matrix. A discrepancy
     /// therefore isolates the displacement, not the projection.</para>
@@ -65,7 +65,7 @@ namespace MapRenderer.Tests
 
         /// <summary>Converts a STYLED px width to a world-metre width via the frame constant
         /// (<c>docs/line-rendering-design.md</c> §1's conversion, given one site here). Unused by T's own
-        /// teeth (T2/T3 use world metres deliberately, per §3.2) — exists for the P3 label-offset consumer
+        /// teeth (T2/T3 use world metres deliberately, per §3.2) — exists for the P3 symbol-offset consumer
         /// and the caps/joins stage, whose styled sizes are in px.</summary>
         public static double StyledPixelsToWorldMetres(double styledPx, double metresPerDevicePixel)
             => styledPx * metresPerDevicePixel;
@@ -79,7 +79,7 @@ namespace MapRenderer.Tests
         ///
         /// <para><b>THE BLIND SPOT, NAMED.</b> <c>mpp</c> is a per-FRAME constant — the ruler at the look-at
         /// depth — so this form is silently wrong at any other depth, by exactly the depth ratio. Every
-        /// fixture in the pitch-alignment epic anchored its label at the look-at, where that error is
+        /// fixture in the pitch-alignment epic anchored its symbol at the look-at, where that error is
         /// identically zero, and therefore could not observe the quantity the epic is about. The
         /// depth-GENERAL sibling is <see cref="ClosedFormPerpendicularSpanPx"/>; prefer it whenever the
         /// measurand is not at the look-at.</para></summary>
@@ -122,7 +122,7 @@ namespace MapRenderer.Tests
         /// <para>The depth-GENERAL sibling of <see cref="ClosedFormAcrossAzimuthSpanPx"/> (which is
         /// look-at-only — see the blind-spot note there). Its terms are the raw projection
         /// (<c>camera.projectionMatrix.m11</c>, <c>camera.pixelHeight</c>) and a measured view depth; it
-        /// carries no per-frame ruler, so it stays correct as a label recedes.</para>
+        /// carries no per-frame ruler, so it stays correct as a symbol recedes.</para>
         ///
         /// <para>VALIDITY: exact for a displacement perpendicular to the view axis (both endpoints then share
         /// one <c>w</c>, so the perspective divide is a single scale factor), and a small-span approximation

@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
     /// break the registry↔CBUFFER equality that makes those tests meaningful.</para>
     ///
     /// <para>Prior art for keeping a texture id off the CBUFFER registry:
-    /// <c>WorldLabelRenderer.AtlasPropId</c>. This class exists rather than a private field there because
+    /// <c>WorldSymbolRenderer.AtlasPropId</c>. This class exists rather than a private field there because
     /// both the render layer and its tests bind the sheet, and the name should have one source.</para>
     /// </summary>
     public static class TexturePropertyId

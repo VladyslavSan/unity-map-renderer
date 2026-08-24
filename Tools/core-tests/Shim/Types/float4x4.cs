@@ -1,6 +1,6 @@
 namespace Unity.Mathematics
 {
-    // S20 T2: float4x4 is needed by MapRenderer.Core.Text.Placement.LabelScreenProjection (the combined
+    // S20 T2: float4x4 is needed by MapRenderer.Core.Text.Placement.SymbolScreenProjection (the combined
     // view-projection matrix). Column-major (c0..c3 are the matrix's columns), matching the real
     // Unity.Mathematics.float4x4 / HLSL mul(matrix, columnVector) convention — see VectorMath.mul below.
     public struct float4x4

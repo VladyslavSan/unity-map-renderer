@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Tiles
         public void F1_FeedSwapIsReal_NoResidualPushSymbols()
         {
             string tileManagerSrc = File.ReadAllText(SourcePath("MapRenderer.Unity", "Rendering", "Tile", "TileManager.cs"));
-            string subsystemSrc   = File.ReadAllText(SourcePath("MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs"));
+            string subsystemSrc   = File.ReadAllText(SourcePath("MapRenderer.Unity", "Text", "SymbolSubsystem.cs"));
 
             Assert.AreEqual(0, CountOccurrences(tileManagerSrc, "SymbolTileBytesReady"),
                 "TileManager must contain ZERO SymbolTileBytesReady occurrences — the push feed is retired.");
@@ -118,11 +118,11 @@ namespace MapRenderer.Tests.Tiles
                 "KickMeshBuild's signature must carry an ISymbolTileWorkerPass parameter.");
 
             Assert.AreEqual(0, CountOccurrences(subsystemSrc, "OnTileBytesReady"),
-                "SymbolLabelSubsystem must contain ZERO OnTileBytesReady occurrences — the push entry is retired.");
+                "SymbolSubsystem must contain ZERO OnTileBytesReady occurrences — the push entry is retired.");
             Assert.AreEqual(0, CountOccurrences(subsystemSrc, "_buildQueue"),
-                "SymbolLabelSubsystem must contain ZERO _buildQueue occurrences — the build-start queue is retired.");
-            Assert.IsTrue(typeof(ISymbolTileWorkerFactory).IsAssignableFrom(typeof(SymbolLabelSubsystem)),
-                "SymbolLabelSubsystem must implement ISymbolTileWorkerFactory.");
+                "SymbolSubsystem must contain ZERO _buildQueue occurrences — the build-start queue is retired.");
+            Assert.IsTrue(typeof(ISymbolTileWorkerFactory).IsAssignableFrom(typeof(SymbolSubsystem)),
+                "SymbolSubsystem must implement ISymbolTileWorkerFactory.");
         }
 
         // ── F-4: DrainMeshBuilds stays symbol-silent (§Q-Drain KEEP) ───────────────────────────────────

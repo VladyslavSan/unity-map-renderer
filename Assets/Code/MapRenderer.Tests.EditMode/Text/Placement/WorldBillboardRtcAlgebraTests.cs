@@ -1,12 +1,12 @@
 // Unity EditMode — a real UnityEngine.Camera supplies the view-projection matrix (mirrors
-// LabelScreenProjectionUnityTests' pattern), but this test does NOT render anything (no GPU readback) —
+// SymbolScreenProjectionUnityTests' pattern), but this test does NOT render anything (no GPU readback) —
 // it is a pure algebra check, fast within the batch run. NOT registered in core-tests.csproj (needs
 // UnityEngine.Camera for projectionMatrix/worldToCameraMatrix).
 //
-// A0 T1 (world-anchored-labels-design.md §10 T1, §11 A0): pins the "two-term-RTC-vs-single-narrow" seam —
+// A0 T1 (world-anchored-symbols-design.md §10 T1, §11 A0): pins the "two-term-RTC-vs-single-narrow" seam —
 // the world-anchored path composes a screen position via TWO float32-narrowed terms (mesh-baked
 // AnchorLocal = anchorRender-tileOriginRender, plus the per-frame tile transform
-// tileOriginRender-sceneOriginRender), while the OLD path (LabelScreenProjection.TryProjectPoint) narrows
+// tileOriginRender-sceneOriginRender), while the OLD path (SymbolScreenProjection.TryProjectPoint) narrows
 // renderPos-sceneOriginRender in ONE step. FloatingOrigin's tileOrigin term cancels analytically (its own
 // doc comment), so the two compositions should agree on the projected screen position within a tight px
 // bound — this test proves that empirically across zooms, all 4 glyph corners, and several tile origins
@@ -83,8 +83,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                     double2 viewportLogicalPx = mapCamera.ViewportPx / mapCamera.DevicePixelRatio;
                     float4x4 viewProj = math.mul(
-                        LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
-                        LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
+                        SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
+                        SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
 
                     // A small, deterministic offset from the look-at (mirrors
                     // SymbolAtlasOrientationSnapshotTests' pattern) so the anchor is not exactly screen-center.
@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Text.Placement
                                 float2 newScreenPx = ProjectWorldPathCorner(
                                     anchorRender, tileOriginRender, sceneOriginRender, viewProj, viewportLogicalPx, offsetPx);
 
-                                Assert.IsTrue(LabelScreenProjection.TryProjectPoint(
+                                Assert.IsTrue(SymbolScreenProjection.TryProjectPoint(
                                         anchorRender, sceneOriginRender, viewProj, viewportLogicalPx, float3x3.identity,
                                         out float2 oldAnchorScreenPx, out _),
                                     $"anchor must project in front of the camera (lookAt {lookAt.Latitude},{lookAt.Longitude}, tileZoom {tileZoom})");
@@ -150,8 +150,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                     double2 viewportLogicalPx = mapCamera.ViewportPx / mapCamera.DevicePixelRatio;
                     float4x4 viewProj = math.mul(
-                        LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
-                        LabelPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
+                        SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.projectionMatrix),
+                        SymbolPlacementSystem.ToFloat4x4(mapCamera.Camera.worldToCameraMatrix));
 
                     double altitude = uCam.transform.position.y;
                     double3 anchorRender = sceneOriginRender + new double3(altitude * 0.01, 0.0, altitude * 0.02);
@@ -166,7 +166,7 @@ namespace MapRenderer.Tests.Text.Placement
                             float2 newScreenPx = ProjectWorldPathCorner(
                                 anchorRender, tileOriginRender, sceneOriginRender, viewProj, viewportLogicalPx, offsetPx);
 
-                            Assert.IsTrue(LabelScreenProjection.TryProjectPoint(
+                            Assert.IsTrue(SymbolScreenProjection.TryProjectPoint(
                                     anchorRender, sceneOriginRender, viewProj, viewportLogicalPx, float3x3.identity,
                                     out float2 oldAnchorScreenPx, out _),
                                 $"anchor must project in front of the camera (lookAt {lookAt.Latitude},{lookAt.Longitude}, tileZoom {tileZoom})");
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests.Text.Placement
             float viewportY = (float)viewportLogicalPx.y;
 
             // The pinned shader line: clip.xy += off / _ScreenParamsLogical.xy * 2.0 * clip.w (_ScreenParamsLogical
-            // is set to viewportLogicalPx — see WorldBillboardMeshBuilder/LabelPlacementSystem's identical convention).
+            // is set to viewportLogicalPx — see WorldBillboardMeshBuilder/SymbolPlacementSystem's identical convention).
             clip.x += offsetPx.x / viewportX * 2.0f * clip.w;
             clip.y += offsetPx.y / viewportY * 2.0f * clip.w;
 

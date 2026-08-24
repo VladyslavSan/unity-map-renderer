@@ -40,12 +40,12 @@ namespace MapRenderer.Core.Text
         /// <para><b>WIRED as of W1</b> (pitch-alignment epic; landed with no production caller in P1, which
         /// this paragraph used to describe). <c>SymbolFeatureExtractor.Extract</c> calls this once per symbol
         /// layer for each of the text and icon key pairs, and stamps the RESOLVED value onto the emitted
-        /// <c>SymbolLabel</c>; it travels to <c>CurvedStageInput.PitchAlignment</c>, where
+        /// <c>SymbolFeature</c>; it travels to <c>CurvedStageInput.PitchAlignment</c>, where
         /// <see cref="AlignmentMode.Map"/> selects the world-metre arc walk in
-        /// <c>LabelStagingMath.StageCurved</c>.</para>
+        /// <c>SymbolStagingMath.StageCurved</c>.</para>
         ///
         /// <para><b>The CURVED (along-line) arm only.</b> The point arm does not consume this yet — there is
-        /// no pitch-alignment field on <c>PointStageInput</c> — so a map-pitched POINT label still billboards.
+        /// no pitch-alignment field on <c>PointStageInput</c> — so a map-pitched POINT symbol still billboards.
         /// That is a deliberate scope fence, not an oversight; it is the next stage of the same epic.</para></summary>
         public static AlignmentMode ResolvePitch(AlignmentMode pitchMode, AlignmentMode rotationMode, SymbolPlacement placement)
         {

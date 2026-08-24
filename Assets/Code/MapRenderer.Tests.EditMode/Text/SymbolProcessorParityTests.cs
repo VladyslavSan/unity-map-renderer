@@ -1,4 +1,4 @@
-// Unity EditMode only — needs a real Camera/Material/Shader + the internal SymbolLabelSubsystem, and drives
+// Unity EditMode only — needs a real Camera/Material/Shader + the internal SymbolSubsystem, and drives
 // the glyph atlas Texture2D upload. NOT registered in core-tests.csproj.
 
 using System.Collections;
@@ -21,6 +21,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests; // TestGlyphSource
+using MapRenderer.Tests.Text.Placement; // BlockColumnHash
 using Symbol = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
@@ -29,14 +30,14 @@ namespace MapRenderer.Tests.Text
 {
     /// <summary>
     /// Epic A / A3 acceptance tooth #3 (the PRIMARY semantic
-    /// tooth): the differential — production <see cref="SymbolLabelSubsystem"/> output, driven through the
+    /// tooth): the differential — production <see cref="SymbolSubsystem"/> output, driven through the
     /// A3 processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/>
     /// ORACLE fed the same bytes/style/camera-zoom/projection over a SECOND, independent builder/glyph
     /// pipeline. THREE symbol layers — one on a different source (so the "s"-source layers' GLOBAL indices
     /// {1,2} diverge from their within-build ordinals {0,1}, §F-3(ii)) and two "s"-source layers with a
     /// ZOOM-INTERPOLATED text-size (so the tile's integer zoom vs the captured camera zoom, §F-3(i), yield
     /// observably different sizes) — so the per-layer processor split, material-index stamping, and
-    /// cross-layer label order are all exercised, and EACH §F-3 falsifier is a genuine (non-coincidental)
+    /// cross-layer symbol order are all exercised, and EACH §F-3 falsifier is a genuine (non-coincidental)
     /// divergence, not just a hypothetical one. See <c>SetUp</c>'s comment for the layout.
     ///
     /// <para>RED-verified against the un-rewired (pre-A3) subsystem for the STRUCTURAL delegation teeth
@@ -50,7 +51,7 @@ namespace MapRenderer.Tests.Text
     /// <para>Falsifiers this tooth catches (§F-3): (i) <c>ctx.Zoom</c> fed the tile's integer zoom instead of
     /// the captured camera zoom; (ii) material indices remapped to per-build ordinals instead of global
     /// <c>layerIndices</c>; (iii) per-layer split reordering or a dropped/collapsed layer; (iv) the main
-    /// tail skipped entirely (zero labels).</para>
+    /// tail skipped entirely (zero symbols).</para>
     /// </summary>
     [TestFixture]
     public class SymbolProcessorParityTests
@@ -62,11 +63,11 @@ namespace MapRenderer.Tests.Text
         // THREE symbol layers, declared in an order that makes both falsifiers this differential exists to
         // catch actually falsifiable (dev-side strengthening after the advisor flagged the original
         // two-layer/constant-text-size style as hollow for exactly the two plumbing bugs §F-3(i)/(ii) name):
-        //  - "labels-other" (a DIFFERENT source, "other") occupies GLOBAL index 0, so the two "s"-source
+        //  - "symbols-other" (a DIFFERENT source, "other") occupies GLOBAL index 0, so the two "s"-source
         //    layers get GLOBAL indices {1, 2} while their WITHIN-BUILD ordinals (k in BuildTileAsync's loop)
         //    are {0, 1} — global-index ≠ ordinal, so a material-index-remap bug (§F-3(ii): stamping `k`
         //    instead of the global `layerIndices[k]`) produces an observably different MaterialIndex.
-        //  - "labels-a"/"labels-b" (source "s", over the fixture's "centroids") use a ZOOM-INTERPOLATED
+        //  - "symbols-a"/"symbols-b" (source "s", over the fixture's "centroids") use a ZOOM-INTERPOLATED
         //    text-size, so evaluating at the tile's INTEGER zoom (3) instead of the captured CAMERA zoom
         //    (5.0, §F-3(i)) yields an observably different TextSizePx/glyph-quad geometry, not an
         //    identical value by coincidence.
@@ -90,7 +91,7 @@ namespace MapRenderer.Tests.Text
         private GameObject _camGo;
         private RenderTexture _rt;
         private MapCamera _mapCamera;
-        private SymbolLabelSubsystem _subsystem;
+        private SymbolSubsystem _subsystem;
         private byte[] _tileBytes;
         private byte[] _latinGlyphs;
         private StyleDocument _style;
@@ -109,7 +110,7 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            _subsystem = new SymbolLabelSubsystem(_mapCamera);
+            _subsystem = new SymbolSubsystem(_mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
             _latinGlyphs = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
             _style = StyleParser.Parse(StyleJson);
@@ -169,11 +170,17 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        /// <summary>Drives the REAL production subsystem to a committed label set — same bytes, same
-        /// style, same glyph fixture as the oracle below. Only "s"-source bytes are pushed — "labels-other"
+        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
+        // deduped ACROSS tiles — this fixture only ever commits ONE tile (SourceId/Tile), so the replacement reads
+        // that tile's baked native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b) rather
+        // than routing through the cross-tile winner plan the deep block-vs-block compare below needs.
+        private static readonly SymbolTileStore.Key ProductionKey = new SymbolTileStore.Key(SourceId, Tile);
+
+        /// <summary>Drives the REAL production subsystem until it commits a baked block — same bytes, same
+        /// style, same glyph fixture as the oracle below. Only "s"-source bytes are pushed — "symbols-other"
         /// (a different source) is never built; it exists solely to make the "s" layers' GLOBAL indices
         /// {1,2} diverge from their within-build ordinals {0,1} (§F-3(ii) falsifier).</summary>
-        private IEnumerator DriveProductionBuild(List<LabelInstance> output)
+        private IEnumerator DriveProductionBuild()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             _subsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
@@ -185,15 +192,13 @@ namespace MapRenderer.Tests.Text
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                output.Clear();
-                _subsystem.CollectInto(output);
-                if (output.Count > 0) yield break;
+                if (_subsystem.Store().DebugBlockFor(ProductionKey) != null) yield break;
                 yield return null;
             }
             Assert.Fail("production build did not commit labels within 200 pumped frames");
         }
 
-        /// <summary>Builds the ORACLE label set: the pre-A3-shaped single pass
+        /// <summary>Builds the ORACLE symbol set: the pre-A3-shaped single pass
         /// (<see cref="StyledSymbolTileBuilder.BuildAsync"/>) over a SECOND, independent glyph pipeline fed
         /// the SAME ranges — atlas state is equivalent but independent, so this is not self-referential with
         /// the processor machinery A3 changes (only <c>ExtractLayers</c>/<c>ShapeAsync</c>, which A3 does not
@@ -204,10 +209,10 @@ namespace MapRenderer.Tests.Text
         /// <c>SymbolBufferParityTests</c> is that oracle. Recorded here rather than only in the newer file
         /// because a stale independence claim left where a reader finds it is precisely how this epic
         /// disarmed a structural tooth once already.</para></summary>
-        private List<LabelInstance> BuildOracle()
+        private SymbolTileBuffer BuildOracle()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
-            // Match SymbolLabelSubsystem.SetStyle's atlas dimension EXACTLY (its AtlasDimension = 4096,
+            // Match SymbolSubsystem.SetStyle's atlas dimension EXACTLY (its AtlasDimension = 4096,
             // clamped to the GPU max) — a different atlas size packs glyphs at different cells, so their
             // normalized UVs would differ from production for a reason that has NOTHING to do with A3
             // (a test-harness artifact, not a real divergence).
@@ -219,7 +224,7 @@ namespace MapRenderer.Tests.Text
             double zoom = _mapCamera.CurrentProperties.Zoom; // same captured camera zoom the production build uses
             var projection = _mapCamera.Projection;
 
-            var oracle = new List<LabelInstance>();
+            var oracle = new SymbolTileBuffer();
             // BuildAsync completes synchronously here: TestGlyphSource resolves via UniTask.FromResult and
             // neither BuildAsync/ExtractLayers/ShapeAsync forces a thread hop — no real async suspension.
             // _sSourceLayers/_sSourceGlobalIndices mirror exactly what BuildTileAsync passes for the "s"
@@ -229,55 +234,33 @@ namespace MapRenderer.Tests.Text
             return oracle;
         }
 
+        /// <summary>4.4b: the differential is now BLOCK-vs-block, collapsing the former symbol-for-symbol
+        /// (the retired per-symbol carrier's own assert helper) and batch-record comparisons into one — both compared the SAME
+        /// underlying committed content, just through two different readers, and
+        /// <see cref="BlockColumnHash.AssertColumnsEqual"/> already covers every column either one did (record
+        /// kind/detail, point/curved stage inputs, quads) at finer, per-column granularity.</summary>
         [UnityTest]
-        public IEnumerator ProductionBuild_MatchesSinglePassOracle_LabelForLabel()
+        public IEnumerator ProductionBuild_MatchesSinglePassOracle_BlockForBlock()
         {
-            var production = new List<LabelInstance>();
-            yield return DriveProductionBuild(production);
+            yield return DriveProductionBuild();
+            SymbolTileBlock production = _subsystem.Store().DebugBlockFor(ProductionKey);
+            Assert.IsNotNull(production, "sanity: the production build committed a block");
 
-            List<LabelInstance> oracle = BuildOracle();
+            SymbolTileBuffer oracleSymbols = BuildOracle();
+            Assert.Greater(oracleSymbols.Symbols.Count, 0, "sanity: the fixture + the 's'-source layers must yield labels at all");
 
-            Assert.Greater(oracle.Count, 0, "sanity: the fixture + the 's'-source layers must yield labels at all");
-            Assert.AreEqual(oracle.Count, production.Count, "candidate COUNT must match the oracle");
-
-            for (int i = 0; i < oracle.Count; i++)
-                LabelInstanceAssert.AreEqual(oracle[i], production[i], i);
-        }
-
-        [UnityTest]
-        public IEnumerator ProductionBatch_MatchesOracleBatch_RecordAndQuadContent()
-        {
-            var production = new List<LabelInstance>();
-            yield return DriveProductionBuild(production);
-            List<LabelInstance> oracle = BuildOracle();
-
-            int slotCount = _allStyleSymbolLayers.Count; // mirrors production CurrentBatch's _allSymbolLayers.Count
-            var oracleBatch = new SymbolLabelBatch();
-            var productionBatch = new SymbolLabelBatch();
-            SymbolLabelBatchBuilder.Build(oracleBatch, oracle, slotCount, _mapCamera.Projection);
-            SymbolLabelBatchBuilder.Build(productionBatch, production, slotCount, _mapCamera.Projection);
-
-            Assert.AreEqual(oracleBatch.Count, productionBatch.Count, "record count");
-            CollectionAssert.AreEqual(Trim(oracleBatch.Kinds, oracleBatch.Count), Trim(productionBatch.Kinds, productionBatch.Count), "Kinds");
-            CollectionAssert.AreEqual(Trim(oracleBatch.Detail, oracleBatch.Count), Trim(productionBatch.Detail, productionBatch.Count), "Detail");
-
-            Assert.AreEqual(oracleBatch.PointCount, productionBatch.PointCount, "point count");
-            CollectionAssert.AreEqual(Trim(oracleBatch.PointQuadStart, oracleBatch.PointCount), Trim(productionBatch.PointQuadStart, productionBatch.PointCount), "PointQuadStart");
-            CollectionAssert.AreEqual(Trim(oracleBatch.PointQuadCount, oracleBatch.PointCount), Trim(productionBatch.PointQuadCount, productionBatch.PointCount), "PointQuadCount");
-            CollectionAssert.AreEqual(Trim(oracleBatch.Points, oracleBatch.PointCount), Trim(productionBatch.Points, productionBatch.PointCount), "Points (stable stage input fields)");
-
-            Assert.AreEqual(oracleBatch.CurvedCount, productionBatch.CurvedCount, "curved count");
-            CollectionAssert.AreEqual(Trim(oracleBatch.Curveds, oracleBatch.CurvedCount), Trim(productionBatch.Curveds, productionBatch.CurvedCount), "Curveds");
-
-            Assert.AreEqual(oracleBatch.QuadCount, productionBatch.QuadCount, "quad count");
-            CollectionAssert.AreEqual(Trim(oracleBatch.Quads, oracleBatch.QuadCount), Trim(productionBatch.Quads, productionBatch.QuadCount), "Quads (glyph geometry)");
+            int slotCount = _allStyleSymbolLayers.Count; // mirrors production SymbolSubsystem.SlotCount
+            double3 origin = TileRenderOrigin.Project(Tile, _mapCamera.Projection); // mirrors RunTailAsync's tail.TileOriginRender
+            SymbolTileBlock oracle = SymbolTileBlockBaker.Bake(oracleSymbols, slotCount, in origin, new SymbolStringTable());
+            try { BlockColumnHash.AssertColumnsEqual(oracle, production); }
+            finally { oracle.Dispose(); }
         }
 
         /// <summary>Epic A / A3 acceptance tooth #4 (§F — "the tail actually runs" tooth): a glyph-fetch
         /// delegate reachable ONLY from <see cref="StyledSymbolTileBuilder.ShapeAsync"/> (the tail) records
         /// the thread it runs on; together with the existing, unmodified
         /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> recorder (which pins the WORKER half off main),
-        /// this proves the phase split runs on the right threads AND in the right order — labels only commit
+        /// this proves the phase split runs on the right threads AND in the right order — symbols only commit
         /// if the tail ran after the worker step that fed it.</summary>
         [UnityTest]
         public IEnumerator SymbolMainTail_RunsOnMainThread_AfterWorkerPass()
@@ -294,30 +277,21 @@ namespace MapRenderer.Tests.Text
 
             var loaded = new List<LoadedTileKey> { Key(Tile) };
             DriveTileBytesReady(Tile);
-            var labels = new List<LabelInstance>();
+            int symbolCount = 0;
             for (int f = 0; f < 200; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
-                labels.Clear();
-                _subsystem.CollectInto(labels);
-                if (labels.Count > 0) break;
+                symbolCount = _subsystem.Store().DebugBlockFor(ProductionKey)?.Kinds.Length ?? 0;
+                if (symbolCount > 0) break;
                 yield return null;
             }
 
-            Assert.Greater(labels.Count, 0, "sanity: the build actually committed labels (the tail ran)");
+            Assert.Greater(symbolCount, 0, "sanity: the build actually committed labels (the tail ran)");
             Assert.Greater(observedThreadIds.Count, 0, "sanity: the glyph-fetch delegate — reachable only from the tail — fired at all");
             foreach (int id in observedThreadIds)
                 Assert.AreEqual(mainThreadId, id, "the glyph-fetch delegate must run on the MAIN thread (the tail), never the worker pool");
         }
-
-        private static T[] Trim<T>(T[] array, int count)
-        {
-            var result = new T[count];
-            System.Array.Copy(array, result, count);
-            return result;
-        }
-
 
         private static byte[] LoadUp(params string[] relative)
         {

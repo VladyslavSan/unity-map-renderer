@@ -22,7 +22,7 @@
 CBUFFER_START(UnityPerMaterial)
 // (B) Internal — engine plumbing, never style-bound:
 // _ScreenParamsLogical — (logicalWidth, logicalHeight, 0, 0) in pixels; refreshed every frame by
-//   LabelPlacementSystem/WorldLabelRenderer. Scales the constant-px glyph-corner OFFSET into clip space
+//   SymbolPlacementSystem/WorldSymbolRenderer. Scales the constant-px glyph-corner OFFSET into clip space
 //   (see the world pass's vertex stage) — the vertex POSITION itself comes from the stock
 //   object/view/projection transform, not a logical-px bypass.
 float4 _ScreenParamsLogical;

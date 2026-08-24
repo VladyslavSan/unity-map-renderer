@@ -38,11 +38,11 @@ namespace MapRenderer.App
     ///   <c>+delta.x</c> for heading (drag-right → bearing increases).</para>
     ///
     /// <para><b>D5 — Ordering:</b> this <c>Update</c> only queues patches onto <see cref="MapCamera.CurrentProperties"/>.
-    ///   The whole per-frame pipeline (camera commit → tile rebase → label placement) then runs in one ordered
+    ///   The whole per-frame pipeline (camera commit → tile rebase → symbol placement) then runs in one ordered
     ///   pass in <see cref="MapView.LateUpdate"/> off a single snapshot of those props. That pipeline is in
     ///   <c>LateUpdate</c> ON PURPOSE: Unity runs every LateUpdate after every Update, so this controller's
     ///   patches are ALWAYS folded in the same frame they were produced — no sibling-order dependency, no
-    ///   <c>DefaultExecutionOrder</c>, no whole-map-vs-input latency. And because camera, tiles and labels all
+    ///   <c>DefaultExecutionOrder</c>, no whole-map-vs-input latency. And because camera, tiles and symbols all
     ///   read the one snapshot, none can lag the others.</para>
     ///
     /// <para><b>Camera-transform helper:</b>

@@ -21,7 +21,7 @@ namespace MapRenderer.Tests.Text
     ///
     /// <para><b>Written BEFORE the conversion.</b> It drives the production entry point
     /// (<see cref="SymbolFeatureExtractor.Extract"/>) with the signature P2 does not break, so it measures the
-    /// pre-conversion label sequence and re-measures the post-conversion one.</para>
+    /// pre-conversion symbol sequence and re-measures the post-conversion one.</para>
     ///
     /// <para><b>Why a separate fixture from <c>SymbolBufferParityTests</c>.</b> That file's T1 states, in its
     /// own doc, that its arm B <i>transcribes</i> the production bucketing rather than calling it — a defect
@@ -54,8 +54,8 @@ namespace MapRenderer.Tests.Text
         private const string FilterJson = @"[""!="", ""cls"", ""skip""]";
 
         /// <summary>
-        /// E3 — the labels extracted from the SIX-feature source layer, with only four features selected, are
-        /// the same sequence (count, <c>FeatureIndex</c>, text, anchor, placement, kind) as the labels
+        /// E3 — the symbols extracted from the SIX-feature source layer, with only four features selected, are
+        /// the same sequence (count, <c>FeatureIndex</c>, text, anchor, placement, kind) as the symbols
         /// extracted from the four selected features alone as their own, unfiltered layer.
         ///
         /// <para><b>Catches:</b> sizing the counting sort's <c>ringStart</c> to the <i>selected</i> count
@@ -93,10 +93,10 @@ namespace MapRenderer.Tests.Text
                 "precondition: a Polygon must be SELECTED and interleaved, so the kind gate stays " +
                 "independently load-bearing");
 
-            List<SymbolStyle.SymbolLabel> shared  = Extract(layerFeatures, FilterJson);
-            List<SymbolStyle.SymbolLabel> control = Extract(SelectedOnlyLayer(layerFeatures), null);
+            List<SymbolStyle.SymbolFeature> shared  = Extract(layerFeatures, FilterJson);
+            List<SymbolStyle.SymbolFeature> control = Extract(SelectedOnlyLayer(layerFeatures), null);
 
-            // ── Non-vacuity #3: the control is a real, multi-feature, multi-path extraction. A one-label or
+            // ── Non-vacuity #3: the control is a real, multi-feature, multi-path extraction. A one-symbol or
             //    single-text control could not tell a permuted attribution from a correct one.
             Assert.AreEqual(5, control.Count,
                 "precondition: the control must emit 5 labels — 2 (multi-point 'a') + 1 (line-centre 'b') + " +
@@ -111,8 +111,8 @@ namespace MapRenderer.Tests.Text
 
             for (int i = 0; i < control.Count; i++)
             {
-                SymbolStyle.SymbolLabel e = control[i];
-                SymbolStyle.SymbolLabel a = shared[i];
+                SymbolStyle.SymbolFeature e = control[i];
+                SymbolStyle.SymbolFeature a = shared[i];
                 Assert.AreEqual(e.Text, a.Text,
                     $"label {i} TEXT — a mismatch is a path bucketed onto the wrong feature");
                 Assert.AreEqual(e.FeatureIndex, a.FeatureIndex,
@@ -128,7 +128,7 @@ namespace MapRenderer.Tests.Text
             // The FeatureIndex sequence is pinned absolutely as well as differentially: a control that had
             // itself drifted would make the comparison above agree on a wrong answer.
             var indices = new List<int>();
-            foreach (SymbolStyle.SymbolLabel label in shared) indices.Add(label.FeatureIndex);
+            foreach (SymbolStyle.SymbolFeature label in shared) indices.Add(label.FeatureIndex);
             CollectionAssert.AreEqual(new[] { 0, 1, 2, 3, 4 }, indices,
                 "FeatureIndex counts emitted labels 0..n-1 in emission order, per tile — never the source " +
                 "layer's feature ordinal, and never restarted per feature");
@@ -158,10 +158,10 @@ namespace MapRenderer.Tests.Text
         private static IReadOnlyList<IFeature> SelectedOnlyLayer(IReadOnlyList<IFeature> layerFeatures)
             => new List<IFeature> { layerFeatures[0], layerFeatures[2], layerFeatures[3], layerFeatures[5] };
 
-        private static List<SymbolStyle.SymbolLabel> Extract(IReadOnlyList<IFeature> features, string filterJson)
+        private static List<SymbolStyle.SymbolFeature> Extract(IReadOnlyList<IFeature> features, string filterJson)
         {
             var tile = TestDecodedTiles.Of("probe", Tile, features, Extent);
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var labels = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
                 StyleLayer(filterJson), tile, Tile, Zoom, new WebMercatorProjection(), labels);
             return labels;
@@ -199,10 +199,10 @@ namespace MapRenderer.Tests.Text
             return ordinals;
         }
 
-        private static int DistinctTexts(IReadOnlyList<SymbolStyle.SymbolLabel> labels)
+        private static int DistinctTexts(IReadOnlyList<SymbolStyle.SymbolFeature> labels)
         {
             var seen = new HashSet<string>();
-            foreach (SymbolStyle.SymbolLabel label in labels) seen.Add(label.Text);
+            foreach (SymbolStyle.SymbolFeature label in labels) seen.Add(label.Text);
             return seen.Count;
         }
     }

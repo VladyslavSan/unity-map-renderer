@@ -9,8 +9,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// symbol worker pass from its per-tile kick — the retired parallel push feed
     /// (<c>SymbolTileBytesReady</c>/<c>OnTileBytesReady</c>) is replaced by this factory. TileManager holds
     /// only this interface pair (<c>string</c>/<see cref="TileId"/>/<see cref="SharedDisposable{T}"/> types) —
-    /// it never references a label/store/glyph type; the real implementor
-    /// (<c>MapRenderer.Unity.Text.SymbolLabelSubsystem</c>) lives on the other side of the seam.
+    /// it never references a symbol/store/glyph type; the real implementor
+    /// (<c>MapRenderer.Unity.Text.SymbolSubsystem</c>) lives on the other side of the seam.
     /// </summary>
     internal interface ISymbolTileWorkerFactory
     {

@@ -1,6 +1,6 @@
 // Engine-free: shared verbatim between the Unity EditMode runner and Tools/core-tests (registered in
 // core-tests.csproj). Top-level `using Unity.Mathematics;` + unqualified float2/float4 (namespace-
-// collision trap — see LabelScreenProjection.cs's header comment).
+// collision trap — see SymbolScreenProjection.cs's header comment).
 
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -126,7 +126,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Winding: TL/TR/BR/BL matches BuildQuad's convention exactly (same corner→attribute mapping) —
-        //    WorldLabelRenderer's index emit (TL,TR,BR / TL,BR,BL) depends on this. ──
+        //    WorldSymbolRenderer's index emit (TL,TR,BR / TL,BR,BL) depends on this. ──
         [Test]
         public void BuildWorldQuad_Winding_MatchesBuildQuadConvention()
         {

@@ -5,7 +5,7 @@
 // catch a vertical flip because they never touch the REAL uploaded atlas texture or the REAL shader. This
 // test renders one REAL glyph ('A', from the committed NotoSansRegular fixture — the SAME glyph
 // GlyphAtlasTextureTests/SdfDistanceFieldTests already prove is present) through the REAL
-// LabelPlacementSystem + Map/Symbol shader + GlyphAtlasTexture, reads the framebuffer back, and checks:
+// SymbolPlacementSystem + Map/Symbol shader + GlyphAtlasTexture, reads the framebuffer back, and checks:
 //   1. Horizontal placement: the anchor sits at the look-at's longitude → the glyph's ink must be roughly
 //      horizontally centered. This is the position axis the readback CAN assert reliably (see below).
 //   2. Orientation: 'A' has a narrow apex at its OWN top and a wide crossbar/legs at its OWN bottom -- the
@@ -16,13 +16,13 @@
 // shipping on-screen path renders through URP's intermediate RT and blits to the backbuffer (that blit
 // flips Y), which a direct camera→RT readback lacks -- so the readback is the vertical mirror of what ships
 // (Unity's well-known render-to-texture flip; _ProjectionParams.x is -1 in both paths so the shader cannot
-// branch -- see Symbol_ForwardPass's header). On-screen is the ground truth (verified live: labels upright
+// branch -- see Symbol_ForwardPass's header). On-screen is the ground truth (verified live: symbols upright
 // and tracking their features under pan/zoom), so this test UN-MIRRORS the readback before the orientation
 // check. Absolute VERTICAL position is therefore NOT asserted here -- it's a verified-live eyeball item;
 // only the flip-invariant horizontal axis (1) and the un-mirrored orientation (2) are machine-checked.
 //
 // SUBMISSION PATH (E2, the render-layer model): system.Tick() renders through a
-// REAL persistent scene MeshRenderer now -- LabelPlacementSystem's demo-path fallback LabelSlotPresenter
+// REAL persistent scene MeshRenderer now -- SymbolPlacementSystem's demo-path fallback SymbolSlotPresenter
 // creates a hidden GameObject with a MeshFilter/MeshRenderer bound to the built Mesh/Material as PART OF
 // Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. This replaces the
 // pre-E2 Graphics.RenderMesh submission, which rendered 0 px in headless EditMode (a harness limitation --
@@ -32,6 +32,7 @@
 // The Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip
 // via _ScreenParamsLogical), so the hidden presenter's identity transform is inert.
 
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -86,7 +87,8 @@ namespace MapRenderer.Tests.Text.Placement
             // 2. Real shaping + layout pipeline (not a hand-built SymbolQuad).
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            TextLayoutResult layout = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default);
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
 
             // 3. Overhead camera: white background so black text ('ink') is trivially distinguishable by
             //    RGB (NOT alpha -- blending over an opaque clear always yields alpha=1 in the readback).
@@ -117,36 +119,33 @@ namespace MapRenderer.Tests.Text.Placement
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
 
-            var label = new LabelInstance
-            {
-                AnchorRender = anchorRender,
-                Layout = layout,
-                Paint = LabelPaint.Default, // black text; default halo is WHITE == background, so invisible here
-                TextSizePx = 220f, // large -- reliably legible at the readback resolution
-                SortKey = 0f,
-                FeatureIndex = 0,
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
+                paint: SymbolPaint.Default, // black text; default halo is WHITE == background, so invisible here
+                textSizePx: 220f, // large -- reliably legible at the readback resolution
+                sortKey: 0f,
+                featureIndex: 0,
                 // Epic A / A1 Risk R1: TileKey=0 (tile 0/0/0) is ~2e7m from this mid-latitude anchor —
                 // float32-unsafe for the world-anchored AnchorLocal bake (jitter/vanish on-screen). A
                 // realistic containing tile keeps the bake within one tile span (float32-safe).
-                TileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14),
-            };
+                tileKey: TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14));
 
             // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
-            var system = new LabelPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
                 // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
-                system.Tick(in frame, plan.Build(new[] { label }), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
+                system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount,
                     "DIAGNOSTIC precondition: the label's anchor must NOT be culled (LastQuadCount should be " +
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +
                     "bug, not a rendering bug.");
 
                 // E2: Tick() already bound the built Mesh/Material to a real persistent scene MeshRenderer
-                // (the demo fallback LabelSlotPresenter) — render straight away, no manual attach (see the
+                // (the demo fallback SymbolSlotPresenter) — render straight away, no manual attach (see the
                 // file header's SUBMISSION PATH paragraph; a double-attach would double-blend the SDF ink).
                 snap.Render(uCam);
 
@@ -157,7 +156,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // vertical flip: the SHIPPING on-screen path renders to URP's intermediate RT and blits to the
                 // backbuffer (that blit flips Y), whereas a direct camera→RT readback lacks that blit, so it is
                 // the vertical MIRROR of what ships on screen. On-screen is the ground truth (verified live in
-                // the demo: labels render upright and track their features correctly under pan/zoom), and
+                // the demo: symbols render upright and track their features correctly under pan/zoom), and
                 // _ProjectionParams.x is -1 in BOTH paths so the shader cannot branch (see Symbol_ForwardPass's
                 // header). Un-mirror here so the orientation check below reads the on-screen truth; a regression
                 // that broke the on-screen flip would mirror this buffer and flip the result, so the guard bites.
@@ -193,7 +192,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally
             {
                 snap.Dispose();
-                system.Dispose(); // destroys the fallback presenter BEFORE its mesh (LabelPlacementSystem's own ordering)
+                system.Dispose(); // destroys the fallback presenter BEFORE its mesh (SymbolPlacementSystem's own ordering)
                 atlasTexture.Dispose();
                 Object.DestroyImmediate(camGo);
             }

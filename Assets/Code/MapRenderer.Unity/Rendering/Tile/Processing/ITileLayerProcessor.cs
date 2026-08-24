@@ -11,11 +11,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// reads through it instead of decoding for its own cadence; as of A6 the decode itself is encoding-driven
     /// (<see cref="ITileDecoder"/>), so this contract is not MVT-specific at all.
     ///
-    /// Deliberately independent of mesh disposal and the symbol label sink — the two sibling capability
+    /// Deliberately independent of mesh disposal and the symbol symbol sink — the two sibling capability
     /// interfaces extend this base without touching each other's code: <see cref="ITileMeshLayerProcessor"/>
     /// (A1, mesh settlement — returns a disposable <see cref="IRenderLayerPayload"/>) and
     /// <see cref="ITileWorkerThenMainLayerProcessor"/> (A3, a main-thread tail — artifact-free; the symbol
-    /// sink stays the coordinator's own <c>SymbolTileLabelStore</c>).
+    /// sink stays the coordinator's own <c>SymbolTileStore</c>).
     /// </summary>
     internal interface ITileLayerProcessor
     {

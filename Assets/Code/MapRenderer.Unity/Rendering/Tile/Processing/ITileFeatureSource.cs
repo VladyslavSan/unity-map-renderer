@@ -48,7 +48,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <see cref="SharedDisposable{T}.Acquire"/> while the kick's reference is still live — which is what
         /// keeps the tile alive across the <c>SetStyle</c>→<c>SpritesSettled</c> window and is why a parked
         /// build no longer re-decodes — and releases it from <c>PumpBuilds</c>' drain or from
-        /// <c>SymbolLabelSubsystem.DrainAndDiscardParkedBuilds</c>. A fetch outcome nobody wants is released
+        /// <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>. A fetch outcome nobody wants is released
         /// by <c>TileManager.DiscardFetchOutcome</c>.</para>
         ///
         /// <para><b>Failures are reported through the returned <see cref="UniTask{T}"/>, never thrown

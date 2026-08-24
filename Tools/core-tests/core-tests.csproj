@@ -89,7 +89,7 @@
     <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileTelemetrySnapshot.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolStoreTelemetrySnapshot.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/LabelPlacementTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolPlacementTelemetrySnapshot.cs" />
     <!-- The three carriers above are all the telemetry Core holds: plain init-only structs with no logic. The
          publish channel that used to live here (and its shared-verbatim tests) is gone — providers now own their
          snapshot as a field and hand it out by ref, so the behaviour to test sits with the providers in
@@ -302,24 +302,26 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextLayoutOptionsBuilder.cs" />
 
     <!-- S105 Slice 2: point-feature extraction (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/SymbolLabel.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/SymbolFeature.cs" />
 
     <!-- S105 Slice 2: A3 extraction over the fixture centroids layer (shared verbatim) -->
 
     <!-- S105 Slice 3: StyledSymbolTileBuilder (engine-free, like GlyphManager) — extract → request glyphs
-         → shape → LabelInstance. -->
+         → shape → a raw label record. -->
 
-    <!-- Symbol tile-label store — engine-free lifecycle bookkeeping (active/cached mirror of the mesh cache). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolTileLabelStore.cs" />
-    <!-- Stage 4b (labels-async-reconcile): the off-main reconcile carriers + pure dedup worker (engine-free). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolLabelSnapshot.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/SymbolLabelReconciler.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolTileLabelStoreTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolLabelReconcilerTests.cs" />
-    <!-- Stage 3 (labels-async-reconcile): fixed-grid dedup zoom-invariance tooth (engine-free; shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SymbolDedupZoomInvarianceTests.cs" />
+    <!-- Reader cutover (labels-async-reconcile stage 4.2): SymbolTileStore / SymbolSnapshot /
+         SymbolReconciler now read the native SymbolTileBlock (Unity.Collections) directly instead of
+         a managed per-label carrier list, which this shim project cannot compile (no NativeArray shim). Per
+         ARCHITECTURE.md §2 / AGENTS.md §4b this is the sanctioned "6 files move from the 0.1s loop to EditMode"
+         cost — a RELOCATION, not a retired oracle: SymbolTileStore.cs, SymbolSnapshot.cs,
+         SymbolReconciler.cs, SymbolTileStoreTests.cs, SymbolReconcilerTests.cs,
+         SymbolDedupZoomInvarianceTests.cs all moved out; they still run, just in the Unity EditMode runner
+         (Assets/Code/MapRenderer.Tests.EditMode/Text/). A 7th, mechanical consequence of the store's removal:
+         CrossTileIdentityTests.cs constructed a SymbolTileStore in its Store_* cases — those 3 cases moved
+         to Text/Placement/CrossTileIdentityStoreTests.cs (EditMode-only); the file's OWN engine-free
+         CrossTileSymbolKey.For-math teeth stay registered below, unmoved. -->
 
-    <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped LabelInstances, no synthetic source. -->
+    <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped label records, no synthetic source. -->
 
     <!-- S43: LineDash (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineDash.cs" />
@@ -407,7 +409,7 @@
 
     <!-- I3: icon labels — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelKind.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolKind.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/IconImageResolver.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IconQuadLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/IconImageResolverTests.cs" />
@@ -425,9 +427,9 @@
     <!-- P-A (non-centred icon+text pairing): the pairing predicate's teeth — engine-free. -->
 
     <!-- Road shields §10 (symbol pairing, D8-D11): the pair resolver — engine-free. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/LabelPairRole.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelPairing.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelPairingTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolPairRole.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolPairing.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolPairingTests.cs" />
 
     <!-- S19: symbol layout (text-only) — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolQuad.cs" />
@@ -439,7 +441,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolPlacement.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutOptions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IGlyphAtlasView.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutResult.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextLayoutBounds.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextQuadLayout.cs" />
 
     <!-- S19 Slice 1: layout tests (shared verbatim) -->
@@ -455,20 +457,27 @@
     <!-- TextQuadLayoutAllocTests.cs is Unity-only (UnityEngine.TestTools.Constraints) — NOT registered here. -->
 
     <!-- S20 Slice 1: placement/billboard math (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelPaint.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelInstance.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolPaint.cs" />
+    <!-- 4.4c: the reused build-scratch ShapeAsync writes into instead of a fresh per-label managed carrier list
+         per tile — SymbolPairing.cs (above) references ShapedSymbol, so it must compile here too. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/ShapedSymbol.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileBuffer.cs" />
+    <!-- The 3b zero-alloc tooth: GC.GetTotalMemory is dead in the Unity EditMode Mono runner (proven — a 400 KB
+         calibration alloc read 16 KB), so this byte-delta tooth is core-tests-ONLY (it lives here, NOT in the
+         Assets EditMode tree, so Unity never compiles/runs it). See allocgcmemory-constraint-false-positives. -->
+    <Compile Include="SymbolTileBufferAllocTests.cs" />
     <!-- Epic A / A1: WorldBillboardVertex is BillboardMath.BuildWorldQuad's output type — must compile
          alongside BillboardMath.cs (below) even though A0 didn't need it here (no real emit yet). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/WorldBillboardVertex.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PlacedQuad.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CandidateEmit.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStageInputs.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelStagingMath.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelScreenProjection.cs" />
-    <!-- W3: LabelStagingMath.StageCurved takes one of these, so the fast runner needs it to compile. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelViewTransform.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTranslate.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBearing.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolStageInputs.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolStagingMath.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolScreenProjection.cs" />
+    <!-- W3: SymbolStagingMath.StageCurved takes one of these, so the fast runner needs it to compile. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolViewTransform.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTranslate.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolBearing.cs" />
 
     <!-- #5 B1: curved along-line text — Core helpers (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcMath.cs" />
@@ -477,22 +486,25 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchor.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchorPlacement.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LineAnchorPlacementTests.cs" />
-    <!-- A-3: cross-tile label identity (engine-free) + its tests -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CrossTileLabelKey.cs" />
+    <!-- A-3: cross-tile label identity (engine-free) + its tests. CrossTileIdentityTests.cs's own engine-free
+         `For`-math teeth stay in this project; its Store_* cases moved out (reader cutover 4.2 — see this
+         file's note by the six-file relocation, above) to Text/Placement/CrossTileIdentityStoreTests.cs
+         (EditMode-only). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CrossTileSymbolKey.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/CrossTileIdentityTests.cs" />
     <!-- Stage 2 (labels-async-reconcile): label-text interning for the low-alloc dedup key + its tests -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTextIntern.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTextInternTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolStringTable.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStringTableTests.cs" />
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelFarPlaneCull.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelFarPlaneCullTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverage.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolFarPlaneCull.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolFarPlaneCullTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverage.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageTests.cs" />
     <!-- Tile-key codec (IR B4): lifted out of SymbolFeatureExtractor so Core consumers keep it -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileKey.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileKey.cs" />
     <!-- Moves the coverage cull ahead of the SoA batch build (cull-after-dedup, before Build) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelTileCoverageFilter.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTileCoverageFilterTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverageFilter.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageFilterTests.cs" />
     <!-- S3: globe far-side horizon cull, a gather fade-out trigger (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/HorizonCull.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />
@@ -500,34 +512,34 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathSortKeyTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedVertexTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathSortKeyTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedVertexTests.cs" />
     <!-- P2 T-2: SampleUp exact per-glyph sample (engine-free; shared verbatim). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelStagingMathCurvedUpTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedUpTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <!-- W4: curved-text vertical centring teeth (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextCentringTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelTranslateTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelBearingTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTranslateTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
 
     <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelBox.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCandidate.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollision.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LabelCollisionGrid.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolBox.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCandidate.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCollision.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCollisionGrid.cs" />
 
     <!-- Epic A / A1: T3 BuildWorldQuad billboard golden, T2 screen-projection golden + culling
          (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelScreenProjectionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolScreenProjectionTests.cs" />
 
     <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCollisionOrderTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateCollisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LabelCandidateRangeTilingTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionOrderTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateCollisionTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateRangeTilingTests.cs" />
 
     <!-- GeoJSON source, S1: RFC 7946 parse + client-side tile slicing (Core, engine-free).
          RingWindowClipperParityTests.cs is Unity-only (it drives RingClipJob) — NOT registered here. -->

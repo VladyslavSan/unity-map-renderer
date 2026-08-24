@@ -10,12 +10,12 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// Symbol <see cref="IRenderLayer"/>: a MapLibre <c>symbol</c> layer as a runtime render object (the
     /// render-layer model). Axes: <see cref="RenderLayerBuild.FramePlaced"/> —
-    /// rebuilt every frame from per-label placement, NOT the Burst tile-mesh pipeline — /
+    /// rebuilt every frame from per-symbol placement, NOT the Burst tile-mesh pipeline — /
     /// <see cref="DrawPersistence.Persistent"/> — per Epic A / A1, this layer's material is bound + presented
-    /// by <see cref="Placement.WorldLabelRenderer"/> (the world-anchored draw path), redrawn by Unity every
+    /// by <see cref="Placement.WorldSymbolRenderer"/> (the world-anchored draw path), redrawn by Unity every
     /// camera render with no orchestrator.
     ///
-    /// <para>Owns (D11, migrated here from <c>SymbolLabelSubsystem</c>): the per-layer <see cref="WorldTextMaterial"/>/
+    /// <para>Owns (D11, migrated here from <c>SymbolSubsystem</c>): the per-layer <see cref="WorldTextMaterial"/>/
     /// <see cref="WorldIconMaterial"/> clones and the halo bind. <see cref="Material"/> IS
     /// <see cref="WorldTextMaterial"/> — the old screen-space <c>SymbolText</c> clone (and its
     /// <c>IconMaterial</c> sibling) is retired; its <c>renderQueue</c> is written by
@@ -23,7 +23,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// default) for free, since <c>Build</c> reads <see cref="IRenderLayer.Material"/>. The world icon's
     /// queue has no such free ride (nothing else reads a symbol layer's icon material at Build time), so
     /// <see cref="Create"/> writes it directly. Collision stays global (D8) — only the DRAW is per-layer,
-    /// via the material <see cref="Placement.WorldLabelRenderer.EndFrame"/> resolves for this layer's
+    /// via the material <see cref="Placement.WorldSymbolRenderer.EndFrame"/> resolves for this layer's
     /// slot.</para>
     ///
     /// <para><b>G7/D7 (Stage 2, road-shields):</b> the icon and text are coplanar at the same anchor
@@ -154,7 +154,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 var haloColor = paint.HaloColor.Evaluate(zoom); // MapRenderer.Core.Expressions.Color (sRGB)
                 // sRGB→linear (project is Linear color space; the shader consumes _HaloColor directly, and
                 // SetColor uploads raw floats with no gamma conversion) — mirrors the vertex text-color bake
-                // in LabelPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
+                // in SymbolPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
                 material.SetColor(HaloColorId,
                     new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A).linear);
                 // S107: both halo terms are added to a signed distance the SDF shader carries in DEVICE px

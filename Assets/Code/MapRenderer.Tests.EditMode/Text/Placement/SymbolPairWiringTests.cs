@@ -1,8 +1,8 @@
-// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (LabelSlotPresenter creates one,
+// Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (SymbolSlotPresenter creates one,
 // SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
 //
 // Road-shields §10 D8/D9 (docs/road-shields-design.md) P10 — the Tick()-level wiring tooth for a centred
-// icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE LabelCandidate (LastCandidateCount) yet
+// icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE SymbolCandidate (LastCandidateCount) yet
 // still place BOTH halves' quads (LastQuadCount) and build BOTH the world text AND world icon meshes at the
 // same (tileKey, slot) — the direct fix for "only the number, no badge". A second test drives the pair
 // through a real collision loss and asserts BOTH halves drop together (no bare number).
@@ -66,11 +66,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // A centred icon+text pair: Owner (icon) immediately followed by its Rider (text) — the adjacency
-        // contract §10 D10 relies on (SymbolTileLabelBlockBaker/TestSymbolPlan preserve list order per tile).
+        // contract §10 D10 relies on (SymbolTileBlockBaker/TestSymbolPlan preserve list order per tile).
         // Stage C: <paramref name="textOptional"/> stamps text-optional on the RIDER, and
         // <paramref name="textTranslatePx"/> pushes the text's box clear of the icon's so a blocker can
         // address one half alone (at a shared anchor the two boxes overlap by construction).
-        private static (LabelInstance icon, LabelInstance text) MakePairLabels(double3 sceneOriginRender,
+        private static void AddPairSymbols(SymbolTileBuffer buffer, double3 sceneOriginRender,
             bool textOptional = false, float textTranslatePx = 0f)
         {
             var iconQuads = new List<SymbolQuad>
@@ -81,21 +81,18 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
                 },
             };
-            var icon = new LabelInstance
-            {
-                AnchorRender = sceneOriginRender,
-                Layout = new TextLayoutResult { Quads = iconQuads, BoundsMin = new float2(-8f, -8f), BoundsMax = new float2(8f, 8f), LineCount = 1 },
-                Kind = LabelKind.Icon,
-                IconImage = "shield", // a REAL identity — a null one would dedup-collide with any other
-                                      // null-identity label sharing this anchor (e.g. a hand-built blocker).
-                Paint = LabelPaint.Default,
-                TextSizePx = TextQuadLayout.OneEm,
-                SortKey = 0f,
-                FeatureIndex = 0,
-                TileKey = 0L,
-                PairRole = LabelPairRole.Owner,
-                PairId = 0,
-            };
+            // Owner (icon) then Rider (text), in that order — the adjacency contract §10 D10 relies on.
+            TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, iconQuads, new float2(-8f, -8f), new float2(8f, 8f),
+                kind: SymbolKind.Icon,
+                iconImage: "shield", // a REAL identity — a null one would dedup-collide with any other
+                                      // null-identity symbol sharing this anchor (e.g. a hand-built blocker).
+                paint: SymbolPaint.Default,
+                textSizePx: TextQuadLayout.OneEm,
+                sortKey: 0f,
+                featureIndex: 0,
+                tileKey: 0L,
+                pairRole: SymbolPairRole.Owner,
+                pairId: 0);
 
             var textQuads = new List<SymbolQuad>
             {
@@ -105,23 +102,18 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
                 },
             };
-            var text = new LabelInstance
-            {
-                AnchorRender = sceneOriginRender,
-                Layout = new TextLayoutResult { Quads = textQuads, BoundsMin = new float2(-6f, -6f), BoundsMax = new float2(6f, 6f), LineCount = 1 },
-                Paint = LabelPaint.Default,
-                TextSizePx = 24f,
-                Text = "42", // a REAL identity — see the icon's IconImage comment above
-                SortKey = 0f,
-                FeatureIndex = 1,
-                TileKey = 0L,
-                PairRole = LabelPairRole.Rider,
-                PairId = 0,
-                PairOptional = textOptional,
-                TranslatePx = new float2(textTranslatePx, 0f),
-                TranslateAnchor = TextTranslateAnchor.Viewport,
-            };
-            return (icon, text);
+            TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, textQuads, new float2(-6f, -6f), new float2(6f, 6f),
+                text: "42", // a REAL identity — see the icon's IconImage comment above
+                paint: SymbolPaint.Default,
+                textSizePx: 24f,
+                sortKey: 0f,
+                featureIndex: 1,
+                tileKey: 0L,
+                pairRole: SymbolPairRole.Rider,
+                pairId: 0,
+                pairOptional: textOptional,
+                translatePx: new float2(textTranslatePx, 0f),
+                translateAnchor: TextTranslateAnchor.Viewport);
         }
 
         private static (GameObject camGo, MapCamera mapCamera, SceneFrame frame) BuildScene()
@@ -149,37 +141,37 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
             using var plan = new TestSymbolPlan(mapCamera.Projection);
 
             try
             {
-                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender);
-                var pairLabels = new List<LabelInstance> { icon, text };
+                var pairScratch = new SymbolTileBuffer();
+                AddPairSymbols(pairScratch, frame.SceneOriginRender);
 
                 // R3: duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(pairLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(pairScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(pairLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(pairScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
-                // §10 D8: TWO labels (icon+text), ONE candidate — the whole point of the pairing fix (fewer
+                // §10 D8: TWO symbols (icon+text), ONE candidate — the whole point of the pairing fix (fewer
                 // sort/grid/fade operations than the pre-fix two-independent-candidates shape).
                 Assert.AreEqual(1, system.LastCandidateCount, "a centred pair must stage as exactly ONE candidate");
                 Assert.AreEqual(2, system.LastQuadCount, "both halves' quads must still be placed (icon quad + text quad)");
 
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Icon, out Mesh worldIconMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Icon, out Mesh worldIconMesh),
                     "the world icon slot mesh must exist");
                 Assert.Greater(worldIconMesh.vertexCount, 0, "the icon mesh must have built non-zero vertices");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Icon), "the icon presenter must be showing");
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon), "the icon presenter must be showing");
 
-                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, LabelKind.Text, out Mesh worldTextMesh),
+                Assert.IsTrue(system.TryGetWorldSlotMesh(0L, 0, SymbolKind.Text, out Mesh worldTextMesh),
                     "the world text slot mesh must exist");
                 Assert.Greater(worldTextMesh.vertexCount, 0,
                     "the text mesh must have built non-zero vertices — the bare-number bug is a MISSING icon, not a missing text");
-                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, LabelKind.Text),
+                Assert.IsTrue(system.IsWorldSlotVisible(0L, 0, SymbolKind.Text),
                     "the text presenter must be showing — BOTH halves survive together");
             }
             finally
@@ -208,7 +200,7 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
             using var plan = new TestSymbolPlan(mapCamera.Projection);
@@ -216,13 +208,14 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 const float TextOffsetPx = 200f;
-                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender, textOptional, TextOffsetPx);
+                var mixedScratch = new SymbolTileBuffer();
+                AddPairSymbols(mixedScratch, frame.SceneOriginRender, textOptional, TextOffsetPx);
 
                 // A higher-priority blocker sitting on the TEXT half's translated box and nowhere near the
                 // icon's (±40 px around +200, vs. the icon's ±8 around 0). It lives on its OWN tile key so its
                 // (Kind=Text) quads land in a different world slot than the pair's text half — otherwise a
                 // non-empty text mesh could not be attributed.
-                long blockerTileKey = LabelTileKey.Pack(new TileId { Z = 1, X = 1, Y = 0 });
+                long blockerTileKey = SymbolTileKey.Pack(new TileId { Z = 1, X = 1, Y = 0 });
                 var blockerQuads = new List<SymbolQuad>
                 {
                     new SymbolQuad
@@ -231,33 +224,27 @@ namespace MapRenderer.Tests.Text.Placement
                         UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
                     },
                 };
-                var blocker = new LabelInstance
-                {
-                    AnchorRender = frame.SceneOriginRender,
-                    Layout = new TextLayoutResult { Quads = blockerQuads, BoundsMin = new float2(-40f, -40f), BoundsMax = new float2(40f, 40f), LineCount = 1 },
-                    Paint = LabelPaint.Default,
-                    TextSizePx = 24f,
-                    Text = "blocker",
-                    SortKey = -1f,
-                    FeatureIndex = 99,
-                    TileKey = blockerTileKey,
-                    TranslatePx = new float2(TextOffsetPx, 0f),
-                    TranslateAnchor = TextTranslateAnchor.Viewport,
-                };
-
-                var mixedLabels = new List<LabelInstance> { icon, text, blocker };
+                TestSymbolTileBuffer.AddPoint(mixedScratch, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
+                    text: "blocker",
+                    paint: SymbolPaint.Default,
+                    textSizePx: 24f,
+                    sortKey: -1f,
+                    featureIndex: 99,
+                    tileKey: blockerTileKey,
+                    translatePx: new float2(TextOffsetPx, 0f),
+                    translateAnchor: TextTranslateAnchor.Viewport);
 
                 // Two Ticks: the first schedules the collision, the second harvests its verdict (R3) — and,
                 // for the optional case, seeds the per-half drop mask the emit loop reads.
-                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair (one candidate each)");
 
-                bool iconShows = system.IsWorldSlotVisible(0L, 0, LabelKind.Icon);
-                bool textShows = system.IsWorldSlotVisible(0L, 0, LabelKind.Text);
+                bool iconShows = system.IsWorldSlotVisible(0L, 0, SymbolKind.Icon);
+                bool textShows = system.IsWorldSlotVisible(0L, 0, SymbolKind.Text);
                 if (textOptional)
                 {
                     Assert.AreEqual(2, system.LastQuadCount,
@@ -288,7 +275,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── P3/P4 at the Tick level: a real collision loss drops BOTH halves, not just the icon ──────────────
         [Test]
-        public void CentredPair_Tick_BlockedByHigherPriorityLabel_BothHalvesDropTogether_NoBareNumber()
+        public void CentredPair_Tick_BlockedByHigherPrioritySymbol_BothHalvesDropTogether_NoBareNumber()
         {
             var (camGo, mapCamera, frame) = BuildScene();
             var atlasTexture = BuildTinyAtlasTexture();
@@ -296,15 +283,13 @@ namespace MapRenderer.Tests.Text.Placement
             var settings = BuildSettings();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
-            var system = new LabelPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
+            var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
             using var plan = new TestSymbolPlan(mapCamera.Projection);
 
             try
             {
-                (LabelInstance icon, LabelInstance text) = MakePairLabels(frame.SceneOriginRender);
-
                 // A higher-priority (lower SortKey) blocker at the SAME anchor, big enough to overlap the icon's box.
                 var blockerQuads = new List<SymbolQuad>
                 {
@@ -314,22 +299,18 @@ namespace MapRenderer.Tests.Text.Placement
                         UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
                     },
                 };
-                var blocker = new LabelInstance
-                {
-                    AnchorRender = frame.SceneOriginRender,
-                    Layout = new TextLayoutResult { Quads = blockerQuads, BoundsMin = new float2(-40f, -40f), BoundsMax = new float2(40f, 40f), LineCount = 1 },
-                    Paint = LabelPaint.Default,
-                    TextSizePx = 24f,
-                    SortKey = -1f,
-                    FeatureIndex = 99,
-                    TileKey = 0L,
-                };
+                var mixedScratch = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(mixedScratch, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
+                    paint: SymbolPaint.Default,
+                    textSizePx: 24f,
+                    sortKey: -1f,
+                    featureIndex: 99,
+                    tileKey: 0L);
+                AddPairSymbols(mixedScratch, frame.SceneOriginRender);
 
-                var mixedLabels = new List<LabelInstance> { blocker, icon, text };
-
-                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedLabels), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "the blocker + the pair (one candidate each)");

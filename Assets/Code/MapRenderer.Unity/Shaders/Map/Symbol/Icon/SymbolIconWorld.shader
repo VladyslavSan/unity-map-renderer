@@ -6,7 +6,7 @@
 // _ScreenParamsLogical + a plain Texture2D _MainTex, no SDF/halo props) — no new Input file. See
 // SymbolTextWorld.shader's header for the shared "object-to-world transform is MEANINGFUL here" rationale.
 //
-// Submission: the world-anchored label renderer (WorldLabelRenderer) sets this material's per-frame
+// Submission: the world-anchored label renderer (WorldSymbolRenderer) sets this material's per-frame
 // transform via FloatingOrigin.TileToSceneRebased — never Graphics.RenderMesh, never a static tile mesh.
 Shader "Map/Symbol/IconWorld"
 {
@@ -15,7 +15,7 @@ Shader "Map/Symbol/IconWorld"
         _MainTex("Sprite Atlas (RGBA)", 2D) = "white" {}
 
         // (B) Internal render/engine params — NOT style properties; refreshed every frame by
-        // WorldLabelRenderer (mirrors SymbolTextWorld's/SymbolIcon's identical _ScreenParamsLogical).
+        // WorldSymbolRenderer (mirrors SymbolTextWorld's/SymbolIcon's identical _ScreenParamsLogical).
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
 
         // (C) Render state — material-UI knobs (S58 pattern), verbatim from SymbolIcon.

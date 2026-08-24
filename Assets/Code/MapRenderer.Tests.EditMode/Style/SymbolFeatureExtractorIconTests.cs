@@ -22,7 +22,7 @@ namespace MapRenderer.Tests.Style
     /// <summary>
     /// I3: <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
-    /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolLabel"/> (<c>Kind == Icon</c>)
+    /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolFeature"/> (<c>Kind == Icon</c>)
     /// independently of the existing text path (<c>Kind == Text</c>, unchanged). Mirrors
     /// <c>SymbolFeatureExtractorTests</c>'s hand-encoded MultiPoint pattern. Engine-free; runs in both
     /// runners.
@@ -99,47 +99,47 @@ namespace MapRenderer.Tests.Style
         }
 
         [Test]
-        public void Extract_IconOnlyFeature_YieldsOneIconLabelWithExactQuad()
+        public void Extract_IconOnlyFeature_YieldsOneIconWithExactQuad()
         {
             // PRIMARY tooth (RED-verified): a feature with NO text-field but a resolvable icon-image must
-            // still emit a label — the pre-I3 extractor would have skipped it entirely on "text==null".
+            // still emit a symbol — the pre-I3 extractor would have skipped it entirely on "text==null".
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"icon-image\":\"star\"}");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
-            Assert.AreEqual(1, labels.Count, "an icon-only feature must yield exactly one (icon) label");
-            SymbolStyle.SymbolLabel label = labels[0];
-            Assert.AreEqual(LabelKind.Icon, label.Kind);
-            Assert.IsNull(label.Text, "an icon label carries no text");
+            Assert.AreEqual(1, symbols.Count, "an icon-only feature must yield exactly one (icon) symbol");
+            SymbolStyle.SymbolFeature symbol = symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, symbol.Kind);
+            Assert.IsNull(symbol.Text, "an icon symbol carries no text");
 
             SymbolQuad expected = IconQuadLayout.Layout(StarEntry, SheetSize, 1f, TextAnchor.Center, float2.zero);
-            AssertQuadEqual(expected, label.IconQuad);
+            AssertQuadEqual(expected, symbol.IconQuad);
         }
 
         [Test]
-        public void Extract_UnknownSpriteName_YieldsZeroIconLabels_NoThrow()
+        public void Extract_UnknownSpriteName_YieldsZeroIcons_NoThrow()
         {
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"does-not-exist\"}");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             Assert.DoesNotThrow(() =>
-                SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas));
+                SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas));
 
-            Assert.AreEqual(1, labels.Count, "the text label still resolves");
-            Assert.AreEqual(LabelKind.Text, labels[0].Kind, "an unresolvable sprite name must not emit an icon label");
+            Assert.AreEqual(1, symbols.Count, "the text symbol still resolves");
+            Assert.AreEqual(SymbolKind.Text, symbols[0].Kind, "an unresolvable sprite name must not emit an icon symbol");
         }
 
         [Test]
-        public void Extract_TextAndIcon_YieldsTwoLabels_IconFirstThenText()
+        public void Extract_TextAndIcon_YieldsTwoSymbols_IconFirstThenText()
         {
             // §10 D8/D10 (road-shields, road-shields-design.md — supersedes D5): a feature resolving BOTH a
             // text and an icon is ONE placement instance. The icon (collision owner) is emitted first, the
-            // text rides as its Rider — ONE placement instance downstream (LabelPairing / StagePointPair), so
+            // text rides as its Rider — ONE placement instance downstream (SymbolPairing / StagePointPair), so
             // neither half's overlap flags are forced anymore; both carry their AUTHORED
             // text-allow-overlap/text-ignore-placement (default false, unset here).
             // NOTE (P-A): this layer leaves every anchor/offset at its default, i.e. the halves are CENTRED —
@@ -149,27 +149,27 @@ namespace MapRenderer.Tests.Style
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
-            Assert.AreEqual(2, labels.Count, "a feature with both text-field and icon-image yields two labels");
-            Assert.AreEqual(LabelKind.Icon, labels[0].Kind, "the icon (pair owner) is emitted first");
-            Assert.AreEqual(0, labels[0].FeatureIndex);
-            Assert.IsFalse(labels[0].AllowOverlap); Assert.IsFalse(labels[0].IgnorePlacement);
-            Assert.AreEqual(LabelKind.Text, labels[1].Kind, "the rider text is emitted second");
-            Assert.AreEqual("L", labels[1].Text);
-            Assert.AreEqual(1, labels[1].FeatureIndex, "the text label continues the SAME ordinal sequence");
-            Assert.IsFalse(labels[1].AllowOverlap, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
-            Assert.IsFalse(labels[1].IgnorePlacement, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
+            Assert.AreEqual(2, symbols.Count, "a feature with both text-field and icon-image yields two symbols");
+            Assert.AreEqual(SymbolKind.Icon, symbols[0].Kind, "the icon (pair owner) is emitted first");
+            Assert.AreEqual(0, symbols[0].FeatureIndex);
+            Assert.IsFalse(symbols[0].AllowOverlap); Assert.IsFalse(symbols[0].IgnorePlacement);
+            Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text is emitted second");
+            Assert.AreEqual("L", symbols[1].Text);
+            Assert.AreEqual(1, symbols[1].FeatureIndex, "the text symbol continues the SAME ordinal sequence");
+            Assert.IsFalse(symbols[1].AllowOverlap, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
+            Assert.IsFalse(symbols[1].IgnorePlacement, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
             // §10 D10: the pair is stamped Owner/Rider sharing one PairId (the owner's own FeatureIndex).
-            Assert.AreEqual(MapRenderer.Core.Text.LabelPairRole.Owner, labels[0].PairRole);
-            Assert.AreEqual(MapRenderer.Core.Text.LabelPairRole.Rider, labels[1].PairRole);
-            Assert.AreEqual(labels[0].FeatureIndex, labels[0].PairId);
-            Assert.AreEqual(labels[0].PairId, labels[1].PairId);
-            // Both labels share the same anchor (same point).
-            Assert.AreEqual(labels[0].AnchorRender.x, labels[1].AnchorRender.x, 1e-9);
-            Assert.AreEqual(labels[0].AnchorRender.y, labels[1].AnchorRender.y, 1e-9);
-            Assert.AreEqual(labels[0].AnchorRender.z, labels[1].AnchorRender.z, 1e-9);
+            Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Owner, symbols[0].PairRole);
+            Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Rider, symbols[1].PairRole);
+            Assert.AreEqual(symbols[0].FeatureIndex, symbols[0].PairId);
+            Assert.AreEqual(symbols[0].PairId, symbols[1].PairId);
+            // Both symbols share the same anchor (same point).
+            Assert.AreEqual(symbols[0].AnchorRender.x, symbols[1].AnchorRender.x, 1e-9);
+            Assert.AreEqual(symbols[0].AnchorRender.y, symbols[1].AnchorRender.y, 1e-9);
+            Assert.AreEqual(symbols[0].AnchorRender.z, symbols[1].AnchorRender.z, 1e-9);
         }
 
         [Test]
@@ -180,47 +180,47 @@ namespace MapRenderer.Tests.Style
             var layer = PointLayer(
                 "{\"icon-image\":\"marker\",\"icon-size\":2,\"icon-offset\":[2,0],\"icon-anchor\":\"top-left\"}");
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
-            Assert.AreEqual(1, labels.Count);
+            Assert.AreEqual(1, symbols.Count);
             SymbolQuad expected = IconQuadLayout.Layout(MarkerEntry, SheetSize, 2f, TextAnchor.TopLeft, new float2(2f, 0f));
-            AssertQuadEqual(expected, labels[0].IconQuad);
+            AssertQuadEqual(expected, symbols[0].IconQuad);
         }
 
         [Test]
-        public void Extract_TextOnly_NullAtlas_YieldsZeroIconLabels_ByteIdenticalToPreI3()
+        public void Extract_TextOnly_NullAtlas_YieldsZeroIcons_ByteIdenticalToPreI3()
         {
             var tile = OnePointTile(new double2(100, 200));
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
             // 5-arg (pre-I3) call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
-            var preI3Style = new List<SymbolStyle.SymbolLabel>();
+            var preI3Style = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
 
-            var explicitNull = new List<SymbolStyle.SymbolLabel>();
+            var explicitNull = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), explicitNull, null);
 
-            Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon label, even with icon-image set");
+            Assert.AreEqual(1, preI3Style.Count, "a null atlas never emits an icon symbol, even with icon-image set");
             Assert.AreEqual(1, explicitNull.Count);
-            Assert.AreEqual(LabelKind.Text, preI3Style[0].Kind);
+            Assert.AreEqual(SymbolKind.Text, preI3Style[0].Kind);
             Assert.AreEqual(preI3Style[0].Text, explicitNull[0].Text);
             Assert.AreEqual(preI3Style[0].FeatureIndex, explicitNull[0].FeatureIndex);
             Assert.AreEqual(preI3Style[0].PaddingPx, explicitNull[0].PaddingPx, 1e-9);
         }
 
         [Test]
-        public void Extract_AtlasPresent_TextOnlyLayer_NoIconImage_YieldsZeroIconLabels()
+        public void Extract_AtlasPresent_TextOnlyLayer_NoIconImage_YieldsZeroIcons()
         {
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\"}"); // no icon-image at all
 
-            var labels = new List<SymbolStyle.SymbolLabel>();
-            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), labels, atlas);
+            var symbols = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), symbols, atlas);
 
-            Assert.AreEqual(1, labels.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
-            Assert.AreEqual(LabelKind.Text, labels[0].Kind);
+            Assert.AreEqual(1, symbols.Count, "an atlas being present doesn't manufacture icons the layer never asked for");
+            Assert.AreEqual(SymbolKind.Text, symbols[0].Kind);
         }
 
         private static void AssertQuadEqual(in SymbolQuad expected, in SymbolQuad actual)

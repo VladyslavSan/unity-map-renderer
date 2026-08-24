@@ -72,7 +72,7 @@ namespace MapRenderer.Tests.Text
         {
             var metrics = new FixedAdvanceMetrics(12f);
             var shaper = new CodepointTextShaper();
-            var request = new ShapingRequest { Text = "Hello Map Labels", FontStack = null, Metrics = metrics };
+            var request = new ShapingRequest { Text = "Hello Map Symbols", FontStack = null, Metrics = metrics };
             var output = new List<PositionedGlyph>(32);
 
             // Warm-up: stabilizes `output`'s backing array capacity.

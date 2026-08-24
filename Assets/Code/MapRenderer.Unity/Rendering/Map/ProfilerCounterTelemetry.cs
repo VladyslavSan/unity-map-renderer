@@ -49,9 +49,9 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string CacheBytesHeld    = "MapRenderer.Cache.BytesHeld";
             internal const string CacheEvictions    = "MapRenderer.Cache.Evictions";
 
-            internal const string ActiveLabelTiles  = "MapRenderer.Symbols.ActiveLabelTiles";
-            internal const string CachedLabelTiles  = "MapRenderer.Symbols.CachedLabelTiles";
-            internal const string InputLabels       = "MapRenderer.Symbols.InputLabels";
+            internal const string ActiveSymbolTiles  = "MapRenderer.Symbols.ActiveSymbolTiles";
+            internal const string CachedSymbolTiles  = "MapRenderer.Symbols.CachedSymbolTiles";
+            internal const string InputSymbols       = "MapRenderer.Symbols.InputSymbols";
             internal const string DistanceCulled    = "MapRenderer.Symbols.DistanceCulled";
             internal const string HorizonCulled     = "MapRenderer.Symbols.HorizonCulled";
             internal const string ZoomCulled        = "MapRenderer.Symbols.ZoomCulled";
@@ -91,9 +91,9 @@ namespace MapRenderer.Unity.Rendering.Map
         private static ProfilerCounterValue<long>   _cacheBytesHeld    = Bytes(CounterNames.CacheBytesHeld);
         private static ProfilerCounterValue<int>    _cacheEvictions    = Count(CounterNames.CacheEvictions);
 
-        private static ProfilerCounterValue<int>    _activeLabelTiles  = Count(CounterNames.ActiveLabelTiles);
-        private static ProfilerCounterValue<int>    _cachedLabelTiles  = Count(CounterNames.CachedLabelTiles);
-        private static ProfilerCounterValue<int>    _inputLabels       = Count(CounterNames.InputLabels);
+        private static ProfilerCounterValue<int>    _activeSymbolTiles  = Count(CounterNames.ActiveSymbolTiles);
+        private static ProfilerCounterValue<int>    _cachedSymbolTiles  = Count(CounterNames.CachedSymbolTiles);
+        private static ProfilerCounterValue<int>    _inputSymbols       = Count(CounterNames.InputSymbols);
         private static ProfilerCounterValue<int>    _distanceCulled    = Count(CounterNames.DistanceCulled);
         private static ProfilerCounterValue<int>    _horizonCulled     = Count(CounterNames.HorizonCulled);
         private static ProfilerCounterValue<int>    _zoomCulled        = Count(CounterNames.ZoomCulled);
@@ -102,7 +102,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private static ProfilerCounterValue<int>    _candidates        = Count(CounterNames.Candidates);
         private static ProfilerCounterValue<int>    _survivors         = Count(CounterNames.Survivors);
         private static ProfilerCounterValue<int>    _placedQuads       = Count(CounterNames.PlacedQuads);
-        private static ProfilerCounterValue<int>    _liveFadeRecords   = Count(CounterNames.LiveFadeRecords);
+        private static ProfilerCounterValue<int>    _liveFadeSymbols   = Count(CounterNames.LiveFadeRecords);
         private static ProfilerCounterValue<int>    _mirrorRebuilds    = Count(CounterNames.MirrorRebuilds);
 
         // FlushOnEndOfFrame WITHOUT ResetToZeroOnFlush: these are LEVELS (the snapshot contract), so a frame
@@ -137,8 +137,8 @@ namespace MapRenderer.Unity.Rendering.Map
             if (!UnityEngine.Profiling.Profiler.enabled) return;
 
             OnTileTelemetry(in _view.TileManager.Telemetry);
-            OnSymbolStoreTelemetry(in _view.Symbols.Telemetry);
-            OnLabelPlacementTelemetry(in _view.Labels.Telemetry);
+            OnSymbolStoreTelemetry(in _view.SymbolSubsystem.Telemetry);
+            OnSymbolPlacementTelemetry(in _view.SymbolPlacementSystem.Telemetry);
         }
 
         private void OnTileTelemetry(in TileTelemetrySnapshot snap)
@@ -168,22 +168,22 @@ namespace MapRenderer.Unity.Rendering.Map
 
         private void OnSymbolStoreTelemetry(in SymbolStoreTelemetrySnapshot store)
         {
-            _activeLabelTiles.Value = store.ActiveLabelTiles;
-            _cachedLabelTiles.Value = store.CachedLabelTiles;
-            _coverageDropped.Value  = store.CoverageDroppedLabels;
+            _activeSymbolTiles.Value = store.ActiveSymbolTiles;
+            _cachedSymbolTiles.Value = store.CachedSymbolTiles;
+            _coverageDropped.Value  = store.CoverageDroppedSymbols;
         }
 
-        private void OnLabelPlacementTelemetry(in LabelPlacementTelemetrySnapshot placement)
+        private void OnSymbolPlacementTelemetry(in SymbolPlacementTelemetrySnapshot placement)
         {
-            _inputLabels.Value     = placement.InputLabelCount;
-            _distanceCulled.Value  = placement.DistanceCulledLabels;
-            _horizonCulled.Value   = placement.HorizonCulledLabels;
-            _zoomCulled.Value      = placement.ZoomCulledLabels;
-            _coverageFading.Value  = placement.CoverageFadingLabels;
+            _inputSymbols.Value     = placement.InputSymbolCount;
+            _distanceCulled.Value  = placement.DistanceCulledSymbols;
+            _horizonCulled.Value   = placement.HorizonCulledSymbols;
+            _zoomCulled.Value      = placement.ZoomCulledSymbols;
+            _coverageFading.Value  = placement.CoverageFadingSymbols;
             _candidates.Value      = placement.CollisionCandidateCount;
             _survivors.Value       = placement.CollisionSurvivorCount;
             _placedQuads.Value     = placement.PlacedQuadCount;
-            _liveFadeRecords.Value = placement.LiveFadeRecordCount;
+            _liveFadeSymbols.Value = placement.LiveFadeSymbolCount;
             _mirrorRebuilds.Value  = placement.MirrorRebuildCount;
         }
     }

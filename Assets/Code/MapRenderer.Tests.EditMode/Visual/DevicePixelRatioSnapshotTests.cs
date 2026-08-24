@@ -76,12 +76,12 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Device-px width the world-metre "ground feature" is sized to at dpr 1.</summary>
         private const float GroundFeatureDevicePx = 40f;
 
-        /// <summary>Label size in LOGICAL px — big enough that a ±1 px bbox quantisation is under 2 %.</summary>
-        private const float LabelTextSizePx = 80f;
+        /// <summary>Symbol size in LOGICAL px — big enough that a ±1 px bbox quantisation is under 2 %.</summary>
+        private const float TextSizePx = 80f;
 
         private static readonly Color BgColor     = new Color(0.05f, 0.05f, 0.08f, 1f);
         private static readonly Color GroundColor = new Color(0.20f, 0.45f, 0.98f, 1f);
-        private static readonly float4 LabelInk   = new float4(0.1f, 0.85f, 0.1f, 1f);
+        private static readonly float4 TextInk   = new float4(0.1f, 0.85f, 0.1f, 1f);
 
         private const string LineStyleJson = @"{
             ""version"": 8,
@@ -354,7 +354,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Label arm ────────────────────────────────────────────────────────────────────────────
+        // ── Symbol arm ────────────────────────────────────────────────────────────────────────────
 
         private static byte[] LoadGlyphFixture(string fileName)
             => File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", fileName));
@@ -371,7 +371,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        private static (GlyphAtlasTexture texture, TextLayoutResult layout) BuildGlyphA()
+        private static (GlyphAtlasTexture texture, List<SymbolQuad> quads, TextLayoutBounds bounds) BuildGlyphA()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadGlyphFixture("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();
@@ -380,51 +380,46 @@ namespace MapRenderer.Tests.Visual
             texture.Upload(atlas);
             var shaper = new CodepointTextShaper();
             ShapedRun run = shaper.Shape(new ShapingRequest { Text = "A", Metrics = new AtlasMetrics(atlas) });
-            return (texture, TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default));
+            var quads = new List<SymbolQuad>();
+            TextLayoutBounds bounds = TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, quads);
+            return (texture, quads, bounds);
         }
 
         /// <summary>
         /// The <c>text-size</c> arm. The glyph quad's px offsets are divided by <c>_ScreenParamsLogical</c>
-        /// in the shader, which <see cref="LabelPlacementSystem"/> fills from
+        /// in the shader, which <see cref="SymbolPlacementSystem"/> fills from
         /// <see cref="MapCamera.ViewportLogicalPx"/> — so at dpr 2 the LOGICAL viewport halves and the glyph's
         /// DEVICE footprint doubles, with nothing multiplied at the style seam. This arm is what makes T3 a
         /// statement about pixels rather than about a uniform.
         /// </summary>
-        private static float MeasureLabelHeightPx(SweptScene scene, SnapshotRenderer snap)
+        private static float MeasureTextHeightPx(SweptScene scene, SnapshotRenderer snap)
         {
-            var (glyphAtlas, layout) = BuildGlyphA();
+            var (glyphAtlas, quads, bounds) = BuildGlyphA();
             StyleDocument style = StyleParser.Parse(SymbolStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, SweptZoom, drawIndex: 0);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned.");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
-            var system = new LabelPlacementSystem(scene.MapCam,
+            var system = new SymbolPlacementSystem(scene.MapCam,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            var label = new LabelInstance
-            {
-                AnchorRender = scene.Frame.SceneOriginRender, // exactly at the look-at → centred on screen
-                Layout       = layout,
-                Paint        = new LabelPaint { TextColor = LabelInk, Opacity = 1f },
-                TextSizePx   = LabelTextSizePx,
-                SortKey      = 0f,
-                FeatureIndex = 0,
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddPoint(buffer, scene.Frame.SceneOriginRender, quads, bounds.Min, bounds.Max,
+                paint: new SymbolPaint { TextColor = TextInk, Opacity = 1f },
+                textSizePx: TextSizePx, sortKey: 0f, featureIndex: 0,
                 // A realistic containing tile keeps the world-anchored bake float32-safe (TileKey=0 would be
-                // ~2e7 m away) — the same note every world-label fixture carries.
-                TileKey       = TestTileKeys.PackedContaining(
+                // ~2e7 m away) — the same note every world-symbol fixture carries.
+                tileKey: TestTileKeys.PackedContaining(
                     new GeoCoordinate { Latitude = LookAtLat, Longitude = LookAtLon }, zoom: 14),
-                MaterialIndex = 0,
-                AllowOverlap  = true,
-            };
-            var labels = new List<LabelInstance> { label };
+                materialIndex: 0, allowOverlap: true);
             var layers = new List<SymbolRenderLayer> { renderLayer };
 
             using var plan = new TestSymbolPlan(scene.MapCam.Projection);
             try
             {
                 // Duplicated Tick — the collision verdict is harvested one Tick late (R3).
-                system.Tick(in scene.Frame, plan.Build(labels), glyphAtlas, float.PositiveInfinity, layers);
-                system.Tick(in scene.Frame, plan.Build(labels), glyphAtlas, float.PositiveInfinity, layers);
+                system.Tick(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
+                system.Tick(in scene.Frame, plan.Build(buffer), glyphAtlas, float.PositiveInfinity, layers);
                 Assert.AreEqual(1, system.LastQuadCount,
                     $"the single 'A' must place at dpr {scene.MapCam.DevicePixelRatio} (precondition, not the tooth).");
 
@@ -607,58 +602,58 @@ namespace MapRenderer.Tests.Visual
         // ── T3 (load-bearing) ────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T3 — the reported symptom, pinned.</b> A rendered line and a rendered label must scale by the
+        /// <b>T3 — the reported symptom, pinned.</b> A rendered line and a rendered symbol must scale by the
         /// SAME factor across the dpr sweep, and that factor must be 2.
         ///
         /// <para>Both are asserted against 2.0 AND against each other, deliberately. "Both moved" would pass
-        /// on a build that multiplied the LABEL side at the style seam as well — the label path already
-        /// divides by the logical viewport, so a second multiply gives <c>labelRatio == 4</c>, which the
+        /// on a build that multiplied the LABEL side at the style seam as well — the symbol path already
+        /// divides by the logical viewport, so a second multiply gives <c>textRatio == 4</c>, which the
         /// against-2.0 clause is the only thing that catches.</para>
         ///
         /// <para>Two arms over the SAME sweep with the SAME fixed framebuffer, rendered one at a time: the
-        /// label is anchored at the look-at and the ribbon crosses it, so a combined frame would put the two
+        /// symbol is anchored at the look-at and the ribbon crosses it, so a combined frame would put the two
         /// measurements on top of each other. Both render through the swept MapCamera's own camera, which is
         /// the part that matters.</para>
         /// </summary>
         [Test]
-        public void LineWidth_AndLabelSize_ScaleByTheSameFactorAcrossDpr()
+        public void LineWidth_AndTextSize_ScaleByTheSameFactorAcrossDpr()
         {
             var saved   = SetupLitAmbient();
             var lightGo = BuildDirectionalLight();
             using var snap = new SnapshotRenderer(Size, Size);
             try
             {
-                float lineAt1, labelAt1;
+                float lineAt1, textAt1;
                 using (var scene1 = BuildScene(Dpr1))
                 {
                     lineAt1  = MeasureStyledLineWidthPx(scene1, snap);
-                    labelAt1 = MeasureLabelHeightPx(scene1, snap);
+                    textAt1 = MeasureTextHeightPx(scene1, snap);
                 }
 
-                float lineAt2, labelAt2;
+                float lineAt2, textAt2;
                 using (var scene2 = BuildScene(Dpr2))
                 {
                     lineAt2  = MeasureStyledLineWidthPx(scene2, snap);
-                    labelAt2 = MeasureLabelHeightPx(scene2, snap);
+                    textAt2 = MeasureTextHeightPx(scene2, snap);
                 }
 
                 double lineRatio  = lineAt2  / lineAt1;
-                double labelRatio = labelAt2 / labelAt1;
+                double textRatio = textAt2 / textAt1;
                 TestContext.WriteLine(
                     $"T3: line {lineAt1:F2} → {lineAt2:F2} px (ratio {lineRatio:F3}); " +
-                    $"label {labelAt1:F2} → {labelAt2:F2} px (ratio {labelRatio:F3})");
+                    $"label {textAt1:F2} → {textAt2:F2} px (ratio {textRatio:F3})");
 
-                Assert.That(labelRatio, Is.EqualTo(2.0).Within(RatioTolerance),
-                    $"a label's device footprint must double at dpr 2 — measured {labelAt1:F2} → " +
-                    $"{labelAt2:F2} px, ratio {labelRatio:F3}. A ratio near 4 means the label side was ALSO " +
+                Assert.That(textRatio, Is.EqualTo(2.0).Within(RatioTolerance),
+                    $"a label's device footprint must double at dpr 2 — measured {textAt1:F2} → " +
+                    $"{textAt2:F2} px, ratio {textRatio:F3}. A ratio near 4 means the label side was ALSO " +
                     "multiplied at the style seam on top of the _ScreenParamsLogical division it already has.");
 
                 Assert.That(lineRatio, Is.EqualTo(2.0).Within(RatioTolerance),
                     $"a line's device width must double at dpr 2 — measured {lineAt1:F2} → {lineAt2:F2} px, " +
                     $"ratio {lineRatio:F3}.");
 
-                Assert.That(lineRatio, Is.EqualTo(labelRatio).Within(RatioTolerance),
-                    $"THE SYMPTOM: line ratio {lineRatio:F3} vs label ratio {labelRatio:F3}. Raising the " +
+                Assert.That(lineRatio, Is.EqualTo(textRatio).Within(RatioTolerance),
+                    $"THE SYMPTOM: line ratio {lineRatio:F3} vs label ratio {textRatio:F3}. Raising the " +
                     "device-pixel ratio must not enlarge the labels while leaving the roads at their literal " +
                     "screen width — that is the drift this epic exists to remove.");
             }

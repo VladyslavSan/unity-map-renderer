@@ -123,8 +123,8 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>Epic A / A3 (plan §F tooth 1 — primary structural delegation tooth, RED-verified
-        /// against the pre-A3 <c>SymbolLabelSubsystem</c>): the subsystem no longer decodes, extracts, or
-        /// shapes labels itself — that machinery moved into the processor contract. Against the un-rewired
+        /// against the pre-A3 <c>SymbolSubsystem</c>): the subsystem no longer decodes, extracts, or
+        /// shapes symbols itself — that machinery moved into the processor contract. Against the un-rewired
         /// source (decode at <c>BuildTileAsync</c>'s old <c>:324</c>, <c>ExtractLayers</c> at <c>:325</c>,
         /// <c>ShapeAsync</c> at <c>:333</c>, no runner call) this test FAILS on all four forms — adding the
         /// interface/processor as an unused façade while <c>BuildTileAsync</c> keeps its inline decode/
@@ -133,7 +133,7 @@ namespace MapRenderer.Tests.Structure
         public void SymbolSubsystem_DelegatesDecodeExtractAndShapeToTheProcessorMachinery()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
@@ -142,16 +142,16 @@ namespace MapRenderer.Tests.Structure
             const string runSymbolCallForm     = "TileLayerProcessorRunner.RunSymbolWorkerPass(";
 
             Assert.AreEqual(0, CountOccurrences(source, DecodeCallForm),
-                $"SymbolLabelSubsystem.cs must contain ZERO direct '{DecodeCallForm}' call sites — the " +
+                $"SymbolSubsystem.cs must contain ZERO direct '{DecodeCallForm}' call sites — the " +
                 "symbol decode now lives in TileLayerProcessorRunner.RunSymbolWorkerPass (Epic A / A3).");
             Assert.AreEqual(0, CountOccurrences(source, extractLayersCallForm),
-                $"SymbolLabelSubsystem.cs must contain ZERO direct '{extractLayersCallForm}' call sites — " +
+                $"SymbolSubsystem.cs must contain ZERO direct '{extractLayersCallForm}' call sites — " +
                 "per-layer extraction now happens inside TileSymbolLayerProcessor.ProcessOnWorker.");
             Assert.AreEqual(0, CountOccurrences(source, shapeAsyncCallForm),
-                $"SymbolLabelSubsystem.cs must contain ZERO direct '{shapeAsyncCallForm}' call sites — " +
+                $"SymbolSubsystem.cs must contain ZERO direct '{shapeAsyncCallForm}' call sites — " +
                 "per-layer shaping now happens inside TileSymbolLayerProcessor.CompleteOnMainAsync.");
             Assert.AreEqual(1, CountOccurrences(source, runSymbolCallForm),
-                $"SymbolLabelSubsystem.cs must call '{runSymbolCallForm}' exactly once — the single " +
+                $"SymbolSubsystem.cs must call '{runSymbolCallForm}' exactly once — the single " +
                 "decode-once fan-out point for the symbol worker pass.");
         }
 
@@ -259,7 +259,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>Epic A / A6 (plan §E-13, F-1 — WriteInto-path neutralization, structural). The
-        /// fill/line/symbol fan-out — from feature selection through mesh/label build — references NO MVT
+        /// fill/line/symbol fan-out — from feature selection through mesh/symbol build — references NO MVT
         /// carrier type (<c>MvtTile</c>/<c>MvtFeature</c>/<c>MvtLayer</c>/<c>MvtDecoder</c>) by name; only the
         /// neutral <c>IDecodedTile</c>/<c>ITileLayer</c>/<c>IFeature</c>/<c>ITileDecoder</c> surface (§B-1,
         /// §B-3). Genuinely RED pre-A6: every one of these 15 files named an MVT carrier type. The set is
@@ -681,7 +681,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>D0 (funnel 4 — the parked symbol entry): every site that DISCARDS parked builds must go
-        /// through <c>SymbolLabelSubsystem.DrainAndDiscardParkedBuilds</c>. Exactly two
+        /// through <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>. Exactly two
         /// <c>_pendingSpriteQueue.TryDequeue(</c> sites may exist in the file — the funnel, and
         /// <c>PumpBuilds</c>' live drain, which CONSUMES entries rather than discarding them and is a
         /// different job. Genuinely RED against the pre-D0 source, which had three: the live drain plus two
@@ -695,7 +695,7 @@ namespace MapRenderer.Tests.Structure
         public void TheParkedBuildPurge_HasExactlyOneDiscardFunnel()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
@@ -703,7 +703,7 @@ namespace MapRenderer.Tests.Structure
             const string funnelCall  = "DrainAndDiscardParkedBuilds()";
 
             Assert.AreEqual(2, CountOccurrences(StripComments(source), dequeueForm),
-                $"SymbolLabelSubsystem.cs must contain EXACTLY two '{dequeueForm}' sites — the discard " +
+                $"SymbolSubsystem.cs must contain EXACTLY two '{dequeueForm}' sites — the discard " +
                 "funnel and PumpBuilds' live drain. A third is a new drop path that a later per-entry " +
                 "obligation would not know about.");
 
@@ -761,7 +761,7 @@ namespace MapRenderer.Tests.Structure
         public void TheParkedDrainsDispatch_TakesNoCancellationToken_AndItsGuardReleasesSitInFinallys()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
@@ -847,7 +847,7 @@ namespace MapRenderer.Tests.Structure
         public void TryParkBuildAndTheAbandonDrain_LockTheSameParkGate()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolLabelSubsystem.cs");
+                Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 

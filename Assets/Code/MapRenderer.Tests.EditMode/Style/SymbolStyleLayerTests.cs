@@ -72,7 +72,7 @@ namespace MapRenderer.Tests.Style
             // Layout defaults.
             Assert.AreEqual(16f, sym.Layout.TextSize.Evaluate(0.0), 1e-6, "text-size default is 16");
             Assert.AreEqual(2f, sym.Layout.TextPadding.Evaluate(0.0), 1e-6,
-                "text-padding default is 2 (the resolver applies the spec default; LabelInstance's carrier default is 0)");
+                "text-padding default is 2 (the resolver applies the spec default; the record carrier's default is 0)");
             Assert.IsFalse(sym.Layout.TextAllowOverlap, "text-allow-overlap default is false");
             Assert.IsFalse(sym.Layout.TextIgnorePlacement, "text-ignore-placement default is false");
             Assert.AreEqual(SymbolPlacement.Point, sym.Layout.SymbolPlacement.Evaluate(0.0), "symbol-placement default is point");

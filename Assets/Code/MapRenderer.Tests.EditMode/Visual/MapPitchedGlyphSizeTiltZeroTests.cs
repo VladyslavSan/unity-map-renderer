@@ -1,5 +1,5 @@
 // Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL
-// LabelPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
+// SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
 // Tools/core-tests/core-tests.csproj (it renders).
 //
 // Stage W2 — THE TILT-ZERO CALIBRATION ARM (W2-T4, T5, T9).
@@ -8,7 +8,7 @@
 // axis, so every ground point shares ONE view depth d, and `MetresPerLogicalPixel` is BY DEFINITION the
 // metres-per-logical-pixel ruler at d. A map-pitched corner displaced by `cornerPx · mppLogical` METRES
 // therefore projects to exactly `cornerPx` LOGICAL PIXELS — which is precisely what the viewport branch adds
-// to clip.xy after projection. So at tilt 0 a map-pitched curved label and a viewport-pitched twin must
+// to clip.xy after projection. So at tilt 0 a map-pitched curved symbol and a viewport-pitched twin must
 // render PIXEL-IDENTICALLY (up to AA).
 //
 // That single identity carries three things at once, and each is a separate tooth below:
@@ -24,7 +24,7 @@
 // THE REFERENCE IS THE VIEWPORT ARM, AND THAT IS NOT AN ACCIDENT. It shares NO code with the map branch:
 // `SymbolWorldIsMapPitched` sends the two down mutually exclusive paths in the vertex stage. P3a's rebuilt-T2
 // is the recorded lesson — a reference drawn from the arm under test cancels the very defect it is meant to
-// expose. The two labels here differ in EXACTLY ONE FIELD, `LabelInstance.PitchAlignment`.
+// expose. The two symbols here differ in EXACTLY ONE FIELD, `ShapedSymbol.PitchAlignment`.
 //
 // WHY 45° AND 90° ARE SWEPT AND 0° ALONE WOULD BE VACUOUS FOR THE SIGN. A road at 0° is horizontal on
 // screen, and the 'F' cell's displacement about its anchor is then symmetric under the mirror the sign
@@ -38,7 +38,7 @@
 // this file takes a centroid.
 //
 // NO METRE LITERALS: every world length here is a multiple of `scene.MetresPerDevicePixel`, the same rule
-// TiltFixtureSelfTests and OffLookAtLabelScene enforce — a bare metre literal is sub-pixel at this pose.
+// TiltFixtureSelfTests and OffLookAtSymbolScene enforce — a bare metre literal is sub-pixel at this pose.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;
@@ -64,7 +64,7 @@ namespace MapRenderer.Tests.Visual
         private const float TextSizePx = 160f;
 
         /// <summary>Half-length of the road, as a multiple of the frame ruler. Only has to exceed the chord
-        /// probe's half-width (the label is ONE glyph, so its arc span is exactly 0 and the spill gate is
+        /// probe's half-width (the symbol is ONE glyph, so its arc span is exactly 0 and the spill gate is
         /// trivially satisfied); 200 leaves a wide margin at both ends.</summary>
         private const double RoadHalfLengthRulerUnits = 200.0;
 
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T4a (DPR 1) + W2-T4c (DPR 2) + W2-T4d (45°/90°) — the absolute-scale clause.</b> Proves: at
-        /// tilt 0 a map-pitched curved label covers the same number of ink pixels as its viewport-pitched
+        /// tilt 0 a map-pitched curved symbol covers the same number of ink pixels as its viewport-pitched
         /// twin, at both device-pixel ratios and at three road angles.
         ///
         /// <para><b>This is the only tooth in W2 that is not blind to a uniform scale error.</b>
@@ -201,13 +201,13 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>W2-T9 — the degenerate-frame branch is observed, not merely written.</b> Proves: a map-pitched
-        /// curved label whose per-vertex <c>Up</c> is <see cref="float3.zero"/> still renders, and at tilt 0
+        /// curved symbol whose per-vertex <c>Up</c> is <see cref="float3.zero"/> still renders, and at tilt 0
         /// with a screen-horizontal road it renders as its viewport twin does — i.e. it took
         /// <c>SymbolWorldMapPitchClip</c>'s camera-facing METRE fallback, and did NOT reinterpret its metre
         /// offsets as pixels.
         ///
         /// <para><b>The P2 hazard this exists for.</b> Roughly ten older fixtures write <c>float3.zero</c> for
-        /// <c>Up</c>, and both <c>SymbolTileLabelBlockBaker</c> and the parity oracle do so whenever
+        /// <c>Up</c>, and both <c>SymbolTileBlockBaker</c> and the parity oracle do so whenever
         /// <c>PathUpRender</c> is null. Those feed a zero-length normal straight into a tangent-frame
         /// construction. Without this tooth the fallback is an unobserved branch, and this epic has already
         /// shipped one of those (<c>round-caps-never-rendered</c>: a <c>normalize(0)</c> NaN that made round
@@ -300,7 +300,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Renders the SAME curved label twice through ONE scene and ONE camera — once with
+        /// Renders the SAME curved symbol twice through ONE scene and ONE camera — once with
         /// <c>PitchAlignment = Map</c>, once with the field left at the enum's zero value
         /// (<see cref="AlignmentMode.Auto"/>, which resolves to the pre-W2 screen path) — and returns both
         /// ink signatures.
@@ -309,8 +309,8 @@ namespace MapRenderer.Tests.Visual
         /// cell, same <c>TextSizePx</c>, same road, same camera, same frame. Everything a scale error could
         /// hide behind is shared, so what survives the comparison is the branch itself.</para>
         ///
-        /// <para>Both arms are rendered from one <see cref="LabelPlacementSystem"/>, re-Ticked between them —
-        /// the same two-pass discipline <c>OffLookAtLabelScene</c> uses, and for the same reason: one camera
+        /// <para>Both arms are rendered from one <see cref="SymbolPlacementSystem"/>, re-Ticked between them —
+        /// the same two-pass discipline <c>OffLookAtSymbolScene</c> uses, and for the same reason: one camera
         /// means one projection, so the two frames are comparable by construction rather than by assumption.
         /// Each Tick is duplicated because the collision verdict is harvested one Tick late (R3).</para>
         /// </summary>
@@ -323,12 +323,12 @@ namespace MapRenderer.Tests.Visual
                 SizePx           = SizePx,
                 DevicePixelRatio = devicePixelRatio,
                 BackgroundColor  = Color.white, // WorldSymbolInkAnalysis.InkThreshold reads dark ink on white.
-                LitAmbient       = false,       // the label arm needs no lit recipe.
+                LitAmbient       = false,       // the symbol arm needs no lit recipe.
             };
 
             TiltedGroundScene    scene    = null;
             GlyphAtlasTexture    atlas    = null;
-            LabelPlacementSystem system   = null;
+            SymbolPlacementSystem system   = null;
             TestSymbolPlan       plan     = null;
             SnapshotRenderer     snapshot = null;
             try
@@ -357,7 +357,7 @@ namespace MapRenderer.Tests.Visual
 
                 long tileKey = TestTileKeys.PackedContaining(sceneConfig.LookAt.Surface, zoom: 14);
 
-                system = new LabelPlacementSystem(scene.MapCam,
+                system = new SymbolPlacementSystem(scene.MapCam,
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
                 snapshot = new SnapshotRenderer(SizePx, SizePx);
@@ -378,36 +378,32 @@ namespace MapRenderer.Tests.Visual
         }
 
         private static InkReading RenderArm(
-            TiltedGroundScene scene, LabelPlacementSystem system, TestSymbolPlan plan,
+            TiltedGroundScene scene, SymbolPlacementSystem system, TestSymbolPlan plan,
             SnapshotRenderer snapshot, GlyphAtlasTexture atlas, in SceneFrame frame,
             double3 pathA, double3 pathB, double3 up, in SymbolQuad cell, long tileKey,
             AlignmentMode pitch, string armName)
         {
-            var label = new LabelInstance
-            {
-                Placement      = SymbolPlacement.LineCenter,
-                PitchAlignment = pitch,          // THE one field the two arms differ in.
-                PathRender     = new[] { pathA, pathB },
-                PathUpRender   = new[] { up, up },
-                UpRender       = up,
-                LineAnchors    = new[] { new LineAnchor(0, 0.5f) },
-                CurvedGlyphs   = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } },
-                Paint          = LabelPaint.Default,
-                Text           = armName,
-                TextSizePx     = TextSizePx,
-                MaxAngleDeg    = 180f,
-                KeepUpright    = false,
+            var buffer = new SymbolTileBuffer();
+            var glyphs = new List<CurvedGlyph> { new CurvedGlyph { ArcCenter = 0f, Cell = cell } };
+            TestSymbolTileBuffer.AddCurved(buffer, glyphs, new[] { new LineAnchor(0, 0.5f) },
+                new[] { pathA, pathB }, new[] { up, up },
+                placement: SymbolPlacement.LineCenter,
+                up: up,
+                pitchAlignment: pitch,            // THE one field the two arms differ in.
+                paint: SymbolPaint.Default,
+                text: armName,
+                textSizePx: TextSizePx,
+                maxAngleDeg: 180f,
+                keepUpright: false,
                 // P3a's recorded lesson: at coarse zoom the dedup/collision machinery decides who emits and a
-                // fixture silently loses its label.
-                AllowOverlap   = true,
-                FeatureIndex   = 0,
-                TileKey        = tileKey,
-            };
+                // fixture silently loses its symbol.
+                allowOverlap: true,
+                featureIndex: 0,
+                tileKey: tileKey);
 
-            var one = new[] { label };
             // R3: duplicate Tick — the collision verdict is harvested one Tick late.
-            system.Tick(in frame, plan.Build(one), atlas);
-            system.Tick(in frame, plan.Build(one), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
+            system.Tick(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
                 $"W2-T4 precondition ({armName}): the label must stage exactly one quad, got " +
                 $"{system.LastQuadCount}. A zero means it spilled its road (StageCurved's centerArc ± halfSpan " +

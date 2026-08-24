@@ -82,7 +82,7 @@ namespace MapRenderer.Unity.Rendering.Map
         public PropertyStorageMode PropertyStorage = PropertyStorageMode.Dense;
 
         [Tooltip("Rapid-zoom stutter: recompute the full symbol-label placement (project/collide/emit — the " +
-            "main-thread LabelTick that spikes to ~100ms) only every Nth frame; on the held frames between, " +
+            "main-thread SymbolTick that spikes to ~100ms) only every Nth frame; on the held frames between, " +
             "labels stay GPU-billboarded at their world anchors (only reflow / collision / fade update less " +
             "often). 1 = every frame (throttle OFF, unchanged behaviour). 2-4 trades a few frames of " +
             "label-reflow latency for a large main-thread saving during zoom.")]
@@ -104,13 +104,13 @@ namespace MapRenderer.Unity.Rendering.Map
                  "the new value. A tuning knob, not a live toggle.")]
         public double FillTileBufferClip = 0.0;
 
-        [Header("Labels")]
+        [Header("Symbols")]
         [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
                  "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +
                  "tilt-foreshortened horizon tile pile-up, whose labels are collision-discarded anyway. " +
                  "Read live every Tick → tweak in Play to eyeball it. Default 0.05 (a tile must cover 5% of the " +
                  "screen to keep its labels). Raise to cull more aggressively; set <= 0 to DISABLE the cull.")]
-        public double LabelTileCoverageCull = 0.05;
+        public double SymbolTileCoverageCull = 0.05;
 
         [Range(0f, 1f)]
         [Tooltip("Per-label far-distance cull, as a FRACTION of the camera far plane. Each label whose anchor is " +
@@ -122,7 +122,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "pull distant labels in closer than the full frustum depth. 0 = OFF: the cull distance collapses " +
                  "to zero, which the cull reads as its non-positive disable and keeps ALL labels (so the slider " +
                  "runs tightest just above 0, then flips to off at 0).")]
-        public double LabelMaxDistanceFraction = 1.0;
+        public double SymbolMaxDistanceFraction = 1.0;
 
         [Header("Rendering")]
         [Tooltip("Tile render backend. Entities (default) = per-tile entity hierarchy via Entities " +

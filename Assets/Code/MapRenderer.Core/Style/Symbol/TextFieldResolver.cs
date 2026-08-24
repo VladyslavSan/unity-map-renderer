@@ -6,7 +6,7 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// S105 F2 — resolves a symbol layer's <c>text-field</c> to a concrete label string for one feature.
+    /// S105 F2 — resolves a symbol layer's <c>text-field</c> to a concrete symbol string for one feature.
     /// Two forms, single-section only (multi-section <c>["format", …]</c> is deferred):
     /// <list type="bullet">
     /// <item><b>Token string</b> (the legacy sugar): a plain string with <c>{prop}</c> tokens expanded
@@ -15,15 +15,15 @@ namespace MapRenderer.Core.Style.Symbol
     /// <item><b>Expression array</b>: <c>["get",…]</c>/<c>["coalesce",…]</c>/<c>["concat",…]</c> parsed by the
     /// existing <see cref="ExpressionParser"/> and evaluated, then rendered to string (spec <c>to-string</c>).</item>
     /// </list>
-    /// Returns <c>null</c> when NO label should be produced — the field is absent, or the resolved text is
-    /// empty/whitespace (a missing property must SKIP the feature, not emit a blank label). Engine-free;
+    /// Returns <c>null</c> when NO symbol should be produced — the field is absent, or the resolved text is
+    /// empty/whitespace (a missing property must SKIP the feature, not emit a blank symbol). Engine-free;
     /// clean-room (public Style Spec — <c>text-field</c> token syntax + expressions).
     /// </summary>
     public static class TextFieldResolver
     {
         /// <summary>
         /// Resolve <paramref name="textField"/> (a layer's raw <c>text-field</c> JSON) for
-        /// <paramref name="feature"/>. Returns the label string, or <c>null</c> to skip the feature.
+        /// <paramref name="feature"/>. Returns the symbol string, or <c>null</c> to skip the feature.
         /// </summary>
         public static string Resolve(JsonValue textField, IFeature feature)
         {

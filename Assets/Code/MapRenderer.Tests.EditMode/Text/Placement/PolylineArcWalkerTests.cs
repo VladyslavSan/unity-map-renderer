@@ -111,7 +111,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Cursor_ReverseMonotonicSweep_MatchesForwardSweep()
         {
-            // A reversed (keep-upright) label queries arcs in DECREASING order — the backward cursor walk must
+            // A reversed (keep-upright) symbol queries arcs in DECREASING order — the backward cursor walk must
             // give the same points as a fresh walker queried forward.
             PolylineArcWalker reverse = Staircase();
             PolylineArcWalker forward = Staircase();

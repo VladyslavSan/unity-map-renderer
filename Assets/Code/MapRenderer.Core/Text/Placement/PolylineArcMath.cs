@@ -68,7 +68,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// Point + tangent angle (radians) at arc distance <paramref name="arc"/> from the start, clamped to the
         /// endpoints. <paramref name="cursor"/> is a resumable segment hint (Lever A): the caller queries arcs in
-        /// monotonic order per label, so resuming from the last hit is O(1) amortized instead of O(count) per glyph.
+        /// monotonic order per symbol, so resuming from the last hit is O(1) amortized instead of O(count) per glyph.
         /// Robust to out-of-order queries — the two guarded walks land on the containing segment regardless of where
         /// the cursor started. Pass a cursor seeded to 0 at the start of each polyline.
         /// </summary>

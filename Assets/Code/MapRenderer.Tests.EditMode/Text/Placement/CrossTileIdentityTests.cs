@@ -1,55 +1,33 @@
 // Engine-free: shared verbatim between the Unity EditMode runner and Tools/core-tests (registered in
 // core-tests.csproj). Uses only MapRenderer.Core types + Unity.Mathematics (shimmed headless).
 
-using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Style.Symbol;
-using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Unity.Text;
 
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// A-3: cross-tile point-label identity (<see cref="CrossTileLabelKey"/>) + the store's dedup.
+    /// A-3: cross-tile point-symbol identity (<see cref="CrossTileSymbolKey"/>) — the <c>For</c>-math primitive,
+    /// engine-free.
     ///
-    /// <para><see cref="CrossTileLabelKey.For"/> stays a GENERAL grid primitive — still
-    /// <c>quantizeMeters</c>-parameterized, its snapping math unchanged — so the <c>For</c>-math teeth below
-    /// still assert it at an explicit grid: (1) a grid is COARSE ENOUGH — a point's real parent (z10) vs child
-    /// (z11) reprojection lands within one cell (the doc's original "1px-at-max-zoom" would not); (2) FINE ENOUGH
-    /// — distinct labels &gt; a few cells apart keep different keys; plus the 3-axis (globe Y), icon, and text
-    /// parity cases.</para>
+    /// <para><see cref="CrossTileSymbolKey.For"/> stays a GENERAL grid primitive — still
+    /// <c>quantizeMeters</c>-parameterized, its snapping math unchanged — so the teeth below assert it at an
+    /// explicit grid: (1) a grid is COARSE ENOUGH — a point's real parent (z10) vs child (z11) reprojection
+    /// lands within one cell (the doc's original "1px-at-max-zoom" would not); (2) FINE ENOUGH — distinct symbols
+    /// &gt; a few cells apart keep different keys; plus the 3-axis (globe Y), icon, and text parity cases.</para>
     ///
-    /// <para><b>Stage 3:</b> the STORE dedup no longer takes a caller grid — it keys on the fixed
-    /// <see cref="CrossTileLabelKey.CanonicalGridMeters"/> (4 m), so the <c>Store_*</c> cases below pass a gate
-    /// <c>q</c> whose MAGNITUDE the store ignores; their anchors are spaced to merge/split under the fixed 4 m
-    /// grid: (3) a symbol present in both a parent and child tile dedups to ONE, finest-zoom wins;
-    /// (4) different text in the same cell does NOT merge; (5) line labels are not deduped; (6) the gate ≤ 0
-    /// disables dedup (the pre-A-3 pass-through).</para>
+    /// <para><b>Reader cutover (4.2).</b> The <c>Store_*</c> cases that exercised
+    /// <see cref="MapRenderer.Unity.Text.SymbolTileStore"/>'s dedup moved to
+    /// <c>CrossTileIdentityStoreTests</c> (EditMode-only, alongside this file) — the store now reads a baked
+    /// native block, which needs <c>Unity.Collections</c> that this project's core-tests shim lacks. This file's
+    /// OWN <see cref="CrossTileSymbolKey.For"/> math teeth are untouched and stay in the fast loop.</para>
     /// </summary>
     [TestFixture]
     public class CrossTileIdentityTests
     {
-        private static LabelInstance PointLabel(double3 anchor, int layer, string text, TileId tile)
-            => new LabelInstance
-            {
-                Placement = SymbolPlacement.Point,
-                AnchorRender = anchor,
-                MaterialIndex = layer,
-                Text = text,
-                TileKey = LabelTileKey.Pack(tile),
-            };
-
-        private static List<LabelInstance> Collect(SymbolTileLabelStore store, double q)
-        {
-            var output = new List<LabelInstance>();
-            store.CollectInto(output, q);
-            return output;
-        }
-
         // ── (1) The decisive falsifier: a point's REAL adjacent-zoom reprojection collapses. Same physical
         //    location as MVT-quantized in a z10 tile vs its z11 child lands within ONE display-zoom pixel cell,
         //    so a display-pixel grid (GroundResolution at the coarser zoom) collapses them. ──
@@ -80,7 +58,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── (S1) the 3-axis defect: on the globe, two equator-mirrored anchors (30°N / 30°S, same longitude)
         //    share render X/Z (both ∝ cosφ) but differ in Y (=sinφ·R, opposite sign) — an x/z-only key collides
-        //    them into one label. Non-look-at latitudes so cosφ≠0 (X/Z genuinely equal, not both ~0). ──
+        //    them into one symbol. Non-look-at latitudes so cosφ≠0 (X/Z genuinely equal, not both ~0). ──
         [Test]
         public void GlobeEquatorMirroredAnchors_AreDistinct()
         {
@@ -89,7 +67,7 @@ namespace MapRenderer.Tests.Text.Placement
             double3 render30S = proj.Project(new GeoCoordinate { Latitude = -30.0, Longitude = 45.0 });
             double q = CameraPoseMath.MetersPerPixel(6.0);
 
-            Assert.AreNotEqual(CrossTileLabelKey.For(render30N, 0, "X", null, q), CrossTileLabelKey.For(render30S, 0, "X", null, q),
+            Assert.AreNotEqual(CrossTileSymbolKey.For(render30N, 0, "X", null, q), CrossTileSymbolKey.For(render30S, 0, "X", null, q),
                 "30°N and 30°S at the same longitude share render X/Z but must stay distinct labels (the Y axis)");
         }
 
@@ -103,9 +81,9 @@ namespace MapRenderer.Tests.Text.Placement
             double3 near = mid + new double3(3.0, 0, -3.0);     // a few metres → same cell
             double3 far = mid + new double3(3.0 * q, 0, 0);     // 3 cells away → different
 
-            Assert.AreEqual(CrossTileLabelKey.For(mid, 0, "T", null, q), CrossTileLabelKey.For(near, 0, "T", null, q),
+            Assert.AreEqual(CrossTileSymbolKey.For(mid, 0, "T", null, q), CrossTileSymbolKey.For(near, 0, "T", null, q),
                 "anchors within a grid cell share one identity");
-            Assert.AreNotEqual(CrossTileLabelKey.For(mid, 0, "T", null, q), CrossTileLabelKey.For(far, 0, "T", null, q),
+            Assert.AreNotEqual(CrossTileSymbolKey.For(mid, 0, "T", null, q), CrossTileSymbolKey.For(far, 0, "T", null, q),
                 "anchors several cells apart are distinct labels");
         }
 
@@ -115,12 +93,12 @@ namespace MapRenderer.Tests.Text.Placement
         {
             const double q = 50.0;
             double3 a = new double3(q * 10.5, 0, q * 10.5);
-            Assert.AreNotEqual(CrossTileLabelKey.For(a, 0, "Paris", null, q), CrossTileLabelKey.For(a, 0, "Lyon", null, q));
-            Assert.AreNotEqual(CrossTileLabelKey.For(a, 0, "Paris", null, q), CrossTileLabelKey.For(a, 1, "Paris", null, q),
+            Assert.AreNotEqual(CrossTileSymbolKey.For(a, 0, "Paris", null, q), CrossTileSymbolKey.For(a, 0, "Lyon", null, q));
+            Assert.AreNotEqual(CrossTileSymbolKey.For(a, 0, "Paris", null, q), CrossTileSymbolKey.For(a, 1, "Paris", null, q),
                 "same anchor+text on a different layer is a different label");
         }
 
-        // ── I6 (a): two icon labels (text=null) at the SAME cell/layer but DIFFERENT icon-image must stay
+        // ── I6 (a): two icon symbols (text=null) at the SAME cell/layer but DIFFERENT icon-image must stay
         //    distinct — the I5b-deferred gap this stage closes (pre-fix they collide: same text==null, so the
         //    old 4-arg key ignored the icon entirely). ──
         [Test]
@@ -128,15 +106,15 @@ namespace MapRenderer.Tests.Text.Placement
         {
             const double q = 50.0;
             double3 a = new double3(q * 10.5, 0, q * 10.5);
-            var keyA = CrossTileLabelKey.For(a, 0, null, "sprite-a", q);
-            var keyB = CrossTileLabelKey.For(a, 0, null, "sprite-b", q);
+            var keyA = CrossTileSymbolKey.For(a, 0, null, "sprite-a", q);
+            var keyB = CrossTileSymbolKey.For(a, 0, null, "sprite-b", q);
             Assert.AreNotEqual(keyA, keyB, "same cell/layer, different icon-image → distinct identity");
             Assert.AreNotEqual(keyA.GetHashCode(), keyB.GetHashCode(), "…and distinct hashes");
         }
 
         // ── I6 (b): the SAME icon-image across a parent/child reprojected anchor (the real adjacent-zoom
         //    diff from teeth (1)) still collapses to one identity — icons get the same seamless-swap dedup
-        //    text labels already have. ──
+        //    text symbols already have. ──
         [Test]
         public void IconIdentity_SameIconAcrossParentChildAnchor_AreEqual()
         {
@@ -150,7 +128,7 @@ namespace MapRenderer.Tests.Text.Placement
             double3 a10 = proj.Project(new GeoCoordinate { Latitude = g10.y, Longitude = g10.x });
             double q = WebMercator.GroundResolution(10);
 
-            Assert.AreEqual(CrossTileLabelKey.For(a10, 0, null, "sprite-a", q), CrossTileLabelKey.For(a11, 0, null, "sprite-a", q),
+            Assert.AreEqual(CrossTileSymbolKey.For(a10, 0, null, "sprite-a", q), CrossTileSymbolKey.For(a11, 0, null, "sprite-a", q),
                 "the same icon reprojected parent→child lands in the same identity cell");
         }
 
@@ -161,82 +139,11 @@ namespace MapRenderer.Tests.Text.Placement
         {
             const double q = 50.0;
             double3 a = new double3(q * 3.5, 0, q * 3.5);
-            var k1 = CrossTileLabelKey.For(a, 0, "Paris", null, q);
-            var k2 = CrossTileLabelKey.For(a, 0, "Paris", null, q);
+            var k1 = CrossTileSymbolKey.For(a, 0, "Paris", null, q);
+            var k2 = CrossTileSymbolKey.For(a, 0, "Paris", null, q);
             Assert.AreEqual(k1, k2);
             Assert.AreEqual(k1.GetHashCode(), k2.GetHashCode());
         }
 
-        // ── (3) THE seamless-swap dedup: the same symbol active in a parent + child tile collapses to ONE,
-        //    keeping the finest (child) zoom. ──
-        [Test]
-        public void Store_ParentAndChildSameSymbol_DedupToFinest()
-        {
-            const double q = 50.0; // Stage 3: the store IGNORES this magnitude — it grids on the fixed 4 m; q only gates dedup ON.
-            double3 anchor = new double3(5000.0, 0, 5000.0); // a CanonicalGridMeters=4 cell centre (5000 = 4·1250)
-            var parent = new TileId { Z = 10, X = 500, Y = 400 };
-            var child = new TileId { Z = 11, X = 1000, Y = 800 };
-            var parentLabel = PointLabel(anchor + new double3(1, 0, 1), 0, "Metropolis", parent); // 1 m — well inside the 4 m cell
-            var childLabel = PointLabel(anchor, 0, "Metropolis", child);
-
-            var store = new SymbolTileLabelStore(cacheCap: 8);
-            var kParent = new SymbolTileLabelStore.Key("src", parent);
-            var kChild = new SymbolTileLabelStore.Key("src", child);
-            store.CompleteBuild(kParent, store.BeginBuild(kParent), new List<LabelInstance> { parentLabel });
-            store.CompleteBuild(kChild, store.BeginBuild(kChild), new List<LabelInstance> { childLabel });
-
-            List<LabelInstance> output = Collect(store, q);
-            Assert.AreEqual(1, output.Count, "the duplicate parent+child symbol collapses to one");
-            Assert.AreSame(childLabel, output[0], "the finest (child) tile's label wins");
-        }
-
-        // ── (4) two GENUINELY distinct nearby symbols (different cells) both survive. ──
-        [Test]
-        public void Store_DistinctSymbols_BothSurvive()
-        {
-            const double q = 50.0;
-            var tile = new TileId { Z = 12, X = 3, Y = 4 };
-            var a = PointLabel(new double3(q * 10.5, 0, q * 10.5), 0, "A", tile);
-            var b = PointLabel(new double3(q * 40.5, 0, q * 10.5), 0, "B", tile);
-
-            var store = new SymbolTileLabelStore(cacheCap: 8);
-            var key = new SymbolTileLabelStore.Key("src", tile);
-            store.CompleteBuild(key, store.BeginBuild(key), new List<LabelInstance> { a, b });
-            Assert.AreEqual(2, Collect(store, q).Count, "distinct-cell symbols are not merged");
-        }
-
-        // ── (5) line labels are excluded from dedup in v1 (two coincident line labels both pass through). ──
-        [Test]
-        public void Store_LineLabels_AreNotDeduped()
-        {
-            const double q = 50.0;
-            var tile = new TileId { Z = 12, X = 3, Y = 4 };
-            var line1 = new LabelInstance { Placement = SymbolPlacement.Line, Text = "Main St", MaterialIndex = 0,
-                TileKey = LabelTileKey.Pack(tile) };
-            var line2 = new LabelInstance { Placement = SymbolPlacement.LineCenter, Text = "Main St", MaterialIndex = 0,
-                TileKey = LabelTileKey.Pack(tile) };
-
-            var store = new SymbolTileLabelStore(cacheCap: 8);
-            var key = new SymbolTileLabelStore.Key("src", tile);
-            store.CompleteBuild(key, store.BeginBuild(key), new List<LabelInstance> { line1, line2 });
-            Assert.AreEqual(2, Collect(store, q).Count, "line labels pass through undeduped (per-anchor identity is a follow-up)");
-        }
-
-        // ── (6) quantize ≤ 0 disables dedup — the pre-A-3 pass-through (duplicates NOT collapsed). ──
-        [Test]
-        public void Store_QuantizeDisabled_EmitsEverything()
-        {
-            const double q = 50.0;
-            double3 anchor = new double3(q * 5.5, 0, q * 5.5);
-            var parent = new TileId { Z = 10, X = 500, Y = 400 };
-            var child = new TileId { Z = 11, X = 1000, Y = 800 };
-
-            var store = new SymbolTileLabelStore(cacheCap: 8);
-            var kP = new SymbolTileLabelStore.Key("src", parent);
-            var kC = new SymbolTileLabelStore.Key("src", child);
-            store.CompleteBuild(kP, store.BeginBuild(kP), new List<LabelInstance> { PointLabel(anchor, 0, "X", parent) });
-            store.CompleteBuild(kC, store.BeginBuild(kC), new List<LabelInstance> { PointLabel(anchor, 0, "X", child) });
-            Assert.AreEqual(2, Collect(store, 0.0).Count, "quantize<=0 is the pre-A-3 pass-through: both emitted");
-        }
     }
 }

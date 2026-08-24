@@ -9,8 +9,8 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs
 {
     /// <summary>
-    /// Burst-gather Stage 1 (docs/symbol-label-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
-    /// <c>LabelPlacementSystem.GatherIntoMirror</c>'s two managed loops (<c>LabelPlacementSystem.cs:1050-1157</c>)
+    /// Burst-gather Stage 1 (docs/symbol-symbol-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
+    /// <c>SymbolPlacementSystem.GatherIntoMirror</c>'s two managed loops (<c>SymbolPlacementSystem.cs:1050-1157</c>)
     /// — compact every winner's pre-baked <see cref="SymbolBlockView"/> slice into one contiguous set of native
     /// mirror pools, remapping every <c>Detail</c>/<c>*Start</c> field by the running pool offset. Run
     /// SYNCHRONOUSLY (<c>.Run()</c>) inside <c>PmGather</c>, strictly before <c>TickCore</c> reads a single
@@ -20,16 +20,12 @@ namespace MapRenderer.Jobs
     /// a struct copied element-for-element from a block's own array — no new floating-point arithmetic is
     /// introduced anywhere. <c>SymbolGatherParityTests.Gather_MatchesBuildOracle_FieldByField</c> is the teeth.</para>
     ///
-    /// <para>Resizes the caller's <c>Allocator.Persistent</c> mirror <see cref="NativeList{T}"/> outputs itself
-    /// (pass 1 totals the per-pool sizes; pass 2 fills) — the same "grow an externally-owned persistent list
-    /// from inside a Burst <c>IJob</c>" shape as <c>GlobeFillSubdivideJob{TProj}.Execute</c>'s <c>OutVerts.Add</c>
-    /// (<c>GlobeFillSubdivider.cs:172-173</c>, list allocated by <c>StyledFillTileBuilder.cs:268</c>) — established,
-    /// shipped practice in this codebase; not the <see cref="LabelStageJob"/> shape (that job's outputs are
-    /// PRE-sized by the caller because ITS caller doesn't know the counts either — here pass 1 computes them
-    /// before pass 2 needs the resize, so growth is bounded and single-shot, not per-element).</para>
+    /// <para>Resizes the caller's <c>Allocator.Persistent</c> mirror <see cref="NativeList{T}"/> outputs itself:
+    /// pass 1 totals the per-pool sizes, pass 2 fills — so the resize is bounded and single-shot, not
+    /// per-element growth.</para>
     ///
-    /// <para>Does NOT write the three per-record masks (<c>RecordDeparting</c>/<c>RecordCoverageFading</c>/
-    /// <c>RecordDropped</c>) — those are the per-frame overrides <c>WritePerFrameMasks</c> rewrites every Tick
+    /// <para>Does NOT write the three per-record masks (<c>SymbolDeparting</c>/<c>SymbolCoverageFading</c>/
+    /// <c>SymbolDropped</c>) — those are the per-frame overrides <c>WritePerFrameMasks</c> rewrites every Tick
     /// (memo hit or not) and are resized/filled by the caller, outside this job.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
@@ -56,7 +52,7 @@ namespace MapRenderer.Jobs
         public int WinnerCount;
 
         // ── outputs: the mirror pools (record order == winner order; NOT the three per-frame masks) ──
-        public NativeList<byte> MKinds;
+        public NativeList<SymbolPlacementKind> MKinds;
         public NativeList<int>  MDetail, MWorldCount, MWorldStart;
         public NativeList<double3> MRepAnchor;
         public NativeList<PointStageInput> MPoints;
@@ -79,7 +75,7 @@ namespace MapRenderer.Jobs
         {
             int winners = WinnerCount;
 
-            // Pass 1 (mirrors LabelPlacementSystem.cs:1050-1070): total per-pool sizes, so each mirror list is
+            // Pass 1 (mirrors SymbolPlacementSystem.cs:1050-1070): total per-pool sizes, so each mirror list is
             // resized ONCE.
             int records = winners, points = 0, curveds = 0, quads = 0, glyphs = 0, anchors = 0, fades = 0, worlds = 0;
             for (int r = 0; r < winners; r++)
@@ -87,7 +83,7 @@ namespace MapRenderer.Jobs
                 SymbolBlockView block = BlockViews[BlockId[r]];
                 int li = LocalIndex[r];
                 int detail = block.Detail[li];
-                if (block.Kinds[li] == (byte)LabelRecordKind.Point)
+                if (block.Kinds[li] == SymbolPlacementKind.Point)
                 {
                     points++;
                     quads += block.PointQuadCount[detail];
@@ -142,7 +138,7 @@ namespace MapRenderer.Jobs
                 }
                 mWorld += worldCount;
 
-                if (block.Kinds[li] == (byte)LabelRecordKind.Point)
+                if (block.Kinds[li] == SymbolPlacementKind.Point)
                 {
                     int quadStartSrc = block.PointQuadStart[detail], quadCount = block.PointQuadCount[detail];
                     int quadStart = mQuad;
@@ -153,10 +149,10 @@ namespace MapRenderer.Jobs
                     MPoints[slot] = block.Points[detail];
                     MPointQuadStart[slot] = quadStart; MPointQuadCount[slot] = quadCount;
 
-                    MKinds[r] = (byte)LabelRecordKind.Point; MDetail[r] = slot;
+                    MKinds[r] = SymbolPlacementKind.Point; MDetail[r] = slot;
                     MWorldStart[r] = worldStart; MWorldCount[r] = worldCount; MRepAnchor[r] = block.RepAnchor[li];
 
-                    maxBoxes += 1; maxQuads += quadCount; maxCandidates += 1; // mirrors SymbolLabelBatch.AddPoint
+                    maxBoxes += 1; maxQuads += quadCount; maxCandidates += 1; // mirrors SymbolBatch.AddPoint
                 }
                 else
                 {
@@ -182,10 +178,10 @@ namespace MapRenderer.Jobs
                     MCurvedAnchorStart[slot] = anchorStart; MCurvedAnchorCount[slot] = anchorCount;
                     MCurvedAnchorFadeStart[slot] = fadeStart;
 
-                    MKinds[r] = (byte)LabelRecordKind.Curved; MDetail[r] = slot;
+                    MKinds[r] = SymbolPlacementKind.Curved; MDetail[r] = slot;
                     MWorldStart[r] = worldStart; MWorldCount[r] = worldCount; MRepAnchor[r] = block.RepAnchor[li];
 
-                    int placements = anchorCount + 1; // mirrors SymbolLabelBatch.AddCurved
+                    int placements = anchorCount + 1; // mirrors SymbolBatch.AddCurved
                     maxBoxes += placements * glyphCount; maxQuads += placements * glyphCount; maxCandidates += placements;
                 }
             }

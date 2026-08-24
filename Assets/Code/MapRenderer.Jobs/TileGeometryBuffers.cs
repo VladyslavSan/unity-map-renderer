@@ -218,7 +218,7 @@ namespace MapRenderer.Jobs
 
             // Owned outright in BOTH modes (never an AsArray() view): a derived buffer holds its own COPY of
             // the column, so freeing it here can never reach the buffer it was derived from.
-            if (FeatureGeometryType.IsCreated) FeatureGeometryType.Dispose();
+            FeatureGeometryType.Dispose();
 
             if (_ownsBackingLists)
             {

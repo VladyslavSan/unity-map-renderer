@@ -306,7 +306,7 @@ namespace MapRenderer.Core.Expressions
 
         private Expression ParseMatch(List<JsonValue> args, Scope scope, bool zoomAllowed)
         {
-            // match: input, (label, output)+ , default  -> count even and >= 4
+            // match: input, (symbol, output)+ , default  -> count even and >= 4
             if (args.Count < 4 || args.Count % 2 != 0)
                 throw new ExpressionParseException(
                     $"\"match\" expects input, label/output pairs, and a default (even count >=4), got {args.Count}.");
@@ -519,7 +519,7 @@ namespace MapRenderer.Core.Expressions
             return JsonValue.OfArray(outItems);
         }
 
-        // ---- JSON -> Value (for literal / match labels / object literals) --------------------------
+        // ---- JSON -> Value (for literal / match symbols / object literals) --------------------------
 
         internal static Value JsonToValue(JsonValue node)
         {

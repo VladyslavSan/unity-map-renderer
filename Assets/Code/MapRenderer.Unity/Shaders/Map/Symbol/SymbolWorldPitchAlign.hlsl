@@ -8,7 +8,7 @@
 // closer to each other."
 //
 // THIS FILE QUERIES NO RULER, AND MUST NOT. `offsetMetres` arrives ALREADY in metres from the CPU. It is
-// `LabelStagingMath.StageCurved`'s own `arcScale` that put it there — the very same factor that spaced the
+// `SymbolStagingMath.StageCurved`'s own `arcScale` that put it there — the very same factor that spaced the
 // glyph ANCHORS along the world polyline (W1). So spacing and size come from ONE constant, and their ratio
 // is the purely typographic `ΔArcCenter / cellWidthBaked`: every scale cancels, at every depth. That is why
 // no per-anchor pixel ruler is needed here — the two quantities being compared were put on the same ruler
@@ -56,7 +56,7 @@
 // The teeth therefore discriminate by ~22× against their 1.0 px bound; this is not a marginal call.
 #define SYMBOL_WORLD_MAP_Y_SIGN (-1.0)
 
-// bit2 of the float-encoded AlignFlags word — WorldLabelRenderer's MapPitchAlignFlag (4). bit0 is A3's
+// bit2 of the float-encoded AlignFlags word — WorldSymbolRenderer's MapPitchAlignFlag (4). bit0 is A3's
 // map-bearing, bit1 is Stage AC's along-line, so the only words reachable today are {0, 2, 6}.
 //
 // Written as a REAL bit test rather than a `>= 3.5` magnitude test, which a future bit3 would silently
@@ -82,9 +82,9 @@ bool SymbolWorldGroundFrame(float3 tangentOS, float3 upOS, out float3 xh, out fl
 
     // Guard BEFORE any normalize, both operands. TransformObjectToWorldDir's normalizing overload is
     // normalize(mul(M, v)), and normalize(0) is NaN — P3a's N1 was exactly a second unguarded normalize in a
-    // file that claimed NaN-safety. Both inputs are unit vectors when they are meaningful (LabelStagingMath
+    // file that claimed NaN-safety. Both inputs are unit vectors when they are meaningful (SymbolStagingMath
     // writes a unit tangent; P2 writes a unit surface normal), so `< 0.5` cleanly separates "unit" from the
-    // float3(0,0,0) that ~10 older fixtures — and SymbolTileLabelBlockBaker / the parity oracle whenever
+    // float3(0,0,0) that ~10 older fixtures — and SymbolTileBlockBaker / the parity oracle whenever
     // PathUpRender is null — still write for Up.
     if (dot(upOS, upOS) < 0.5 || dot(tangentOS, tangentOS) < 0.5) return false;
 

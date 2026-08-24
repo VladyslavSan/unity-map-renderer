@@ -70,9 +70,10 @@ namespace MapRenderer.Tests.Text
 
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default);
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
 
-            Assert.AreEqual(2, result.Quads.Count, "two visible glyphs, no whitespace -- exactly two quads");
+            Assert.AreEqual(2, resultQuads.Count, "two visible glyphs, no whitespace -- exactly two quads");
             Assert.AreEqual(1, result.LineCount);
 
             // ---- Hand-computed golden, per the corrected TOP-anchored layout math ----
@@ -101,8 +102,8 @@ namespace MapRenderer.Tests.Text
             float2 expectedTopLeftLowerA = new float2(leftXLowerA, cellTopYLowerA) + anchorShift;
             float2 expectedBottomRightLowerA = new float2(leftXLowerA + entryLowerA.CellSize.x, cellTopYLowerA - entryLowerA.CellSize.y) + anchorShift;
 
-            SymbolQuad quadA = result.Quads[0];
-            SymbolQuad quadLowerA = result.Quads[1];
+            SymbolQuad quadA = resultQuads[0];
+            SymbolQuad quadLowerA = resultQuads[1];
 
             Assert.AreEqual(expectedTopLeftA.x, quadA.TopLeft.x, Tolerance, "'A' TopLeft.x");
             Assert.AreEqual(expectedTopLeftA.y, quadA.TopLeft.y, Tolerance, "'A' TopLeft.y");
@@ -148,9 +149,10 @@ namespace MapRenderer.Tests.Text
             GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default);
-            SymbolQuad quadA = result.Quads[0];
-            SymbolQuad quadLowerA = result.Quads[1];
+            var resultQuads = new List<SymbolQuad>();
+            TextQuadLayout.Layout(run, atlas, in TextLayoutOptions.Default, resultQuads);
+            SymbolQuad quadA = resultQuads[0];
+            SymbolQuad quadLowerA = resultQuads[1];
 
             // Tooth 1: quad size must be the buffered CellSize, not the bare glyph Width/Height
             // (CellSize - 2*Buffer).
@@ -190,7 +192,8 @@ namespace MapRenderer.Tests.Text
                 .Where(m => m.Name == "Layout")
                 .ToArray();
 
-            Assert.AreEqual(2, layoutMethods.Length, "expected exactly the two documented Layout overloads");
+            Assert.AreEqual(1, layoutMethods.Length,
+                "expected exactly the one no-alloc Layout overload (the allocating overload was retired with the managed layout-result carrier)");
 
             foreach (MethodInfo method in layoutMethods)
             {
@@ -245,11 +248,12 @@ namespace MapRenderer.Tests.Text
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance));
 
             TextLayoutOptions zeroOptions = default;
-            TextLayoutResult result = TextQuadLayout.Layout(run, atlas, in zeroOptions);
+            var resultQuads = new List<SymbolQuad>();
+            TextLayoutBounds result = TextQuadLayout.Layout(run, atlas, in zeroOptions, resultQuads);
 
-            Assert.AreEqual(1, result.Quads.Count);
+            Assert.AreEqual(1, resultQuads.Count);
             Assert.AreEqual(1, result.LineCount);
-            float2 size = result.BoundsMax - result.BoundsMin;
+            float2 size = result.Max - result.Min;
             Assert.Greater(size.x, 0f, "a zero-valued MaxWidthEm must fall back, not collapse the layout");
             Assert.Greater(size.y, 0f, "a zero-valued LineHeightEm must fall back, not collapse the layout");
         }
