@@ -107,10 +107,13 @@ namespace MapRenderer.Tests.Mvt
             var keyIndex = new Dictionary<string, int> { ["s"] = 0, ["n"] = 1, ["b"] = 2 };
             var tagWords = new NativeArray<uint>(
                 new uint[] { 0, 0, 1, 1, 2, 2 }, Allocator.Persistent); // pairs (keyIdx, valIdx), one per key
+            var tagOffsets = new NativeArray<int>(new[] { 0 }, Allocator.Persistent); // one feature, ordinal 0
+            var tagLengths = new NativeArray<int>(new[] { 6 }, Allocator.Persistent);
             try
             {
-                var resolver = new MvtLayerPropertyResolver(keys, values, valueStrings, keyIndex, tagWords);
-                var store = new DensePropertyStore(resolver, 0, 6);
+                var resolver = new MvtLayerPropertyResolver(
+                    keys, values, valueStrings, keyIndex, tagWords, tagOffsets, tagLengths);
+                var store = new DensePropertyStore(resolver, 0);
 
                 TestDelegate act = () =>
                 {
@@ -128,6 +131,8 @@ namespace MapRenderer.Tests.Mvt
             {
                 values.Dispose();
                 tagWords.Dispose();
+                tagOffsets.Dispose();
+                tagLengths.Dispose();
             }
         }
 
@@ -154,16 +159,19 @@ namespace MapRenderer.Tests.Mvt
             var values = new NativeArray<MvtValueNative>(new[] { MvtValueNative.String(0) }, Allocator.Persistent);
             var keyIndex = new Dictionary<string, int> { ["s"] = 0 };
             var tagWords = new NativeArray<uint>(new uint[] { 0, 0 }, Allocator.Persistent);
+            var tagOffsets = new NativeArray<int>(new[] { 0 }, Allocator.Persistent); // one feature, ordinal 0
+            var tagLengths = new NativeArray<int>(new[] { 2 }, Allocator.Persistent);
             try
             {
-                var resolver = new MvtLayerPropertyResolver(keys, values, valueStrings, keyIndex, tagWords);
-                var store = new DensePropertyStore(resolver, 0, 2);
+                var resolver = new MvtLayerPropertyResolver(
+                    keys, values, valueStrings, keyIndex, tagWords, tagOffsets, tagLengths);
+                var store = new DensePropertyStore(resolver, 0);
 
                 // Anti-vacuity: prove the read succeeds WHILE values is alive.
                 bool foundWhileAlive = store.TryGetByKeyIndex(0, out Value _);
                 Assert.That(foundWhileAlive, Is.True, "precondition: the read must succeed before disposal");
 
-                values.Dispose(); // dispose ONLY the values array — tagWords stays live
+                values.Dispose(); // dispose ONLY the values array — tagWords/columns stay live
 
                 Assert.Throws<ObjectDisposedException>(() => store.TryGetByKeyIndex(0, out Value _),
                     "reading a value after the Values array is disposed must throw ObjectDisposedException — " +
@@ -173,6 +181,8 @@ namespace MapRenderer.Tests.Mvt
             {
                 if (values.IsCreated) values.Dispose();
                 tagWords.Dispose();
+                tagOffsets.Dispose();
+                tagLengths.Dispose();
             }
         }
     }

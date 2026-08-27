@@ -384,6 +384,16 @@ namespace MapRenderer.Tests.Structure
                 "the adopted `values` local must be nulled immediately after AdoptValues — the same " +
                 "double-free guard as tagWords, keeping the finally's unconditional values.Dispose() from " +
                 "freeing the buffer the layer just took ownership of.");
+
+            // Native-column decoupling: the per-feature (offset,count) columns are now ADOPTED by the layer
+            // (the resolver borrows them), not transient — so they need the same null-on-transfer guard, or
+            // the finally's unconditional tagOffsets/tagLengths.Dispose() would free the columns the layer
+            // just took ownership of (UAF for every store reading a slice by ordinal).
+            StringAssert.Contains(
+                "AdoptFeatureTagColumns(tagOffsets, tagLengths); tagOffsets = default; tagLengths = default;",
+                normalised,
+                "the adopted `tagOffsets`/`tagLengths` locals must be nulled immediately after " +
+                "AdoptFeatureTagColumns — the same double-free guard as tagWords/values.");
         }
 
         /// <summary>

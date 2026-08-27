@@ -23,18 +23,17 @@ namespace MapRenderer.Jobs.Mvt
     internal sealed class DensePropertyStore : IMvtPropertyStore
     {
         private readonly MvtLayerPropertyResolver _resolver;
-        private readonly int _tagOffset;
-        private readonly int _tagCount;
+        private readonly int _ordinal;
 
-        /// <param name="resolver">The owning layer's shared Keys/Values/key-index/tag-words tables.</param>
-        /// <param name="tagOffset">Start index of this feature's (keyIdx,valIdx) pairs into
-        /// <see cref="MvtLayerPropertyResolver.TagWords"/>.</param>
-        /// <param name="tagCount">Word count of this feature's slice (not pair count).</param>
-        public DensePropertyStore(MvtLayerPropertyResolver resolver, int tagOffset, int tagCount)
+        /// <param name="resolver">The owning layer's shared Keys/Values/key-index/tag-word tables AND the
+        /// per-feature (offset,count) columns this store's slice is read from.</param>
+        /// <param name="ordinal">This feature's layer ordinal — the store holds only this, resolving its
+        /// (offset,count) slice through <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/> on demand
+        /// so the slice lives in exactly one place (the layer's columns), never copied per feature.</param>
+        public DensePropertyStore(MvtLayerPropertyResolver resolver, int ordinal)
         {
             _resolver = resolver;
-            _tagOffset = tagOffset;
-            _tagCount = tagCount;
+            _ordinal = ordinal;
         }
 
         /// <summary>
@@ -63,13 +62,18 @@ namespace MapRenderer.Jobs.Mvt
         /// </summary>
         public bool TryGetByKeyIndex(int keyIndex, out Value value)
         {
+            if (!_resolver.TryGetFeatureSlice(_ordinal, out int tagOffset, out int tagCount))
+            {
+                value = Value.Null;
+                return false;
+            }
             NativeArray<MvtValueNative> values = _resolver.Values;
             var words = _resolver.TagWords;
-            int pairCount = _tagCount / 2;
+            int pairCount = tagCount / 2;
             for (int i = pairCount - 1; i >= 0; i--)
             {
-                if ((int)words[_tagOffset + i * 2] != keyIndex) continue;
-                int valIdx = (int)words[_tagOffset + i * 2 + 1];
+                if ((int)words[tagOffset + i * 2] != keyIndex) continue;
+                int valIdx = (int)words[tagOffset + i * 2 + 1];
                 if (valIdx < 0 || valIdx >= values.Length) continue;
                 value = values[valIdx].ToValue(_resolver.ValueStrings);
                 return true;
@@ -78,7 +82,10 @@ namespace MapRenderer.Jobs.Mvt
             return false;
         }
 
-        public IReadOnlyDictionary<string, Value> AsDictionary() => _resolver.ResolveToDictionary(_tagOffset, _tagCount);
+        public IReadOnlyDictionary<string, Value> AsDictionary()
+            => _resolver.TryGetFeatureSlice(_ordinal, out int offset, out int count)
+                ? _resolver.ResolveToDictionary(offset, count)
+                : new Dictionary<string, Value>();
 
         public int Count => AsDictionary().Count;
     }

@@ -12,13 +12,15 @@ namespace MapRenderer.Jobs.Mvt
     /// building the map on first use would be a write racing concurrent readers, the same publication
     /// hazard <see cref="MvtLayer.Geometry"/> documents for lazy per-layer geometry materialization.
     /// </summary>
-    internal sealed class MvtLayerPropertyResolver : IFeatureKeyResolver
+    internal sealed class MvtLayerPropertyResolver : IFeatureKeyResolver, INativeFilterColumns
     {
         private readonly List<string> _keys;
         private readonly NativeArray<MvtValueNative> _values;
         private readonly string[] _valueStrings;
         private readonly Dictionary<string, int> _keyIndex;
         private readonly NativeArray<uint> _tagWords;
+        private readonly NativeArray<int> _tagOffsets;
+        private readonly NativeArray<int> _tagLengths;
 
         /// <param name="keys">The layer's key table (declaration order).</param>
         /// <param name="values">The layer's value table (declaration order) — BORROWED: owned by
@@ -32,15 +34,39 @@ namespace MapRenderer.Jobs.Mvt
         /// BORROWED: owned by <see cref="MvtLayer.FeatureTagWords"/>, freed by <see cref="MvtLayer.Dispose"/>.
         /// This resolver never disposes it and must not be read once the owning layer has (see
         /// <see cref="TagWords"/>).</param>
+        /// <param name="tagOffsets">Per-feature start index into <paramref name="tagWords"/>, by ordinal —
+        /// BORROWED: owned by <see cref="MvtLayer.FeatureTagOffsets"/>, freed by <see cref="MvtLayer.Dispose"/>.</param>
+        /// <param name="tagLengths">Per-feature word count into <paramref name="tagWords"/>, by ordinal —
+        /// BORROWED: owned by <see cref="MvtLayer.FeatureTagLengths"/>, freed by <see cref="MvtLayer.Dispose"/>.</param>
         public MvtLayerPropertyResolver(
             List<string> keys, NativeArray<MvtValueNative> values, string[] valueStrings,
-            Dictionary<string, int> keyIndex, NativeArray<uint> tagWords)
+            Dictionary<string, int> keyIndex, NativeArray<uint> tagWords,
+            NativeArray<int> tagOffsets, NativeArray<int> tagLengths)
         {
             _keys = keys;
             _values = values;
             _valueStrings = valueStrings;
             _keyIndex = keyIndex;
             _tagWords = tagWords;
+            _tagOffsets = tagOffsets;
+            _tagLengths = tagLengths;
+        }
+
+        /// <summary>The native-column capability read of a feature's tag slice, by layer ordinal — the seam
+        /// a Burst evaluator uses instead of reaching into a <see cref="DensePropertyStore"/>. Also the
+        /// single source the store's own managed reads resolve their slice through, so the (offset,count)
+        /// lives in one place.</summary>
+        public bool TryGetFeatureSlice(int featureOrdinal, out int offset, out int count)
+        {
+            if ((uint)featureOrdinal >= (uint)_tagOffsets.Length)
+            {
+                offset = 0;
+                count = 0;
+                return false;
+            }
+            offset = _tagOffsets[featureOrdinal];
+            count = _tagLengths[featureOrdinal];
+            return true;
         }
 
         /// <summary>The layer's decoded value table, by index — shared (not copied) so a

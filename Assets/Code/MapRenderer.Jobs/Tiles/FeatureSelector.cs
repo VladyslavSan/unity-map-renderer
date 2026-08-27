@@ -4,6 +4,7 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
+using MapRenderer.Jobs.Expressions;
 
 namespace MapRenderer.Jobs.Tiles
 {
@@ -42,6 +43,10 @@ namespace MapRenderer.Jobs.Tiles
     ///   <item>The layer's <c>filter</c> is compiled <b>once per filter</b> and memoized (see
     ///     <see cref="FilterFor"/>), then evaluated per feature.</item>
     ///   <item>Null/absent source-layer → empty result (mirrors <see cref="SourceLayerResolver"/> null-tolerance).</item>
+    ///   <item>At each <see cref="ITileLayer"/> entry point, a VM-compilable filter over a
+    ///     <see cref="INativeFilterSource"/>-capable layer is evaluated by the Burst filter VM instead of
+    ///     <see cref="CompiledFilter"/> — a representation change only; see <see cref="NativeProgramFor"/>
+    ///     and the native/managed dispatch in the private <c>SelectFeaturesInto</c> helpers.</item>
     /// </list>
     /// </summary>
     public static class FeatureSelector
@@ -61,21 +66,31 @@ namespace MapRenderer.Jobs.Tiles
             if (tileLayer == null)
                 return System.Array.Empty<IFeature>();
 
-            // 2. The compiled filter for this layer — memoized across calls.
-            var filter = FilterFor(layer);
-
-            // 3. String→id key hoist: bind the filter's constant-key get/has layout once for this layer,
-            // when the layer is index-capable (Dense MVT) — never per feature.
-            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
-            int[] binding = BindKeys(filter, keyResolver);
+            // 2. Probe the native-filter seam first — see BindNativeFilter. Only when it declines (no
+            // capability, no compilable program, or the layer's own rebind refusal) do we compile/bind the
+            // managed filter at all: the native branch never rents a key-binding buffer or compiles
+            // CompiledFilter.
+            INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
+            CompiledFilter filter = null;
+            int[] binding = null;
+            if (native == null)
+            {
+                filter = FilterFor(layer);
+                var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+                binding = BindKeys(filter, keyResolver);
+            }
             try
             {
-                // 4. Evaluate per feature. A6: the feature IS an IFeature (the neutral carrier implements it
-                // directly), so it passes straight to filter.Matches — no adapter alloc.
+                // 3. Evaluate per feature — indexed so the native branch has an ordinal to address. A6: the
+                // feature IS an IFeature (the neutral carrier implements it directly), so it passes straight
+                // to filter.Matches — no adapter alloc.
+                IReadOnlyList<IFeature> features = tileLayer.Features;
                 var result = new List<IFeature>();
-                foreach (var feature in tileLayer.Features)
+                for (int i = 0; i < features.Count; i++)
                 {
-                    if (filter.Matches(feature, zoom, binding))
+                    IFeature feature = features[i];
+                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    if (matched)
                         result.Add(feature);
                 }
                 return result;
@@ -83,7 +98,24 @@ namespace MapRenderer.Jobs.Tiles
             finally
             {
                 ReturnKeys(binding);
+                native?.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Probes <paramref name="tileLayer"/> for the native-filter capability (<see cref="INativeFilterSource"/>)
+        /// and, when present, compiles/memoizes <paramref name="layer"/>'s filter to a
+        /// <see cref="NativeFilterProgram"/> (<see cref="NativeProgramFor"/>) and asks the layer to bind it.
+        /// Returns <c>null</c> — meaning "evaluate on the managed <see cref="CompiledFilter"/> path instead"
+        /// — when the layer has no such capability, the filter falls outside the VM's accepted subset, or
+        /// the layer itself refuses the bind (see <see cref="INativeFilterSource.TryBindNativeFilter"/>).
+        /// The caller owns disposing a non-null result.
+        /// </summary>
+        private static INativeFeatureMatcher BindNativeFilter(ITileLayer tileLayer, StyleLayer layer)
+        {
+            if (tileLayer is not INativeFilterSource nfs) return null;
+            NativeFilterProgram program = NativeProgramFor(layer?.Filter);
+            return program != null ? nfs.TryBindNativeFilter(program) : null;
         }
 
         /// <summary>
@@ -106,7 +138,8 @@ namespace MapRenderer.Jobs.Tiles
             StyleLayer layer, ITileLayer tileLayer, double zoom, List<SelectedTileFeature> into)
         {
             var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
-            SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver);
+            INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
+            SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver, native);
         }
 
         /// <summary>The <see cref="List{T}"/> selection over an ALREADY-FETCHED feature list (the caller read
@@ -119,29 +152,36 @@ namespace MapRenderer.Jobs.Tiles
         /// what it did before the string→id key hoist.</para></summary>
         public static void SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into)
-            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null);
+            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null, native: null);
 
         private static void SelectFeaturesInto(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into,
-            IFeatureKeyResolver keyResolver)
+            IFeatureKeyResolver keyResolver, INativeFeatureMatcher native)
         {
             into.Clear();
-            if (features == null) return;
+            if (features == null) { native?.Dispose(); return; }
 
-            var filter = FilterFor(layer);
-            int[] binding = BindKeys(filter, keyResolver);
+            CompiledFilter filter = null;
+            int[] binding = null;
+            if (native == null)
+            {
+                filter = FilterFor(layer);
+                binding = BindKeys(filter, keyResolver);
+            }
             try
             {
                 for (int i = 0; i < features.Count; i++)
                 {
                     IFeature feature = features[i];
-                    if (filter.Matches(feature, zoom, binding))
+                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    if (matched)
                         into.Add(new SelectedTileFeature { Feature = feature, Ordinal = i });
                 }
             }
             finally
             {
                 ReturnKeys(binding);
+                native?.Dispose();
             }
         }
 
@@ -161,7 +201,8 @@ namespace MapRenderer.Jobs.Tiles
             StyleLayer layer, ITileLayer tileLayer, double zoom, SelectedTileFeature[] into)
         {
             var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
-            return SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver);
+            INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
+            return SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver, native);
         }
 
         /// <summary>
@@ -178,23 +219,29 @@ namespace MapRenderer.Jobs.Tiles
         /// </summary>
         public static int SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into)
-            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null);
+            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null, native: null);
 
         private static int SelectFeaturesInto(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into,
-            IFeatureKeyResolver keyResolver)
+            IFeatureKeyResolver keyResolver, INativeFeatureMatcher native)
         {
-            if (features == null) return 0;
+            if (features == null) { native?.Dispose(); return 0; }
 
-            var filter = FilterFor(layer);
-            int[] binding = BindKeys(filter, keyResolver);
+            CompiledFilter filter = null;
+            int[] binding = null;
+            if (native == null)
+            {
+                filter = FilterFor(layer);
+                binding = BindKeys(filter, keyResolver);
+            }
             try
             {
                 int count = 0;
                 for (int i = 0; i < features.Count; i++)
                 {
                     IFeature feature = features[i];
-                    if (filter.Matches(feature, zoom, binding))
+                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    if (matched)
                         into[count++] = new SelectedTileFeature { Feature = feature, Ordinal = i };
                 }
                 return count;
@@ -202,6 +249,7 @@ namespace MapRenderer.Jobs.Tiles
             finally
             {
                 ReturnKeys(binding);
+                native?.Dispose();
             }
         }
 
@@ -276,5 +324,37 @@ namespace MapRenderer.Jobs.Tiles
         // Hoisted so the lookup allocates no delegate per call.
         private static readonly ConditionalWeakTable<JsonValue, CompiledFilter>.CreateValueCallback
             CompileCallback = f => CompiledFilter.Compile(f);
+
+        // ---- native-program memo -----------------------------------------------------------------------
+
+        /// <summary>
+        /// The <see cref="NativeFilterProgram"/> for <paramref name="filter"/> — compiled on first use and
+        /// reused thereafter, mirroring <see cref="FilterFor"/>'s memo exactly (same keyed-on-the-node
+        /// rationale: <see cref="StyleLayer.Filter"/> is mutable, so keying on the layer could serve a stale
+        /// compile). Returns <c>null</c> both for "no filter" and for "compiled, but outside the VM's
+        /// accepted subset" — either way the caller falls back to the managed path.
+        /// </summary>
+        internal static NativeFilterProgram NativeProgramFor(JsonValue filter)
+        {
+            if (filter == null) return null; // no filter ⇒ managed match-all path
+            return NativeProgramMemo_.GetValue(filter, CompileNativeCallback).Program;
+        }
+
+        /// <summary>The explicit box the memo above stores <see cref="NativeProgramFor"/>'s cached verdict
+        /// in. <see cref="ConditionalWeakTable{TKey,TValue}"/> cannot store a <c>null</c> value, and the
+        /// REFUSAL verdict must be cached too — otherwise every call for an unsupported filter recompiles
+        /// and refuses it again. A box makes "refused" an explicit, unambiguous cached state rather than
+        /// relying on CWT null-value semantics.</summary>
+        private sealed class NativeProgramMemo
+        {
+            internal NativeFilterProgram Program;
+        }
+
+        private static readonly ConditionalWeakTable<JsonValue, NativeProgramMemo> NativeProgramMemo_ =
+            new ConditionalWeakTable<JsonValue, NativeProgramMemo>();
+
+        private static readonly ConditionalWeakTable<JsonValue, NativeProgramMemo>.CreateValueCallback
+            CompileNativeCallback = f =>
+                new NativeProgramMemo { Program = NativeFilterCompiler.TryCompile(f, out var p) ? p : null };
     }
 }

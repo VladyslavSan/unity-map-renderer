@@ -49,26 +49,29 @@ namespace MapRenderer.Tests.Mvt
 
         /// <summary>
         /// <see cref="DensePropertyStore"/>'s instance field set must be EXACTLY
-        /// <c>{MvtLayerPropertyResolver, int, int}</c> — no <c>uint[]</c> (the pre-flatten representation)
-        /// and no <c>NativeArray&lt;uint&gt;</c> (the bloated per-feature-handle design the plan rejects:
-        /// a 48 B handle per store, in the Editor, erases the whole stage's win). Only an exact field-set
-        /// assertion catches the bloated design — a looser "no uint[]" check would pass it.
+        /// <c>{MvtLayerPropertyResolver, int}</c> — the resolver plus its feature ordinal, nothing more.
+        /// The per-feature <c>(offset,count)</c> slice now lives in the layer's native columns (read by
+        /// ordinal through <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/>), so the store holds no
+        /// copy of it — leaner than the earlier two-int shape. Still no <c>uint[]</c> (the pre-flatten
+        /// representation) and no <c>NativeArray&lt;uint&gt;</c> (a 48 B per-store handle in the Editor that
+        /// would erase the whole stage's win across ~495 stores/tile). Only an exact field-set assertion
+        /// catches a bloated design — a looser "no uint[]" check would pass it.
         /// </summary>
         [Test]
-        public void Store_HasExactFieldSet_ResolverAndTwoInts()
+        public void Store_HasExactFieldSet_ResolverAndOrdinal()
         {
             FieldInfo[] instanceFields = typeof(DensePropertyStore).GetFields(
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
             Type[] actualFieldTypes = instanceFields.Select(f => f.FieldType)
                 .OrderBy(t => t.FullName, StringComparer.Ordinal).ToArray();
-            Type[] expectedFieldTypes = new[] { typeof(MvtLayerPropertyResolver), typeof(int), typeof(int) }
+            Type[] expectedFieldTypes = new[] { typeof(MvtLayerPropertyResolver), typeof(int) }
                 .OrderBy(t => t.FullName, StringComparer.Ordinal).ToArray();
 
             CollectionAssert.AreEqual(expectedFieldTypes, actualFieldTypes,
-                "DensePropertyStore's instance fields must be EXACTLY {MvtLayerPropertyResolver, int, int} " +
-                "— no uint[] (the pre-flatten representation) and no NativeArray<uint> (a per-store handle, " +
-                "which in the Editor costs 48 B and erases the whole stage's win across ~495 stores/tile).");
+                "DensePropertyStore's instance fields must be EXACTLY {MvtLayerPropertyResolver, int} — the " +
+                "resolver plus its ordinal; the (offset,count) slice lives in the layer's columns, not here. " +
+                "No uint[] and no NativeArray<uint> (a 48 B per-store handle that erases the win over ~495 stores/tile).");
         }
 
         // ── Tooth #1a ───────────────────────────────────────────────────────────────────────────
@@ -165,6 +168,28 @@ namespace MapRenderer.Tests.Mvt
             tile.Dispose();
             Assert.That(layer.Values.IsCreated, Is.False,
                 "MvtLayer.Dispose must free Values — IsCreated should now be false.");
+
+            Assert.DoesNotThrow(() => tile.Dispose(),
+                "a second Dispose must be a no-op (idempotent write-back), not a throw.");
+        }
+
+        /// <summary>The leak guard for the per-feature (offset,count) columns the native-column decoupling
+        /// added: <see cref="MvtLayer.Dispose"/> frees both <see cref="MvtLayer.FeatureTagOffsets"/> and
+        /// <see cref="MvtLayer.FeatureTagLengths"/> exactly once, and a second Dispose is a no-op.</summary>
+        [Test]
+        public void DecodedTile_FreesFeatureTagColumns_ExactlyOnce()
+        {
+            MvtTile tile = TestDecodedTiles.Track(
+                MvtDecoder.Decode(FixtureTileId, LoadFixture()));
+            MvtLayer layer = tile.Layers.First(l => l.FeatureTagOffsets.Length > 0);
+            Assert.That(layer.FeatureTagOffsets.IsCreated && layer.FeatureTagLengths.IsCreated, Is.True,
+                "precondition: the columns are alive before disposal");
+
+            tile.Dispose();
+            Assert.That(layer.FeatureTagOffsets.IsCreated, Is.False,
+                "MvtLayer.Dispose must free FeatureTagOffsets.");
+            Assert.That(layer.FeatureTagLengths.IsCreated, Is.False,
+                "MvtLayer.Dispose must free FeatureTagLengths.");
 
             Assert.DoesNotThrow(() => tile.Dispose(),
                 "a second Dispose must be a no-op (idempotent write-back), not a throw.");

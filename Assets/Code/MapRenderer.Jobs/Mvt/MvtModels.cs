@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Expressions;
 using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Jobs.Mvt
@@ -82,6 +83,7 @@ namespace MapRenderer.Jobs.Mvt
             value = Value.Null;
             return false;
         }
+
     }
 
     /// <summary>
@@ -90,7 +92,7 @@ namespace MapRenderer.Jobs.Mvt
     /// decoded geometry (<see cref="Geometry"/>, since IR C1 P3) and its flattened tag words
     /// (<see cref="FeatureTagWords"/>).
     /// </summary>
-    public sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, IDisposable
+    public sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, INativeFilterSource, IDisposable
     {
         public string Name;
         public uint Extent = 4096;
@@ -152,17 +154,21 @@ namespace MapRenderer.Jobs.Mvt
         /// use-after-free on this buffer — the same borrowed-lifetime contract <see cref="Geometry"/> already
         /// carries.</para>
         ///
-        /// <para><c>default</c> (<c>IsCreated == false</c>) for a layer with no features, allocating
-        /// nothing.</para></summary>
+        /// <para>For a feature-less (or tag-less) layer this is a <b>zero-length</b> buffer, not
+        /// <c>default</c> — <see cref="MvtDecoder"/>'s flatten constructs it unconditionally (a zero total
+        /// still allocates a zero-length <c>NativeArray</c>), so it is owned and freed here like any other.
+        /// Consumers gate on <c>.Length</c>, not on <c>IsCreated</c>.</para></summary>
         internal NativeArray<uint> FeatureTagWords { get; private set; }
 
         private bool _featureTagsAdopted;
 
         /// <summary>Takes ownership of this layer's flattened tag-word buffer. <b>Callable exactly once</b> —
         /// unlike <see cref="AdoptGeometry"/> there is no feature-column lockstep check here, because
-        /// <see cref="FeatureTagWords"/>'s length is a WORD count, not a feature count: per-feature
-        /// <c>(offset, count)</c> pairs live on the stores themselves (never on the layer), so there is no
-        /// per-feature column on this buffer for a mismatch to corrupt.</summary>
+        /// <see cref="FeatureTagWords"/>'s length is a WORD count, not a feature count. The per-feature
+        /// <c>(offset, count)</c> slice INTO this buffer lives in the separate feature-count columns
+        /// <see cref="FeatureTagOffsets"/>/<see cref="FeatureTagLengths"/> (adopted via
+        /// <see cref="AdoptFeatureTagColumns"/>), which a store reads by ordinal — so the words buffer
+        /// itself carries no per-feature column for a mismatch to corrupt.</summary>
         internal void AdoptFeatureTagWords(NativeArray<uint> tagWords)
         {
             if (_featureTagsAdopted)
@@ -173,6 +179,38 @@ namespace MapRenderer.Jobs.Mvt
 
             _featureTagsAdopted = true;
             FeatureTagWords = tagWords;
+        }
+
+        /// <summary>Per-feature start index into <see cref="FeatureTagWords"/>, by layer ordinal — the
+        /// (offset,count) columns a <see cref="DensePropertyStore"/> and the native filter VM both read a
+        /// feature's tag slice from (via <see cref="MvtLayerPropertyResolver.TryGetFeatureSlice"/>), so the
+        /// slice lives in one place instead of being copied onto 495 per-feature stores. BORROWED by the
+        /// resolver; freed here in <see cref="Dispose"/>.</summary>
+        internal NativeArray<int> FeatureTagOffsets { get; private set; }
+
+        /// <summary>Per-feature word count into <see cref="FeatureTagWords"/>, by layer ordinal — the twin
+        /// of <see cref="FeatureTagOffsets"/>.</summary>
+        internal NativeArray<int> FeatureTagLengths { get; private set; }
+
+        private bool _featureTagColumnsAdopted;
+
+        /// <summary>Takes ownership of this layer's per-feature (offset,count) columns. <b>Callable exactly
+        /// once</b>, and — unlike <see cref="AdoptFeatureTagWords"/> — with a feature-count lockstep check:
+        /// these ARE per-feature columns indexed by ordinal, so a length mismatch would mis-slice every
+        /// store, the same corruption <see cref="AdoptGeometry"/> guards against.</summary>
+        internal void AdoptFeatureTagColumns(NativeArray<int> offsets, NativeArray<int> lengths)
+        {
+            if (_featureTagColumnsAdopted)
+                throw new InvalidOperationException(
+                    $"MvtLayer '{Name}' already owns its tag-slice columns — minted exactly once inside the decode.");
+            if (offsets.Length != Features.Count || lengths.Length != Features.Count)
+                throw new InvalidOperationException(
+                    $"MvtLayer '{Name}' tag-slice columns ({offsets.Length}/{lengths.Length}) must match its " +
+                    $"feature count ({Features.Count}) — a store indexes them by ordinal.");
+
+            _featureTagColumnsAdopted = true;
+            FeatureTagOffsets = offsets;
+            FeatureTagLengths = lengths;
         }
 
         /// <summary>Frees this layer's buffers. Idempotent — but only because the disposed struct/array is
@@ -189,6 +227,14 @@ namespace MapRenderer.Jobs.Mvt
             NativeArray<uint> tags = FeatureTagWords;
             if (tags.IsCreated) tags.Dispose();
             FeatureTagWords = tags;
+
+            NativeArray<int> offsets = FeatureTagOffsets;
+            if (offsets.IsCreated) offsets.Dispose();
+            FeatureTagOffsets = offsets;
+
+            NativeArray<int> lengths = FeatureTagLengths;
+            if (lengths.IsCreated) lengths.Dispose();
+            FeatureTagLengths = lengths;
 
             NativeArray<MvtValueNative> values = Values;
             if (values.IsCreated) values.Dispose();
@@ -207,8 +253,9 @@ namespace MapRenderer.Jobs.Mvt
         ///
         /// <para><b>BORROWED by every resolver/store in this layer</b> — same borrowed-lifetime contract as
         /// <see cref="FeatureTagWords"/>: never dispose, never mutate, never retain past the decode's scope;
-        /// the layer frees it in <see cref="Dispose"/>. <c>default</c> (<c>IsCreated == false</c>) for a
-        /// layer with no values, allocating nothing.</para></summary>
+        /// the layer frees it in <see cref="Dispose"/>. For a value-less layer this is a <b>zero-length</b>
+        /// buffer, not <c>default</c> — <see cref="MvtDecoder"/> materializes it unconditionally; consumers
+        /// gate on <c>.Length</c>, not <c>IsCreated</c>.</para></summary>
         public NativeArray<MvtValueNative> Values { get; private set; }
 
         /// <summary>The per-layer value-string side table: the index space a <see cref="ValueType.String"/>
@@ -248,6 +295,12 @@ namespace MapRenderer.Jobs.Mvt
         internal MvtLayerPropertyResolver DenseKeyResolver { get; set; }
 
         IFeatureKeyResolver IIndexedFeatureSource.KeyResolver => DenseKeyResolver;
+
+        /// <summary>The native-filter capability seam's implementation — forwarded to
+        /// <see cref="NativeFilterSelection.TryBind"/> so this layer stays a thin forwarder, matching how
+        /// <see cref="IIndexedFeatureSource.KeyResolver"/> is forwarded above.</summary>
+        INativeFeatureMatcher INativeFilterSource.TryBindNativeFilter(NativeFilterProgram program) =>
+            NativeFilterSelection.TryBind(this, program);
     }
 
     public sealed class MvtTile : IDecodedTile

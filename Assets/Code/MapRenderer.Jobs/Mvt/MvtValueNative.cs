@@ -1,4 +1,5 @@
 using MapRenderer.Core.Expressions;
+using MapRenderer.Jobs.Expressions;
 
 namespace MapRenderer.Jobs.Mvt
 {
@@ -53,6 +54,25 @@ namespace MapRenderer.Jobs.Mvt
                 case ValueType.Number: return Value.Number(_number);
                 case ValueType.Boolean: return Value.Bool(_number != 0.0);
                 default: return Value.Null;
+            }
+        }
+
+        /// <summary>
+        /// The native filter VM's Burst-safe counterpart of <see cref="ToValue"/>: reconstitutes this
+        /// entry as a <see cref="NativeValue"/> instead of the managed <see cref="Value"/> — no string
+        /// table needed, since a <see cref="ValueType.String"/> entry carries its raw <see cref="_stringId"/>
+        /// forward rather than resolving bytes (the id space <see cref="NativeFilterProgram.Rebind"/>'s
+        /// literal scan also resolves into). Color/Array/Object never occur (this type cannot represent
+        /// them), so there is nothing to map for those tags.
+        /// </summary>
+        internal NativeValue ToNativeValue()
+        {
+            switch (Type)
+            {
+                case ValueType.String: return NativeValue.String(_stringId);
+                case ValueType.Number: return NativeValue.Number(_number);
+                case ValueType.Boolean: return NativeValue.Bool(_number != 0.0);
+                default: return NativeValue.Null;
             }
         }
     }

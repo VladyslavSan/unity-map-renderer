@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Profiling;
@@ -239,13 +240,26 @@ namespace MapRenderer.Jobs.Mvt
 
                 FlattenFeatureColumn(r, tagStart, tagEnd, featCount, ref tagOffsets, ref tagLengths, ref tagWords);
 
-                // Resolver takes the tag-words AND value-table buffers here (both borrowed, both local) —
-                // nothing between this point and the adopts below depends on the resolver, so it can move as
-                // late as the buffers it needs.
-                var propertyResolver = new MvtLayerPropertyResolver(layer.Keys, values, valueStrings, keyIndex, tagWords);
+                // N2 hardening: validate the tag-slice columns' feature-count lockstep HERE — before
+                // AdoptGeometry — not only inside AdoptFeatureTagColumns (which keeps its own copy as
+                // defence-in-depth). By the time AdoptFeatureTagColumns runs, AdoptGeometry has already
+                // handed the layer its geometry; a throw at that point would leak it, because the layer is
+                // not yet reachable from tile.Layers and Decode's catch can only free what IS reachable.
+                // Unreachable today — FlattenFeatureColumn builds tagOffsets/tagLengths at featCount by
+                // construction — but this converts "unreachable in practice" into "structurally cannot fire
+                // after the adopt". See ValidateTagSliceColumnsMatchFeatureCount's regression tooth.
+                ValidateTagSliceColumnsMatchFeatureCount(tagOffsets.Length, tagLengths.Length, featCount, layer.Name);
 
+                // Resolver takes the tag-words, value-table AND per-feature (offset,count) columns here (all
+                // borrowed, all local) — nothing between this point and the adopts below depends on the
+                // resolver, so it can move as late as the buffers it needs.
+                var propertyResolver = new MvtLayerPropertyResolver(
+                    layer.Keys, values, valueStrings, keyIndex, tagWords, tagOffsets, tagLengths);
+
+                // Each store holds only its ordinal; its (offset,count) slice is read from the layer's
+                // columns through the resolver, so the slice lives in one place, not copied per store.
                 for (int i = 0; i < layer.Features.Count; i++)
-                    layer.Features[i].Store = new DensePropertyStore(propertyResolver, tagOffsets[i], tagLengths[i]);
+                    layer.Features[i].Store = new DensePropertyStore(propertyResolver, i);
 
                 // String→id key hoist: every layer is Dense, so every layer advertises IIndexedFeatureSource
                 // capability against this resolver.
@@ -265,13 +279,16 @@ namespace MapRenderer.Jobs.Mvt
                     layer.AdoptGeometry(materializer.Materialize());
                 }
 
-                // Adopt LAST, after every store has captured its (offset, count) view and the geometry has
-                // been adopted — see the invariant comment above. Null each local on transfer (the
-                // "transfer nulls the source" double-free guard): the `finally` below still runs
-                // `tagWords.Dispose()`/`values.Dispose()`, but on a default array that is a no-op, so a
-                // just-adopted buffer is never freed out from under the layer.
+                // Adopt LAST, after the geometry has been adopted — see the invariant comment above. Null
+                // each local on transfer (the "transfer nulls the source" double-free guard): the `finally`
+                // below still runs each Dispose(), but on a default array that is a no-op, so a just-adopted
+                // buffer is never freed out from under the layer. The (offset,count) columns are adopted here
+                // too — the resolver borrows them, so they must outlive the transient decode scope.
                 layer.AdoptFeatureTagWords(tagWords);
                 tagWords = default;
+                layer.AdoptFeatureTagColumns(tagOffsets, tagLengths);
+                tagOffsets = default;
+                tagLengths = default;
                 layer.AdoptValues(values, valueStrings);
                 values = default;
             }
@@ -287,6 +304,28 @@ namespace MapRenderer.Jobs.Mvt
             }
 
             return layer;
+        }
+
+        /// <summary>
+        /// N2 hardening: throws unless <paramref name="tagOffsetsLength"/> and <paramref name="tagLengthsLength"/>
+        /// both equal <paramref name="featCount"/> — the lockstep <see cref="MvtLayer.AdoptFeatureTagColumns"/>
+        /// also enforces, called here <b>before <see cref="MvtLayer.AdoptGeometry"/></b> so a mismatch throws
+        /// while every decode buffer is still local to <see cref="DecodeLayer"/> and its <c>finally</c> can
+        /// free them (see the call site's comment for why a throw after <c>AdoptGeometry</c> would leak it).
+        ///
+        /// <para>Broadened from <c>private</c> to <c>internal</c> so the regression tooth can drive it
+        /// directly with a synthetic mismatch — a REAL mismatch is unreachable through <see cref="Decode"/>
+        /// (<see cref="FlattenFeatureColumn"/> builds both columns at <paramref name="featCount"/> by
+        /// construction), so there is no malformed-tile input that reaches this check from the public
+        /// decode entry point.</para>
+        /// </summary>
+        internal static void ValidateTagSliceColumnsMatchFeatureCount(
+            int tagOffsetsLength, int tagLengthsLength, int featCount, string layerName)
+        {
+            if (tagOffsetsLength != featCount || tagLengthsLength != featCount)
+                throw new InvalidOperationException(
+                    $"MVT layer '{layerName}' tag-slice columns ({tagOffsetsLength}/{tagLengthsLength}) must " +
+                    $"match its feature count ({featCount}).");
         }
 
         /// <summary>
