@@ -10,16 +10,25 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Tests.Mvt
 {
     /// <summary>
-    /// H1 (safe subset) — <see cref="MvtDecoder"/> pre-sizes each layer's <c>Features</c> / <c>Keys</c> /
-    /// <c>Values</c> lists (and its two per-feature scratch lists) from a read-only counting pass, so the
-    /// streaming decode never grows them by doubling and discarding a chain of backing arrays. Tooth: after
-    /// decode, every list's <c>Capacity</c> equals its <c>Count</c> exactly — no growth over-allocation.
+    /// H1 (safe subset) — <see cref="MvtDecoder"/> pre-sizes each layer's <c>Features</c> / <c>Keys</c> lists
+    /// (and its two per-feature scratch lists) from a read-only counting pass, so the streaming decode never
+    /// grows them by doubling and discarding a chain of backing arrays. Tooth: after decode, every list's
+    /// <c>Capacity</c> equals its <c>Count</c> exactly — no growth over-allocation.
     /// </summary>
     /// <remarks>
     /// RED without the pre-size: a <see cref="System.Collections.Generic.List{T}"/> grown by doubling lands on
     /// the next power of two ≥ Count, strictly greater whenever Count is not itself a reached power of two.
     /// The fixture-has-a-non-power-of-two guard keeps the tooth from passing vacuously on a layer whose count
     /// a doubling build would coincidentally land on.
+    ///
+    /// <para><b>Recorded limitation — the <c>Values</c> arm is dropped, deliberately.</b> This stage moved
+    /// <see cref="MvtLayer.Values"/> off <c>List&lt;MvtValue&gt;</c> onto <c>NativeArray&lt;MvtValueNative&gt;</c>,
+    /// sized to the exact decoded count by construction (no <c>Capacity</c> to over-allocate) — the
+    /// "no growth over-allocation" property this file pins now belongs to the DECODE's transient
+    /// <c>List&lt;MvtValueNative&gt;</c> scratch, which falls out of scope before this test can observe it.
+    /// Value-table COUNT correctness (as opposed to allocation shape) is still pinned — by
+    /// <c>MvtPropertyDecodeTests.Countries_ValueTable_HasExpectedCount</c> (914, via <c>.Length</c>) — so this
+    /// is a deliberate narrowing of what this file observes, not a silently weakened tooth.</para>
     /// </remarks>
     [TestFixture]
     public class MvtDecodePresizeTests
@@ -43,8 +52,6 @@ namespace MapRenderer.Tests.Mvt
                     $"layer '{layer.Name}': Features must be pre-sized exactly (no doubling reallocation).");
                 Assert.That(layer.Keys.Capacity, Is.EqualTo(layer.Keys.Count),
                     $"layer '{layer.Name}': Keys must be pre-sized exactly.");
-                Assert.That(layer.Values.Capacity, Is.EqualTo(layer.Values.Count),
-                    $"layer '{layer.Name}': Values must be pre-sized exactly.");
 
                 // A 0-count layer is Capacity==Count==0 with or without the fix — not a discriminator — so it
                 // must not satisfy the guard; require a non-empty layer whose count a doubling build overshoots.

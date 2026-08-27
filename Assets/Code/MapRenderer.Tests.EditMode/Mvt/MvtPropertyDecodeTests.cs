@@ -1,6 +1,5 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Code/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// EditMode only (NOT compiled by Tools/core-tests/ — MvtDecoder/MvtModels pull Unity.Collections, and
+// layer.Values is now a NativeArray<MvtValueNative>, see core-tests.csproj's tile-decode seam).
 
 using System;
 using System.IO;
@@ -75,11 +74,15 @@ namespace MapRenderer.Tests.Mvt
 
         // ── Value table ─────────────────────────────────────────────────────────────────────────
 
+        /// <remarks>The sole guard of value-table count correctness this stage: <c>MvtDecodePresizeTests</c>
+        /// dropped its own <c>Values</c> capacity arm, since <see cref="MvtLayer.Values"/> is a
+        /// <c>NativeArray</c> sized exactly to the decoded count by construction (no capacity to probe) —
+        /// see that file's recorded-limitation note.</remarks>
         [Test]
         public void Countries_ValueTable_HasExpectedCount()
         {
             var layer = LoadCountries();
-            Assert.That(layer.Values.Count, Is.EqualTo(914), "countries value table has 914 entries");
+            Assert.That(layer.Values.Length, Is.EqualTo(914), "countries value table has 914 entries");
         }
 
         [Test]
@@ -265,9 +268,9 @@ namespace MapRenderer.Tests.Mvt
             // Value string_value (field 1, wire type 2)
             byte[] valMsg = StringField(1, "hello");
             var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values.Count, Is.EqualTo(1));
+            Assert.That(layer.Values.Length, Is.EqualTo(1));
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.String));
-            Assert.That(layer.Values[0].AsString(), Is.EqualTo("hello"));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsString(), Is.EqualTo("hello"));
             Assert.That(layer.Features[0].Properties["k"].AsString(), Is.EqualTo("hello"));
         }
 
@@ -281,7 +284,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = Cat(Tag(2, 5), floatBytes);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo((double)f).Within(1e-5));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo((double)f).Within(1e-5));
             Assert.That(layer.Features[0].Properties["k"].AsNumber(), Is.EqualTo((double)f).Within(1e-5));
         }
 
@@ -296,7 +299,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = Cat(Tag(3, 1), doubleBytes);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo(d).Within(1e-12));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(d).Within(1e-12));
         }
 
         [Test]
@@ -306,7 +309,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = VarintField(4, 42);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo(42.0));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(42.0));
         }
 
         [Test]
@@ -317,7 +320,7 @@ namespace MapRenderer.Tests.Mvt
             ulong raw = (ulong)neg; // two's complement (all bits set for sign extension)
             byte[] valMsg = VarintField(4, raw);
             var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo(-7.0));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(-7.0));
         }
 
         [Test]
@@ -327,7 +330,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = VarintField(5, 999);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Number));
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo(999.0));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(999.0));
         }
 
         [Test]
@@ -339,7 +342,7 @@ namespace MapRenderer.Tests.Mvt
             ulong zigzag = (ulong)((n << 1) ^ (n >> 63));
             byte[] valMsg = VarintField(6, zigzag);
             var layer = BuildSyntheticLayer(valMsg);
-            Assert.That(layer.Values[0].AsNumber(), Is.EqualTo(-5.0));
+            Assert.That(layer.Values[0].ToValue(layer.ValueStrings).AsNumber(), Is.EqualTo(-5.0));
         }
 
         [Test]
@@ -349,7 +352,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = VarintField(7, 1);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Boolean));
-            Assert.IsTrue(layer.Values[0].AsBool());
+            Assert.IsTrue(layer.Values[0].ToValue(layer.ValueStrings).AsBool());
             Assert.IsTrue(layer.Features[0].Properties["k"].AsBool());
         }
 
@@ -360,7 +363,7 @@ namespace MapRenderer.Tests.Mvt
             byte[] valMsg = VarintField(7, 0);
             var layer = BuildSyntheticLayer(valMsg);
             Assert.That(layer.Values[0].Type, Is.EqualTo(MapRenderer.Core.Expressions.ValueType.Boolean));
-            Assert.IsFalse(layer.Values[0].AsBool());
+            Assert.IsFalse(layer.Values[0].ToValue(layer.ValueStrings).AsBool());
         }
 
         // ── Malformed tag input — skip-tolerant ─────────────────────────────────────────────────

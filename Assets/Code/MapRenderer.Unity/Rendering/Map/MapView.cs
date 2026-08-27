@@ -12,7 +12,6 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs.Mvt;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
@@ -290,10 +289,10 @@ namespace MapRenderer.Unity.Rendering.Map
         /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
         /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
         /// </summary>
-        // internal (not private): the D1a resolve-to-Dense integration tooth
-        // (ProductionPropertyStorageDefaultTests.ProductionConfig_ResolvesToDenseThroughBuildSourceSpecs)
-        // drives this method directly, reached via InternalsVisibleTo — test-only visibility widening, no
-        // behaviour change (ARCHITECTURE.md "test code must not bloat the production codebase").
+        // internal (not private): several EditMode/PlayMode teeth (e.g. A7TileFeatureSourceTests,
+        // MapViewSourceSpecTests) drive this method directly, reached via InternalsVisibleTo — test-only
+        // visibility widening, no behaviour change (ARCHITECTURE.md "test code must not bloat the
+        // production codebase").
         internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
         {
@@ -392,19 +391,11 @@ namespace MapRenderer.Unity.Rendering.Map
 
                 string template = def.Tiles[0]; // first template (no multi-host round-robin yet)
                 var    key      = Tile.TileManager.SourceKey.From(def);
-                // D1a: MapViewConfig.PropertyStorage is the format-neutral PropertyStorageMode (it lives
-                // outside the decoder folders and so may not name MvtPropertyStorage — see that type's
-                // doc). This is the one site that already knows it is building an MVT source, so the
-                // resolve to the MVT-specific enum happens HERE, never upstream of it.
-                var mvtPropertyStorage = _config.PropertyStorage == PropertyStorageMode.Dense
-                    ? MvtPropertyStorage.Dense
-                    : MvtPropertyStorage.Dictionary;
                 // Epic A / A7: the ONE production site that wraps the byte fetcher into the raised
                 // ITileFeatureSource seam — TileManager never names the byte-level type (F-1).
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(
-                        factory(template), propertyStorage: mvtPropertyStorage)));
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(template))));
             }
 
             return specs;

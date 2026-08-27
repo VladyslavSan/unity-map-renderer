@@ -24,7 +24,8 @@ namespace MapRenderer.Jobs.Mvt
     /// feature's geometry field is captured as a byte-range only (see <c>DecodeFeature</c>'s doc) and every
     /// feature's commands are flattened directly into one shared <c>Allocator.Persistent</c>
     /// <c>NativeArray&lt;uint&gt;</c>, consumed by <c>MvtGeometryMaterializer</c> and freed before this call
-    /// returns.</para>
+    /// returns. Feature tag words are flattened the same way, into <c>MvtLayer.FeatureTagWords</c> — one
+    /// shared per-layer buffer instead of a per-feature <c>uint[]</c>.</para>
     ///
     /// <para><b>Why eager, and why the id is a parameter.</b> Lazy per-layer materialization would mutate the
     /// tile on a second thread <i>after</i> the wrapping <c>SharedDisposable{IDecodedTile}</c> publishes it,
@@ -77,11 +78,7 @@ namespace MapRenderer.Jobs.Mvt
         /// <param name="id">The slippy-map address these tile-local coordinates belong to. Stamped into every
         /// layer's buffer, and thereafter the only copy — see the type doc.</param>
         /// <param name="data">The MVT protobuf bytes.</param>
-        /// <param name="propertyStorage">Which <c>IMvtPropertyStore</c> to build for each decoded feature
-        /// (D1a — GC-eliminating dense storage behind an A/B flag). Defaults to
-        /// <see cref="MvtPropertyStorage.Dictionary"/> — today's byte-identical production behaviour.</param>
-        public static MvtTile Decode(
-            TileId id, byte[] data, MvtPropertyStorage propertyStorage = MvtPropertyStorage.Dictionary)
+        public static MvtTile Decode(TileId id, byte[] data)
         {
             var tile = new MvtTile();
             try
@@ -95,7 +92,7 @@ namespace MapRenderer.Jobs.Mvt
                     if (field == TileLayers && wt == 2)
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        tile.Layers.Add(DecodeLayer(id, r.Slice(s, e), propertyStorage));
+                        tile.Layers.Add(DecodeLayer(id, r.Slice(s, e)));
                     }
                     else
                     {
@@ -114,29 +111,37 @@ namespace MapRenderer.Jobs.Mvt
             return tile;
         }
 
-        private static MvtLayer DecodeLayer(TileId id, ProtobufReader r, MvtPropertyStorage propertyStorage)
+        private static MvtLayer DecodeLayer(TileId id, ProtobufReader r)
         {
             var layer = new MvtLayer();
 
             // Pre-size every per-feature / per-table list from a read-only counting pass over the layer bytes
-            // (a struct COPY of the cursor, like ReadPackedUInt32). MVT decode is streaming — the true counts
-            // are only known after the read loop — so without this the Features / Keys / Values lists and the
-            // two per-feature scratch lists grow by doubling, discarding a chain of backing arrays per layer.
-            // The extra scan is off-main CPU traded for less GC (the goal). A miscount could only mis-SIZE a
-            // list, never change what is decoded, so this is behaviour-preserving by construction.
+            // (a struct COPY of the cursor). MVT decode is streaming — the true counts are only known after
+            // the read loop — so without this the Features / Keys / Values lists and the four per-feature
+            // scratch lists grow by doubling, discarding a chain of backing arrays per layer. The extra scan
+            // is off-main CPU traded for less GC (the goal). A miscount could only mis-SIZE a list, never
+            // change what is decoded, so this is behaviour-preserving by construction.
             var (featureCount, keyCount, valueCount) = CountLayerElements(r);
             layer.Features.Capacity = featureCount;
             layer.Keys.Capacity     = keyCount;
-            layer.Values.Capacity   = valueCount;
 
-            // Keep raw tag arrays per-feature; resolve to Properties after the full layer is read.
-            // This is order-independent: keys/values may follow features in the serialised stream.
-            var rawTagsList = new List<uint[]>(featureCount);
-            // 2a: per-feature geometry BYTE BOUNDS only (two small int lists, not a uint[] per feature) — the
-            // command words themselves are never parsed into managed memory. See DecodeFeature's doc. Lists,
-            // not fixed arrays, for the same reason rawTagsList is a List: CountLayerElements's count is a
-            // hint (a miscount only mis-sizes the capacity, never breaks decoding — see its doc), so the
-            // real loop must not assume the counted and actual feature counts are identical.
+            // Transient GROWABLE scratch, not a valueCount-sized NativeArray — CountLayerElements' counts are
+            // hints (a miscount only mis-SIZES a list, never changes what is decoded, see its doc); a fixed
+            // native array sized at valueCount would turn an undercount into an out-of-bounds crash. The
+            // native array is materialized below, inside the try, once the true count is known.
+            var valuesScratch = new List<MvtValueNative>(valueCount);
+            var stringScratch = new List<string>(valueCount);
+
+            // Per-feature tag-word BYTE BOUNDS only (two small int lists, not a uint[] per feature) — the
+            // words themselves are never parsed into managed memory; resolved to Properties after the full
+            // layer is read (order-independent: keys/values may follow features in the serialised stream).
+            // See DecodeFeature's doc. Lists, not fixed arrays: CountLayerElements's count is a hint (a
+            // miscount only mis-sizes the capacity, never breaks decoding — see its doc), so the real loop
+            // must not assume the counted and actual feature counts are identical.
+            var tagStart = new List<int>(featureCount);
+            var tagEnd   = new List<int>(featureCount);
+            // 2a: per-feature geometry BYTE BOUNDS only, same shape as the tag bounds above — the command
+            // words themselves are never parsed into managed memory. See DecodeFeature's doc.
             var geomStart = new List<int>(featureCount);
             var geomEnd   = new List<int>(featureCount);
 
@@ -162,15 +167,16 @@ namespace MapRenderer.Jobs.Mvt
                     case LayerValues when wt == 2:
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        layer.Values.Add(DecodeValue(r.Slice(s, e)));
+                        valuesScratch.Add(DecodeValue(r.Slice(s, e), stringScratch));
                         break;
                     }
                     case LayerFeatures when wt == 2:
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        var (feature, rawTags, fGeomStart, fGeomEnd) = DecodeFeature(r.Slice(s, e));
+                        var (feature, fTagStart, fTagEnd, fGeomStart, fGeomEnd) = DecodeFeature(r.Slice(s, e));
                         layer.Features.Add(feature);
-                        rawTagsList.Add(rawTags);
+                        tagStart.Add(fTagStart);
+                        tagEnd.Add(fTagEnd);
                         geomStart.Add(fGeomStart);
                         geomEnd.Add(fGeomEnd);
                         break;
@@ -181,101 +187,186 @@ namespace MapRenderer.Jobs.Mvt
                 }
             }
 
-            // Two-pass resolve: keys/values are now complete; build each feature's property store
-            // (D1a). The key→index map is built HERE — once per layer, inside the decode, before any
-            // store exists — never lazily on first read: a decoded tile is published across threads
-            // afterwards, and a first-read build would be a write racing concurrent readers (the same
-            // publication hazard MvtLayer.Geometry documents for lazy per-layer geometry).
+            // The key→index map is built HERE — once per layer, inside the decode, before any store exists —
+            // never lazily on first read: a decoded tile is published across threads afterwards, and a
+            // first-read build would be a write racing concurrent readers (the same publication hazard
+            // MvtLayer.Geometry documents for lazy per-layer geometry).
             var keyIndex = new Dictionary<string, int>(layer.Keys.Count);
             for (int i = 0; i < layer.Keys.Count; i++)
                 keyIndex[layer.Keys[i]] = i;
-            var propertyResolver = new MvtLayerPropertyResolver(layer.Keys, layer.Values, keyIndex);
 
-            for (int i = 0; i < layer.Features.Count; i++)
-            {
-                layer.Features[i].Store = propertyStorage == MvtPropertyStorage.Dense
-                    ? new DensePropertyStore(rawTagsList[i], propertyResolver)
-                    : (IMvtPropertyStore)new DictionaryPropertyStore(
-                        propertyResolver.ResolveToDictionary(rawTagsList[i]));
-            }
-
-            // IR C1 P3: materialize this layer's rings NOW, from the command streams collected above, and let
-            // them fall out of scope. `layer.Extent` is fully resolved by this point — the extent field may
-            // appear anywhere in the layer message, which is why this runs after the read loop and not inside
-            // it. The kind column is read off the same features, in the same order, as the command list.
+            // IR C1 P3: materialize this layer's rings and tag words NOW, from the byte bounds collected
+            // above, and let the scratch fall out of scope. `layer.Extent` is fully resolved by this point —
+            // the extent field may appear anywhere in the layer message, which is why this runs after the
+            // read loop and not inside it. The kind column is read off the same features, in the same order,
+            // as the command list.
             var kinds = new List<TileGeometryType>(layer.Features.Count);
             for (int i = 0; i < layer.Features.Count; i++)
                 kinds.Add(layer.Features[i].GeometryType);
 
-            // 2a: flatten every feature's recorded [geomStart, geomEnd) byte slice straight into ONE shared
-            // Allocator.Persistent NativeArray<uint> — the native shape MvtDecodeJob already consumes. Same
-            // two-pass count-then-fill technique as ReadPackedUInt32 (a throwaway counter cursor, then an
-            // exact-sized fill), just walking N feature slices into one buffer instead of N managed uint[]s.
-            // These buffers are BORROWED by the materializer (never disposed by it — see its ctor doc), so
-            // this method remains the sole owner and frees them in `finally`, on every exit path.
+            // 2a: flatten tags, then geometry — both via FlattenFeatureColumn (see its doc for the two-pass
+            // count-then-fill technique) — into ONE shared Allocator.Persistent NativeArray<uint> apiece.
+            // The geometry buffers are BORROWED by the materializer (never disposed by it — see its ctor
+            // doc); the tag-words buffer is adopted by the layer (see AdoptFeatureTagWords below) — this
+            // method remains the sole owner of every buffer until it hands ownership off, and frees whatever
+            // is still its own in `finally`, on every exit path.
             //
-            // The count/fill loops re-read raw varints from the tile's own bytes (ReadVarint throws on a
-            // truncated/over-long varint — reachable on a malformed tile), so BOTH loops sit inside the try:
-            // a throw there must not leak whichever of the three buffers already exists. Each is declared
-            // `default` first and disposed under an IsCreated guard, because a throw from the FIRST
-            // allocation (or the count loop, which runs between the first two) leaves the others
-            // un-allocated — and IsCreated on a default NativeArray is false without touching a safety
-            // handle, so the guard itself never throws.
+            // Both flatten calls re-read raw varints from the tile's own bytes (ReadVarint throws on a
+            // truncated/over-long varint — reachable on a malformed tile), so BOTH sit inside the try: a
+            // throw there must not leak whichever buffers already exist. Each of the six locals below is
+            // declared `default` first; FlattenFeatureColumn takes its three outputs by `ref`, not `out`
+            // (see its doc), so a throw partway through either call still leaves THESE locals pointing at
+            // whatever that call had already allocated — visible to `finally` below and disposed there under
+            // no IsCreated guard: NativeArray.Dispose() early-returns on a default value, so the finally
+            // frees whatever was allocated and no-ops on the rest.
             int featCount = layer.Features.Count;
             var featOffsets = default(NativeArray<int>);
             var featLengths = default(NativeArray<int>);
             var commands    = default(NativeArray<uint>);
+            var tagOffsets  = default(NativeArray<int>);
+            var tagLengths  = default(NativeArray<int>);
+            var tagWords    = default(NativeArray<uint>);
+            var values      = default(NativeArray<MvtValueNative>);
             try
             {
-                featOffsets = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                featLengths = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                int totalWords = 0;
-                for (int i = 0; i < featCount; i++)
-                {
-                    int n = 0;
-                    if (geomEnd[i] > geomStart[i])
-                    {
-                        var counter = r.Slice(geomStart[i], geomEnd[i]); // struct copy — independent cursor
-                        while (counter.HasMore) { counter.ReadVarint(); n++; }
-                    }
-                    featOffsets[i] = totalWords;
-                    featLengths[i] = n;
-                    totalWords += n;
-                }
-                commands = new NativeArray<uint>(totalWords, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                for (int i = 0; i < featCount; i++)
-                {
-                    int len = featLengths[i];
-                    if (len == 0) continue;
-                    var fill = r.Slice(geomStart[i], geomEnd[i]);
-                    int pos = featOffsets[i];
-                    for (int k = 0; k < len; k++) commands[pos + k] = (uint)fill.ReadVarint();
-                }
+                // Materialize the value table from the transient scratch NOW, at the top of the try, so a
+                // throw anywhere below still leaves `values` visible to `finally`.
+                values = new NativeArray<MvtValueNative>(
+                    valuesScratch.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                for (int i = 0; i < valuesScratch.Count; i++)
+                    values[i] = valuesScratch[i];
+                string[] valueStrings = stringScratch.ToArray();
+
+                FlattenFeatureColumn(r, tagStart, tagEnd, featCount, ref tagOffsets, ref tagLengths, ref tagWords);
+
+                // Resolver takes the tag-words AND value-table buffers here (both borrowed, both local) —
+                // nothing between this point and the adopts below depends on the resolver, so it can move as
+                // late as the buffers it needs.
+                var propertyResolver = new MvtLayerPropertyResolver(layer.Keys, values, valueStrings, keyIndex, tagWords);
+
+                for (int i = 0; i < layer.Features.Count; i++)
+                    layer.Features[i].Store = new DensePropertyStore(propertyResolver, tagOffsets[i], tagLengths[i]);
+
+                // String→id key hoist: every layer is Dense, so every layer advertises IIndexedFeatureSource
+                // capability against this resolver.
+                layer.DenseKeyResolver = propertyResolver;
+
+                FlattenFeatureColumn(r, geomStart, geomEnd, featCount, ref featOffsets, ref featLengths, ref commands);
 
                 using (PmDecode.Auto())
                 {
                     var materializer = new MvtGeometryMaterializer(id, layer.Extent, kinds, commands, featOffsets, featLengths);
+                    // INVARIANT: nothing between this AdoptGeometry and the AdoptFeatureTagWords/AdoptValues
+                    // below may throw. All three adopts must run, in order, before the method returns — the
+                    // layer is not yet in tile.Layers, so Decode's catch cannot free any buffer if a throw
+                    // lands between them (it would only free buffers already reachable from an added layer).
+                    // A future edit that inserts a throwing statement here would leak whatever was already
+                    // adopted.
                     layer.AdoptGeometry(materializer.Materialize());
                 }
+
+                // Adopt LAST, after every store has captured its (offset, count) view and the geometry has
+                // been adopted — see the invariant comment above. Null each local on transfer (the
+                // "transfer nulls the source" double-free guard): the `finally` below still runs
+                // `tagWords.Dispose()`/`values.Dispose()`, but on a default array that is a no-op, so a
+                // just-adopted buffer is never freed out from under the layer.
+                layer.AdoptFeatureTagWords(tagWords);
+                tagWords = default;
+                layer.AdoptValues(values, valueStrings);
+                values = default;
             }
             finally
             {
+                tagWords.Dispose();
+                tagOffsets.Dispose();
+                tagLengths.Dispose();
                 commands.Dispose();
                 featOffsets.Dispose();
                 featLengths.Dispose();
+                values.Dispose();
             }
 
             return layer;
         }
 
         /// <summary>
-        /// Decodes one Value sub-message per MVT spec §4.4. All numeric variants map to
-        /// <see cref="MvtValue.Number"/> (double); string → <see cref="MvtValue.String"/>;
-        /// bool → <see cref="MvtValue.Bool"/>. Unknown fields are skipped.
+        /// Flattens one per-feature byte-bounds column — <paramref name="starts"/>/<paramref name="ends"/>,
+        /// as recorded by <see cref="DecodeFeature"/> for either the tag or the geometry field — into ONE
+        /// shared <c>Allocator.Persistent</c> native buffer. Two-pass count-then-fill: a first pass over
+        /// each feature's <c>[start, end)</c> slice on a throwaway cursor copy counts its varints (so
+        /// <paramref name="words"/> can be allocated at its exact total size), then a second pass re-slices
+        /// and fills it. Both passes re-read raw varints from the tile's own bytes via
+        /// <c>ProtobufReader.ReadVarint</c>, which throws on a truncated/over-long varint — reachable on a
+        /// malformed tile — so this method can throw after allocating <paramref name="offsets"/>/
+        /// <paramref name="lengths"/> and/or <paramref name="words"/>.
+        ///
+        /// <para><b>Why the three outputs are <c>ref</c>, not <c>out</c>.</b> An <c>out</c> parameter is
+        /// copied back to the caller only on NORMAL return, so a throw mid-body would leave the caller's
+        /// local unchanged — stranding whatever this method had already allocated, invisible to any
+        /// <c>finally</c> the caller wraps the call in. A <c>ref</c> parameter IS the caller's own storage:
+        /// each assignment here (<c>offsets = …</c>, then <c>words = …</c>) is visible to the caller the
+        /// instant it executes, so a throw between the two still leaves the caller holding a valid reference
+        /// to whichever buffers this method finished allocating before the throw — exactly what
+        /// <see cref="DecodeLayer"/>'s enclosing <c>try</c>/<c>finally</c> depends on to free every buffer on
+        /// every exit path (see <see cref="DecodeLayer"/>'s comment at the call sites).</para>
+        ///
+        /// <para>Callers own everything written into <paramref name="offsets"/>/<paramref name="lengths"/>/
+        /// <paramref name="words"/> and are responsible for disposal — this method never disposes, on the
+        /// success path or the throw path.</para>
         /// </summary>
-        private static MvtValue DecodeValue(ProtobufReader r)
+        /// <param name="r">A reader over the layer's bytes; re-sliced per feature via <c>Slice(start, end)</c>,
+        /// never advanced itself.</param>
+        /// <param name="starts">Per-feature byte-bound start, index-aligned with <paramref name="ends"/> and
+        /// with <paramref name="offsets"/>/<paramref name="lengths"/>.</param>
+        /// <param name="ends">Per-feature byte-bound end (exclusive); <c>end &lt;= start</c> means zero words
+        /// for that feature (the field was absent).</param>
+        /// <param name="featCount">The layer's feature count — the length <paramref name="offsets"/> and
+        /// <paramref name="lengths"/> are allocated at.</param>
+        /// <param name="offsets">Per-feature start index into <paramref name="words"/>, by ref.</param>
+        /// <param name="lengths">Per-feature word count, by ref.</param>
+        /// <param name="words">Every feature's varints, concatenated in feature order, by ref.</param>
+        private static void FlattenFeatureColumn(
+            ProtobufReader r, IReadOnlyList<int> starts, IReadOnlyList<int> ends, int featCount,
+            ref NativeArray<int> offsets, ref NativeArray<int> lengths, ref NativeArray<uint> words)
         {
-            MvtValue result = MvtValue.Null;
+            offsets = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            lengths = new NativeArray<int>(featCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            int total = 0;
+            for (int i = 0; i < featCount; i++)
+            {
+                int n = 0;
+                if (ends[i] > starts[i])
+                {
+                    var counter = r.Slice(starts[i], ends[i]); // struct copy — independent cursor
+                    while (counter.HasMore) { counter.ReadVarint(); n++; }
+                }
+                offsets[i] = total;
+                lengths[i] = n;
+                total += n;
+            }
+            words = new NativeArray<uint>(total, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            for (int i = 0; i < featCount; i++)
+            {
+                int len = lengths[i];
+                if (len == 0) continue;
+                var fill = r.Slice(starts[i], ends[i]);
+                int pos = offsets[i];
+                for (int k = 0; k < len; k++) words[pos + k] = (uint)fill.ReadVarint();
+            }
+        }
+
+        /// <summary>
+        /// Decodes one Value sub-message per MVT spec §4.4. All numeric variants map to
+        /// <see cref="MvtValueNative.Number"/> (double); string → <see cref="MvtValueNative.String"/>, its
+        /// text appended to <paramref name="stringTable"/> (the transient scratch <see cref="MvtLayer.ValueStrings"/>
+        /// is materialized from); bool → <see cref="MvtValueNative.Bool"/>. Unknown fields are skipped.
+        /// </summary>
+        /// <param name="r">A reader over this Value sub-message's bytes.</param>
+        /// <param name="stringTable">The layer's transient string scratch — a string variant appends here
+        /// and the result's StringId is the appended index.</param>
+        private static MvtValueNative DecodeValue(ProtobufReader r, List<string> stringTable)
+        {
+            MvtValueNative result = MvtValueNative.Null;
             while (r.HasMore)
             {
                 uint tag = r.ReadTag();
@@ -284,26 +375,27 @@ namespace MapRenderer.Jobs.Mvt
                 switch (field)
                 {
                     case ValueString when wt == 2:
-                        result = MvtValue.String(r.ReadString());
+                        stringTable.Add(r.ReadString());
+                        result = MvtValueNative.String(stringTable.Count - 1);
                         break;
                     case ValueFloat when wt == 5:
-                        result = MvtValue.Number((double)r.ReadFloat());
+                        result = MvtValueNative.Number((double)r.ReadFloat());
                         break;
                     case ValueDouble when wt == 1:
-                        result = MvtValue.Number(r.ReadDouble());
+                        result = MvtValueNative.Number(r.ReadDouble());
                         break;
                     case ValueInt when wt == 0:
                         // int64: read as raw varint, reinterpret as signed (two's complement)
-                        result = MvtValue.Number((double)(long)r.ReadVarint());
+                        result = MvtValueNative.Number((double)(long)r.ReadVarint());
                         break;
                     case ValueUint when wt == 0:
-                        result = MvtValue.Number((double)r.ReadVarint());
+                        result = MvtValueNative.Number((double)r.ReadVarint());
                         break;
                     case ValueSint when wt == 0:
-                        result = MvtValue.Number((double)r.ReadSInt64());
+                        result = MvtValueNative.Number((double)r.ReadSInt64());
                         break;
                     case ValueBool when wt == 0:
-                        result = MvtValue.Bool(r.ReadVarint() != 0);
+                        result = MvtValueNative.Bool(r.ReadVarint() != 0);
                         break;
                     default:
                         r.SkipField(wt);
@@ -314,25 +406,32 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Decodes one Feature sub-message. Returns the feature (geometry type + id), the raw tag uint array
-        /// (to be resolved after the layer's key/value tables are fully read) and the geometry command
-        /// stream's byte bounds — all three as OUT-OF-BAND results the caller consumes, because none belongs
-        /// on the feature (IR C1 P3). Feature id (field 1) is set on the feature directly.
+        /// Decodes one Feature sub-message. Returns the feature (geometry type + id), the tag-word stream's
+        /// byte bounds (to be flattened after the layer's key/value tables are fully read) and the geometry
+        /// command stream's byte bounds — all three as OUT-OF-BAND results the caller consumes, because none
+        /// belongs on the feature (IR C1 P3). Feature id (field 1) is set on the feature directly.
         ///
-        /// <para><b>2a: the geometry field is NOT parsed here.</b> <c>ReadLengthDelimited</c> returns
-        /// <c>[start,end)</c> as absolute offsets into the tile's root byte buffer (every
-        /// <see cref="ProtobufReader"/> slice shares the same backing array — see <c>ProtobufReader.Slice</c>),
-        /// so the caller can re-open that exact byte range later with its OWN reader and flatten every
-        /// feature's commands straight into one shared <c>NativeArray&lt;uint&gt;</c> — no per-feature managed
-        /// <c>uint[]</c> ever exists. A second (or later) occurrence of the field overwrites the bounds,
-        /// matching the old last-wins behaviour where a repeated <c>ReadPackedUInt32</c> call discarded the
-        /// previous array. Absent field ⇒ <c>(0, 0)</c>, the same "zero commands" default the old
-        /// <c>null</c> geometry meant.</para>
+        /// <para><b>2a: neither the tag field nor the geometry field is parsed here.</b>
+        /// <c>ReadLengthDelimited</c> returns <c>[start,end)</c> as absolute offsets into the tile's root byte
+        /// buffer (every <see cref="ProtobufReader"/> slice shares the same backing array — see
+        /// <c>ProtobufReader.Slice</c>), so the caller can re-open that exact byte range later with its OWN
+        /// reader and flatten every feature's tag words / commands straight into one shared
+        /// <c>NativeArray&lt;uint&gt;</c> apiece — no per-feature managed <c>uint[]</c> ever exists. A second
+        /// (or later) occurrence of either field overwrites its bounds, matching the old last-wins behaviour
+        /// where a repeated packed-varint read discarded the previous array. Absent field ⇒ <c>(0, 0)</c>,
+        /// the same "zero words" default the old <c>null</c>/empty result meant.</para>
+        ///
+        /// <para><b>Deliberate: a repeated <c>FeatureTags</c> is now last-wins AND lazily parsed.</b> Only the
+        /// LAST occurrence's bounds survive here, and those bytes are parsed once, later, by the caller — so
+        /// a malformed EARLIER occurrence (e.g. an unterminated packed varint) is never parsed at all and is
+        /// no longer eagerly rejected, where the old per-occurrence eager parse threw as soon as it reached
+        /// it. <c>FeatureGeometry</c> has carried this exact deferred-parse, last-wins-on-repeat behaviour
+        /// since it was first flattened; tags now share it.</para>
         /// </summary>
-        private static (MvtFeature feature, uint[] rawTags, int geomStart, int geomEnd) DecodeFeature(ProtobufReader r)
+        private static (MvtFeature feature, int tagStart, int tagEnd, int geomStart, int geomEnd) DecodeFeature(ProtobufReader r)
         {
             var f = new MvtFeature();
-            uint[] rawTags = null;
+            int tagStart = 0, tagEnd = 0;
             int geomStart = 0, geomEnd = 0;
             while (r.HasMore)
             {
@@ -346,11 +445,8 @@ namespace MapRenderer.Jobs.Mvt
                         f.HasId = true;
                         break;
                     case FeatureTags when wt == 2:
-                    {
-                        var (s, e) = r.ReadLengthDelimited();
-                        rawTags = ReadPackedUInt32(r.Slice(s, e));
+                        (tagStart, tagEnd) = r.ReadLengthDelimited();
                         break;
-                    }
                     case FeatureType when wt == 0:
                         f.GeometryType = (TileGeometryType)r.ReadUInt32();
                         break;
@@ -362,7 +458,7 @@ namespace MapRenderer.Jobs.Mvt
                         break;
                 }
             }
-            return (f, rawTags ?? System.Array.Empty<uint>(), geomStart, geomEnd);
+            return (f, tagStart, tagEnd, geomStart, geomEnd);
         }
 
         /// <summary>
@@ -391,22 +487,6 @@ namespace MapRenderer.Jobs.Mvt
                 counter.SkipField(wt);
             }
             return (features, keys, values);
-        }
-
-        /// <summary>
-        /// Reads a packed-varint field (MVT tags / geometry command stream) into an exact-sized array.
-        /// Two-pass count-then-fill — counts on a throwaway cursor copy, then fills once — so exactly one
-        /// array is allocated: no growing <c>List&lt;uint&gt;</c>, no <c>ToArray()</c> duplicate.
-        /// </summary>
-        private static uint[] ReadPackedUInt32(ProtobufReader r)
-        {
-            var counter = r;                       // struct copy — independent cursor over the same [s,e] slice
-            int n = 0;
-            while (counter.HasMore) { counter.ReadVarint(); n++; }
-            if (n == 0) return System.Array.Empty<uint>();
-            var result = new uint[n];
-            for (int i = 0; i < n; i++) result[i] = (uint)r.ReadVarint();
-            return result;
         }
     }
 }

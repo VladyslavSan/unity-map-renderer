@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Tiles;
@@ -23,7 +24,7 @@ namespace MapRenderer.Jobs.Mvt
     /// purely an evaluation surface — filters and expressions, nothing else. The command words are consumed
     /// inside <c>MvtDecoder</c> and never outlive it.</para>
     /// </summary>
-    public sealed class MvtFeature : IFeature
+    public sealed class MvtFeature : IFeature, IIndexedFeature
     {
         /// <summary>Geometry type (MVT Feature.type field).</summary>
         public TileGeometryType GeometryType;
@@ -44,23 +45,14 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>
         /// The property store backing <see cref="Properties"/> and <see cref="IFeature.TryGetProperty"/> —
-        /// Dictionary or Dense, selected per <see cref="MvtPropertyStorage"/> and set by
-        /// <see cref="MvtDecoder"/> once the layer's key/value tables are complete. Internal: production
-        /// code goes through the decoder, never hand-assembles a store.
+        /// set by <see cref="MvtDecoder"/> once the layer's key/value tables are complete. Internal:
+        /// production code goes through the decoder, never hand-assembles a store.
         /// </summary>
         internal IMvtPropertyStore Store { get; set; }
 
-        /// <summary>
-        /// Decoded properties, materialized from <see cref="Store"/>. Always non-null. The setter wraps
-        /// the given map in a <see cref="DictionaryPropertyStore"/> — a convenience for direct test
-        /// construction (object-initializer syntax); it has no production caller, kept only so the
-        /// pre-D1a fold-parity tests (<c>A6AdapterFoldTests</c>) stay byte-identical.
-        /// </summary>
-        public IReadOnlyDictionary<string, Value> Properties
-        {
-            get => Store?.AsDictionary() ?? EmptyProperties;
-            set => Store = value == null ? null : new DictionaryPropertyStore(value);
-        }
+        /// <summary>Decoded properties, materialized from <see cref="Store"/>. Always non-null — an empty
+        /// dictionary when <see cref="Store"/> is unset.</summary>
+        public IReadOnlyDictionary<string, Value> Properties => Store?.AsDictionary() ?? EmptyProperties;
 
         private static readonly Dictionary<string, Value> EmptyProperties = new Dictionary<string, Value>();
 
@@ -82,14 +74,23 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         IReadOnlyDictionary<string, Value> IFeature.Properties => Properties;
+
+        /// <summary>The string→id key hoist's int-keyed read: forwards to <see cref="Store"/>.</summary>
+        bool IIndexedFeature.TryGetPropertyByKeyIndex(int keyIndex, out Value value)
+        {
+            if (Store != null) return Store.TryGetByKeyIndex(keyIndex, out value);
+            value = Value.Null;
+            return false;
+        }
     }
 
     /// <summary>
     /// A decoded MVT layer. Carries the layer name, extent, version, the decoded key table
-    /// (field 3, ordered), the decoded value table (field 4, ordered), the feature list — and, since
-    /// IR C1 P3, <b>this layer's decoded geometry</b> (<see cref="Geometry"/>).
+    /// (field 3, ordered), the decoded value table (field 4, ordered), the feature list, this layer's
+    /// decoded geometry (<see cref="Geometry"/>, since IR C1 P3) and its flattened tag words
+    /// (<see cref="FeatureTagWords"/>).
     /// </summary>
-    public sealed class MvtLayer : ITileLayer, IDisposable
+    public sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, IDisposable
     {
         public string Name;
         public uint Extent = 4096;
@@ -141,34 +142,112 @@ namespace MapRenderer.Jobs.Mvt
 
         TileGeometryBuffers ITileLayer.Geometry => Geometry;
 
-        /// <summary>Frees this layer's buffer. Idempotent — but only because the disposed struct is written
-        /// BACK: <see cref="TileGeometryBuffers.Dispose"/> clears its own <c>IsCreated</c> to make the second
-        /// call a no-op, and a property getter hands out a COPY, so <c>Geometry.Dispose()</c> would free the
-        /// arrays and then leave this layer still claiming to own them — a double free on the next call.</summary>
+        /// <summary>This layer's flattened (keyIdx,valIdx) tag words, one shared <c>Allocator.Persistent</c>
+        /// buffer for every feature in the layer — the buffer <see cref="DensePropertyStore"/> and
+        /// <see cref="MvtLayerPropertyResolver.TagWords"/> borrow a <c>(offset, count)</c> view into.
+        ///
+        /// <para><b>BORROWED by every store/resolver in this layer.</b> A reader must never dispose it, never
+        /// mutate it, and never retain it past the decode's scope; the layer frees it in <see cref="Dispose"/>,
+        /// which <see cref="MvtTile.Dispose"/> drives. Reading through a store after that point is a
+        /// use-after-free on this buffer — the same borrowed-lifetime contract <see cref="Geometry"/> already
+        /// carries.</para>
+        ///
+        /// <para><c>default</c> (<c>IsCreated == false</c>) for a layer with no features, allocating
+        /// nothing.</para></summary>
+        internal NativeArray<uint> FeatureTagWords { get; private set; }
+
+        private bool _featureTagsAdopted;
+
+        /// <summary>Takes ownership of this layer's flattened tag-word buffer. <b>Callable exactly once</b> —
+        /// unlike <see cref="AdoptGeometry"/> there is no feature-column lockstep check here, because
+        /// <see cref="FeatureTagWords"/>'s length is a WORD count, not a feature count: per-feature
+        /// <c>(offset, count)</c> pairs live on the stores themselves (never on the layer), so there is no
+        /// per-feature column on this buffer for a mismatch to corrupt.</summary>
+        internal void AdoptFeatureTagWords(NativeArray<uint> tagWords)
+        {
+            if (_featureTagsAdopted)
+                throw new InvalidOperationException(
+                    $"MvtLayer '{Name}' already owns its tag words. A layer's buffer is minted exactly " +
+                    "once, inside the decode; adopting a second would orphan the first (the decoded " +
+                    "tile's Dispose frees only what the layer currently holds).");
+
+            _featureTagsAdopted = true;
+            FeatureTagWords = tagWords;
+        }
+
+        /// <summary>Frees this layer's buffers. Idempotent — but only because the disposed struct/array is
+        /// written BACK: <see cref="TileGeometryBuffers.Dispose"/> clears its own <c>IsCreated</c> to make the
+        /// second call a no-op, and each property getter hands out a COPY, so disposing the getter's result
+        /// directly would free the underlying buffer and then leave this layer still claiming to own it — a
+        /// double free on the next call.</summary>
         public void Dispose()
         {
             TileGeometryBuffers geometry = Geometry;
             geometry.Dispose();
             Geometry = geometry;
+
+            NativeArray<uint> tags = FeatureTagWords;
+            if (tags.IsCreated) tags.Dispose();
+            FeatureTagWords = tags;
+
+            NativeArray<MvtValueNative> values = Values;
+            if (values.IsCreated) values.Dispose();
+            Values = values;
         }
 
         /// <summary>Layer key table (MVT Layer field 3): string keys in declaration order.</summary>
         public readonly List<string> Keys = new List<string>();
 
-        /// <summary>
-        /// Layer value table (MVT Layer field 4): decoded variant values in declaration order.
-        /// String, float, double, int, uint, sint, bool variants are all mapped to the compact
-        /// <see cref="MvtValue"/> (String → MvtValue.String; numerics → MvtValue.Number; bool →
-        /// MvtValue.Bool) — narrower than <see cref="Value"/> (no Color/Array/Object), reconstituted to
-        /// <see cref="Value"/> at the read boundary via <see cref="MvtValue.ToValue"/>.
-        /// </summary>
-        public readonly List<MvtValue> Values = new List<MvtValue>();
+        /// <summary>Layer value table (MVT Layer field 4): decoded variant values in declaration order, one
+        /// shared <c>Allocator.Persistent</c> buffer per layer — mirrors <see cref="FeatureTagWords"/>'s
+        /// ownership idiom exactly. String, float, double, int, uint, sint, bool variants are all mapped to
+        /// the blittable <see cref="MvtValueNative"/> (String → a <see cref="ValueStrings"/> index; numerics
+        /// → Number; bool → Bool) — reconstituted to the shared expression <see cref="Value"/> at the read
+        /// boundary via <see cref="MvtValueNative.ToValue"/>.
+        ///
+        /// <para><b>BORROWED by every resolver/store in this layer</b> — same borrowed-lifetime contract as
+        /// <see cref="FeatureTagWords"/>: never dispose, never mutate, never retain past the decode's scope;
+        /// the layer frees it in <see cref="Dispose"/>. <c>default</c> (<c>IsCreated == false</c>) for a
+        /// layer with no values, allocating nothing.</para></summary>
+        public NativeArray<MvtValueNative> Values { get; private set; }
+
+        /// <summary>The per-layer value-string side table: the index space a <see cref="ValueType.String"/>
+        /// entry in <see cref="Values"/> resolves against. A plain GC field — no <c>Dispose</c> — adopted
+        /// in lockstep with <see cref="Values"/> via <see cref="AdoptValues"/> so the id↔table pairing is a
+        /// property of the type, not of the decoder remembering.</summary>
+        internal string[] ValueStrings { get; private set; }
+
+        private bool _valuesAdopted;
+
+        /// <summary>Takes ownership of this layer's value table. <b>Callable exactly once</b> — mirrors
+        /// <see cref="AdoptFeatureTagWords"/>: no feature-column lockstep check, because
+        /// <see cref="Values"/>'s length is a value-table count, not a feature count (same reasoning
+        /// <see cref="AdoptFeatureTagWords"/> documents).</summary>
+        internal void AdoptValues(NativeArray<MvtValueNative> values, string[] valueStrings)
+        {
+            if (_valuesAdopted)
+                throw new InvalidOperationException(
+                    $"MvtLayer '{Name}' already owns its value table. A layer's buffer is minted exactly " +
+                    "once, inside the decode; adopting a second would orphan the first (the decoded " +
+                    "tile's Dispose frees only what the layer currently holds).");
+
+            _valuesAdopted = true;
+            Values = values;
+            ValueStrings = valueStrings;
+        }
 
         // ── ITileLayer — zero-copy: List<MvtFeature> satisfies IReadOnlyList<IFeature> by
         // IReadOnlyList<out T> covariance (MvtFeature : IFeature), so this is a forward, not a copy. ──
         string                       ITileLayer.Name    => Name;
         uint                         ITileLayer.Extent  => Extent;
         IReadOnlyList<IFeature>      ITileLayer.Features => Features;
+
+        /// <summary>The string→id key hoist's capability carrier: this layer's key resolver, set by
+        /// <see cref="MvtDecoder"/> once, alongside every feature's <see cref="MvtFeature.Store"/>.
+        /// </summary>
+        internal MvtLayerPropertyResolver DenseKeyResolver { get; set; }
+
+        IFeatureKeyResolver IIndexedFeatureSource.KeyResolver => DenseKeyResolver;
     }
 
     public sealed class MvtTile : IDecodedTile

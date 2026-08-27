@@ -19,15 +19,18 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Mvt
 {
     /// <summary>
-    /// D1a — dense MVT property storage (<see cref="MvtPropertyStorage.Dense"/>), the GC-eliminating
-    /// alternative to the eager per-feature <see cref="MvtPropertyStorage.Dictionary"/> that stays the
-    /// default. Two things this stage must prove:
+    /// D1a — dense MVT property storage (<see cref="DensePropertyStore"/>), the GC-eliminating alternative
+    /// to an eager per-feature dictionary and the sole production property store. Two things this stage
+    /// must prove:
     /// <list type="bullet">
-    ///   <item><b>Equivalence</b> — Dense answers <see cref="IFeature.TryGetProperty"/> and
-    ///     <see cref="IFeature.Properties"/> identically to Dictionary, for every layer, every feature,
-    ///     every declared key, plus one key guaranteed absent.</item>
-    ///   <item><b>Zero allocation</b> — the hot single-key <c>TryGetProperty</c> path allocates nothing on
-    ///     Dense, for both a present and an absent key.</item>
+    ///   <item><b>Equivalence</b> — <see cref="DensePropertyStore.TryGet"/> (the backward tag-pair scan
+    ///     <see cref="IFeature.TryGetProperty"/> hits) agrees with
+    ///     <see cref="MvtLayerPropertyResolver.ResolveToDictionary"/> (the forward walk
+    ///     <see cref="IFeature.Properties"/> resolves through), for every layer, every feature, every
+    ///     declared key, plus one key guaranteed absent. Two independent implementations of the same
+    ///     resolve — not a comparison against a second store.</item>
+    ///   <item><b>Zero allocation</b> — the hot single-key <c>TryGetProperty</c> path allocates nothing,
+    ///     for both a present and an absent key.</item>
     /// </list>
     /// </summary>
     [TestFixture]
@@ -60,66 +63,55 @@ namespace MapRenderer.Tests.Mvt
 
         /// <summary>
         /// The discriminating oracle: for every layer, every feature, every key the layer declares (plus
-        /// one key guaranteed absent from every feature), Dense and Dictionary must agree on both the
-        /// presence bool and the resolved <see cref="Value"/>. A dense implementation with an index-math
-        /// bug (wrong keyIdx/valIdx, wrong pair picked on a duplicate-key feature, off-by-one on the
-        /// backward scan) fails this test; a store that always returns <c>false</c> is caught by the
-        /// per-key presence assertion, not just a value comparison. RED-verified by swapping the
-        /// keyIdx/valIdx read order inside <see cref="DensePropertyStore.TryGet"/>: every presence
-        /// assertion for every real property failed (all reads land on the wrong slot) — restored before
-        /// committing.
+        /// one key guaranteed absent from every feature), <see cref="IFeature.TryGetProperty"/> (backward
+        /// tag-pair scan, <see cref="DensePropertyStore.TryGetByKeyIndex"/>) must agree with
+        /// <see cref="IFeature.Properties"/> (forward walk, <see cref="MvtLayerPropertyResolver.ResolveToDictionary"/>)
+        /// on both the presence bool and the resolved <see cref="Value"/> — two independent
+        /// implementations of the same resolve. An index-math bug in either (wrong keyIdx/valIdx, wrong
+        /// pair picked on a duplicate-key feature, off-by-one) fails this test; a store that always returns
+        /// <c>false</c> is caught by the per-key presence assertion, not just a value comparison.
+        /// RED-verified by swapping the keyIdx/valIdx read order inside
+        /// <see cref="DensePropertyStore.TryGetByKeyIndex"/>: every presence assertion for every real
+        /// property failed (all reads land on the wrong slot) — restored before committing.
         /// </summary>
         [Test]
-        public void Dense_And_Dictionary_TryGetProperty_AgreeForEveryKeyAndEveryFeature_AcrossAllLayers()
+        public void TryGetProperty_AgreesWithResolveToDictionary_ForEveryKeyAndEveryFeature_AcrossAllLayers()
         {
-            byte[] bytes = LoadFixture();
-            MvtTile dictTile = TestDecodedTiles.Track(
-                MvtDecoder.Decode(FixtureTileId, bytes, MvtPropertyStorage.Dictionary));
-            MvtTile denseTile = TestDecodedTiles.Track(
-                MvtDecoder.Decode(FixtureTileId, bytes, MvtPropertyStorage.Dense));
-
-            Assert.That(denseTile.Layers.Count, Is.EqualTo(dictTile.Layers.Count),
-                "precondition: both decodes of the same bytes must produce the same layer count");
+            MvtTile tile = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTileId, LoadFixture()));
 
             int comparisons = 0;
-            for (int li = 0; li < dictTile.Layers.Count; li++)
+            foreach (MvtLayer layer in tile.Layers)
             {
-                MvtLayer dictLayer = dictTile.Layers[li];
-                MvtLayer denseLayer = denseTile.Layers[li];
-                Assert.That(denseLayer.Features.Count, Is.EqualTo(dictLayer.Features.Count),
-                    $"layer '{dictLayer.Name}': both decodes must produce the same feature count");
-
                 // Every key this layer declares, plus one name guaranteed absent from every feature.
-                var namesToCheck = new List<string>(dictLayer.Keys) { "NoSuchKeyXYZ123" };
+                var namesToCheck = new List<string>(layer.Keys) { "NoSuchKeyXYZ123" };
 
-                for (int fi = 0; fi < dictLayer.Features.Count; fi++)
+                for (int fi = 0; fi < layer.Features.Count; fi++)
                 {
-                    IFeature dictFeature = dictLayer.Features[fi];
-                    IFeature denseFeature = denseLayer.Features[fi];
+                    IFeature feature = layer.Features[fi];
+                    // The forward oracle: MvtLayerPropertyResolver.ResolveToDictionary via AsDictionary(),
+                    // independent of the backward TryGet scan under test below.
+                    IReadOnlyDictionary<string, Value> resolved = feature.Properties;
 
                     foreach (string name in namesToCheck)
                     {
-                        bool dictFound = dictFeature.TryGetProperty(name, out Value dictValue);
-                        bool denseFound = denseFeature.TryGetProperty(name, out Value denseValue);
+                        bool resolvedFound = resolved.TryGetValue(name, out Value resolvedValue);
+                        bool tryGetFound = feature.TryGetProperty(name, out Value tryGetValue);
                         comparisons++;
 
-                        Assert.That(denseFound, Is.EqualTo(dictFound),
-                            $"layer '{dictLayer.Name}' feature[{fi}] key '{name}': " +
-                            "TryGetProperty presence must agree between Dense and Dictionary");
-                        if (dictFound)
-                            Assert.That(denseValue, Is.EqualTo(dictValue),
-                                $"layer '{dictLayer.Name}' feature[{fi}] key '{name}': " +
-                                "TryGetProperty value must agree between Dense and Dictionary");
+                        Assert.That(tryGetFound, Is.EqualTo(resolvedFound),
+                            $"layer '{layer.Name}' feature[{fi}] key '{name}': " +
+                            "TryGetProperty presence must agree with ResolveToDictionary");
+                        if (resolvedFound)
+                            Assert.That(tryGetValue, Is.EqualTo(resolvedValue),
+                                $"layer '{layer.Name}' feature[{fi}] key '{name}': " +
+                                "TryGetProperty value must agree with ResolveToDictionary");
                     }
-
-                    Assert.That(denseFeature.Properties.Count, Is.EqualTo(dictFeature.Properties.Count),
-                        $"layer '{dictLayer.Name}' feature[{fi}]: Properties.Count must agree");
                 }
             }
 
             Assert.That(comparisons, Is.GreaterThan(1000),
                 "precondition: the fixture must exercise many (layer, feature, key) combinations — " +
-                "too few and a shallow/broken Dense implementation could pass this test vacuously");
+                "too few and a shallow/broken TryGet implementation could pass this test vacuously");
         }
 
         // ── Zero allocation ─────────────────────────────────────────────────────────────────────
@@ -128,7 +120,7 @@ namespace MapRenderer.Tests.Mvt
         public void TryGetProperty_ExistingKey_OnDenseStore_AllocatesNoGCMemory()
         {
             MvtLayer layer = TestDecodedTiles.Track(
-                MvtDecoder.Decode(FixtureTileId, LoadFixture(), MvtPropertyStorage.Dense)).GetLayer("countries");
+                MvtDecoder.Decode(FixtureTileId, LoadFixture())).GetLayer("countries");
             IFeature feature = layer.Features[0]; // every countries feature has NAME (has NAME == 239)
 
             // Warm the EXACT delegate the constraint invokes (not just the method), so its compiled body is
@@ -147,7 +139,7 @@ namespace MapRenderer.Tests.Mvt
         public void TryGetProperty_MissingKey_OnDenseStore_AllocatesNoGCMemory()
         {
             MvtLayer layer = TestDecodedTiles.Track(
-                MvtDecoder.Decode(FixtureTileId, LoadFixture(), MvtPropertyStorage.Dense)).GetLayer("countries");
+                MvtDecoder.Decode(FixtureTileId, LoadFixture())).GetLayer("countries");
             IFeature feature = layer.Features[0];
 
             TestDelegate act = () => feature.TryGetProperty("NoSuchKeyXYZ123", out Value _);

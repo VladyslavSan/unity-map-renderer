@@ -1,5 +1,6 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// NOT compiled by Tools/core-tests: MvtModels.cs (MvtFeature) is not registered there — the tile-decode
+// seam note in core-tests.csproj lists what MvtDecoder/MvtModels pull in. Do NOT add any UnityEngine,
+// MeshBuilder, NativeArray, or MonoBehaviour references — it still runs headless under Unity EditMode.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -17,13 +18,25 @@ namespace MapRenderer.Tests.Filters
     /// <list type="bullet">
     ///   <item><c>Id</c>: <c>HasId ? Value.Number((double)Id) : Value.Null</c> — the uint64→double
     ///     narrowing (MvtFeatureAdapter.cs:42, now deleted).</item>
-    ///   <item><c>TryGetProperty</c>: the null-guard fallback — a null/absent <c>Properties</c> dictionary
-    ///     or missing key returns <c>false</c> + <c>Value.Null</c>, never throws.</item>
-    ///   <item><c>Properties</c>: the field, or an empty dictionary when the field is null.</item>
+    ///   <item><c>TryGetProperty</c>: the null-guard fallback — an unset <see cref="MvtFeature.Store"/> or
+    ///     a missing key returns <c>false</c> + <c>Value.Null</c>, never throws.</item>
+    ///   <item><c>Properties</c>: an empty dictionary when <see cref="MvtFeature.Store"/> is unset.</item>
     ///   <item><c>GeometryType</c>/<c>HasId</c>: straight pass-through.</item>
     /// </list>
     /// A loose reimpl (e.g. dropping the HasId guard, or a different id narrowing) fails this test —
     /// filter/paint parity depends on this fold being byte-exact.
+    ///
+    /// <para>The three tests over a POPULATED property bag (<c>TryGetProperty_PresentKey</c>,
+    /// <c>TryGetProperty_MissingKey</c>, <c>Properties_NonNullField</c>) build a
+    /// <see cref="DictionaryFeature"/> instead of an <see cref="MvtFeature"/> — <see cref="MvtFeature.Store"/>
+    /// is internal and can only legitimately hold a real <see cref="MapRenderer.Jobs.Mvt.DensePropertyStore"/>
+    /// (a view over decoded <c>NativeArray</c> tag words), which this engine-free-styled file cannot hand-roll.
+    /// They therefore exercise the <see cref="IFeature"/> contract via the double, not
+    /// <see cref="MvtFeature"/>'s own forwarding — the store-forwarding this file used to pin over a
+    /// hand-built dictionary is instead covered, over 1000+ real decoded (layer, feature, key) combinations,
+    /// by <c>DensePropertyStoreTests.TryGetProperty_AgreesWithResolveToDictionary_ForEveryKeyAndEveryFeature_AcrossAllLayers</c>.
+    /// The two null/empty-bag tests below stay on <see cref="MvtFeature"/> itself (no populated bag needed),
+    /// so the null-guard pin they exist for is unaffected.</para>
     /// </summary>
     [TestFixture]
     public class A6AdapterFoldTests
@@ -62,13 +75,10 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void TryGetProperty_PresentKey_ReturnsTrueAndValue()
         {
-            var feature = new MvtFeature
-            {
-                Properties = new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") },
-            };
-            IFeature asFeature = feature;
+            IFeature feature = new DictionaryFeature(
+                new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") });
 
-            bool found = asFeature.TryGetProperty("NAME", out Value value);
+            bool found = feature.TryGetProperty("NAME", out Value value);
 
             Assert.IsTrue(found);
             Assert.AreEqual(Value.String("Aruba"), value);
@@ -77,35 +87,32 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void TryGetProperty_MissingKey_ReturnsFalseAndNull()
         {
-            var feature = new MvtFeature
-            {
-                Properties = new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") },
-            };
-            IFeature asFeature = feature;
+            IFeature feature = new DictionaryFeature(
+                new Dictionary<string, Value> { ["NAME"] = Value.String("Aruba") });
 
-            bool found = asFeature.TryGetProperty("ABBREV", out Value value);
+            bool found = feature.TryGetProperty("ABBREV", out Value value);
 
             Assert.IsFalse(found, "a missing key must return false, not throw.");
             Assert.AreEqual(Value.Null, value);
         }
 
         [Test]
-        public void TryGetProperty_NullPropertiesDictionary_ReturnsFalseAndNull_NeverThrows()
+        public void TryGetProperty_NoStore_ReturnsFalseAndNull_NeverThrows()
         {
-            var feature = new MvtFeature { Properties = null };
+            var feature = new MvtFeature(); // Store left unset
             IFeature asFeature = feature;
 
             bool found = asFeature.TryGetProperty("NAME", out Value value);
 
             Assert.IsFalse(found,
-                "a null Properties dictionary must be guarded, not throw (MvtFeatureAdapter's null-guard).");
+                "an unset Store must be guarded, not throw (MvtFeatureAdapter's null-guard).");
             Assert.AreEqual(Value.Null, value);
         }
 
         [Test]
-        public void Properties_NullField_ExposesEmptyDictionary_NotNull()
+        public void Properties_NoStore_ExposesEmptyDictionary_NotNull()
         {
-            var feature = new MvtFeature { Properties = null };
+            var feature = new MvtFeature(); // Store left unset
             IFeature asFeature = feature;
 
             Assert.IsNotNull(asFeature.Properties,
@@ -116,12 +123,11 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void Properties_NonNullField_ExposesTheSameEntries()
         {
-            var backing = new Dictionary<string, Value> { ["CONTINENT"] = Value.String("Africa") };
-            var feature = new MvtFeature { Properties = backing };
-            IFeature asFeature = feature;
+            IFeature feature = new DictionaryFeature(
+                new Dictionary<string, Value> { ["CONTINENT"] = Value.String("Africa") });
 
-            Assert.AreEqual(1, asFeature.Properties.Count);
-            Assert.AreEqual(Value.String("Africa"), asFeature.Properties["CONTINENT"]);
+            Assert.AreEqual(1, feature.Properties.Count);
+            Assert.AreEqual(Value.String("Africa"), feature.Properties["CONTINENT"]);
         }
 
         [Test]

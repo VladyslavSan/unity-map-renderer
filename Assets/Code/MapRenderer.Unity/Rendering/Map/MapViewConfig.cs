@@ -74,13 +74,6 @@ namespace MapRenderer.Unity.Rendering.Map
                  "favours the near/bottom edge of the frustum instead of the visual centre.")]
         public TilePriorityStrategy PriorityStrategy = TilePriorityStrategy.GroundDistanceToLookAt;
 
-        [Tooltip("D1a: feature-property storage picked at decode time. Dense (default) keeps the wire's " +
-                 "(keyIdx,valIdx) tag pairs instead of expanding each feature into a per-feature " +
-                 "Dictionary<string,Value> — the GC-lean path, proven byte-identical to Dictionary by a " +
-                 "differential test. Dictionary is the legacy eager-dict storage, kept for A/B comparison; " +
-                 "prefer Dense unless diagnosing a storage-specific regression.")]
-        public PropertyStorageMode PropertyStorage = PropertyStorageMode.Dense;
-
         [Tooltip("Rapid-zoom stutter: recompute the full symbol-label placement (project/collide/emit — the " +
             "main-thread SymbolTick that spikes to ~100ms) only every Nth frame; on the held frames between, " +
             "labels stay GPU-billboarded at their world anchors (only reflow / collision / fade update less " +
@@ -146,20 +139,6 @@ namespace MapRenderer.Unity.Rendering.Map
             ByteBudget = 128L * 1024 * 1024,
             MaxCount   = 1024,
         };
-    }
-
-    /// <summary>
-    /// D1a: which feature-property representation a decode builds. Deliberately NOT named after a wire
-    /// format — <see cref="MapViewConfig"/> sits outside the decoder folders
-    /// (<c>NeutralGeometryPathTests.NoProductionTypeOutsideTheDecoderFolders_HasAFormatNamedTypeInAMemberSignature</c>),
-    /// so it cannot name <c>MapRenderer.Jobs.Mvt.MvtPropertyStorage</c> in a member signature. The
-    /// MVT-specific value this selects is resolved at the one wiring site that already knows it is
-    /// building an MVT source — <see cref="MapView.BuildSourceSpecs"/> — never upstream of it.
-    /// </summary>
-    public enum PropertyStorageMode
-    {
-        Dictionary = 0,
-        Dense = 1,
     }
 
     /// <summary>

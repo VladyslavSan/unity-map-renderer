@@ -64,15 +64,26 @@ namespace MapRenderer.Jobs.Tiles
             // 2. The compiled filter for this layer — memoized across calls.
             var filter = FilterFor(layer);
 
-            // 3. Evaluate per feature. A6: the feature IS an IFeature (the neutral carrier implements it
-            // directly), so it passes straight to filter.Matches — no adapter alloc.
-            var result = new List<IFeature>();
-            foreach (var feature in tileLayer.Features)
+            // 3. String→id key hoist: bind the filter's constant-key get/has layout once for this layer,
+            // when the layer is index-capable (Dense MVT) — never per feature.
+            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+            int[] binding = BindKeys(filter, keyResolver);
+            try
             {
-                if (filter.Matches(feature, zoom))
-                    result.Add(feature);
+                // 4. Evaluate per feature. A6: the feature IS an IFeature (the neutral carrier implements it
+                // directly), so it passes straight to filter.Matches — no adapter alloc.
+                var result = new List<IFeature>();
+                foreach (var feature in tileLayer.Features)
+                {
+                    if (filter.Matches(feature, zoom, binding))
+                        result.Add(feature);
+                }
+                return result;
             }
-            return result;
+            finally
+            {
+                ReturnKeys(binding);
+            }
         }
 
         /// <summary>
@@ -93,25 +104,44 @@ namespace MapRenderer.Jobs.Tiles
         /// </summary>
         public static void SelectFeatures(
             StyleLayer layer, ITileLayer tileLayer, double zoom, List<SelectedTileFeature> into)
-            => SelectFeatures(layer, tileLayer?.Features, zoom, into);
+        {
+            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+            SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver);
+        }
 
         /// <summary>The <see cref="List{T}"/> selection over an ALREADY-FETCHED feature list (the caller read
         /// <see cref="ITileLayer.Features"/> once). Clears <paramref name="into"/> first; a null
         /// <paramref name="features"/> leaves it empty. See the <see cref="ITileLayer"/> overload for the
-        /// selection contract.</summary>
+        /// selection contract.
+        ///
+        /// <para>No <see cref="ITileLayer"/> is available here to probe for <see cref="IIndexedFeatureSource"/>
+        /// capability, so this overload always evaluates on the string key-lookup path (no binding) — exactly
+        /// what it did before the string→id key hoist.</para></summary>
         public static void SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into)
+            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null);
+
+        private static void SelectFeaturesInto(
+            StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into,
+            IFeatureKeyResolver keyResolver)
         {
             into.Clear();
             if (features == null) return;
 
             var filter = FilterFor(layer);
-
-            for (int i = 0; i < features.Count; i++)
+            int[] binding = BindKeys(filter, keyResolver);
+            try
             {
-                IFeature feature = features[i];
-                if (filter.Matches(feature, zoom))
-                    into.Add(new SelectedTileFeature { Feature = feature, Ordinal = i });
+                for (int i = 0; i < features.Count; i++)
+                {
+                    IFeature feature = features[i];
+                    if (filter.Matches(feature, zoom, binding))
+                        into.Add(new SelectedTileFeature { Feature = feature, Ordinal = i });
+                }
+            }
+            finally
+            {
+                ReturnKeys(binding);
             }
         }
 
@@ -129,7 +159,10 @@ namespace MapRenderer.Jobs.Tiles
         /// </summary>
         public static int SelectFeatures(
             StyleLayer layer, ITileLayer tileLayer, double zoom, SelectedTileFeature[] into)
-            => SelectFeatures(layer, tileLayer?.Features, zoom, into);
+        {
+            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+            return SelectFeaturesInto(layer, tileLayer?.Features, zoom, into, keyResolver);
+        }
 
         /// <summary>
         /// The scratch-buffer selection over an ALREADY-FETCHED feature list — the caller reads
@@ -138,22 +171,70 @@ namespace MapRenderer.Jobs.Tiles
         /// twice (pinned by <c>RunWorkerPass_ObtainsGeometryWithoutReReadingTheFeatureList</c>). Appends
         /// matches into <paramref name="into"/> at <c>[0, count)</c> and returns the count; does not clear
         /// <paramref name="into"/> (grow-only-buffer contract).
+        ///
+        /// <para>No <see cref="ITileLayer"/> is available here to probe for <see cref="IIndexedFeatureSource"/>
+        /// capability, so this overload always evaluates on the string key-lookup path (no binding) — exactly
+        /// what it did before the string→id key hoist.</para>
         /// </summary>
         public static int SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into)
+            => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null);
+
+        private static int SelectFeaturesInto(
+            StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into,
+            IFeatureKeyResolver keyResolver)
         {
             if (features == null) return 0;
 
             var filter = FilterFor(layer);
-
-            int count = 0;
-            for (int i = 0; i < features.Count; i++)
+            int[] binding = BindKeys(filter, keyResolver);
+            try
             {
-                IFeature feature = features[i];
-                if (filter.Matches(feature, zoom))
-                    into[count++] = new SelectedTileFeature { Feature = feature, Ordinal = i };
+                int count = 0;
+                for (int i = 0; i < features.Count; i++)
+                {
+                    IFeature feature = features[i];
+                    if (filter.Matches(feature, zoom, binding))
+                        into[count++] = new SelectedTileFeature { Feature = feature, Ordinal = i };
+                }
+                return count;
             }
-            return count;
+            finally
+            {
+                ReturnKeys(binding);
+            }
+        }
+
+        // ---- string→id key hoist: the per-layer bind step -----------------------------------------------
+
+        /// <summary>
+        /// Resolves <paramref name="filter"/>'s <see cref="CompiledFilter.KeyLayout"/> against
+        /// <paramref name="keyResolver"/> ONCE for this call — not once per feature — returning a rented
+        /// <c>binding[slot] = keyIndex</c> array (<c>-1</c> for a name the layer's table lacks, mirroring
+        /// <see cref="IFeatureKeyResolver.TryResolveKey"/> returning false) for
+        /// <see cref="CompiledFilter.Matches(IFeature, double, int[])"/> to read per feature. Returns
+        /// <c>null</c> — meaning "every constant-key get/has node falls to the string path" — when the
+        /// filter has no such node, or the feature source advertised no <see cref="IIndexedFeatureSource"/>
+        /// capability. The caller MUST pair a non-null result with <see cref="ReturnKeys"/> in a
+        /// <c>finally</c>.
+        /// </summary>
+        private static int[] BindKeys(CompiledFilter filter, IFeatureKeyResolver keyResolver)
+        {
+            IReadOnlyList<string> layout = filter.KeyLayout;
+            if (layout.Count == 0 || keyResolver == null)
+                return null;
+
+            int[] binding = KeyBindingBuffers.Rent(layout.Count);
+            for (int slot = 0; slot < layout.Count; slot++)
+                binding[slot] = keyResolver.TryResolveKey(layout[slot], out int keyIndex) ? keyIndex : -1;
+            return binding;
+        }
+
+        /// <summary>Returns a <see cref="BindKeys"/> result to its thread-local pool; a <c>null</c> binding
+        /// (the no-capability/no-layout case) is a no-op.</summary>
+        private static void ReturnKeys(int[] binding)
+        {
+            if (binding != null) KeyBindingBuffers.Return(binding);
         }
 
         // ---- compiled-filter memo ---------------------------------------------------------------------

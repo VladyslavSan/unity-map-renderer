@@ -14,9 +14,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
-using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
@@ -88,57 +86,6 @@ namespace MapRenderer.Tests.DataSources
 
             // The caller owns the one reference GetTile handed over; releasing it is what frees the buffers.
             handle.Release();
-        }
-
-        /// <summary>
-        /// D1a: <see cref="MvtTileFeatureSource"/>'s <c>propertyStorage</c> constructor argument must reach
-        /// the decode it runs inside <see cref="MvtTileFeatureSource.GetTile"/> — the wiring seat
-        /// <c>MapView.BuildSourceSpecs</c> threads <c>MapViewConfig.PropertyStorage</c> through in
-        /// production. Discriminating on the concrete <see cref="MvtFeature.Store"/> type (not just on
-        /// equal property VALUES, which Dense and Dictionary already agree on byte-for-byte per
-        /// <c>DensePropertyStoreTests</c>): a source that silently ignored the argument would decode both
-        /// requests through the SAME default and produce the SAME store type twice, failing this.
-        /// </summary>
-        [Test]
-        public async Task GetTile_PropertyStorage_ThreadsThroughToTheDecodedFeatureStore()
-        {
-            byte[] fixtureBytes = System.IO.File.ReadAllBytes(
-                System.IO.Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes"));
-
-            using var denseSource = new MvtTileFeatureSource(
-                TestDataSource.FromBytes(fixtureBytes), propertyStorage: MvtPropertyStorage.Dense);
-            using var dictSource = new MvtTileFeatureSource(
-                TestDataSource.FromBytes(fixtureBytes), propertyStorage: MvtPropertyStorage.Dictionary);
-
-            SharedDisposable<IDecodedTile> denseHandle = await denseSource.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
-            SharedDisposable<IDecodedTile> dictHandle  = await dictSource.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
-
-            var denseLayer = (MvtLayer)denseHandle.Value.GetLayer("countries");
-            var dictLayer  = (MvtLayer)dictHandle.Value.GetLayer("countries");
-            Assert.Greater(denseLayer.Features.Count, 0, "precondition: the fixture's 'countries' layer must have features");
-            Assert.AreEqual(denseLayer.Features.Count, dictLayer.Features.Count);
-
-            var denseFeature = (MvtFeature)denseLayer.Features[0];
-            var dictFeature  = (MvtFeature)dictLayer.Features[0];
-
-            Assert.IsInstanceOf<DensePropertyStore>(denseFeature.Store,
-                "propertyStorage: Dense must decode into a DensePropertyStore-backed feature.");
-            Assert.IsInstanceOf<DictionaryPropertyStore>(dictFeature.Store,
-                "propertyStorage: Dictionary must decode into a DictionaryPropertyStore-backed feature — " +
-                "and, paired with the assertion above, proves the constructor argument actually selects " +
-                "which store GetTile's decode builds, not just which one the default happens to be.");
-
-            denseHandle.Release();
-            dictHandle.Release();
-        }
-
-        /// <summary>D1a: production defaults to the GC-lean storage. Only pins the DEFAULT — see
-        /// <see cref="GetTile_PropertyStorage_ThreadsThroughToTheDecodedFeatureStore"/> for the proof that
-        /// the value, once set, actually reaches the decode.</summary>
-        [Test]
-        public void MapViewConfig_PropertyStorage_DefaultsToDense()
-        {
-            Assert.AreEqual(PropertyStorageMode.Dense, new MapViewConfig().PropertyStorage);
         }
 
         [Test]

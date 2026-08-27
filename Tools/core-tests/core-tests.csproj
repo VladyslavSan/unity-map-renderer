@@ -160,6 +160,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Value.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Coercions.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IFeature.cs" />
+    <!-- String→id key hoist: capability interfaces + the constant-key get/has fast node (Core, engine-free). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IIndexedFeature.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IFeatureKeyResolver.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IIndexedFeatureSource.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/ITileCommandStreamFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/DictionaryFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/InMemoryTileFeature.cs" />
@@ -179,6 +183,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/ColorCtors.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/FeatureData.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/ContextOps.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/FeatureKeyExpression.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Strings.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
@@ -233,6 +238,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
+    <!-- T1a (string→id key hoist): the int-vs-string path structural proof, engine-free. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionTests.cs" />
+    <!-- T3 (string→id key hoist): GeoJSON / non-index-capable features stay on the string path, engine-free. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionCapabilityTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ZoomTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/StringTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/LetVarTests.cs" />

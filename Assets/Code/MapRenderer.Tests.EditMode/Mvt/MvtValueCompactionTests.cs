@@ -1,20 +1,20 @@
-// Unity EditMode only. T3's zero-alloc meter is UnityEngine.TestTools' Is.Not.AllocatingGCMemory() (the
-// Recorder-based meter — GC.GetAllocatedBytesForCurrentThread() is DEAD in this runner, see
-// DensePropertyStoreTests). T2's size probe uses GC.GetTotalMemory with the same calibration-canary
-// technique as DecodeGeometryFlattenAllocTests, since Marshal.SizeOf/UnsafeUtility.SizeOf are illegal on a
-// struct holding a managed string reference. NOT registered in core-tests.csproj (MvtValue/MvtModels are
-// not compiled there — see core-tests.csproj's tile-decode seam).
+// Unity EditMode only. NOT registered in core-tests.csproj (MvtValueNative/MvtModels are not compiled there —
+// see core-tests.csproj's tile-decode seam). Reaches internal MvtLayer.AdoptValues via InternalsVisibleTo
+// ("MapRenderer.Tests.EditMode" from MapRenderer.Jobs).
 //
-// Stage C (value-table reduction): MvtLayer.Values shrank from List<Value> (72 B/entry) to
-// List<MvtValue> (24 B/entry) — a narrower type carrying only the MVT wire value space (string/number/
-// bool/null), reconstituted to the shared expression Value at the read boundary via MvtValue.ToValue().
-// See docs/valuetable-plan.md (devloop) for the design; Value.cs/Color.cs are untouched (fence).
+// This stage (value table -> blittable native): MvtLayer.Values shrank from a GC-heap List<MvtValue> (24 B/
+// entry, one managed string field) to a blittable NativeArray<MvtValueNative> (16 B/entry, no managed field)
+// plus a per-layer managed string[] side table (MvtValueNative.StringId indexes it). See
+// native-mvt-storage-stage2-valuetable-plan.md (devloop) for the design; Value.cs/Color.cs are untouched
+// (fence).
 
 using System;
 using System.Linq;
 using System.Reflection;
 using System.Collections.Generic;
 using NUnit.Framework;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Expressions;
@@ -25,156 +25,155 @@ namespace MapRenderer.Tests.Mvt
     [TestFixture]
     public class MvtValueCompactionTests
     {
-        // ── T1 — field shape (structural) ──────────────────────────────────────────────────────
+        // ── T1 — blittability (structural) ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// <see cref="MvtValue"/> must carry no <see cref="Color"/> field (the whole point of giving the
-        /// value table its own type instead of reusing <see cref="Value"/>), and its instance field set
-        /// must be exactly the compact layout: the <see cref="ValueType"/> tag, a <c>double</c> and a
-        /// <c>string</c>. Also pins that <see cref="MvtLayer.Values"/> now holds <see cref="MvtValue"/>,
-        /// not <see cref="Value"/> — the actual shrink this stage delivers.
+        /// <see cref="MvtValueNative"/> must carry NO managed field (the whole point of the native table:
+        /// it lives in a <c>NativeArray</c>, off the GC heap) and must be blittable per
+        /// <see cref="UnsafeUtility"/>. Also pins that <see cref="MvtLayer.Values"/>'s element type is
+        /// <see cref="MvtValueNative"/> — the actual shape this stage delivers.
         /// </summary>
         /// <remarks>
-        /// RED-verify (two independent injections, both restored before commit):
-        /// 1. Add a <c>Color</c> field to <see cref="MvtValue"/> — the "no Color field" assertion fails
-        ///    (and T2's size ratio also reds, since a Color field bloats the struct — expected collateral).
-        /// 2. Revert <see cref="MvtLayer.Values"/>'s declared type to <c>List&lt;Value&gt;</c>: the element
-        ///    type is coupled across DecodeValue / the resolver / both stores (and this fixture's own T3
-        ///    setup passes a <c>List&lt;MvtValue&gt;</c> into the resolver ctor), so a faithful revert
-        ///    cascades to a COMPILE ERROR rather than a runtime element-type assertion failure — a stronger
-        ///    signal, but not the runtime failure literally named. The element-type assertion is therefore
-        ///    belt-and-suspenders over the compile-time coupling; T1's live teeth are the no-Color and
-        ///    exact-field-set checks (injection 1).
+        /// RED-verify: add a <c>string</c> field to <see cref="MvtValueNative"/> — both the no-managed-field
+        /// assertion and the blittability assertion fail. Restored before commit.
         /// </remarks>
         [Test]
-        public void MvtValue_HasCompactFieldShape_AndBacksTheLayerValueTable()
+        public void MvtValueNative_HasNoManagedField_IsBlittable_AndBacksTheLayerValueTable()
         {
-            FieldInfo[] instanceFields = typeof(MvtValue).GetFields(
+            FieldInfo[] instanceFields = typeof(MvtValueNative).GetFields(
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
-            Assert.That(instanceFields.Any(f => f.FieldType == typeof(Color)), Is.False,
-                "MvtValue must carry no Color field — that's the reason it exists instead of reusing Value.");
+            Assert.That(instanceFields.Any(f => !f.FieldType.IsValueType), Is.False,
+                "MvtValueNative must carry no managed (reference-type) field — that's what makes it fit in " +
+                "a NativeArray at all.");
 
-            Type[] actualFieldTypes = instanceFields.Select(f => f.FieldType)
-                .OrderBy(t => t.FullName, StringComparer.Ordinal).ToArray();
-            Type[] expectedFieldTypes = new[] { typeof(MapRenderer.Core.Expressions.ValueType), typeof(double), typeof(string) }
-                .OrderBy(t => t.FullName, StringComparer.Ordinal).ToArray();
-            CollectionAssert.AreEqual(expectedFieldTypes, actualFieldTypes,
-                "MvtValue's instance fields must be exactly {ValueType, double, string} — no more, no less.");
+            Assert.That(UnsafeUtility.IsBlittable<MvtValueNative>(), Is.True,
+                "MvtValueNative must be blittable — required to live in a NativeArray<MvtValueNative>.");
 
-            FieldInfo valuesField = typeof(MvtLayer).GetField(nameof(MvtLayer.Values));
-            Assert.That(valuesField, Is.Not.Null, "precondition: MvtLayer.Values must exist");
-            Type elementType = valuesField.FieldType.GetGenericArguments()[0];
-            Assert.That(elementType, Is.EqualTo(typeof(MvtValue)),
-                "MvtLayer.Values must be a List<MvtValue>, not List<Value> — the field this stage shrinks.");
+            PropertyInfo valuesProperty = typeof(MvtLayer).GetProperty(nameof(MvtLayer.Values));
+            Assert.That(valuesProperty, Is.Not.Null, "precondition: MvtLayer.Values must exist");
+            Assert.That(valuesProperty.PropertyType, Is.EqualTo(typeof(NativeArray<MvtValueNative>)),
+                "MvtLayer.Values must be a NativeArray<MvtValueNative> — the field this stage nativizes.");
         }
 
-        // ── T2 — size probe (magnitude) ────────────────────────────────────────────────────────
-
-        // GC.GetTotalMemory's own noise floor (brief: only trustworthy at >= ~100 KB/op) — the calibration
-        // canary must clear this by a wide margin to prove the meter is alive in this run.
-        private const long CalibrationFloor = 100_000;
-
-        /// <summary>Proves GC.GetTotalMemory is a LIVE meter in this run before the size probe below
-        /// trusts it — the same calibration technique as DecodeGeometryFlattenAllocTests.</summary>
-        [Test]
-        public void Calibration_GetTotalMemory_ReadsALiveAllocation()
-        {
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            long before = GC.GetTotalMemory(false);
-            byte[] block = new byte[8 << 20];
-            block[0] = 1; // defeat dead-store elimination
-            long after = GC.GetTotalMemory(false);
-
-            Assert.Greater(after - before, CalibrationFloor,
-                "GC.GetTotalMemory must read a live 8 MiB allocation well clear of its own noise floor, or " +
-                "the meter is dead in this run and the probe below cannot be trusted.");
-            GC.KeepAlive(block);
-        }
+        // ── T2 — size (magnitude) ───────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// MvtValue (24 B) vs Value (72 B), measured as array-allocation bytes rather than
-        /// Marshal.SizeOf/UnsafeUtility.SizeOf — both are illegal on a struct holding a managed <c>string</c>
-        /// reference. At 200,000 elements the two arrays land at ≈4.8 MB and ≈14.4 MB respectively, both
-        /// clear of GC.GetTotalMemory's ~100 KB noise floor by orders of magnitude, so the ~9.6 MB delta is
-        /// a robust discriminator.
+        /// <see cref="MvtValueNative"/> must hold its designed 16 B packing (double 8 + <c>ValueType</c> 4 +
+        /// int 4, no padding — the deliberate double-first field order the struct documents). This pins the
+        /// actual win, not merely "no worse than the 24 B managed <c>MvtValue</c> it replaces". Legal now
+        /// that the struct is blittable (<c>UnsafeUtility.SizeOf</c>/<c>Marshal.SizeOf</c> throw on a struct
+        /// holding a managed reference, which is why the type this replaces needed a GC-probe instead).
         /// </summary>
-        /// <remarks>RED-verify: bloat MvtValue with filler fields matching Value's layout (bool + Color +
-        /// two reference fields) so its measured size regresses toward Value's — the ratio assertion fails.
-        /// Restored before commit.</remarks>
+        /// <remarks>RED-verify: EITHER add a filler field OR reorder the fields enum-first
+        /// (<c>{ValueType, double, int}</c>) — both land the struct at 24 B (a 4 B pad after the lone leading
+        /// int-sized field, then the double's 8-byte alignment) and fail the ≤ 16 assertion. The enum-first
+        /// case is the one a looser ≤ 24 ceiling would silently pass; this is the tooth that observes the
+        /// field-order the struct's own comment calls deliberate. Restored before commit.</remarks>
         [Test]
-        public void MvtValueArray_IsUnderHalfTheSizeOf_ValueArray()
+        public void MvtValueNative_HoldsItsDesigned16BytePacking()
         {
-            const int count = 200_000;
+            int size = UnsafeUtility.SizeOf<MvtValueNative>();
+            TestContext.WriteLine($"MEASURE sizeof(MvtValueNative)={size} B");
 
-            long mvtValueBytes = MeasureArrayAllocationBytes(() => new MvtValue[count]);
-            long valueBytes = MeasureArrayAllocationBytes(() => new Value[count]);
-
-            TestContext.WriteLine($"MEASURE MvtValue[{count}]={mvtValueBytes} B, Value[{count}]={valueBytes} B");
-
-            Assert.That(mvtValueBytes, Is.LessThan(valueBytes * 0.5),
-                $"MvtValue[{count}] ({mvtValueBytes} B) must be under half the size of Value[{count}] " +
-                $"({valueBytes} B) — the 72→24 B/entry shrink this stage delivers.");
+            Assert.That(size, Is.LessThanOrEqualTo(16),
+                $"MvtValueNative is {size} B — must hold its designed 16 B packing; an enum-first reorder or " +
+                "any added field regresses it to 24 B (see the field-order comment in MvtValueNative).");
         }
 
-        private static long MeasureArrayAllocationBytes(Func<Array> allocate)
-        {
-            // Warm-up: JIT the delegate before the measured allocation.
-            for (int w = 0; w < 3; w++) GC.KeepAlive(allocate());
-
-            GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-            int collectionsBefore = GC.CollectionCount(0);
-            long before = GC.GetTotalMemory(false);
-
-            Array array = allocate();
-
-            long after = GC.GetTotalMemory(false);
-            int collectionsAfter = GC.CollectionCount(0);
-            GC.KeepAlive(array);
-
-            Assert.AreEqual(collectionsBefore, collectionsAfter,
-                "a Gen0 collection fired inside the measurement window — the byte delta is unreliable here; " +
-                "this indicates a flaky run, not a probe result.");
-
-            return after - before;
-        }
-
-        // ── T3 — DensePropertyStore.TryGet stays zero-alloc through ToValue() ─────────────────────
+        // ── T3 — DensePropertyStore.TryGet stays zero-alloc through ToValue(string[]) ─────────────
 
         /// <summary>
         /// Guards the exact code this stage adds: <see cref="DensePropertyStore.TryGet"/> now calls
-        /// <see cref="MvtValue.ToValue"/> on every hit, and that reconstitution must stay alloc-free for
-        /// every variant the wire produces (string, number, bool). Builds the resolver/store directly
-        /// (internal types, visible to this assembly) rather than through the decoder, so all three
-        /// variants are covered in one feature without a protobuf-encoding round-trip.
+        /// <see cref="MvtValueNative.ToValue"/> on every hit, and that reconstitution must stay alloc-free
+        /// for every variant the wire produces (string, number, bool). Builds the resolver/store directly
+        /// (internal types, visible to this assembly) rather than through the decoder, so all three variants
+        /// are covered in one feature without a protobuf-encoding round-trip.
         /// </summary>
         /// <remarks>RED-verify: inject a boxing conversion into DensePropertyStore.TryGet before the
-        /// <c>ToValue()</c> call — but it must ESCAPE, or the JIT dead-store-eliminates it and the box never
-        /// happens (an unused <c>object _ = values[valIdx];</c> silently no-ops and the tooth stays GREEN — a
-        /// false pass). Force it live: <c>object _box = values[valIdx]; GC.KeepAlive(_box);</c>. Only then
-        /// does the constraint fail — and it fails T3 alone (3/4), confirming isolation. Restored before
+        /// <c>ToValue(...)</c> call — but it must ESCAPE, or the JIT dead-store-eliminates it and the box
+        /// never happens (an unused <c>object _ = values[valIdx];</c> silently no-ops and the tooth stays
+        /// GREEN — a false pass). Force it live: <c>object _box = values[valIdx]; GC.KeepAlive(_box);</c>.
+        /// Only then does the constraint fail — and it fails T3 alone, confirming isolation. Restored before
         /// commit.</remarks>
         [Test]
         public void DensePropertyStore_TryGet_ThroughToValue_AllocatesNoGCMemory_ForStringNumberAndBool()
         {
             var keys = new List<string> { "s", "n", "b" };
-            var values = new List<MvtValue> { MvtValue.String("hello"), MvtValue.Number(42.0), MvtValue.Bool(true) };
+            var valueStrings = new[] { "hello" };
+            var values = new NativeArray<MvtValueNative>(
+                new[] { MvtValueNative.String(0), MvtValueNative.Number(42.0), MvtValueNative.Bool(true) },
+                Allocator.Persistent);
             var keyIndex = new Dictionary<string, int> { ["s"] = 0, ["n"] = 1, ["b"] = 2 };
-            var resolver = new MvtLayerPropertyResolver(keys, values, keyIndex);
-            var rawTags = new uint[] { 0, 0, 1, 1, 2, 2 }; // pairs (keyIdx, valIdx), one per key
-            var store = new DensePropertyStore(rawTags, resolver);
-
-            TestDelegate act = () =>
+            var tagWords = new NativeArray<uint>(
+                new uint[] { 0, 0, 1, 1, 2, 2 }, Allocator.Persistent); // pairs (keyIdx, valIdx), one per key
+            try
             {
-                store.TryGet("s", out Value _);
-                store.TryGet("n", out Value _);
-                store.TryGet("b", out Value _);
-            };
-            for (int w = 0; w < 50; w++) act(); // warm the exact measured delegate (JIT its body)
+                var resolver = new MvtLayerPropertyResolver(keys, values, valueStrings, keyIndex, tagWords);
+                var store = new DensePropertyStore(resolver, 0, 6);
 
-            Assert.That(act, Is.Not.AllocatingGCMemory(),
-                "DensePropertyStore.TryGet must not allocate when reconstituting MvtValue.ToValue() for " +
-                "string, number or bool — all three are struct-field copies.");
+                TestDelegate act = () =>
+                {
+                    store.TryGet("s", out Value _);
+                    store.TryGet("n", out Value _);
+                    store.TryGet("b", out Value _);
+                };
+                for (int w = 0; w < 50; w++) act(); // warm the exact measured delegate (JIT its body)
+
+                Assert.That(act, Is.Not.AllocatingGCMemory(),
+                    "DensePropertyStore.TryGet must not allocate when reconstituting MvtValueNative.ToValue() " +
+                    "for string, number or bool — all three are struct-field copies plus a string-table index.");
+            }
+            finally
+            {
+                values.Dispose();
+                tagWords.Dispose();
+            }
+        }
+
+        // ── NEW — value-array read-after-dispose (white-box UAF) ──────────────────────────────────
+
+        /// <summary>
+        /// Isolates the *values* array's own disposed-collections-safety check: a resolver built with a
+        /// LIVE <c>tagWords</c> array but a SEPARATELY-disposed <c>Values</c> array. <c>TryGetByKeyIndex</c>
+        /// resolves <c>valIdx</c> from the live <c>tagWords</c>, then indexing the disposed <c>values</c>
+        /// array must throw. The tile-level read-after-dispose tooth
+        /// (<c>NativeTagStorageTests.ReadingProperty_AfterTileDisposed_FailsLoud</c>) cannot observe this: it
+        /// disposes the whole layer, and <c>tagWords</c> (read first, inside <c>TryGetByKeyIndex</c>) throws
+        /// before <c>values</c> is ever touched — shadowing the values-array check. This tooth constructs the
+        /// resolver by hand so it can dispose ONLY <c>values</c>, isolating the check the shadow hides.
+        /// </summary>
+        /// <remarks>RED-verify: point the resolver at a still-live (undisposed) values array — the
+        /// <c>Throws</c> assertion reds (no exception; a value is returned instead). Restored before
+        /// commit.</remarks>
+        [Test]
+        public void TryGetByKeyIndex_AfterValuesArrayDisposed_FailsLoud()
+        {
+            var keys = new List<string> { "s" };
+            var valueStrings = new[] { "hello" };
+            var values = new NativeArray<MvtValueNative>(new[] { MvtValueNative.String(0) }, Allocator.Persistent);
+            var keyIndex = new Dictionary<string, int> { ["s"] = 0 };
+            var tagWords = new NativeArray<uint>(new uint[] { 0, 0 }, Allocator.Persistent);
+            try
+            {
+                var resolver = new MvtLayerPropertyResolver(keys, values, valueStrings, keyIndex, tagWords);
+                var store = new DensePropertyStore(resolver, 0, 2);
+
+                // Anti-vacuity: prove the read succeeds WHILE values is alive.
+                bool foundWhileAlive = store.TryGetByKeyIndex(0, out Value _);
+                Assert.That(foundWhileAlive, Is.True, "precondition: the read must succeed before disposal");
+
+                values.Dispose(); // dispose ONLY the values array — tagWords stays live
+
+                Assert.Throws<ObjectDisposedException>(() => store.TryGetByKeyIndex(0, out Value _),
+                    "reading a value after the Values array is disposed must throw ObjectDisposedException — " +
+                    "a disposed NativeArray read under collections safety checks, isolated from tagWords.");
+            }
+            finally
+            {
+                if (values.IsCreated) values.Dispose();
+                tagWords.Dispose();
+            }
         }
     }
 }

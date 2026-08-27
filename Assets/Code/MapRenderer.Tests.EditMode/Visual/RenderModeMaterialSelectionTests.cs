@@ -1,5 +1,4 @@
-// Unity EditMode only — uses MonoBehaviour + per-layer material inspection (mirrors MapViewStyledFillTests
-// and the BuildSourceSpecs-driving pattern in ProductionPropertyStorageDefaultTests).
+// Unity EditMode only — uses MonoBehaviour + per-layer material inspection (mirrors MapViewStyledFillTests).
 //
 // S4 (unlit epic) acceptance: render mode is a property of the MapMaterialSet the config references (the
 // reshape of D1 = Option B — a Lit set puts the view in lit, an Unlit set in unlit; there is no separate
@@ -114,9 +113,9 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>Blocking, main-thread-only wait for a <see cref="UniTask"/> (mirrors
-        /// <c>ProductionPropertyStorageDefaultTests.Await</c>/<c>GeoJsonSourceTests.SpinToCompleted</c>) —
-        /// parks the calling thread rather than yielding the continuation to whatever thread completes the
-        /// task, so every line after this still runs on the main thread (DestroyImmediate requires it).</summary>
+        /// <c>GeoJsonSourceTests.SpinToCompleted</c>) — parks the calling thread rather than yielding the
+        /// continuation to whatever thread completes the task, so every line after this still runs on the
+        /// main thread (DestroyImmediate requires it).</summary>
         private static void Await(UniTask task, int timeoutMs = 20000)
         {
             var t = task.Preserve();

@@ -32,12 +32,31 @@ namespace MapRenderer.Core.Expressions
             }
         }
 
+        // The string→id key hoist's key layout: one entry per constant-key get/has node routed to
+        // FeatureKeyExpression, in parse order — that node's `slot` is its index here. A caller that wants
+        // the layout uses the Parse(JsonValue, out) overload; the plain Parse overloads discard it, so
+        // their nodes still carry slots but no binding is ever supplied for them (always the string path).
+        private readonly List<string> _keyLayout = new List<string>();
+
         /// <summary>Parse from a JSON string (a single expression).</summary>
         public static Expression Parse(string json) => Parse(JsonParser.Parse(json));
 
         /// <summary>Parse a JSON DOM node as an expression.</summary>
-        public static Expression Parse(JsonValue json)
-            => new ExpressionParser().ParseNode(json, new Scope(null), zoomAllowed: false);
+        public static Expression Parse(JsonValue json) => Parse(json, out _);
+
+        /// <summary>
+        /// Parse a JSON DOM node as an expression, also yielding its constant-key <c>get</c>/<c>has</c>
+        /// layout (<paramref name="keyLayout"/>) — the ordered key names a per-layer bind site (e.g.
+        /// <c>FeatureSelector</c>) resolves once into an <see cref="EvaluationContext.KeyBinding"/> array.
+        /// Empty when the expression has no constant-key <c>get</c>/<c>has</c> node.
+        /// </summary>
+        public static Expression Parse(JsonValue json, out IReadOnlyList<string> keyLayout)
+        {
+            var parser = new ExpressionParser();
+            var expr = parser.ParseNode(json, new Scope(null), zoomAllowed: false);
+            keyLayout = parser._keyLayout;
+            return expr;
+        }
 
         // --------------------------------------------------------------------------------------------
 
@@ -234,7 +253,18 @@ namespace MapRenderer.Core.Expressions
         {
             if (args.Count == 1)
             {
-                // get(key) -> feature property
+                // Constant-key fast form: get("name") -> hoistable, EvaluationContext.KeyBinding-aware.
+                // Gated on a BARE JSON string, not "folds to a constant" — a dynamic key like ["get",5] or
+                // ["get",["get","x"]] stays on the closure below verbatim (same error/ordering behaviour).
+                if (args[0].Kind == JsonKind.String)
+                {
+                    string name = args[0].AsString();
+                    int slot = _keyLayout.Count;
+                    _keyLayout.Add(name);
+                    return new FeatureKeyExpression(name, slot, isHas: false);
+                }
+
+                // get(key) -> feature property (dynamic key form)
                 var key = ParseNode(args[0], scope, zoomAllowed: false);
                 return new FeatureDataExpression((in EvaluationContext ctx) =>
                 {
@@ -262,6 +292,15 @@ namespace MapRenderer.Core.Expressions
         {
             if (args.Count == 1)
             {
+                // Constant-key fast form — see ParseGet's matching comment.
+                if (args[0].Kind == JsonKind.String)
+                {
+                    string name = args[0].AsString();
+                    int slot = _keyLayout.Count;
+                    _keyLayout.Add(name);
+                    return new FeatureKeyExpression(name, slot, isHas: true);
+                }
+
                 var key = ParseNode(args[0], scope, zoomAllowed: false);
                 return new FeatureDataExpression((in EvaluationContext ctx) =>
                 {

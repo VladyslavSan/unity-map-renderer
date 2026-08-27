@@ -1,28 +1,40 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
     /// <see cref="IMvtPropertyStore"/> that keeps MVT's dense representation instead of expanding it: a
-    /// feature's raw (keyIdx,valIdx) tag pairs, retained instead of discarded after decode, resolved
-    /// against the layer's shared <see cref="MvtLayerPropertyResolver"/> only on demand.
-    /// <see cref="TryGet"/> — the hot single-key path — allocates nothing: it maps the queried name to a
-    /// key index via the layer's shared map, then scans this feature's own (typically few) tag pairs.
+    /// VIEW — <c>(offset, count)</c> — into the owning layer's shared tag-word buffer
+    /// (<see cref="MvtLayerPropertyResolver.TagWords"/>), resolved against the layer's shared
+    /// <see cref="MvtLayerPropertyResolver"/> only on demand. <see cref="TryGet"/> — the hot single-key
+    /// path — allocates nothing: it maps the queried name to a key index via the layer's shared map, then
+    /// scans its (typically few) tag pairs within that view.
     /// <see cref="AsDictionary"/> is the cold path (the rare <c>properties</c> expression / test code),
     /// materializing a fresh dictionary on every call.
+    ///
+    /// <para><b>Lifetime.</b> Because this is a view rather than an owner, a store's (and therefore its
+    /// <see cref="MvtFeature"/>'s) readable lifetime is bounded by its owning <see cref="MvtLayer"/>'s: once
+    /// <see cref="MvtLayer.Dispose"/> frees <see cref="MvtLayer.FeatureTagWords"/>, reading through this
+    /// store is a use-after-free on the underlying native buffer, not merely a double-free risk. No store,
+    /// feature or resolver may be read once its owning layer has been disposed.</para>
     /// </summary>
     internal sealed class DensePropertyStore : IMvtPropertyStore
     {
-        private readonly uint[] _rawTags;
         private readonly MvtLayerPropertyResolver _resolver;
+        private readonly int _tagOffset;
+        private readonly int _tagCount;
 
-        /// <param name="rawTags">This feature's (keyIdx,valIdx) pairs, as decoded.</param>
-        /// <param name="resolver">The owning layer's shared Keys/Values/key-index tables.</param>
-        public DensePropertyStore(uint[] rawTags, MvtLayerPropertyResolver resolver)
+        /// <param name="resolver">The owning layer's shared Keys/Values/key-index/tag-words tables.</param>
+        /// <param name="tagOffset">Start index of this feature's (keyIdx,valIdx) pairs into
+        /// <see cref="MvtLayerPropertyResolver.TagWords"/>.</param>
+        /// <param name="tagCount">Word count of this feature's slice (not pair count).</param>
+        public DensePropertyStore(MvtLayerPropertyResolver resolver, int tagOffset, int tagCount)
         {
-            _rawTags = rawTags ?? System.Array.Empty<uint>();
             _resolver = resolver;
+            _tagOffset = tagOffset;
+            _tagCount = tagCount;
         }
 
         /// <summary>
@@ -36,23 +48,37 @@ namespace MapRenderer.Jobs.Mvt
         public bool TryGet(string name, out Value value)
         {
             if (_resolver.TryGetKeyIndex(name, out int keyIdx))
+                return TryGetByKeyIndex(keyIdx, out value);
+            value = Value.Null;
+            return false;
+        }
+
+        /// <summary>
+        /// The int-keyed twin of <see cref="TryGet"/>, extracted so a caller that already resolved
+        /// <paramref name="keyIndex"/> (the string→id key hoist — the filter-selection bind step in
+        /// <c>FeatureSelector</c>) skips the name→index <see cref="MvtLayerPropertyResolver.TryGetKeyIndex"/>
+        /// lookup. Holds the same backward tag-pair scan as <see cref="TryGet"/> verbatim — one copy of the
+        /// scan, so both callers, and the differential oracle covering <see cref="TryGet"/>, exercise
+        /// identical logic.
+        /// </summary>
+        public bool TryGetByKeyIndex(int keyIndex, out Value value)
+        {
+            NativeArray<MvtValueNative> values = _resolver.Values;
+            var words = _resolver.TagWords;
+            int pairCount = _tagCount / 2;
+            for (int i = pairCount - 1; i >= 0; i--)
             {
-                List<MvtValue> values = _resolver.Values;
-                int pairCount = _rawTags.Length / 2;
-                for (int i = pairCount - 1; i >= 0; i--)
-                {
-                    if ((int)_rawTags[i * 2] != keyIdx) continue;
-                    int valIdx = (int)_rawTags[i * 2 + 1];
-                    if (valIdx < 0 || valIdx >= values.Count) continue;
-                    value = values[valIdx].ToValue();
-                    return true;
-                }
+                if ((int)words[_tagOffset + i * 2] != keyIndex) continue;
+                int valIdx = (int)words[_tagOffset + i * 2 + 1];
+                if (valIdx < 0 || valIdx >= values.Length) continue;
+                value = values[valIdx].ToValue(_resolver.ValueStrings);
+                return true;
             }
             value = Value.Null;
             return false;
         }
 
-        public IReadOnlyDictionary<string, Value> AsDictionary() => _resolver.ResolveToDictionary(_rawTags);
+        public IReadOnlyDictionary<string, Value> AsDictionary() => _resolver.ResolveToDictionary(_tagOffset, _tagCount);
 
         public int Count => AsDictionary().Count;
     }

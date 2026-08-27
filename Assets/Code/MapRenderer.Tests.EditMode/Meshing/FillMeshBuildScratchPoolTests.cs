@@ -1,7 +1,7 @@
 // Unity EditMode only. The zero-allocation tooth uses a thread-local GC.GetAllocatedBytesForCurrentThread()
 // delta over many calls (precise, cannot miss an allocation the call makes on this thread) rather than
-// UnityEngine.TestTools' Is.Not.AllocatingGCMemory() — see DensePropertyStoreTests/MvtPropertyStorage for the
-// same rationale in this repo. NOT registered in core-tests.csproj (UnityEngine.Mesh is not compiled there).
+// UnityEngine.TestTools' Is.Not.AllocatingGCMemory() — see DensePropertyStoreTests for the same rationale in
+// this repo. NOT registered in core-tests.csproj (UnityEngine.Mesh is not compiled there).
 //
 // perf/gc-elimination: StyledFillTileBuilder.WriteMeshData also runs FillMeshPipeline.Schedule, which itself
 // allocates several managed arrays per call (`new NativeArray<T>[polyCount]` ×12, `new int[holeCount]`, an
