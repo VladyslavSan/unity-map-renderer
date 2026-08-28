@@ -7,12 +7,12 @@ namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
     /// The native filter VM's per-feature managed entry point: reads a feature's tag slice, runs
-    /// <see cref="NativeFilterEvalJob"/> synchronously, and reports the result — the seam the parity
+    /// <see cref="NativeFilterEvaluationJob"/> synchronously, and reports the result — the seam the parity
     /// oracle and the zero-allocation tooth exercise. Reuses its length-1 result buffers across calls
     /// (construct once per scope, <see cref="Dispose"/> when done), so a warm per-feature loop adds no
     /// per-call native allocation.
     ///
-    /// <para>Declared beside <see cref="NativeFilterEvalJob"/> in the decoder folder rather than with the
+    /// <para>Declared beside <see cref="NativeFilterEvaluationJob"/> in the decoder folder rather than with the
     /// rest of the VM in <c>MapRenderer.Jobs.Expressions</c>, because <see cref="Evaluate"/> names
     /// <see cref="MvtLayer"/> and <see cref="MvtFeature"/> — see that type's doc for why.</para>
     /// </summary>
@@ -43,9 +43,9 @@ namespace MapRenderer.Jobs.Mvt
             INativeFilterColumns columns = layer.DenseKeyResolver;
             columns.TryGetFeatureSlice(featureIndex, out int offset, out int count);
 
-            var job = new NativeFilterEvalJob
+            var job = new NativeFilterEvaluationJob
             {
-                Program = program.Ops,
+                Program = program.Operations,
                 Binding = binding,
                 TagWords = columns.TagWords,
                 Values = columns.Values,

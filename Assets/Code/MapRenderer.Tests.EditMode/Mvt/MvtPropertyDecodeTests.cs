@@ -124,9 +124,8 @@ namespace MapRenderer.Tests.Mvt
             Assert.IsTrue(arubaFeature.Properties.TryGetValue("ADM0_A3", out var adm0));
             Assert.That(adm0.AsString(), Is.EqualTo("ABW"));
 
-            // HasId and Id (field-1 id, distinct from the 'fid' property)
-            Assert.IsTrue(arubaFeature.HasId, "Aruba feature must have HasId=true");
-            Assert.That(arubaFeature.Id, Is.EqualTo(182UL), "Aruba feature id (field-1) must be 182");
+            // Id (field-1 id, distinct from the 'fid' property)
+            Assert.That(arubaFeature.Id, Is.EqualTo(Value.Number(182)), "Aruba feature id (field-1) must be 182");
         }
 
         [Test]
@@ -141,8 +140,7 @@ namespace MapRenderer.Tests.Mvt
                     nameVal.AsString() == "Afghanistan")
                 {
                     count++;
-                    Assert.IsTrue(f.HasId, "Afghanistan must have HasId=true");
-                    Assert.That(f.Id, Is.EqualTo(129UL), "Afghanistan feature id (field-1) must be 129");
+                    Assert.That(f.Id, Is.EqualTo(Value.Number(129)), "Afghanistan feature id (field-1) must be 129");
                 }
             }
             Assert.That(count, Is.EqualTo(1), "Exactly 1 feature named 'Afghanistan'");
@@ -177,10 +175,10 @@ namespace MapRenderer.Tests.Mvt
         public void AllFeatures_HaveId_AndDistinctIds()
         {
             var layer = LoadCountries();
-            var idSet = new HashSet<ulong>();
+            var idSet = new HashSet<Value>();
             foreach (var f in layer.Features)
             {
-                Assert.IsTrue(f.HasId, "Every countries feature must have HasId=true");
+                Assert.That(f.Id.IsNull, Is.False, "Every countries feature must have an id");
                 idSet.Add(f.Id);
             }
             Assert.That(idSet.Count, Is.EqualTo(239), "All 239 feature ids are distinct");
@@ -449,7 +447,7 @@ namespace MapRenderer.Tests.Mvt
         // ── Feature id = 0 is valid (not treated as absent) ─────────────────────────────────────
 
         [Test]
-        public void FeatureId_Zero_IsValid_HasIdTrue()
+        public void FeatureId_Zero_IsValid_NotNull()
         {
             // Build a feature with id field present = 0
             byte[] featureId   = VarintField(1, 0);
@@ -468,8 +466,19 @@ namespace MapRenderer.Tests.Mvt
             var layer = tile.GetLayer("zeroid");
             Assert.IsNotNull(layer);
             Assert.That(layer.Features.Count, Is.EqualTo(1));
-            Assert.IsTrue(layer.Features[0].HasId, "id=0 must be HasId=true (field-1 was present)");
-            Assert.That(layer.Features[0].Id, Is.EqualTo(0UL));
+            Assert.That(layer.Features[0].Id.IsNull, Is.False, "id=0 must not be Value.Null (field-1 was present)");
+            Assert.That(layer.Features[0].Id, Is.EqualTo(Value.Number(0)));
+        }
+
+        // ── Feature id absent decodes to Value.Null, not a zero Value.Number ────────────────────
+
+        [Test]
+        public void FeatureId_AbsentField1_DecodesAsValueNull()
+        {
+            // BuildSyntheticLayer's feature never emits field 1 (id) at all.
+            var layer = BuildSyntheticLayer(StringField(1, "hello"));
+            Assert.That(layer.Features[0].Id.IsNull, Is.True,
+                "an absent field-1 must decode to Value.Null, never a zero Value.Number.");
         }
     }
 }

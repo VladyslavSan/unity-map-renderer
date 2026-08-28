@@ -38,7 +38,7 @@ namespace MapRenderer.Core.GeoJson
     /// authored winding cannot be trusted; downstream (<c>RingAssemblyJob</c>) classifies by sign.</para>
     ///
     /// <para><b>It IS the evaluation surface</b> (<see cref="IFeature"/>), exactly as <c>MvtFeature</c> is
-    /// for the other format. <c>HasId</c>/<c>Id</c>/<c>Properties</c>/<c>GeometryType</c> already had the
+    /// for the other format. <c>Id</c>/<c>Properties</c>/<c>GeometryType</c> already had the
     /// interface's shape, so implementing it costs one forwarding method and saves the per-tile adapter a
     /// decoded GeoJSON layer would otherwise allocate one of per feature. Slicing carries the parsed feature
     /// BY REFERENCE into every tile it touches, so the filter and expression layers read the authored
@@ -46,12 +46,10 @@ namespace MapRenderer.Core.GeoJson
     /// </summary>
     public sealed class GeoJsonFeature : IFeature
     {
-        /// <summary>False when the RFC <c>id</c> member is absent; <see cref="Id"/> is then
-        /// <see cref="Value.Null"/>.</summary>
-        public bool HasId { get; init; }
-
-        /// <summary>The RFC <c>id</c>, string or number (RFC 7946 §3.2). A <see cref="Value"/> rather than
-        /// MVT's <c>ulong</c>, so a string id and a number above 2⁵³ both survive intact.</summary>
+        /// <summary>The RFC <c>id</c>, string or number (RFC 7946 §3.2), or <see cref="Value.Null"/> when the
+        /// RFC <c>id</c> member is absent. Stored as a <see cref="Value"/>: a string id keeps its exact text,
+        /// a numeric id is a <c>Value.Number</c> (double) — so, as with an MVT id, an integer above 2⁵³
+        /// narrows.</summary>
         public Value Id { get; init; }
 
         /// <summary>Never null — <c>properties: null</c> yields an EMPTY map, because

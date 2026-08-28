@@ -9,28 +9,44 @@ namespace MapRenderer.Jobs.Expressions
 {
     /// <summary>
     /// Compiles a style layer's raw filter JSON into a <see cref="NativeFilterProgram"/> when it falls
-    /// inside the narrow fast-path op subset — <c>all</c>, <c>==</c>/<c>!=</c>, <c>!</c>, constant-key
-    /// <c>get</c>, <c>geometry-type</c> (only as a direct <c>==</c>/<c>!=</c> operand against a string
-    /// literal), a restricted single-arm <c>match</c> (a pure membership test — rewritten to <c>!=</c>/
-    /// <c>all</c>/<c>!</c> and re-emitted, no new VM ops), and string/number/boolean literals — with a
-    /// statically-Boolean root (see the design doc's §5.4: this removes the top-level
-    /// <c>Coercions.ToBoolean</c> the VM cannot replicate on a string root). Anything else, or a program
-    /// exceeding the VM's bounded op-count/stack-depth capacity, is refused: the layer stays on the managed
-    /// <see cref="CompiledFilter"/> path, unchanged.
-    ///
-    /// Consumes the same normalised expression-dialect JSON <see cref="CompiledFilter.Compile"/> feeds to
-    /// <see cref="ExpressionParser"/> (via <see cref="FilterDialect"/>/<see cref="LegacyFilterTranslator"/>)
-    /// — not the parsed <see cref="Expression"/> tree, which cannot distinguish <c>==</c>/<c>!=</c>/<c>!</c>
-    /// (they are all opaque <c>FunctionExpression</c> closures; see the design doc §5.1).
+    /// inside the VM's fast-path subset (the <c>TryEmit*</c> methods are the accepted shapes); anything
+    /// else — or a program over the VM's op-count/stack-depth capacity — is refused and the layer stays on
+    /// the managed <see cref="CompiledFilter"/> path.
+    /// <para>Two non-obvious facts: it compiles from the normalised expression-dialect JSON, not the parsed
+    /// <see cref="Expression"/> tree — whose <c>==</c>/<c>!=</c>/<c>!</c> are indistinguishable opaque
+    /// closures (design doc §5.1) — and it requires a statically-Boolean root (design doc §5.4).</para>
     /// </summary>
     internal static class NativeFilterCompiler
     {
         /// <summary>The bounded op program's element capacity — read off the container type, never
         /// hardcoded, so a capacity change there can't silently drift from the refusal bound.</summary>
-        private static readonly int MaxOps = default(FixedList512Bytes<NativeFilterOp>).Capacity;
+        private static readonly int MaxOperations = default(FixedList512Bytes<NativeFilterOperation>).Capacity;
 
-        /// <summary>The VM's runtime operand-stack capacity (see <see cref="NativeFilterEvalJob"/>).</summary>
+        /// <summary>The VM's runtime operand-stack capacity (see <c>NativeFilterEvaluationJob</c>).</summary>
         private static readonly int MaxStackDepth = default(FixedList128Bytes<NativeValue>).Capacity;
+
+        /// <summary>Caps distinct literal-string operands, bounding the binding array, the per-layer
+        /// <c>Rebind</c> scan, and the per-feature <c>InStringSet</c> loop. Needed because <c>InStringSet</c>
+        /// emits O(1) ops regardless of label count, so <c>MaxOperations</c> no longer caps a match's label
+        /// list ("always bound loops"). Far above any real style (liberty's largest match is ~15
+        /// labels).</summary>
+        private const int MaxLiterals = 256;
+
+        // The expression-dialect operator/keyword heads this compiler accepts, each named once so the
+        // accept-list (IsBooleanRootHead), the dispatch switch (TryEmit) and the compare-code map
+        // (CompareOperatorCode) reference one literal apiece and cannot drift out of step.
+        private const string OpGet = "get";
+        private const string OpGeometryType = "geometry-type";
+        private const string OpAll = "all";
+        private const string OpNot = "!";
+        private const string OpEqual = "==";
+        private const string OpNotEqual = "!=";
+        private const string OpMatch = "match";
+        private const string OpHas = "has";
+        private const string OpLess = "<";
+        private const string OpLessOrEqual = "<=";
+        private const string OpGreater = ">";
+        private const string OpGreaterOrEqual = ">=";
 
         /// <summary>
         /// Attempts to compile <paramref name="rawFilter"/> (a style layer's raw <c>filter</c> JSON, as
@@ -58,23 +74,25 @@ namespace MapRenderer.Jobs.Expressions
 
             var builder = new Builder();
             if (!TryEmit(normalised, builder)) return false;
-            if (builder.Ops.Count > MaxOps || builder.MaxDepth > MaxStackDepth) return false;
+            if (builder.Operations.Count > MaxOperations || builder.MaxDepth > MaxStackDepth) return false;
+            if (builder.LiteralStrings.Count > MaxLiterals) return false; // bound the InStringSet loop / Rebind / binding
 
-            // Fix up LitStr operands: emitted as a 0-based index into LiteralStrings, offset here by the
-            // final KeyNames count so both tables share one binding array (see Mvt.NativeFilterRebind).
+            // Fix up LiteralString/InStringSet operands: both emitted as a 0-based index into LiteralStrings
+            // (InStringSet's is its first label's index), offset here by the final KeyNames count so both
+            // tables share one binding array (see Mvt.NativeFilterRebind).
             int keyCount = builder.KeyNames.Count;
-            for (int i = 0; i < builder.Ops.Count; i++)
+            for (int i = 0; i < builder.Operations.Count; i++)
             {
-                NativeFilterOp op = builder.Ops[i];
-                if (op.Op == NativeOp.LitStr)
-                    builder.Ops[i] = new NativeFilterOp(NativeOp.LitStr, keyCount + op.Operand, op.Immediate);
+                NativeFilterOperation operation = builder.Operations[i];
+                if (operation.Operation == NativeOperation.LiteralString || operation.Operation == NativeOperation.InStringSet)
+                    builder.Operations[i] = new NativeFilterOperation(operation.Operation, keyCount + operation.Operand, operation.Immediate);
             }
 
-            var ops = new FixedList512Bytes<NativeFilterOp>();
-            for (int i = 0; i < builder.Ops.Count; i++) ops.Add(builder.Ops[i]);
+            var operations = new FixedList512Bytes<NativeFilterOperation>();
+            for (int i = 0; i < builder.Operations.Count; i++) operations.Add(builder.Operations[i]);
 
             program = new NativeFilterProgram(
-                ops, builder.KeyNames.ToArray(), builder.LiteralStrings.ToArray());
+                operations, builder.KeyNames.ToArray(), builder.LiteralStrings.ToArray());
             return true;
         }
 
@@ -82,7 +100,8 @@ namespace MapRenderer.Jobs.Expressions
         {
             if (!node.IsArray || node.Items.Count == 0 || node.Items[0].Kind != JsonKind.String) return false;
             string head = node.Items[0].AsString();
-            return head == "all" || head == "==" || head == "!=" || head == "!" || head == "match";
+            return head == OpAll || head == OpEqual || head == OpNotEqual || head == OpNot || head == OpMatch
+                || head == OpHas || head == OpLess || head == OpLessOrEqual || head == OpGreater || head == OpGreaterOrEqual;
         }
 
         // ---- recursive-descent emitter -------------------------------------------------------------
@@ -92,7 +111,7 @@ namespace MapRenderer.Jobs.Expressions
         /// a running operand-stack-depth simulation used to size the VM's runtime stack.</summary>
         private sealed class Builder
         {
-            internal readonly List<NativeFilterOp> Ops = new List<NativeFilterOp>();
+            internal readonly List<NativeFilterOperation> Operations = new List<NativeFilterOperation>();
             internal readonly List<string> KeyNames = new List<string>();
             internal readonly List<string> LiteralStrings = new List<string>();
             internal int Depth;
@@ -118,12 +137,18 @@ namespace MapRenderer.Jobs.Expressions
 
             switch (head)
             {
-                case "get": return TryEmitGet(items, b);
-                case "all": return TryEmitAll(items, b);
-                case "!": return TryEmitNot(items, b);
-                case "==": return TryEmitEq(items, negate: false, b);
-                case "!=": return TryEmitEq(items, negate: true, b);
-                case "match": return TryEmitMatch(items, b);
+                case OpGet: return TryEmitGet(items, b);
+                case OpAll: return TryEmitAll(items, b);
+                case OpNot: return TryEmitNot(items, b);
+                case OpEqual: return TryEmitEq(items, negate: false, b);
+                case OpNotEqual: return TryEmitEq(items, negate: true, b);
+                case OpMatch: return TryEmitMatch(items, b);
+                case OpHas: return TryEmitHas(items, b);
+                case OpLess:
+                case OpLessOrEqual:
+                case OpGreater:
+                case OpGreaterOrEqual:
+                    return TryEmitCompare(items, head, b);
                 default: return false; // every other op, including a bare "geometry-type", refuses.
             }
         }
@@ -135,15 +160,15 @@ namespace MapRenderer.Jobs.Expressions
                 case JsonKind.String:
                     int slot = b.LiteralStrings.Count;
                     b.LiteralStrings.Add(node.AsString());
-                    b.Ops.Add(new NativeFilterOp(NativeOp.LitStr, slot));
+                    b.Operations.Add(new NativeFilterOperation(NativeOperation.LiteralString, slot));
                     b.Push();
                     return true;
                 case JsonKind.Number:
-                    b.Ops.Add(new NativeFilterOp(NativeOp.LitNum, immediate: node.AsDouble()));
+                    b.Operations.Add(new NativeFilterOperation(NativeOperation.LiteralNumber, immediate: node.AsDouble()));
                     b.Push();
                     return true;
                 case JsonKind.Bool:
-                    b.Ops.Add(new NativeFilterOp(NativeOp.LitBool, node.AsBool() ? 1 : 0));
+                    b.Operations.Add(new NativeFilterOperation(NativeOperation.LiteralBoolean, node.AsBool() ? 1 : 0));
                     b.Push();
                     return true;
                 default:
@@ -156,31 +181,80 @@ namespace MapRenderer.Jobs.Expressions
             if (items.Count != 2 || items[1].Kind != JsonKind.String) return false;
             int slot = b.KeyNames.Count;
             b.KeyNames.Add(items[1].AsString());
-            b.Ops.Add(new NativeFilterOp(NativeOp.Get, slot));
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.Get, slot));
             b.Push();
             return true;
         }
 
-        /// <summary>Emits <c>all</c>'s real short-circuit form (design doc §5.8): each arg, then an
-        /// <see cref="NativeOp.AllStep"/> that pops it, error-checks it, and on false jumps past the
-        /// trailing <see cref="NativeOp.PushTrue"/>; falling off the end (every arg true) reaches
-        /// <c>PushTrue</c>. Every arg's <c>AllStep</c> shares the same landing site — patched here once the
-        /// final index is known.</summary>
+        /// <summary>Emits the constant-key <c>has</c> form (mirrors <c>FeatureKeyExpression(isHas:
+        /// true)</c>'s constant-key path): requires a bare-string key, same as <c>TryEmitGet</c> —
+        /// the dynamic-key (<c>["has",["get","x"]]</c>) and 2-arg forms are separate managed closures and
+        /// stay refused.</summary>
+        private static bool TryEmitHas(IReadOnlyList<JsonValue> items, Builder b)
+        {
+            if (items.Count != 2 || items[1].Kind != JsonKind.String) return false;
+            int slot = b.KeyNames.Count;
+            b.KeyNames.Add(items[1].AsString());
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.Has, slot));
+            b.Push();
+            return true;
+        }
+
+        /// <summary>Emits an ordered comparison (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>),
+        /// restricted to exactly one <c>get</c> operand and one JSON number literal — the design doc's
+        /// byte-identity argument: any other shape (two <c>get</c>s, <c>get</c> vs a string, a
+        /// <c>geometry-type</c> operand, or literal-vs-literal) could compare strings, whose ordinal
+        /// bytes the VM's string-id representation cannot reproduce, so it stays refused (managed
+        /// path).</summary>
+        private static bool TryEmitCompare(IReadOnlyList<JsonValue> items, string comparisonOperator, Builder b)
+        {
+            if (items.Count != 3) return false;
+            JsonValue a = items[1], c = items[2];
+
+            bool aIsGet = IsGetNode(a);
+            bool cIsGet = IsGetNode(c);
+            bool aIsNumberLiteral = a.Kind == JsonKind.Number;
+            bool cIsNumberLiteral = c.Kind == JsonKind.Number;
+            if (!((aIsGet && cIsNumberLiteral) || (aIsNumberLiteral && cIsGet))) return false;
+
+            if (!TryEmit(a, b)) return false;
+            if (!TryEmit(c, b)) return false;
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.Compare, CompareOperatorCode(comparisonOperator)));
+            b.Pop(2);
+            b.Push();
+            return true;
+        }
+
+        /// <summary>The operator code a <c>Compare</c> op carries in its <c>Operand</c> — see
+        /// <see cref="NativeFilterOperation"/>'s summary.</summary>
+        private static int CompareOperatorCode(string comparisonOperator)
+        {
+            switch (comparisonOperator)
+            {
+                case OpLess: return 0;
+                case OpLessOrEqual: return 1;
+                case OpGreater: return 2;
+                default: return 3; // OpGreaterOrEqual
+            }
+        }
+
+        /// <summary>Emits <c>all</c>'s short-circuit form (design doc §5.8). Every arg's <c>AllStep</c>
+        /// shares one landing site, back-patched here once the final index is known.</summary>
         private static bool TryEmitAll(IReadOnlyList<JsonValue> items, Builder b)
         {
             var patchAt = new List<int>();
             for (int i = 1; i < items.Count; i++)
             {
                 if (!TryEmit(items[i], b)) return false;
-                patchAt.Add(b.Ops.Count);
-                b.Ops.Add(new NativeFilterOp(NativeOp.AllStep));
+                patchAt.Add(b.Operations.Count);
+                b.Operations.Add(new NativeFilterOperation(NativeOperation.AllStep));
                 b.Pop(); // AllStep consumes the arg's boolean (fall-through net: -1)
             }
-            b.Ops.Add(new NativeFilterOp(NativeOp.PushTrue));
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.PushTrue));
             b.Push();
-            int target = b.Ops.Count; // right after PushTrue — every AllStep's short-circuit landing site
+            int target = b.Operations.Count; // right after PushTrue — every AllStep's short-circuit landing site
             foreach (int idx in patchAt)
-                b.Ops[idx] = new NativeFilterOp(NativeOp.AllStep, target);
+                b.Operations[idx] = new NativeFilterOperation(NativeOperation.AllStep, target);
             return true;
         }
 
@@ -188,7 +262,7 @@ namespace MapRenderer.Jobs.Expressions
         {
             if (items.Count != 2) return false;
             if (!TryEmit(items[1], b)) return false;
-            b.Ops.Add(new NativeFilterOp(NativeOp.Not));
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.Not));
             // pop 1, push 1: net zero depth change.
             return true;
         }
@@ -205,7 +279,7 @@ namespace MapRenderer.Jobs.Expressions
                 JsonValue other = aGeom ? c : a;
                 if (other.Kind != JsonKind.String) return false; // must pair with a string literal
                 int targetKind = ResolveGeometryKind(other.AsString());
-                b.Ops.Add(new NativeFilterOp(NativeOp.GeomEq, targetKind, negate ? 1.0 : 0.0));
+                b.Operations.Add(new NativeFilterOperation(NativeOperation.GeometryEqual, targetKind, negate ? 1.0 : 0.0));
                 b.Push();
                 return true;
             }
@@ -221,30 +295,25 @@ namespace MapRenderer.Jobs.Expressions
             //    decoder appends value strings without dedup) compare UNEQUAL by id while managed compares
             //    bytes and reports equal. Rebind's duplicate-refusal guards literal-vs-column only, never
             //    column-vs-column.
-            // The safe generic-Eq shape is exactly one dynamic operand (get) against one literal.
+            // The safe generic-Equal shape is exactly one dynamic operand (get) against one literal.
             if (!a.IsArray && !c.IsArray) return false;
             if (IsGetNode(a) && IsGetNode(c)) return false;
 
             if (!TryEmit(a, b)) return false;
             if (!TryEmit(c, b)) return false;
-            // Negate rides in Immediate for both Eq and GeomEq (uniform across the equality ops); Operand
-            // is free here (Eq takes its operands off the stack, not from the binding).
-            b.Ops.Add(new NativeFilterOp(NativeOp.Eq, immediate: negate ? 1.0 : 0.0));
+            // Negate rides in Immediate for both Equal and GeometryEqual (uniform across the equality ops);
+            // Operand is free here (Equal takes its operands off the stack, not from the binding).
+            b.Operations.Add(new NativeFilterOperation(NativeOperation.Equal, immediate: negate ? 1.0 : 0.0));
             b.Pop(2);
             b.Push();
             return true;
         }
 
-        /// <summary>
-        /// Emits liberty.json's <c>match</c> shape — a single arm with a list (or scalar) label and
-        /// complementary boolean outputs, which is exactly a membership test — by rewriting it to the
-        /// existing <c>!=</c>/<c>all</c>/<c>!</c> ops and recursing through <see cref="TryEmit"/>, rather
-        /// than hand-emitting: this keeps one emission path and inherits every refusal/rebind rule
-        /// (design doc's match-widening note). Refuses (returns false, leaving the layer on the managed
-        /// path) anything outside that restricted shape: a multi-arm match, a non-boolean or
-        /// non-complementary output pair, an input that isn't <c>get</c>/<c>geometry-type</c>, or an empty
-        /// label list / a label that isn't a string or number.
-        /// </summary>
+        /// <summary>Emits a single-arm <c>match</c> (a membership test with complementary boolean outputs).
+        /// A <c>get</c>-input, all-string-label match takes the compact <c>InStringSet</c> path; every other
+        /// accepted shape rewrites to <c>!=</c>/<c>all</c>/<c>!</c> and recurses through the emitter,
+        /// inheriting its refusal/rebind rules (design doc's match-widening note). The body's guards are what
+        /// stays managed.</summary>
         private static bool TryEmitMatch(IReadOnlyList<JsonValue> items, Builder b)
         {
             // ["match", input, label, output, default] — exactly one arm; a multi-arm match stays managed.
@@ -262,27 +331,44 @@ namespace MapRenderer.Jobs.Expressions
             foreach (JsonValue l in labels)
                 if (l.Kind != JsonKind.String && l.Kind != JsonKind.Number) return false;
 
-            var allArgs = new List<JsonValue> { JsonValue.OfString("all") };
+            bool member = output.AsBool();
+
+            bool allStringLabels = true;
             foreach (JsonValue l in labels)
-                allArgs.Add(JsonValue.OfArray(new List<JsonValue> { JsonValue.OfString("!="), input, l }));
+                if (l.Kind != JsonKind.String) { allStringLabels = false; break; }
+
+            if (IsGetNode(input) && allStringLabels)
+            {
+                if (!TryEmitGet(input.Items, b)) return false;
+                int firstLabel = b.LiteralStrings.Count;
+                foreach (JsonValue l in labels) b.LiteralStrings.Add(l.AsString());
+                b.Operations.Add(new NativeFilterOperation(NativeOperation.InStringSet, firstLabel, labels.Count));
+                b.Pop();
+                b.Push(); // InStringSet pops the Get's value and pushes the bool: net depth unchanged from after Get.
+                if (!member) b.Operations.Add(new NativeFilterOperation(NativeOperation.Not)); // depth-neutral
+                return true;
+            }
+
+            var allArgs = new List<JsonValue> { JsonValue.OfString(OpAll) };
+            foreach (JsonValue l in labels)
+                allArgs.Add(JsonValue.OfArray(new List<JsonValue> { JsonValue.OfString(OpNotEqual), input, l }));
             JsonValue all = JsonValue.OfArray(allArgs);
 
             // member (output == true): input ∈ labels ≡ !all(input != a, input != b, …)
             // otherwise:               input ∉ labels ≡  all(input != a, input != b, …)
-            bool member = output.AsBool();
             JsonValue rewrite = member
-                ? JsonValue.OfArray(new List<JsonValue> { JsonValue.OfString("!"), all })
+                ? JsonValue.OfArray(new List<JsonValue> { JsonValue.OfString(OpNot), all })
                 : all;
             return TryEmit(rewrite, b);
         }
 
         private static bool IsGeometryTypeNode(JsonValue node)
             => node.IsArray && node.Items.Count == 1 &&
-               node.Items[0].Kind == JsonKind.String && node.Items[0].AsString() == "geometry-type";
+               node.Items[0].Kind == JsonKind.String && node.Items[0].AsString() == OpGeometryType;
 
         private static bool IsGetNode(JsonValue node)
             => node.IsArray && node.Items.Count == 2 &&
-               node.Items[0].Kind == JsonKind.String && node.Items[0].AsString() == "get";
+               node.Items[0].Kind == JsonKind.String && node.Items[0].AsString() == OpGet;
 
         /// <summary>Inverts <c>FeatureData.GeometryTypeName</c> at compile time. A name outside its four
         /// outputs (Point/LineString/Polygon/Unknown) resolves to -1 — no <c>TileGeometryType</c> value is

@@ -27,7 +27,6 @@ namespace MapRenderer.Tests
         /// <summary>MVT command-stream geometry (<see cref="ITileCommandStreamFeature"/>), or null.</summary>
         public uint[]           Geometry     { get; set; }
 
-        public bool   HasId => false;
         public Value  Id    => Value.Null;
 
         public bool TryGetProperty(string name, out Value value)

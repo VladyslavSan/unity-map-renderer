@@ -135,7 +135,7 @@ test-code-bloat) live in **Coding conventions** below — don't restate them her
 A larger change lands one **stage** at a time via a three-role chain, each role a separate agent (models
 chosen for the job — a strong reasoning model plans, a fast capable model develops, a strong model reviews).
 Each role is a **tool-scoped subagent**: the planner reads and plans but writes no production code; the
-developer implements and runs the gate; the reviewer reads the diff and re-runs the gate but edits nothing.
+developer implements and runs the gate; the reviewer reads the diff and edits nothing.
 This is a lightweight, human-in-the-loop chain — there is **no board, no stage files, no autonomous
 supervisor**; the design docs below are the only tracking.
 1. **Plan.** A planner writes a **file-level implementation plan** grounded in the epic's SSOT design doc —
@@ -148,10 +148,14 @@ supervisor**; the design docs below are the only tracking.
    batch-Burst stale-XML hazard; **never re-bake a snapshot to go green** — a diff means behaviour changed).
    Regression tests for a fixed bug are **RED-verified** (confirm they fail against the un-fixed code, then
    pass). Does **not** commit.
-3. **Review.** A reviewer reads the working-tree diff, **independently re-runs the gate** (doesn't trust the
-   dev's word), and returns APPROVE or ranked actionable findings — stating an explicit verdict on each
-   judgment call the change hinges on. Non-blocking findings are **recorded** (in the design doc, for the
-   merge step), not necessarily fixed in-stage.
+3. **Review.** A reviewer reads the working-tree diff and returns APPROVE or ranked actionable findings —
+   stating an explicit verdict on each judgment call the change hinges on. Non-blocking findings are
+   **recorded** (in the design doc, for the merge step), not necessarily fixed in-stage.
+   **Reviewers do not launch the gate.** The dev's word is not trusted either — the *orchestrator* re-runs
+   `./Tools/run-tests.sh` itself, once, on the frozen post-review tree, and that run is the authority. The
+   reason is mechanical: Unity's project lock is exclusive, so a second batch run exits 3, and a review arm
+   that RED-verifies by injecting a defect is *mutating the tree the gate is compiling* — a gate that races
+   an arm reads clean and means nothing.
 Then **commit one stage per revertible commit** on the feature branch (never fold stages; the merge step
 decides what to squash). The design doc is the running SSOT — decisions, the stage sequence, and open
 findings live there. The orchestrator (main session) hands each role its brief, relays results, and gates

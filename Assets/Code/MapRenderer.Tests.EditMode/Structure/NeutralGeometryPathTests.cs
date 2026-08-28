@@ -170,7 +170,7 @@ namespace MapRenderer.Tests.Structure
             // Non-vacuity FIRST: the surfaces are the real ones, not empty or wrong types. Every member the
             // design says survives must be here, or the absence assertions below assert about nothing.
             foreach (string surviving in new[]
-                     { nameof(IFeature.GeometryType), nameof(IFeature.HasId), nameof(IFeature.Id),
+                     { nameof(IFeature.GeometryType), nameof(IFeature.Id),
                        nameof(IFeature.TryGetProperty), nameof(IFeature.Properties) })
                 Assert.IsNotEmpty(
                     typeof(IFeature).GetMember(surviving, BindingFlags.Public | BindingFlags.Instance),

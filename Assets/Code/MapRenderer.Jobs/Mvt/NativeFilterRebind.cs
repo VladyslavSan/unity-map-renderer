@@ -8,7 +8,7 @@ namespace MapRenderer.Jobs.Mvt
     /// <see cref="NativeFilterProgram"/>'s per-tile-layer binding step — an extension method rather than an
     /// instance method on <see cref="NativeFilterProgram"/> itself, so the format-neutral
     /// <c>MapRenderer.Jobs.Expressions</c> folder never names an MVT-specific type in a member signature
-    /// (see <see cref="NativeFilterEvalJob"/>'s doc for why that matters — <c>NeutralGeometryPathTests</c>).
+    /// (see <see cref="NativeFilterEvaluationJob"/>'s doc for why that matters — <c>NeutralGeometryPathTests</c>).
     /// </summary>
     internal static class NativeFilterRebind
     {

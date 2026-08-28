@@ -268,7 +268,9 @@ namespace MapRenderer.Tests.Filters
 
         // ── T3 — fallback correctness (both refusal gates) ──────────────────────────────────────
 
-        [TestCase("[\"<\",[\"get\",\"admin_level\"],2]")]
+        // Two-get comparison: the byte-identity argument only holds for get-vs-number-literal (F3); a
+        // get-vs-get shape could compare two strings, so it stays refused.
+        [TestCase("[\"<\",[\"get\",\"a\"],[\"get\",\"b\"]]")]
         // Multi-arm match: outside the restricted single-arm membership shape match-widening accepts.
         [TestCase("[\"match\",[\"get\",\"class\"],\"a\",true,\"b\",false,true]")]
         public void NativeProgramFor_RefusesUnsupportedFilter_AndSelectionStaysManagedAndCorrect(string json)

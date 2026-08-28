@@ -134,16 +134,15 @@ namespace MapRenderer.Tests.GeoJsons
         {
             GeoJsonFeature stringId = GeoJsonParser.Parse(GeoJsonTestFixtures.Feature(
                 "Point", GeoJsonTestFixtures.Position(0.0, 0.0), idMember: "\"id\":\"node/42\",")).Features[0];
-            Assert.That(stringId.HasId, Is.True);
+            Assert.That(stringId.Id.IsNull, Is.False);
             Assert.That(stringId.Id.AsString(), Is.EqualTo("node/42"));
 
             GeoJsonFeature numberId = GeoJsonParser.Parse(GeoJsonTestFixtures.Feature(
                 "Point", GeoJsonTestFixtures.Position(0.0, 0.0), idMember: "\"id\":42,")).Features[0];
-            Assert.That(numberId.HasId, Is.True);
+            Assert.That(numberId.Id.IsNull, Is.False);
             Assert.That(numberId.Id.AsNumber(), Is.EqualTo(42.0));
 
             GeoJsonFeature noId = GeoJsonParser.Parse(Point(0.0, 0.0)).Features[0];
-            Assert.That(noId.HasId, Is.False);
             Assert.That(noId.Id.IsNull, Is.True);
         }
 

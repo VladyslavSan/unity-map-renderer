@@ -28,7 +28,6 @@ namespace MapRenderer.Tests.Expressions
         private static GeoJsonFeature MakeGeoJsonFeature(IReadOnlyDictionary<string, Value> properties)
             => new GeoJsonFeature
             {
-                HasId = false,
                 Id = Value.Null,
                 Properties = properties,
                 GeometryType = TileGeometryType.Point,

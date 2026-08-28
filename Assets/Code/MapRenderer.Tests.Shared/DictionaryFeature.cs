@@ -24,7 +24,6 @@ namespace MapRenderer.Tests
         private readonly Dictionary<string, Value> _properties;
 
         public TileGeometryType GeometryType { get; }
-        public bool HasId { get; }
         public Value Id { get; }
 
         /// <summary>MVT command-stream geometry, or null when this double is only standing in for the
@@ -44,7 +43,6 @@ namespace MapRenderer.Tests
                 foreach (var kv in properties)
                     _properties[kv.Key] = kv.Value;
             GeometryType = geometryType;
-            HasId = hasId;
             Id = hasId ? id : Value.Null;
         }
 

@@ -11,20 +11,24 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Filters
 {
     /// <summary>
-    /// Epic A / A6 (plan §F-5, load-bearing byte-parity guard): <c>MvtFeature</c> now implements
+    /// Epic A / A6 (plan §F-5, load-bearing byte-parity guard): <c>MvtFeature</c> implements
     /// <see cref="IFeature"/> directly (the retired <c>MvtFeatureAdapter</c> folded in verbatim — design
-    /// §B-2). This test pins that fold against the adapter's EXACT documented semantics (not just "some
+    /// §B-2). This test pins that implementation against its EXACT documented semantics (not just "some
     /// reasonable behaviour"):
     /// <list type="bullet">
-    ///   <item><c>Id</c>: <c>HasId ? Value.Number((double)Id) : Value.Null</c> — the uint64→double
-    ///     narrowing (MvtFeatureAdapter.cs:42, now deleted).</item>
-    ///   <item><c>TryGetProperty</c>: the null-guard fallback — an unset <see cref="MvtFeature.Store"/> or
-    ///     a missing key returns <c>false</c> + <c>Value.Null</c>, never throws.</item>
-    ///   <item><c>Properties</c>: an empty dictionary when <see cref="MvtFeature.Store"/> is unset.</item>
-    ///   <item><c>GeometryType</c>/<c>HasId</c>: straight pass-through.</item>
+    ///   <item><c>TryGetProperty</c>: a feature with no real property store (its <see cref="MvtFeature.Store"/>
+    ///     defaulted to the <c>EmptyPropertyStore</c> Null Object), or a missing key, returns <c>false</c> +
+    ///     <c>Value.Null</c> — never throws.</item>
+    ///   <item><c>Properties</c>: an empty dictionary for a feature whose <see cref="MvtFeature.Store"/> is
+    ///     the default Null Object.</item>
+    ///   <item><c>GeometryType</c>: straight pass-through.</item>
     /// </list>
-    /// A loose reimpl (e.g. dropping the HasId guard, or a different id narrowing) fails this test —
-    /// filter/paint parity depends on this fold being byte-exact.
+    ///
+    /// <para>Feature <c>Id</c> is not exercised here: since the id-representation cleanup deleted
+    /// <c>IFeature.HasId</c>, <c>MvtFeature.Id</c> is a plain stored <see cref="Value"/> (a direct
+    /// auto-property, no fold to pin), and the decode-level narrowing (present id →
+    /// <c>Value.Number((double)ReadVarint())</c>, absent field-1 → <c>Value.Null</c>, id 0 → a valid
+    /// <c>Value.Number(0)</c>) is pinned in <c>MvtPropertyDecodeTests</c>.</para>
     ///
     /// <para>The three tests over a POPULATED property bag (<c>TryGetProperty_PresentKey</c>,
     /// <c>TryGetProperty_MissingKey</c>, <c>Properties_NonNullField</c>) build a
@@ -35,43 +39,12 @@ namespace MapRenderer.Tests.Filters
     /// <see cref="MvtFeature"/>'s own forwarding — the store-forwarding this file used to pin over a
     /// hand-built dictionary is instead covered, over 1000+ real decoded (layer, feature, key) combinations,
     /// by <c>DensePropertyStoreTests.TryGetProperty_AgreesWithResolveToDictionary_ForEveryKeyAndEveryFeature_AcrossAllLayers</c>.
-    /// The two null/empty-bag tests below stay on <see cref="MvtFeature"/> itself (no populated bag needed),
-    /// so the null-guard pin they exist for is unaffected.</para>
+    /// The two empty-bag tests below stay on <see cref="MvtFeature"/> itself (no populated bag needed),
+    /// so the Null-Object pin they exist for is unaffected.</para>
     /// </summary>
     [TestFixture]
     public class A6AdapterFoldTests
     {
-        [Test]
-        public void Id_HasId_ReturnsNumberOfTheUint64NarrowedToDouble()
-        {
-            var feature = new MvtFeature { HasId = true, Id = 42UL };
-            IFeature asFeature = feature;
-
-            Assert.AreEqual(Value.Number(42.0), asFeature.Id,
-                "HasId=true must return Value.Number((double)Id) — the uint64->double narrowing.");
-        }
-
-        [Test]
-        public void Id_NoId_ReturnsNull()
-        {
-            var feature = new MvtFeature { HasId = false, Id = 7UL };
-            IFeature asFeature = feature;
-
-            Assert.AreEqual(Value.Null, asFeature.Id,
-                "HasId=false must return Value.Null regardless of the raw Id field (id=0 is a valid id per " +
-                "the MVT spec — HasId, not a zero-check, gates presence).");
-        }
-
-        [Test]
-        public void Id_ZeroIsAValidId_NotConfusedWithAbsent()
-        {
-            var feature = new MvtFeature { HasId = true, Id = 0UL };
-            IFeature asFeature = feature;
-
-            Assert.AreEqual(Value.Number(0.0), asFeature.Id,
-                "id=0 with HasId=true is a valid id (MVT spec) — must resolve to Value.Number(0), not Value.Null.");
-        }
-
         [Test]
         public void TryGetProperty_PresentKey_ReturnsTrueAndValue()
         {
@@ -99,24 +72,24 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void TryGetProperty_NoStore_ReturnsFalseAndNull_NeverThrows()
         {
-            var feature = new MvtFeature(); // Store left unset
+            var feature = new MvtFeature(); // Store defaults to the EmptyPropertyStore Null Object
             IFeature asFeature = feature;
 
             bool found = asFeature.TryGetProperty("NAME", out Value value);
 
             Assert.IsFalse(found,
-                "an unset Store must be guarded, not throw (MvtFeatureAdapter's null-guard).");
+                "with no real store the default EmptyPropertyStore answers 'absent' — never throws.");
             Assert.AreEqual(Value.Null, value);
         }
 
         [Test]
         public void Properties_NoStore_ExposesEmptyDictionary_NotNull()
         {
-            var feature = new MvtFeature(); // Store left unset
+            var feature = new MvtFeature(); // Store defaults to the EmptyPropertyStore Null Object
             IFeature asFeature = feature;
 
             Assert.IsNotNull(asFeature.Properties,
-                "Properties must never be null (adapter fallback to an empty dictionary).");
+                "Properties must never be null (the default EmptyPropertyStore exposes an empty dictionary).");
             Assert.AreEqual(0, asFeature.Properties.Count);
         }
 
@@ -137,16 +110,6 @@ namespace MapRenderer.Tests.Filters
             IFeature asFeature = feature;
 
             Assert.AreEqual(TileGeometryType.Polygon, asFeature.GeometryType);
-        }
-
-        [Test]
-        public void HasId_PassesThroughUnchanged()
-        {
-            var withId = new MvtFeature { HasId = true, Id = 1 };
-            var withoutId = new MvtFeature { HasId = false };
-
-            Assert.IsTrue(((IFeature)withId).HasId);
-            Assert.IsFalse(((IFeature)withoutId).HasId);
         }
     }
 }

@@ -146,6 +146,12 @@ namespace MapRenderer.Jobs.Mvt
             var geomStart = new List<int>(featureCount);
             var geomEnd   = new List<int>(featureCount);
 
+            // Per-feature header data (geometry kind + id) buffered here rather than written onto an
+            // MvtFeature yet: a feature is built COMPLETE — with its property store — only after the layer's
+            // key/value/tag tables exist (below), which is what lets MvtFeature be an immutable, construct-once
+            // value instead of a two-phase one (see MvtFeature.Store).
+            var headers = new List<(TileGeometryType Kind, Value Id)>(featureCount);
+
             while (r.HasMore)
             {
                 uint tag = r.ReadTag();
@@ -174,8 +180,8 @@ namespace MapRenderer.Jobs.Mvt
                     case LayerFeatures when wt == 2:
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        var (feature, fTagStart, fTagEnd, fGeomStart, fGeomEnd) = DecodeFeature(r.Slice(s, e));
-                        layer.Features.Add(feature);
+                        var (fKind, fId, fTagStart, fTagEnd, fGeomStart, fGeomEnd) = DecodeFeature(r.Slice(s, e));
+                        headers.Add((fKind, fId));
                         tagStart.Add(fTagStart);
                         tagEnd.Add(fTagEnd);
                         geomStart.Add(fGeomStart);
@@ -201,9 +207,9 @@ namespace MapRenderer.Jobs.Mvt
             // the extent field may appear anywhere in the layer message, which is why this runs after the
             // read loop and not inside it. The kind column is read off the same features, in the same order,
             // as the command list.
-            var kinds = new List<TileGeometryType>(layer.Features.Count);
-            for (int i = 0; i < layer.Features.Count; i++)
-                kinds.Add(layer.Features[i].GeometryType);
+            var kinds = new List<TileGeometryType>(headers.Count);
+            for (int i = 0; i < headers.Count; i++)
+                kinds.Add(headers[i].Kind);
 
             // 2a: flatten tags, then geometry — both via FlattenFeatureColumn (see its doc for the two-pass
             // count-then-fill technique) — into ONE shared Allocator.Persistent NativeArray<uint> apiece.
@@ -220,7 +226,7 @@ namespace MapRenderer.Jobs.Mvt
             // whatever that call had already allocated — visible to `finally` below and disposed there under
             // no IsCreated guard: NativeArray.Dispose() early-returns on a default value, so the finally
             // frees whatever was allocated and no-ops on the rest.
-            int featCount = layer.Features.Count;
+            int featCount = headers.Count;
             var featOffsets = default(NativeArray<int>);
             var featLengths = default(NativeArray<int>);
             var commands    = default(NativeArray<uint>);
@@ -256,10 +262,17 @@ namespace MapRenderer.Jobs.Mvt
                 var propertyResolver = new MvtLayerPropertyResolver(
                     layer.Keys, values, valueStrings, keyIndex, tagWords, tagOffsets, tagLengths);
 
-                // Each store holds only its ordinal; its (offset,count) slice is read from the layer's
-                // columns through the resolver, so the slice lives in one place, not copied per store.
-                for (int i = 0; i < layer.Features.Count; i++)
-                    layer.Features[i].Store = new DensePropertyStore(propertyResolver, i);
+                // Build every feature COMPLETE now — geometry kind + id from its parsed header, and its
+                // property store — so MvtFeature is constructed once and never mutated (its fields are
+                // init-only). Each store holds only its ordinal; its (offset,count) slice is read from the
+                // layer's columns through the resolver, so the slice lives in one place, not copied per store.
+                for (int i = 0; i < headers.Count; i++)
+                    layer.Features.Add(new MvtFeature
+                    {
+                        GeometryType = headers[i].Kind,
+                        Id           = headers[i].Id,
+                        Store        = new DensePropertyStore(propertyResolver, i),
+                    });
 
                 // String→id key hoist: every layer is Dense, so every layer advertises IIndexedFeatureSource
                 // capability against this resolver.
@@ -445,10 +458,12 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// Decodes one Feature sub-message. Returns the feature (geometry type + id), the tag-word stream's
-        /// byte bounds (to be flattened after the layer's key/value tables are fully read) and the geometry
-        /// command stream's byte bounds — all three as OUT-OF-BAND results the caller consumes, because none
-        /// belongs on the feature (IR C1 P3). Feature id (field 1) is set on the feature directly.
+        /// Decodes one Feature sub-message. Returns the feature HEADER (geometry type + id, the latter
+        /// <see cref="Value.Null"/> when field 1 was absent), the tag-word stream's byte bounds (to be
+        /// flattened after the layer's key/value tables are fully read) and the geometry command stream's
+        /// byte bounds — all as OUT-OF-BAND results the caller consumes to build the feature once, complete,
+        /// later (none belongs on the feature — IR C1 P3 — and <see cref="MvtFeature"/> is construct-once,
+        /// so it is not built until its store exists).
         ///
         /// <para><b>2a: neither the tag field nor the geometry field is parsed here.</b>
         /// <c>ReadLengthDelimited</c> returns <c>[start,end)</c> as absolute offsets into the tile's root byte
@@ -467,9 +482,11 @@ namespace MapRenderer.Jobs.Mvt
         /// it. <c>FeatureGeometry</c> has carried this exact deferred-parse, last-wins-on-repeat behaviour
         /// since it was first flattened; tags now share it.</para>
         /// </summary>
-        private static (MvtFeature feature, int tagStart, int tagEnd, int geomStart, int geomEnd) DecodeFeature(ProtobufReader r)
+        private static (TileGeometryType kind, Value id, int tagStart, int tagEnd, int geomStart, int geomEnd)
+            DecodeFeature(ProtobufReader r)
         {
-            var f = new MvtFeature();
+            TileGeometryType kind = default; // MVT type 0 = UNKNOWN — the default when field 3 is absent.
+            Value id = Value.Null;
             int tagStart = 0, tagEnd = 0;
             int geomStart = 0, geomEnd = 0;
             while (r.HasMore)
@@ -480,14 +497,13 @@ namespace MapRenderer.Jobs.Mvt
                 switch (field)
                 {
                     case FeatureId when wt == 0:
-                        f.Id = r.ReadVarint();
-                        f.HasId = true;
+                        id = Value.Number((double)r.ReadVarint());
                         break;
                     case FeatureTags when wt == 2:
                         (tagStart, tagEnd) = r.ReadLengthDelimited();
                         break;
                     case FeatureType when wt == 0:
-                        f.GeometryType = (TileGeometryType)r.ReadUInt32();
+                        kind = (TileGeometryType)r.ReadUInt32();
                         break;
                     case FeatureGeometry when wt == 2:
                         (geomStart, geomEnd) = r.ReadLengthDelimited();
@@ -497,7 +513,7 @@ namespace MapRenderer.Jobs.Mvt
                         break;
                 }
             }
-            return (f, tagStart, tagEnd, geomStart, geomEnd);
+            return (kind, id, tagStart, tagEnd, geomStart, geomEnd);
         }
 
         /// <summary>

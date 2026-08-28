@@ -12,21 +12,20 @@ namespace MapRenderer.Jobs.Expressions
     internal sealed class NativeFilterProgram
     {
         /// <summary>The compiled opcode program: post-order, with <c>all</c> short-circuit jumps.</summary>
-        internal readonly FixedList512Bytes<NativeFilterOp> Ops;
+        internal readonly FixedList512Bytes<NativeFilterOperation> Operations;
 
-        /// <summary>Constant-key <c>get</c> names, in emission order — a <see cref="NativeOp.Get"/>'s
-        /// <c>Operand</c> is an index here.</summary>
+        /// <summary>Constant-key <c>get</c> names, in emission order — a <c>Get</c>'s <c>Operand</c> is an
+        /// index here.</summary>
         internal readonly string[] KeyNames;
 
-        /// <summary>String-literal <c>==</c>/<c>!=</c> operands, in emission order — a
-        /// <see cref="NativeOp.LitStr"/>'s <c>Operand</c> is <c>KeyNames.Length</c> plus an index
-        /// here.</summary>
+        /// <summary>String-literal <c>==</c>/<c>!=</c> operands, in emission order — a <c>LiteralString</c>'s
+        /// <c>Operand</c> is <c>KeyNames.Length</c> plus an index here.</summary>
         internal readonly string[] LiteralStrings;
 
         internal NativeFilterProgram(
-            FixedList512Bytes<NativeFilterOp> ops, string[] keyNames, string[] literalStrings)
+            FixedList512Bytes<NativeFilterOperation> operations, string[] keyNames, string[] literalStrings)
         {
-            Ops = ops;
+            Operations = operations;
             KeyNames = keyNames;
             LiteralStrings = literalStrings;
         }

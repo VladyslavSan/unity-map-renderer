@@ -8,10 +8,10 @@ namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
     /// The native filter VM's error taxonomy. Burst forbids exceptions, so every erroring opcode threads
-    /// a code instead of throwing; a non-<see cref="None"/> code halts evaluation immediately (sticky —
+    /// a code instead of throwing; a non-<c>None</c> code halts evaluation immediately (sticky —
     /// later steps never run) and always maps the filter outcome to <c>matched = false</c> — the same
     /// outcome <c>CompiledFilter.Matches</c> gives a caught <c>ExpressionEvaluationException</c>.
-    /// <see cref="StackOverflow"/> and <see cref="StepBudget"/> are defensive: compile-time-impossible for
+    /// <c>StackOverflow</c> and <c>StepBudget</c> are defensive: compile-time-impossible for
     /// a <see cref="NativeFilterCompiler"/>-accepted program (bounded stack depth / op count), reachable
     /// only if that guarantee is ever broken — and even then map to exclude, never a silent include.
     /// </summary>
@@ -32,7 +32,13 @@ namespace MapRenderer.Jobs.Mvt
         StackOverflow,
 
         /// <summary>Defensive: the program counter exceeded its step budget.</summary>
-        StepBudget
+        StepBudget,
+
+        /// <summary>An ordered comparison (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>) whose operands
+        /// were not both <see cref="ValueType.Number"/> at runtime (a <c>get</c> that resolved to a string
+        /// or was absent) — mirrors <c>DecisionOps.CompareValues</c>'s type-mismatch throw, which
+        /// <c>CompiledFilter</c> catches into an exclude.</summary>
+        NonComparable
     }
 
     /// <summary>
@@ -43,15 +49,15 @@ namespace MapRenderer.Jobs.Mvt
     /// compiles cleanly under Burst.
     ///
     /// <para>Declared here rather than beside the rest of the VM in <c>MapRenderer.Jobs.Expressions</c>
-    /// because its columns (<see cref="Values"/>) are <see cref="MvtValueNative"/> — a format-named type a
+    /// because its columns (<c>Values</c>) are <see cref="MvtValueNative"/> — a format-named type a
     /// non-decoder-folder production type may not name in a member signature (see
-    /// <c>NeutralGeometryPathTests</c>); <see cref="Mvt"/> is a decoder folder. <see cref="NativeFilterEvaluator"/>
+    /// <c>NeutralGeometryPathTests</c>); <c>Mvt</c> is a decoder folder. <see cref="NativeFilterEvaluator"/>
     /// and <see cref="NativeFilterProgram"/>'s MVT rebind live here for the same reason.</para>
     /// </summary>
     [BurstCompile]
-    internal struct NativeFilterEvalJob : IJob
+    internal struct NativeFilterEvaluationJob : IJob
     {
-        public FixedList512Bytes<NativeFilterOp> Program;
+        public FixedList512Bytes<NativeFilterOperation> Program;
 
         /// <summary>The rebound <c>slot→id</c> array: <see cref="NativeFilterProgram.KeyNames"/> ids
         /// first, then <see cref="NativeFilterProgram.LiteralStrings"/> ids (see
@@ -66,7 +72,7 @@ namespace MapRenderer.Jobs.Mvt
         /// <see cref="MvtLayerPropertyResolver.Values"/>).</summary>
         [ReadOnly] public NativeArray<MvtValueNative> Values;
 
-        /// <summary>This feature's tag-pair slice into <see cref="TagWords"/>: start index and word count
+        /// <summary>This feature's tag-pair slice into <c>TagWords</c>: start index and word count
         /// (not pair count) — supplied by the caller from <see cref="INativeFilterColumns.TryGetFeatureSlice"/>.</summary>
         public int TagOffset;
         public int TagCount;
@@ -75,7 +81,7 @@ namespace MapRenderer.Jobs.Mvt
         public int GeometryKind;
 
         /// <summary>Length-1 output: 1 iff the filter matched (meaningful only when
-        /// <see cref="ResultError"/>[0] is <see cref="NativeFilterError.None"/>).</summary>
+        /// <c>ResultError</c>[0] is <see cref="NativeFilterError.None"/>).</summary>
         public NativeArray<byte> ResultMatched;
 
         /// <summary>Length-1 output: the <see cref="NativeFilterError"/> code, as a byte.</summary>
@@ -85,92 +91,135 @@ namespace MapRenderer.Jobs.Mvt
         {
             FixedList128Bytes<NativeValue> stack = default;
             NativeFilterError error = NativeFilterError.None;
-            int pc = 0;
+            int programCounter = 0;
 
-            // pc only ever increases (by 1, or by a strictly-forward AllStep jump), so this loop is
-            // bounded by Program.Length steps — no separate step counter needed.
-            while (pc < Program.Length && error == NativeFilterError.None)
+            // programCounter only ever increases (by 1, or by a strictly-forward AllStep jump), so this
+            // loop is bounded by Program.Length steps — no separate step counter needed.
+            while (programCounter < Program.Length && error == NativeFilterError.None)
             {
-                NativeFilterOp op = Program[pc];
-                switch (op.Op)
+                NativeFilterOperation operation = Program[programCounter];
+                switch (operation.Operation)
                 {
-                    case NativeOp.LitNum:
-                        error = Push(ref stack, NativeValue.Number(op.Immediate));
-                        pc++;
+                    case NativeOperation.LiteralNumber:
+                        error = Push(ref stack, NativeValue.Numeric(operation.Immediate));
+                        programCounter++;
                         break;
 
-                    case NativeOp.LitBool:
-                        error = Push(ref stack, NativeValue.Bool(op.Operand != 0));
-                        pc++;
+                    case NativeOperation.LiteralBoolean:
+                        error = Push(ref stack, NativeValue.Bool(operation.Operand != 0));
+                        programCounter++;
                         break;
 
-                    case NativeOp.LitStr:
-                        error = Push(ref stack, NativeValue.String(Binding[op.Operand]));
-                        pc++;
+                    case NativeOperation.LiteralString:
+                        error = Push(ref stack, NativeValue.String(Binding[operation.Operand]));
+                        programCounter++;
                         break;
 
-                    case NativeOp.Get:
+                    case NativeOperation.Get:
                     {
-                        int keyIndex = Binding[op.Operand];
-                        error = Push(ref stack, ReadTag(keyIndex));
-                        pc++;
+                        int keyIndex = Binding[operation.Operand];
+                        error = Push(ref stack, ReadTag(keyIndex, out _));
+                        programCounter++;
                         break;
                     }
 
-                    case NativeOp.GeomEq:
+                    case NativeOperation.Has:
                     {
-                        bool eq = GeometryKind == op.Operand;
-                        bool negate = op.Immediate != 0.0;
-                        error = Push(ref stack, NativeValue.Bool(negate ? !eq : eq));
-                        pc++;
+                        int keyIndex = Binding[operation.Operand];
+                        ReadTag(keyIndex, out bool present);
+                        error = Push(ref stack, NativeValue.Bool(present));
+                        programCounter++;
                         break;
                     }
 
-                    case NativeOp.Eq:
+                    case NativeOperation.GeometryEqual:
+                    {
+                        bool equal = GeometryKind == operation.Operand;
+                        bool negate = operation.Immediate != 0.0;
+                        error = Push(ref stack, NativeValue.Bool(negate ? !equal : equal));
+                        programCounter++;
+                        break;
+                    }
+
+                    case NativeOperation.Equal:
                     {
                         if (!Pop(ref stack, out NativeValue right)) { error = NativeFilterError.StackOverflow; break; }
                         if (!Pop(ref stack, out NativeValue left)) { error = NativeFilterError.StackOverflow; break; }
-                        bool eq = NativeValue.NativeEquals(left, right);
-                        bool negate = op.Immediate != 0.0;
-                        error = Push(ref stack, NativeValue.Bool(negate ? !eq : eq));
-                        pc++;
+                        bool equal = NativeValue.NativeEquals(left, right);
+                        bool negate = operation.Immediate != 0.0;
+                        error = Push(ref stack, NativeValue.Bool(negate ? !equal : equal));
+                        programCounter++;
                         break;
                     }
 
-                    case NativeOp.Not:
+                    case NativeOperation.Compare:
+                    {
+                        if (!Pop(ref stack, out NativeValue right)) { error = NativeFilterError.StackOverflow; break; }
+                        if (!Pop(ref stack, out NativeValue left)) { error = NativeFilterError.StackOverflow; break; }
+                        if (!NativeValue.TryCompare(left, right, out int comparison)) { error = NativeFilterError.NonComparable; break; }
+                        bool result;
+                        switch (operation.Operand)
+                        {
+                            case 0: result = comparison < 0; break;
+                            case 1: result = comparison <= 0; break;
+                            case 2: result = comparison > 0; break;
+                            default: result = comparison >= 0; break;
+                        }
+                        error = Push(ref stack, NativeValue.Bool(result));
+                        programCounter++;
+                        break;
+                    }
+
+                    case NativeOperation.Not:
                     {
                         if (!Pop(ref stack, out NativeValue arg)) { error = NativeFilterError.StackOverflow; break; }
                         if (arg.Type != ValueType.Boolean) { error = NativeFilterError.NonBoolean; break; }
                         error = Push(ref stack, NativeValue.Bool(!arg.BoolValue));
-                        pc++;
+                        programCounter++;
                         break;
                     }
 
-                    case NativeOp.AllStep:
+                    case NativeOperation.AllStep:
                     {
                         if (!Pop(ref stack, out NativeValue arg)) { error = NativeFilterError.StackOverflow; break; }
                         if (arg.Type != ValueType.Boolean) { error = NativeFilterError.NonBoolean; break; }
                         if (arg.BoolValue)
                         {
-                            pc++;
+                            programCounter++;
                         }
                         else
                         {
                             error = Push(ref stack, NativeValue.Bool(false));
-                            pc = op.Operand;
+                            programCounter = operation.Operand;
                         }
                         break;
                     }
 
-                    case NativeOp.PushTrue:
+                    case NativeOperation.PushTrue:
                         error = Push(ref stack, NativeValue.Bool(true));
-                        pc++;
+                        programCounter++;
                         break;
 
+                    case NativeOperation.InStringSet:
+                    {
+                        if (!Pop(ref stack, out NativeValue v)) { error = NativeFilterError.StackOverflow; break; }
+                        bool member = false;
+                        if (v.Type == ValueType.String)
+                        {
+                            int start = operation.Operand;
+                            int count = (int)operation.Immediate;
+                            for (int i = 0; i < count; i++)
+                                if (v.StringId == Binding[start + i]) { member = true; break; }
+                        }
+                        error = Push(ref stack, NativeValue.Bool(member));
+                        programCounter++;
+                        break;
+                    }
+
                     default:
-                        // Unreachable: every op a NativeFilterCompiler-accepted program emits is one of the
-                        // cases above. Mapped to exclude, never a silent include, matching NativeFilterError's
-                        // no-fall-through-include contract.
+                        // Unreachable: every operation a NativeFilterCompiler-accepted program emits is one of
+                        // the cases above. Mapped to exclude, never a silent include, matching
+                        // NativeFilterError's no-fall-through-include contract.
                         error = NativeFilterError.StepBudget;
                         break;
                 }
@@ -194,9 +243,18 @@ namespace MapRenderer.Jobs.Mvt
         /// <summary>Mirrors <see cref="DensePropertyStore.TryGetByKeyIndex"/> verbatim: walks this
         /// feature's tag pairs backward, returning the first (= last in tag order) whose key index matches
         /// and whose value index is in range. Bounded by this feature's own tag-pair count (design doc
-        /// §5.9).</summary>
-        private NativeValue ReadTag(int keyIndex)
+        /// §5.9).
+        ///
+        /// <para><paramref name="found"/> is the presence bit <c>TryGetByKeyIndex</c> returns — set iff such
+        /// a tag pair exists, <b>independent of the decoded value's type</b>. It is NOT
+        /// <c>result.Type != Null</c>: <see cref="MvtDecoder"/> stores a present-but-<see cref="MvtValueNative.Null"/>
+        /// value for a Value sub-message with no recognized field (empty / unknown-field — legal protobuf a
+        /// non-conformant tile can carry), and managed <c>has</c> reports that key as present. <c>get</c> may
+        /// ignore <paramref name="found"/> (a present-Null and an absent key both read as <c>Null</c>, which
+        /// is exactly what managed <c>get</c> yields for both); only <c>has</c> must key off it.</para></summary>
+        private NativeValue ReadTag(int keyIndex, out bool found)
         {
+            found = false;
             if (keyIndex < 0) return NativeValue.Null;
             int pairCount = TagCount / 2;
             for (int i = pairCount - 1; i >= 0; i--)
@@ -204,6 +262,7 @@ namespace MapRenderer.Jobs.Mvt
                 if ((int)TagWords[TagOffset + i * 2] != keyIndex) continue;
                 int valIdx = (int)TagWords[TagOffset + i * 2 + 1];
                 if (valIdx < 0 || valIdx >= Values.Length) continue;
+                found = true;
                 return Values[valIdx].ToNativeValue();
             }
             return NativeValue.Null;
@@ -218,6 +277,8 @@ namespace MapRenderer.Jobs.Mvt
             return NativeFilterError.None;
         }
 
+        /// <summary>Pops the top value; returns false (leaving <paramref name="value"/> default) if the
+        /// stack is empty, which the caller maps to <c>StackOverflow</c>.</summary>
         private static bool Pop(ref FixedList128Bytes<NativeValue> stack, out NativeValue value)
         {
             if (stack.Length == 0) { value = default; return false; }

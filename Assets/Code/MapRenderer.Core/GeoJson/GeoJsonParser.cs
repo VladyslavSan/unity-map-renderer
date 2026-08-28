@@ -74,7 +74,6 @@ namespace MapRenderer.Core.GeoJson
 
                 features.Add(new GeoJsonFeature
                 {
-                    HasId             = false,
                     Id                = Value.Null,
                     Properties        = EmptyProperties,
                     GeometryType      = geometryType,
@@ -113,8 +112,7 @@ namespace MapRenderer.Core.GeoJson
 
             return new GeoJsonFeature
             {
-                HasId             = TryReadId(feature, featureIndex, out Value id),
-                Id                = id,
+                Id                = ReadId(feature, featureIndex),
                 Properties        = ReadProperties(feature, featureIndex),
                 GeometryType      = geometryType,
                 Paths             = paths,
@@ -122,18 +120,15 @@ namespace MapRenderer.Core.GeoJson
             };
         }
 
-        private static bool TryReadId(JsonValue feature, int featureIndex, out Value id)
+        private static Value ReadId(JsonValue feature, int featureIndex)
         {
             if (!feature.TryGet("id", out JsonValue raw))
-            {
-                id = Value.Null;
-                return false;
-            }
+                return Value.Null;
 
             switch (raw.Kind)
             {
-                case JsonKind.String: id = Value.String(raw.AsString()); return true;
-                case JsonKind.Number: id = Value.Number(raw.AsDouble()); return true;
+                case JsonKind.String: return Value.String(raw.AsString());
+                case JsonKind.Number: return Value.Number(raw.AsDouble());
                 default:
                     throw new GeoJsonFormatException(
                         $"GeoJSON feature {featureIndex} has an \"id\" of kind {raw.Kind}; " +

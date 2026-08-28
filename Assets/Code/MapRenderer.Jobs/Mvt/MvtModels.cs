@@ -28,62 +28,42 @@ namespace MapRenderer.Jobs.Mvt
     public sealed class MvtFeature : IFeature, IIndexedFeature
     {
         /// <summary>Geometry type (MVT Feature.type field).</summary>
-        public TileGeometryType GeometryType;
+        public TileGeometryType GeometryType { get; init; }
 
         /// <summary>
-        /// Feature id decoded from MVT Feature field 1 (uint64 varint). Valid only when
-        /// <see cref="HasId"/> is true. Note: id=0 is a valid feature id per the MVT spec —
-        /// use <see cref="HasId"/> for presence, never compare Id to 0.
+        /// Feature id decoded from MVT Feature field 1 (uint64 varint), or <see cref="Value.Null"/> when
+        /// field 1 was absent. Note: id=0 is a valid feature id per the MVT spec — an absent id is
+        /// <see cref="Value.Null"/>, never a zero <see cref="Value.Number"/>.
         ///
-        /// Precision note: uint64 values larger than 2^53 lose precision when exposed as a
-        /// <c>double</c> via <see cref="IFeature.Id"/> at the expression layer. The raw <c>ulong</c>
-        /// here preserves the full value for any future consumer that reads it directly.
+        /// Precision note: uint64 values larger than 2^53 lose precision when narrowed to the
+        /// <c>double</c> a <see cref="Value.Number"/> stores — accepted, since every real consumer already
+        /// reads the id as a double.
         /// </summary>
-        public ulong Id;
-
-        /// <summary>True when field 1 was present in the encoded feature message.</summary>
-        public bool HasId;
+        public Value Id { get; init; } = Value.Null;
 
         /// <summary>
-        /// The property store backing <see cref="Properties"/> and <see cref="IFeature.TryGetProperty"/> —
-        /// set by <see cref="MvtDecoder"/> once the layer's key/value tables are complete. Internal:
-        /// production code goes through the decoder, never hand-assembles a store.
+        /// The property store backing <see cref="Properties"/> and <see cref="IFeature.TryGetProperty"/>.
+        /// Set once at construction (<see cref="MvtDecoder"/> builds each feature complete, with its store,
+        /// once the layer's key/value tables exist); defaults to <see cref="EmptyPropertyStore.Instance"/>
+        /// so it is never null — a feature with no properties holds the Null Object, not <c>null</c>.
         /// </summary>
-        internal IMvtPropertyStore Store { get; set; }
+        internal IMvtPropertyStore Store { get; init; } = EmptyPropertyStore.Instance;
 
-        /// <summary>Decoded properties, materialized from <see cref="Store"/>. Always non-null — an empty
-        /// dictionary when <see cref="Store"/> is unset.</summary>
-        public IReadOnlyDictionary<string, Value> Properties => Store?.AsDictionary() ?? EmptyProperties;
-
-        private static readonly Dictionary<string, Value> EmptyProperties = new Dictionary<string, Value>();
+        /// <summary>Decoded properties, materialized from <see cref="Store"/> (empty for a feature whose
+        /// store is the <see cref="EmptyPropertyStore"/>).</summary>
+        public IReadOnlyDictionary<string, Value> Properties => Store.AsDictionary();
 
         // ── IFeature — the retired MvtFeatureAdapter's semantics, folded verbatim ────────────────────
 
         TileGeometryType IFeature.GeometryType => GeometryType;
-        bool             IFeature.HasId        => HasId;
 
-        /// <remarks>Returns <see cref="Value.Number"/> of the uint64 id cast to double. Values larger
-        /// than 2^53 lose precision at this boundary; the raw <see cref="Id"/> field preserves the full
-        /// value for any future non-double consumer. (MvtFeatureAdapter.cs:42, folded verbatim.)</remarks>
-        Value IFeature.Id => HasId ? Value.Number((double)Id) : Value.Null;
-
-        bool IFeature.TryGetProperty(string name, out Value value)
-        {
-            if (Store != null) return Store.TryGet(name, out value);
-            value = Value.Null;
-            return false;
-        }
+        bool IFeature.TryGetProperty(string name, out Value value) => Store.TryGet(name, out value);
 
         IReadOnlyDictionary<string, Value> IFeature.Properties => Properties;
 
         /// <summary>The string→id key hoist's int-keyed read: forwards to <see cref="Store"/>.</summary>
         bool IIndexedFeature.TryGetPropertyByKeyIndex(int keyIndex, out Value value)
-        {
-            if (Store != null) return Store.TryGetByKeyIndex(keyIndex, out value);
-            value = Value.Null;
-            return false;
-        }
-
+            => Store.TryGetByKeyIndex(keyIndex, out value);
     }
 
     /// <summary>

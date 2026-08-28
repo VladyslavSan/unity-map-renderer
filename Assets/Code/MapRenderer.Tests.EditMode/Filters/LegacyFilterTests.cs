@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Filters
         [Test]
         public void EqId_AbsentId_NoMatch()
         {
-            // feature 0 and 4 and 5 have no id; HasId=false -> id expression yields Null
+            // feature 0 and 4 and 5 have no id -> id expression yields Null
             var result = Select("[\"==\",\"$id\",1]");
             Assert.IsFalse(result.Contains(0), "feature 0 (no id) should not match $id==1");
             Assert.IsFalse(result.Contains(4), "feature 4 (no id) should not match $id==1");

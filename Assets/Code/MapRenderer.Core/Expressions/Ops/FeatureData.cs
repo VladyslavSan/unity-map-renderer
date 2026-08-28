@@ -42,7 +42,7 @@ namespace MapRenderer.Core.Expressions.Ops
             {
                 if (ctx.Feature == null)
                     throw new ExpressionEvaluationException("id: no feature in context.");
-                return ctx.Feature.HasId ? ctx.Feature.Id : Value.Null;
+                return ctx.Feature.Id;
             }, ValueType.Value);
         }
 

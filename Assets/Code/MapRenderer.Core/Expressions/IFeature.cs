@@ -15,10 +15,8 @@ namespace MapRenderer.Core.Expressions
         /// <summary>The feature's geometry type. Maps to the spec strings Point/LineString/Polygon.</summary>
         TileGeometryType GeometryType { get; }
 
-        /// <summary>True when the feature has an id (the <c>id</c> expression is an error otherwise — spec).</summary>
-        bool HasId { get; }
-
-        /// <summary>The feature id (string or number per MVT); valid only when <see cref="HasId"/>.</summary>
+        /// <summary>The feature id (String or Number per MVT), or <see cref="Value.Null"/> when the feature
+        /// has no id.</summary>
         Value Id { get; }
 
         /// <summary>True and yields the property value when the feature has property <paramref name="name"/>.</summary>

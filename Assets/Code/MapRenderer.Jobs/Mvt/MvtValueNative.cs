@@ -70,7 +70,7 @@ namespace MapRenderer.Jobs.Mvt
             switch (Type)
             {
                 case ValueType.String: return NativeValue.String(_stringId);
-                case ValueType.Number: return NativeValue.Number(_number);
+                case ValueType.Number: return NativeValue.Numeric(_number);
                 case ValueType.Boolean: return NativeValue.Bool(_number != 0.0);
                 default: return NativeValue.Null;
             }

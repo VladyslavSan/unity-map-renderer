@@ -34,7 +34,6 @@ namespace MapRenderer.Tests.Expressions
             public int ByIndexCalls { get; private set; }
 
             public TileGeometryType GeometryType => TileGeometryType.Unknown;
-            public bool HasId => false;
             public Value Id => Value.Null;
             public IReadOnlyDictionary<string, Value> Properties => EmptyProperties;
             private static readonly Dictionary<string, Value> EmptyProperties = new Dictionary<string, Value>();
