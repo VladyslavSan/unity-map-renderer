@@ -398,7 +398,7 @@ GameObject:
   - component: {fileID: 300000004}
   - component: {fileID: 300000007}
   m_Layer: 0
-  m_Name: MapBootstrapper
+  m_Name: MapHost
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -444,8 +444,13 @@ MonoBehaviour:
     MaxMeshBuildsPerTick: 2
     MaxVerticesPerTick: 50000
     MaxReleasesPerTick: 4
+    MaxConcurrentTileLoads: 12
+    PriorityStrategy: 0
+    SymbolPlacementThrottleFrames: 1
+    FillTileBufferClip: 0
     SymbolTileCoverageCull: 0.001
-    Backend: 0
+    SymbolMaxDistanceFraction: 1
+    Backend: 2
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
     PreparedCache:
       Enabled: 1
@@ -463,8 +468,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bf01f2a6f0fb743a6bdffe9ea7ea8fb5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapController
-  Map: {fileID: 0}
-  Camera: {fileID: 0}
   ZoomSensitivity: 0.5
   KeyboardZoomStep: 2
   BearingSensitivity: 0.3
@@ -505,7 +508,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f764aa4dcc26249138aaf4adf26ba8df, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.CameraControlPanel
-  Map: {fileID: 300000003}
   Zoom: 14
   Tilt: 0
   Heading: 0
@@ -524,7 +526,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5da27bab377744121a84c49751149e45, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.MapTelemetryPanel
-  Map: {fileID: 300000003}
   VisibleTileCount: 0
   CoverColumns: 0
   CoverRows: 0
@@ -550,13 +551,19 @@ MonoBehaviour:
   PreparedCacheByteBudget: 0
   PreparedCacheFillPercent: 0
   PreparedCacheEvictions: 0
-  SymbolActiveLabelTiles: 0
-  SymbolCachedLabelTiles: 0
-  SymbolInputLabelCount: 0
-  SymbolDistanceCulledLabels: 0
+  SymbolActiveTiles: 0
+  SymbolCachedTiles: 0
+  SymbolCoverageDropped: 0
+  SymbolInputCount: 0
+  SymbolDistanceCulled: 0
+  SymbolCoverageFading: 0
+  SymbolZoomCulled: 0
   SymbolCollisionCandidates: 0
   SymbolCollisionSurvivors: 0
   SymbolPlacedQuads: 0
+  SymbolLiveFade: 0
+  SymbolMirrorRebuilds: 0
+  SymbolMirrorRebuildsPerSecond: 0
 --- !u!1 &856564744
 GameObject:
   m_ObjectHideFlags: 0

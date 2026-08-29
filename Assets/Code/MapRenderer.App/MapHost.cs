@@ -103,6 +103,10 @@ namespace MapRenderer.App
 
         private void Start()
         {
+            // Log the perf-relevant runtime settings first — Burst/threading state that is otherwise
+            // invisible in a player and silently makes the build slow (a switched-off editor Burst toggle).
+            RuntimeDiagnostics.Log();
+
             // 0. Cap the frame rate to the display refresh (VSync) — uncapped rendering serves no
             //    purpose for a map demo and just spins up the GPU/fans. vSyncCount=1 = every v-blank.
             if (CapFrameRateToRefreshRate)
