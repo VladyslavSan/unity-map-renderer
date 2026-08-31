@@ -18,7 +18,8 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
                  │  decode + extract features — off the main thread (thread pool), sharing the mesh
                  │  pass's decode (A4/A5b: one decode-once entry, no parallel push feed)
                  │  shape glyphs (HarfBuzz-free CodepointTextShaper, bidi, Arabic joining)  (Core/Text)
-                 │  ShapeAsync writes each raw label into a reused SymbolTileBuffer (no per-label alloc)
+                 │  Shape writes each raw label into a reused SymbolTileBuffer (no per-label alloc), after
+                 │  the tail's one glyph-ensure suspension has already populated the atlas
                  ▼
      SymbolTileBuffer ─▶ Bake ─▶ SymbolTileBlock ──▶ SymbolTileStore   (Unity/Text)
                  │  native per-tile SoA block; per-(source,tile) sets, collected-set Version, static-frame skip

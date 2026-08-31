@@ -61,7 +61,7 @@ MapRenderer.Core (engine-free, headless-testable; UniTask via NetCore build)
 
 MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Object lifecycle)
   UnityWebRequestDataSource : UnityWebRequest + .ToUniTask()  ← efficient production HTTP, zero Task
-  MapView mesh-build/consume : UniTask.RunOnThreadPool → SwitchToMainThread
+  MapView mesh-build/consume : IWorkScheduler.Schedule → WorkHandle<T> (poll/consume; no PlayerLoop hop)
   Mesh/GameObject create + Object.Destroy : MAIN THREAD ONLY
   cancellation : destroyCancellationToken
 ```
@@ -70,6 +70,29 @@ MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Obje
 `Task` and there's no Task-free HTTP in engine-free BCL — so real HTTP moves to the Unity
 `UnityWebRequestDataSource`, while Core defines only the `UniTask` contract and ships a Task-free file/fixture
 impl. A test-only impl *may* fall back to `Task`/`HttpClient` as an explicit escape hatch, but we don't need it.
+
+### CPU-offload update: `IWorkScheduler`/`WorkHandle<T>`, not unconditionally UniTask
+
+This doc originally stated UniTask as the unconditional primitive for "threading lives in the Unity layer".
+That no longer holds for CPU offload: `UnityEngine`'s managed ThreadPool is not wired to WebGL web workers
+(`docs/threading-on-web.md`), so `UniTask.RunOnThreadPool` silently never runs its body there. The tile
+pipeline's CPU-offload sites (decode dispatch, then the mesh-build kicks) now go through
+`MapRenderer.Unity/Concurrency/IWorkScheduler` — `ThreadPoolWorkScheduler` (desktop/editor, reproducing the
+old `RunOnThreadPool` dispatch byte-for-byte) or `InlineWorkScheduler` (WebGL, runs the body synchronously on
+the calling thread) — and the result travels as a `WorkHandle<T>`, not a bare `UniTask<T>`. Every I/O await
+(HTTP fetch, `SwitchToMainThread`) is unaffected and still goes through UniTask exactly as designed above;
+this is a CPU-offload-only correction, not a reopening of "why UniTask".
+
+### `TileScheduler`'s negative-cache TTL
+
+A fetch reporting `HasData=false` (HTTP 404/204, a missing file) is deliberately NOT written to the LRU
+`TileCache`. Two simpler alternatives were rejected: caching the absent response in the LRU (no expiry —
+a transient 404 would stick until LRU eviction, arbitrarily far in the future) and not caching it at all
+(a permanently-missing *visible* tile would re-fetch every single frame). Instead it goes into a small
+scheduler-level negative cache with a short, injectable-clock TTL: a re-request within the TTL returns
+absent without hitting the source; after it expires, the tile is re-fetched. The short TTL is the middle
+ground — a recovered tile reappears promptly, while per-frame re-fetch storms are suppressed. The clock is
+injectable so tests advance time deterministically, with no wall-clock sleeps.
 
 ## Disposal & cancellation contract (where these renderers leak)
 
@@ -117,6 +140,15 @@ continuation resumes on the main thread — the single choke-point that owns the
 **Leak-guard test (teeth):** drive N tiles through load→release including the race (release a tile whose
 mesh build result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
 `NativeLeakDetection`/alloc-vs-dispose counts) and **zero orphaned `Mesh`** (created-vs-destroyed count).
+
+### `TileScheduler.Dispose` does not drain in-flight fetches
+
+`TileScheduler.Dispose` cancels and disposes the per-tile CTSs and clears its maps, but does not block to
+await outstanding fetches first. This is deliberate: `Dispose` can be called from the main thread, and a
+blocking drain there risks deadlock if a fetch's completion needs that same thread to make progress.
+In-flight fetches are cancelled best-effort instead; a late completion is harmless because the CTS-identity
+guard skips the cache write. A future caller that genuinely needs to await outstanding fetches before
+disposing should add an explicit `DrainAsync()` method rather than making `Dispose` itself block.
 
 ## Packaging
 

@@ -12,6 +12,7 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
@@ -88,6 +89,7 @@ namespace MapRenderer.Tests.Tiles
         private sealed class ProbeFeatureSource : ITileFeatureSource
         {
             private readonly byte[] _bytes;
+            private static readonly IWorkScheduler Scheduler = new ThreadPoolWorkScheduler();
 
             internal readonly LeaseProbeDecoder Probe = new LeaseProbeDecoder();
             internal bool Serving = true;
@@ -105,7 +107,7 @@ namespace MapRenderer.Tests.Tiles
             {
                 UniTaskCompletionSource gate = Gate;
                 if (gate != null) await gate.Task;
-                return await TileDecodeDispatch.DecodeAsync(id, _bytes, Probe);
+                return await TileDecodeDispatch.DecodeAsync(id, _bytes, Probe, Scheduler);
             }
 
             public void Release(TileId id) { }

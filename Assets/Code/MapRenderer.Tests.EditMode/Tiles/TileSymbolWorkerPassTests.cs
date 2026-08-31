@@ -1,11 +1,10 @@
-// Unity EditMode only — MvtTile/UniTask/CancellationToken over the committed fixture. NOT registered in
+// Unity EditMode only — MvtTile/CancellationToken over the committed fixture. NOT registered in
 // core-tests.csproj.
 
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Collections;
@@ -51,7 +50,7 @@ namespace MapRenderer.Tests.Tiles
         // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
 
         /// <summary>Records ProcessOnWorker invocations (order + the observed decoded-tile reference + the
-        /// source-layer buffer that tile hands back) into a SHARED log, and counts CompleteOnMainAsync calls
+        /// source-layer buffer that tile hands back) into a SHARED log, and counts CompleteOnMain calls
         /// so a test can assert the runner never invokes the tail.
         /// <para><b>IR C1 P3 — what the third column became.</b> Under P2 it recorded the pass-scoped
         /// <c>TileGeometryStore</c>, because a <c>null</c> or per-processor store was output-neutral (each
@@ -68,7 +67,7 @@ namespace MapRenderer.Tests.Tiles
             private readonly int _order;
             private readonly List<(int order, IDecodedTile tile, NativeArray<double2> buffer)> _log;
 
-            public int CompleteOnMainAsyncCallCount { get; private set; }
+            public int CompleteOnMainCallCount { get; private set; }
 
             public LayerPhase Phase { get; }
 
@@ -84,10 +83,9 @@ namespace MapRenderer.Tests.Tiles
             public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
                 => _log.Add((_order, tile, tile?.GetLayer(ProbeSourceLayer)?.Geometry.Vertices ?? default));
 
-            public UniTask CompleteOnMainAsync(CancellationToken ct)
+            public void CompleteOnMain(CancellationToken ct)
             {
-                CompleteOnMainAsyncCallCount++;
-                return UniTask.CompletedTask;
+                CompleteOnMainCallCount++;
             }
         }
 
@@ -128,9 +126,9 @@ namespace MapRenderer.Tests.Tiles
             Assert.IsTrue(log[0].buffer.Equals(log[2].buffer),
                 "every symbol processor must borrow the SAME source-layer buffer");
 
-            Assert.AreEqual(0, p0.CompleteOnMainAsyncCallCount, "the runner must never invoke the main-thread tail");
-            Assert.AreEqual(0, p1.CompleteOnMainAsyncCallCount, "the runner must never invoke the main-thread tail");
-            Assert.AreEqual(0, p2.CompleteOnMainAsyncCallCount, "the runner must never invoke the main-thread tail");
+            Assert.AreEqual(0, p0.CompleteOnMainCallCount, "the runner must never invoke the main-thread tail");
+            Assert.AreEqual(0, p1.CompleteOnMainCallCount, "the runner must never invoke the main-thread tail");
+            Assert.AreEqual(0, p2.CompleteOnMainCallCount, "the runner must never invoke the main-thread tail");
         }
 
         [Test]

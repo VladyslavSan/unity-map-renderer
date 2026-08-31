@@ -26,7 +26,7 @@ namespace MapRenderer.Tests.Text
     /// <para><b>Why a differential oracle, and why NOT <c>SymbolProcessorParityTests</c>.</b> That suite's two
     /// arms BOTH run through <c>StyledSymbolTileBuilder.ExtractLayers</c> → <c>SymbolFeatureExtractor.Extract</c>
     /// — the exact code B4 changes — so B4's rewire lands identically in both and the tooth cannot disagree
-    /// about it, whatever it breaks. (Its own doc states the premise: "only ExtractLayers/ShapeAsync, <i>which
+    /// about it, whatever it breaks. (Its own doc states the premise: "only ExtractLayers/Shape, <i>which
     /// A3 does not modify</i>, are shared." B4 modifies them; that premise expires with this stage.) It stays a
     /// valuable REGRESSION tooth and stays green unedited, but it is not B4's acceptance tooth. T1 below is:
     /// arm A is <c>MvtGeometry.Decode</c> — the OLD implementation, running live, in code B4 does not touch —

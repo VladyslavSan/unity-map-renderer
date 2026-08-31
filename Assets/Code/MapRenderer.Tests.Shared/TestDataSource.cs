@@ -3,10 +3,10 @@
 // across the test suite.
 //
 // Engine-free by design: it references only byte[]/TileId/UniTask/CancellationToken/TileEncoding — NO
-// `using UnityEngine`. DataSourceTests.cs (which uses this) is compiled by BOTH the Unity EditMode runner
-// AND the fast Tools/core-tests project, so anything it touches must compile engine-free. The matching
-// <Compile Include> for this file lives in Tools/core-tests/core-tests.csproj (that project is not
-// glob-based — the entry is required).
+// `using UnityEngine`. TileSchedulerOrderingTests.cs (which uses this) is compiled by BOTH the Unity
+// EditMode runner AND the fast Tools/core-tests project, so anything it touches must compile engine-free.
+// The matching <Compile Include> for this file lives in Tools/core-tests/core-tests.csproj (that project
+// is not glob-based — the entry is required).
 
 using System;
 using System.Threading;

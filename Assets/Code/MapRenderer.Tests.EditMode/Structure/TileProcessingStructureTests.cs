@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Structure
         // Anchors the method DEFINITION (return-type-prefixed), not one of KickMeshBuild's several call
         // sites elsewhere in TileManager.cs (which read just "KickMeshBuild(...)" with no return type
         // before them) — this substring is unique to the signature.
-        private const string KickMeshBuildSignatureAnchor = "UniTask<MeshBuildResult> KickMeshBuild(";
+        private const string KickMeshBuildSignatureAnchor = "WorkHandle<MeshBuildResult> KickMeshBuild(";
 
         [Test]
         public void TileManager_DelegatesDecodeAndLayerWritesToTheProcessorRunner()
@@ -128,7 +128,15 @@ namespace MapRenderer.Tests.Structure
         /// source (decode at <c>BuildTileAsync</c>'s old <c>:324</c>, <c>ExtractLayers</c> at <c>:325</c>,
         /// <c>ShapeAsync</c> at <c>:333</c>, no runner call) this test FAILS on all four forms — adding the
         /// interface/processor as an unused façade while <c>BuildTileAsync</c> keeps its inline decode/
-        /// extract/shape (the "rename" non-implementation) cannot pass.</summary>
+        /// extract/shape (the "rename" non-implementation) cannot pass.
+        /// <para>Glyph-fetch hoist: <c>ShapeAsync</c> was renamed to the synchronous <c>Shape</c>, so the
+        /// call-form assertion checks BOTH <c>".ShapeAsync("</c> (must stay dead — the identifier no longer
+        /// exists) AND <c>"_builder.Shape("</c> (must also be absent — the shape loop still runs entirely
+        /// inside <c>TileSymbolLayerProcessor.CompleteOnMain</c>, never called directly by the subsystem).
+        /// Anchored on the concrete call form, not a bare <c>".Shape("</c> — the bare form would also ban the
+        /// identifier from appearing in PROSE (a comment or XML doc explaining why it is not called), which
+        /// is not what this tooth is checking. The two forms are independently meaningful:
+        /// <c>".ShapeAsync("</c> does not contain <c>"_builder.Shape("</c>.</para></summary>
         [Test]
         public void SymbolSubsystem_DelegatesDecodeExtractAndShapeToTheProcessorMachinery()
         {
@@ -139,6 +147,7 @@ namespace MapRenderer.Tests.Structure
 
             const string extractLayersCallForm = ".ExtractLayers(";
             const string shapeAsyncCallForm    = ".ShapeAsync(";
+            const string shapeCallForm         = "_builder.Shape(";
             const string runSymbolCallForm     = "TileLayerProcessorRunner.RunSymbolWorkerPass(";
 
             Assert.AreEqual(0, CountOccurrences(source, DecodeCallForm),
@@ -148,8 +157,12 @@ namespace MapRenderer.Tests.Structure
                 $"SymbolSubsystem.cs must contain ZERO direct '{extractLayersCallForm}' call sites — " +
                 "per-layer extraction now happens inside TileSymbolLayerProcessor.ProcessOnWorker.");
             Assert.AreEqual(0, CountOccurrences(source, shapeAsyncCallForm),
-                $"SymbolSubsystem.cs must contain ZERO direct '{shapeAsyncCallForm}' call sites — " +
-                "per-layer shaping now happens inside TileSymbolLayerProcessor.CompleteOnMainAsync.");
+                $"SymbolSubsystem.cs must contain ZERO direct '{shapeAsyncCallForm}' call sites — the " +
+                "identifier no longer exists (renamed to Shape by the glyph-fetch hoist).");
+            Assert.AreEqual(0, CountOccurrences(source, shapeCallForm),
+                $"SymbolSubsystem.cs must contain ZERO direct '{shapeCallForm}' call sites — " +
+                "per-layer shaping still happens inside TileSymbolLayerProcessor.CompleteOnMain, never " +
+                "called directly by the subsystem.");
             Assert.AreEqual(1, CountOccurrences(source, runSymbolCallForm),
                 $"SymbolSubsystem.cs must call '{runSymbolCallForm}' exactly once — the single " +
                 "decode-once fan-out point for the symbol worker pass.");
@@ -254,8 +267,8 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(coreOffenders,
                 $"no file under MapRenderer.Core may call '{DecodeCallForm}' — IR C1 moved the whole tile-" +
-                "decode seam out of Core (ARCHITECTURE.md §2: the product is Unity + Jobs; Core is a " +
-                $"convenience, never the preferred home for logic). Found it in: {string.Join(", ", coreOffenders)}");
+                "decode seam out of Core (ARCHITECTURE.md §2: the product is Unity + Jobs; Core is legacy, " +
+                $"not a destination for new code). Found it in: {string.Join(", ", coreOffenders)}");
         }
 
         /// <summary>Epic A / A6 (plan §E-13, F-1 — WriteInto-path neutralization, structural). The
@@ -461,12 +474,14 @@ namespace MapRenderer.Tests.Structure
                 "reference it owns and releases. Successor to the R1-era IDecodedTileHandle clause.");
         }
 
-        /// <summary>Epic A / A7 (plan §F tooth 6, §G-1): pins the pool-completion invariant
+        /// <summary>Epic A / A7 (plan §F tooth 6, §G-1): pins the off-PlayerLoop invariant
         /// <c>DrainMeshBuilds</c>'s spin-on-<c>IsCompleted</c> depends on — <c>MvtTileFeatureSource.GetTile</c>
-        /// must introduce NO main-thread hop (the scheduler's own continuation already ends on the pool), or
-        /// the drain-spin would never observe completion without pumping the PlayerLoop (the exact A5b
-        /// <c>KickMeshBuild</c> hazard this mirrors). Lightweight/structural — the behavioural net is the
-        /// <c>DrainMeshBuilds</c> snapshot/leak exercise elsewhere in the suite (plan §F-5).</summary>
+        /// must introduce NO main-thread hop (completion stays off the PlayerLoop, supplied by the decode hop
+        /// on the <c>HasData</c> path and by synchronous/inline completion otherwise — not by the fetch
+        /// scheduler, which introduces no thread-pool hop of its own), or the drain-spin would never observe
+        /// completion without pumping the PlayerLoop (the exact A5b <c>KickMeshBuild</c> hazard this mirrors).
+        /// Lightweight/structural — the behavioural net is the <c>DrainMeshBuilds</c> snapshot/leak exercise
+        /// elsewhere in the suite (plan §F-5).</summary>
         [Test]
         public void MvtTileFeatureSource_GetTile_NeverHopsToMainThread()
         {
@@ -478,9 +493,10 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(0, CountOccurrences(source, "SwitchToMainThread"),
                 "MvtTileFeatureSource.cs must contain ZERO 'SwitchToMainThread' occurrences — GetTile's " +
-                "continuation must stay on the pool (the scheduler's own SwitchToThreadPool already handles " +
-                "this), preserving the configureAwait:false pool-completion invariant DrainMeshBuilds' spin " +
-                "depends on (Epic A / A7 §G-1).");
+                "continuation must stay off the PlayerLoop (supplied by TileDecodeDispatch.DecodeAsync on " +
+                "the HasData path, and by synchronous/inline completion otherwise — not by the fetch " +
+                "scheduler, which introduces no thread-pool hop of its own), preserving the off-PlayerLoop " +
+                "invariant DrainMeshBuilds' spin depends on (Epic A / A7 §G-1).");
         }
 
         /// <summary>Epic A / A6.1 (plan §F-1 — rename-complete structural tooth): asserts zero occurrences,
@@ -730,8 +746,9 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>
-        /// D1 fix (funnel 4): the parked drain's dispatch must take <b>no</b> cancellation token, and both
-        /// of its ownership-guard releases must sit in a <c>finally</c> rather than a trailing statement.
+        /// D1 fix (funnel 4), updated for the WorkScheduler migration: the parked drain must dispatch through
+        /// <c>WorkScheduler.Schedule</c>, and both of its ownership-guard releases must sit in a <c>finally</c>
+        /// rather than a trailing statement.
         ///
         /// <para><b>What is NOT here any more, and why.</b> This tooth used to count
         /// <c>DecodeRef.Dispose()</c> spellings and justify itself with "the ct-drop is unreachable from a
@@ -746,19 +763,20 @@ namespace MapRenderer.Tests.Structure
         /// retired <c>AParkEnqueuedAfterItsCancellersDrain_…</c>. What is left here is the residue no
         /// runtime test can see.</para>
         ///
-        /// <para><b>The <c>cancellationToken:</c> clause is the load-bearing one</b>, and it is genuinely
-        /// structural: passing <c>cancellationToken: captured.Ct</c> makes UniTask skip the delegate
-        /// entirely, and the delegate is the only release for a dispatched entry — but reaching that state
-        /// needs a cancellation landing between the drain's own check and the dispatch, which is the one
-        /// window a test cannot force. It is narrowed to the DISPATCH CALL now (arm 1 NIT 4): the old form
-        /// forbade the token anywhere in <c>PumpBuilds</c> and would have tripped on an unrelated future
-        /// dispatch, for the wrong reason.</para>
+        /// <para><b>The old <c>cancellationToken:</c> clause retired, not weakened.</b> Under
+        /// <c>UniTask.RunOnThreadPool</c>, passing <c>cancellationToken: captured.Ct</c> made UniTask skip the
+        /// delegate entirely — and the delegate was the only release, so a skip would leak. Under
+        /// <c>IWorkScheduler.Schedule</c> that hazard does not exist: the interface's own contract is that a
+        /// body is never skipped based on its token (poll, not push — <c>IWorkScheduler.cs</c>), which
+        /// <c>WorkSchedulerContractTests</c> pins directly. So the dispatch here MAY pass <c>captured.Ct</c> —
+        /// it is inert for skip purposes, kept only for symmetry with <c>KickMeshBuild</c>'s idiom — and the
+        /// in-lambda ct check is what actually guards the work, exactly as it did before.</para>
         ///
-        /// <para><b>RED injections:</b> restore <c>cancellationToken: captured.Ct</c> on the dispatch; or
-        /// move either guard release out of its <c>finally</c> into a trailing statement.</para>
+        /// <para><b>RED injections:</b> revert the dispatch to <c>UniTask.RunOnThreadPool</c>; or move either
+        /// guard release out of its <c>finally</c> into a trailing statement.</para>
         /// </summary>
         [Test]
-        public void TheParkedDrainsDispatch_TakesNoCancellationToken_AndItsGuardReleasesSitInFinallys()
+        public void TheParkedDrainsDispatch_GoesThroughTheWorkScheduler_AndItsGuardReleasesSitInFinallys()
         {
             string path = Path.Combine(
                 Application.dataPath, "Code", "MapRenderer.Unity", "Text", "SymbolSubsystem.cs");
@@ -770,17 +788,30 @@ namespace MapRenderer.Tests.Structure
                 ExtractMethodBody(source, "private void DrainAndDiscardParkedBuilds(", path));
 
             // ── The dispatch, narrowed to its own argument list ──────────────────────────────────────
-            int dispatchIndex = pumpBody.IndexOf("UniTask.RunOnThreadPool(", StringComparison.Ordinal);
+            Assert.AreEqual(0, CountOccurrences(pumpBody, "UniTask.RunOnThreadPool"),
+                "PumpBuilds must no longer dispatch the parked drain's worker phase through raw " +
+                "UniTask.RunOnThreadPool — it is dead on WebGL (docs/threading-on-web.md).");
+            // The dispatch must reach the INJECTED policy, so the body may not mint a scheduler of its own:
+            // `new InlineWorkScheduler().Schedule(` hard-codes the policy while still reading like a dispatch,
+            // and the substring check below is unanchored enough that a type merely NAMED *WorkScheduler would
+            // satisfy it. Both construction forms are therefore banned outright.
+            Assert.AreEqual(0, CountOccurrences(pumpBody, "new InlineWorkScheduler"),
+                "PumpBuilds must dispatch through the injected WorkScheduler property, never a locally " +
+                "constructed InlineWorkScheduler — that hard-codes the policy and defeats platform selection.");
+            Assert.AreEqual(0, CountOccurrences(pumpBody, "new ThreadPoolWorkScheduler"),
+                "PumpBuilds must dispatch through the injected WorkScheduler property, never a locally " +
+                "constructed ThreadPoolWorkScheduler — WorkSchedulerFactory is the only construction site.");
+            int dispatchIndex = pumpBody.IndexOf("WorkScheduler.Schedule(", StringComparison.Ordinal);
             Assert.GreaterOrEqual(dispatchIndex, 0,
-                "PumpBuilds must still dispatch the parked drain's worker phase through " +
-                "UniTask.RunOnThreadPool — a direct call would put a full extract on the frame thread.");
+                "PumpBuilds must dispatch the parked drain's worker phase through WorkScheduler.Schedule — a " +
+                "direct call would put a full extract on the frame thread, and a raw " +
+                "UniTask.RunOnThreadPool would be dead on WebGL.");
             string dispatchCall = ExtractParenAfter(pumpBody, dispatchIndex, path);
-            Assert.AreEqual(0, CountOccurrences(dispatchCall, "cancellationToken:"),
-                "PumpBuilds' parked dispatch must NOT pass a cancellationToken to RunOnThreadPool. A " +
-                "cancelled token makes UniTask skip the delegate, and the delegate's `finally` is the only " +
-                "release site for a dispatched entry's reference — the exact hazard that got option T " +
-                "rejected, reached again by the eager decode and handled here. The in-lambda ct check inside " +
-                "the try is the equivalent guard and keeps the finally reachable.");
+            Assert.IsTrue(CountOccurrences(dispatchCall, "captured.Ct") > 0,
+                "the dispatch must forward captured.Ct to Schedule — mirrors KickMeshBuild's idiom. Unlike " +
+                "UniTask.RunOnThreadPool's cancellationToken:, IWorkScheduler.Schedule never skips the body " +
+                "based on this token (WorkSchedulerContractTests pins that contract directly), so passing it " +
+                "here is inert for skip purposes; the in-lambda ct check below is what actually guards.");
 
             // ── PLACEMENT, not presence: the two guard releases are in `finally` blocks ───────────────
             int releasesInFinallys = 0;
@@ -887,8 +918,8 @@ namespace MapRenderer.Tests.Structure
         /// <para><b>RED injections:</b> re-add a caller-side <c>lt.Decode = null;</c> after either kick call;
         /// remove the prologue <c>decode.Acquire()</c> (a leak-balance regression the runtime
         /// <c>EagerDecodeOwnershipTests</c> teeth catch, not this one); or move <c>decode.Release()</c> out
-        /// of the lambda's <c>finally</c>; or remove the guard <c>catch</c> around the pool hand-off (a leak
-        /// on a synchronous <c>RunOnThreadPool</c> throw).</para>
+        /// of the body's <c>finally</c>; or remove the guard <c>catch</c> around the
+        /// <c>IWorkScheduler.Schedule</c> hand-off (a leak on a synchronous dispatch throw).</para>
         /// </summary>
         [Test]
         public void KickMeshBuild_AcquiresItsOwnReference_AndNeitherCallerNullsTheRecordsField()
@@ -899,25 +930,25 @@ namespace MapRenderer.Tests.Structure
             string source   = File.ReadAllText(path);
             string stripped = StripComments(source);
             string body     = StripComments(
-                ExtractMethodBody(source, "UniTask<MeshBuildResult> KickMeshBuild(", path));
+                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickMeshBuild(", path));
 
             Assert.AreEqual(1, CountOccurrences(body, "decode.Acquire()"),
                 "KickMeshBuild must call 'decode.Acquire()' exactly once — its OWN reference, taken in the " +
-                "main-thread prologue before the pool lambda exists. R1 retires the transfer: the record no " +
+                "main-thread prologue before the scheduler call exists. R1 retires the transfer: the record no " +
                 "longer hands this reference over, so the kick must take a separate one of its own.");
             Assert.AreEqual(2, CountOccurrences(body, "decode.Release()"),
-                "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — the pool lambda's `finally` " +
-                "(success path) and the guard `catch` around the Acquire()->RunOnThreadPool hand-off (which " +
-                "can throw synchronously — OOM — before the lambda runs). They are mutually exclusive by " +
+                "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — the body's `finally` " +
+                "(success path) and the guard `catch` around the Acquire()->IWorkScheduler.Schedule hand-off " +
+                "(which can throw synchronously — OOM — before the body runs). They are mutually exclusive by " +
                 "control flow, so each reference is released exactly once; a THIRD would be a real double-free.");
             Assert.AreEqual(1, CountOccurrences(body, "finally"),
                 "…the success release is a `finally`, not a trailing statement — the mesh pass can throw, and " +
                 "a release it skips leaks the kick's own token on the fault path.");
             Assert.IsTrue(Regex.IsMatch(body, @"catch\s*\{\s*decode\.Release\(\);\s*throw;\s*\}"),
                 "…and the SECOND release is a guard `catch { decode.Release(); throw; }` around the " +
-                "Acquire()->RunOnThreadPool hand-off (mirrors TryParkBuild): a synchronous hand-off throw " +
-                "frees the kick's own reference instead of leaking it. Remove the rethrow and it swallows the " +
-                "fault; remove the release and it leaks (the lambda's finally never runs).");
+                "Acquire()->IWorkScheduler.Schedule hand-off (mirrors TryParkBuild): a synchronous hand-off " +
+                "throw frees the kick's own reference instead of leaking it. Remove the rethrow and it " +
+                "swallows the fault; remove the release and it leaks (the body's finally never runs).");
 
             Assert.AreEqual(3, CountOccurrences(stripped, "KickMeshBuild("),
                 "TileManager.cs must contain exactly three 'KickMeshBuild(' occurrences: the definition and " +
@@ -942,6 +973,53 @@ namespace MapRenderer.Tests.Structure
                     "lifetime, and RenderTeardownRecord (funnel 1) is the only release. A null-out here is " +
                     "the retired transfer shape leaking back in.");
             }
+        }
+
+        /// <summary>
+        /// The mesh-build kick migration: both <c>KickMeshBuild</c> and <c>KickSourcelessBackground</c> must
+        /// dispatch through the injected <c>IWorkScheduler</c>, never <c>UniTask.RunOnThreadPool</c> directly
+        /// — the WebGL fix (docs/threading-on-web.md), since <c>RunOnThreadPool</c> never runs its delegate
+        /// on a web player (no managed background threads). Structural companion to the runtime
+        /// <c>InjectedScheduler_Runs…OnTheCallingThread</c> teeth, which prove the POLICY is honored; this one
+        /// proves the PLACEMENT — that both kick sites reach the scheduler at all, not just one of them.
+        ///
+        /// <para>The <c>.Preserve()</c> check is scoped to the two kick bodies, not the whole file: the
+        /// fetch's own <c>.Preserve()</c> (bucket B — <c>AdmitTile</c>) is untouched by this stage and must
+        /// survive.</para>
+        ///
+        /// <para><b>RED injection:</b> revert either kick's dispatch back to
+        /// <c>UniTask.RunOnThreadPool(…, configureAwait: false).Preserve()</c> — genuinely RED today (both
+        /// kicks still use it pre-migration).</para>
+        /// </summary>
+        [Test]
+        public void MeshBuildKicks_DispatchThroughTheWorkScheduler()
+        {
+            string path = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "TileManager.cs");
+            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
+            string source   = File.ReadAllText(path);
+            string stripped = StripComments(source);
+
+            // Counted on STRIPPED text, not raw source — a comment merely mentioning either token (e.g. a
+            // "why not RunOnThreadPool" explanation) must not satisfy or defeat these counts.
+            Assert.AreEqual(0, CountOccurrences(stripped, "UniTask.RunOnThreadPool"),
+                "TileManager.cs must contain ZERO 'UniTask.RunOnThreadPool' call sites — both mesh-build " +
+                "kicks now dispatch through IWorkScheduler, the only policy that runs on a WebGL player.");
+            Assert.AreEqual(2, CountOccurrences(stripped, "WorkScheduler.Schedule("),
+                "TileManager.cs must contain exactly two 'WorkScheduler.Schedule(' call sites — one for " +
+                "KickMeshBuild, one for KickSourcelessBackground.");
+
+            string meshBuildBody = StripComments(
+                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickMeshBuild(", path));
+            string sourcelessBody = StripComments(
+                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickSourcelessBackground(", path));
+
+            Assert.AreEqual(0, CountOccurrences(meshBuildBody, ".Preserve()"),
+                "KickMeshBuild must not call .Preserve() — WorkHandle<T>.GetResult() is repeatable once " +
+                "terminal with no recycling hazard (the backing completion source never recycles), so the " +
+                "wrapper this stage retires from KickMeshBuild is genuinely unnecessary, not just deleted.");
+            Assert.AreEqual(0, CountOccurrences(sourcelessBody, ".Preserve()"),
+                "KickSourcelessBackground must not call .Preserve() either — same WorkHandle<T> contract.");
         }
 
         /// <summary>

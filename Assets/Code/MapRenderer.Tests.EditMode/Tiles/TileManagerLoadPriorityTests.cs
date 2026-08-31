@@ -21,6 +21,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
@@ -59,6 +60,36 @@ namespace MapRenderer.Tests.Tiles
         {
             double2 ll = tile.ToLonLat(0.5, 0.5, 1.0);
             return (ll.x, ll.y);
+        }
+
+        /// <summary>Renders what the manager actually did — which tiles are built, and where the priority
+        /// head sits — so a first-build-order failure names the tile that won instead of reporting a bare
+        /// <c>False</c>. Diagnosis of an order-dependent failure otherwise costs a whole session of
+        /// guessing.</summary>
+        /// <param name="view">The map view under test, after the kicking tick.</param>
+        /// <param name="tileA">The pre-pan center.</param>
+        /// <param name="tileB">The post-pan center, expected to build first.</param>
+        /// <returns>A one-line "[diagnostic] …" suffix for an assertion message.</returns>
+        private static string DescribeBuildOutcome(MapViewComponent view, TileId tileA, TileId tileB)
+        {
+            var loaded = new List<TileId>();
+            view.CollectLoadedTileIds(loaded);
+
+            var built = new List<string>();
+            foreach (TileId id in loaded)
+                if (view.TryGetBuiltTile(id)) built.Add(Name(id, tileA, tileB));
+
+            return $"[diagnostic] built={{{string.Join(", ", built)}}} " +
+                   $"desiredHead={Name(view.DesiredHeadTile(), tileA, tileB)} " +
+                   $"loadedCount={loaded.Count} A={tileA.Z}/{tileA.X}/{tileA.Y} B={tileB.Z}/{tileB.X}/{tileB.Y}";
+
+            static string Name(TileId id, TileId a, TileId b)
+            {
+                string coords = $"{id.Z}/{id.X}/{id.Y}";
+                if (id.Equals(a)) return "A(" + coords + ")";
+                if (id.Equals(b)) return "B(" + coords + ")";
+                return coords;
+            }
         }
 
         /// <summary>A per-tile GATED data source: every fetch stays pending until <see cref="Release"/> is
@@ -128,7 +159,11 @@ namespace MapRenderer.Tests.Tiles
 
             try
             {
-                view.LoadTestStyle(gated.Source, Cam(lonA, latA, 5.0), style: FillStyle());
+                // Inline decode: this tooth asserts the ORDER PumpPending kicks in, so every candidate
+                // must be kick-eligible at the same tick. The default off-main decode lands across an
+                // unpredictable number of ticks (see the ReleaseAll comment below).
+                view.LoadTestStyle(gated.Source, Cam(lonA, latA, 5.0), style: FillStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
 
                 // Tick 1: admits the WHOLE cover (insertion order == A-priority order). Every fetch is held
                 // PENDING by the gate, so nothing can be kicked yet regardless of ThreadPool timing. (An
@@ -153,33 +188,56 @@ namespace MapRenderer.Tests.Tiles
                     "guard: still nothing kicked after the pan — if this fires, the fixture raced ahead of " +
                     "the pan and the test below would be vacuous.");
 
-                // NOW complete every fetch at once — so by the first kicking tick EVERY cover tile is
-                // fetch-complete and PumpPending's priority sort ranks the FULL set, not just whichever fetch
-                // won a race. With all candidates present, the B-centered sort must kick B first.
+                // NOW complete every fetch at once. The decode hop is INLINE for this fixture (see the
+                // LoadTestStyle call above), so every released fetch is also decoded by the time this
+                // returns — which is what makes the next tick rank the FULL cover instead of whichever
+                // subset happened to be ready. Under the default off-main decode that subset varies per
+                // run, and the sort then ranks a partial set: the tooth silently measures readiness order
+                // instead of priority order.
                 gated.ReleaseAll();
 
-                // Pump to the FIRST tick that kicks anything at all.
-                int frames = 0;
-                while (view.MeshBuildsKickedLastTick() == 0 && frames++ < 3000)
-                {
-                    view.LateUpdate();
-                    if (view.MeshBuildsKickedLastTick() > 0) break;
-                    view.AwaitInFlightMeshBuilds();
-                }
+                // Exactly TWO ticks, both deterministic — no "pump until something happens" scan, which is
+                // what let a partial ready-set through. Absorbing a completed fetch and kicking its build
+                // are separate ticks: tick 1 takes every decode (asserted below), tick 2 kicks the single
+                // highest-priority candidate from the now-complete ready-set.
+                view.LateUpdate();
+
+                Assert.AreEqual(0, view.InFlightCount(),
+                    "precondition: every fetch must have landed in ONE tick — if any are still in flight, " +
+                    "the kick below would rank a PARTIAL ready-set and this tooth would be measuring " +
+                    "decode-completion order, not priority order.");
+                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
+                    "guard: the fetch-absorbing tick must not kick — if it does, the kick raced the " +
+                    "decodes and the ready-set was partial after all.");
+
+                view.LateUpdate();
 
                 Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
                     "precondition: exactly one kick must fire on the first kicking tick (cap=1).");
+
+                // Sampled AT the kicking tick: if work is still in flight here, the kick chose from a
+                // PARTIAL ready-set and the priority sort never saw the full cover.
+                var atKick = new List<TileId>();
+                view.CollectLoadedTileIds(atKick);
+                var kickCam  = Cam(lonB, latB, 5.0);
+                var kickCtx  = TilePriorityContext.From(in kickCam, new double2(TestViewportPx, TestViewportPx),
+                    new WebMercatorProjection(), view.Config.PriorityStrategy);
+                string kickDiag = $"atKick: inFlight={view.InFlightCount()} loaded={atKick.Count} " +
+                                  $"priorityArgMin={ArgMin(atKick, in kickCtx)}";
 
                 // Let that ONE kicked build complete and consume on the NEXT tick, without giving a second
                 // kick's build time to complete too.
                 view.AwaitInFlightMeshBuilds();
                 view.LateUpdate();
 
+                string outcome = DescribeBuildOutcome(view, tileA, tileB) + " " + kickDiag;
+
                 Assert.IsTrue(view.TryGetBuiltTile(tileB),
                     "tile B — the NEW center after the pan — must be the FIRST tile built under a " +
-                    "1-kick-per-tick cap, even though A was admitted (inserted) first.");
+                    "1-kick-per-tick cap, even though A was admitted (inserted) first. " + outcome);
                 Assert.IsFalse(view.TryGetBuiltTile(tileA),
-                    "tile A must NOT be built yet — it is no longer the highest priority after the pan.");
+                    "tile A must NOT be built yet — it is no longer the highest priority after the pan. " +
+                    outcome);
                 Assert.IsFalse(view.AllTilesSettled(),
                     "sanity: the cover has more than one tile — only B should be built yet.");
             }

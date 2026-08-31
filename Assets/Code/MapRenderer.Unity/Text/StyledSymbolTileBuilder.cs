@@ -26,12 +26,14 @@ namespace MapRenderer.Unity.Text
     /// project anchor → <see cref="SymbolFeature"/>); this adds the Unity-side shaping the symbols need to
     /// render.
     ///
-    /// <para><b>Deferred two-pass build (the locked threading model).</b> Symbols do NOT have to complete in
-    /// one synchronous pass. <see cref="BuildAsync"/> first REQUESTS every glyph range the tile's symbols
-    /// need (<see cref="GlyphManager.EnsureFontStackRangeAsync"/> — the async fetch/decode/atlas-append),
-    /// and only THEN, once the glyphs are in the shared atlas, shapes + lays out each symbol and emits the
-    /// <see cref="ShapedSymbol"/>. So a tile whose glyphs are still fetching produces its symbols a frame or
-    /// two later rather than stalling the tile-consume critical path.</para>
+    /// <para><b>Deferred three-step build (the locked threading model).</b> Symbols do NOT have to complete
+    /// in one synchronous pass. <see cref="BuildAsync"/> runs <see cref="CollectRequiredRanges"/> (pure,
+    /// sync — gathers every glyph range the tile's symbols need), then <see cref="EnsureGlyphRangesAsync"/>
+    /// (the ONE suspension point — the async fetch/decode/atlas-append for that whole set), and only THEN,
+    /// once the glyphs are in the shared atlas, <see cref="Shape"/> (sync, no suspension) shapes + lays out
+    /// each symbol and emits the <see cref="ShapedSymbol"/>. So a tile whose glyphs are still fetching
+    /// produces its symbols a frame or two later rather than stalling the tile-consume critical path, and
+    /// shaping itself never interleaves with an atlas append.</para>
     /// </summary>
     public sealed class StyledSymbolTileBuilder
     {
@@ -40,7 +42,7 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>Monotonic count of symbols skipped because their build threw a non-cancellation exception
         /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
-        /// only (ShapeAsync is the main tail) — no synchronization.</summary>
+        /// only (Shape is the main tail) — no synchronization.</summary>
         internal int SkippedSymbolCount { get; private set; }
 
         /// <summary>Type+message of the most recent skip, for the subsystem's throttled diagnostic log
@@ -53,22 +55,7 @@ namespace MapRenderer.Unity.Text
             _glyphManager = glyphManager ?? throw new System.ArgumentNullException(nameof(glyphManager));
         }
 
-        /// <summary>
-        /// Build every symbol symbol of <paramref name="symbolLayers"/> over <paramref name="tile"/> and
-        /// append them to <paramref name="buffer"/> (caller-owned — the per-build reused buffer of F5's
-        /// lifecycle). Pass 1 requests every glyph (async); pass 2, once they're in the shared atlas,
-        /// shapes + lays out + emits. Emission order matches <see cref="SymbolFeatureExtractor"/>'s per-tile
-        /// ordinal, so <see cref="ShapedSymbol.FeatureIndex"/> stays the stable S20 tiebreak.
-        ///
-        /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
-        /// production atlas with a fixed dimension): the atlas <c>Size</c> never changes as glyphs append,
-        /// so a tile laid out early keeps valid UVs when a later tile adds glyphs. A growing atlas would
-        /// invalidate earlier tiles' UVs — see the glyph-atlas-uv-growth-staleness lesson.</para>
-        /// </summary>
-        /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
-        /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
-        /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>
-        /// <summary>One symbol layer's extracted symbols + the shaping inputs carried to <see cref="ShapeAsync"/>.
+        /// <summary>One symbol layer's extracted symbols + the shaping inputs carried to <see cref="Shape"/>.
         /// All fields are engine-free Core types, so the whole list is worker-safe.</summary>
         public readonly struct ExtractedLayer
         {
@@ -83,7 +70,7 @@ namespace MapRenderer.Unity.Text
         /// WORKER-SAFE (Stage B): SELECT + project each symbol layer's <see cref="SymbolFeature"/>s off the main
         /// thread. Touches only <see cref="SymbolFeatureExtractor"/> + immutable parsed layers + the stateless
         /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
-        /// may run it on the thread pool. Returns the shaping inputs <see cref="ShapeAsync"/> consumes on main.
+        /// may run it on the thread pool. Returns the shaping inputs <see cref="Shape"/> consumes on main.
         /// </summary>
         /// <param name="spriteAtlas">Forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
         /// <c>null</c> (the default) yields no icon symbols, so omitting this argument is behaviour-preserving.
@@ -113,9 +100,22 @@ namespace MapRenderer.Unity.Text
             return result;
         }
 
-        /// <summary>Convenience (tests + the demo path): extract then shape in one call. The subsystem's live
-        /// path instead runs <see cref="ExtractLayers"/> on a worker and <see cref="ShapeAsync"/> on main.</summary>
-        public UniTask BuildAsync(
+        /// <summary>Convenience (tests + the demo path): extract then shape in one call — collects every
+        /// needed glyph range, ensures it (async), then shapes + lays out + emits every symbol of <paramref
+        /// name="symbolLayers"/> over <paramref name="tile"/> into <paramref name="buffer"/> (caller-owned —
+        /// the per-build reused buffer of F5's lifecycle). Emission order matches
+        /// <see cref="SymbolFeatureExtractor"/>'s per-tile ordinal, so <see cref="ShapedSymbol.FeatureIndex"/>
+        /// stays the stable S20 tiebreak. The subsystem's live path instead runs <see cref="ExtractLayers"/>
+        /// on a worker and the collect/ensure/<see cref="Shape"/> sequence on main.
+        ///
+        /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
+        /// production atlas with a fixed dimension): the atlas <c>Size</c> never changes as glyphs append,
+        /// so a tile laid out early keeps valid UVs when a later tile adds glyphs. A growing atlas would
+        /// invalidate earlier tiles' UVs — see the glyph-atlas-uv-growth-staleness lesson.</para></summary>
+        /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
+        /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
+        /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>
+        public async UniTask BuildAsync(
             IDecodedTile tile,
             TileId tileId,
             IReadOnlyList<StyleLayer> symbolLayers,
@@ -126,26 +126,116 @@ namespace MapRenderer.Unity.Text
             CancellationToken ct = default,
             MapRenderer.Core.Text.Sprites.SpriteAtlasView spriteAtlas = null)
         {
-            if (buffer == null) return UniTask.CompletedTask;
-            return ShapeAsync(ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas), buffer, ct);
+            if (buffer == null) return;
+            List<ExtractedLayer> extracted = ExtractLayers(tile, tileId, symbolLayers, zoom, projection, materialIndices, spriteAtlas);
+            // Per-call locals: BuildAsync has zero production callers (tests + the demo path only), so this
+            // allocation is not on the data plane (conventions-short.md, native-first rule's carve-out).
+            var ranges = new List<(string FontName, int RangeStart)>();
+            var seen = new HashSet<(string FontName, int RangeStart)>();
+            CollectRequiredRanges(extracted, ranges, seen);
+            await EnsureGlyphRangesAsync(ranges, ct);
+            Shape(extracted, buffer, ct);
         }
 
         /// <summary>
-        /// MAIN-THREAD: pass 1 requests every glyph range the pre-extracted symbols need (async fetch/decode/
-        /// atlas-append), then pass 2 shapes + lays out + emits each <see cref="ShapedSymbol"/> into
-        /// <paramref name="buffer"/>. Reads the shared glyph cache/atlas, so it runs on the main thread (Stage
-        /// C moves shaping to a worker via an immutable snapshot). Emission order matches the extractor's
-        /// per-tile ordinal (stable FeatureIndex).
+        /// WORKER-OR-MAIN, pure and synchronous: collects every distinct <c>(fontName, rangeStart)</c> pair
+        /// <paramref name="extractedLayers"/>' symbols will need once shaped, into <paramref name="into"/> in
+        /// FIRST-ENCOUNTER order (layers → symbols → UTF-16 code units → stack names — the exact order the
+        /// deferred two-pass build used to fetch in). <b>That order is load-bearing, not stylistic:</b>
+        /// <see cref="GlyphAtlas"/> is an insertion-order shelf packer, so this order determines every baked
+        /// glyph's UV — reordering it (e.g. emitting from <paramref name="seen"/> instead of <paramref
+        /// name="into"/>) diffs every golden snapshot that shapes text. <paramref name="seen"/> is a
+        /// caller-owned dedup scope, cleared once per BUILD (not per layer) so the set is build-wide.
+        ///
+        /// <para>This reproduces the set pass 1 used to REQUEST, not the set the shaper's presentation-form
+        /// mapping (Arabic joining) actually RESOLVES — the two differ (a pre-existing, deferred gap; see
+        /// <c>symbol-jobification-exploration.md</c> finding F1), and this method must not "fix" that: doing
+        /// so would fetch a different glyph set and change rendering output.</para>
         /// </summary>
-        public async UniTask ShapeAsync(
+        /// <param name="extractedLayers">This build's <see cref="ExtractLayers"/> output; null is a no-op.</param>
+        /// <param name="into">Appended to, in first-encounter order; not cleared by this method.</param>
+        /// <param name="seen">The dedup set backing <paramref name="into"/>; not cleared by this method — the
+        /// caller controls the dedup scope (one build, or narrower).</param>
+        public void CollectRequiredRanges(
+            List<ExtractedLayer> extractedLayers,
+            List<(string FontName, int RangeStart)> into,
+            HashSet<(string FontName, int RangeStart)> seen)
+        {
+            if (extractedLayers == null || into == null || seen == null) return;
+
+            for (int el = 0; el < extractedLayers.Count; el++)
+            {
+                ExtractedLayer       layerEx   = extractedLayers[el];
+                List<SymbolFeature>  extracted = layerEx.Symbols;
+                FontStack            fontStack = layerEx.FontStack;
+                if (fontStack?.Names == null) continue;
+
+                // I5a: an icon symbol carries no Text (null) — skip it here BEFORE dereferencing .Length, or
+                // an icon-only layer NREs on its very first symbol.
+                for (int i = 0; i < extracted.Count; i++)
+                {
+                    if (extracted[i].Kind == SymbolKind.Icon) continue;
+                    string text = extracted[i].Text;
+                    // UTF-16 CODE UNIT, not a decoded codepoint — deliberately reproduces the pre-existing
+                    // surrogate-pair gap (deferred; see symbol-jobification-exploration.md). Do not "fix" this
+                    // into a combined-codepoint walk; that changes the requested set.
+                    for (int c = 0; c < text.Length; c++)
+                    {
+                        int rangeStart = FontStackResolver.ComputeRangeStart(text[c]);
+                        // ALL stack names, not just the winner — GlyphManager.EnsureFontStackRangeAsync fetches
+                        // every name because which font wins isn't known until FontStackResolver.Resolve runs
+                        // against the populated cache; collecting only the first name would kill fallback fonts.
+                        for (int n = 0; n < fontStack.Names.Count; n++)
+                        {
+                            string name = fontStack.Names[n];
+                            if (name == null) continue;
+                            var key = (name, rangeStart);
+                            if (seen.Add(key)) into.Add(key);
+                        }
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// MAIN-THREAD, the ONE surviving suspension point of a symbol build: fetches/decodes/caches/appends
+        /// every range in <paramref name="ranges"/> (typically <see cref="CollectRequiredRanges"/>'s build-wide
+        /// output) into the shared atlas. Calls <see cref="GlyphManager.EnsureFontRangeAsync"/> directly, NOT
+        /// <see cref="GlyphManager.EnsureFontStackRangeAsync"/> — the stack expansion already happened in the
+        /// collect step, so re-expanding here would refetch each name once per distinct codepoint again.
+        /// </summary>
+        /// <param name="ranges">Every <c>(fontName, rangeStart)</c> pair to ensure, in the order to fetch them.</param>
+        public async UniTask EnsureGlyphRangesAsync(
+            List<(string FontName, int RangeStart)> ranges, CancellationToken ct = default)
+        {
+            if (ranges == null) return;
+            for (int i = 0; i < ranges.Count; i++)
+                await _glyphManager.EnsureFontRangeAsync(ranges[i].FontName, ranges[i].RangeStart, ct);
+        }
+
+        /// <summary>
+        /// MAIN-THREAD, synchronous, no suspension point: shapes + lays out + emits each
+        /// <see cref="ShapedSymbol"/> into <paramref name="buffer"/>, reading the shared glyph cache/atlas that
+        /// <see cref="EnsureGlyphRangesAsync"/> already finished populating for this build — this method never
+        /// mutates the atlas. Reads the shared glyph cache/atlas, so it runs on the main thread (Stage C moves
+        /// shaping to a worker via an immutable snapshot). Emission order matches the extractor's per-tile
+        /// ordinal (stable FeatureIndex).
+        ///
+        /// <para><b>No new cancellation checks were added here.</b> This method's only cancellation-observation
+        /// point (the deleted fetch <c>await</c>) is gone, so a cancel landing mid-shape now lets the loop run
+        /// to completion into a buffer the caller then discards — commit semantics are unchanged, since the
+        /// caller's trailing <c>ThrowIfCancellationRequested</c> was, and remains, the sole partial-commit
+        /// guard.</para>
+        /// </summary>
+        public void Shape(
             List<ExtractedLayer> extractedLayers, SymbolTileBuffer buffer, CancellationToken ct = default)
         {
             if (extractedLayers == null || buffer == null) return;
 
             // PER-CALL locals (not instance fields): SymbolSubsystem shares one _builder across
             // tails whose starts are budgeted per frame but never awaited to completion (RunTailAsync /
-            // PumpBuilds), so two ShapeAsync calls can be interleaved on the main thread. A local lives in
-            // this call's own async state machine, so concurrent calls never share it. `buffer` itself is
+            // PumpBuilds), so two Shape calls can be interleaved on the main thread. A local lives in
+            // this call's own stack frame, so concurrent calls never share it. `buffer` itself is
             // NOT one of these — it is rented per-build by SymbolSubsystem (the pairing-adjacency rule:
             // every layer processor of ONE build must write into the SAME buffer instance).
             var glyphScratch = new List<PositionedGlyph>();
@@ -163,22 +253,11 @@ namespace MapRenderer.Unity.Text
                 int               materialIndex = layerEx.MaterialIndex;
                 FontStack         fontStack     = layerEx.FontStack;
 
-                // Pass 1 — REQUEST every glyph the symbols need (async fetch/decode/atlas-append). Each
-                // (fontStack, range) is fetched at most once (GlyphManager caches), so repeated codepoints
-                // and repeated names are cheap. I5a: an icon symbol carries no Text (null) — skip it here
-                // BEFORE dereferencing .Length, or an icon-only layer NREs on its very first symbol.
-                for (int i = 0; i < extracted.Count; i++)
-                {
-                    if (extracted[i].Kind == SymbolKind.Icon) continue;
-                    string text = extracted[i].Text;
-                    for (int c = 0; c < text.Length; c++)
-                        await _glyphManager.EnsureFontStackRangeAsync(fontStack, text[c], ct);
-                }
-
-                // Pass 2 — the glyphs are in the shared atlas: shape + lay out + emit. I5a: the resolver is
-                // only needed by TEXT symbols (an icon-only layer may carry no text-font at all), so it is
-                // built lazily on first use rather than unconditionally — an icon-only layer never touches
-                // the font stack / GlyphManager resolver machinery.
+                // The glyphs are already in the shared atlas (EnsureGlyphRangesAsync ran before this call):
+                // shape + lay out + emit. I5a: the resolver is only needed by TEXT symbols (an icon-only
+                // layer may carry no text-font at all), so it is built lazily on first use rather than
+                // unconditionally — an icon-only layer never touches the font stack / GlyphManager resolver
+                // machinery.
                 FontStackResolver resolver = null;
                 for (int i = 0; i < extracted.Count; i++)
                 {

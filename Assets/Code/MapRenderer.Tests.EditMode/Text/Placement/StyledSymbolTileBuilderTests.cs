@@ -49,7 +49,7 @@ namespace MapRenderer.Tests.Text.Placement
         private const string FontName = "LatinFont";
         private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
 
-        // 4.4c: ShapeAsync/BuildAsync now write a SymbolTileBuffer instead of a per-symbol managed carrier list —
+        // 4.4c: Shape/BuildAsync now write a SymbolTileBuffer instead of a per-symbol managed carrier list —
         // this helper reads back one symbol's quad span (the buffer analogue of `symbol.Layout.Quads`).
         private static List<SymbolQuad> QuadsOf(SymbolTileBuffer buffer, int i)
         {
@@ -202,7 +202,7 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         [Test]
-        public async Task Shape_MixedDirectionSymbol_IsSkipped_OtherSymbolsSurvive()
+        public void Shape_MixedDirectionSymbol_IsSkipped_OtherSymbolsSurvive()
         {
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
@@ -221,7 +221,7 @@ namespace MapRenderer.Tests.Text.Placement
                 0, new FontStack { Names = new[] { FontName } }, symbols);
 
             var output = new SymbolTileBuffer();
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             // The whole tile is NOT aborted: the two LTR symbols build; only the mixed one is skipped.
             Assert.AreEqual(2, output.Symbols.Count, "the two LTR labels survive; the mixed label is skipped");
@@ -233,13 +233,12 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void Shape_CancelledGlyphFetch_PropagatesCancellation_CommitsNothing()
+        public void EnsureGlyphRanges_Cancelled_PropagatesCancellation()
         {
-            // A glyph source that OBSERVES the token (FromRanges discards it), so Pass 1's await surfaces the
-            // cancel. Pins that a cancelled build propagates an OperationCanceledException and commits no symbols.
-            // NOTE: the cancel throws in Pass 1 (unguarded), so this exercises cancel PROPAGATION, not the
-            // Pass-2 catch's OCE exclusion filter (the Pass-2 body observes no ct — that exclusion is
-            // inspection-verified, not pinned here).
+            // A glyph source that OBSERVES the token (FromRanges discards it), so the ensure step's await
+            // surfaces the cancel. Pins that a cancelled ensure propagates an OperationCanceledException.
+            // (Shape never running as a consequence is pinned by T1/T5c, not here — this body never calls
+            // Shape, so an assertion about its output would be true under any implementation.)
             var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -251,22 +250,24 @@ namespace MapRenderer.Tests.Text.Placement
             var symbols = new List<SymbolStyle.SymbolFeature> { PointSymbol("Aruba") };
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(
                 0, new FontStack { Names = new[] { FontName } }, symbols);
+            var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer };
 
             using var cts = new CancellationTokenSource();
             cts.Cancel();
 
-            var output = new SymbolTileBuffer();
+            var ranges = new List<(string FontName, int RangeStart)>();
+            var seen = new HashSet<(string FontName, int RangeStart)>();
+            builder.CollectRequiredRanges(extractedLayers, ranges, seen);
+
             // CatchAsync (not ThrowsAsync) so the assertion accepts any OperationCanceledException SUBTYPE: the
             // Unity/Mono UniTask path surfaces cancellation as TaskCanceledException (an OCE subclass), the
             // dotnet path as a plain OperationCanceledException. The production filter uses `ex is OCE`, so it
             // correctly excludes both from the per-symbol skip — the test must be equally subtype-tolerant.
             Assert.CatchAsync<OperationCanceledException>(async () =>
-                await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output, cts.Token));
-            Assert.AreEqual(0, output.Symbols.Count, "a cancelled build commits no labels");
-            Assert.AreEqual(0, builder.SkippedSymbolCount, "cancellation is not a per-label skip");
+                await builder.EnsureGlyphRangesAsync(ranges, cts.Token));
         }
 
-        // ── I5a: icon symbols ride the same ShapeAsync Pass-1/Pass-2 loop as text, but must never touch the
+        // ── I5a: icon symbols ride the same Shape loop as text, but must never touch the
         //    shaper/resolver/glyph-fetch machinery (an icon-only layer may carry no text-font at all). ──
 
         private static SymbolStyle.SymbolFeature Icon(in SymbolQuad iconQuad) => new SymbolStyle.SymbolFeature
@@ -286,7 +287,7 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         [Test]
-        public async Task Shape_IconOnlyLayer_YieldsOneIcon_NoGlyphFetch_NoShaping()
+        public void Shape_IconOnlyLayer_YieldsOneIcon_NoGlyphFetch_NoShaping()
         {
             // A glyph source that THROWS if ever asked — an icon-only layer must never reach Pass 1's fetch.
             var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
@@ -299,7 +300,7 @@ namespace MapRenderer.Tests.Text.Placement
             var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(), symbols);
 
             var output = new SymbolTileBuffer();
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             Assert.AreEqual(1, output.Symbols.Count, "the icon label must still be emitted");
             Assert.AreEqual(0, builder.SkippedSymbolCount, "an icon build must never be skipped");
@@ -311,7 +312,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public async Task Shape_MixedTextAndIconLayer_YieldsBothKinds_InOriginalOrder()
+        public void Shape_MixedTextAndIconLayer_YieldsBothKinds_InOriginalOrder()
         {
             using var manager = BuildGlyphManager();
             var builder = new StyledSymbolTileBuilder(manager);
@@ -326,7 +327,7 @@ namespace MapRenderer.Tests.Text.Placement
                 0, new FontStack { Names = new[] { FontName } }, symbols);
 
             var output = new SymbolTileBuffer();
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             Assert.AreEqual(3, output.Symbols.Count, "text + icon + text, all three survive");
             Assert.AreEqual(0, builder.SkippedSymbolCount);
@@ -338,7 +339,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A3 (P-B): a MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
         //    The point-icon branch above stays byte-identical (its own tooth is the pair above). ──
         [Test]
-        public async Task Shape_AlongLineIcon_BuildsOneGlyphCurvedInstance_NotAPointInstance()
+        public void Shape_AlongLineIcon_BuildsOneGlyphCurvedInstance_NotAPointInstance()
         {
             var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
                 throw new InvalidOperationException("an icon-only layer must never request a glyph range"));
@@ -367,7 +368,7 @@ namespace MapRenderer.Tests.Text.Placement
                 new List<SymbolStyle.SymbolFeature> { alongLine });
 
             var output = new SymbolTileBuffer();
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
 
             Assert.AreEqual(1, output.Symbols.Count);
             ShapedSymbol built = output.Symbols[0];
@@ -404,13 +405,13 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── 4.4c pairing-adjacency tooth (step4.4-plan.md §4.4c A's TRAP): every layer processor of ONE
         //    build must write into the SAME SymbolTileBuffer, or SymbolPairing's owner-at-i+1 resolution
-        //    breaks. TileSymbolLayerProcessor.CompleteOnMainAsync calls ShapeAsync ONCE PER LAYER — this
-        //    reproduces that shape directly: two ShapeAsync calls sharing one buffer, an owner tailing the
+        //    breaks. TileSymbolLayerProcessor.CompleteOnMain calls Shape ONCE PER LAYER — this
+        //    reproduces that shape directly: two Shape calls sharing one buffer, an owner tailing the
         //    FIRST call and its rider heading the SECOND. RED-verify: give the second call its OWN fresh
         //    buffer instead (the violation) — Bake would then see the owner alone (PairRoles[0] dissolves
         //    to None, its rider never in the same block) rather than a resolved pair. ──
         [Test]
-        public async Task ShapeAsync_TwoCallsShareOneBuffer_OwnerLastOfFirstCall_RiderFirstOfSecondCall_ResolveAsPair()
+        public void Shape_TwoCallsShareOneBuffer_OwnerLastOfFirstCall_RiderFirstOfSecondCall_ResolveAsPair()
         {
             using var manager = new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
             var builder = new StyledSymbolTileBuilder(manager);
@@ -437,10 +438,10 @@ namespace MapRenderer.Tests.Text.Placement
                 materialIndex, new FontStack(), new List<SymbolStyle.SymbolFeature> { riderSymbol });
 
             var buffer = new SymbolTileBuffer();
-            // "processor 1" and "processor 2" — mirrors TileSymbolLayerProcessor's one-ShapeAsync-call-per-layer
+            // "processor 1" and "processor 2" — mirrors TileSymbolLayerProcessor's one-Shape-call-per-layer
             // shape, both fed the SAME shared buffer (the rule TileSymbolLayerProcessor/TryBeginBuild wire up).
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1 }, buffer);
-            await builder.ShapeAsync(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer2 }, buffer);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1 }, buffer);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer2 }, buffer);
 
             Assert.AreEqual(2, buffer.Symbols.Count, "both calls must land in the SAME buffer");
 

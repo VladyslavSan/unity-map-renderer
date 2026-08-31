@@ -3,7 +3,6 @@
 using System;
 using System.IO;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
@@ -88,7 +87,7 @@ namespace MapRenderer.Tests.Tiles
             public LayerPhase Phase => LayerPhase.WorkerThenMain;
             public CapturingSymbolProcessor(IDecodedTile[] box) => _box = box;
             public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context) => _box[0] = tile;
-            public UniTask CompleteOnMainAsync(CancellationToken ct) => UniTask.CompletedTask;
+            public void CompleteOnMain(CancellationToken ct) { }
         }
 
         // ── F-1: cross-cadence ReferenceEquals, both arrival orders ──────────────────────────────────────

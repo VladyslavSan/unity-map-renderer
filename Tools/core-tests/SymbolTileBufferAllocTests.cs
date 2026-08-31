@@ -21,12 +21,12 @@ namespace MapRenderer.Tests.Text.Placement
     /// its pooled lists' backing capacity has stabilized — the entire point of replacing a fresh per-symbol
     /// managed carrier list (plus a per-symbol layout-result object graph) per tile with one reused buffer.
     ///
-    /// <para><b>Scope note</b> (the zero-alloc claim is NOT "all of <c>ShapeAsync</c>"): <c>ShapedRun</c>
-    /// (<c>StyledSymbolTileBuilder.ShapeAsync</c>, `:268`) is a genuine, deliberate per-symbol allocation with
+    /// <para><b>Scope note</b> (the zero-alloc claim is NOT "all of <c>Shape</c>"): <c>ShapedRun</c>
+    /// (<c>StyledSymbolTileBuilder.Shape</c>, `:268`) is a genuine, deliberate per-symbol allocation with
     /// no caller-buffer variant — out of scope, and <c>StyledSymbolTileBuilder</c> itself needs
     /// <c>Unity.Collections</c> transitively so it cannot run here anyway. This tooth targets exactly what
     /// IS reused: the buffer buffer's own <see cref="SymbolTileBuffer.AddSymbol"/> +
-    /// <see cref="SymbolTileBuffer.AppendQuads"/> pool-append path, which is the piece ShapeAsync's four
+    /// <see cref="SymbolTileBuffer.AppendQuads"/> pool-append path, which is the piece Shape's four
     /// emit sites and the baker both drive.</para>
     /// </summary>
     [TestFixture]

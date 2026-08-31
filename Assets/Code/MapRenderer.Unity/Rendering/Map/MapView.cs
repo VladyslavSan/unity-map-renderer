@@ -12,6 +12,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
@@ -296,8 +297,9 @@ namespace MapRenderer.Unity.Rendering.Map
         internal async UniTask<List<Tile.TileManager.SourceSpec>> BuildSourceSpecs(
             StyleDocument style, CancellationToken ct)
         {
-            var loader  = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
-            var factory = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
+            var loader    = DocumentLoaderOverride    ?? StyleDocumentLoader.LoadTextAsync;
+            var factory   = TileSourceFactoryOverride ?? TileDataSourceFactory.Create;
+            IWorkScheduler scheduler = WorkSchedulerFactory.ForCurrentPlatform();
 
             // Distinct rendered source-ids in declared order.
             var seen    = new HashSet<string>();
@@ -359,7 +361,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     var geoJsonOptions = GeoJson.GeoJsonSliceOptions.Default;
                     specs.Add(new Tile.TileManager.SourceSpec(
                         sid, Tile.TileManager.SourceKey.From(def), def.MinZoom, def.MaxZoom,
-                        () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions)));
+                        () => new Tile.Processing.GeoJsonTileFeatureSource(parsed, geoJsonOptions, scheduler)));
                     continue;
                 }
 
@@ -395,7 +397,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 // ITileFeatureSource seam — TileManager never names the byte-level type (F-1).
                 specs.Add(new Tile.TileManager.SourceSpec(
                     sid, key, def.MinZoom, def.MaxZoom,
-                    () => new Tile.Processing.MvtTileFeatureSource(factory(template))));
+                    () => new Tile.Processing.MvtTileFeatureSource(factory(template), scheduler)));
             }
 
             return specs;

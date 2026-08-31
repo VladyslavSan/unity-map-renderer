@@ -254,6 +254,30 @@ re-derives the sign by hand — the exact "why do we reverse this?" confusion th
 
 ## Memory, performance & lifetime
 
+### New data-plane code is born native
+
+Design a new feature's **data plane** over native containers and blittable structs from the first commit —
+do not write it managed and plan to nativize it later. Every hot subsystem here that took the managed-first
+route had to be rewritten afterwards (symbols, then MVT decode); the "optimise later" saving has proven
+illusory twice, and the representation answers it needed are now solved and reusable — tagged unions for
+variants, a flat string pool for text, native columns for per-feature data.
+
+The discriminator is structural, not a performance guess:
+
+- **Data plane → born native.** Anything that recurs per tile / feature / vertex / glyph / frame, or is read
+  inside a job. Blittable structs, `NativeArray`/`NativeList`/`NativeHashMap`, index handles, string pools.
+- **Control plane → managed is correct.** Runs once per style load, per user action, per lifecycle
+  transition; holds references or touches `UnityEngine.Object`. Native containers here buy nothing and cost
+  legibility, debuggability and disposal safety.
+- **The test:** *"will this be read inside a job, or loop over scene-sized data?"* If yes, native. If it is
+  bounded by config size and touched once, managed.
+
+A managed capture on the data plane is **disqualifying**, not merely slow: a body closing over a `Dictionary`
+or a class reference cannot become an `IJob` at all until it is rewritten. Honor that up front.
+
+This rule sits *above* the allocation ladder below, and does not replace its top rung: the best data-plane
+code still allocates **nothing** per iteration, native or otherwise. See `ARCHITECTURE.md` §2.
+
 ### Hot-path allocations: none, then native, then pooled
 
 A **hot path** is anything that runs per feature / per vertex / per glyph / per tile-build / per frame — the
@@ -293,7 +317,7 @@ to the next when the one above is genuinely impossible.
      in. `UnityEngine.Pool` is also engine-only, so engine-free `Core` reaches for `ArrayPool` / a hand-rolled
      pool — but that is a *consequence* of correct placement, never a reason to keep code in Core: per
      `ARCHITECTURE.md` §2, if a type would be materially better with a Unity pool it belongs in Unity/Jobs
-     (Core is a convenience, not a placement argument).
+     (Core is legacy, not a placement argument).
    - **Pool only scoped scratch, never a borrowed container.** Rent/release must bracket a scope the object
      never escapes. Releasing a `List` another object still references — a decoded layer's feature list handed
      out to consumers — clears it out from under the holder: a correctness bug, not a perf tweak.

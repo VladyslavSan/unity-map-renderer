@@ -364,16 +364,18 @@ namespace MapRenderer.Tests.Text
         }
 
         // ═══ T10c: the drain must JOIN the worker. A restyle/teardown while the reconcile worker is PARKED MID-RUN
-        //          must NOT free the block the worker still reads. A drain built on UniTask.GetAwaiter().GetResult()
-        //          THROWS "not yet completed" on a pending task instead of blocking, so it returned WITHOUT joining
-        //          and the following ReleasePins+Clear disposed the block under Run (native use-after-free) — the
-        //          exact overlap T10 avoids by opening the gate BEFORE SetStyle. Deterministic, no timing margin:
-        //          with the worker parked at the gate, drive the SPEC A teardown core on a BACKGROUND thread — the
-        //          fixed drain BLOCKS there (block stays alive), the broken drain returns and frees it — and read
-        //          block liveness from the test thread while the worker is STILL parked (gate unset). The 2 s Wait
-        //          is only an upper bound to tell "blocked" from "returned"; the liveness assert has no clock.
-        //          RED-verify: revert DrainInFlightReconcile to `_reconcileTask.GetAwaiter().GetResult()` → the
-        //          teardown returns while the worker is parked and DebugLiveAllocCount drops → both asserts fail.
+        //          must NOT free the block the worker still reads. A drain built on _reconcileHandle.GetResult()
+        //          (WorkHandle<bool>'s equivalent of UniTask's GetAwaiter().GetResult()) THROWS "not yet completed"
+        //          on a pending handle instead of blocking, so it returned WITHOUT joining and the following
+        //          ReleasePins+Clear disposed the block under Run (native use-after-free) — the exact overlap T10
+        //          avoids by opening the gate BEFORE SetStyle. Deterministic, no timing margin: with the worker
+        //          parked at the gate, drive the SPEC A teardown core on a BACKGROUND thread — the fixed drain
+        //          BLOCKS there (block stays alive), the broken drain returns and frees it — and read block
+        //          liveness from the test thread while the worker is STILL parked (gate unset). The 2 s Wait is
+        //          only an upper bound to tell "blocked" from "returned"; the liveness assert has no clock.
+        //          RED-verify: revert DrainInFlightReconcile to call `_reconcileHandle.GetResult()` directly instead
+        //          of `_reconcileHandle.ToUniTask().WaitOffPlayerLoop(...)` first → the teardown returns while the
+        //          worker is parked and DebugLiveAllocCount drops → both asserts fail.
         [UnityTest]
         public IEnumerator TeardownWhileReconcileWorkerParked_JoinsWorker_DoesNotFreeBlockUnderIt()
         {

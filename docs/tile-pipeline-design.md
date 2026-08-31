@@ -294,8 +294,9 @@ public void OnTileBytesReady(string sourceId, TileId tile, byte[] bytes);
 public void PumpBuilds();
 ```
 
-`BuildTileAsync` gains the token (threaded into `_builder.BuildAsync(..., ct)` → `GlyphManager.EnsureFontStackRangeAsync`
-→ `IGlyphSource.FetchAsync`), checked after every await before touching `_glyphManager`/`_atlasTexture`/`_store`;
+`BuildTileAsync` gains the token (threaded into `_builder.BuildAsync(..., ct)` → `EnsureGlyphRangesAsync` →
+`GlyphManager.EnsureFontRangeAsync` → `IGlyphSource.FetchAsync`), checked after every await before touching
+`_glyphManager`/`_atlasTexture`/`_store`;
 `catch (OperationCanceledException) { CancelledBuildCount++; return; }` ahead of the generic catch — a
 restyle/teardown mid-build is silent, never a warning, and never touches disposed state. The atlas-upload block
 **moves out** of `BuildTileAsync` into `PumpBuilds` — the pump's single check per frame coalesces N tiles' worth
@@ -326,7 +327,8 @@ await UniTask.SwitchToMainThread(ct);                            // honours canc
 
 `SymbolFeatureExtractor.Extract`, the parsed `Symbol.StyleLayer` list, and `IProjection` (stateless math) are
 worker-safe; none touch the glyph cache, atlas, or any `UnityEngine.Object`. `StyledSymbolTileBuilder` split into
-worker-safe `ExtractLayers` + main-thread `ShapeAsync` (`BuildAsync` a byte-parity wrapper).
+worker-safe `ExtractLayers` + main-thread `Shape` (`BuildAsync` a byte-parity wrapper composing
+`CollectRequiredRanges` → `EnsureGlyphRangesAsync` → `Shape`).
 
 **Main-thread boundary after Stage B:**
 

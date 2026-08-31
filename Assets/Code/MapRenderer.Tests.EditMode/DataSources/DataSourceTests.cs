@@ -1,6 +1,7 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Code/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// EditMode-only — NOT compiled by Tools/core-tests. This file uses MvtDecoder/MvtTile
+// (MapRenderer.Jobs.Mvt), which the fast dotnet test project does not compile (the MVT decode
+// nativization moved that surface out of its reach). Scheduler-ordering teeth that need both
+// runners live in the engine-free sibling, TileSchedulerOrderingTests.cs.
 //
 // S51: migrated from Task/TaskCompletionSource to UniTask/UniTaskCompletionSource.
 // HttpDataSource tests removed (HttpDataSource deleted from Core; HTTP moved to Unity layer
@@ -416,34 +417,45 @@ namespace MapRenderer.Tests.DataSources
         }
 
         /// <summary>
-        /// When a source returns an already-completed UniTask (UniTask.FromResult), the sync-completion
-        /// path must NOT leave a stale in-flight entry after Request() returns.
+        /// The behavioural anti-hop tooth: <see cref="TileScheduler"/>'s injectable clock is called
+        /// exactly once on the sync-completing-absent path, inside the post-fetch block, AFTER the
+        /// (removed) thread-pool hop — never on the negative-cache read (which finds nothing on a first
+        /// request), so the single invocation is unambiguous. Every recorded thread id must equal the
+        /// test thread's: a hop would move the clock call onto a pool thread.
+        ///
+        /// EditMode-only, deliberately: thread identity is decisive only when the caller is guaranteed
+        /// not to already be a pool thread — the EditMode test thread is the main thread, never a pool
+        /// thread. Under <c>dotnet test</c>, NUnit may run the test ON a pool thread, and a re-inserted
+        /// hop could then resume on that SAME thread — a vacuous GREEN. That is why this tooth stays out
+        /// of <c>core-tests.csproj</c> rather than moving to the engine-free sibling with T1/T3/T4.
         /// </summary>
         [Test]
-        public async Task SyncCompletingSource_NoStaleInFlightEntry()
+        public async Task SchedulerCompletion_RunsOnTheFetchCompletingThread_NoHop()
         {
-            int fetchCount = 0;
-            var fakeSource = TestDataSource.FromFetch(id =>
+            int mainThreadId = Thread.CurrentThread.ManagedThreadId;
+            var recordedThreadIds = new System.Collections.Generic.List<int>();
+            var clockLock = new object();
+
+            var fakeSource = TestDataSource.Absent();
+            var cache      = new TileCache(capacity: 10);
+            var scheduler  = new TileScheduler(fakeSource, cache,
+                negativeTtl: TimeSpan.FromSeconds(5),
+                clock: () =>
+                {
+                    lock (clockLock) { recordedThreadIds.Add(Thread.CurrentThread.ManagedThreadId); }
+                    return DateTime.UtcNow;
+                });
+            var tileId = new TileId { Z = 11, X = 1, Y = 1 };
+
+            await scheduler.Request(tileId);
+
+            Assert.GreaterOrEqual(recordedThreadIds.Count, 1,
+                "the injectable clock must be called at least once on the post-fetch negative-cache write path.");
+            foreach (int id in recordedThreadIds)
             {
-                Interlocked.Increment(ref fetchCount);
-                // Sync completion: returns an already-resolved UniTask.
-                return UniTask.FromResult(MakeResponse(77));
-            });
-
-            var cache     = new TileCache(capacity: 10);
-            var scheduler = new TileScheduler(fakeSource, cache);
-            var tileId    = new TileId { Z = 6, X = 6, Y = 6 };
-
-            // Start the fetch (sync-completing source).
-            var fetchTask = scheduler.Request(tileId);
-
-            // Await completion so the async continuation has run.
-            await fetchTask;
-
-            // After completion the in-flight map must be empty for this tile.
-            Assert.AreEqual(0, scheduler.InFlightCount,
-                "In-flight map must be empty after a sync-completing fetch completes. " +
-                "A stale entry means the UniTask.SwitchToThreadPool guard is missing or broken.");
+                Assert.AreEqual(mainThreadId, id,
+                    "the post-fetch bookkeeping must run on the thread that completed the fetch — no hop.");
+            }
         }
 
         // -----------------------------------------------------------------------------------------

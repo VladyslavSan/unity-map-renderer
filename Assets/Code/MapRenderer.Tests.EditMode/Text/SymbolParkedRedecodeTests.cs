@@ -379,10 +379,11 @@ namespace MapRenderer.Tests.Text
                 "only decode there is). Zero layer reads would mean the extract never ran, and the label " +
                 "assertions above would be measuring something else entirely.");
 
-            // The drain's WORKER PHASE stays off the main thread. PumpBuilds dispatches it via
-            // UniTask.RunOnThreadPool; turning that into a direct call would move the whole extract onto the
-            // main thread — a frame-time regression the sibling parity tooth cannot see, because it pins the
-            // TAIL on main and says nothing about the phase before it.
+            // The drain's WORKER PHASE stays off the main thread. PumpBuilds dispatches it through
+            // SymbolSubsystem.WorkScheduler (ThreadPoolWorkScheduler by default — this fixture never overrides
+            // it); turning that into a direct call would move the whole extract onto the main thread — a
+            // frame-time regression the sibling parity tooth cannot see, because it pins the TAIL on main and
+            // says nothing about the phase before it.
             //
             // THE INSTRUMENT MOVED, and it had to. This used to assert on decode index 1 — the drain's
             // re-decode — and there is no decode 1 any more. The reading is now the EXTRACT's thread, taken
@@ -397,9 +398,9 @@ namespace MapRenderer.Tests.Text
                 Assert.AreNotEqual(mainThreadId, extractThreadId,
                     $"the parked drain's worker phase must run OFF the main thread. A layer was read on " +
                     $"thread {extractThreadId}, the main thread is {mainThreadId}. PumpBuilds dispatches the " +
-                    "drain through UniTask.RunOnThreadPool exactly as the kick does; a direct call there " +
-                    "would put a full extract on the frame thread for every build that ever parked on a " +
-                    "sprite fetch.");
+                    "drain through SymbolSubsystem.WorkScheduler (ThreadPoolWorkScheduler by default); a " +
+                    "direct call there would put a full extract on the frame thread for every build that ever " +
+                    "parked on a sprite fetch.");
 
             // ── Arm 2: the ORACLE. Same everything, except the sprite fetch has already settled when the
             // kick arrives, so TryBeginBuild builds inline and nothing is ever parked.

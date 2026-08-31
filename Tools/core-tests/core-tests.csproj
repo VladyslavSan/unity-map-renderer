@@ -187,8 +187,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Strings.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
-    <!-- S81: shared engine-free test double for IDataSource (used by DataSourceTests in both runners) -->
+    <!-- S81: shared engine-free test double for IDataSource (used by TileSchedulerOrderingTests in both runners) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/TestDataSource.cs" />
+    <!-- fetch-scheduler-web-hang: the both-runners home for the scheduler-ordering teeth (T1/T3/T4). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/DataSources/TileSchedulerOrderingTests.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/VerifiedDisposableTests.cs" />

@@ -35,7 +35,13 @@ namespace MapRenderer.Unity.Text
         /// <summary>When non-null, the next <see cref="Run"/> blocks on this gate ONCE (then clears it), so a
         /// test can PARK the worker in flight (assert one-in-flight / apply-stale / pin lifetime) and release it
         /// deterministically. A teardown while this is held MUST open the gate first, or the drain hangs. Internal
-        /// test-only.</summary>
+        /// test-only.
+        /// <para>Arming this while the owning <c>SymbolSubsystem</c>'s <c>WorkScheduler</c> is an
+        /// <c>InlineWorkScheduler</c> deadlocks the calling thread — <c>ScheduleReconcileIfDirty</c>'s dispatch
+        /// would then run <see cref="Run"/> (and this park) synchronously on that same thread, with no other
+        /// thread able to reach the release. <c>SymbolSubsystem.WorkScheduler</c>'s setter guards the order
+        /// selecting Inline while this is armed; arming this field directly while already Inline is NOT
+        /// guarded (this class has no reference back to the scheduler) — a test must not do both.</para></summary>
         internal ManualResetEventSlim GateForTest;
 
         /// <summary>When true, the next <see cref="Run"/> throws once after writing a deliberately misaligned

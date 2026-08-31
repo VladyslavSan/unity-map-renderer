@@ -95,16 +95,19 @@ The data-parallel stages run as Burst jobs across tiles; only mesh creation touc
 ### Module boundaries — what belongs where
 
 **The product is `MapRenderer.Unity` + `MapRenderer.Jobs`.** That is the production target, and its
-architecture, readability and performance are what matter. `MapRenderer.Core` is a **convenience, not a goal**:
-engine-free code is easier to reason about and gets a fast `dotnet test` loop (`Tools/core-tests`, ~0.1s, no
-Editor lock). Core is a good playground. It is **not** the important module, and **not** the preferred home for
-logic.
+architecture, readability and performance are what matter.
+
+**`MapRenderer.Core` is legacy: it is not a destination for new code.** It is large because much of this
+renderer was written engine-free first, and while that code lives there it still earns a fast `dotnet test`
+loop (`Tools/core-tests`, ~0.1s, no Editor lock, runs with the Editor open) — worth using, never worth
+designing for. Engine-free is no longer a property we target. New work goes to `Unity`/`Jobs`, and Core
+shrinks as subsystems nativize.
 
 | assembly | role | what belongs |
 |---|---|---|
 | `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination |
 | `MapRenderer.Jobs` | **the product** | the native/decode assembly: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
-| `MapRenderer.Core` | convenience | code that is *naturally* engine-free: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
+| `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
 
 > **`Jobs` is not "only Burst-able code" — read the row literally.** Since IR C1 it also holds a hand-rolled
 > **managed** protobuf decoder (`Mvt/MvtDecoder.cs`), the managed selection seam (`Tiles/FeatureSelector.cs`)
@@ -134,9 +137,34 @@ should own, bound to its tile only by convention — nothing in the type system 
 with the wrong one). Each workaround was individually reasonable and locally correct. All three were
 consequences of refusing to move ~10 files out of a 206-file assembly.
 
-`Structure/CoreAssemblyBoundaryTests` pins that Core stays runnable outside the Editor — that is the **goal**,
-and it is worth keeping. It is **not** a reason to keep any particular type in Core; enforcing the mechanism
-instead of the goal is what made this boundary feel inviolable.
+`Structure/CoreAssemblyBoundaryTests` pins that what is *still in* Core stays runnable outside the Editor, so
+the existing fast loop does not rot silently. It guards a property of legacy code — it is **not** a goal to
+extend, and **never** a reason to keep or place a type in Core.
+
+### New code is designed for performance, not nativized later
+
+**Design new features data-oriented and native-first from the start.** Every hot subsystem here written
+managed-first has had to be rewritten over native containers afterwards — symbols, then MVT decode — so the
+"explore in managed, optimise later" saving has proven illusory on the data plane, twice. The representation
+answers are already solved and reusable (tagged unions for variants, a flat string pool for text, native
+columns for per-feature data), so new data-plane code starts there at near-zero marginal cost and skips the
+retrofit.
+
+The discriminator is **not** "is it hot?" — it is *structural*:
+
+| | born native | managed is correct |
+|---|---|---|
+| **which** | the **data plane** — anything that recurs per tile / feature / vertex / glyph / frame, or is read inside a job | the **control plane** — runs once per style load, per user action, or per lifecycle transition |
+| **shape** | blittable structs, `NativeArray`/`NativeList`/`NativeHashMap`, index handles, string pools | classes, `List`/`Dictionary`, references, `UnityEngine.Object` |
+| **test** | "will this be read inside a job, or loop over scene-sized data?" | "is this bounded by config size and touched once?" |
+
+A managed capture on the data plane is not just slower — it is *disqualifying*: a body that closes over a
+`Dictionary` or a class reference cannot become an `IJob` at all without being rewritten first. That is a
+design constraint to honor up front, not a performance note to revisit.
+
+This does not license nativizing the control plane. Native containers there buy nothing and cost real
+legibility, debuggability and disposal risk — see the allocation ladder in `docs/conventions.md`, whose top
+rung is still *allocate nothing*, not *allocate native*.
 
 ### Two geometry classes, two paths
 | Class | Built | Lifetime | Rendered as |

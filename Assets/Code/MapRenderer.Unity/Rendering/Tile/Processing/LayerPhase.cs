@@ -19,7 +19,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         WorkerOnly,
 
         /// <summary>A3+: a worker-side step followed by a main-thread completion step
-        /// (<see cref="ITileWorkerThenMainLayerProcessor.CompleteOnMainAsync"/>). The MESH worker-pass
+        /// (<see cref="ITileWorkerThenMainLayerProcessor.CompleteOnMain"/>). The MESH worker-pass
         /// entries (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>,
         /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>) still reject this phase — they
         /// have no tail; only <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> choreographs it.</summary>

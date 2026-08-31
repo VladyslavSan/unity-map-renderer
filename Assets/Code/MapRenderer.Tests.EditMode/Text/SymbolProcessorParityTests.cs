@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Text
     /// <para>RED-verified against the un-rewired (pre-A3) subsystem for the STRUCTURAL delegation teeth
     /// (see the A3 stage report). Empirically, THIS differential passes unmodified against a structurally
     /// faithful pre-A3 <c>BuildTileAsync</c> too — pre-A3 already calls
-    /// <c>ExtractLayers</c>/<c>ShapeAsync</c> with the same zoom/projection/global-material-indices the
+    /// <c>ExtractLayers</c>/<c>Shape</c> with the same zoom/projection/global-material-indices the
     /// oracle uses, so it computes IDENTICAL values. Its proven role (RED-verified by injecting each §F-3
     /// falsifier into a scratch copy of the post-A3 <c>BuildTileAsync</c> — see the A3 stage report) is a
     /// WRONG-A3-REWIRE falsifier, not a pre/post-A3 discriminator.</para>
@@ -201,10 +201,10 @@ namespace MapRenderer.Tests.Text
         /// <summary>Builds the ORACLE symbol set: the pre-A3-shaped single pass
         /// (<see cref="StyledSymbolTileBuilder.BuildAsync"/>) over a SECOND, independent glyph pipeline fed
         /// the SAME ranges — atlas state is equivalent but independent, so this is not self-referential with
-        /// the processor machinery A3 changes (only <c>ExtractLayers</c>/<c>ShapeAsync</c>, which A3 does not
+        /// the processor machinery A3 changes (only <c>ExtractLayers</c>/<c>Shape</c>, which A3 does not
         /// modify, are shared).
         /// <para><b>That independence premise EXPIRED at IR stage B4</b>, which modifies exactly
-        /// <c>ExtractLayers</c>/<c>ShapeAsync</c>. This fixture is therefore no longer independent of the
+        /// <c>ExtractLayers</c>/<c>Shape</c>. This fixture is therefore no longer independent of the
         /// symbol geometry path, and must not be cited as the oracle for a change to it —
         /// <c>SymbolBufferParityTests</c> is that oracle. Recorded here rather than only in the newer file
         /// because a stale independence claim left where a reader finds it is precisely how this epic
@@ -226,7 +226,7 @@ namespace MapRenderer.Tests.Text
 
             var oracle = new SymbolTileBuffer();
             // BuildAsync completes synchronously here: TestGlyphSource resolves via UniTask.FromResult and
-            // neither BuildAsync/ExtractLayers/ShapeAsync forces a thread hop — no real async suspension.
+            // neither BuildAsync/ExtractLayers/Shape forces a thread hop — no real async suspension.
             // _sSourceLayers/_sSourceGlobalIndices mirror exactly what BuildTileAsync passes for the "s"
             // build: the "s"-source layers in declared order, stamped with their GLOBAL indices {1,2}.
             oracleBuilder.BuildAsync(mvt, Tile, _sSourceLayers, zoom, projection, oracle, _sSourceGlobalIndices)
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>Epic A / A3 acceptance tooth #4 (§F — "the tail actually runs" tooth): a glyph-fetch
-        /// delegate reachable ONLY from <see cref="StyledSymbolTileBuilder.ShapeAsync"/> (the tail) records
+        /// delegate reachable ONLY from <see cref="StyledSymbolTileBuilder.Shape"/> (the tail) records
         /// the thread it runs on; together with the existing, unmodified
         /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> recorder (which pins the WORKER half off main),
         /// this proves the phase split runs on the right threads AND in the right order — symbols only commit

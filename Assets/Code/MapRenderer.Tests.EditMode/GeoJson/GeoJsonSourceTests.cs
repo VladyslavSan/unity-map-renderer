@@ -19,6 +19,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;
@@ -36,6 +37,10 @@ namespace MapRenderer.Tests.GeoJsons
     public class GeoJsonSourceTests
     {
         private static readonly TileId WorldTile = new TileId { Z = 0, X = 0, Y = 0 };
+
+        // Off-main, matching production's desktop policy — these teeth exercise GetTile's/the source's own
+        // contract, not the scheduler choice.
+        private static readonly IWorkScheduler Scheduler = new ThreadPoolWorkScheduler();
 
         private const int ProfilerSampleCapacity = 64;
 
@@ -565,7 +570,8 @@ namespace MapRenderer.Tests.GeoJsons
                         {
                             built.Add(def.Type);
                             return new GeoJsonTileFeatureSource(
-                                GeoJsonParser.Parse(RectangleAt(RectMin, RectMax)), GeoJsonSliceOptions.Default);
+                                GeoJsonParser.Parse(RectangleAt(RectMin, RectMax)), GeoJsonSliceOptions.Default,
+                                Scheduler);
                         }),
                     };
                     view.View.TileManager.SetSources(specs, view.Config.Backend);
@@ -615,7 +621,7 @@ namespace MapRenderer.Tests.GeoJsons
                         {
                             created++;
                             var s = new GeoJsonTileFeatureSource(
-                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default);
+                                GeoJsonParser.Parse(def.Data), GeoJsonSliceOptions.Default, Scheduler);
                             sources.Add(s);
                             return s;
                         }),
@@ -684,7 +690,7 @@ namespace MapRenderer.Tests.GeoJsons
         // ── T5 · the lease: the handle is LAZY and the buffers are FREED ──────────────────────────────
 
         private static GeoJsonTileFeatureSource SourceOver(string dataJson, GeoJsonSliceOptions options)
-            => new GeoJsonTileFeatureSource(GeoJsonParser.Parse(dataJson), options);
+            => new GeoJsonTileFeatureSource(GeoJsonParser.Parse(dataJson), options, Scheduler);
 
         /// <summary>
         /// <b>T5 (the decisive arm), INVERTED — <c>GetTile</c> SLICES, and slices OFF THE MAIN THREAD.</b>
@@ -741,6 +747,56 @@ namespace MapRenderer.Tests.GeoJsons
                 "per cover tile from inside Tick, so a source that sliced inline would put a full slice on " +
                 "the frame thread for every one of them — the cost laziness used to avoid by accident and " +
                 "TileDecodeDispatch.DecodeAsync now avoids on purpose.");
+        }
+
+        /// <summary>
+        /// <b>T5, POLICY ARM</b> — proves the source actually REACHES the <see cref="IWorkScheduler"/> it was
+        /// constructed with, rather than merely landing off the main thread by coincidence. <see cref="T5_GetTile_SlicesOffTheMainThread"/>
+        /// only proves "not on main", which a <c>DecodeAsync</c> that ignored its scheduler parameter and
+        /// hardcoded <see cref="ThreadPoolWorkScheduler"/> internally would satisfy too — that substitution is
+        /// exactly what the WebGL fix depends on being impossible.
+        ///
+        /// <para>Constructed with <see cref="InlineWorkScheduler"/> instead of <see cref="Scheduler"/>.
+        /// <see cref="GeoJsonTileFeatureSource.GetTile"/> has no <c>await</c> before <c>DecodeAsync</c>, so
+        /// under Inline the whole slice runs synchronously on THIS test's own thread — the inverse of the
+        /// sibling tooth's assertion, using the same two recorders.</para>
+        /// </summary>
+        [UnityTest]
+        public IEnumerator T5_GetTile_HonoursAnInjectedInlineScheduler_AndSlicesOnTheCallingThread()
+        {
+            using var source = new GeoJsonTileFeatureSource(
+                GeoJsonParser.Parse(RectangleAt(RectMin, RectMax)), GeoJsonSliceOptions.Default,
+                new InlineWorkScheduler());
+
+            using var mainOnly  = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Tile.Decode",
+                ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame | ProfilerRecorderOptions.CollectOnlyOnCurrentThread);
+            using var anyThread = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, "MapRenderer.Tile.Decode",
+                ProfilerSampleCapacity, ProfilerRecorderOptions.SumAllSamplesInFrame);
+
+            UniTask<SharedDisposable<IDecodedTile>> task = source.GetTile(WorldTile);
+            SharedDisposable<IDecodedTile> handle = null;
+            for (int f = 0; f < 200 && !task.Status.IsCompleted(); f++) yield return null;
+            Assert.IsTrue(task.Status.IsCompleted(), "the slice must complete within the pumped window");
+            handle = task.GetAwaiter().GetResult();
+
+            Assert.IsNotNull(handle, "precondition: the world tile is inside the dataset's bbox, so it slices");
+            ITileLayer layer = handle.Value.GetLayer(null);
+            Assert.IsNotNull(layer, "precondition: GetTile really produced a decoded tile, not an empty shell");
+            Assert.IsTrue(layer.Geometry.IsCreated,
+                "precondition: the slice really allocated native buffers — otherwise 'it sliced' is vacuous");
+            handle.Release();
+
+            yield return null; // let the recorder's frame close
+
+            long mainHits = 0, anyHits = 0;
+            for (int i = 0; i < math.min(mainOnly.Count,  ProfilerSampleCapacity); i++) mainHits += mainOnly.GetSample(i).Count;
+            for (int i = 0; i < math.min(anyThread.Count, ProfilerSampleCapacity); i++) anyHits  += anyThread.GetSample(i).Count;
+
+            Assert.Greater(anyHits, 0, "sanity: the slice ran");
+            Assert.Greater(mainHits, 0,
+                "DECISIVE: the injected Inline scheduler must be REACHED by the slice. A DecodeAsync that " +
+                "ignored its scheduler parameter and minted a ThreadPoolWorkScheduler internally would satisfy " +
+                "the sibling tooth's 'not on main' arm but never put a sample here.");
         }
 
         /// <summary>
@@ -868,7 +924,7 @@ namespace MapRenderer.Tests.GeoJsons
             GeoJsonDataset dataset = GeoJsonParser.Parse(RectangleAt(RectMin, RectMax));
 
             Assert.Throws<System.ArgumentOutOfRangeException>(
-                () => new GeoJsonTileFeatureSource(dataset, default),
+                () => new GeoJsonTileFeatureSource(dataset, default, Scheduler),
                 "a default(GeoJsonSliceOptions) has a zero extent and cannot slice anything. Accepting it " +
                 "here defers the fault to every tile's own decode, once per cover tile.");
 
@@ -879,12 +935,12 @@ namespace MapRenderer.Tests.GeoJsons
                 SimplifyTolerance       = 1.0
             };
             Assert.Throws<System.ArgumentOutOfRangeException>(
-                () => new GeoJsonTileFeatureSource(dataset, simplifying),
+                () => new GeoJsonTileFeatureSource(dataset, simplifying, Scheduler),
                 "…and so must an unimplemented non-zero SimplifyTolerance, whose extent is perfectly " +
                 "usable: every tile this source is asked for would fault at its own slice instead.");
 
             Assert.DoesNotThrow(
-                () => new GeoJsonTileFeatureSource(dataset, GeoJsonSliceOptions.Default).Dispose(),
+                () => new GeoJsonTileFeatureSource(dataset, GeoJsonSliceOptions.Default, Scheduler).Dispose(),
                 "…while usable options must still construct, or the guard is refusing everything");
         }
 

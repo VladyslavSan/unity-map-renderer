@@ -3,16 +3,17 @@ using System.Collections.Concurrent;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Thread-safe rent/return pool of <see cref="MeshDataPayload"/> instances. Unlike
-    /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileMeshLayerProcessorPool"/>, BOTH ends of
-    /// this pool's lifecycle cross the thread boundary: a payload is minted inside
-    /// <c>TileMeshLayerProcessor.Complete</c> on a ThreadPool WORKER thread (the settle loop inside
-    /// <c>TileLayerProcessorRunner.RunWorkerPass</c>, itself only ever run inside
-    /// <c>UniTask.RunOnThreadPool</c>) and returned to the pool from <see cref="MeshDataPayload.Dispose"/> on
-    /// the MAIN THREAD (<c>TileManager.ConsumeMeshBuild</c>). <see cref="ConcurrentBag{T}"/> is what makes
-    /// that handoff safe — <see cref="Rent"/> atomically removes an instance before handing it out, so no
-    /// two renters, on any thread, can ever observe the same reference at once. Mirrors
-    /// <c>TileBuildScratchPool</c>'s shape exactly; see its doc comment for the fuller rationale.
+    /// Thread-safe rent/return pool of <see cref="MeshDataPayload"/> instances. A payload is minted inside
+    /// <c>TileMeshLayerProcessor.Complete</c> on whichever thread runs the settle loop inside
+    /// <c>TileLayerProcessorRunner.RunWorkerPass</c> — a ThreadPool worker under
+    /// <c>ThreadPoolWorkScheduler</c>, or the MAIN THREAD itself under <c>InlineWorkScheduler</c> (the WebGL
+    /// policy) — and returned to the pool from <see cref="MeshDataPayload.Dispose"/> on the MAIN THREAD
+    /// (<c>TileManager.ConsumeMeshBuild</c>). So the mint-to-return handoff crosses a thread boundary under
+    /// ThreadPool but not under Inline (both ends land on main there) — <see cref="ConcurrentBag{T}"/> makes
+    /// it safe either way, not just the crossing case: <see cref="Rent"/> atomically removes an instance
+    /// before handing it out, so no two renters, on any thread (main included), can ever observe the same
+    /// reference at once. Mirrors <c>TileBuildScratchPool</c>'s shape exactly; see its doc comment for the
+    /// fuller rationale.
     /// </summary>
     internal static class MeshDataPayloadPool
     {

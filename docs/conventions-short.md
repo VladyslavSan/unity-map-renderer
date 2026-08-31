@@ -71,6 +71,19 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
 
 ## Memory, performance & lifetime
 
+- **New data-plane code is born native — nativizing later is not the plan.** Write a new feature's data plane
+  over blittable structs + `NativeArray`/`NativeList`/`NativeHashMap` from the first commit. Symbols and MVT
+  decode both went managed-first and had to be rewritten; the representation answers (tagged unions, flat
+  string pool, native per-feature columns) are solved and reusable.
+  - *Discriminator (structural, not a perf guess):* **data plane** = recurs per tile/feature/vertex/glyph/frame
+    or is read inside a job → **native**. **Control plane** = once per style load / user action / lifecycle
+    transition, holds refs or `UnityEngine.Object` → **managed is correct** (native there costs legibility and
+    disposal safety, buys nothing).
+  - *The test:* "will this be read inside a job, or loop over scene-sized data?"
+  - A managed capture on the data plane is **disqualifying**, not just slow — a body closing over a
+    `Dictionary`/class ref cannot become an `IJob` until rewritten.
+  - Sits **above** the ladder below and does not replace its top rung: best is still to allocate *nothing*.
+
 - **Hot-path allocations: none → native → pooled (a descending ladder).** In any loop that recurs per
   feature / vertex / glyph / tile-build / frame, a managed `new` is not local: Unity's GC is
   **stop-the-world**, so one worker-thread allocation freezes every thread mid-frame. Take the highest rung:

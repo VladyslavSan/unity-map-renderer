@@ -740,7 +740,8 @@ namespace MapRenderer.Tests.Lifetime
                 // No wait is needed here, and none is correct. DebugLiveAllocCount is bumped SYNCHRONOUSLY
                 // AT KICK on the main thread — MeshDataPayload.AllocateTracked (Interlocked.Increment) runs
                 // inside TileMeshLayerProcessor.AllocateForKick, in KickMeshBuild's main-thread prologue,
-                // BEFORE the RunOnThreadPool dispatch — not when the ThreadPool build finishes. So every
+                // BEFORE the IWorkScheduler.Schedule dispatch — not when the build itself finishes (on a
+                // ThreadPool worker, or inline on main, depending on policy). So every
                 // tile the kick-pump above kicked has already incremented the counter, and the payloads the
                 // pan just stashed in _pendingDisposal sit there undisposed: held > countBefore holds the
                 // instant we read it.

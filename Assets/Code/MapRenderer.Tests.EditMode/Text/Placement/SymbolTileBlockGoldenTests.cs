@@ -27,7 +27,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4a): the
     /// block-byte-identity golden — pins <see cref="SymbolTileBlockBaker.Bake"/>'s output shape so a
-    /// later refactor of the bake path (4.4b sheds the resident graph, 4.4c retypes <c>ShapeAsync</c> onto
+    /// later refactor of the bake path (4.4b sheds the resident graph, 4.4c retypes <c>Shape</c> onto
     /// reused buffer) cannot silently change what gets baked, only how it gets there.
     ///
     /// <para><b>Two fixtures, two golden strategies.</b> <see cref="Bake_HandBuiltHazardFixture_MatchesExplicitGolden"/>
@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// exercises every §4.4a hazard (see its own doc) and asserts EXPLICIT, hand-derivable expected values per
     /// column — a real oracle, not a value
     /// pasted from a first run (<c>handed-down-formula-is-never-re-derived</c>). But because its input never
-    /// passes through <c>StyledSymbolTileBuilder.ShapeAsync</c>, it CANNOT catch a 4.4c regression in that
+    /// passes through <c>StyledSymbolTileBuilder.Shape</c>, it CANNOT catch a 4.4c regression in that
     /// tail's own emit sites (the four record-append calls and the quad-layout
     /// migration) — only <see cref="Bake_ProducedFixture_MatchesCommittedGoldenHash"/> (built the same way
     /// <c>SymbolProcessorParityTests.BuildOracle</c> is) exercises that path, so BOTH fixtures are required,
@@ -285,7 +285,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
         // ── the PRODUCED fixture: an independent StyledSymbolTileBuilder.BuildAsync, as
-        // SymbolProcessorParityTests.BuildOracle does — the ONLY fixture that exercises ShapeAsync's own
+        // SymbolProcessorParityTests.BuildOracle does — the ONLY fixture that exercises Shape's own
         // emit sites (see the type doc). Cannot hand-derive glyph UVs / zoom-interpolated TextSizePx, so
         // this pins a HASH, not explicit values — see CapturedGoldenHash's doc for how to fill it in.
         // ══════════════════════════════════════════════════════════════════════════════════════════════

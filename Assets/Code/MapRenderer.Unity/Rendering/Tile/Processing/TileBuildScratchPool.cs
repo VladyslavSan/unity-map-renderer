@@ -4,10 +4,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
     /// Thread-safe rent/return pool of <see cref="TileBuildScratch"/> instances, one per IN-FLIGHT mesh build.
-    /// Mesh builds run CONCURRENTLY on ThreadPool threads (<c>TileManager.KickMeshBuild</c>/
-    /// <c>KickSourcelessBackground</c> → <c>UniTask.RunOnThreadPool</c> → <see cref="TileLayerProcessorRunner.RunWorkerPass"/>/
-    /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>), so two builds must never observe the same
-    /// <see cref="TileBuildScratch"/> at once — a data race, since both would write through the same arrays.
+    /// Mesh builds dispatch through <c>TileManager.KickMeshBuild</c>/<c>KickSourcelessBackground</c> →
+    /// <c>IWorkScheduler.Schedule</c> → <see cref="TileLayerProcessorRunner.RunWorkerPass"/>/
+    /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/> — CONCURRENTLY on ThreadPool worker
+    /// threads under <c>ThreadPoolWorkScheduler</c> (desktop/editor), or one at a time on the MAIN THREAD
+    /// under <c>InlineWorkScheduler</c> (WebGL, no concurrency at all — see that policy's doc). Either way,
+    /// two builds must never observe the same <see cref="TileBuildScratch"/> at once — a data race, since
+    /// both would write through the same arrays.
     ///
     /// <para><see cref="ConcurrentBag{T}"/> makes that true structurally rather than by convention: <see cref="Rent"/>
     /// atomically REMOVES an instance from the bag before handing it to the caller, so no other thread can see it

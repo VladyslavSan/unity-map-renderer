@@ -259,7 +259,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             DriveTileBytesReady(tile);
 
             // Pump frames so the build starts, hops the pool (decode+extract), returns to main, and parks on the
-            // gated glyph fetch inside ShapeAsync.
+            // gated glyph fetch — the tail's prepare step (EnsureGlyphRangesAsync), now BEFORE the shape loop.
             for (int f = 0; f < 60; f++) { _subsystem.PumpBuilds(); yield return null; }
             Assert.AreEqual(0, _subsystem.CancelledBuildCount, "not cancelled yet (parked on the gated glyph fetch).");
 

@@ -8,7 +8,8 @@ namespace MapRenderer.Jobs.Tiles
     /// resolver does not <c>new int[]</c> once per <c>SelectFeatures</c> call. Same shape as
     /// <c>MapRenderer.Core.Expressions.EvalArgBuffers</c> — a free-list of WHOLE arrays, <c>[ThreadStatic]</c>
     /// because <see cref="FeatureSelector.SelectFeatures(Core.Style.StyleLayer, Tiles.IDecodedTile, double)"/>
-    /// runs off-main on ThreadPool workers.
+    /// can run on any thread — a ThreadPool worker under the desktop/editor policy, or the MAIN THREAD itself
+    /// under the WebGL (Inline) one — and each thread must own its own free-list regardless of which.
     /// </summary>
     /// <remarks>
     /// <b>Contract:</b> every <see cref="Rent"/> MUST be paired with a <see cref="Return"/> in a

@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Jobs;
@@ -14,12 +13,12 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// Epic A / A3: the <see cref="ITileWorkerThenMainLayerProcessor"/> adapter around one symbol STYLE
     /// LAYER's share of a symbol tile build — one instance per symbol style layer per (source, tile) build
     /// (matching the mesh side's per-layer granularity). This is parity-safe because
-    /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.ShapeAsync"/>
+    /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.Shape"/>
     /// are ALREADY per-layer loops, so N single-layer processors invoked in declared order reproduce the
     /// identical call sequence and symbol order as one N-layer call.
     ///
     /// <para>Worker step = <see cref="StyledSymbolTileBuilder.ExtractLayers"/> for this one layer. Main tail =
-    /// <see cref="StyledSymbolTileBuilder.ShapeAsync"/> for this layer's extraction, appending into the
+    /// <see cref="StyledSymbolTileBuilder.Shape"/> for this layer's extraction, appending into the
     /// build's SHARED <see cref="SymbolTileBuffer"/> — every processor of one build writes into
     /// the SAME instance (the pairing-adjacency rule), so the committed scratch is the same shape
     /// <c>SymbolTileStore.CompleteBuild</c> receives today (no concat step, no order ambiguity).</para>
@@ -44,7 +43,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly SpriteAtlasView _spriteAtlas;
 
         // Set by ProcessOnWorker; null if the worker step never ran (an earlier processor in the same
-        // dense pass faulted) — CompleteOnMainAsync's no-op path relies on ShapeAsync already returning
+        // dense pass faulted) — CompleteOnMain's no-op path relies on Shape already returning
         // early on a null extraction list.
         private List<StyledSymbolTileBuilder.ExtractedLayer> _extracted;
 
@@ -75,11 +74,19 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                 _spriteAtlas);
         }
 
-        /// <summary>MAIN-THREAD tail: shape
-        /// + lay out this layer's extraction and append into the build's shared output list. A null
-        /// <see cref="_extracted"/> (worker never ran) is the no-op path — <c>ShapeAsync</c> already returns
-        /// early on a null input.</summary>
-        public UniTask CompleteOnMainAsync(CancellationToken ct)
-            => _builder.ShapeAsync(_extracted, _sharedBuffer, ct);
+        /// <summary>MAIN-THREAD tail, synchronous: shape + lay out this layer's extraction and append into
+        /// the build's shared output list. A null <see cref="_extracted"/> (worker never ran) is the no-op
+        /// path — <c>Shape</c> already returns early on a null input.</summary>
+        public void CompleteOnMain(CancellationToken ct)
+            => _builder.Shape(_extracted, _sharedBuffer, ct);
+
+        /// <summary>MAIN-THREAD, after the worker step (<see cref="ProcessOnWorker"/> must already have run):
+        /// collects this layer's glyph-range requests into the build-wide <paramref name="into"/>/<paramref
+        /// name="seen"/> pair. Called from <see cref="SymbolSubsystem"/>'s tail, before any processor's
+        /// <see cref="CompleteOnMain"/> — the caller establishing that precondition. Exists on this concrete
+        /// class only; deliberately not part of <see cref="ITileWorkerThenMainLayerProcessor"/>.</summary>
+        public void CollectRequiredRanges(
+            List<(string FontName, int RangeStart)> into, HashSet<(string FontName, int RangeStart)> seen)
+            => _builder.CollectRequiredRanges(_extracted, into, seen);
     }
 }

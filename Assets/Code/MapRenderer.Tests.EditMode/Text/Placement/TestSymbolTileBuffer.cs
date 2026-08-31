@@ -11,7 +11,7 @@ namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
     /// Appends hand-built <see cref="ShapedSymbol"/>s straight into a <see cref="SymbolTileBuffer"/> —
-    /// mirroring what <c>StyledSymbolTileBuilder.ShapeAsync</c>'s point/curved/icon emit branches produce, so a
+    /// mirroring what <c>StyledSymbolTileBuilder.Shape</c>'s point/curved/icon emit branches produce, so a
     /// test fixture can feed <c>SymbolTileBlockBaker.Bake</c> directly.
     ///
     /// <para><b>Default-value contract (READ BEFORE ADDING A PARAMETER).</b> Every optional parameter below

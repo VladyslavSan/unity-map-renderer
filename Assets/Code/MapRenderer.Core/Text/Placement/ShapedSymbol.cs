@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Text.Placement
     /// per-symbol managed allocation (the 3b win) — <see cref="SymbolTileBuffer.Symbols"/> is a
     /// <c>List&lt;ShapedSymbol&gt;</c>, so appending one is an in-place struct copy, not a heap allocation.
     /// A build appends one record per successfully-shaped symbol: a per-symbol build failure is SKIPPED outright
-    /// (<c>StyledSymbolTileBuilder.ShapeAsync</c>), so the list is dense — no gap/placeholder element.
+    /// (<c>StyledSymbolTileBuilder.Shape</c>), so the list is dense — no gap/placeholder element.
     /// </summary>
     public readonly struct ShapedSymbol
     {

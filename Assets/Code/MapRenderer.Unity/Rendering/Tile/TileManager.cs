@@ -13,6 +13,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Common;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Jobs;
 using MapRenderer.Jobs.Tiles;
 using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
@@ -170,7 +171,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Per-tile live record: the in-flight fetch request, the mesh build UniTask, and the built tile
+        /// Per-tile live record: the in-flight fetch request, the mesh build handle, and the built tile
         /// container GameObject.
         ///
         /// S47/S51: the lifecycle is now:
@@ -183,14 +184,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// tiles. A tile released while its mesh build is in-flight will never have ConsumeMeshBuild
         /// called for it.
         ///
-        /// Note: UniTask is a struct. .Preserve() on the stored UniTask allows polling .IsCompleted
-        /// and reading .GetAwaiter().GetResult() only after IsCompleted is true.
+        /// <c>MeshBuildTask</c> is a <see cref="WorkHandle{T}"/>: pollable across frames with no
+        /// <c>.Preserve()</c> needed, and <c>GetResult()</c> is repeatable once terminal (the backing
+        /// completion source never recycles). Unlike <c>default(UniTask{T})</c>, a <c>default</c>
+        /// <see cref="WorkHandle{T}"/> carries no source and every member throws — <see cref="HasMeshBuild"/>
+        /// is what makes that safe: every read of <c>MeshBuildTask</c> is guarded by it, so the field is only
+        /// ever touched while it holds a real handle.
         /// </summary>
         private struct LoadedTile
         {
             public UniTask<SharedDisposable<IDecodedTile>> Request;
             public bool                        FetchCompleted; // fetch done; mesh build may be in-flight
-            public UniTask<MeshBuildResult>    MeshBuildTask;  // default until fetch completes; default after consumed
+            public WorkHandle<MeshBuildResult> MeshBuildTask;  // default until fetch completes; default after consumed
             public bool                        HasMeshBuild;   // true when MeshBuildTask is valid
             public bool                        Built;          // mesh produced (or definitively absent/failed)
 
@@ -622,14 +627,14 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         // ── S48 mid-flight discard holding pen ────────────────────────────────────────────────
         // When a tile is released mid-flight (ReleaseTile while MeshBuildTask is still running),
-        // the UniTask has already been captured but not yet produced a result. We cannot dispose the
-        // NativeArrays immediately — they don't exist yet. Instead we stash the UniTask here; each
+        // the handle has already been captured but not yet produced a result. We cannot dispose the
+        // NativeArrays immediately — they don't exist yet. Instead we stash the handle here; each
         // Tick drains completed tasks, disposing their NativeArray payloads. Teardown spins to
         // completion and disposes everything remaining.
         //
         // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Dispose
         // are all main-thread). No locking is required.
-        private readonly List<UniTask<MeshBuildResult>> _pendingDisposal = new(8);
+        private readonly List<WorkHandle<MeshBuildResult>> _pendingDisposal = new(8);
 
         // ── teardown-cancel: the manager-lifetime token ───────────────────────────────────────────
         // Cancelled ONCE, at the very top of DoDispose, so every in-flight mesh build aborts before the
@@ -641,13 +646,56 @@ namespace MapRenderer.Unity.Rendering.Tile
         // structural guarantee that builds cancel ONLY on teardown.
         private readonly CancellationTokenSource _lifetimeCts = new();
 
+        /// <summary>The execution policy both mesh-build kicks dispatch through: ThreadPool on desktop/editor,
+        /// Inline on a WebGL player, where no worker ever picks a dispatch up (docs/threading-on-web.md).
+        /// Settable so a test can force Inline and exercise the web-correct path on desktop; rejects a policy
+        /// whose <see cref="IWorkScheduler.RunsInline"/> is true while <see cref="MeshBuildGateForTest"/> is
+        /// armed, whose park would then freeze the calling (main) thread. The check reads
+        /// <see cref="IWorkScheduler.RunsInline"/> rather than the concrete type — a decorator (e.g. a test
+        /// spy) wrapping an Inline scheduler is just as deadlock-prone, and that property's own contract is
+        /// what makes a wrapper forward the answer instead of hiding it.</summary>
+        internal IWorkScheduler WorkScheduler
+        {
+            get => _workScheduler;
+            set
+            {
+                if (value != null && value.RunsInline && _meshBuildGateForTest != null)
+                    throw new System.InvalidOperationException(
+                        "WorkScheduler: cannot select a RunsInline policy while MeshBuildGateForTest is armed " +
+                        "— the kick's WaitHandle.WaitAny park would then run on the CALLING thread (the body " +
+                        "runs inline), i.e. main, and the only release (_lifetimeCts.Cancel() in teardown) is " +
+                        "itself main-thread work that could never run — a guaranteed deadlock.");
+                _workScheduler = value;
+            }
+        }
+
+        private IWorkScheduler _workScheduler = WorkSchedulerFactory.ForCurrentPlatform();
+
         /// <summary>Test-only park: when non-null, EVERY mesh-build worker parks on this jointly with the
         /// lifetime token before running (the field is intentionally NOT self-clearing — unlike its cited
         /// precedent, which parks once), so a test can hold builds genuinely in-flight and observe that
         /// teardown-cancel releases every parked worker promptly. The test releases them by setting the gate
         /// or by tearing down (which cancels the token both parked workers also wait on). Mirrors
-        /// <see cref="MapRenderer.Unity.Text.SymbolReconciler.GateForTest"/>. Internal test-only.</summary>
-        internal ManualResetEventSlim MeshBuildGateForTest;
+        /// <see cref="MapRenderer.Unity.Text.SymbolReconciler.GateForTest"/>. Internal test-only.
+        /// <para>Rejects a non-null gate while <see cref="WorkScheduler"/>'s <see cref="IWorkScheduler.RunsInline"/>
+        /// is true — the symmetric guard to <see cref="WorkScheduler"/>'s own, since <c>WaitHandle.WaitAny</c>
+        /// on the calling (main) thread would then have no release. Same concrete-type-vs-property reasoning
+        /// as that guard: a wrapped Inline scheduler is checked via the property, not <c>is InlineWorkScheduler</c>.</para></summary>
+        internal ManualResetEventSlim MeshBuildGateForTest
+        {
+            get => _meshBuildGateForTest;
+            set
+            {
+                if (value != null && _workScheduler != null && _workScheduler.RunsInline)
+                    throw new System.InvalidOperationException(
+                        "MeshBuildGateForTest: cannot arm the gate while WorkScheduler.RunsInline is true — " +
+                        "the gate's WaitHandle.WaitAny park runs on the calling (main) thread under that " +
+                        "policy, with no release available — a guaranteed deadlock.");
+                _meshBuildGateForTest = value;
+            }
+        }
+
+        private ManualResetEventSlim _meshBuildGateForTest;
 
         // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
         // When a tile is released before its fetch completes (rapid zoom/cover churn), the preserved
@@ -1029,7 +1077,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt = kv.Value;
                 if (lt.Built) continue;
                 pending++;
-                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.Status.IsCompleted())
+                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.IsCompleted)
                     backlog++;
             }
 
@@ -1163,8 +1211,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>
         /// One frame of the tile loop. Allocation-free in steady state.
         ///
-        /// S47/S51: no main-thread mesh build. PumpPending only KICKS background UniTasks
-        /// on fetch completion; ConsumeMeshBuilds polls and CONSUMES completed UniTasks
+        /// S47/S51: no main-thread mesh build. PumpPending only KICKS background mesh builds
+        /// on fetch completion; ConsumeMeshBuilds polls and CONSUMES completed handles
         /// (uploads mesh + creates GameObjects). Neither step blocks on mesh build.
         ///
         /// The caller (MapView) runs <see cref="RenderLayerSet.ApplyZoom"/> and refreshes the scene
@@ -1334,20 +1382,25 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// S47 deterministic drain — blocks the calling thread until all in-flight fetch and
-        /// mesh build UniTasks complete, then consumes their results synchronously (uploads meshes +
+        /// S47 deterministic drain — blocks the calling thread until all in-flight fetch tasks and mesh
+        /// build handles complete, then consumes their results synchronously (uploads meshes +
         /// creates GameObjects). After this returns, <see cref="AllTilesSettled()"/> is guaranteed
         /// true for all currently loaded tiles.
         ///
         /// This is a full drain: it handles tiles at any stage of the pipeline:
         ///   (a) Fetch in-flight: parks until the fetch UniTask completes, then kicks mesh build inline.
-        ///   (b) Mesh build in-flight: parks until the UniTask completes, then consumes inline.
+        ///   (b) Mesh build in-flight: parks until the handle completes, then consumes inline.
         ///   (c) Neither (tile not yet fetched): marks Built=true (nothing to do).
         ///
-        /// Safe: both fetch and mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool),
-        /// so they complete on the ThreadPool and their continuation fires there without needing the Unity
-        /// PlayerLoop to advance. Parking on that completion via <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/>
-        /// from the main thread therefore does not deadlock (no PlayerLoop dependency to dead-end on).
+        /// Safe: the fetch UniTask's completion stays OFF the PlayerLoop (see
+        /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileDecodeDispatch"/>'s class doc) —
+        /// supplied by the decode hop on the <c>HasData</c> path, and by synchronous/inline completion
+        /// otherwise — so its continuation fires without needing the Unity PlayerLoop to advance.
+        /// The mesh build dispatches through <see cref="WorkScheduler"/>, whose completion fires on the
+        /// COMPLETING thread and is never posted to the PlayerLoop (I-2) — the same non-blocking guarantee,
+        /// by a different mechanism. Parking on either completion via
+        /// <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/> from the main thread therefore does not
+        /// deadlock (no PlayerLoop dependency to dead-end on).
         ///
         /// Called by test helpers for deterministic settle. NOT called from the production Update path.
         ///
@@ -1385,9 +1438,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (!lt.FetchCompleted)
                 {
                     var req = lt.Request;
-                    // Parks on a kernel event via WaitOffPlayerLoop: the fetch UniTask completes on the
-                    // ThreadPool (configureAwait: false / SwitchToThreadPool pattern), so its continuation
-                    // fires ThreadPool-side and wakes this wait without needing the PlayerLoop — no deadlock.
+                    // Parks on a kernel event via WaitOffPlayerLoop: req's completion stays OFF the
+                    // PlayerLoop (see TileDecodeDispatch's class doc) — supplied by the decode hop on the
+                    // HasData path, and by synchronous/inline completion otherwise — so its continuation
+                    // wakes this wait without needing the PlayerLoop — no deadlock.
                     req.WaitOffPlayerLoop(10000);
 
                     lt.FetchCompleted = true;
@@ -1454,11 +1508,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // (b) Mesh build in-flight — spin and consume.
                 if (lt.HasMeshBuild)
                 {
-                    var tessTask = lt.MeshBuildTask;
-                    // Parks on a kernel event via WaitOffPlayerLoop: mesh build UniTask uses
-                    // configureAwait: false (RunOnThreadPool), so its continuation fires ThreadPool-side and
-                    // wakes this wait without needing the PlayerLoop.
-                    tessTask.WaitOffPlayerLoop(10000);
+                    // Bridges into the UniTask I/O chain so WaitOffPlayerLoop applies: the WorkScheduler
+                    // completes the handle on the completing thread, never posting to the PlayerLoop (I-2),
+                    // so this park wakes without needing the PlayerLoop to advance.
+                    UniTask<MeshBuildResult> buildTask = lt.MeshBuildTask.ToUniTask();
+                    buildTask.WaitOffPlayerLoop(10000);
                     // Drain ignores per-frame caps: unbounded budget consumes ALL layers in one call → Built.
                     ConsumeMeshBuild(id, ref lt, int.MaxValue, int.MaxValue, out _, out _);
                 }
@@ -1476,15 +1530,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// kicks, and harvests NOTHING — a cap-deferred tile (fetch observed but no build kicked yet) is
         /// skipped, since there is no in-flight task to park on; the real <c>LateUpdate</c> Tick kicks and
         /// consumes it. Callers that need the mesh actually consumed still tick <c>LateUpdate</c>; this method
-        /// only supplies the ThreadPool wall-clock. See <see cref="DrainMeshBuilds"/> for the consuming peer
-        /// this method deliberately does not replicate.
+        /// only parks off the PlayerLoop until in-flight work completes. See <see cref="DrainMeshBuilds"/> for
+        /// the consuming peer this method deliberately does not replicate.
         ///
-        /// <para>Pump callers invoke this once per settle iteration, re-scanning <c>_loaded</c> each time. A
-        /// task that <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/> reports as timed out is STILL
-        /// pending, and re-parking on a still-pending task double-registers its single continuation (see that
-        /// method's contract). So a per-task timeout throws <see cref="System.TimeoutException"/> — a hung
-        /// fetch/build is a hard failure surfaced loudly, never silently re-waited. A healthy task completes
-        /// in milliseconds and never approaches <paramref name="timeoutMs"/>.</para></summary>
+        /// <para>Pump callers invoke this once per settle iteration, re-scanning <c>_loaded</c> each time. For
+        /// the FETCH task a timeout still means "still pending", and re-parking on a still-pending
+        /// <c>UniTask</c> double-registers its single continuation (see
+        /// <see cref="UniTaskParkExtensions.WaitOffPlayerLoop"/>'s contract) — the mesh-build handle's own
+        /// bridge does not share that specific hazard (a <see cref="WorkHandle{T}"/>'s completion source
+        /// appends continuations rather than occupying one slot), but a hang there is exactly as much a bug.
+        /// Either way a per-task timeout throws <see cref="System.TimeoutException"/> — a hung fetch/build is
+        /// a hard failure surfaced loudly, never silently re-waited. A healthy task completes in milliseconds
+        /// and never approaches <paramref name="timeoutMs"/>.</para></summary>
         /// <param name="timeoutMs">The maximum time to wait per parked task, in milliseconds.</param>
         /// <exception cref="System.TimeoutException">A loaded tile's fetch or mesh-build task did not complete
         /// within <paramref name="timeoutMs"/> (a hang).</exception>
@@ -1499,7 +1556,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (!lt.FetchCompleted)
                     completed = lt.Request.WaitOffPlayerLoop(timeoutMs);
                 else if (lt.HasMeshBuild)
-                    completed = lt.MeshBuildTask.WaitOffPlayerLoop(timeoutMs);
+                {
+                    UniTask<MeshBuildResult> buildTask = lt.MeshBuildTask.ToUniTask();
+                    completed = buildTask.WaitOffPlayerLoop(timeoutMs);
+                }
                 else
                     continue; // fetch observed but not yet kicked (cap-deferred) — no in-flight task to park on.
 
@@ -1515,10 +1575,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// S47/S51/S55 pump: per tile, kick its mesh build then consume the built mesh.
         ///
         /// Mesh build (fetch→kick): for tiles whose fetch completed, mint the shared decode entry and kick a
-        /// background mesh-build UniTask (S55: at most <paramref name="maxMeshBuildsPerTick"/> kicks per
+        /// background mesh build (S55: at most <paramref name="maxMeshBuildsPerTick"/> kicks per
         /// Tick — the entry is retained in <see cref="LoadedTile.Decode"/> until the cap allows).
         ///
-        /// Consume (build→upload): for tiles whose mesh-build UniTask is completed, consume the result on the
+        /// Consume (build→upload): for tiles whose mesh-build handle is completed, consume the result on the
         /// main thread (UploadMesh → backend registration) MESH-by-mesh (S87). The per-frame budget is dual —
         /// at most <paramref name="maxConsumesPerTick"/> layer MESHES AND
         /// <paramref name="maxVerticesPerTick"/> vertices per frame, whichever binds first; a tile whose
@@ -1585,7 +1645,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTile lt       = _loaded[key];
 
                 // ── Consume a completed mesh build MESH-by-mesh under the dual budget (S87) ──
-                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.Status.IsCompleted())
+                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.IsCompleted)
                 {
                     int meshBudgetLeft = consumeCap - meshesConsumed;
                     int vertBudgetLeft = vertsCap   - verticesConsumed;
@@ -1732,20 +1792,21 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Starts a background <see cref="UniTask{MeshBuildResult}"/> that reads the shared decode
-        /// (decoding it if this is the first cadence to reach it — A4) and runs every tile-mesh render
-        /// layer bound to this <c>(source, tile)</c> through <see cref="Processing.TileLayerProcessorRunner"/>
-        /// — the fan-out point (Epic A / A1). Returns immediately (non-blocking).
+        /// Starts a background mesh build that reads the shared decode (decoding it if this is the first
+        /// cadence to reach it — A4) and runs every tile-mesh render layer bound to this <c>(source, tile)</c>
+        /// through <see cref="Processing.TileLayerProcessorRunner"/> — the fan-out point (Epic A / A1).
+        /// Returns immediately (non-blocking on <see cref="ThreadPoolWorkScheduler"/>; the body already ran
+        /// by the time this returns on <see cref="InlineWorkScheduler"/>).
         ///
-        /// S51: uses UniTask.RunOnThreadPool(configureAwait: false) instead of Task.Run.
-        /// configureAwait: false is REQUIRED: the default (true) posts the final continuation via
-        /// UniTask.Yield() to the Unity PlayerLoop. DrainMeshBuilds() and the synchronous-spin
-        /// path in Dispose poll IsCompleted on the main thread WITHOUT pumping the PlayerLoop, so
-        /// the task would never reach Succeeded with configureAwait: true. With configureAwait: false,
-        /// completion stays on the ThreadPool and IsCompleted is true as soon as the work body returns.
+        /// Dispatches through <see cref="WorkScheduler"/> — <see cref="ThreadPoolWorkScheduler"/> on
+        /// desktop/editor, <see cref="InlineWorkScheduler"/> on a WebGL player, where no worker ever picks a
+        /// ThreadPool dispatch up (docs/threading-on-web.md). Under both policies, completion fires on the
+        /// COMPLETING thread and is never posted to the PlayerLoop (I-2), so <see cref="DrainMeshBuilds"/>'s
+        /// and <see cref="Dispose"/>'s synchronous-spin polls — which never pump the PlayerLoop — cannot
+        /// dead-end waiting for a continuation that would only ever run there.
         ///
-        /// The UniTask is stored with .Preserve() in the caller so its .IsCompleted can be polled
-        /// across multiple frames without exhausting the UniTask.
+        /// The returned <see cref="WorkHandle{T}"/> is pollable across frames with no <c>.Preserve()</c>
+        /// needed — its backing completion source never recycles (see <see cref="WorkHandle{T}"/>'s doc).
         ///
         /// The task captures only value-type / immutable inputs (<paramref name="decode"/>, layer records
         /// are read-only after Initialise). No Unity.Object is captured or touched off-main.
@@ -1763,7 +1824,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <see cref="DrainMeshBuilds"/> call sites pass nothing, so drain stays symbol-silent (unchanged —
         /// symbols never appeared in snapshots and no test drove symbols via drain).</para>
         /// </summary>
-        private UniTask<MeshBuildResult> KickMeshBuild(
+        private WorkHandle<MeshBuildResult> KickMeshBuild(
             LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
             Processing.ISymbolTileWorkerPass symbolPass = null)
         {
@@ -1772,11 +1833,18 @@ namespace MapRenderer.Unity.Rendering.Tile
             // kick, and no call site nulls its field around this call any more (see the LoadedTile.Decode
             // field doc: RenderTeardownRecord, funnel 1, is its only release, for the record's whole in-cover
             // lifetime, kicked or not). The KICK instead takes its OWN separate reference — `decode.Acquire()`
-            // below, immediately before the pool lambda that reads it is created — and releases exactly that one
-            // from the lambda's `finally`. The `RunOnThreadPool` hand-off can itself throw synchronously
+            // below, immediately before the scheduler call that reads it is created — and releases exactly that
+            // one from the body's `finally`. The `WorkScheduler.Schedule` hand-off can itself throw synchronously
             // (OOM), so the Acquire is guarded (try/catch below) to release on that path too. A main-thread prologue
             // throw therefore never touches the kick's reference at all (it is not acquired yet), and the
             // caller's own reference is untouched either way — one of the funnels frees it in due course.
+            // A single `catch` below suffices under BOTH scheduler policies precisely because `Schedule` never
+            // propagates a body exception (I-3: both schedulers wrap the body in their own try/catch and route
+            // a throw to `TrySetException`) — so a body throw is always absorbed by the body's own `finally`,
+            // never by this method's `catch`, and `Schedule` itself can only throw for a dispatch failure that
+            // ran BEFORE the body (and its `finally`) ever existed. That holds whether the body runs later on a
+            // pool thread or synchronously inside `Schedule` on the calling thread (Inline) — the release count
+            // is exactly one either way.
             var     layersSnapshot = _layers.SnapshotLayers();
             double  zoom           = id.Z;
             double3 tileOrigin     = lt.TileOriginRender;
@@ -1821,7 +1889,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             CancellationToken token = _lifetimeCts.Token; // captured as a local so the lambda closes over the token, not `this`
             try
             {
-                return UniTask.RunOnThreadPool(() =>
+                return WorkScheduler.Schedule(_ =>
                 {
                     // teardown-cancel test gate: when non-null, park jointly on the test gate and the lifetime
                     // token before doing any work, so a test can hold a build genuinely in-flight (and thereby
@@ -1874,7 +1942,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     {
                         decode.Release();
                     }
-                }, configureAwait: false).Preserve(); // .Preserve() allows polling .IsCompleted across multiple frames
+                }, token);
             }
             catch
             {
@@ -1888,16 +1956,17 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Epic A / A2 (design §B Q1/Q2): starts a background <see cref="UniTask{MeshBuildResult}"/> for a
-        /// SOURCE-LESS (background) tile — no bytes, no decode. Called from <see cref="PumpPending"/> (under
-        /// the shared build cap) and <see cref="DrainMeshBuilds"/> (uncapped). Mirrors
-        /// <see cref="KickMeshBuild"/>'s structure exactly, minus the byte/decode plumbing: one
+        /// Epic A / A2 (design §B Q1/Q2): starts a background mesh build for a SOURCE-LESS (background) tile
+        /// — no bytes, no decode. Called from <see cref="PumpPending"/> (under the shared build cap) and
+        /// <see cref="DrainMeshBuilds"/> (uncapped). Mirrors <see cref="KickMeshBuild"/>'s structure exactly,
+        /// minus the byte/decode plumbing (and its ownership guard — this kick acquires nothing): one
         /// <see cref="Processing.TileBackgroundLayerProcessor"/> per background layer (dense order, by TYPE —
         /// <see cref="ComputeSourcelessLayerIds"/>), each pre-allocating its own writable
-        /// <see cref="Mesh.MeshDataArray"/> on the MAIN THREAD, then <see cref="Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass"/>
-        /// on the ThreadPool.
+        /// <see cref="Mesh.MeshDataArray"/> on the MAIN THREAD, then
+        /// <see cref="Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass"/> dispatched through
+        /// <see cref="WorkScheduler"/> (see <see cref="KickMeshBuild"/>'s doc for the policy contract).
         /// </summary>
-        private UniTask<MeshBuildResult> KickSourcelessBackground(TileId id, double3 origin)
+        private WorkHandle<MeshBuildResult> KickSourcelessBackground(TileId id, double3 origin)
         {
             var    layersSnapshot = _layers.SnapshotLayers();
             double zoom           = id.Z;
@@ -1927,12 +1996,12 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             CancellationToken token = _lifetimeCts.Token; // captured as a local so the lambda closes over the token, not `this`
 
-            return UniTask.RunOnThreadPool(() =>
+            return WorkScheduler.Schedule(_ =>
             {
                 Style.IRenderLayerPayload[] payloads =
                     Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass(in context, processors, token);
                 return new MeshBuildResult { Payloads = payloads };
-            }, configureAwait: false).Preserve();
+            }, token);
         }
 
         /// <summary>
@@ -1948,7 +2017,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// Must be called on the Unity main thread, only when MeshBuildTask.IsCompleted, with positive
         /// budget (the pump guards budget &lt;= 0). A partially-consumed tile keeps HasMeshBuild = true
         /// and !Built; its already-built meshes/handles live in lt.Meshes/lt.DrawHandles, the remaining layers
-        /// stay alive in the Preserved task (re-fetched each call). Eviction's holding pen disposes the
+        /// stay alive in the handle (re-fetched each call). Eviction's holding pen disposes the
         /// remainder (idempotent — already-consumed layers are no-ops).
         ///
         /// Mid-flight release: ReleaseTile removes the tile from _loaded, so this is never called for a
@@ -1961,18 +2030,19 @@ namespace MapRenderer.Unity.Rendering.Tile
             meshesConsumed = 0;
             vertsConsumed  = 0;
 
-            var task = lt.MeshBuildTask;
+            var buildHandle = lt.MeshBuildTask;
 
             // Faulted or cancelled — nothing to render; complete immediately.
-            if (task.Status != UniTaskStatus.Succeeded)
+            if (!buildHandle.IsSucceeded)
             {
                 FinishConsume(ref lt);
                 return true;
             }
 
-            // .GetResult() is Preserve-safe and re-callable across frames (the pump calls this only when
-            // IsCompleted is true). Per-layer NativeArrays are disposed as each layer is consumed.
-            MeshBuildResult result = task.GetAwaiter().GetResult();
+            // GetResult() is re-callable across frames — the handle's backing completion source is a manual,
+            // non-recycling one, so no .Preserve() is needed (the pump calls this only when IsCompleted is
+            // true). Per-layer NativeArrays are disposed as each layer is consumed.
+            MeshBuildResult result = buildHandle.GetResult();
 
             int denseCount        = result.Payloads?.Length ?? 0;
             int currentLayerCount = _layers.Count;
@@ -2136,9 +2206,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// Does NOT wait for in-flight work (non-blocking). Mid-flight mesh build is removed
         /// from _loaded immediately so PumpPending/DrainMeshBuilds never visit it again.
         ///
-        /// S48 holding pen: when a mesh build UniTask is still in-flight at release time, its
-        /// NativeArray payload has not yet been produced (it will be allocated on the ThreadPool
-        /// after this method returns). We stash the UniTask in <see cref="_pendingDisposal"/>;
+        /// S48 holding pen: when a mesh build handle is still in-flight at release time (only possible under
+        /// <see cref="ThreadPoolWorkScheduler"/> — an <see cref="InlineWorkScheduler"/> handle is already
+        /// terminal by the time it is stored), its NativeArray payload has not yet been produced; it will be
+        /// allocated on the ThreadPool worker thread still running the build. We stash the handle in
+        /// <see cref="_pendingDisposal"/>;
         /// <see cref="DrainPendingDisposal"/> polls it each Tick and disposes the payload when the
         /// task completes. This guarantees no NativeArray leak for mid-flight-released tiles.
         /// </summary>
@@ -2500,7 +2572,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // running) is counted; an S87 partial (task complete, cursor mid-way) is stashed but not counted.
             if (lt.HasMeshBuild && !lt.Built)
             {
-                if (!lt.MeshBuildTask.Status.IsCompleted())
+                if (!lt.MeshBuildTask.IsCompleted)
                     ReleasedMidFlightCount++;
                 _pendingDisposal.Add(lt.MeshBuildTask);
             }
@@ -2530,13 +2602,13 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Iterate backwards so we can remove in-place without index shifting.
             for (int i = _pendingDisposal.Count - 1; i >= 0; i--)
             {
-                var task = _pendingDisposal[i];
-                if (!task.Status.IsCompleted())
+                var handle = _pendingDisposal[i];
+                if (!handle.IsCompleted)
                     continue; // still in-flight; check again next Tick
 
                 // Task completed (succeeded, faulted, or cancelled).
-                if (task.Status == UniTaskStatus.Succeeded)
-                    DisposeWholeResult(task.GetAwaiter().GetResult());
+                if (handle.IsSucceeded)
+                    DisposeWholeResult(handle.GetResult());
                 // Faulted/cancelled: no payloads produced, nothing to dispose.
 
                 _pendingDisposal.RemoveAt(i);
@@ -2724,16 +2796,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             // S48: drain the mid-flight-discard holding pen — park to completion, then dispose the
             // NativeArray payload; we're tearing down and must not leak. Runs AFTER the teardown loop
             // above, so it also absorbs every mesh build that loop just stashed.
-            // Mesh build UniTasks use configureAwait: false (UniTask.RunOnThreadPool), so they complete on
-            // the ThreadPool and their continuation fires there — WaitOffPlayerLoop parks on a kernel event
-            // set by that continuation, deadlock-free (no PlayerLoop dependency).
+            // The handle's WorkScheduler completes it on the completing thread, never posting to the
+            // PlayerLoop (I-2) — WaitOffPlayerLoop parks on a kernel event set by that completion,
+            // deadlock-free (no PlayerLoop dependency).
             for (int i = 0; i < _pendingDisposal.Count; i++)
             {
-                var task = _pendingDisposal[i];
-                task.WaitOffPlayerLoop(10000);
+                var handle = _pendingDisposal[i];
+                UniTask<MeshBuildResult> buildTask = handle.ToUniTask();
+                buildTask.WaitOffPlayerLoop(10000);
 
-                if (task.Status == UniTaskStatus.Succeeded)
-                    DisposeWholeResult(task.GetAwaiter().GetResult());
+                if (handle.IsSucceeded)
+                    DisposeWholeResult(handle.GetResult());
             }
 
             _pendingDisposal.Clear();

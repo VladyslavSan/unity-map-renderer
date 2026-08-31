@@ -166,7 +166,8 @@ the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` gener
   to `docs/smooth-transitions-design.md`. Full-sphere polar background is on the globe track.)
 - **A3 — symbol as the first `WorkerThenMain` processor** (still self-decoding). `TileSymbolLayerProcessor` (one
   per symbol style layer per (source, tile) build; worker step = `StyledSymbolTileBuilder.ExtractLayers`, main
-  tail = `ShapeAsync`) + `RunSymbolWorkerPass` (the symbol cadence's own decode-once worker pass — faults
+  tail = `Shape`, gated behind a build-wide glyph-range collect/ensure step) + `RunSymbolWorkerPass` (the symbol
+  cadence's own decode-once worker pass — faults
   propagate rather than settle, since symbol holds only managed state). `SymbolLabelSubsystem.BuildTileAsync`
   becomes the per-tile coordinator: one `SwitchToThreadPool`/`SwitchToMainThread(ct)` hop batches every layer's
   tail. Zero `TileManager` edits. Two self-decoding cadences persist by design until A4. Non-vacuity of the

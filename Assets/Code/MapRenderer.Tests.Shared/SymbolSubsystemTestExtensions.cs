@@ -70,5 +70,12 @@ namespace MapRenderer.Tests
         /// commit while the backlog keeps growing.</summary>
         internal static int PendingSpriteCount(this SymbolSubsystem subsystem)
             => subsystem._pendingSpriteQueue.Count;
+
+        /// <summary>The shared symbol build pipeline, so a test can read its telemetry (e.g.
+        /// <c>SkippedSymbolCount</c>) to observe shaping progress mid-build — the production dispatch path
+        /// (<c>TryBeginBuild</c>/<c>PumpBuilds</c>/<c>RunTailAsync</c>) exposes no other window onto its
+        /// internal, per-build <see cref="SymbolTileBuffer"/>.</summary>
+        internal static StyledSymbolTileBuilder Builder(this SymbolSubsystem subsystem)
+            => subsystem._builder;
     }
 }

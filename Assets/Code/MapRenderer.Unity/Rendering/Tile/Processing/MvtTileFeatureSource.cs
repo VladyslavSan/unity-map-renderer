@@ -4,6 +4,7 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -25,32 +26,37 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     internal sealed class MvtTileFeatureSource : ITileFeatureSource
     {
-        private readonly IDataSource   _byteSource;
-        private readonly bool          _ownsByteSource;
-        private readonly TileScheduler _scheduler;
-        private readonly TileCache     _cache;
+        private readonly IDataSource    _byteSource;
+        private readonly bool           _ownsByteSource;
+        private readonly TileScheduler  _scheduler;
+        private readonly TileCache      _cache;
+        private readonly IWorkScheduler _workScheduler;
 
         /// <param name="byteSource">The byte fetcher. Owned (disposed on <see cref="Dispose"/>) iff
         /// <paramref name="ownsByteSource"/> — mirrors the exact ownership <c>TileManager.SetSources</c> used
         /// to apply itself before the raise.</param>
+        /// <param name="workScheduler">The execution policy the decode hop runs under — see
+        /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
         /// <param name="cacheCapacity">LRU capacity for the internal <see cref="TileCache"/> — moved here from
         /// the old <c>TileManager.SetSources</c>'s <c>new TileCache(capacity: 256)</c>.</param>
         /// <param name="ownsByteSource">Whether this source disposes <paramref name="byteSource"/>.</param>
-        public MvtTileFeatureSource(IDataSource byteSource, int cacheCapacity = 256, bool ownsByteSource = true)
+        public MvtTileFeatureSource(IDataSource byteSource, IWorkScheduler workScheduler,
+            int cacheCapacity = 256, bool ownsByteSource = true)
         {
             _byteSource     = byteSource;
             _ownsByteSource = ownsByteSource;
             _cache          = new TileCache(cacheCapacity);
             _scheduler      = new TileScheduler(byteSource, _cache);
+            _workScheduler  = workScheduler;
         }
 
         /// <summary>Fetch via the (unchanged) scheduler, then decode the bytes through
         /// <see cref="TileDecodeDispatch.DecodeAsync"/> — absent (<c>!HasData</c>) maps to a null handle, the
         /// coordinator's null-for-absent contract. This method never hops back to the main thread: the
-        /// scheduler's own continuation already ends on the pool (its internal thread-pool switch), and the
-        /// decode adds another pool hop with <c>configureAwait: false</c>, so the drain-spin's
-        /// pool-completion invariant (§G-1) is preserved — and is now PROVIDED BY the shared dispatch rather
-        /// than argued for here.</summary>
+        /// real invariant the drain-spin needs is completion staying OFF the PlayerLoop (see
+        /// <see cref="TileDecodeDispatch"/>'s class doc), which <see cref="TileDecodeDispatch.DecodeAsync"/>
+        /// supplies on the <c>HasData</c> path and synchronous/inline completion supplies otherwise — not
+        /// the fetch scheduler ending on a thread-pool hop, which it no longer does.</summary>
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             TileResponse resp = await _scheduler.Request(id, ct);
@@ -58,7 +64,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // Everything downstream reads it off the decoded buffer instead of carrying its own copy.
             return (resp.HasData && resp.Bytes != null)
                 ? await TileDecodeDispatch.DecodeAsync(
-                    id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding))
+                    id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding), _workScheduler)
                 : null;
         }
 

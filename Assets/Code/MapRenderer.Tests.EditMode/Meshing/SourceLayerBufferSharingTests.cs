@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
-using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -97,7 +96,7 @@ namespace MapRenderer.Tests.Meshing
             public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
                 => _log.Add((_style.SourceLayer,
                              SourceLayerResolver.ResolveTileLayer(_style, tile)?.Geometry.Vertices ?? default));
-            public UniTask CompleteOnMainAsync(CancellationToken ct) => UniTask.CompletedTask;
+            public void CompleteOnMain(CancellationToken ct) { }
         }
 
         private sealed class NullPayload : IRenderLayerPayload
@@ -140,7 +139,7 @@ namespace MapRenderer.Tests.Meshing
             var symbolLog = new List<(string source, NativeArray<double2> buffer)>();
 
             // A real builder over an empty glyph source: the worker step (ExtractLayers) never touches the
-            // glyph cache — it is the main-thread ShapeAsync tail that does — so an empty source is enough to
+            // glyph cache — it is the main-thread Shape tail that does — so an empty source is enough to
             // run the PRODUCTION symbol processors here, which is the point (the fan-in under test must be
             // one production actually creates).
             using var glyphManager = new GlyphManager(

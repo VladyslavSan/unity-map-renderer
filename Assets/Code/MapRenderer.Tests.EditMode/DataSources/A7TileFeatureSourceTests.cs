@@ -15,6 +15,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
@@ -23,6 +24,10 @@ namespace MapRenderer.Tests.DataSources
     [TestFixture]
     public class A7TileFeatureSourceTests
     {
+        // Off-main, matching production's desktop policy — these teeth exercise GetTile's own contract, not
+        // the scheduler choice.
+        private static readonly IWorkScheduler Scheduler = new ThreadPoolWorkScheduler();
+
         // ── F-4: GetTile decodes EAGERLY — the inversion of the retired lazy tooth ────────────────────────
 
         // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
@@ -41,7 +46,7 @@ namespace MapRenderer.Tests.DataSources
         public async Task GetTile_MalformedBytes_FaultsTheTask_AndMintsNoHandle()
         {
             var byteSource = TestDataSource.FromBytes(MalformedMvtBytes);
-            using var source = new MvtTileFeatureSource(byteSource);
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
 
             System.Exception thrown = null;
             SharedDisposable<IDecodedTile> handle = null;
@@ -72,7 +77,7 @@ namespace MapRenderer.Tests.DataSources
             byte[] fixtureBytes = System.IO.File.ReadAllBytes(
                 System.IO.Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes"));
             var byteSource = TestDataSource.FromBytes(fixtureBytes);
-            using var source = new MvtTileFeatureSource(byteSource);
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
 
             SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
             Assert.IsNotNull(handle, "sanity: present bytes must mint a handle");
@@ -93,7 +98,7 @@ namespace MapRenderer.Tests.DataSources
         {
             // Byte-equivalent to today's TileResponse.HasData == false branch (§G risk 4).
             var byteSource = TestDataSource.Absent();
-            using var source = new MvtTileFeatureSource(byteSource);
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
 
             SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
 

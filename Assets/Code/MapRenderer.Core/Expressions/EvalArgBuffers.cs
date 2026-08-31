@@ -11,10 +11,11 @@ namespace MapRenderer.Core.Expressions
     /// This is a <b>free-list of whole arrays</b>, not one growable buffer with a cursor, for two
     /// non-local reasons that a single body does not reveal:
     /// <list type="bullet">
-    ///   <item><b>Thread affinity.</b> The parsed expression tree is shared across the worker threads that
-    ///     build tiles concurrently (<c>FeatureSelector.SelectFeatures</c> runs off-main), so the buffer
-    ///     cannot live on the shared <see cref="FunctionExpression"/> instance — it is <c>[ThreadStatic]</c>
-    ///     here so each thread owns its own pool.</item>
+    ///   <item><b>Thread affinity.</b> The parsed expression tree is shared across whatever threads build
+    ///     tiles concurrently (<c>FeatureSelector.SelectFeatures</c> can run on a ThreadPool worker, or on the
+    ///     MAIN THREAD under the WebGL/Inline dispatch policy), so the buffer cannot live on the shared
+    ///     <see cref="FunctionExpression"/> instance — it is <c>[ThreadStatic]</c> here so each thread owns
+    ///     its own pool regardless of which threads are actually in play.</item>
     ///   <item><b>Re-entrancy.</b> Evaluation nests — a node's argument is itself an expression that borrows
     ///     a buffer while the outer node's buffer is still half-filled — so two frames on one thread are live
     ///     at once. Distinct arrays (never a shared backing store) mean no frame can alias or reallocate

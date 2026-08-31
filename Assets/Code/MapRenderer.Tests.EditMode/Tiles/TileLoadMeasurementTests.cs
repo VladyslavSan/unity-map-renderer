@@ -92,8 +92,9 @@ namespace MapRenderer.Tests.Tiles
 
             // Warm-up: the FIRST Request is a genuine new fetch (CancellationTokenSource.CreateLinkedTokenSource
             // + FetchAndCacheAsync(...).Preserve()) — legitimately allocates. Drive it to completion so
-            // cache.Put has already run (FetchAndCacheAsync's SwitchToThreadPool + lock + Put happen BEFORE
-            // the outer UniTask's IsCompleted flips true — no race with the assertion below).
+            // cache.Put has already run. With a sync-completing source the whole fetch (including the
+            // lock + Put) now runs INSIDE Request() itself, so WaitOffPlayerLoop short-circuits on an
+            // already-completed awaiter — no race with the assertion below.
             var first  = scheduler.Request(id);
             first.WaitOffPlayerLoop(10000);
             Assert.IsTrue(first.Status.IsCompleted(), "warm-up fetch must complete before measuring the cache-hit path.");

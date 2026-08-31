@@ -5,6 +5,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
 
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
@@ -20,11 +21,14 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// others would have been freed by nothing. That premise is gone — every drop path is now an OWNER with
     /// a release in it, so a tile handed out to a record that never kicks is freed when the record dies.</para>
     ///
-    /// <para><b>The slice must stay OFF the main thread</b>, which laziness used to arrange for free by
-    /// deferring it into the kick's pool lambda. It is now arranged deliberately, by routing through
-    /// <see cref="TileDecodeDispatch.DecodeAsync"/> — the same pool hop the MVT source uses — and pinned by
-    /// a tooth rather than by an accident of the design. Slicing inline inside <c>Tick</c> would be a
-    /// per-cover-tile main-thread stall.</para>
+    /// <para><b>The slice stays OFF the main thread under the desktop policy</b>, which laziness used to
+    /// arrange for free by deferring it into the kick's pool lambda. It is now arranged deliberately, by
+    /// routing through <see cref="TileDecodeDispatch.DecodeAsync"/> — the same dispatch the MVT source uses,
+    /// under whichever <see cref="IWorkScheduler"/> this source was constructed with — and pinned by a tooth
+    /// rather than by an accident of the design. Under <see cref="ThreadPoolWorkScheduler"/> (desktop/editor)
+    /// slicing inline inside <c>Tick</c> would be a per-cover-tile main-thread stall; under
+    /// <see cref="InlineWorkScheduler"/> (WebGL) the slice runs synchronously on whatever thread calls
+    /// <c>GetTile</c> by design — there is no worker thread to hop to.</para>
     ///
     /// <para><b>Reusing the shared decode dispatch verbatim</b> costs zero lines in the most safety-critical
     /// part of the pipeline (the pool hop's completion invariant, the profiler marker, the lease's refcount
@@ -44,13 +48,17 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly GeoJsonProjectedDataset _dataset;
         private readonly GeoJsonSliceOptions     _options;
         private readonly ITileDecoder            _decoder;
+        private readonly IWorkScheduler          _scheduler;
 
         /// <param name="dataset">The parsed dataset. Projected ONCE here — projection is zoom-independent, so
         /// it is the whole of the work that can be shared across every tile this source will serve. Recorded
         /// cost: that happens on the main thread inside <c>SetStyle</c>, O(N) once per style-set; negligible
         /// for a fixture, a hitch for a large dataset.</param>
         /// <param name="options">Slice options — see the type doc: a parameter, deliberately.</param>
-        internal GeoJsonTileFeatureSource(GeoJsonDataset dataset, in GeoJsonSliceOptions options)
+        /// <param name="scheduler">The execution policy the slice hop runs under — see
+        /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
+        internal GeoJsonTileFeatureSource(GeoJsonDataset dataset, in GeoJsonSliceOptions options,
+            IWorkScheduler scheduler)
         {
             // Validated HERE, not at the first slice. These options are retained for the source's whole
             // life, so an unusable set (a `default(GeoJsonSliceOptions)`, whose zero extent makes the probe
@@ -59,9 +67,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // the wiring site that chose it.
             options.Validate();
 
-            _dataset = GeoJsonProjectedDataset.Project(dataset);
-            _options = options;
-            _decoder = new GeoJsonTileDecoder(_dataset, options);
+            _dataset   = GeoJsonProjectedDataset.Project(dataset);
+            _options   = options;
+            _decoder   = new GeoJsonTileDecoder(_dataset, options);
+            _scheduler = scheduler;
         }
 
         /// <summary>Slices the tile and hands back a lease over it, or null for a tile this dataset provably
@@ -72,13 +81,14 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <see cref="GeoJsonSliceOptions.UnitSquareWindow"/> arithmetic the slicer's per-feature reject uses,
         /// so it can never reject a tile that has geometry. It cannot be an exact answer without slicing, and
         /// the point of it is to avoid slicing a tile at all just to learn it is empty — not to keep the
-        /// slice off the main thread, which the pool hop below now does. A tile inside the box but between
-        /// features therefore yields a non-null handle over an
+        /// slice off the main thread, which the scheduler hop below arranges (a pool hop under
+        /// <see cref="ThreadPoolWorkScheduler"/>; inline, on WebGL). A tile
+        /// inside the box but between features therefore yields a non-null handle over an
         /// empty tile, which the coordinator already handles (zero layers ⇒ every processor settles at zero
         /// vertices).</para>
         ///
-        /// <para>The probe runs on the CALLER's thread — three comparisons — and only the slice hops to the
-        /// pool. A disjoint tile therefore still costs nothing and still never decodes.</para></summary>
+        /// <para>The probe runs on the CALLER's thread — three comparisons — and only the slice runs under the
+        /// injected scheduler. A disjoint tile therefore still costs nothing and still never decodes.</para></summary>
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             // Nothing here is long enough to cancel MID-call, and no production caller threads a token
@@ -94,7 +104,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                             _dataset.BboxMax.y < windowMin.y || _dataset.BboxMin.y > windowMax.y;
 
             // The slice is the decode, and it runs on the pool — never inline in the caller's Tick.
-            return disjoint ? null : await TileDecodeDispatch.DecodeAsync(id, null, _decoder);
+            return disjoint ? null : await TileDecodeDispatch.DecodeAsync(id, null, _decoder, _scheduler);
         }
 
         /// <summary>Nothing to cancel and nothing to evict — the dataset is retained for this source's whole

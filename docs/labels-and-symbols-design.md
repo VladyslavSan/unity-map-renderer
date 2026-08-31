@@ -38,8 +38,9 @@ decode → feature-extract (off the main thread) → glyph-shape → atlas-appen
 frame by `PumpBuilds`. Decode + per-layer extract run through
 `Rendering.Tile.Processing.TileLayerProcessorRunner.RunSymbolWorkerPass` (the symbol cadence's own decode-once
 worker-pass entry) over one `TileSymbolLayerProcessor` per symbol style layer, each writing into the build's
-shared label list; the main-thread shape/atlas-append tail runs as `RunTailAsync`'s per-layer
-`CompleteOnMainAsync` loop, started by `PumpBuilds`' once-per-frame drain of the pool→main
+shared label list; the main-thread tail (`RunTailAsync`) first collects every processor's required glyph
+ranges and awaits them (the build's ONE suspension point), then runs the per-layer `CompleteOnMain` loop —
+synchronous, no atlas mutation — started by `PumpBuilds`' once-per-frame drain of the pool→main
 `ConcurrentQueue` handoff (`_handoffQueue`). Finished per-tile labels land in
 `SymbolTileLabelStore`, which:
 
@@ -47,8 +48,8 @@ shared label list; the main-thread shape/atlas-append tail runs as `RunTailAsync
 - bumps a monotonic **`Version`** on every set-changing mutation — the key the fast clock uses to know whether
   anything actually changed.
 
-**Per-label build isolation.** One label whose build throws must NOT blank the whole tile's symbols. The Pass-2
-per-label body in `StyledSymbolTileBuilder.ShapeAsync` (shape → layout → `output.Add`) is wrapped in a
+**Per-label build isolation.** One label whose build throws must NOT blank the whole tile's symbols. The
+per-label body in `StyledSymbolTileBuilder.Shape` (shape → layout → `output.Add`) is wrapped in a
 `catch … when (!(ex is OperationCanceledException) && !ct.IsCancellationRequested)` that skips + counts the one
 label (`SkippedLabelCount` telemetry, throttled once-per-session warn) and lets the rest build + commit. The
 trigger this fixes is the deferred single-run bidi: `CodepointTextShaper` throws on mixed strong-direction text

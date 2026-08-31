@@ -19,9 +19,9 @@ namespace MapRenderer.Core.Data
     /// A missing file returns <c>HasData=false</c>; an I/O error (permission denied, etc.) throws.
     /// </para>
     ///
-    /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (was Task). Implementation switches to the
-    /// ThreadPool via UniTask.SwitchToThreadPool(), then does the synchronous File.ReadAllBytes
-    /// work, then returns WITHOUT switching back to the main thread (no UniTask.SwitchToMainThread).
+    /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (was Task). On desktop/editor it switches to the
+    /// ThreadPool via UniTask.SwitchToThreadPool(), then does the synchronous File.ReadAllBytes work,
+    /// then returns WITHOUT switching back to the main thread (no UniTask.SwitchToMainThread).
     ///
     /// This "switch-then-work-no-return" pattern is equivalent to UniTask.RunOnThreadPool with
     /// configureAwait: false. configureAwait: false (no return) is REQUIRED: the alternative
@@ -29,11 +29,21 @@ namespace MapRenderer.Core.Data
     /// continuation via UniTask.Yield() to the Unity PlayerLoop, which never advances when
     /// polled synchronously from test helpers or DrainMeshBuilds. Without the PlayerLoop pump,
     /// the task never reaches Succeeded — GetResult() throws "Not yet completed" and DrainMeshBuilds
-    /// loops forever. Completing on the ThreadPool (no return) makes IsCompleted true immediately.
+    /// never observes completion. Completing on the ThreadPool (no return) makes IsCompleted true
+    /// immediately.
+    ///
+    /// <b>WebGL player exception:</b> the managed ThreadPool has no workers there (see
+    /// docs/threading-on-web.md) — a queued SwitchToThreadPool continuation would never run, hanging
+    /// this fetch forever exactly like <see cref="MapRenderer.Core.Data.TileScheduler"/>'s own
+    /// now-removed hop did. The switch is therefore guarded to desktop/editor only
+    /// (<c>#if !UNITY_WEBGL || UNITY_EDITOR</c>); on a WebGL player the read runs synchronously,
+    /// inline on the calling thread — a real but accepted cost (the alternative is a permanent
+    /// silent hang), the same trade-off the mesh path already accepts on WebGL.
     ///
     /// UniTask.SwitchToThreadPool() is available in both the NetCore NuGet build (headless dotnet test)
     /// and the vendored Unity build. UniTask.RunOnThreadPool is NOT available in the NetCore build,
-    /// so this pattern is the portable equivalent.
+    /// so this pattern is the portable equivalent. <c>UNITY_WEBGL</c> is undefined under
+    /// <c>dotnet test</c>, so the fast test project keeps the desktop behaviour, unchanged.
     /// No PlayerLoop-dependent APIs are used here.
     /// </summary>
     public sealed class FileDataSource : IDataSource
@@ -77,12 +87,19 @@ namespace MapRenderer.Core.Data
             // back to the main thread. This "switch-work-no-return" pattern is equivalent to
             // UniTask.RunOnThreadPool(configureAwait: false) and is the only portable pattern that
             // works in BOTH the NetCore NuGet build (dotnet test, no RunOnThreadPool method) and
-            // the vendored Unity build. The result UniTask completes on the ThreadPool; IsCompleted
-            // is true immediately after return, with no PlayerLoop dependency.
+            // the vendored Unity build. The result UniTask completes on the ThreadPool on desktop/editor,
+            // or inline on WebGL (see the class doc); either way IsCompleted is true immediately after
+            // return, with no PlayerLoop dependency.
+            //
+            // Guarded to desktop/editor: the managed ThreadPool has no workers on a WebGL player (see
+            // docs/threading-on-web.md), so this switch would hang forever there. On WebGL the read
+            // below runs synchronously, inline on the calling thread instead — see the class doc.
             //
             // CancellationToken is checked before the read starts; mid-read cancellation is not
             // guaranteed (acceptable, consistent with the old netstandard2.1 path).
+#if !UNITY_WEBGL || UNITY_EDITOR
             await UniTask.SwitchToThreadPool();
+#endif
             ct.ThrowIfCancellationRequested();
             byte[] data = File.ReadAllBytes(fullPath);
             return new TileResponse(data, TileEncoding.Mvt);

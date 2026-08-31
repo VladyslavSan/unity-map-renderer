@@ -9,6 +9,7 @@ using MapRenderer.Core.View.Camera;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using EntitiesTileRenderer = MapRenderer.Unity.Rendering.Backend.Entities.TileRenderer;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
+using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
@@ -38,6 +39,10 @@ namespace MapRenderer.Tests
         // to the view (destroyed with it); the RenderTexture is shared (the camera never renders to it).
         private static RenderTexture _testViewportRt;
 
+        // Off-main, matching production's desktop policy — LoadTestStyle exercises the source's own
+        // fetch/decode contract, not the scheduler choice.
+        private static readonly IWorkScheduler TestWorkScheduler = new ThreadPoolWorkScheduler();
+
         /// <summary>Wire a deterministic square (px×px) offscreen camera into <paramref name="view"/> so its
         /// tile loop has a non-null camera / viewport. Chains after <c>AddComponent&lt;MapView&gt;()</c>.</summary>
         public static MapViewComponent WithTestCamera(this MapViewComponent view, int px = 1080)
@@ -62,9 +67,19 @@ namespace MapRenderer.Tests
         /// at the one injected <paramref name="source"/>. No test-only seam on production TileManager. Requires
         /// the camera to be wired first (<see cref="WithTestCamera"/>).
         /// </summary>
+        /// <param name="view">The view to wire.</param>
+        /// <param name="source">The byte source every rendered source-id is pointed at.</param>
+        /// <param name="initialView">Camera properties to seed before the first tick.</param>
+        /// <param name="style">Style document to build layers from; a default is used when null.</param>
+        /// <param name="decodeScheduler">Overrides the decode hop's scheduler. Defaults to the off-main
+        /// desktop policy. Pass an <c>InlineWorkScheduler</c> when a fixture's assertion depends on EVERY
+        /// admitted tile being decode-ready within the tick that completes its fetch — under the default,
+        /// decodes land across an unpredictable number of ticks, so a per-tick budget sees a partial
+        /// ready-set.</param>
         internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
-            CameraProperties initialView, StyleDocument style = null)
+            CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null)
         {
+            IWorkScheduler decodeSched = decodeScheduler ?? TestWorkScheduler;
             MapView mv = view.View;
             mv.Camera.SetProperties(initialView);
             mv.Camera.SyncToCamera(); // production commits in LateUpdate; tests drive it explicitly at the seed
@@ -90,7 +105,7 @@ namespace MapRenderer.Tests
                 // mirroring MapView.BuildSourceSpecs' production wrap.
                 if (seen.Add(sid))
                     specs.Add(new TileManager.SourceSpec(
-                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source)));
+                        sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source, decodeSched)));
             }
         }
 

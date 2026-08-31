@@ -18,15 +18,18 @@ reviews (e.g. *"violates SPEC-DPR R-9"*). See `specs/README.md` for the doc type
 
 ## Project layout
 
-**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`; `MapRenderer.Core` is a convenience, not a goal —
-and never a placement argument.** Put code where it belongs architecturally, then test it wherever it lands.
-**Read `ARCHITECTURE.md` §2 "Module boundaries" before moving code between assemblies or adding a type to
-Core** — it carries the rule, the rationale, and the three-workaround failure that produced it.
+**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`; `MapRenderer.Core` is legacy — not a destination
+for new code, and never a placement argument.** Put code where it belongs architecturally, then test it
+wherever it lands. **New features are designed data-oriented and native-first from the start** — the data
+plane (anything per tile / feature / vertex / glyph / frame, or read inside a job) is born native; nativizing
+later is not the plan. **Read `ARCHITECTURE.md` §2 "Module boundaries" before moving code between assemblies
+or adding a type to Core** — it carries both rules, the rationale, and the three-workaround failure that
+produced the first one.
 
 - `Assets/Code/MapRenderer.Unity/` — **the product**: MonoBehaviours, mesh building, rendering glue.
 - `Assets/Code/MapRenderer.Jobs/` — **the product**: Burst + Collections jobs; anything naturally blittable.
-- `Assets/Code/MapRenderer.Core/` — naturally engine-free code: tile math, geometry, earcut, style/expression
-  evaluation, text shaping.
+- `Assets/Code/MapRenderer.Core/` — **legacy, no new code**: engine-free tile math, geometry, earcut,
+  style/expression evaluation, text shaping that predates the rule.
 - `Assets/Code/MapRenderer.Tests.EditMode/` — headless EditMode tests.
 - `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
 - Assemblies are split via `.asmdef`; Core does not depend on `MapRenderer.Unity`.
@@ -91,7 +94,8 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 > ```
 
 ### Fast Core tests (no Unity) — a faster loop for code that *already* lives in `MapRenderer.Core`
-> A convenience, **never** a placement argument — see `ARCHITECTURE.md` §2 "Module boundaries".
+> Use it for the legacy code that is there; **never** a placement argument, and never a reason to put new
+> code in Core — see `ARCHITECTURE.md` §2 "Module boundaries".
 
 `MapRenderer.Core` is plain C# (its only Unity dependency is `Unity.Mathematics.double2`, which a 2-field
 shim replaces). `Tools/core-tests/` is a `dotnet test` project that compiles the **real** Core `.cs` files

@@ -162,7 +162,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // First pass: exact per-array sizes, so every NativeArray below is allocated ONCE at its final size
-        // (Burst-safe fixed arrays — no growth). Mirrors ShapeAsync's contribution to each buffer pool 1:1
+        // (Burst-safe fixed arrays — no growth). Mirrors Shape's contribution to each buffer pool 1:1
         // (each symbol's *Count field IS that contribution — no re-derivation needed here).
         private static void CountSizes(SymbolTileBuffer buffer, int rawCount, out int pointCount, out int curvedCount,
             out int quadCount, out int glyphCount, out int anchorCount, out int anchorFadeCount, out int worldPointCount)
