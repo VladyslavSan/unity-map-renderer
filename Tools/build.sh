@@ -24,6 +24,7 @@ TARGET — the PLATFORM only; --dev selects the variant
   android    Builds/Android/UnityMapRenderer.apk      debug-signed APK, sideload/preview
   macos      Builds/macOS/UnityMapRenderer.app        unsigned .app (see CAVEATS)
   linux      Builds/Linux/UnityMapRenderer.x86_64     + _Data folder
+  web        Builds/Web/UnityMapRenderer/              open with Tools/serve-web.sh (see WEB below)
   release    android + macos + linux                  the public release set
   desktop    macos + linux
   all        android + macos + linux
@@ -41,6 +42,21 @@ EXAMPLES
   Tools/build.sh macos --dev              # the profiling player
   Tools/build.sh desktop --dev            # macOS + Linux, both development
   Tools/build.sh macos --dev --allow-install
+
+WEB
+  The player CANNOT be opened from the filesystem or served by a plain static server: Unity compresses
+  with Brotli and its loader has no fallback decoder, so the server must send Content-Encoding. Use
+  `Tools/serve-web.sh` (defaults to this build, port 8080).
+
+  Two settings are forced by BuildScript.RunWeb / ApplyReleaseSettings because a player with either one
+  wrong does not start, and fails silently rather than erroring:
+    Burst AOT off        com.unity.entities + Burst AOT traps during static init on this Unity version.
+                         Costs every job running inline on the main thread — Burst is the only route to
+                         a worker thread on web.
+    stripping Minimal    High builds clean and then hangs at 100%. Costs ~4.5 MB of shippable size.
+
+  Full reasoning, the measured table of configurations that do and do not start, and how to verify a
+  build is genuinely what it claims: docs/web-target.md.
 
 PASSTHROUGH
   Anything other than --dev is forwarded verbatim to every `unity build` invocation. These CLI flags
@@ -93,7 +109,7 @@ TARGET="${1:-}"
 
 if [ -z "$TARGET" ]; then
   # Brief on a mistake, full on request: an argument slip should not cost a screenful.
-  echo "usage: Tools/build.sh <android|macos|linux|release|desktop|all> [--dev] [unity build flags...]" >&2
+  echo "usage: Tools/build.sh <android|macos|linux|web|release|desktop|all> [--dev] [unity build flags...]" >&2
   echo "  --dev = the profileable DEVELOPMENT player, into Builds/<platform>-Development/" >&2
   echo "  run 'Tools/build.sh --help' for the full interface" >&2
   exit 2
@@ -147,10 +163,11 @@ case "$TARGET" in
   android) PLATFORMS=(android) ;;
   macos)   PLATFORMS=(macos) ;;
   linux)   PLATFORMS=(linux) ;;
+  web)     PLATFORMS=(web) ;;
   release) PLATFORMS=(android macos linux) ;;
   desktop) PLATFORMS=(macos linux) ;;
   all)     PLATFORMS=(android macos linux) ;;
-  *) echo "unknown target '$TARGET' — want android|macos|linux|release|desktop|all" >&2
+  *) echo "unknown target '$TARGET' — want android|macos|linux|web|release|desktop|all" >&2
      echo "(run 'Tools/build.sh --help' for the full interface)" >&2; exit 2 ;;
 esac
 
@@ -161,6 +178,7 @@ btarget_for() { case "$1" in
     android) echo Android ;;
     macos)   echo StandaloneOSX ;;
     linux)   echo StandaloneLinux64 ;;
+    web)     echo WebGL ;;
   esac; }
 # platform -> BuildScript entry point. --dev appends "Development" to the method name, which is the
 # whole mechanism: BuildScript's method name alone decides platform, variant and output path, so there
@@ -169,6 +187,7 @@ method_for()  { case "$1" in
     android) echo MapRenderer.Build.BuildScript.BuildAndroid ;;
     macos)   echo MapRenderer.Build.BuildScript.BuildMacOS ;;
     linux)   echo MapRenderer.Build.BuildScript.BuildLinux ;;
+    web)     echo MapRenderer.Build.BuildScript.BuildWeb ;;
   esac; }
 
 build_one() {

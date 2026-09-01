@@ -852,15 +852,18 @@ PlayerSettings:
   scriptingBackend:
     Android: 1
     Standalone: 1
+    WebGL: 1
   il2cppCompilerConfiguration:
     Android: 1
     Standalone: 1
+    WebGL: 1
   il2cppCodeGeneration: {}
   il2cppLTOMode: {}
   il2cppStacktraceInformation: {}
   managedStrippingLevel:
     Android: 3
     Standalone: 3
+    WebGL: 4
   incrementalIl2cppBuild: {}
   suppressCommonWarnings: 1
   allowUnsafeCode: 0

@@ -790,7 +790,7 @@ namespace MapRenderer.Tests.Structure
             // ── The dispatch, narrowed to its own argument list ──────────────────────────────────────
             Assert.AreEqual(0, CountOccurrences(pumpBody, "UniTask.RunOnThreadPool"),
                 "PumpBuilds must no longer dispatch the parked drain's worker phase through raw " +
-                "UniTask.RunOnThreadPool — it is dead on WebGL (docs/threading-on-web.md).");
+                "UniTask.RunOnThreadPool — it is dead on WebGL (docs/web-target.md).");
             // The dispatch must reach the INJECTED policy, so the body may not mint a scheduler of its own:
             // `new InlineWorkScheduler().Schedule(` hard-codes the policy while still reading like a dispatch,
             // and the substring check below is unanchored enough that a type merely NAMED *WorkScheduler would
@@ -978,7 +978,7 @@ namespace MapRenderer.Tests.Structure
         /// <summary>
         /// The mesh-build kick migration: both <c>KickMeshBuild</c> and <c>KickSourcelessBackground</c> must
         /// dispatch through the injected <c>IWorkScheduler</c>, never <c>UniTask.RunOnThreadPool</c> directly
-        /// — the WebGL fix (docs/threading-on-web.md), since <c>RunOnThreadPool</c> never runs its delegate
+        /// — the WebGL fix (docs/web-target.md), since <c>RunOnThreadPool</c> never runs its delegate
         /// on a web player (no managed background threads). Structural companion to the runtime
         /// <c>InjectedScheduler_Runs…OnTheCallingThread</c> teeth, which prove the POLICY is honored; this one
         /// proves the PLACEMENT — that both kick sites reach the scheduler at all, not just one of them.

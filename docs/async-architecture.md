@@ -75,7 +75,7 @@ impl. A test-only impl *may* fall back to `Task`/`HttpClient` as an explicit esc
 
 This doc originally stated UniTask as the unconditional primitive for "threading lives in the Unity layer".
 That no longer holds for CPU offload: `UnityEngine`'s managed ThreadPool is not wired to WebGL web workers
-(`docs/threading-on-web.md`), so `UniTask.RunOnThreadPool` silently never runs its body there. The tile
+(`docs/web-target.md`), so `UniTask.RunOnThreadPool` silently never runs its body there. The tile
 pipeline's CPU-offload sites (decode dispatch, then the mesh-build kicks) now go through
 `MapRenderer.Unity/Concurrency/IWorkScheduler` — `ThreadPoolWorkScheduler` (desktop/editor, reproducing the
 old `RunOnThreadPool` dispatch byte-for-byte) or `InlineWorkScheduler` (WebGL, runs the body synchronously on

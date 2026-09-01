@@ -1,7 +1,7 @@
 // Unity EditMode only — needs a real Camera + the internal SymbolSubsystem. SymbolSubsystem's own two
 // off-main dispatch sites (PumpBuilds's parked-build drain, ScheduleReconcileIfDirty's cross-tile reconcile)
 // dispatch through the injected SymbolSubsystem.WorkScheduler policy — the WebGL fix for the last pair of
-// raw UniTask.RunOnThreadPool sites in the tile pipeline (docs/threading-on-web.md). Mirrors
+// raw UniTask.RunOnThreadPool sites in the tile pipeline (docs/web-target.md). Mirrors
 // MeshBuildWorkSchedulerTests' shape for TileManager's own two kicks, sharing its RecordingWorkScheduler spy
 // (TestSupport/) so the two suites cannot drift into two subtly different instruments.
 //

@@ -6,7 +6,9 @@ and decisions, `docs/coordinates-and-projections.md` for the math foundations, `
 line AA, lit shading, and the render-layer model are the later sections), `docs/conventions.md` for
 generic coding conventions, `docs/gc-and-allocation-design.md` for why managed allocation dominates
 frame timing (GC is stop-the-world) and how the hot paths avoid it, `docs/step-0.md` for the current
-milestone, and
+milestone, **`docs/web-target.md` before touching a web build** (the `Tools/build.sh web` recipe, the two
+settings a web player must have or it silently never starts, what does and does not run off the main
+thread there, and how to prove a build is the configuration you asked for), and
 **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
 workflow) — check it before debugging a shader/material/test-harness surprise.
 Proprietary / all rights reserved.

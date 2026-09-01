@@ -198,7 +198,7 @@ namespace MapRenderer.Unity.Text
         /// <summary>The execution policy both off-main dispatch sites in this class go through — the parked-
         /// build drain (<c>PumpBuilds</c>) and the cross-tile reconcile (<c>ScheduleReconcileIfDirty</c>):
         /// ThreadPool on desktop/editor, Inline on a WebGL player, where no worker ever picks a dispatch up
-        /// (docs/threading-on-web.md). Settable so a test can force Inline and exercise the web-correct path
+        /// (docs/web-target.md). Settable so a test can force Inline and exercise the web-correct path
         /// on desktop. Mirrors <see cref="MapRenderer.Unity.Rendering.Tile.TileManager.WorkScheduler"/>.
         /// <para>Rejects a <see cref="IWorkScheduler.RunsInline"/> policy while
         /// <see cref="SymbolReconciler.GateForTest"/> is armed — under Inline,

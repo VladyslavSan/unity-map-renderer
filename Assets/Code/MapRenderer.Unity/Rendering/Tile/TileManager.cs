@@ -647,7 +647,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly CancellationTokenSource _lifetimeCts = new();
 
         /// <summary>The execution policy both mesh-build kicks dispatch through: ThreadPool on desktop/editor,
-        /// Inline on a WebGL player, where no worker ever picks a dispatch up (docs/threading-on-web.md).
+        /// Inline on a WebGL player, where no worker ever picks a dispatch up (docs/web-target.md).
         /// Settable so a test can force Inline and exercise the web-correct path on desktop; rejects a policy
         /// whose <see cref="IWorkScheduler.RunsInline"/> is true while <see cref="MeshBuildGateForTest"/> is
         /// armed, whose park would then freeze the calling (main) thread. The check reads
@@ -1800,7 +1800,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         ///
         /// Dispatches through <see cref="WorkScheduler"/> — <see cref="ThreadPoolWorkScheduler"/> on
         /// desktop/editor, <see cref="InlineWorkScheduler"/> on a WebGL player, where no worker ever picks a
-        /// ThreadPool dispatch up (docs/threading-on-web.md). Under both policies, completion fires on the
+        /// ThreadPool dispatch up (docs/web-target.md). Under both policies, completion fires on the
         /// COMPLETING thread and is never posted to the PlayerLoop (I-2), so <see cref="DrainMeshBuilds"/>'s
         /// and <see cref="Dispose"/>'s synchronous-spin polls — which never pump the PlayerLoop — cannot
         /// dead-end waiting for a continuation that would only ever run there.

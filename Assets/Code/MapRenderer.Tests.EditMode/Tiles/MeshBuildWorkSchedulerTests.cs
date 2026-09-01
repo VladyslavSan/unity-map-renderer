@@ -1,5 +1,5 @@
 // Stage-2 acceptance: TileManager's two mesh-build kicks (KickMeshBuild, KickSourcelessBackground) dispatch
-// through the injected IWorkScheduler policy — the actual WebGL blank-map fix (docs/threading-on-web.md).
+// through the injected IWorkScheduler policy — the actual WebGL blank-map fix (docs/web-target.md).
 // T1/T2 drive the real MapView cover→build→consume loop with an InlineWorkScheduler injected via the
 // TileManager.WorkScheduler test seam, and observe BOTH ends: that Schedule was reached (placement) and
 // where the body ran (policy) — a test that only checks one of those cannot tell "converted" from "present

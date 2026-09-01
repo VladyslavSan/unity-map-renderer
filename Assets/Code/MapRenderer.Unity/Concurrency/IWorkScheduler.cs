@@ -2,7 +2,7 @@ namespace MapRenderer.Unity.Concurrency
 {
     /// <summary>Execution policy for off-main CPU work that is (today) a plain C# closure. ThreadPool
     /// reproduces today's UniTask.RunOnThreadPool parallelism (desktop/editor); Inline runs the body
-    /// synchronously on the calling thread — the WebGL fix (docs/threading-on-web.md), since nothing is
+    /// synchronously on the calling thread — the WebGL fix (docs/web-target.md), since nothing is
     /// dispatched to a worker that will never run it.
     ///
     /// <para><b>This is a transitional bridge, not the destination.</b> <see cref="Schedule{T}"/> takes a

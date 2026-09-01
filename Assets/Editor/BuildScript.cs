@@ -65,6 +65,10 @@ namespace MapRenderer.Build
         public static void BuildLinux()            => RunLinux(development: false);
         public static void BuildLinuxDevelopment() => RunLinux(development: true);
 
+        [MenuItem("Tools/Build/Web (WebGL/WebGPU)")]
+        public static void BuildWeb()            => RunWeb(development: false);
+        public static void BuildWebDevelopment() => RunWeb(development: true);
+
         private static void RunAndroid(bool development)
         {
             // APK (sideload/preview), not an AAB. An empty keystore => Unity debug-signs it: installable
@@ -89,6 +93,57 @@ namespace MapRenderer.Build
         {
             RunBuild(BuildTarget.StandaloneLinux64, BuildTargetGroup.Standalone,
                      "Linux", ProductBase + ".x86_64", development);
+        }
+
+        /// <summary>
+        /// The web player. Two settings are forced here rather than left to the project, because on this
+        /// target they are not preferences — a build with either one wrong does not start at all:
+        ///
+        /// <para><b>Burst AOT is disabled for Web.</b> `com.unity.entities` + Burst AOT traps during static
+        /// init on this Unity version, before any managed entry point runs (WebGPU hangs instead of
+        /// trapping). Reproduced from a stock project with no ECS code, so it is not ours to fix. The cost is
+        /// real and is the reason the web player is slow: Burst is the ONLY way a job reaches a worker thread
+        /// on the web, so with it off every job runs inline on the main thread. Re-enable both this and
+        /// threads support together once Entities is fixed or removed — see
+        /// <c>docs/web-target.md</c>.</para>
+        ///
+        /// <para><b>Threads support is left ON.</b> It buys nothing while Burst is off — nothing can reach a
+        /// worker — and it costs a serving constraint: the player then requires a cross-origin-isolated host
+        /// (COOP/COEP on every response, which <c>Tools/serve-web.sh</c> sends and most static hosts do not).
+        /// It stays on because this is the configuration that has actually been observed rendering a map;
+        /// turning it off is an untested variation, and an unverified build recipe is worse than a
+        /// constrained one. Revisit together with Burst.</para>
+        /// </summary>
+        /// <param name="development">Whether to build the development variant.</param>
+        private static void RunWeb(bool development)
+        {
+            PlayerSettings.WebGL.threadsSupport = true;
+            SetWebBurstAot(false);
+            RunBuild(BuildTarget.WebGL, BuildTargetGroup.WebGL, "Web", ProductBase, development);
+        }
+
+        /// <summary>Sets Burst's per-platform AOT toggle for Web through Burst's own settings object, so the
+        /// value lands wherever this Burst version keeps it instead of in a hand-written JSON path.</summary>
+        /// <param name="enabled">Whether Burst AOT compiles for the web player.</param>
+        /// <remarks>Verify the result rather than trusting it: Unity has been observed skipping Burst's build
+        /// callback entirely, producing a Burst-less player that reports Burst as enabled. The check that
+        /// cannot be fooled is whether <c>lib_burst_generated.wasm</c> appears under <c>Library/Bee</c>.
+        /// <c>Tools/build.sh web</c> performs it.</remarks>
+        private static void SetWebBurstAot(bool enabled)
+        {
+            Type t = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "Unity.Burst.Editor")
+                ?.GetType("Unity.Burst.Editor.BurstPlatformAotSettings");
+            if (t == null) { Console.WriteLine("[build] Burst editor assembly absent; AOT toggle skipped"); return; }
+
+            const System.Reflection.BindingFlags Any =
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.Static    | System.Reflection.BindingFlags.Instance;
+            object settings = t.GetMethod("GetOrCreateSettings", Any).Invoke(null, new object[] { BuildTarget.WebGL });
+            t.GetField("EnableBurstCompilation", Any).SetValue(settings, enabled);
+            object target = t.GetMethod("ResolveTarget", Any).Invoke(null, new object[] { BuildTarget.WebGL });
+            t.GetMethod("Save", Any).Invoke(settings, new[] { target });
+            Console.WriteLine($"[build] web: Burst AOT EnableBurstCompilation={enabled}");
         }
 
         /// <param name="platformDir">Output subfolder under <c>Builds/</c>. A development build appends
@@ -205,11 +260,22 @@ namespace MapRenderer.Build
             //   High-stripped build (map loads, tiles render, input works) before publishing.
             PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.High);
 
+            // WEB EXCEPTION (measured 2026-09-01): High produces a player that builds clean and then never
+            // finishes initialising — engine, graphics device, physics and input all come up, then the loader
+            // sticks at 100% with no error. Minimal renders, from the same tree with the same Burst setting
+            // and one build between them, so this is exactly the runtime hazard the paragraph above warns
+            // about rather than a code defect. Suspected cause is Entities' reflection-driven type/system
+            // registration; not confirmed, because Minimal was enough to unblock. The cost is binary size
+            // (18.6 MB vs 14.0 MB shippable). Revisit with an Assets/link.xml preserving what it needs.
+            if (nbt == NamedBuildTarget.WebGL)
+                PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.Minimal);
+
             // Drop unused engine modules.
             PlayerSettings.stripEngineCode = true;
 
-            Console.WriteLine($"[build] release config: IL2CPP/Release, managed stripping=High, " +
-                              $"engine-code-strip=on, development=off ({nbt})");
+            Console.WriteLine($"[build] release config: IL2CPP/Release, managed stripping=" +
+                              $"{PlayerSettings.GetManagedStrippingLevel(nbt)}, engine-code-strip=on, " +
+                              $"development=off ({nbt})");
         }
 
         /// <summary>

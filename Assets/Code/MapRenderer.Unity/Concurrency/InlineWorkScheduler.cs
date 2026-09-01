@@ -4,7 +4,7 @@ namespace MapRenderer.Unity.Concurrency
 {
     /// <summary>Runs the body synchronously, on the calling thread, before <see cref="Schedule{T}"/> returns —
     /// the handle is already terminal. Selected on WebGL (no live worker threads —
-    /// docs/threading-on-web.md) and the Stage-1 acceptance seam: forcing it in an EditMode test reproduces
+    /// docs/web-target.md) and the Stage-1 acceptance seam: forcing it in an EditMode test reproduces
     /// "runs correctly with zero dispatch" without a WebGL build.</summary>
     internal sealed class InlineWorkScheduler : IWorkScheduler
     {

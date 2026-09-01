@@ -33,7 +33,7 @@ namespace MapRenderer.Core.Data
     /// immediately.
     ///
     /// <b>WebGL player exception:</b> the managed ThreadPool has no workers there (see
-    /// docs/threading-on-web.md) — a queued SwitchToThreadPool continuation would never run, hanging
+    /// docs/web-target.md) — a queued SwitchToThreadPool continuation would never run, hanging
     /// this fetch forever exactly like <see cref="MapRenderer.Core.Data.TileScheduler"/>'s own
     /// now-removed hop did. The switch is therefore guarded to desktop/editor only
     /// (<c>#if !UNITY_WEBGL || UNITY_EDITOR</c>); on a WebGL player the read runs synchronously,
@@ -92,7 +92,7 @@ namespace MapRenderer.Core.Data
             // return, with no PlayerLoop dependency.
             //
             // Guarded to desktop/editor: the managed ThreadPool has no workers on a WebGL player (see
-            // docs/threading-on-web.md), so this switch would hang forever there. On WebGL the read
+            // docs/web-target.md), so this switch would hang forever there. On WebGL the read
             // below runs synchronously, inline on the calling thread instead — see the class doc.
             //
             // CancellationToken is checked before the read starts; mid-read cancellation is not
