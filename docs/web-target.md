@@ -447,11 +447,22 @@ string` shifted it by 21 KB and made a void build look valid). Two checks cannot
 
 `bcl.exe` in `Logs/Editor.log` is the same signal read from the other end.
 
-**Per-assembly exclusion** —
+**Do not bisect with per-assembly exclusion.**
 `ProjectSettings/Burst_DisableAssembliesForPlayerCompilation_<Target>.json`
-(`{"MonoBehaviour":{"DisabledAssemblies":["Some.Assembly"]}}`) — is the right instrument to bisect *which*
-assembly's Burst code breaks the player, because `BurstAotCompiler` reads it straight off disk at build time.
-It is worthless until Burst is actually running again; verify that first with the two checks above.
+(`{"MonoBehaviour":{"DisabledAssemblies":["Some.Assembly"]}}`) looks like the instrument for finding *which*
+assembly's Burst code breaks the player, and `BurstAotCompiler` does read it straight off disk at build time
+— but excluding an assembly while Burst is globally on leaves the runtime believing Burst is enabled and
+resolving function pointers that were never compiled. That state is arguably worse than either extreme, and
+neither result it produced here is trustworthy: it was tried twice on 6000.5, once for the eight
+`Unity.Entities*` / `Unity.Transforms` / `Unity.Scenes` assemblies and once for `MapRenderer.Jobs`. The
+Entities run is the informative one — excluding them did **not** avoid the startup crash, so the fault was
+never in Entities' own Burst-compiled code. Bisect by removing `[BurstCompile]` attributes from subsets of
+the jobs instead, which leaves no inconsistency.
+
+**Instrument before you bisect.** Five builds went into bisecting `[BurstCompile]` attributes against a
+theory that the pipeline was producing wrong data. It was producing correct data the whole time. One build
+that printed the real values eliminated the entire style/decode/index path at once. When the symptom is
+"the output is wrong" and the pipeline is long, print before you halve.
 
 **To recover a Burst-on build:** close the Editor, delete `Library/Bee`, reopen, build once. This does not
 touch `Library/Artifacts`, so there is no asset reimport — it costs a full script/linker/IL2CPP pass and
