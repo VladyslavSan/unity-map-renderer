@@ -171,8 +171,11 @@ progresses.
 
 #### Two "multi-threaded" signals that are lies here
 
-- `JobsUtility.JobWorkerCount` reported `5` and `SystemInfo.processorCount` reported `8` — both are
-  **configured** values, not counts of live pthreads. The `IJobParallelFor` result (`[0]` only) is the truth.
+- `JobsUtility.JobWorkerCount` reported `5` and `SystemInfo.processorCount` reported `8`, while an
+  `IJobParallelFor` reached only `[0]`. **Superseded 2026-09-02:** with Burst on, that same parallel job
+  reaches all 5 workers, so the count was accurate and the Burst-off build was the lie. Keep reading the
+  `IJobParallelFor` result rather than the count — but a mismatch now means Burst is off, not that the
+  platform has no threads.
 - The engine logs `[Physics::Module] Threading Mode: Multi-Threaded` — a backend config string, not evidence
   of running threads.
 
@@ -296,6 +299,41 @@ Burst-enabled web build did not start at the time. The mechanism is not project-
 gone as of Unity 6.6** — this project now ships a Burst-on web player — so the re-measurement inside this
 repo is possible, and still owed: what has been confirmed here is that the player *renders*, not yet that
 our jobs land on a worker. Re-run the probe shape in *How to reproduce* against this repo to close it.
+
+### Measured in THIS project, in a real web player (2026-09-02)
+
+The minimal-project result above reproduces here, in the shipped configuration (Burst on, Entities linked,
+Entities backend rendering, stripping High, cross-origin-isolated):
+
+| probe | result |
+|---|---|
+| serial chain of 8 Burst `IJob`s | `Schedule()` returned in **0.0 ms**, chain took 66 ms wall over **4 frames**, `ThreadIndex 3` |
+| `IJobParallelFor`, 64 items | **5 distinct worker threads** (`1,2,3,4,5`), 22 ms wall for ~80 ms of serial work — **~3.6×** |
+| Burst guard inside the job body | `ranAsManagedIL=0/8` |
+
+Four frames advancing across 66 ms is ~60 fps: the main thread rendered normally while the chain ran
+elsewhere. **So off-main execution and real multi-core parallelism are both available to this project on
+the web.**
+
+**The Burst guard is the part to copy, not the verdict.** The job body calls a `[BurstDiscard]` method that
+can only run on the managed fallback, and reports per-job whether it fired. Without it an "inline" reading
+is ambiguous — a managed body runs inline *by definition* — and that ambiguity is exactly what produced the
+retracted 2026-08-31 conclusion. A probe that cannot tell those two apart should refuse to return a verdict.
+
+**This corrects the "configured, not live" note above.** `JobsUtility.JobWorkerCount` reported 5, and 5 is
+what the parallel job actually reached. The count was never the lie; the Burst-off build that made it look
+like one was.
+
+**What it does NOT mean: the renderer is not faster yet.** Nothing here asks for a worker. Managed offload
+still routes to `InlineWorkScheduler` on web, and the mesh pipeline is `.Run()` at all 12 job sites with no
+`.Schedule()` anywhere — deliberately, so it stays callable off the main thread. `.Run()` executes on the
+calling thread even when the body is Burst-compiled and five workers sit idle. The capability is now proven;
+spending it is separate work.
+
+Note also what the two probes measure differently: the serial chain reached **one** worker, because a chain
+is serial by construction. Multi-core wins come from either many tiles building concurrently on different
+workers, or `IJobParallelFor` *within* a stage — not from converting a dependent chain to `.Schedule()`,
+which buys off-main only.
 
 ## `com.unity.entities` + Burst AOT broke the web player — FIXED in Unity 6.6 (history)
 
@@ -423,18 +461,7 @@ a correct toggle produced no artifacts until `Library/Bee` was moved aside.
 
 ## Open questions (not yet measured)
 
-- **Do this project's own jobs reach a worker on the web?** Burst-on is now shippable here, and the
-  mechanism is established in a minimal project, but the in-repo measurement has not been taken. Until it
-  is, "the web player is Burst-compiled" and "the web player uses worker threads" are separate claims.
-
-  **Expect `ThreadIndex 0`, and do not read it as the 2026-08-31 result returning.** Nothing in this
-  project currently *asks* for a worker, for two reasons Burst does not touch: managed offload still
-  routes to `InlineWorkScheduler` on web, and the mesh pipeline is `.Run()` at all 12 job sites with no
-  `.Schedule()` anywhere — deliberately, so it stays callable off the main thread. `.Run()` executes on
-  the calling thread even when the body is Burst-compiled and workers are idle. So an inline reading here
-  measures our call sites, not the platform, and would look exactly like the retracted finding above while
-  meaning something entirely different. Convert one `.Run()` site to `.Schedule()` before concluding
-  anything, or the probe cannot distinguish the two.
+- ~~Do this project's own jobs reach a worker on the web?~~ **Measured 2026-09-02 — yes. See below.**
 - **What `IWorkScheduler`'s inline-on-web policy still costs.** It was adopted when nothing could reach a
   worker. Managed closures remain dead on the web regardless of Burst, so the seam is still needed — but the
   cost of each site that stays managed is now a real parallelism loss rather than a theoretical one.
