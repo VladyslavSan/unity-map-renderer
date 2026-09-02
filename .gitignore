@@ -109,6 +109,10 @@ InitTestScene*.unity*
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
 
+# Written by com.unity.test-framework.performance on every batch run
+/[Aa]ssets/[Rr]esources/PerformanceTestRun*.json*
+/[Aa]ssets/[Rr]esources.meta
+
 # ---- Project tooling / OS ----
 .claude/settings.local.json
 .vscode/
