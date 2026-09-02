@@ -426,6 +426,15 @@ a correct toggle produced no artifacts until `Library/Bee` was moved aside.
 - **Do this project's own jobs reach a worker on the web?** Burst-on is now shippable here, and the
   mechanism is established in a minimal project, but the in-repo measurement has not been taken. Until it
   is, "the web player is Burst-compiled" and "the web player uses worker threads" are separate claims.
+
+  **Expect `ThreadIndex 0`, and do not read it as the 2026-08-31 result returning.** Nothing in this
+  project currently *asks* for a worker, for two reasons Burst does not touch: managed offload still
+  routes to `InlineWorkScheduler` on web, and the mesh pipeline is `.Run()` at all 12 job sites with no
+  `.Schedule()` anywhere — deliberately, so it stays callable off the main thread. `.Run()` executes on
+  the calling thread even when the body is Burst-compiled and workers are idle. So an inline reading here
+  measures our call sites, not the platform, and would look exactly like the retracted finding above while
+  meaning something entirely different. Convert one `.Run()` site to `.Schedule()` before concluding
+  anything, or the probe cannot distinguish the two.
 - **What `IWorkScheduler`'s inline-on-web policy still costs.** It was adopted when nothing could reach a
   worker. Managed closures remain dead on the web regardless of Burst, so the seam is still needed — but the
   cost of each site that stays managed is now a real parallelism loss rather than a theoretical one.
